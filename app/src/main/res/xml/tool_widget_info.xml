@@ -1,0 +1,6 @@
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="160dp" android:minHeight="180dp" android:minResizeWidth="140dp" android:minResizeHeight="140dp"
+    android:targetCellWidth="3" android:targetCellHeight="3" android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0" android:initialLayout="@layout/tool_widget" android:previewLayout="@layout/tool_widget"
+    android:configure="com.alpha.assistant.surfaces.WidgetConfigurationActivity"
+    android:widgetFeatures="reconfigurable|configuration_optional" android:widgetCategory="home_screen" />

@@ -1,0 +1,14 @@
+.gradle/
+.kotlin/
+.idea/
+.cxx/
+**/build/
+local.properties
+*.jks
+*.keystore
+.env
+.env.*
+*.log
+docs/evidence/
+evidence/
+app/src/main/assets/voice/silero/
