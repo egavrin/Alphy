@@ -1,0 +1,657 @@
+{
+  "snapshot": {
+    "base_commit": "cbf25f0ba107b9b028580a5a83235b6a5537427d",
+    "source": "existing working tree; uncommitted changes included",
+    "evidence": {
+      "ui-contract": {
+        "path": "app/src/main/java/com/alpha/assistant/tools/ToolSpec.kt",
+        "symbol": "validateUi",
+        "line": 59,
+        "sha256": "5c6fe56f46c2be3bab798b034aa49bb9e54dcbe04e08fff01d927e39ef9262bb",
+        "origin": "working-tree"
+      },
+      "ui-renderer": {
+        "path": "app/src/main/java/com/alpha/assistant/tools/ToolUi.kt",
+        "symbol": "NativeNode",
+        "line": 148,
+        "sha256": "6f6fbfbf4cf9df3f32457e9a58f11a927adf030e4b4c534fcc0a853cb3a123ec",
+        "origin": "working-tree"
+      },
+      "tool-format": {
+        "path": "app/src/main/java/com/alpha/assistant/tools/ToolSpec.kt",
+        "symbol": "parse",
+        "line": 127,
+        "sha256": "5c6fe56f46c2be3bab798b034aa49bb9e54dcbe04e08fff01d927e39ef9262bb",
+        "origin": "working-tree"
+      },
+      "tool-generation": {
+        "path": "app/src/main/java/com/alpha/assistant/tools/ToolEngine.kt",
+        "symbol": "ToolGenerationService",
+        "line": 16,
+        "sha256": "386484a8410ff7a4a76969fbd4b5e96b1386d4467326d0d987895e0bc2ebcf0d",
+        "origin": "working-tree"
+      },
+      "tool-transitions": {
+        "path": "app/src/main/java/com/alpha/assistant/tools/ToolEngine.kt",
+        "symbol": "ToolEngine",
+        "line": 118,
+        "sha256": "386484a8410ff7a4a76969fbd4b5e96b1386d4467326d0d987895e0bc2ebcf0d",
+        "origin": "working-tree"
+      },
+      "capability-catalog": {
+        "path": "app/src/main/java/com/alpha/assistant/capabilities/CapabilityContract.kt",
+        "symbol": "CapabilityCatalog",
+        "line": 24,
+        "sha256": "d8e75854a1ca75698a58f38a11441a2aabd58f1acf88650725fb6cf9fcc44762",
+        "origin": "working-tree"
+      },
+      "android-adapters": {
+        "path": "app/src/main/java/com/alpha/assistant/capabilities/AndroidCapabilities.kt",
+        "symbol": "AndroidCapabilities",
+        "line": 24,
+        "sha256": "46fb12b80424e40ed0d13f19a85b012f1d404d8379dd7ddfe3bb476161722d58",
+        "origin": "working-tree"
+      },
+      "sandbox-contract": {
+        "path": "app/src/main/java/com/alpha/assistant/sandbox/SandboxContract.kt",
+        "symbol": "SandboxContract",
+        "line": 5,
+        "sha256": "d2720eee4b3ada0abd06574573b9efb4fdb419c50be726feb9c291ba2dcdcf42",
+        "origin": "working-tree"
+      },
+      "automation-contract": {
+        "path": "app/src/main/java/com/alpha/assistant/automations/AutomationContract.kt",
+        "symbol": "AutomationDefinition",
+        "line": 10,
+        "sha256": "4aeae34cbc52a6e72ad3c033337071df3d6f64ad8b95f75a445a5f997ed79dd9",
+        "origin": "working-tree"
+      },
+      "build-target": {
+        "path": "app/build.gradle.kts",
+        "symbol": "android.defaultConfig",
+        "line": 8,
+        "sha256": "95640583e624d1a50bccde7320ba47243aba89334b13ed0b9dd3e85e2c793935",
+        "origin": "working-tree"
+      }
+    }
+  },
+  "scope": {
+    "sdk": "Registered adapters, delegated CalendarKit targets, and Vera.Live.fetch. The full 11684-row search index includes stubs and is not an implemented-function catalog.",
+    "intents": "Seven curated addresses, all bundled Celia candidate keys, all bundled summary keys, and the dynamic-registry contract. Device-dependent addresses require a device snapshot.",
+    "status": "supported means the stated functional scope exists in current source. unimplemented includes partial equivalents. android_platform_limitation applies only to literal OHOS routes or APIs, not inferred functional impossibility.",
+    "planned": "Every unimplemented applicable equivalent remains future work. No future package is marked implemented.",
+    "verification": "Source inventory and integrity only. No emulator, device, SDK execution, model request, or credential access.",
+    "android_dispositions": "All 554 registered SDK/calendar/curated intent runtime keys have explicit Android dispositions and P6 family assignments. Candidate mappings do not assert full equivalence or implementation."
+  },
+  "evidence": {
+    "ui-contract": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/ToolSpec.kt",
+      "symbol": "validateUi",
+      "line": 59,
+      "sha256": "5c6fe56f46c2be3bab798b034aa49bb9e54dcbe04e08fff01d927e39ef9262bb",
+      "origin": "working-tree"
+    },
+    "ui-renderer": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/ToolUi.kt",
+      "symbol": "NativeNode",
+      "line": 148,
+      "sha256": "6f6fbfbf4cf9df3f32457e9a58f11a927adf030e4b4c534fcc0a853cb3a123ec",
+      "origin": "working-tree"
+    },
+    "tool-format": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/ToolSpec.kt",
+      "symbol": "parse",
+      "line": 127,
+      "sha256": "5c6fe56f46c2be3bab798b034aa49bb9e54dcbe04e08fff01d927e39ef9262bb",
+      "origin": "working-tree"
+    },
+    "tool-generation": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/ToolEngine.kt",
+      "symbol": "ToolGenerationService",
+      "line": 16,
+      "sha256": "386484a8410ff7a4a76969fbd4b5e96b1386d4467326d0d987895e0bc2ebcf0d",
+      "origin": "working-tree"
+    },
+    "tool-transitions": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/ToolEngine.kt",
+      "symbol": "ToolEngine",
+      "line": 118,
+      "sha256": "386484a8410ff7a4a76969fbd4b5e96b1386d4467326d0d987895e0bc2ebcf0d",
+      "origin": "working-tree"
+    },
+    "capability-catalog": {
+      "path": "app/src/main/java/com/alpha/assistant/capabilities/CapabilityContract.kt",
+      "symbol": "CapabilityCatalog",
+      "line": 24,
+      "sha256": "d8e75854a1ca75698a58f38a11441a2aabd58f1acf88650725fb6cf9fcc44762",
+      "origin": "working-tree"
+    },
+    "android-adapters": {
+      "path": "app/src/main/java/com/alpha/assistant/capabilities/AndroidCapabilities.kt",
+      "symbol": "AndroidCapabilities",
+      "line": 24,
+      "sha256": "46fb12b80424e40ed0d13f19a85b012f1d404d8379dd7ddfe3bb476161722d58",
+      "origin": "working-tree"
+    },
+    "sandbox-contract": {
+      "path": "app/src/main/java/com/alpha/assistant/sandbox/SandboxContract.kt",
+      "symbol": "SandboxContract",
+      "line": 5,
+      "sha256": "d2720eee4b3ada0abd06574573b9efb4fdb419c50be726feb9c291ba2dcdcf42",
+      "origin": "working-tree"
+    },
+    "automation-contract": {
+      "path": "app/src/main/java/com/alpha/assistant/automations/AutomationContract.kt",
+      "symbol": "AutomationDefinition",
+      "line": 10,
+      "sha256": "4aeae34cbc52a6e72ad3c033337071df3d6f64ad8b95f75a445a5f997ed79dd9",
+      "origin": "working-tree"
+    },
+    "build-target": {
+      "path": "app/build.gradle.kts",
+      "symbol": "android.defaultConfig",
+      "line": 8,
+      "sha256": "95640583e624d1a50bccde7320ba47243aba89334b13ed0b9dd3e85e2c793935",
+      "origin": "working-tree"
+    }
+  },
+  "defaults": {
+    "ui": {
+      "status": "unimplemented",
+      "scope": "The complete reference component contract is absent. Native primitives provide only the explicit subsets below.",
+      "evidence": [
+        "ui-contract",
+        "ui-renderer"
+      ]
+    },
+    "graphics": {
+      "status": "unimplemented",
+      "scope": "No generated graphics schema, renderer, or pointer-event contract exists.",
+      "evidence": [
+        "ui-contract",
+        "ui-renderer"
+      ]
+    },
+    "sdk": {
+      "status": "unimplemented",
+      "scope": "Exact reference bindings are absent. android-dispositions.json defines a concrete candidate, restriction, or target-specific unresolved contract for every registered SDK key.",
+      "evidence": [
+        "capability-catalog",
+        "android-adapters"
+      ]
+    },
+    "calendar": {
+      "status": "unimplemented",
+      "scope": "Calendar read and creation-form subsets do not implement this complete reference contract. Direct calendar writes are explicitly unavailable.",
+      "evidence": [
+        "capability-catalog",
+        "android-adapters"
+      ]
+    },
+    "live": {
+      "status": "unimplemented",
+      "scope": "Generated JavaScript cannot call a search/model host bridge or fetch live figures.",
+      "evidence": [
+        "tool-generation",
+        "sandbox-contract"
+      ]
+    },
+    "intent": {
+      "status": "android_platform_limitation",
+      "scope": "This literal OHOS bundle/module/ability route cannot execute through Alphy Android adapters. Functional equivalents require separate Android contracts.",
+      "evidence": [
+        "capability-catalog",
+        "android-adapters"
+      ],
+      "android_applicability": "literal-ohos-route-only; functional-equivalent-unresolved"
+    },
+    "intent_candidate": {
+      "status": "android_platform_limitation",
+      "scope": "Offline OHOS candidate only. No module, ability, live presence, or verified Android contract exists.",
+      "evidence": [
+        "capability-catalog",
+        "android-adapters"
+      ],
+      "android_applicability": "literal-ohos-route-only; functional-equivalent-unresolved"
+    },
+    "intent_summary": {
+      "status": "unimplemented",
+      "scope": "Description metadata does not prove a callable target or a supported function.",
+      "evidence": [
+        "capability-catalog"
+      ]
+    },
+    "intent_registry": {
+      "status": "android_platform_limitation",
+      "scope": "OHOS insight-intent enumeration and signing permissions are not Android contracts. Alphy has only its bounded native catalog.",
+      "evidence": [
+        "capability-catalog",
+        "android-adapters"
+      ]
+    },
+    "workflow": {
+      "status": "unimplemented",
+      "scope": "The complete reference workflow is absent; current Alphy generation uses a bounded JSON tool workflow.",
+      "evidence": [
+        "tool-generation",
+        "tool-transitions"
+      ]
+    },
+    "ui_helper": {
+      "status": "unimplemented",
+      "scope": "The exact std/ui helper export is absent. Generated JavaScript can perform local calculations within sandbox limits.",
+      "evidence": [
+        "ui-contract",
+        "ui-renderer"
+      ]
+    }
+  },
+  "overrides": {
+    "ui:Column": {
+      "status": "unimplemented",
+      "scope": "column supports bounded vertical children. Reference style sets are absent.",
+      "evidence": [
+        "ui-contract",
+        "ui-renderer"
+      ],
+      "related_alphy": "supported-native-subset"
+    },
+    "ui:Row": {
+      "status": "unimplemented",
+      "scope": "row currently renders vertically. Horizontal flow and reference style sets are absent.",
+      "evidence": [
+        "ui-contract",
+        "ui-renderer"
+      ],
+      "related_alphy": "supported-native-subset"
+    },
+    "ui:Text": {
+      "status": "unimplemented",
+      "scope": "text supports a label and optional scalar binding. Reference text styles and exact text semantics are absent.",
+      "evidence": [
+        "ui-contract",
+        "ui-renderer"
+      ],
+      "related_alphy": "supported-native-subset"
+    },
+    "ui:Button": {
+      "status": "unimplemented",
+      "scope": "button sends an action with null value. Reference numeric value, enabled prop, and style contract are absent.",
+      "evidence": [
+        "ui-contract",
+        "ui-renderer"
+      ],
+      "related_alphy": "supported-native-subset"
+    },
+    "ui:TextField": {
+      "status": "unimplemented",
+      "scope": "input binds a string and submits it explicitly. Reference field props and event contract differ.",
+      "evidence": [
+        "ui-contract",
+        "ui-renderer"
+      ],
+      "related_alphy": "supported-native-subset"
+    },
+    "ui:Toggle": {
+      "status": "unimplemented",
+      "scope": "toggle uses a Checkbox and boolean state. Reference style and enabled props are absent.",
+      "evidence": [
+        "ui-contract",
+        "ui-renderer"
+      ],
+      "related_alphy": "supported-native-subset"
+    },
+    "ui:Checkbox": {
+      "status": "unimplemented",
+      "scope": "toggle provides a boolean Checkbox. Reference component and prop contract are absent.",
+      "evidence": [
+        "ui-contract",
+        "ui-renderer"
+      ],
+      "related_alphy": "supported-native-subset"
+    },
+    "ui:ListItem": {
+      "status": "unimplemented",
+      "scope": "list renders typed records with an optional stable-ID action. Reference ListItem layout and payload contract are absent.",
+      "evidence": [
+        "ui-contract",
+        "ui-renderer"
+      ],
+      "related_alphy": "supported-native-subset"
+    },
+    "sdk:CameraKit.CameraManager.setTorchMode": {
+      "status": "unimplemented",
+      "scope": "flashlight.set supports boolean on/off for one available camera. AUTO and ALWAYS_OPEN reference modes are absent.",
+      "evidence": [
+        "capability-catalog",
+        "android-adapters"
+      ],
+      "related_alphy": "flashlight.set"
+    },
+    "sdk:SensorServiceKit.vibrator.vibrate": {
+      "status": "unimplemented",
+      "scope": "vibration.play supports one shot of 1..2000 milliseconds. Reference patterns, modes, and lifecycle differ.",
+      "evidence": [
+        "capability-catalog",
+        "android-adapters"
+      ],
+      "related_alphy": "vibration.play"
+    },
+    "sdk:SensorServiceKit.vibrator.startVibration": {
+      "status": "unimplemented",
+      "scope": "vibration.play supports one shot of 1..2000 milliseconds. Reference patterns, modes, and lifecycle differ.",
+      "evidence": [
+        "capability-catalog",
+        "android-adapters"
+      ],
+      "related_alphy": "vibration.play"
+    },
+    "calendar:CalendarKit.Calendar.getEvents": {
+      "status": "unimplemented",
+      "scope": "calendar.read reads at most 50 instances in a selected calendar and a 31-day range. Reference filters, fields, and wire format differ.",
+      "evidence": [
+        "capability-catalog",
+        "android-adapters"
+      ],
+      "related_alphy": "calendar.read"
+    },
+    "calendar:CalendarKit.Calendar.queryEventInstances": {
+      "status": "unimplemented",
+      "scope": "calendar.read reads at most 50 instances in a selected calendar and a 31-day range. Reference filters, fields, and wire format differ.",
+      "evidence": [
+        "capability-catalog",
+        "android-adapters"
+      ],
+      "related_alphy": "calendar.read"
+    },
+    "calendar:CalendarKit.CalendarManager.editEvent": {
+      "status": "unimplemented",
+      "scope": "calendar.create opens ACTION_INSERT with title, times, and location. Saving and event IDs remain unverified.",
+      "evidence": [
+        "capability-catalog",
+        "android-adapters"
+      ],
+      "related_alphy": "calendar.create"
+    },
+    "intent:com.huawei.hmos.calendar/phone/MainAbility": {
+      "status": "android_platform_limitation",
+      "scope": "app.open with calendar launches an Android calendar selector. It does not execute the literal OHOS route.",
+      "evidence": [
+        "capability-catalog",
+        "android-adapters"
+      ],
+      "related_alphy": "app.open(calendar)"
+    },
+    "intent:com.huawei.hmos.maps.app/entry/EntryAbility/ViewSearchPageLocal": {
+      "status": "android_platform_limitation",
+      "scope": "The reference excludes this ignored intent from discovery. maps.open launches an Android geo search; visible results remain unverified.",
+      "evidence": [
+        "capability-catalog",
+        "android-adapters"
+      ],
+      "related_alphy": "maps.open"
+    },
+    "workflow:generation.cancel": {
+      "status": "supported",
+      "scope": "Alphy supports a cancelled terminal generation request with session checks before persistence. This status covers cancellation only.",
+      "evidence": [
+        "tool-generation",
+        "tool-transitions"
+      ]
+    },
+    "workflow:refine.state": {
+      "status": "unimplemented",
+      "scope": "Alphy preserves all existing fields, types, collection definitions, and IDs. It rejects destructive revisions rather than applying reference reset behavior.",
+      "evidence": [
+        "tool-format",
+        "tool-transitions"
+      ],
+      "related_alphy": "ToolSpec.stateForRevision; stronger data-preservation constraint"
+    },
+    "workflow:repair.edits": {
+      "status": "unimplemented",
+      "scope": "Alphy retries invalid generated output once with structured validation feedback. It does not apply source edits or smoke-run every handler.",
+      "evidence": [
+        "tool-generation"
+      ],
+      "related_alphy": "one automatic validation-repair retry"
+    },
+    "workflow:build.preview": {
+      "status": "unimplemented",
+      "scope": "Alphy validates schema, typed state, native UI, and a safe preview. It does not compile VERA or smoke-run every handler.",
+      "evidence": [
+        "tool-generation",
+        "tool-format"
+      ],
+      "related_alphy": "validated sandbox preview"
+    }
+  },
+  "ui_groups": {
+    "primitives": [
+      "Column",
+      "Row",
+      "Card",
+      "Scroll",
+      "Text",
+      "Spacer",
+      "Divider",
+      "Image",
+      "Icon"
+    ],
+    "inputs": [
+      "Button",
+      "Cell",
+      "TextField",
+      "Toggle",
+      "Checkbox",
+      "Slider",
+      "Select",
+      "Tabs",
+      "BackHandler",
+      "NumberField",
+      "TimeField",
+      "DateField",
+      "IconButton"
+    ],
+    "graphics_and_motion": [
+      "Path",
+      "Canvas",
+      "Motion",
+      "Transform",
+      "Stage",
+      "Surface",
+      "Ticker",
+      "Sparkline"
+    ]
+  },
+  "native_controls": [
+    "column",
+    "row",
+    "text",
+    "button",
+    "input",
+    "toggle",
+    "list"
+  ],
+  "native_capabilities": [
+    {
+      "id": "notification.post",
+      "arguments": "{title:string,text:string}"
+    },
+    {
+      "id": "calendar.read",
+      "arguments": "{calendarId:integer,from:epochMillis,to:epochMillis}; maximum 31 days and 50 events"
+    },
+    {
+      "id": "calendar.create",
+      "arguments": "{title:string,start:epochMillis,end:epochMillis,location?:string}; user saves in calendar app"
+    },
+    {
+      "id": "link.open",
+      "arguments": "{url:string}; public HTTPS host only"
+    },
+    {
+      "id": "app.open",
+      "arguments": "{app:'settings'|'browser'|'calendar'|'camera'}"
+    },
+    {
+      "id": "maps.open",
+      "arguments": "{query:string}"
+    },
+    {
+      "id": "vibration.play",
+      "arguments": "{milliseconds:integer}; 1 to 2000"
+    },
+    {
+      "id": "flashlight.set",
+      "arguments": "{enabled:boolean}"
+    },
+    {
+      "id": "photo.pick",
+      "arguments": "{}; system picker, selected content only"
+    },
+    {
+      "id": "file.pick",
+      "arguments": "{mime:string}; system document picker"
+    },
+    {
+      "id": "camera.capture",
+      "arguments": "{}; system camera thumbnail, user reviews before keeping"
+    }
+  ],
+  "verification_criteria": {
+    "ui": "Create and reopen an artifact for each declared component. Verify declared props, allowed styles, child rules, visible output, typed events, and state preservation.",
+    "graphics": "Render each operation with deterministic coordinates and colors. Compare a saved image and helper outputs. Verify shape limits, transforms, and pointer phases.",
+    "sdk": "Invoke the exact binding with documented valid and invalid params. Verify typed results, permission denial, unsupported hardware, and explicit failures. Never equate request acceptance with physical success.",
+    "calendar": "Use a disposable selected calendar. Verify exact filters, IDs, time zones, recurrence, DTO fields, create/update/delete results, permission denial, cancellation, and retained unrelated data.",
+    "live": "Replay fixed search hits and extraction replies. Verify figure provenance, labels, limits, expiry, missing configuration, and explicit errors without live model calls.",
+    "intent": "Verify address, presence, mode, parameter schema, permission result, ignored-target filtering, and actual visible effect. Return codes alone do not prove the requested effect.",
+    "intent_candidate": "Resolve only through a supplied live-registry snapshot. Missing module, ability, or presence must keep the candidate uncallable.",
+    "intent_summary": "Treat every summary as metadata. Require an independent target contract before a capability claim.",
+    "intent_registry": "Use a fixed registry snapshot. Verify empty-registry behavior, full addresses, and last-entry selection for duplicate bundle/intent lookup keys.",
+    "workflow": "Use the per-entry deterministic workflow criteria. Save revision, command, inputs, and expected/observed results.",
+    "ui_helper": "Verify conditional visibility and formatting for zero, negative values, finite bounds, dates, times, and durations. Compare exact expected labels."
+  },
+  "workflows": [
+    {
+      "key": "build.route",
+      "path": "agent/VeraBuildRoute.ets",
+      "symbol": "buildScreen",
+      "group": "generation",
+      "behavior": "Surface route, agent composition, then whole-screen hole; explicit not-built or cancelled outcome.",
+      "verification": "Use deterministic host replies for each route; verify route order and terminal outcomes."
+    },
+    {
+      "key": "build.needs",
+      "path": "NeedsChoose.ets",
+      "symbol": "composeNeeds",
+      "group": "generation",
+      "behavior": "Convert the request to needs and select finite ready parts or sections.",
+      "verification": "Replay a fixed needs response; verify every required need has a selected part or explicit unresolved hole."
+    },
+    {
+      "key": "build.alignment",
+      "path": "agent/AgentAlign.ets",
+      "symbol": "alignLeftovers",
+      "group": "generation",
+      "behavior": "Match unresolved needs to catalog sections before custom source.",
+      "verification": "Replay a section selection; verify matched needs disappear from the custom remainder."
+    },
+    {
+      "key": "build.assembly",
+      "path": "VeraCompose.ets",
+      "symbol": "assembleProgram",
+      "group": "generation",
+      "behavior": "Assemble selected parts, section bindings, state, handlers, and the complete screen.",
+      "verification": "Assemble a fixed multi-part request; verify handlers and shared state through complete actions."
+    },
+    {
+      "key": "build.section-hole",
+      "path": "agent/AgentHole.ets",
+      "symbol": "writeHole",
+      "group": "generation",
+      "behavior": "Generate the unresolved section against the screen plan and available SDK/intent contracts.",
+      "verification": "Supply a fixed section response; validate its inputs, outputs, bindings, and final assembled behavior."
+    },
+    {
+      "key": "build.surface",
+      "path": "agent/AgentSurface.ets",
+      "symbol": "writeSurfaceApp",
+      "group": "generation",
+      "behavior": "Generate a complete ui.Surface app; compile and play it; at most two source attempts.",
+      "verification": "Replay a drawing or game with pointer events; verify visible state and bounded failure."
+    },
+    {
+      "key": "build.preview",
+      "path": "agent/AgentRepair.ets",
+      "symbol": "settleProgram",
+      "group": "validation",
+      "behavior": "Compile and smoke-run the assembled source before service; repair bounded failures.",
+      "verification": "Reject invalid source and failed handlers; serve only a source that passes every required smoke action."
+    },
+    {
+      "key": "validate.actions",
+      "path": "VeraSmoke.ets",
+      "symbol": "smokeRun",
+      "group": "validation",
+      "behavior": "Run init, view, and every handler with bounded typed sample payloads.",
+      "verification": "Use a fixed artifact with a failing action; verify that the action failure blocks service."
+    },
+    {
+      "key": "repair.edits",
+      "path": "agent/AgentRepair.ets",
+      "symbol": "repairProgram",
+      "group": "repair",
+      "behavior": "Apply at most two repair rounds to current source; compile and smoke-run after each accepted edit.",
+      "verification": "Replay valid, ambiguous, missing, and still-invalid edits; verify bounded retries and retained diagnostics."
+    },
+    {
+      "key": "repair.apply",
+      "path": "VeraRepair.ets",
+      "symbol": "applyRepair",
+      "group": "repair",
+      "behavior": "Apply replacement edits with source anchors; report invalid edits.",
+      "verification": "Verify exact matching, ambiguous anchors, missing anchors, and complete-source replies against fixed source."
+    },
+    {
+      "key": "refine.composition",
+      "path": "VeraComposition.ets",
+      "symbol": "editComposition",
+      "group": "refinement",
+      "behavior": "Select a composition edit, modify a section graph, and rebuild its source.",
+      "verification": "Add, remove, replace, and move a section; verify unaffected sections and state remain usable."
+    },
+    {
+      "key": "refine.state",
+      "path": "VeraStateCarry.ets",
+      "symbol": "carryState",
+      "group": "refinement",
+      "behavior": "Carry compatible fields and arrays; fresh defaults replace incompatible or removed reference fields.",
+      "verification": "Verify compatible field and record retention. Alphy must reject destructive schema changes under project instructions."
+    },
+    {
+      "key": "discover.sdk",
+      "path": "VeraSdkIndex.ets",
+      "symbol": "findSdkFunctionFromCache",
+      "group": "discovery",
+      "behavior": "Search the offline SDK index with an optional implemented-target filter.",
+      "verification": "Search fixed requests; verify exact target, contract, and implemented/stub distinction."
+    },
+    {
+      "key": "discover.intent",
+      "path": "VeraIntentIndex.ets",
+      "symbol": "allEntries",
+      "group": "discovery",
+      "behavior": "Build curated, installed Celia, and raw-registry candidates; exclude ignored and unreachable targets.",
+      "verification": "Use a fixed registry; verify provenance, exact addresses, precedence, filtering, and no invented ability names."
+    },
+    {
+      "key": "generation.cancel",
+      "path": "agent/VeraBuildRoute.ets",
+      "symbol": "buildScreen",
+      "group": "generation",
+      "behavior": "Return a cancelled terminal outcome when the generation host reports cancellation.",
+      "verification": "Cancel a request before generation and before draft commit; verify no accepted tool appears."
+    }
+  ]
+}

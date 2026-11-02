@@ -32,25 +32,25 @@ class WidgetConfigurationActivity : ComponentActivity() {
                 var prefs by remember { mutableStateOf(ToolWidgets.preferences(this,id)) }
                 var error by remember { mutableStateOf<String?>(null) }
                 LaunchedEffect(Unit) {
-                    runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ToolStore(this@WidgetConfigurationActivity).use { it.tools().filter { tool -> tool.saved } } } }
+                    runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ToolStore(this@WidgetConfigurationActivity).use { it.tools().filter { tool -> tool.saved && !tool.archived } } } }
                         .onSuccess { tools = it }.onFailure { error = "Saved tools could not be read. Data remains available." }
                     loaded = true
                 }
                 Surface(Modifier.fillMaxSize()) {
                     Column(Modifier.safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp),verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("Alpha widget",style = MaterialTheme.typography.headlineMedium)
+                        Text("Alphy widget",style = MaterialTheme.typography.headlineMedium)
                         Text("Choose a saved tool. Each widget has its own appearance and shares the tool state.")
                         tools.forEach { tool ->
                             Row { RadioButton(selected == tool.id,{ selected = tool.id }); TextButton(onClick = { selected = tool.id }) { Text(ToolSpec.parse(tool.spec).title) } }
                         }
-                        if(loaded && tools.isEmpty()) Text("No saved tools. Save a tool in Alpha first.")
+                        if(loaded && tools.isEmpty()) Text("No saved tools. Save a tool in Alphy first.")
                         WidgetOptions(prefs) { prefs = it }
                         tools.find { it.id == selected }?.let { WidgetPreview(it,prefs) }
                         error?.let { Text(it,color = MaterialTheme.colorScheme.error) }
                         Button(onClick = {
                             runCatching {
                                 ToolStore(this@WidgetConfigurationActivity).use { store ->
-                                    check(selected?.let(store::tool)?.saved == true) { "Choose a saved tool" }
+                                    check(selected?.let(store::tool)?.let { it.saved && !it.archived } == true) { "Choose a saved tool" }
                                     ToolWidgets.bind(this@WidgetConfigurationActivity,id,selected!!,prefs)
                                     ToolWidgets.update(this@WidgetConfigurationActivity,id,store)
                                 }

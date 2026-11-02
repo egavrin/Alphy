@@ -14,7 +14,7 @@ class VoiceTestActivity : ComponentActivity() {
     lateinit var voice: VoiceSession; private set
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        voice = VoiceSession(applicationContext, scope) {}
+        voice = VoiceSession(applicationContext, scope, transcript = {})
         setContent { VoiceVisibility(voice); Text(voice.status) }
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED)
             requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 1)

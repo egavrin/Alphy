@@ -24,6 +24,8 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import org.json.JSONObject
 
+data class AutomationApproval(val rule: AutomationRule, val archiveToken: String?)
+
 object AutomationRuntime {
     const val CHANGED = "com.alpha.assistant.AUTOMATIONS_CHANGED"
     const val ALARM = "com.alpha.assistant.AUTOMATION_ALARM"
@@ -56,55 +58,109 @@ object AutomationRuntime {
             else -> null
         }
         "notification" -> when {
-            !listenerAllowed(context) -> "Разреши Alpha доступ к уведомлениям в Android."
+            !listenerAllowed(context) -> "Разреши Alphy доступ к уведомлениям в Android."
             rule.definition.notificationPackages().any { source -> runCatching { context.packageManager.getApplicationInfo(source,0) }.isFailure } -> "Одно из выбранных приложений удалено или недоступно."
             else -> null
         }
-        "charging" -> if(requireMonitor && !ChargingMonitor.active) "Наблюдение питания остановлено. Запусти его из Alpha и включи сценарий снова." else null
-        "schedule" -> if(rule.definition.trigger.getBoolean("exact") && !exactAllowed(context)) "Точные напоминания запрещены Android. Разреши будильники и напоминания, затем включи сценарий." else null
+        "charging" -> if(requireMonitor && !ChargingMonitor.active) "Наблюдение питания остановлено. Запусти его из Alphy и включи сценарий снова." else null
+        "schedule" -> if(rule.definition.trigger.optBoolean("exact") && !exactAllowed(context)) "Точные напоминания запрещены Android. Разреши будильники и напоминания, затем включи сценарий." else null
         else -> null
     }
+    fun dependencies(rule: AutomationRule, toolId: String) = rule.definition.actions.any {
+        it.capability in setOf("tool.state.set","tool.records.calendar") && it.args.getString("toolId") == toolId
+    }
+    fun dependencyFailure(tools: ToolStore, rule: AutomationRule): String? = rule.definition.actions
+        .filter { it.capability in setOf("tool.state.set","tool.records.calendar") }.firstNotNullOfOrNull { action ->
+            val target=tools.tool(action.args.getString("toolId"))
+            when {
+                target == null -> "Целевой инструмент недоступен. Все действия сценария остановлены."
+                target.archived -> "Целевой инструмент в архиве. Восстанови его и включи сценарий вручную."
+                target.revision != action.args.getInt("revision") -> "Версия целевого инструмента изменилась. Проверь сценарий."
+                else -> null
+            }
+        }
+    suspend fun prepareApproval(store: AutomationStore, id: String, revision: Int): AutomationApproval = mutex.withLock {
+        val rule=checkNotNull(store.rule(id))
+        check(rule.revision == revision) { "Сценарий изменился. Проверь текущую версию." }
+        AutomationApproval(rule,store.state("approval-archive:$id"))
+    }
+    /** Archive invalidates open confirmations even if the target is recovered before approval resumes. */
+    suspend fun approve(store: AutomationStore, approval: AutomationApproval, validate: (AutomationRule) -> Unit) = mutex.withLock {
+        val expected=approval.rule
+        check(store.state("approval-archive:${expected.id}") == approval.archiveToken) {
+            "Инструмент был архивирован. Проверь сценарий и включи его заново после восстановления."
+        }
+        val current=checkNotNull(store.rule(expected.id))
+        check(current.revision == expected.revision) { "Сценарий изменился. Проверь текущую версию." }
+        validate(current)
+        store.approve(expected.id,expected.revision)
+    }
+    /** Uses the same gate as rule effects. Persist pauses first, so interruption cannot enable background work. */
+    suspend fun archiveTool(tools: ToolStore, rules: AutomationStore, expected: ToolRecord) = mutex.withLock {
+        check(tools.tool(expected.id) == expected && !expected.archived) { "Инструмент изменился. Открой текущую версию." }
+        rules.transaction {
+            rules.rules().filter { dependencies(it,expected.id) }.forEach {
+                rules.attention(it.id,it.revision,"Инструмент в архиве. После восстановления включи сценарий вручную.")
+                rules.setState("approval-archive:${it.id}",java.util.UUID.randomUUID().toString())
+            }
+        }
+        ToolStore.effectMutex.withLock { tools.setArchived(expected,true) }
+    }
+    private fun dependencyFailure(context: Context, rule: AutomationRule) = ToolStore(context).use { dependencyFailure(it,rule) }
     fun actionFailure(context: Context, action: CapabilityRequest): String? {
-        if(action.capability == "tool.state.set") return ToolStore(context).use { tools ->
+        if(action.capability in setOf("tool.state.set","tool.records.calendar")) return ToolStore(context).use { tools ->
             val tool = tools.tool(action.args.getString("toolId"))
             when {
-                tool == null || tool.revision != action.args.getInt("revision") -> "Целевой инструмент изменился или недоступен. Проверь и одобри новую версию сценария."
-                ToolSpec.parse(tool.spec).schema.opt(action.args.getString("field")) !is String -> "Целевое поле инструмента недоступно."
+                tool == null || tool.archived || tool.revision != action.args.getInt("revision") -> "Целевой инструмент изменился или недоступен. Проверь и одобри новую версию сценария."
                 else -> runCatching {
-                    val state = JSONObject(tool.state).put(action.args.getString("field"),action.args.get("value"))
-                    ToolSpec.parse(tool.spec).validateState(state.toString()); null
+                    val spec=ToolSpec.parse(tool.spec)
+                    if(action.capability == "tool.records.calendar") AutomationDataflow.validateCollection(spec,action.args.getString("field"))
+                    else {
+                        require(spec.schema.get(action.args.getString("field")) is String)
+                        spec.validateState(JSONObject(tool.state).put(action.args.getString("field"),action.args.get("value")).toString())
+                    }
+                    null
                 }.getOrElse { "Новое значение не соответствует полю инструмента." }
             }
         }
         val android = AndroidCapabilities(context)
-        if(!android.permissionGranted(action.capability)) return "Доступ Android к действию отозван: ${CapabilityCatalog.definition(action.capability).title}."
+        val nativeId=if(action.capability == "calendar.read.rolling") "calendar.read" else action.capability
+        if(!android.permissionGranted(nativeId)) return "Доступ Android к действию отозван: ${CapabilityCatalog.definition(nativeId).title}."
+        if(nativeId == "calendar.read" && android.calendars().none { it.first == action.args.getLong("calendarId") })
+            return "Выбранный календарь недоступен. Проверь источник и включи сценарий снова."
         if(action.capability == "notification.post") {
             val manager = context.getSystemService(NotificationManager::class.java)
-            if(!manager.areNotificationsEnabled() || manager.getNotificationChannel("alpha-tools")?.importance == NotificationManager.IMPORTANCE_NONE) return "Уведомления Alpha выключены в Android."
+            if(!manager.areNotificationsEnabled() || manager.getNotificationChannel("alpha-tools")?.importance == NotificationManager.IMPORTANCE_NONE) return "Уведомления Alphy выключены в Android."
         }
         return null
     }
     fun executor(context: Context, store: AutomationStore) = AutomationExecutor(store,{ charging(context) },{ rule,action ->
-        triggerFailure(context,rule) ?: actionFailure(context,action)
-    }) { rule,action,_ ->
-        if(!store.active(rule.id,rule.revision)) CapabilityResult("cancelled","Сценарий остановлен.")
-        else if(action.capability == "tool.state.set") {
-            ToolStore(context).use { tools ->
-                tools.transaction {
-                    check(store.active(rule.id,rule.revision))
-                    val old = checkNotNull(tools.tool(action.args.getString("toolId")))
-                    check(old.revision == action.args.getInt("revision"))
-                    val state = ToolSpec.parse(old.spec).validateState(JSONObject(old.state).put(action.args.getString("field"),action.args.get("value")).toString()).toString()
-                    tools.commitTool(old.copy(state=state,stateVersion=old.stateVersion+1),old,false)
-                }
+        triggerFailure(context,rule) ?: dependencyFailure(context,rule) ?: actionFailure(context,action)
+    },preview={ rule,action,step -> perform(context,store,rule,action,step) }) { rule,action,step -> perform(context,store,rule,action,step) }
+    private suspend fun perform(context: Context, store: AutomationStore, rule: AutomationRule, action: CapabilityRequest, step: AutomationStep): CapabilityResult {
+        if(!step.dry && !store.active(rule.id,rule.revision)) return CapabilityResult("cancelled","Сценарий остановлен.")
+        if(action.capability in setOf("tool.state.set","tool.records.calendar")) {
+            val result=ToolStore(context).use { tools -> AutomationTools.execute(tools,rule.definition,action,step,AutomationTools.renderer(context)) {store.active(rule.id,rule.revision)} }
+            if(!step.dry) {
+                ToolWidgets.updateAll(context)
+                context.sendBroadcast(Intent(SurfaceEntry.TOOLS_CHANGED).setPackage(context.packageName))
             }
-            ToolWidgets.updateAll(context)
-            context.sendBroadcast(Intent(SurfaceEntry.TOOLS_CHANGED).setPackage(context.packageName))
-            CapabilityResult("succeeded","Поле инструмента изменено на устройстве.")
-        } else AndroidCapabilities(context).execute(action,false) { error("Фоновый запуск интерфейса запрещён") }
+            return result
+        }
+        if(action.capability in setOf("calendar.read","calendar.read.rolling")) {
+            val resolved=AutomationDataflow.resolveRead(action,step.now)
+            val result=AndroidCapabilities(context).execute(resolved,false) {error("Чтение календаря не открывает интерфейс")}
+            return result.copy(data=JSONObject(result.data.toString()).put("range",resolved.args)
+                .put("preview","Календарь ${resolved.args.getLong("calendarId")}: ${resolved.args.getLong("from")} — ${resolved.args.getLong("to")}. ${result.data.optJSONArray("events")?.length() ?: 0} событий."))
+        }
+        if(step.dry) return CapabilityResult("succeeded","Действие не выполнялось.",JSONObject().put("preview",AutomationDataflow.describe(action)))
+        return AndroidCapabilities(context).execute(action,false) { error("Фоновый запуск интерфейса запрещён") }
     }
-    suspend fun execute(context: Context, store: AutomationStore, id: String, revision: Int, event: AutomationEvent, dry: Boolean = false): AutomationRun? = executor(context,store).run(id,revision,event,dry)
-    suspend fun continueUserRun(context: Context, store: AutomationStore, run: AutomationRun, launch: suspend (Intent) -> Unit): AutomationRun? {
+    suspend fun execute(context: Context, store: AutomationStore, id: String, revision: Int, event: AutomationEvent, dry: Boolean = false): AutomationRun? = mutex.withLock { executor(context,store).run(id,revision,event,dry) }
+    suspend fun continueUserRun(context: Context, store: AutomationStore, run: AutomationRun, launch: suspend (Intent) -> Unit): AutomationRun? = mutex.withLock {
+        continueUserRunLocked(context,store,run,launch)
+    }
+    private suspend fun continueUserRunLocked(context: Context, store: AutomationStore, run: AutomationRun, launch: suspend (Intent) -> Unit): AutomationRun? {
         val rule=store.rule(run.ruleId) ?: return null
         if(rule.revision != run.revision || !store.active(rule.id,rule.revision)) return null
         val details=org.json.JSONArray(run.details)
@@ -112,7 +168,7 @@ object AutomationRuntime {
         val action=rule.definition.actions.find { it.id == pending.getString("action") } ?: return null
         if(action.capability !in setOf("app.open","link.open","maps.open","calendar.create")) return null
         if(!store.claimUserRun(run)) return null
-        val denied=triggerFailure(context,rule) ?: actionFailure(context,action)
+        val denied=triggerFailure(context,rule) ?: dependencyFailure(context,rule) ?: actionFailure(context,action)
         if(denied != null) { store.attention(rule.id,rule.revision,denied); return store.finish(run,"revoked",denied,run.details) }
         if(!store.active(rule.id,rule.revision)) return store.finish(run,"cancelled","Сценарий выключен или изменён.",run.details)
         val result=try { AndroidCapabilities(context).execute(action,true,launch) }
@@ -132,23 +188,26 @@ object AutomationRuntime {
         val now = System.currentTimeMillis()
         for(rule in store.rules()) {
             if(!rule.enabled || rule.approvedRevision != rule.revision) { manager.cancel(alarm(context,rule)); continue }
-            val failure = triggerFailure(context,rule) ?: rule.definition.actions.firstNotNullOfOrNull { actionFailure(context,it) }
+            val failure = triggerFailure(context,rule) ?: dependencyFailure(context,rule) ?: rule.definition.actions.firstNotNullOfOrNull { actionFailure(context,it) }
             if(failure != null) { store.attention(rule.id,rule.revision,failure); manager.cancel(alarm(context,rule)); continue }
-            if(rule.definition.type != "schedule") continue
+            if(!rule.definition.scheduled) continue
             var at = rule.nextAt
-            if(at != null && (resetGeofences && at < now || at < now - if(rule.definition.trigger.getBoolean("exact")) 900000L else 86400000L)) {
+            if(at != null && at < now-AutomationSchedule.MAX_LATENESS) {
                 val missed = AutomationEvent("schedule",rule.definition.occurrenceToken(at))
                 store.begin(rule,missed,now,false)?.let { store.finish(it,"missed","Время прошло, пока расписание было недоступно. Просроченное действие не воспроизводилось.") }
                 at = null
             }
-            if(at == null || resetGeofences) at = rule.definition.nextAfter(now)
+            if(at == null || resetGeofences && at > now && rule.definition.type != "interval") at = rule.definition.nextAfter(now)
             store.next(rule.id,rule.revision,at)
             if(at == null) { manager.cancel(alarm(context,rule)); continue }
             val pending = alarm(context,rule.copy(nextAt=at))
             try {
-                if(rule.definition.trigger.getBoolean("exact")) manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,at,pending)
+                if(rule.definition.trigger.optBoolean("exact")) manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,at,pending)
                 else manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,at,pending)
             } catch(_: SecurityException) { store.attention(rule.id,rule.revision,"Android запретил расписание. Проверь доступ к точным напоминаниям.") }
+        }
+        com.alpha.assistant.tools.ToolStore.effectMutex.withLock {
+            com.alpha.assistant.tools.ToolStore(context).use {tools -> MedicineStore(context).use {medicine -> MedicineRuntime.reconcile(context,tools,medicine) }}
         }
         syncGeofences(context,store,resetGeofences)
     }
@@ -156,9 +215,8 @@ object AutomationRuntime {
         launch(context,done) { store ->
             val rule = intent.getStringExtra("id")?.let(store::rule) ?: return@launch
             val at = intent.getLongExtra("at",0)
-            if(rule.revision != intent.getIntExtra("revision",-1) || rule.nextAt != at || at > System.currentTimeMillis()+1000) return@launch
-            execute(context,store,rule.id,rule.revision,AutomationEvent("schedule",rule.definition.occurrenceToken(at)))
-            store.next(rule.id,rule.revision,null)
+            if(rule.revision != intent.getIntExtra("revision",-1)) return@launch
+            AutomationSchedule.deliver(store,rule,at,System.currentTimeMillis(),executor(context,store))
             reconcile(context,store)
         }
     }
@@ -166,14 +224,14 @@ object AutomationRuntime {
         val value = if(connected) "connected" else "disconnected"
         if(store.transition("power",value)) {
             val token = "power:${android.os.SystemClock.elapsedRealtimeNanos()}"
-            store.rules().filter { it.definition.type == "charging" }.forEach { execute(context,store,it.id,it.revision,AutomationEvent("charging",token,value)) }
+            store.rules().filter { it.definition.type == "charging" }.forEach { executor(context,store).run(it.id,it.revision,AutomationEvent("charging",token,value)) }
         }
     }
     fun notification(context: Context, source: String, key: String, postTime: Long) = launch(context) { store ->
         if(source == context.packageName || !listenerAllowed(context)) return@launch
         val token = "notification:"+java.security.MessageDigest.getInstance("SHA-256").digest("$key:$postTime".toByteArray()).joinToString("") { "%02x".format(it) }
         store.rules().filter { it.definition.type == "notification" && source in it.definition.notificationPackages() }.forEach {
-            execute(context,store,it.id,it.revision,AutomationEvent("notification",token,source))
+            executor(context,store).run(it.id,it.revision,AutomationEvent("notification",token,source))
         }
     }
     private fun geoIntent(context: Context) = PendingIntent.getBroadcast(context,0,Intent(context,AutomationGeofenceReceiver::class.java)
@@ -182,29 +240,44 @@ object AutomationRuntime {
         if(!googleAvailable(context)) return
         val rules = store.rules().filter { store.active(it.id,it.revision) && it.definition.type == "geofence" }
         val fingerprint = rules.joinToString { "${it.id}:${it.revision}" }
-        if(!force && store.state("geofences") == fingerprint) return
         val client = LocationServices.getGeofencingClient(context)
         try {
-            withTimeout(4000) { client.removeGeofences(geoIntent(context)).awaitTask() }
-            if(rules.isNotEmpty()) {
-                val fences = rules.map { rule ->
-                    store.setState("geo:${rule.id}:${rule.revision}","")
-                    if(force) store.setState("geo-clock:${rule.id}:${rule.revision}","-1")
-                    val t = rule.definition.trigger
-                    Geofence.Builder().setRequestId("${rule.id}:${rule.revision}").setCircularRegion(t.getDouble("latitude"),t.getDouble("longitude"),t.getDouble("radius").toFloat())
-                        .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_ENTER or Geofence.GEOFENCE_TRANSITION_EXIT).setExpirationDuration(Geofence.NEVER_EXPIRE).build()
+            registerGeofences(store,fingerprint,force,
+                {withTimeout(4000) { client.removeGeofences(geoIntent(context)).awaitTask() }}) {
+                if(rules.isNotEmpty()) {
+                    val fences = rules.map { rule ->
+                        store.setState("geo:${rule.id}:${rule.revision}","")
+                        if(force) store.setState("geo-clock:${rule.id}:${rule.revision}","-1")
+                        val t = rule.definition.trigger
+                        Geofence.Builder().setRequestId("${rule.id}:${rule.revision}").setCircularRegion(t.getDouble("latitude"),t.getDouble("longitude"),t.getDouble("radius").toFloat())
+                            .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_ENTER or Geofence.GEOFENCE_TRANSITION_EXIT).setExpirationDuration(Geofence.NEVER_EXPIRE).build()
+                    }
+                    withTimeout(4000) {
+                        if(context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED ||
+                            context.checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED)
+                            throw SecurityException("Доступ к геопозиции отозван")
+                        client.addGeofences(GeofencingRequest.Builder().setInitialTrigger(0).addGeofences(fences).build(),geoIntent(context)).awaitTask()
+                    }
                 }
-                withTimeout(4000) { client.addGeofences(GeofencingRequest.Builder().setInitialTrigger(0).addGeofences(fences).build(),geoIntent(context)).awaitTask() }
             }
-            store.setState("geofences",fingerprint)
+        } catch(_: SecurityException) {
+            rules.forEach { store.attention(it.id,it.revision,"Доступ к геопозиции отозван. Разреши точную геопозицию и доступ «Всегда», затем включи сценарий снова.") }
         } catch(_: Exception) {
             rules.forEach { store.attention(it.id,it.revision,"Сервисы Google Play не зарегистрировали геозону. Проверь разрешения и повтори включение.") }
         }
     }
+    suspend fun registerGeofences(store: AutomationStore, fingerprint: String, force: Boolean, remove: suspend () -> Unit, add: suspend () -> Unit): Boolean {
+        if(!force && store.state("geofences") == fingerprint) return false
+        store.setState("geofences","!unregistered")
+        remove()
+        add()
+        store.setState("geofences",fingerprint)
+        return true
+    }
     fun geofence(context: Context, intent: Intent, done: () -> Unit) = launch(context,done) { store ->
             val event = GeofencingEvent.fromIntent(intent) ?: return@launch
             if(event.hasError()) {
-                store.setState("geofences","")
+                store.setState("geofences","!unregistered")
                 store.rules().filter { it.definition.type == "geofence" && it.enabled }.forEach { store.attention(it.id,it.revision,"Сервисы Google Play сообщили ошибку геозоны: ${event.errorCode}. Проверь доступ и включи сценарий снова.") }
                 return@launch
             }
@@ -217,7 +290,7 @@ object AutomationRuntime {
                 val clockKey = "geo-clock:${fence.requestId}"
                 if(timestamp <= (store.state(clockKey)?.toLongOrNull() ?: -1)) continue
                 store.setState(clockKey,timestamp.toString())
-                if(store.transition("geo:${fence.requestId}",transition)) execute(context,store,rule.id,rule.revision,AutomationEvent("geofence","geo:$timestamp:$transition",transition))
+                if(store.transition("geo:${fence.requestId}",transition)) executor(context,store).run(rule.id,rule.revision,AutomationEvent("geofence","geo:$timestamp:$transition",transition))
             }
     }
     private suspend fun <T> com.google.android.gms.tasks.Task<T>.awaitTask(): T = suspendCancellableCoroutine { continuation ->

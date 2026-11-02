@@ -15,6 +15,91 @@ import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
 class CapabilityWorkflowTest {
+    // Failure cases: catalog drift, executable planned entries, false success, discovery effects,
+    // invalid arguments, revoked grants, unsupported actions, and stale picker results.
+    @Test fun catalogDiscoveryAndBothModelPromptsUseOnlyBoundActions() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val discovery = AndroidCapabilities(context).discover()
+        val implemented = discovery.getJSONArray("implemented")
+        assertEquals(CapabilityCatalog.ids, (0 until implemented.length()).map { implemented.getJSONObject(it).getString("id") }.toSet())
+        assertEquals(CapabilityAction.entries.toSet(), CapabilityCatalog.definitions.map { it.action }.toSet())
+        val planned = discovery.getJSONArray("planned")
+        assertTrue(planned.length() >= 8)
+        repeat(planned.length()) {
+            val entry = planned.getJSONObject(it)
+            assertFalse(entry.getBoolean("callable"))
+            assertEquals("planned",entry.getString("implementation"))
+            assertFalse(entry.has("argumentSchema"))
+            assertFalse(entry.getString("id") in CapabilityCatalog.ids)
+            assertTrue(runCatching { CapabilityCatalog.request(JSONObject().put("id","test").put("capability",entry.getString("id")).put("args",JSONObject())) }.isFailure)
+        }
+        repeat(implemented.length()) {
+            val entry = implemented.getJSONObject(it)
+            assertEquals("implemented",entry.getString("implementation"))
+            assertTrue(entry.has("availability"))
+            assertFalse(entry.getJSONObject("argumentSchema").getBoolean("additionalProperties"))
+            assertTrue(entry.getJSONObject("access").getBoolean("toolGrant"))
+            assertTrue(entry.getJSONObject("access").getBoolean("confirmation"))
+            assertTrue(entry.has("result"))
+        }
+        val guidance = CapabilityCatalog.modelGuidance()
+        assertTrue(ChatToolReply.instructions(emptyList()).contains(guidance))
+        val name = "catalog-${UUID.randomUUID()}.db"
+        var generationPrompt = ""
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                generationPrompt = request.turns.joinToString { it.text }
+                emit(CloudEvent.Text(spec()))
+            }
+        }
+        ToolStore(context,name).use { store ->
+            val engine = ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))
+            val draft = engine.createDraft("Catalog fixture",null)
+            engine.generate(draft.id,"fixture",emptyList(),CloudSession())
+            assertTrue(generationPrompt.contains(guidance))
+            assertTrue(store.effects(draft.id).isEmpty())
+            val before = AndroidCapabilities(context).discover().toString()
+            assertEquals(before,AndroidCapabilities(context).discover().toString())
+            assertTrue(store.effects(draft.id).isEmpty())
+        }
+        context.deleteDatabase(name)
+        assertEquals("launched",CapabilityCatalog.definition("calendar.create").resultStatus)
+        assertEquals("launched",CapabilityCatalog.definition("maps.open").resultStatus)
+        assertTrue(runCatching { CapabilityCatalog.request(JSONObject("""{"id":"x","capability":"unsupported.action","args":{}}""")) }.isFailure)
+    }
+
+    @Test fun pickerResultsCannotApplyAfterRevocationOrStateChange(): Unit = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val name = "catalog-picker-${UUID.randomUUID()}.db"
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                emit(CloudEvent.Text(spec().replace("notification.post","photo.pick")
+                    .replace("args:{title:'List',text:'Updated'}","args:{}")))
+            }
+        }
+        ToolStore(context,name).use { store ->
+            val engine = ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))
+            val draft = engine.createDraft("Photo fixture",null)
+            engine.generate(draft.id,"fixture",emptyList(),CloudSession())
+            val live = engine.accept(draft.id)
+            var current = engine.interact(live.id,live.revision,live.stateVersion,"add",null)
+            val broker = CapabilityBroker(context,store)
+            broker.grant(live.id,"photo.pick",true)
+            val pending = store.effects(live.id).single()
+            broker.execute(pending.key,true) { CapabilityResult("awaitingUser","Picker",JSONObject().put("launched",true)) }
+            current = engine.interact(current.id,current.revision,current.stateVersion,"add",null)
+            store.finishUserEffect(pending.key,CapabilityResult("succeeded","Selected",JSONObject().put("uri","content://fixture/photo")))
+            assertEquals("cancelled",store.effect(pending.key)!!.result.status)
+            val newest = store.effects(live.id).last()
+            broker.execute(newest.key,true) { CapabilityResult("awaitingUser","Picker",JSONObject().put("launched",true)) }
+            broker.grant(live.id,"photo.pick",false)
+            store.finishUserEffect(newest.key,CapabilityResult("succeeded","Selected"))
+            assertEquals("revoked",store.effect(newest.key)!!.result.status)
+            assertFalse(store.effect(newest.key)!!.result.data.has("uri"))
+            assertEquals(current,store.tool(live.id))
+        }
+        context.deleteDatabase(name)
+    }
     private fun spec(source: String = "if(input.event.type==='action'){input.state.items.push({id:String(input.state.items.length),text:'Milk',done:false});return {state:input.state,effects:[{id:'notice',capability:'notification.post',args:{title:'List',text:'Updated'}}]};}return {state:input.state};") = JSONObject()
         .put("formatVersion",2).put("title","Shopping").put("description","Typed list")
         .put("capabilities",JSONArray().put("notification.post"))
@@ -84,7 +169,7 @@ class CapabilityWorkflowTest {
         assertNotEquals("succeeded",CapabilityResult("unknownOutcome","External app closed").status)
     }
 
-    @Test fun previewEffectsAndInvalidRuntimeNeverChangeData() = runBlocking {
+    @Test fun previewEffectsAndInvalidRuntimeNeverChangeData(): Unit = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val name = "capability-preview-${UUID.randomUUID()}.db"
         var answer = spec("return {state:input.state,effects:[{id:'notice',capability:'notification.post',args:{title:'x',text:'y'}}]};")

@@ -21,6 +21,117 @@ class ToolWorkflowTest {
         .put("ui", JSONObject("""{"type":"column","children":[{"type":"text","text":"$label","bind":"count"},{"type":"button","text":"Add","action":"add"}]}"""))
         .put("source", "if(input.event.type==='action' && input.event.actionId==='add') input.state.count++; return {state:input.state};").toString()
 
+    // Failure cases: noncanonical stored contracts, scalar extras/nulls/unions, malformed collections, and non-JSON output.
+    @Test fun generatedScalarObjectsNormalizeOnlyAtGenerationAndPreserveRevisionState() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val name = "tool-boundary-${UUID.randomUUID()}.db"
+        val store = ToolStore(context,name)
+        val requests = mutableListOf<CloudRequest>()
+        var answer = JSONObject(spec()).put("stateSchema",JSONObject("""{"count":{"type":"number"},"items":{"type":"list","maxItems":10,"fields":{"id":{"type":"string"},"done":{"type":"boolean"},"amount":{"type":"number"}}}}"""))
+            .put("initialState",JSONObject("""{"count":0,"items":[{"id":"first","done":false,"amount":3}]}""")).toString()
+        val objectSchema = answer
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                requests += request; assertTrue(request.jsonObject); assertFalse(request.search); emit(CloudEvent.Text(answer))
+            }
+        }
+        val engine = ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))
+        try {
+            assertTrue(runCatching { ToolSpec.parse(answer) }.isFailure)
+            val draft = engine.createDraft("Create a counter and list",null)
+            val preview = engine.generate(draft.id,"fixture",emptyList(),CloudSession())
+            assertTrue(store.tools().isEmpty()); assertEquals(0,JSONObject(preview.previewState!!).getInt("count"))
+            val first = engine.accept(draft.id)
+            val parsed = ToolSpec.parse(first.spec)
+            assertEquals("number",parsed.schema.get("count"))
+            assertEquals("string",parsed.schema.getJSONObject("items").getJSONObject("fields").get("id"))
+            val changed = engine.interact(first.id,first.revision,first.stateVersion,"add",null)
+            val revision = engine.createDraft("Rename without data loss",changed.id)
+            engine.generate(revision.id,"fixture",emptyList(),CloudSession())
+            val second = engine.accept(revision.id)
+            assertEquals(2,second.revision); assertEquals(changed.state,second.state); assertTrue(store.effects(first.id).isEmpty())
+            val invalidSchemas = listOf(
+                """{"count":{"type":"number","minimum":0}}""", """{"count":{"type":"integer"}}""",
+                """{"count":null}""", """{"count":{"type":null}}""", """{"count":{"type":["number","string"]}}""",
+                """{"count":{"type":"list","maxItems":10}}""",
+                """{"count":"number","items":{"type":"list","maxItems":10,"fields":{"id":{"type":"string","extra":true}}}}""",
+                """{"count":"number","items":{"type":"list","maxItems":10,"fields":{"id":"string","nested":{"type":"list","fields":{}}}}}"""
+            )
+            // Preserve raw literals here. JSONObject serialization would convert integral doubles to integers.
+            val numericBoundaries = listOf("2.0","2e0","null","2147483648","0","3").map {
+                objectSchema.replace("\"formatVersion\":2,","\"formatVersion\":$it,")
+            } + listOf("10.0","1e1","null","2147483648","0","101").map {
+                objectSchema.replace("\"maxItems\":10,","\"maxItems\":$it,")
+            }
+            val candidates = numericBoundaries + invalidSchemas.map { JSONObject(objectSchema).put("stateSchema",JSONObject(it)).toString() } +
+                listOf("", "   ", "not JSON", objectSchema.dropLast(1), objectSchema + " trailing", "```json\n$objectSchema\n```", "[]")
+            candidates.forEach { invalid ->
+                answer = invalid; requests.clear()
+                val rejected = engine.createDraft("Invalid refinement",second.id)
+                val failure = runCatching { engine.generate(rejected.id,"fixture",emptyList(),CloudSession()) }.exceptionOrNull()
+                assertTrue(invalid.take(100),failure is CloudFailure)
+                assertEquals(2,requests.size); assertEquals(invalid,requests[1].turns[1].text)
+                assertEquals(second,store.tool(first.id)); assertNull(store.draft(rejected.id)!!.candidate)
+                engine.reject(rejected.id)
+            }
+        } finally { store.close(); context.deleteDatabase(name) }
+    }
+
+    // Failure cases: correction loops, preview-only rejection, lost revisions, and invented dates for unknown saved values.
+    @Test fun structuralCorrectionsPreserveSavedToolsDatesAndRevisions(): Unit = runBlocking {
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        val name="tool-ui-correction-${UUID.randomUUID()}.db"
+        val requests=mutableListOf<CloudRequest>()
+        var answers=emptyList<String>()
+        val provider=object: ChatProvider {
+            override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
+                requests.add(request); emit(CloudEvent.Text(answers[requests.lastIndex]))
+            }
+        }
+        val original=JSONObject(spec()).put("stateSchema",JSONObject().put("SECRET_DATE_BIND","string"))
+            .put("initialState",JSONObject().put("SECRET_DATE_BIND",""))
+            .put("ui",JSONObject("""{"type":"input","text":"Visit date","bind":"SECRET_DATE_BIND","action":"date"}"""))
+            .put("source","return {state:input.state};").toString()
+        // A valid generated default must never replace an unknown saved date during refinement.
+        val dateCandidate=JSONObject(original).put("initialState",JSONObject().put("SECRET_DATE_BIND","2028-02-29"))
+            .put("ui",JSONObject("""{"type":"dateInput","text":"Visit date","bind":"SECRET_DATE_BIND","action":"date"}""")).toString()
+        val missingLabel=JSONObject(original).put("ui",JSONObject("""{"type":"icon","name":"Plus","action":"SECRET_ACTION"}""")).toString()
+        val store=ToolStore(context,name)
+        val engine=ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))
+        try {
+            answers=listOf(original)
+            val draft=engine.createDraft("Create a date note",null)
+            engine.generate(draft.id,"offline",emptyList(),CloudSession())
+            assertEquals(1,requests.size)
+            val saved=engine.accept(draft.id)
+            val revisions=store.revisions(saved.id)
+            for(candidate in listOf(missingLabel,dateCandidate)) {
+                requests.clear(); answers=listOf(candidate,candidate)
+                val rejected=engine.createDraft("Refine without changing the date",saved.id)
+                val failure=runCatching {engine.generate(rejected.id,"offline",emptyList(),CloudSession())}.exceptionOrNull() as CloudFailure
+                assertEquals(2,requests.size); assertEquals(saved,store.tool(saved.id)); assertEquals(revisions,store.revisions(saved.id))
+                assertNull(store.draft(rejected.id)!!.candidate); assertNull(store.draft(rejected.id)!!.previewState); assertNull(store.draft(rejected.id)!!.previewUi)
+                val correction=requests[1].turns.last().text
+                assertEquals(candidate,requests[1].turns[1].text)
+                assertFalse(correction.contains("SECRET_")); assertFalse(correction.contains("2028-02-29"))
+                val message=checkNotNull(failure.message)
+                assertFalse(message.contains("UI rule:")); assertFalse(message.contains("$.ui"))
+                if(candidate == dateCandidate) {
+                    assertEquals("widget_preview",failure.code)
+                    assertTrue(correction.contains("UI rule: date_value.")); assertTrue(correction.contains("Stage: PREVIEW."))
+                } else assertTrue(correction.contains("UI rule: accessible_label."))
+                engine.reject(rejected.id)
+            }
+            requests.clear(); answers=listOf(dateCandidate,original)
+            val corrected=engine.createDraft("Keep unknown dates as strings",saved.id)
+            val preview=engine.generate(corrected.id,"offline",emptyList(),CloudSession())
+            assertEquals(2,requests.size); assertEquals(saved.state,preview.previewState)
+            val next=engine.accept(corrected.id)
+            assertEquals(saved.state,next.state); assertEquals("",JSONObject(next.state).getString("SECRET_DATE_BIND"))
+            assertEquals(2,next.revision); assertEquals(2,store.revisions(saved.id).size)
+        } finally {store.close(); context.deleteDatabase(name)}
+    }
+
     @Test fun generatePreviewInteractRefineRejectAcceptReopenRollbackAndStaleCommands() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val name = "tool-test-${UUID.randomUUID()}.db"
@@ -136,6 +247,12 @@ class ToolWorkflowTest {
             repeat(node.childCount) { find(node.getChild(it),text)?.let { found -> return found } }
             return null
         }
+        fun scroll(node: android.view.accessibility.AccessibilityNodeInfo?, action: Int): Boolean {
+            if(node == null) return false
+            if(node.actionList.any { it.id == action } && node.performAction(action)) return true
+            repeat(node.childCount) { if(scroll(node.getChild(it),action)) return true }
+            return false
+        }
         fun waitFor(text: String): android.view.accessibility.AccessibilityNodeInfo {
             var found: android.view.accessibility.AccessibilityNodeInfo? = null
             waitUntil { found = find(instrumentation.uiAutomation.rootInActiveWindow,text); found != null }
@@ -143,10 +260,19 @@ class ToolWorkflowTest {
         }
         fun click(text: String) {
             waitUntil { !model.tools.busy }
+            var direction = android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
             waitUntil {
-                var node = find(instrumentation.uiAutomation.rootInActiveWindow,text)
-                while(node != null && !node.isClickable) node = node.parent
-                node != null && node.isEnabled && node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                val root = instrumentation.uiAutomation.rootInActiveWindow
+                var node = find(root,text)
+                if(node == null) {
+                    if(!scroll(root,direction)) direction = if(direction == android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                        android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD else android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                    instrumentation.uiAutomation.waitForIdle(100,2000)
+                    false
+                } else {
+                    while(node != null && !node.isClickable) node = node.parent
+                    node != null && node.isEnabled && node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                }
             }
             instrumentation.uiAutomation.waitForIdle(100,2000)
         }
@@ -155,21 +281,16 @@ class ToolWorkflowTest {
             click("Создать")
             instrumentation.runOnMainSync { model.tools.preparePrompt("Create a counter") }
             waitFor("Create a counter")
-            click("Создать предпросмотр")
-            waitFor("Отправить запрос для инструмента в DeepSeek?")
-            assertEquals(0,calls)
-            click("Отправить запрос")
-            waitFor("Предпросмотр без действий · элементы управления отключены")
+            click("Create preview")
+            waitFor("Preview · controls are disabled")
             assertTrue(model.tools.tools.isEmpty())
-            click("Применить версию")
+            click("Apply changes")
             waitFor("Count: 0")
             click("Add")
             waitFor("Count: 1")
             assertEquals(1,calls)
-            click("Сохранить в библиотеку")
             waitUntil { model.tools.tools.single().saved }
-            waitFor("Сохранено в библиотеке")
-            click("Библиотека")
+            click("Mini-app library")
             waitFor("Count")
             assertEquals(1,JSONObject(model.tools.tools.single().state).getInt("count"))
             scenario.recreate()
@@ -179,7 +300,7 @@ class ToolWorkflowTest {
         } catch (failure: Throwable) {
             fun dump(node: android.view.accessibility.AccessibilityNodeInfo?): String {
                 if(node == null) return ""
-                return "[text=${node.text}, description=${node.contentDescription}, enabled=${node.isEnabled}]" + (0 until node.childCount).joinToString("") { dump(node.getChild(it)) }
+                return "[text=${node.text}, description=${node.contentDescription}, enabled=${node.isEnabled}, scrollable=${node.isScrollable}, actions=${node.actionList.map { it.id }}]" + (0 until node.childCount).joinToString("") { dump(node.getChild(it)) }
             }
             throw AssertionError("${failure.message}; tool saved=${model.tools.tools.map { it.saved }}; error=${model.tools.error}; tree=${dump(instrumentation.uiAutomation.rootInActiveWindow)}",failure)
         } finally {

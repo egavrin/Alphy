@@ -1,4 +1,4 @@
-Current implementation: [local voice integration](voice-integration.md). The evidence below describes the earlier foundation stage.
+Current implementation: [local voice integration](voice-integration.md). The evidence below describes the earlier foundation stage. The current build uses T-one only and excludes the historical Whisper model and native engine.
 
 # Historical speech reuse evidence
 

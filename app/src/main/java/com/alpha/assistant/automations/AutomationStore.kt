@@ -8,10 +8,10 @@ import org.json.JSONObject
 import java.util.UUID
 
 /** Separate local storage never opens conversations or credentials. */
-class AutomationStore(context: Context, name: String = "alpha-automations.db") : SQLiteOpenHelper(context,name,null,1) {
+class AutomationStore(context: Context, name: String = "alpha-automations.db") : SQLiteOpenHelper(context,name,null,2) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE rules(id TEXT PRIMARY KEY, revision INTEGER NOT NULL, approved INTEGER NOT NULL, enabled INTEGER NOT NULL, definition TEXT NOT NULL, next_at INTEGER, attention TEXT NOT NULL)")
-        db.execSQL("CREATE TABLE runs(id TEXT PRIMARY KEY, rule_id TEXT NOT NULL, revision INTEGER NOT NULL, token TEXT NOT NULL, time INTEGER NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, details TEXT NOT NULL, UNIQUE(rule_id,revision,token))")
+        db.execSQL("CREATE TABLE runs(id TEXT PRIMARY KEY, rule_id TEXT NOT NULL, revision INTEGER NOT NULL, token TEXT NOT NULL, time INTEGER NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, details TEXT NOT NULL, UNIQUE(rule_id,token))")
         db.execSQL("CREATE TABLE effects(run_id TEXT NOT NULL, action_id TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(run_id,action_id))")
         db.execSQL("CREATE TABLE trigger_state(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     }
@@ -46,7 +46,7 @@ class AutomationStore(context: Context, name: String = "alpha-automations.db") :
     fun history(id: String): List<AutomationRun> = readableDatabase.rawQuery("SELECT * FROM runs WHERE rule_id=? ORDER BY time DESC,rowid DESC",arrayOf(id)).use { c ->
         buildList { while(c.moveToNext()) add(AutomationRun(c.getString(0),c.getString(1),c.getInt(2),c.getString(3),c.getLong(4),c.getString(5),c.getString(6),c.getString(7))) }
     }
-    fun occurrence(id: String, revision: Int, token: String): AutomationRun? = readableDatabase.rawQuery("SELECT * FROM runs WHERE rule_id=? AND revision=? AND token=?",arrayOf(id,revision.toString(),token)).use { c ->
+    fun occurrence(id: String, token: String): AutomationRun? = readableDatabase.rawQuery("SELECT * FROM runs WHERE rule_id=? AND token=?",arrayOf(id,token)).use { c ->
         if(c.moveToFirst()) AutomationRun(c.getString(0),c.getString(1),c.getInt(2),c.getString(3),c.getLong(4),c.getString(5),c.getString(6),c.getString(7)) else null
     }
     /** The claim survives process death. Existing claims never start another execution. */
@@ -54,7 +54,7 @@ class AutomationStore(context: Context, name: String = "alpha-automations.db") :
         var result: AutomationRun? = null
         transaction {
             if(!dry && !active(rule.id,rule.revision)) return@transaction
-            if(occurrence(rule.id,rule.revision,event.token) != null) return@transaction
+            if(occurrence(rule.id,event.token) != null) return@transaction
             val run = AutomationRun(UUID.randomUUID().toString(),rule.id,rule.revision,event.token,now,"unknownOutcome","Запуск начат. После прерывания автоматического повтора нет.","[]")
             writableDatabase.insertOrThrow("runs",null,ContentValues().apply {
                 put("id",run.id); put("rule_id",rule.id); put("revision",rule.revision); put("token",event.token); put("time",now)

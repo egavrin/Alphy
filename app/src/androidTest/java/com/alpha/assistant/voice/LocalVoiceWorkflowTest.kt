@@ -17,7 +17,10 @@ class LocalVoiceWorkflowTest {
         android.util.Log.i("AlphaVoiceFixture", value)
         InstrumentationRegistry.getInstrumentation().sendStatus(0, android.os.Bundle().apply { putString("alpha_voice_result", value) })
     }
-    @Test fun microphoneStopsWhenActivityPauses() {
+    @Test fun microphoneStopsWhenActivityPauses() = microphoneStopsOnPause(oneShot = false)
+    @Test fun oneShotMicrophoneStopsWhenActivityPauses() = microphoneStopsOnPause(oneShot = true)
+
+    private fun microphoneStopsOnPause(oneShot: Boolean) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         var voice: VoiceSession? = null
@@ -34,7 +37,7 @@ class LocalVoiceWorkflowTest {
                 android.os.SystemClock.sleep(100)
             }
             assertEquals(android.content.pm.PackageManager.PERMISSION_GRANTED, context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO))
-            scenario.onActivity { activity -> voice = activity.voice; activity.voice.start(true, false) }
+            scenario.onActivity { activity -> voice = activity.voice; activity.voice.start(true, false, oneShot) }
             val deadline = android.os.SystemClock.uptimeMillis() + 20000
             var listening = false
             while (android.os.SystemClock.uptimeMillis() < deadline) {
@@ -48,8 +51,20 @@ class LocalVoiceWorkflowTest {
             android.os.SystemClock.sleep(300)
             val manager = context.getSystemService(android.media.AudioManager::class.java)
             assertTrue("Microphone remains active", manager.activeRecordingConfigurations.isEmpty())
-            report("Activity pause: idle, microphone released")
+            report("Activity pause: oneShot=$oneShot, idle, microphone released")
         }
+    }
+
+    @Test fun productionApkContainsOnlyToneRecognition() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        java.util.zip.ZipFile(context.applicationInfo.sourceDir).use { apk ->
+            val names = apk.entries().asSequence().map { it.name }.toList()
+            assertTrue(names.any { it == "assets/voice/tone/model.onnx" })
+            assertFalse(names.any { it.contains("whisper", ignoreCase = true) })
+        }
+        val manifest = context.assets.open("voice/manifest.json").bufferedReader().use { it.readText() }
+        assertFalse(manifest.contains("whisper", ignoreCase = true))
+        assertTrue(runCatching { Class.forName("com.offlineassistant.app.asr.WhisperTranscriber") }.isFailure)
     }
 
     @Test fun recordedRussianAndLocalSpeech(): Unit = runBlocking {
@@ -60,23 +75,19 @@ class LocalVoiceWorkflowTest {
         val wav = File(context.cacheDir, "voice-fixture.wav")
         instrumentation.context.assets.open("voice/russian.wav").use { input -> wav.outputStream().use(input::copyTo) }
         try {
-            for (engine in VoiceEngine.entries) {
-                val recognizer = models.recognizer(engine)
-                try {
-                    val result = if (engine == VoiceEngine.TONE) {
-                        val wave = com.k2fsa.sherpa.onnx.WaveReader.readWave(wav.absolutePath)
-                        val stream = checkNotNull(recognizer.startStreaming({}, {}))
-                        try {
-                            wave.samples.asList().chunked(1600).forEach { block -> stream.acceptPcm16(ShortArray(block.size) { (block[it] * 32767f).toInt().toShort() }, wave.sampleRate) }
-                            stream.finish()
-                        } finally { stream.cancel() }
-                    } else recognizer.transcribe(wav)
-                    assertNull("${engine}: ${result.error}", result.error)
-                    val text = result.text.orEmpty().lowercase()
-                    report("${engine}: $text")
-                    assertTrue("${engine}: $text", text.contains("таймер") && (text.contains("пять") || text.contains("5")))
-                } finally { recognizer.release() }
-            }
+            val recognizer = models.recognizer()
+            try {
+                val wave = com.k2fsa.sherpa.onnx.WaveReader.readWave(wav.absolutePath)
+                val stream = checkNotNull(recognizer.startStreaming({}, {}))
+                val result = try {
+                    wave.samples.asList().chunked(1600).forEach { block -> stream.acceptPcm16(ShortArray(block.size) { (block[it] * 32767f).toInt().toShort() }, wave.sampleRate) }
+                    stream.finish()
+                } finally { stream.cancel() }
+                assertNull("T-one: ${result.error}", result.error)
+                val text = result.text.orEmpty().lowercase()
+                report("T-one: $text")
+                assertTrue("T-one: $text", text.contains("таймер") && (text.contains("пять") || text.contains("5")))
+            } finally { recognizer.release() }
             val synth = models.synthesizer()
             try {
                 val audio = synth.synthesize("Привет! Таймер на пять минут.")

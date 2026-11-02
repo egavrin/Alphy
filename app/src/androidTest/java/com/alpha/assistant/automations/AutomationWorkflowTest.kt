@@ -95,7 +95,7 @@ class AutomationWorkflowTest {
             val run=checkNotNull(deferred.run(external.id,external.revision,event))
             assertTrue(store.claimUserRun(run))
             assertFalse(store.claimUserRun(run))
-            assertEquals("unknownOutcome",store.occurrence(external.id,external.revision,event.token)?.status)
+            assertEquals("unknownOutcome",store.occurrence(external.id,event.token)?.status)
         } } finally { context.deleteDatabase(name) }
     }
 

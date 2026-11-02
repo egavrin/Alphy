@@ -2,6 +2,6 @@
     <!-- Debug-only loopback HTTP supports deterministic provider tests. -->
     <application android:usesCleartextTraffic="true">
         <activity android:name=".VoiceTestActivity" android:exported="false" />
-        <activity android:name=".CloudTestActivity" android:exported="false" />
+        <activity android:name=".CloudTestActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
     </application>
 </manifest>

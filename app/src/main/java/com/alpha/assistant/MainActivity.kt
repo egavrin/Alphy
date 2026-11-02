@@ -10,7 +10,6 @@ import com.alpha.assistant.surfaces.ToolWidgets
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.lifecycle.ViewModelProvider
 import com.alpha.assistant.ui.AlphaShell
 import com.alpha.assistant.ui.AlphaTheme
 import com.alpha.assistant.ui.ShellViewModel
@@ -32,10 +31,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        model = ViewModelProvider(this)[ShellViewModel::class.java]
+        model = com.alpha.assistant.surfaces.AssistantChat.model(application)
         val filter = IntentFilter(SurfaceEntry.TOOLS_CHANGED).apply { addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_USER_PRESENT) }
-        if(android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(surfaceUpdates,filter,Context.RECEIVER_NOT_EXPORTED)
-        else { @Suppress("DEPRECATION") registerReceiver(surfaceUpdates,filter) }
+        androidx.core.content.ContextCompat.registerReceiver(this,surfaceUpdates,filter,androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
         if(savedInstanceState == null) receiveEntry(intent)
         setContent { AlphaTheme(model.snapshot.theme) { AlphaShell(model) } }
     }

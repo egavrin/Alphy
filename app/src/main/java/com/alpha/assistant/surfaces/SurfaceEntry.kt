@@ -36,7 +36,7 @@ object SurfaceEntry {
                 .setData(android.net.Uri.parse("alpha-pin://result/$token")),flags)
     }
     fun pin(context: Context, tool: ToolRecord, widget: Boolean, prefs: WidgetPreferences): Pair<String,String> {
-        require(tool.saved)
+        require(tool.saved && !tool.archived)
         val token = UUID.randomUUID().toString()
         val spec = ToolSpec.parse(tool.spec)
         val supported = if(widget) AppWidgetManager.getInstance(context).isRequestPinAppWidgetSupported
@@ -86,8 +86,8 @@ class PinResultReceiver : BroadcastReceiver() {
                 check(ToolWidgets.toolId(context,id) == null) { "Widget already configured" }
                 com.alpha.assistant.tools.ToolStore(context).use { store ->
                     val tool = checkNotNull(store.tool(data.getString("tool")))
-                    check(tool.saved)
-                    ToolSpec.parse(tool.spec).also { it.validateState(tool.state); it.validateUi(org.json.JSONObject(tool.ui)) }
+                    check(tool.saved && !tool.archived)
+                    ToolSpec.parse(tool.spec).also { it.validateState(tool.state); it.validateUi(org.json.JSONObject(tool.ui),org.json.JSONObject(tool.state)) }
                     ToolWidgets.bind(context,id,tool.id,WidgetPreferences(data.getString("format"),data.getBoolean("details")))
                     ToolWidgets.update(context,id,store)
                 }
@@ -104,7 +104,12 @@ class AlphaTileService : TileService() {
         val open = {
             val pending = PendingIntent.getActivity(this,0,SurfaceEntry.chatIntent(this),PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             if(android.os.Build.VERSION.SDK_INT >= 34) startActivityAndCollapse(pending)
-            else { @Suppress("DEPRECATION") startActivityAndCollapse(SurfaceEntry.chatIntent(this)) }
+            else {
+                // The PendingIntent overload requires API 34; this branch runs only on older Android versions.
+                @android.annotation.SuppressLint("StartActivityAndCollapseDeprecated")
+                @Suppress("DEPRECATION")
+                startActivityAndCollapse(SurfaceEntry.chatIntent(this))
+            }
         }
         if(isLocked) unlockAndRun(open) else open()
     }

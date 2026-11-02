@@ -10,12 +10,19 @@ import java.time.*
 data class AutomationDefinition(val json: String, val name: String, val trigger: JSONObject,
     val conditions: JSONObject, val actions: List<CapabilityRequest>) {
     val type get() = trigger.getString("type")
+    val scheduled get() = type in setOf("schedule","interval")
     fun occurrenceToken(at: Long): String {
+        if(type == "interval") return "interval:$at"
         val zone=if(trigger.optString("zone","device") == "device") ZoneId.systemDefault() else ZoneId.of(trigger.getString("zone"))
         val date=Instant.ofEpochMilli(at).atZone(zone).toLocalDate()
         return "schedule:${date}T${LocalTime.parse(trigger.getString("time"))}"
     }
     fun nextAfter(now: Long): Long? {
+        if(type == "interval") {
+            val duration=trigger.getLong("minutes")*60000
+            val anchor=trigger.getLong("anchor")
+            return if(now < anchor) anchor else anchor+((now-anchor)/duration+1)*duration
+        }
         if(type != "schedule") return null
         val zone = if(trigger.optString("zone","device") == "device") ZoneId.systemDefault() else ZoneId.of(trigger.getString("zone"))
         val time = LocalTime.parse(trigger.getString("time"))
@@ -32,7 +39,7 @@ data class AutomationDefinition(val json: String, val name: String, val trigger:
         return null
     }
     fun matches(event: AutomationEvent): Boolean = event.type == "manual" || when(type) {
-        "schedule" -> event.type == "schedule"
+        "schedule","interval" -> event.type == "schedule"
         "charging" -> event.type == "charging" && event.source == trigger.getString("connection")
         "notification" -> event.type == "notification" && event.source in notificationPackages()
         "geofence" -> event.type == "geofence" && event.source == trigger.getString("transition")
@@ -50,7 +57,7 @@ data class AutomationDefinition(val json: String, val name: String, val trigger:
         return null
     }
     companion object {
-        val actionIds = setOf("notification.post","calendar.read","tool.state.set","app.open","link.open","maps.open","calendar.create")
+        val actionIds = setOf("notification.post","calendar.read","calendar.read.rolling","tool.records.calendar","tool.state.set","app.open","link.open","maps.open","calendar.create")
         fun parse(input: JSONObject): AutomationDefinition {
             require(input.toString().toByteArray().size <= 20000) { "Сценарий слишком большой" }
             require(input.keys().asSequence().toSet() == setOf("name","trigger","conditions","actions"))
@@ -63,7 +70,7 @@ data class AutomationDefinition(val json: String, val name: String, val trigger:
                 "notification" -> {
                     val a = t.getJSONArray("packages"); require(a.length() in 1..10)
                     val sources = (0 until a.length()).map { a.getString(it) }
-                    require(sources.distinct().size == sources.size && sources.all { it.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+")) && it != "com.alpha.assistant" }) { "Выбери приложения, кроме Alpha" }
+                    require(sources.distinct().size == sources.size && sources.all { it.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+")) && it != "com.alpha.assistant" }) { "Выбери приложения, кроме Alphy" }
                     setOf("type","packages")
                 }
                 "geofence" -> {
@@ -73,6 +80,11 @@ data class AutomationDefinition(val json: String, val name: String, val trigger:
                     require(t.getDouble("radius").isFinite() && t.getDouble("radius") in 100.0..10000.0)
                     require(t.getString("transition") in setOf("enter","exit"))
                     setOf("type","latitude","longitude","radius","transition")
+                }
+                "interval" -> {
+                    require(t.get("minutes") is Int && t.getInt("minutes") in 15..10080) { "Интервал — от 15 минут до 7 дней" }
+                    require(t.get("anchor") is Number && t.getLong("anchor") in 1..4102444800000L && t.getDouble("anchor") == t.getLong("anchor").toDouble())
+                    setOf("type","minutes","anchor")
                 }
                 "schedule" -> {
                     require(t.getString("repeat") in setOf("once","daily","weekly")); LocalTime.parse(t.getString("time"))
@@ -99,22 +111,35 @@ data class AutomationDefinition(val json: String, val name: String, val trigger:
             val actions = (0 until a.length()).map { i ->
                 val raw = a.getJSONObject(i); val capability = raw.getString("capability")
                 require(capability in actionIds)
-                if(capability != "tool.state.set") CapabilityCatalog.request(raw)
+                if(capability !in setOf("tool.state.set","tool.records.calendar","calendar.read.rolling")) CapabilityCatalog.request(raw)
                 else {
                     require(raw.keys().asSequence().toSet() == setOf("id","capability","args"))
                     require(raw.getString("id").matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")))
                     val args = raw.getJSONObject("args")
-                    require(args.keys().asSequence().toSet() == setOf("toolId","revision","field","value"))
-                    require(args.getString("toolId").length in 1..128 && args.get("revision") is Int && args.getInt("revision") > 0)
-                    require(args.getString("field").matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")))
-                    val value = args.get("value")
-                    require(value is Boolean || value is String && value.length <= 2048 || value is Number && value.toDouble().isFinite() && kotlin.math.abs(value.toDouble()) <= 1e12)
+                    if(capability == "calendar.read.rolling") {
+                        require(args.keys().asSequence().toSet() == setOf("calendarId","days","zone"))
+                        require(args.get("calendarId") is Number && args.getLong("calendarId") in 0..4102444800000L && args.getDouble("calendarId") == args.getLong("calendarId").toDouble())
+                        require(args.get("days") is Int && args.getInt("days") in 1..30)
+                        if(args.getString("zone") != "device") ZoneId.of(args.getString("zone"))
+                    } else {
+                        val fields=if(capability == "tool.state.set") setOf("toolId","revision","field","value") else setOf("toolId","revision","field","source")
+                        require(args.keys().asSequence().toSet() == fields)
+                        require(args.getString("toolId").length in 1..128 && args.get("revision") is Int && args.getInt("revision") > 0)
+                        require(args.getString("field").matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")))
+                        if(capability == "tool.state.set") {
+                            val value = args.get("value")
+                            require(value is Boolean || value is String && value.length <= 2048 || value is Number && value.toDouble().isFinite() && kotlin.math.abs(value.toDouble()) <= 1e12)
+                        } else require(args.getString("source").matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")))
+                    }
                     CapabilityRequest(raw.getString("id"),capability,args)
                 }
             }
             require(actions.map { it.id }.distinct().size == actions.size)
+            actions.forEachIndexed { index,action -> if(action.capability == "tool.records.calendar") {
+                require(actions.take(index).any { it.id == action.args.getString("source") && it.capability in setOf("calendar.read","calendar.read.rolling") }) { "Записи должны получать результат предыдущего чтения календаря" }
+            } }
             if(actions.any { it.capability in setOf("app.open","link.open","maps.open","calendar.create") }) require(actions.size == 1) { "Открытие приложения должно быть отдельным сценарием" }
-            if(type == "schedule" && t.getBoolean("exact")) require(actions.all { it.capability == "notification.post" }) { "Точное время доступно только для уведомлений Alpha. Остальные действия выполняются приблизительно." }
+            if(type == "schedule" && t.getBoolean("exact")) require(actions.all { it.capability == "notification.post" }) { "Точное время доступно только для уведомлений Alphy. Остальные действия выполняются приблизительно." }
             return AutomationDefinition(j.toString(),name,t,c,actions)
         }
     }
@@ -124,3 +149,5 @@ data class AutomationRule(val id: String, val revision: Int, val approvedRevisio
     val definition: AutomationDefinition, val nextAt: Long?, val attention: String)
 data class AutomationRun(val id: String, val ruleId: String, val revision: Int, val token: String,
     val time: Long, val status: String, val message: String, val details: String)
+
+data class AutomationStep(val key: String, val now: Long, val previous: Map<String,com.alpha.assistant.capabilities.CapabilityResult>, val dry: Boolean)

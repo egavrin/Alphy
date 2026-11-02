@@ -1,6 +1,6 @@
-Alpha local voice, bundle alpha-voice-1
+Alphy local voice, bundle alpha-voice-1
 
-Adapted Android ASR, WAV JNI, Silero frontend, ONNX inference, and ISTFT sources:
+Adapted Android ASR, Silero frontend, ONNX inference, and ISTFT sources:
 Android Offline Assistant / deal-studio revision feea3d8a0e13.
 Original namespaces and available source notices remain intact.
 
@@ -8,11 +8,6 @@ T-one Russian streaming model: T-Software DC, Apache-2.0.
 Pinned Sherpa-compatible export:
 https://huggingface.co/csukuangfj/sherpa-onnx-streaming-t-one-russian-2025-09-08/tree/9d63341e0f2d8a8b2edaa825aa1fcfe3c5283b47
 See voice/tone/LICENSE for the full model license.
-
-Whisper Base multilingual Q5_1: OpenAI / whisper.cpp contributors, MIT.
-https://huggingface.co/ggerganov/whisper.cpp/tree/87cd18b47b941d2f65d09981dad23bb7d0481c77
-whisper.cpp native sources: ggml-org/whisper.cpp revision 080bbbe85230f624f0b52127f1ae1218247989f9.
-See whisper-MIT.txt.
 
 Silero v5.5 Russian Xenia: Silero Team.
 Source weight: https://models.silero.ai/models/tts/ru/v5_5_ru.pt

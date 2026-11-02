@@ -22,6 +22,55 @@ import java.util.UUID
  * invalid action, locked action, persisted reopen, compact/wide layout and host binding. */
 @RunWith(AndroidJUnit4::class)
 class SurfaceWorkflowTest {
+    /** Render in the Android host, then measure actual child bounds at supported launcher sizes. */
+    @Test fun hostProjectionKeepsBoundStateAndPrimaryActionInsideContent() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val raw = """{"formatVersion":2,"title":"Water test","description":"Local water tracker","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":4},"ui":{"type":"column","children":[{"type":"text","text":"Water test"},{"type":"text","text":"Count","bind":"count"},{"type":"button","text":"Add","action":"add"},{"type":"button","text":"Reset","action":"reset"}]},"source":"return {state:input.state};"}"""
+        val definition = JSONObject(raw)
+        listOf("Less","Half","Double").forEachIndexed { index,label ->
+            definition.getJSONObject("ui").getJSONArray("children").put(JSONObject().put("type","button").put("text",label).put("action","extra$index"))
+        }
+        val spec = ToolSpec.parse(definition.toString())
+        val tool = ToolRecord("host-projection-fixture",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)
+        instrumentation.runOnMainSync {
+            val sizes = listOf(140 to 140,180 to 180,276 to 319,420 to 360) +
+                listOf(168,172,192,196,240,244,288,292,336,340,384,388).map { 276 to it }
+            sizes.forEach { (width,height) ->
+              listOf(false,true).filter { !it || android.os.Build.VERSION.SDK_INT >= 31 }.forEach { responsive ->
+                val host = android.appwidget.AppWidgetHostView(context)
+                host.setPadding(0,0,0,0)
+                val density = context.resources.displayMetrics.density
+                fun measureHost() {
+                    host.measure(android.view.View.MeasureSpec.makeMeasureSpec((width*density).toInt(),android.view.View.MeasureSpec.EXACTLY),
+                        android.view.View.MeasureSpec.makeMeasureSpec((height*density).toInt(),android.view.View.MeasureSpec.EXACTLY))
+                    host.layout(0,0,host.measuredWidth,host.measuredHeight)
+                }
+                measureHost()
+                val views = if(responsive) ToolWidgets.renderForHost(context,98765,tool,WidgetPreferences(),false,Bundle())
+                    else ToolWidgets.render(context,98765,tool,WidgetPreferences(),width >= 250,false,height,width)
+                host.updateAppWidget(views)
+                measureHost()
+                val content = host.findViewById<android.widget.LinearLayout>(com.alpha.assistant.R.id.widget_content)
+                assertNotNull("Host must inflate the widget",content)
+                val children = (0 until content.childCount).map { content.getChildAt(it) }
+                val labels = children.map { (it as android.widget.TextView).text.toString() }
+                assertTrue("$width x $height: $labels",labels.contains("Count: 4"))
+                assertFalse(labels.contains("Water test"))
+                if(height >= 172) assertTrue("Primary action must remain visible: $labels",labels.contains("Add"))
+                children.forEach { child ->
+                    val touch = android.graphics.Rect().also(child::getHitRect)
+                    assertTrue("Control must fit the content: $width x $height, responsive=$responsive",touch.top >= 0 && touch.bottom <= content.height)
+                    assertTrue("Rows must preserve their 48dp touch height: $width x $height, responsive=$responsive",touch.width() > 0 && touch.height() >= (48*density).toInt())
+                    assertTrue((child as android.widget.TextView).text.isNotBlank())
+                }
+                val open = host.findViewById<android.widget.Button>(com.alpha.assistant.R.id.widget_open)
+                assertTrue(open.isClickable)
+                if(height == 140) assertEquals("Open 5 more",open.text.toString())
+              }
+            }
+        }
+    }
     @Test fun widgetBindingActionConcurrencyAndReopen() = runBlocking {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val base = instrumentation.targetContext

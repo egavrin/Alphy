@@ -8,7 +8,7 @@ Alphy is an Android assistant with cloud chat, local voice processing, generated
 - Create interactive tools with native controls and isolated JavaScript execution.
 - Use widgets and approved device capabilities, including notifications and calendar access.
 - Configure local automations for schedules, location, charging, and selected notifications.
-- Use T-one or Whisper for speech recognition and Silero for speech synthesis when the required model files are present.
+- Use T-one for local speech recognition and Silero for continuous-session speech replies when the required model files are present.
 
 Alphy stores conversations and tool data on the device. It stores the provider key with Android Keystore. Cloud requests send the confirmed content to DeepSeek and can incur provider charges. Device actions and permissions require user approval.
 
@@ -35,7 +35,7 @@ Set `ANDROID_HOME` to the Android SDK directory, or set `sdk.dir` in `local.prop
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The app currently retains the application ID `com.alpha.assistant` and the device label `Alpha`.
+The app uses the application ID `com.alpha.assistant` and the device label `Alphy`.
 
 ## Voice models
 

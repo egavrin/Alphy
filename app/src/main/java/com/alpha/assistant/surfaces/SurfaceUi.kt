@@ -68,8 +68,8 @@ import com.alpha.assistant.tools.ToolSpec
                     FilterChip(!widget,{ widget = false },{ Text("Shortcut") })
                 }
                 if(widget) { WidgetOptions(prefs) { prefs = it }; WidgetPreview(tool,prefs) }
-                else { Text(ToolSpec.parse(tool.spec).title,style = MaterialTheme.typography.titleLarge); Text("Opens this tool in Alpha.") }
-                Text("Shared state, separate appearance. Text input and hidden controls open in Alpha. Only local buttons and toggles run here.")
+                else { Text(ToolSpec.parse(tool.spec).title,style = MaterialTheme.typography.titleLarge); Text("Opens this tool in Alphy.") }
+                Text("Shared state, separate appearance. Text input and hidden controls open in Alphy. Only local buttons and toggles run here.")
                 status?.let { Text(it) }
             }
         },confirmButton = { TextButton(onClick = { val result = SurfaceEntry.pin(context,tool,widget,prefs); token = result.first; status = result.second }) { Text("Request Android pin") } },
@@ -80,18 +80,18 @@ import com.alpha.assistant.tools.ToolSpec
     val context = LocalContext.current
     var status by remember { mutableStateOf<String?>(null) }
     val result = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        status = if(context.getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_ASSISTANT)) "Alpha is the system assistant." else "Assistant selection was cancelled or declined."
+        status = if(context.getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_ASSISTANT)) "Alphy is the system assistant." else "Assistant selection was cancelled or declined."
     }
     Text("Android entry points",style = MaterialTheme.typography.titleLarge)
-    Text("Launcher, assistant gesture, and the Alpha Quick Settings tile continue the selected chat. Drafts remain unchanged. Requests require confirmation in Alpha.")
+    Text("Launcher, assistant gesture, and the Alphy Quick Settings tile continue the selected chat. Drafts remain unchanged. Send requests from Alphy. Device actions retain separate access and confirmation.")
     TextButton(onClick = {
         val request = SurfaceEntry.requestAssistant(context)
         if(request == null) status = "This device does not expose the assistant role."
         else runCatching { result.launch(request) }.onFailure { status = "This device could not open assistant selection." }
-    }) { Text("Choose Alpha as system assistant") }
+    }) { Text("Choose Alphy as system assistant") }
     TextButton(onClick = {
         runCatching { context.startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }.onFailure { status = "This device does not expose assistant settings." }
     }) { Text("Open Android assistant settings") }
-    Text("Add the Alpha tile from Android Quick Settings → Edit. Android and launcher support varies by device.")
+    Text("Add the Alphy tile from Android Quick Settings → Edit. Android and launcher support varies by device.")
     status?.let { Text(it,style = MaterialTheme.typography.bodySmall) }
 }

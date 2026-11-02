@@ -4,4 +4,11 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
+    <style name="Theme.Alpha.Assistant" parent="Theme.Alpha">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+    </style>
 </resources>

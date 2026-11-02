@@ -70,11 +70,6 @@
       "path": "tone/tokens.txt",
       "bytes": 202,
       "sha256": "27f7b3ba2096c572375fba1a6b29af1f80d86e08a329940612908112695f97e0"
-    },
-    {
-      "path": "whisper/base-q5_1.bin",
-      "bytes": 59707625,
-      "sha256": "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898"
     }
   ]
 }

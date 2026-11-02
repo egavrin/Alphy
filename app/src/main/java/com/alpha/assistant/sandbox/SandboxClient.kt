@@ -1,60 +1,26 @@
 package com.alpha.assistant.sandbox
 
-import android.content.*
-import android.os.*
-import kotlinx.coroutines.*
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlin.coroutines.resume
+import android.content.Context
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import org.json.JSONObject
 
-class SandboxClient(context: Context) {
-    private val context = context.applicationContext
-
-    suspend fun execute(source: String, input: String): SandboxResult = mutex.withLock {
-        try { SandboxContract.validateRequest(source, input) }
-        catch (_: Exception) { return@withLock SandboxResult("INVALID_REQUEST") }
-        withContext(Dispatchers.Main.immediate) {
-            var connection: ServiceConnection? = null
-            var bound = false
-            try {
-                withTimeoutOrNull(4000) {
-                    suspendCancellableCoroutine { continuation ->
-                        fun complete(result: SandboxResult) {
-                            if (continuation.isActive) continuation.resume(result)
-                        }
-                        val callback = Messenger(Handler(Looper.getMainLooper()) { message ->
-                            val data = message.data
-                            val status = data.getString("status") ?: "INVALID_RESULT"
-                            val json = data.getString("json")
-                            if (status == "OK") {
-                                try { SandboxContract.validateResult(requireNotNull(json)) }
-                                catch (_: Exception) { complete(SandboxResult("INVALID_RESULT")); return@Handler true }
-                            }
-                            complete(SandboxResult(status, json, data.getInt("uid"), data.getInt("pid"), data.getBoolean("networkDenied"), data.getBoolean("privateDataDenied")))
-                            true
-                        })
-                        connection = object : ServiceConnection {
-                            override fun onServiceConnected(name: ComponentName, binder: IBinder) {
-                                try {
-                                    Messenger(binder).send(Message.obtain(null, SandboxContract.EXECUTE).apply {
-                                        replyTo = callback
-                                        data = Bundle().apply { putString("source", source); putString("input", input) }
-                                    })
-                                } catch (_: RemoteException) { complete(SandboxResult("PROCESS_DIED")) }
-                            }
-                            override fun onServiceDisconnected(name: ComponentName) { complete(SandboxResult("PROCESS_DIED")) }
-                            override fun onBindingDied(name: ComponentName) { complete(SandboxResult("PROCESS_DIED")) }
-                            override fun onNullBinding(name: ComponentName) { complete(SandboxResult("UNAVAILABLE")) }
-                        }
-                        bound = context.bindService(Intent(context, JavaScriptSandboxService::class.java), connection!!, Context.BIND_AUTO_CREATE)
-                        if (!bound) complete(SandboxResult("UNAVAILABLE"))
-                    }
-                } ?: SandboxResult("TIMEOUT")
-            } finally {
-                if (bound) context.unbindService(connection!!)
-            }
-        }
+class SandboxClient internal constructor(context: Context,private val runtime: AndroidJsRuntime) {
+    constructor(context: Context): this(context,AndroidJsRuntime.get(context))
+    suspend fun availability(): SandboxResult=runtime.availability()
+    suspend fun execute(source: String,input: String): SandboxResult {
+        try {SandboxContract.validateRequest(source,input)}
+        catch(_: Exception) {return SandboxResult("INVALID_REQUEST")}
+        currentCoroutineContext().ensureActive()
+        val isolate=try {runtime.acquire(retained=false,maxReturnBytes=SandboxContract.MAX_BYTES)}
+            catch(cancel: CancellationException) {throw cancel}
+            catch(failure: RuntimeFailure) {return SandboxResult(failure.status)}
+        try {
+            val result=isolate.evaluate("JSON.stringify((function(input){'use strict';\n$source\n})(JSON.parse(${JSONObject.quote(input)})))",SandboxContract.EVALUATION_MS)
+            if(result.status=="OK" && runCatching {SandboxContract.validateResult(checkNotNull(result.json))}.isFailure)return SandboxResult("INVALID_RESULT")
+            currentCoroutineContext().ensureActive()
+            return result
+        } finally {isolate.close()}
     }
-
-    private companion object { val mutex = Mutex() }
 }

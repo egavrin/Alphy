@@ -36,7 +36,7 @@ class AutomationNotificationListener : NotificationListenerService() {
         }
     }
 }
-/** User starts this monitor in resumed Alpha. It does not restart silently after force-stop or reboot. */
+/** User starts this monitor in resumed Alphy. It does not restart silently after force-stop or reboot. */
 class ChargingMonitor : Service() {
     companion object { @Volatile var active = false; private set }
     private val receiver = object : BroadcastReceiver() {
@@ -53,7 +53,7 @@ class ChargingMonitor : Service() {
         manager.createNotificationChannel(NotificationChannel("alpha-automation-monitor","Наблюдение питания",NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(this,71,Intent(this,MainActivity::class.java),PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         startForeground(7101,Notification.Builder(this,"alpha-automation-monitor").setSmallIcon(R.drawable.ic_alpha)
-            .setContentTitle("Alpha: наблюдение питания").setContentText("Сценарии видят подключение и отключение зарядки. Остановить можно в Alpha.")
+            .setContentTitle("Alphy: наблюдение питания").setContentText("Сценарии видят подключение и отключение зарядки. Остановить можно в Alphy.")
             .setOngoing(true).setContentIntent(open).build())
         active = true
         AutomationRuntime.launch(this) { store ->

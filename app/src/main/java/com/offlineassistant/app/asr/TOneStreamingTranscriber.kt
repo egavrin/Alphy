@@ -149,14 +149,14 @@ private class SherpaTOneSession(
         val latencyMs = (System.nanoTime() - finalizationStarted) / 1_000_000L
         if (lastTranscript.isBlank()) {
             telemetryStore.recordFailure(
-                ModelNames.WHISPER,
+                ModelNames.TONE,
                 ModelOperations.TRANSCRIPTION,
                 latencyMs,
                 "T-one returned an empty transcript."
             )
             AudioTranscription(null, "T-one returned an empty transcript.", latencyMs)
         } else {
-            telemetryStore.recordSuccess(ModelNames.WHISPER, ModelOperations.TRANSCRIPTION, latencyMs)
+            telemetryStore.recordSuccess(ModelNames.TONE, ModelOperations.TRANSCRIPTION, latencyMs)
             AudioTranscription(lastTranscript, null, latencyMs)
         }
     }

@@ -1,0 +1,129 @@
+{
+  "task": "alphy-parity-P0",
+  "acceptance_repair": "Replace blanket SDK applicability with complete target-specific Android dispositions.",
+  "tested_base_revision": "cbf25f0ba107b9b028580a5a83235b6a5537427d",
+  "reference_revision": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+  "command": [
+    "python3",
+    "docs/parity/extract.py",
+    "/Users/egavrin/Documents/deal-studio-ohos",
+    "--check",
+    "--android-sdk",
+    "/opt/homebrew/share/android-commandlinetools"
+  ],
+  "working_directory": "Alpha repository root",
+  "inputs": [
+    "pinned reference Git objects",
+    "docs/parity/alphy-baseline.json",
+    "docs/parity/android-dispositions.json",
+    "recorded Android 37.0 public SDK jar and api-versions.xml"
+  ],
+  "expected": "Exit 0; exact inventory reproduction; all finite counts, keys, provenance, target dispositions, public API signatures, and API history checks pass.",
+  "observed": {
+    "android_disposition_counts": {
+      "equivalent_candidate": 56,
+      "platform_restriction": 5,
+      "subset_candidate": 128,
+      "unresolved": 365
+    },
+    "counts": {
+      "calendar": 20,
+      "graphics": 14,
+      "intent": 6,
+      "intent_candidate": 682,
+      "intent_registry": 1,
+      "intent_summary": 640,
+      "live": 1,
+      "sdk": 528,
+      "ui": 62,
+      "ui_helper": 7,
+      "workflow": 15
+    },
+    "inventory_sha256": "dc01c6b6400c74c10fa2fdba7ee7f1048ee20b6a3965003f564fabdf72680d42",
+    "mode": "check",
+    "reference_commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+    "result": "PASS",
+    "sdk_index_without_adapter": 11136,
+    "sdk_registry_rows": 530,
+    "verified_android_members": 152
+  },
+  "exit_code": 0,
+  "baseline_source_hash_checks": [
+    {
+      "evidence": "ui-contract",
+      "expected_sha256": "5c6fe56f46c2be3bab798b034aa49bb9e54dcbe04e08fff01d927e39ef9262bb",
+      "observed_sha256": "5c6fe56f46c2be3bab798b034aa49bb9e54dcbe04e08fff01d927e39ef9262bb",
+      "result": "PASS"
+    },
+    {
+      "evidence": "ui-renderer",
+      "expected_sha256": "6f6fbfbf4cf9df3f32457e9a58f11a927adf030e4b4c534fcc0a853cb3a123ec",
+      "observed_sha256": "6f6fbfbf4cf9df3f32457e9a58f11a927adf030e4b4c534fcc0a853cb3a123ec",
+      "result": "PASS"
+    },
+    {
+      "evidence": "tool-format",
+      "expected_sha256": "5c6fe56f46c2be3bab798b034aa49bb9e54dcbe04e08fff01d927e39ef9262bb",
+      "observed_sha256": "5c6fe56f46c2be3bab798b034aa49bb9e54dcbe04e08fff01d927e39ef9262bb",
+      "result": "PASS"
+    },
+    {
+      "evidence": "tool-generation",
+      "expected_sha256": "386484a8410ff7a4a76969fbd4b5e96b1386d4467326d0d987895e0bc2ebcf0d",
+      "observed_sha256": "386484a8410ff7a4a76969fbd4b5e96b1386d4467326d0d987895e0bc2ebcf0d",
+      "result": "PASS"
+    },
+    {
+      "evidence": "tool-transitions",
+      "expected_sha256": "386484a8410ff7a4a76969fbd4b5e96b1386d4467326d0d987895e0bc2ebcf0d",
+      "observed_sha256": "386484a8410ff7a4a76969fbd4b5e96b1386d4467326d0d987895e0bc2ebcf0d",
+      "result": "PASS"
+    },
+    {
+      "evidence": "capability-catalog",
+      "expected_sha256": "d8e75854a1ca75698a58f38a11441a2aabd58f1acf88650725fb6cf9fcc44762",
+      "observed_sha256": "d8e75854a1ca75698a58f38a11441a2aabd58f1acf88650725fb6cf9fcc44762",
+      "result": "PASS"
+    },
+    {
+      "evidence": "android-adapters",
+      "expected_sha256": "46fb12b80424e40ed0d13f19a85b012f1d404d8379dd7ddfe3bb476161722d58",
+      "observed_sha256": "46fb12b80424e40ed0d13f19a85b012f1d404d8379dd7ddfe3bb476161722d58",
+      "result": "PASS"
+    },
+    {
+      "evidence": "sandbox-contract",
+      "expected_sha256": "d2720eee4b3ada0abd06574573b9efb4fdb419c50be726feb9c291ba2dcdcf42",
+      "observed_sha256": "d2720eee4b3ada0abd06574573b9efb4fdb419c50be726feb9c291ba2dcdcf42",
+      "result": "PASS"
+    },
+    {
+      "evidence": "automation-contract",
+      "expected_sha256": "4aeae34cbc52a6e72ad3c033337071df3d6f64ad8b95f75a445a5f997ed79dd9",
+      "observed_sha256": "4aeae34cbc52a6e72ad3c033337071df3d6f64ad8b95f75a445a5f997ed79dd9",
+      "result": "PASS"
+    },
+    {
+      "evidence": "build-target",
+      "expected_sha256": "95640583e624d1a50bccde7320ba47243aba89334b13ed0b9dd3e85e2c793935",
+      "observed_sha256": "95640583e624d1a50bccde7320ba47243aba89334b13ed0b9dd3e85e2c793935",
+      "result": "PASS"
+    }
+  ],
+  "artifacts": {
+    "extract.py": "2160b5f463a06d69c79feab1484df1b84e71c15bf1e432de4d7f6c80e7a13353",
+    "alphy-baseline.json": "c68fbf822add47cdab89573b0b253aec303776f87f826ae8d62345fc7f3d328b",
+    "android-dispositions.json": "81b35224a37f03bf9a4eab0de6dc0e5feb05ff58485ae198a3a21ecae59760db",
+    "inventory.json": "dc01c6b6400c74c10fa2fdba7ee7f1048ee20b6a3965003f564fabdf72680d42",
+    "README.md": "61a9ff3c99a5316e637f6d0dde806f8338869082919799061eed17bf2742c8dd"
+  },
+  "unresolved_targets": 365,
+  "unresolved_rationale": "Exact OHOS semantics, authority, provider protocol, or result conversion lacks a reviewed Android contract. Each target names the missing evidence and next verification step.",
+  "limits": [
+    "source and public API integrity only",
+    "application/device workflows not run",
+    "candidate mappings do not prove semantic equivalence",
+    "no credentials read",
+    "no model calls"
+  ]
+}

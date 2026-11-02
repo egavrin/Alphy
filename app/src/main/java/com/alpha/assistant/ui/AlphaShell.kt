@@ -36,6 +36,7 @@ import com.alpha.assistant.cloud.ImageInput
 import com.alpha.assistant.cloud.validSourceUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.contentDescription
@@ -55,6 +56,7 @@ import java.util.Date
 @Composable fun AlphaShell(model: ShellViewModel) {
     var page by rememberSaveable { mutableStateOf("chat") }
     var sheet by rememberSaveable { mutableStateOf<String?>(null) }
+    var automationRequest by rememberSaveable { mutableStateOf<String?>(null) }
     var search by rememberSaveable { mutableStateOf("") }
     var consumedSurface by rememberSaveable { mutableStateOf(0) }
     LaunchedEffect(model.surfaceSequence) {
@@ -71,19 +73,10 @@ import java.util.Date
     val snackbar = remember { SnackbarHostState() }
     fun notice(text: String) { scope.launch { snackbar.showSnackbar(text) } }
     fun navigate(destination: String) { sheet = null; page = destination; focus.clearFocus() }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: "Файл"
-                val attachment = Attachment(uri.toString(), name, context.contentResolver.getType(uri) ?: "application/octet-stream")
-                model.addAttachment(attachment)
-            }.onFailure { notice("Не удалось сохранить доступ к файлу. Выберите файл ещё раз.") }
-        }
-    }
     BackHandler(sheet != null || page != "chat") { if (sheet != null) sheet = null else page = "chat" }
     val activity = context as? Activity
     VoiceVisibility(model.voice)
+    WeatherLocationAccess(model)
     DisposableEffect(page) {
         if (page == "settings") activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         onDispose { activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
@@ -98,14 +91,10 @@ import java.util.Date
                 Button(onClick = model::load) { Text("Повторить") }
             }
         } else {
-            Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 17.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (page != "chat") IconButton(onClick = { page = "chat" }) { AlphaIcon(Glyph.Back) }
-                    Text("Alpha", fontSize = 27.sp, fontWeight = FontWeight.Medium, letterSpacing = (-1).sp)
-                    Box(Modifier.padding(start = 7.dp, top = 5.dp).size(6.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
-                    Spacer(Modifier.weight(1f))
-                    Text("Личный ассистент", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+            val focusedMiniApp=page == "tools" && (model.tools.selectedId != null || model.tools.selectedDraftId != null)
+            Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+                if (!focusedMiniApp) ShellHeader(page != "chat", { navigate("chat") },
+                    { sheet = "menu"; focus.clearFocus() }, { navigate("history") })
                 if (model.saveFailed) {
                     Surface(color = MaterialTheme.colorScheme.errorContainer) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -118,36 +107,32 @@ import java.util.Date
                     val split = maxWidth >= 640.dp && page == "tools"
                     if (split) {
                         Row(Modifier.fillMaxSize()) {
-                            Column(Modifier.weight(1f).fillMaxHeight()) { ChatPane(model, { navigate("tools") }, { sheet = "context" }, { sheet = "cloud" }, { sheet = "voice" }) }
+                            Column(Modifier.weight(1f).fillMaxHeight()) { ChatPane(model, { navigate("tools") }, { sheet = "context" }) { request -> automationRequest=request; navigate("automation") } }
                             VerticalDivider()
-                            Column(Modifier.weight(1f)) { com.alpha.assistant.tools.ToolsPane(model.tools, snapshot.selectedId, snapshot.draft.text, snapshot.draft.attachments) { navigate("chat") } }
+                            Column(Modifier.weight(1f)) { com.alpha.assistant.tools.ToolsPane(model.tools, snapshot.selectedId, snapshot.draft.text, snapshot.draft.attachments.filter { it.contextText == null }) { navigate("chat") } }
                         }
                     } else when (page) {
-                        "chat" -> ChatPane(model, { navigate("tools") }, { sheet = "context" }, { sheet = "cloud" }, { sheet = "voice" })
-                        "tools" -> com.alpha.assistant.tools.ToolsPane(model.tools, snapshot.selectedId, snapshot.draft.text, snapshot.draft.attachments) { navigate("chat") }
-                        "automation" -> com.alpha.assistant.automations.AutomationsPane(model.tools)
+                        "chat" -> ChatPane(model, { navigate("tools") }, { sheet = "context" }) { request -> automationRequest=request; navigate("automation") }
+                        "tools" -> com.alpha.assistant.tools.ToolsPane(model.tools, snapshot.selectedId, snapshot.draft.text, snapshot.draft.attachments.filter { it.contextText == null }) { navigate("chat") }
+                        "automation" -> com.alpha.assistant.automations.AutomationsPane(model.tools,automationRequest) {automationRequest=null}
                         "capabilities" -> CapabilitiesPane(model.tools)
-                        "history" -> HistoryPane(snapshot.conversations, search, { search = it }, { model.select(it); navigate("chat") }, { model.select(null); navigate("chat") })
+                        "history" -> HistoryPane(snapshot.conversations, search, { search = it }, { model.select(it); navigate("chat") }, { model.select(null); navigate("chat") }, model::renameConversation, model::deleteConversation, model::clearHistory)
                         "settings" -> SettingsPane(model)
                     }
                 }
-                Row(Modifier.fillMaxWidth().padding(horizontal = 19.dp, vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Surface(onClick = { sheet = "menu"; focus.clearFocus() }, shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 15.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) { AlphaIcon(Glyph.Menu); Text("Меню", fontSize = 13.sp) }
-                    }
-                    TextButton(onClick = { navigate("history") }) { AlphaIcon(Glyph.History); Spacer(Modifier.width(7.dp)); Text("История", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
-                }
+
             }
         }
-        Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.BottomCenter) { SnackbarHost(snackbar, Modifier.padding(bottom = 64.dp)) }
+        Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.BottomCenter) { SnackbarHost(snackbar, Modifier.padding(16.dp)) }
     }
     model.requestError?.let { error ->
         AlertDialog(onDismissRequest = model::clearRequestError, title = { Text("Не удалось отправить") }, text = { Text(error) }, confirmButton = { TextButton(onClick = model::clearRequestError) { Text("Понятно") } })
     }
-    if (sheet != null && !model.loadFailed && !model.loading) {
+    if (sheet == "context" && !model.loadFailed && !model.loading) ReviewedContextDialog(model) { sheet = null }
+    if (sheet != null && sheet != "context" && !model.loadFailed && !model.loading) {
         ModalBottomSheet(onDismissRequest = { sheet = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = MaterialTheme.colorScheme.surface) {
             Column(Modifier.fillMaxWidth().heightIn(max = 650.dp).navigationBarsPadding()) {
-                val title = when (sheet) { "voice" -> "Local voice"; "context" -> "Добавить к запросу"; "cloud" -> "Облачная обработка"; else -> "Alpha" }
+                val title = when (sheet) { "voice" -> "Голосовой сеанс"; "context" -> "Добавить к запросу"; else -> "Alphy" }
                 Text(title, Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.headlineSmall)
                 Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp)) {
                     when (sheet) {
@@ -157,22 +142,15 @@ import java.util.Date
                             MenuRow("Новый чат", "Отдельный черновик", Glyph.Plus) { model.select(null); navigate("chat") }
                             MenuRow("Мои инструменты", "Сохранённое из разговоров", Glyph.Grid) { navigate("tools") }
                             MenuRow("Автоматизации", "Расписания и журнал", Glyph.Repeat) { navigate("automation") }
-                            MenuRow("Контекст и функции", "Источники и доступ", Glyph.Settings) { navigate("capabilities") }
+                            MenuRow("Непрерывный голосовой сеанс", "T-one и локальные ответы Silero", Glyph.Mic) { sheet = "voice" }
+                            MenuRow("Разрешения и функции", "Доступ Android и мини-приложений", Glyph.Settings) { navigate("capabilities") }
                             Text("ИСТОРИЯ БЕСЕД", Modifier.padding(top = 28.dp, bottom = 10.dp), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if (snapshot.conversations.isEmpty()) Text("Пока нет разговоров", Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                             snapshot.conversations.take(5).forEach { c -> MenuRow(c.title, if (c.draft.text.isNotEmpty() || c.draft.attachments.isNotEmpty()) "Есть черновик" else "Сохранено на устройстве", Glyph.History) { model.select(c.id); navigate("chat") } }
                             TextButton(onClick = { navigate("history") }) { Text("Вся история") }
                         }
-                        "context" -> {
-                            MenuRow("Изображения", "JPEG, PNG, GIF, WebP · до 5 МиБ · до 4 файлов", Glyph.File) { sheet = null; picker.launch(arrayOf("image/jpeg", "image/png", "image/gif", "image/webp")) }
-                            MenuRow("Камера и фото", "Ещё не подключены", Glyph.Camera) { notice("Камера и фото ещё не подключены") }
-                            MenuRow("Текущий экран", "Ещё не подключён", Glyph.Screen) { notice("Доступ к экрану ещё не подключён") }
-                            MenuRow("Календарь", "Доступ не запрашивался", Glyph.Calendar) { notice("Календарь ещё не подключён") }
-                            Text("Изображения остаются в черновике до отправки. Alpha передаёт выбранные изображения в DeepSeek только с этим запросом. Следующие запросы не используют эти изображения автоматически.", Modifier.padding(vertical = 20.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        "cloud" -> {
-                            Notice("Диалог обрабатывает DeepSeek с вашим API-ключом. Кнопка отправки передаёт текст запроса и до 40 сообщений завершённого диалога в выбранном чате. Изображения передаются только с выбранным запросом. История хранится на устройстве. Облачный провайдер обрабатывает переданные данные по своим правилам и тарифам.")
-                        }
+
+
                     }
                 }
                 if (sheet == "menu") {
@@ -188,25 +166,28 @@ import java.util.Date
     }
 }
 
-@Composable private fun ChatPane(model: ShellViewModel, tools: () -> Unit, context: () -> Unit, mode: () -> Unit, voice: () -> Unit) {
+@OptIn(ExperimentalLayoutApi::class)
+@Composable internal fun ShellHeader(back: Boolean, home: () -> Unit, menu: () -> Unit, history: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = menu, modifier = Modifier.heightIn(min = 48.dp)) { AlphaIcon(Glyph.Menu); Spacer(Modifier.width(6.dp)); Text("Меню") }
+            Text("Alphy", Modifier.weight(1f), fontSize = 27.sp, fontWeight = FontWeight.Medium, letterSpacing = (-1).sp)
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (back) TextButton(onClick = home, modifier = Modifier.heightIn(min = 48.dp)) { AlphaIcon(Glyph.Back); Text("Чат") }
+            TextButton(onClick = history, modifier = Modifier.heightIn(min = 48.dp)) { AlphaIcon(Glyph.History); Spacer(Modifier.width(7.dp)); Text("История") }
+        }
+    }
+}
+
+@Composable internal fun ChatPane(model: ShellViewModel, tools: () -> Unit, context: () -> Unit, automation: (String) -> Unit) {
     val snapshot = model.snapshot
-    var confirmSend by remember { mutableStateOf(false) }
-    var retryId by remember { mutableStateOf<String?>(null) }
     val uriHandler = LocalUriHandler.current
+    var shareText by rememberSaveable { mutableStateOf<String?>(null) }
     var linkError by remember { mutableStateOf(false) }
     val busy = model.activeConversationId != null
-    if (confirmSend || retryId != null) {
-        val retry = snapshot.selected?.messages?.find { it.id == retryId }?.replyTo?.let { id -> snapshot.selected?.messages?.find { it.id == id } }
-        val images = retry?.attachments ?: snapshot.draft.attachments
-        val search = retry?.search ?: model.searchEnabled
-        AlertDialog(onDismissRequest = { confirmSend = false; retryId = null }, title = { Text("Отправить в DeepSeek?") },
-            text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Будут переданы текст этого запроса и до 40 сообщений завершённого диалога в этом чате. Используется ваш API-ключ и тариф DeepSeek.")
-                if (images.isNotEmpty()) Text("Только для этого запроса: " + images.joinToString { it.name } + ". Изображения не передаются повторно в следующих сообщениях. Повтор запроса отправит их снова.")
-                if (search) Text("Разрешён веб-поиск DeepSeek: до двух поисковых запросов. Поисковые фразы формирует модель из текста и изображений этого запроса и контекста диалога.")
-            } }, confirmButton = { TextButton(onClick = { val id = retryId; confirmSend = false; retryId = null; if (id == null) model.send() else model.retry(id) }) { Text("Отправить") } },
-            dismissButton = { TextButton(onClick = { confirmSend = false; retryId = null }) { Text("Отмена") } })
-    }
+    val startVoice = rememberVoiceStart(model, oneShot = true)
+    DisposableEffect(model.voice) { onDispose { model.voice.stop() } }
     if (linkError) AlertDialog(onDismissRequest = { linkError = false }, title = { Text("Не удалось открыть ссылку") }, text = { Text("Проверьте наличие браузера на устройстве.") }, confirmButton = { TextButton(onClick = { linkError = false }) { Text("Понятно") } })
     Column(Modifier.fillMaxHeight().widthIn(max = 620.dp).fillMaxWidth()) {
         if (snapshot.selected == null) {
@@ -217,7 +198,7 @@ import java.util.Date
                 Spacer(Modifier.weight(1f))
                 Row(Modifier.padding(top = 42.dp, bottom = 22.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     StartCard("Создать", "Свой инструмент\nили виджет", Glyph.Spark, Modifier.weight(1f), tools)
-                    StartCard("Мой день", "Подключить календарь\nи составить план", Glyph.Calendar, Modifier.weight(1f), tools)
+                    StartCard("Мой день", "Подключить календарь\nи составить план", Glyph.Calendar, Modifier.weight(1f)) {automation("Обновляй Мой день из календаря каждый день в 08:00")}
                 }
             }
         } else {
@@ -229,16 +210,22 @@ import java.util.Date
             }
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(15.dp)) {
                 item { Text(chat.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                items(model.tools.tools.filter { it.conversationId == chat.id }, key = { "tool-${it.id}" }) { artifact ->
+                items(model.tools.tools.filter { tool -> tool.conversationId == chat.id && chat.messages.none { it.toolId == tool.id } }, key = { "tool-${it.id}" }) { artifact ->
                     com.alpha.assistant.tools.ToolCard(artifact) { model.tools.select(artifact.id); tools() }
                 }
                 items(chat.messages, key = { it.id }) { message ->
                     Column(Modifier.fillMaxWidth().padding(start = if (message.role == "user") 25.dp else 0.dp)) {
                         Surface(shape = RoundedCornerShape(23.dp), color = if (message.role == "user") MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primaryContainer) {
                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                                if (message.text.isNotEmpty()) Text(message.text, fontSize = 15.sp, lineHeight = 23.sp)
-                                if (message.role == "user" && message.text.isNotBlank()) TextButton(onClick = { model.tools.preparePrompt(message.text); tools() }) { Text("Create tool from message") }
-                                message.attachments.forEach { Text("Изображение · ${it.name} · только в исходном запросе", style = MaterialTheme.typography.bodySmall) }
+                                if (message.text.isNotEmpty()) {
+                                    MarkdownText(message.text,linkError = { linkError = true })
+                                    TextButton(onClick = { shareText = message.text }) { Text("Выбрать текст для заметки") }
+                                }
+                                if (message.role == "user" && message.text.isNotBlank()) {
+                                    TextButton(onClick = { model.tools.preparePrompt(message.text); tools() }) { Text("Create tool from message") }
+                                    TextButton(onClick = {automation(message.text)}) {Text("Создать сценарий из запроса")}
+                                }
+                                message.attachments.forEach { Text("Вложение · ${it.name} · только в исходном запросе", style = MaterialTheme.typography.bodySmall) }
                                 if (message.searchStatus.isNotEmpty()) Text(when (message.searchStatus) {
                                     "searching" -> "Поиск в интернете…"; "found" -> "Веб-поиск завершён"; "empty" -> "Поиск не нашёл результатов"; else -> "Ошибка веб-поиска"
                                 }, style = MaterialTheme.typography.labelSmall)
@@ -246,9 +233,21 @@ import java.util.Date
                                     TextButton(onClick = { if (validSourceUrl(source.url)) runCatching { uriHandler.openUri(source.url) }.onFailure { linkError = true } else linkError = true }) { Text("[${index + 1}] ${source.title.ifBlank { source.url }}\n${source.url}", style = MaterialTheme.typography.bodySmall) }
                                 }
                                 if (message.error.isNotBlank()) Text(message.error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                                if (message.id == chat.messages.lastOrNull()?.id && message.status in listOf("error", "cancelled", "interrupted")) TextButton(onClick = { retryId = message.id }, enabled = !busy) { Text("Повторить запрос") }
-                                if (message.role == "assistant" && message.status in listOf("pending", "streaming")) Text(if (message.status == "pending") "Подготовка запроса…" else "DeepSeek отвечает…", style = MaterialTheme.typography.labelSmall)
+                                if (message.id == chat.messages.lastOrNull()?.id && message.status in listOf("error", "cancelled", "interrupted")) TextButton(onClick = { model.retry(message.id) }, enabled = !busy) { Text("Повторить запрос") }
+                                if(message.status == "generating") { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Creating your widget…",style = MaterialTheme.typography.labelSmall) }
+                                if (message.role == "assistant" && message.status in listOf("pending", "streaming")) Text(if (model.weatherLocationBusy) "Определяем примерное местоположение…" else if (message.status == "pending") "Подготовка запроса…" else "DeepSeek отвечает…", style = MaterialTheme.typography.labelSmall)
                             }
+                        }
+                        if(message.toolId != null && message.toolRevision != null) {
+                            val artifact=model.tools.tools.find {it.id == message.toolId}
+                            val latest=chat.messages.lastOrNull {it.toolId == message.toolId && it.toolRevision != null}
+                            if(artifact != null) {
+                                Spacer(Modifier.height(8.dp))
+                                com.alpha.assistant.tools.ArtifactCard(artifact,revision=message.toolRevision,
+                                    historical=latest?.id != message.id || artifact.revision != message.toolRevision,
+                                    open={model.tools.select(artifact.id);tools()},
+                                    refine={model.tools.select(artifact.id);tools()})
+                            } else Text("Mini-app unavailable · historical revision ${message.toolRevision}",style=MaterialTheme.typography.labelMedium)
                         }
                         if (message.status == "not_sent") Text("Не отправлено · сохранённое локальное сообщение", Modifier.padding(start = 5.dp, top = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -256,40 +255,43 @@ import java.util.Date
             }
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp)) {
-            if (model.voice.active) {
+            if (model.voice.active && !model.voice.oneShot) {
                 Text(model.voice.status, style = MaterialTheme.typography.bodySmall)
                 if (model.voice.partial.isNotBlank()) Text(model.voice.partial, style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { model.voice.stop() }) { Text("Stop voice session") }
+                TextButton(onClick = { model.voice.stop() }) { Text("Остановить сеанс") }
             }
-            snapshot.draft.attachments.forEach { attachment ->
-                ImagePreview(attachment)
-                InputChip(selected = true, onClick = { model.editDraft(snapshot.draft.copy(attachments = snapshot.draft.attachments - attachment)) }, label = { Text(attachment.name, maxLines = 1) }, leadingIcon = { AlphaIcon(Glyph.File) }, trailingIcon = { AlphaIcon(Glyph.Close) }, modifier = Modifier.semantics { contentDescription = "Убрать файл ${attachment.name}" })
+            Column(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
+                snapshot.draft.attachments.forEach { attachment ->
+                    ImagePreview(attachment)
+                    InputChip(selected = true, onClick = { model.editDraft(snapshot.draft.copy(attachments = snapshot.draft.attachments - attachment)) }, label = { Text(attachment.name, maxLines = 1) }, leadingIcon = { AlphaIcon(Glyph.File) }, trailingIcon = { AlphaIcon(Glyph.Close) }, modifier = Modifier.semantics { contentDescription = "Убрать файл ${attachment.name}" })
+                }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = model.searchEnabled, onCheckedChange = model::setSearch)
-                Text("Веб-поиск DeepSeek", style = MaterialTheme.typography.bodySmall)
-                if (model.attachmentBusy) Text(" · проверка изображения…", style = MaterialTheme.typography.labelSmall)
-            }
+            if (model.voice.permissionRequired) MicrophonePermissionGuidance(model.voice, startVoice)
+            else if (!model.voice.active && model.voice.hasAttempted) Text(model.voice.status, style = MaterialTheme.typography.bodySmall)
+            if(snapshot.draft.text.isNotBlank()) TextButton(onClick={automation(snapshot.draft.text)}) {Text("Сценарий из запроса · локальная проверка")}
+            if (model.attachmentBusy) Text("Проверка изображения…", style = MaterialTheme.typography.labelSmall)
             Surface(shape = RoundedCornerShape(27.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                 Column(Modifier.padding(12.dp)) {
-                    BasicTextField(value = snapshot.draft.text, onValueChange = { model.editDraft(snapshot.draft.copy(text = it)) }, modifier = Modifier.fillMaxWidth().heightIn(min = 43.dp, max = 150.dp).padding(horizontal = 7.dp, vertical = 5.dp).semantics { contentDescription = "Сообщение ассистенту" }, textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface), cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), decorationBox = { inner ->
-                        if (snapshot.draft.text.isEmpty()) Text("Спроси о чём угодно", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 16.sp)
-                        inner()
-                    })
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        RoundAction(Glyph.Plus, "Добавить контекст", context)
-                        Spacer(Modifier.weight(1f))
-                        TextButton(onClick = mode) { AlphaIcon(Glyph.Cloud); Spacer(Modifier.width(5.dp)); Text("Облако", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
-                        RoundAction(Glyph.Mic, "Голосовой запрос", voice)
-                        Spacer(Modifier.width(5.dp))
-                        if (busy) RoundAction(Glyph.Close, "Остановить ответ", model::cancelRequest)
-                        else RoundAction(Glyph.Arrow, "Отправить сообщение", { confirmSend = true }, primary = true, enabled = !model.attachmentBusy && (snapshot.draft.text.isNotBlank() || snapshot.draft.attachments.isNotEmpty()))
+                    if (model.voice.active && model.voice.oneShot) InlineVoiceRecorder(model)
+                    else {
+                        BasicTextField(value = snapshot.draft.text, onValueChange = { model.editDraft(snapshot.draft.copy(text = it)) }, modifier = Modifier.fillMaxWidth().heightIn(min = 43.dp, max = 150.dp).padding(horizontal = 7.dp, vertical = 5.dp).semantics { contentDescription = "Сообщение ассистенту" }, textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface), cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), decorationBox = { inner ->
+                            if (snapshot.draft.text.isEmpty()) Text("Спроси о чём угодно", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 16.sp)
+                            inner()
+                        })
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            RoundAction(Glyph.Plus, "Добавить контекст", context)
+                            Spacer(Modifier.weight(1f))
+                            RoundAction(Glyph.Mic, "Голосовой запрос", startVoice, enabled = !busy && !model.attachmentBusy && !model.voice.active)
+                            Spacer(Modifier.width(5.dp))
+                            if (busy) RoundAction(Glyph.Close, "Остановить ответ", model::cancelRequest)
+                            else RoundAction(Glyph.Arrow, "Отправить сообщение", { model.send() }, primary = true, enabled = !model.attachmentBusy && (snapshot.draft.text.isNotBlank() || snapshot.draft.attachments.isNotEmpty()))
+                        }
                     }
                 }
             }
-            Text("DeepSeek · облачная обработка · история на устройстве", Modifier.fillMaxWidth().padding(top = 6.dp, start = 8.dp), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+    shareText?.let { ShareTextToNotes(it) { shareText = null } }
 }
 
 @Composable private fun StartCard(title: String, subtitle: String, glyph: Glyph, modifier: Modifier, action: () -> Unit) {
@@ -328,16 +330,52 @@ import java.util.Date
     }
 }
 
-@Composable private fun HistoryPane(conversations: List<Conversation>, search: String, edit: (String) -> Unit, select: (String) -> Unit, newChat: () -> Unit) {
+@Composable private fun HistoryPane(conversations: List<Conversation>, search: String, edit: (String) -> Unit,
+    select: (String) -> Unit, newChat: () -> Unit, rename: (String, String) -> Unit, delete: (String) -> Unit, clear: () -> Unit) {
+    var menuId by rememberSaveable { mutableStateOf<String?>(null) }
+    var renameId by rememberSaveable { mutableStateOf<String?>(null) }
+    var renameText by rememberSaveable { mutableStateOf("") }
+    var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
+    var confirmClear by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) { Text("Разговоры", Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium); TextButton(onClick = newChat) { AlphaIcon(Glyph.Plus); Text("Новый чат") } }
         OutlinedTextField(value = search, onValueChange = edit, placeholder = { Text("Поиск в истории") }, leadingIcon = { AlphaIcon(Glyph.Search) }, modifier = Modifier.fillMaxWidth().padding(vertical = 15.dp).semantics { contentDescription = "Поиск разговоров" }, singleLine = true, shape = RoundedCornerShape(18.dp))
         val results = conversations.filter { c -> search.isBlank() || c.title.contains(search, true) || c.messages.any { it.text.contains(search, true) } || c.draft.text.contains(search, true) }
         LazyColumn(Modifier.weight(1f)) {
             if (results.isEmpty()) item { Text(if (search.isBlank()) "Здесь появятся твои разговоры." else "Ничего не найдено. Попробуй другой запрос.", Modifier.padding(vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            items(results, key = { it.id }) { c -> MenuRow(c.title, DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(c.updatedAt)) + if (c.draft.text.isNotEmpty() || c.draft.attachments.isNotEmpty()) " · черновик" else " · на устройстве", Glyph.History) { select(c.id) } }
+            items(results, key = { it.id }) { c ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).clickable { select(c.id) }.padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text(c.title, fontSize = 15.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        Text(DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(c.updatedAt)) + if (c.draft.text.isNotEmpty() || c.draft.attachments.isNotEmpty()) " · черновик" else " · на устройстве", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Box {
+                        IconButton(onClick = { menuId = c.id }, modifier = Modifier.semantics { contentDescription = "Действия разговора ${c.title}" }) { Text("⋯", fontSize = 25.sp) }
+                        DropdownMenu(expanded = menuId == c.id, onDismissRequest = { menuId = null }) {
+                            DropdownMenuItem(text = { Text("Переименовать") }, onClick = { renameId = c.id; renameText = c.title; menuId = null })
+                            DropdownMenuItem(text = { Text("Удалить разговор", color = MaterialTheme.colorScheme.error) }, onClick = { deleteId = c.id; menuId = null })
+                        }
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
         }
+        TextButton(onClick = { confirmClear = true }, enabled = conversations.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("Очистить историю", color = if (conversations.isNotEmpty()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
     }
+    if (renameId != null) AlertDialog(onDismissRequest = { renameId = null }, title = { Text("Переименовать разговор") }, text = {
+        OutlinedTextField(value = renameText, onValueChange = { renameText = it }, label = { Text("Название разговора") }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Название разговора" }, isError = renameText.isBlank(), supportingText = { if (renameText.isBlank()) Text("Введи название") })
+    }, confirmButton = { TextButton(onClick = { renameId?.let { rename(it, renameText) }; renameId = null }, enabled = renameText.isNotBlank()) { Text("Сохранить название") } }, dismissButton = { TextButton(onClick = { renameId = null }) { Text("Отмена") } })
+    val deleting = conversations.find { it.id == deleteId }
+    if (deleting != null) AlertDialog(onDismissRequest = { deleteId = null }, title = { Text("Удалить разговор?") }, text = {
+        Text("«${deleting.title}»: сообщения и черновик этого разговора будут удалены. Другие разговоры, черновик нового чата, инструменты, автоматизации, API-ключи и исходные файлы сохранятся.")
+    }, confirmButton = { TextButton(onClick = { delete(deleting.id); deleteId = null }) { Text("Удалить") } }, dismissButton = { TextButton(onClick = { deleteId = null }) { Text("Отмена") } })
+    if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("Очистить всю историю?") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Будут удалены все разговоры, их сообщения и черновики. Активный запрос остановится. Фильтр поиска не ограничивает удаление.")
+            Text("Черновик нового чата, инструменты и их данные, автоматизации, API-ключи и исходные файлы сохранятся.")
+        }
+    }, confirmButton = { TextButton(onClick = { clear(); confirmClear = false }) { Text("Очистить всё") } }, dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Отмена") } })
 }
 
 @Composable private fun CapabilitiesPane(controller: com.alpha.assistant.tools.ToolController) {
@@ -365,9 +403,9 @@ import java.util.Date
             Button(onClick = { model.saveKey(key) { if (it) key = "" } }, enabled = key.isNotBlank() && !model.keyBusy) { Text("Сохранить ключ") }
             TextButton(onClick = { confirmClear = true }, enabled = !model.keyBusy) { Text("Удалить ключ") }
         }
-        Notice("Текст и выбранные изображения обрабатывает DeepSeek после подтверждения отправки. Веб-поиск выполняется только при выборе этой функции. Сохранение ключа не отправляет данные и не проверяет баланс.")
+        Notice("Текст и выбранные изображения обрабатывает DeepSeek после подтверждения отправки. Веб-поиск доступен в каждом запросе. Сохранение ключа не отправляет данные и не проверяет баланс.")
         com.alpha.assistant.surfaces.SystemEntrySettings()
-        Text("Alpha · 0.1.0", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Alphy · 0.1.0", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("Удалить API-ключ?") }, text = { Text("Разговоры и черновики сохранятся.") }, confirmButton = { TextButton(onClick = { model.clearKey(); confirmClear = false }) { Text("Удалить") } }, dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Отмена") } })
 }
@@ -376,7 +414,13 @@ import java.util.Date
     Surface(shape = RoundedCornerShape(17.dp), color = MaterialTheme.colorScheme.surfaceVariant) { Text(text, Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall, lineHeight = 20.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 }
 
-@Composable private fun ImagePreview(attachment: Attachment) {
+@Composable internal fun ImagePreview(attachment: Attachment, modifier: Modifier = Modifier.size(76.dp)) {
+    if(attachment.contextText != null) {
+        androidx.compose.foundation.text.selection.SelectionContainer {
+            Text(attachment.contextText,Modifier.heightIn(max = 160.dp).verticalScroll(rememberScrollState()),style = MaterialTheme.typography.bodySmall)
+        }
+        return
+    }
     val resolver = LocalContext.current.contentResolver
     val preview by produceState<ImageBitmap?>(null, attachment.uri) {
         value = withContext(Dispatchers.IO) { runCatching {
@@ -388,6 +432,6 @@ import java.util.Date
             })?.asImageBitmap()
         }.getOrNull() }
     }
-    if (preview != null) Image(preview!!, contentDescription = "Предпросмотр ${attachment.name}", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)))
+    if (preview != null) Image(preview!!, contentDescription = "Предпросмотр ${attachment.name}", modifier = modifier.clip(RoundedCornerShape(12.dp)))
     else Text("Предпросмотр недоступен: ${attachment.name}. При отправке доступ будет проверен снова.", style = MaterialTheme.typography.bodySmall)
 }

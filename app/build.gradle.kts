@@ -5,13 +5,11 @@ plugins {
 android {
     namespace = "com.alpha.assistant"
     compileSdk = 37
-    ndkVersion = "27.0.12077973"
     defaultConfig {
         applicationId = "com.alpha.assistant"
         minSdk = 29
         targetSdk = 37
         ndk { abiFilters += "arm64-v8a" }
-        externalNativeBuild { cmake { arguments += "-DCMAKE_BUILD_TYPE=Release" } }
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -21,11 +19,16 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures { compose = true }
-    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
     packaging { jniLibs { excludes += setOf("lib/armeabi-v7a/**", "lib/x86/**", "lib/x86_64/**") } }
-    androidResources { noCompress += listOf("onnx", "bin", "f32") }
+    androidResources {
+        noCompress += listOf("onnx", "f32")
+        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:CVS:thumbs.db:picasa.ini:*~:whisper:whisper-MIT.txt"
+    }
 }
 dependencies {
+    implementation("org.commonmark:commonmark:0.30.0")
+    implementation("org.commonmark:commonmark-ext-gfm-tables:0.30.0")
+    implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.30.0")
     implementation(files("libs/sherpa-onnx-static-link-onnxruntime-1.13.4.aar"))
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.27.0")
     implementation("com.github.wendykierp:JTransforms:3.2")
@@ -35,7 +38,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
-    implementation("io.github.dokar3:quickjs-kt:1.0.14")
+    implementation("androidx.javascriptengine:javascriptengine:1.1.1")
     implementation("com.google.android.gms:play-services-location:21.3.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
