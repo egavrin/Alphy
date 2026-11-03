@@ -43,11 +43,13 @@ The repository excludes the Silero model bundle because its license restricts co
 
 ## Tests
 
-Run the Android instrumentation tests on an ARM64 device or emulator:
+Run the Android instrumentation tests on the ARM64 emulator `emulator-5556`:
 
 ```sh
-./gradlew :app:connectedDebugAndroidTest
+python3 tools/compose_acceptance/run.py suite --label LABEL
 ```
+
+The command builds the app APK and the test APK. It installs both with `adb install -r` on `emulator-5556` only, so the app keeps its data. The build uses `JAVA_HOME=/opt/homebrew/opt/openjdk@17` and `ANDROID_HOME=/opt/homebrew/share/android-commandlinetools`. Use the `--adb` option for a different adb path. `LABEL` names a new evidence directory in `evidence/alphy-ui/`. Add test classes or methods after the label to run only those tests. The project does not use `connectedDebugAndroidTest`, because that task uninstalls the app with its data and its key.
 
 Some workflows require device permissions, Google Play services, or the local voice models. See the documents in [`docs/`](docs/) for feature details and test limits.
 

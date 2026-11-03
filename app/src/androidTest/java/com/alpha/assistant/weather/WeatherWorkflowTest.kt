@@ -130,7 +130,7 @@ class WeatherWorkflowTest {
                 assertEquals("complete", model.snapshot.selected!!.messages.last().status)
                 java.io.File(app.getExternalFilesDir(null), "weather-workflow.txt").writeText(
                     "Revision: ${InstrumentationRegistry.getArguments().getString("testedRevision", "not supplied")}\n" +
-                    "Command: connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.alpha.assistant.weather.WeatherWorkflowTest\n" +
+                    "Command: python3 tools/compose_acceptance/run.py suite --label LABEL com.alpha.assistant.weather.WeatherWorkflowTest\n" +
                     "Inputs: isolated chat store, controlled approximate places, and delayed request-owned results.\n" +
                     "Expected and observed: shared surface transition retains foreground; background access blocked; cancel, draft edit, and conversation switch reject late places; retry acquires a new place.\n")
             }

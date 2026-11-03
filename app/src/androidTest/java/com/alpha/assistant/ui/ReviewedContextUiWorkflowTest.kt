@@ -72,7 +72,7 @@ class ReviewedContextUiWorkflowTest {
                     File(evidence, "permissions.png").outputStream().use { assertTrue(screenshot.compress(Bitmap.CompressFormat.PNG, 100, it)) }
                     screenshot.recycle()
                 }
-                File(evidence, "workflow.txt").writeText("Tested revision: ${InstrumentationRegistry.getArguments().getString("testedRevision", "not supplied")}\nCommand: connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.alpha.assistant.ui.ReviewedContextUiWorkflowTest\nInput: isolated persisted draft, image, reviewed pasted text.\nExpected and observed: same draft identity and original image; one reviewed text; no cloud sends.\n")
+                File(evidence, "workflow.txt").writeText("Tested revision: ${InstrumentationRegistry.getArguments().getString("testedRevision", "not supplied")}\nCommand: python3 tools/compose_acceptance/run.py suite --label LABEL com.alpha.assistant.ui.ReviewedContextUiWorkflowTest\nInput: isolated persisted draft, image, reviewed pasted text.\nExpected and observed: same draft identity and original image; one reviewed text; no cloud sends.\n")
             }
         } finally {
             CloudTestActivity.factory = null

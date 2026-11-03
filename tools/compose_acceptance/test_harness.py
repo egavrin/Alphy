@@ -227,6 +227,43 @@ class HarnessBoundaries(unittest.TestCase):
         for path, expected in coverage["source_sha256"].items():
             self.assertEqual(expected, harness.digest(harness.ROOT / path), path)
 
+    def test_suite_outcome_reads_raw_instrumentation(self):
+        passed = "INSTRUMENTATION_RESULT: stream=\n\nTime: 1.2\n\nOK (2 tests)\n\n\nINSTRUMENTATION_CODE: -1\n"
+        self.assertEqual(harness.suite_outcome(passed, set()), {"observed": "passed", "tests": 2, "failures": [], "skipped": []})
+        failed = ("INSTRUMENTATION_STATUS: class=a.B\nINSTRUMENTATION_STATUS: test=x\nINSTRUMENTATION_STATUS_CODE: 1\n"
+                  "INSTRUMENTATION_STATUS: class=a.B\nINSTRUMENTATION_STATUS: stack=java.lang.AssertionError: no\n\tat a.B.x(B.kt:1)\n"
+                  "INSTRUMENTATION_STATUS: test=x\nINSTRUMENTATION_STATUS_CODE: -2\n"
+                  "INSTRUMENTATION_RESULT: stream=\n\nFAILURES!!!\nTests run: 2,  Failures: 1\n\n\nINSTRUMENTATION_CODE: -1\n")
+        self.assertEqual(harness.suite_outcome(failed, set()), {"observed": "failed", "tests": 2, "failures": ["a.B#x"], "skipped": []})
+        self.assertEqual(harness.suite_outcome(failed, {"a.B#x"})["observed"], "passed")
+        assumed = ("INSTRUMENTATION_STATUS: class=a.B\nINSTRUMENTATION_STATUS: test=y\nINSTRUMENTATION_STATUS_CODE: 1\n"
+                   "INSTRUMENTATION_STATUS: class=a.B\nINSTRUMENTATION_STATUS: test=y\nINSTRUMENTATION_STATUS_CODE: -4\n"
+                   "INSTRUMENTATION_RESULT: stream=\n\nOK (1 test)\n\n\nINSTRUMENTATION_CODE: -1\n")
+        self.assertEqual(harness.suite_outcome(assumed, set()), {"observed": "failed", "tests": 1, "failures": [], "skipped": ["a.B#y"]})
+        self.assertEqual(harness.suite_outcome(assumed, set(), {"a.B#y"})["observed"], "passed")
+        crashed = "INSTRUMENTATION_RESULT: shortMsg=Process crashed.\nINSTRUMENTATION_CODE: 0\n"
+        self.assertEqual(harness.suite_outcome(crashed, set())["observed"], "failed")
+
+    def test_suite_command_uses_only_the_test_emulator(self):
+        command = harness.suite_instrument_command("adb", ["a.B#x", "c.D"], "abc123")
+        self.assertEqual(command[:3], ["adb", "-s", "emulator-5556"])
+        self.assertEqual(command[command.index("class") + 1], "a.B#x,c.D")
+        self.assertEqual(command[-1], "com.alpha.assistant.test/androidx.test.runner.AndroidJUnitRunner")
+        self.assertNotIn("class", harness.suite_instrument_command("adb", [], "abc123"))
+
+    def test_suite_build_failure_records_no_apk_hashes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            args = harness.argparse.Namespace(label="red", expect="build-failed", baseline=None, targets=[],
+                                              adb="adb", output=Path(temporary))
+            def execute(command, **options):
+                return Mock(returncode=1 if command[0] == "./gradlew" else 0, stdout="")
+            with patch.object(harness.subprocess, "run", side_effect=execute), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(0, harness.suite(args))
+            record = json.loads((Path(temporary) / "red/run.json").read_text())
+            self.assertEqual("build-failed", record["observed"])
+            self.assertIsNone(record["apks"])
+            self.assertIsNone(record["installedApkSha256"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,6 +15,10 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 SCENARIOS = ROOT / "app/src/androidTest/assets/compose-scenarios.json"
+ADB = "/opt/homebrew/share/android-commandlinetools/platform-tools/adb"
+APKS = ("app/build/outputs/apk/debug/app-debug.apk", "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk")
+BUILD_ENVIRONMENT = {"JAVA_HOME": "/opt/homebrew/opt/openjdk@17", "ANDROID_HOME": "/opt/homebrew/share/android-commandlinetools"}
+RUNNER = "com.alpha.assistant.test/androidx.test.runner.AndroidJUnitRunner"
 
 
 def scenarios():
@@ -93,7 +97,7 @@ def instrument_command(adb, scenario, repetition, revision, source_hash, live, s
     command = adb_command(adb, "shell", "am", "instrument", "-w", "-r")
     for key, value in args.items():
         command += ["-e", key, value]
-    return command + ["com.alpha.assistant.test/androidx.test.runner.AndroidJUnitRunner"]
+    return command + [RUNNER]
 
 
 def validate_results(case, rows):
@@ -116,17 +120,17 @@ def validate_matrix(rows):
         raise ValueError("Synthetic runs cannot complete the real matrix.")
 
 
-def identity():
+def identity(apks=True):
     paths = sorted(path for parent in ("app/src", "tools/compose_acceptance") for path in (ROOT / parent).rglob("*")
                    if path.is_file() and "__pycache__" not in path.parts)
     paths += [ROOT / "app/build.gradle.kts", SCENARIOS]
     files = {str(path.relative_to(ROOT)): digest(path) for path in paths}
     aggregate = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
-    return {"revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, env=child_environment()).strip(),
-            "sourceSha256": aggregate, "files": files,
-            "apks": {str(path.relative_to(ROOT)): digest(path) for path in (
-                ROOT / "app/build/outputs/apk/debug/app-debug.apk",
-                ROOT / "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk")}}
+    tested = {"revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, env=child_environment()).strip(),
+              "sourceSha256": aggregate, "files": files}
+    if apks:
+        tested["apks"] = {path: digest(ROOT / path) for path in APKS}
+    return tested
 
 
 def run(args):
@@ -282,6 +286,115 @@ def verify_failed(directory):
     return "FAILED"
 
 
+def suite_outcome(stdout, known, known_skipped=frozenset()):
+    """Classify raw `am instrument -r` output. Only a finished JUnit run without an unknown failure or skip passes."""
+    status, failures, skipped = {}, set(), set()
+    for line in stdout.splitlines():
+        kind, _, value = line.strip().partition(": ")
+        if kind == "INSTRUMENTATION_STATUS":
+            key, _, value = value.partition("=")
+            status[key] = value
+        elif kind == "INSTRUMENTATION_STATUS_CODE":
+            test = status.get("class", "") + "#" + status.get("test", "")
+            if value in ("-1", "-2"):
+                failures.add(test)
+            elif value in ("-3", "-4"):
+                skipped.add(test)
+            status = {}
+    counts = re.findall(r"^(?:OK \((\d+) tests?\)|Tests run: (\d+))", stdout, re.M)
+    finished = bool(re.search(r"^INSTRUMENTATION_CODE: -1\s*$", stdout, re.M) and re.search(r"^(?:OK \(|FAILURES!!!)", stdout, re.M))
+    passed = finished and failures <= set(known) and skipped <= set(known_skipped)
+    return {"observed": "passed" if passed else "failed", "tests": int("".join(counts[-1])) if counts else 0,
+            "failures": sorted(failures), "skipped": sorted(skipped)}
+
+
+def suite_instrument_command(adb, targets, revision):
+    command = adb_command(adb, "shell", "am", "instrument", "-w", "-r")
+    if targets:
+        command += ["-e", "class", ",".join(targets)]
+    return command + ["-e", "testedRevision", revision, RUNNER]
+
+
+def tested_source():
+    """identity() keeps the plain HEAD because run() sends it as composeRevision. The record marks a dirty tree."""
+    tested = identity(apks=False)
+    dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True, env=child_environment()))
+    return {"revision": tested["revision"] + ("+dirty" if dirty else ""), "dirty": dirty, "sourceSha256": tested["sourceSha256"]}
+
+
+def evidence_directory(args):
+    directory = args.output / args.label
+    if directory.exists():
+        raise SystemExit(f"The evidence directory {directory} exists. Use a new label.")
+    return directory
+
+
+def write_run(directory, record):
+    (directory / "run.json").write_text(json.dumps(record, indent=2) + "\n")
+    print(f"Observed: {record['observed']}. Evidence: {directory}")
+    return 0 if record["observed"] == record["expected"] else 1
+
+
+def installed_apk_hash(adb, commands, log):
+    commands.append(adb_command(adb, "shell", "pm", "path", "com.alpha.assistant"))
+    listed = subprocess.run(commands[-1], stdout=subprocess.PIPE, stderr=log, text=True, env=child_environment()).stdout.split()
+    paths = [entry.removeprefix("package:") for entry in listed if entry.startswith("package:")]
+    if not paths:
+        return None
+    commands.append(adb_command(adb, "shell", "sha256sum", paths[0]))
+    hashed = subprocess.run(commands[-1], stdout=subprocess.PIPE, stderr=log, text=True, env=child_environment()).stdout.split()
+    return hashed[0] if hashed else None
+
+
+def suite(args):
+    """Build both APKs, replace-install them on emulator-5556, and run device tests. The app keeps its data and key."""
+    started = time.monotonic()
+    baseline = json.loads(args.baseline.read_text()) if args.baseline else {"failures": [], "skipped": []}
+    known, known_skipped = set(baseline["failures"]), set(baseline["skipped"])
+    directory = evidence_directory(args)
+    subprocess.run(adb_command(args.adb, "get-state"), check=True, capture_output=True, env=child_environment())
+    record = {**tested_source(), "apks": None, "installedApkSha256": None, "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "serial": "emulator-5556", "commands": [], "targets": args.targets, "expected": args.expect,
+              "baseline": None if args.baseline is None else str(args.baseline)}
+    directory.mkdir(parents=True)
+
+    def execute(command, log, environment=None):
+        record["commands"].append(command)
+        return subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT,
+                              env=child_environment() | (environment or {})).returncode == 0
+
+    with (directory / "build.log").open("w") as log:
+        built = execute(["./gradlew", ":app:assembleDebug", ":app:assembleDebugAndroidTest", "--console=plain"], log, BUILD_ENVIRONMENT)
+    outcome = {"observed": "build-failed", "tests": 0, "failures": [], "skipped": []}
+    if built:
+        record["apks"] = {path: digest(ROOT / path) for path in APKS}
+        with (directory / "install.log").open("w") as log:
+            prepared = [execute(adb_command(args.adb, "install", "-r", path), log) for path in APKS]
+            record["installedApkSha256"] = installed_apk_hash(args.adb, record["commands"], log)
+            # A crashed earlier test can leave a large font or night mode.
+            prepared += [execute(adb_command(args.adb, "shell", "settings", "put", "system", "font_scale", "1.0"), log),
+                         execute(adb_command(args.adb, "shell", "cmd", "uimode", "night", "no"), log)]
+        with (directory / "stdout.log").open("w") as log:
+            execute(suite_instrument_command(args.adb, args.targets, record["revision"]), log)
+        outcome = suite_outcome((directory / "stdout.log").read_text(errors="replace"), known, known_skipped)
+        if not all(prepared) or record["installedApkSha256"] != record["apks"][APKS[0]]:
+            outcome["observed"] = "failed"
+    record.update(outcome, elapsedSeconds=round(time.monotonic() - started, 1))
+    return write_run(directory, record)
+
+
+def host(args):
+    started = time.monotonic()
+    directory = evidence_directory(args)
+    command = ["python3", "tools/compose_acceptance/test_harness.py"]
+    record = {**tested_source(), "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "commands": [command], "expected": args.expect}
+    directory.mkdir(parents=True)
+    with (directory / "stdout.log").open("w") as log:
+        exit_code = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT, env=child_environment()).returncode
+    record.update(observed="passed" if exit_code == 0 else "failed", elapsedSeconds=round(time.monotonic() - started, 1))
+    return write_run(directory, record)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -292,8 +405,19 @@ def main():
     execute.add_argument("--live", action="store_true", help="Authorize one real normal generation, with at most one correction.")
     execute.add_argument("--credential-check", action="store_true", help="Transfer a synthetic sentinel without a provider call or artifact generation.")
     execute.add_argument("--seconds", type=int, choices=range(1, 181), default=30)
-    execute.add_argument("--adb", default="/opt/homebrew/share/android-commandlinetools/platform-tools/adb")
+    execute.add_argument("--adb", default=ADB)
     execute.add_argument("--output", type=Path, default=ROOT / "evidence/compose-execution/scenarios")
+    device = commands.add_parser("suite", help="Build, replace-install, and run device tests on emulator-5556 only.")
+    device.add_argument("--label", required=True)
+    device.add_argument("--expect", choices=("passed", "failed", "build-failed"), default="passed")
+    device.add_argument("--baseline", type=Path, help="A run.json whose failures and skipped tests are known.")
+    device.add_argument("--adb", default=ADB)
+    device.add_argument("--output", type=Path, default=ROOT / "evidence/alphy-ui")
+    device.add_argument("targets", nargs="*", help="com.alpha.assistant.<package>.<Class>[#<method>]. None runs the full suite.")
+    host_tests = commands.add_parser("host", help="Run the host tests and record the evidence.")
+    host_tests.add_argument("--label", required=True)
+    host_tests.add_argument("--expect", choices=("passed", "failed"), default="passed")
+    host_tests.add_argument("--output", type=Path, default=ROOT / "evidence/alphy-ui")
     check = commands.add_parser("verify")
     check.add_argument("directory", type=Path)
     failed = commands.add_parser("verify-failed", help="Validate failed evidence without asserting workflow success.")
@@ -312,6 +436,10 @@ def main():
             raise SystemExit(1)
     elif args.command == "verify-failed":
         verify_failed(args.directory)
+    elif args.command == "suite":
+        raise SystemExit(suite(args))
+    elif args.command == "host":
+        raise SystemExit(host(args))
     else:
         directories = sorted(path.parent for path in args.directory.glob("*/manifest.json"))
         if not all([verify(path) for path in directories]):
