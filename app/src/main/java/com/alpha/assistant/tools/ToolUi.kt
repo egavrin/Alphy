@@ -136,14 +136,7 @@ import com.alpha.assistant.ui.Glyph
         }) {artifactSnapshot=it}
         if(appControls) ModalBottomSheet(onDismissRequest={appControls=false}) {
             Column(Modifier.fillMaxWidth().heightIn(max=600.dp).verticalScroll(rememberScrollState()).padding(16.dp)) {
-                val current=checkNotNull(displayed)
-                val calendarHost=remember(current.id,current.revision,current.stateVersion,controller.grants,controller.effects) {
-                    controller.calendarUiHost(current,navigationForeground) {intent ->check(navigationForeground());navigationContext.startActivity(intent)}
-                }
-                ToolContent(current.ui,current.state,controlsReady && !controller.busy,heading=spec.title,calendarHost=calendarHost,
-                    imageVersion=(tool.id to controller.grants),imageLoader={controller.nativeImage(tool.id,it)},imageAvailable={controller.nativeImageAvailable(tool.id,it)}) {id,value ->
-                    controller.interact(current,id,value,navigationForeground) {intent ->check(navigationForeground());navigationContext.startActivity(intent)}
-                }
+                MiniAppContent(controller,tool,displayed,spec.title,navigationContext,navigationForeground,enabled=controlsReady && !controller.busy)
             }
         }
         return
@@ -222,14 +215,7 @@ import com.alpha.assistant.ui.Glyph
                 }
                 if(spec != null) NativeToolSurface(tool,spec,draft == null && !tool.archived && details == null,canvasHeight,controller.artifactHost(tool)) {artifactSnapshot=it}
                 if(spec == null) Text("This artifact uses an unavailable protocol. Its saved data, versions, records, and access grants remain intact.")
-                if(spec != null) {
-                val current=checkNotNull(displayed)
-                val calendarHost=remember(current.id,current.revision,current.stateVersion,controller.grants,controller.effects) {
-                    controller.calendarUiHost(current,navigationForeground) {intent ->check(navigationForeground());navigationContext.startActivity(intent)}
-                }
-                ToolContent(current.ui,current.state,!controller.busy && draft == null && !tool.archived,heading=spec.title,calendarHost=calendarHost,
-                    imageVersion=(tool.id to controller.grants),imageLoader={controller.nativeImage(tool.id,it)},imageAvailable={controller.nativeImageAvailable(tool.id,it)}) {id,value ->controller.interact(current,id,value,navigationForeground) { intent -> check(navigationForeground()); navigationContext.startActivity(intent) }}
-                }
+                if(spec != null) MiniAppContent(controller,tool,displayed,spec.title,navigationContext,navigationForeground,enabled=!controller.busy && draft == null && !tool.archived)
             } else Text(draft?.prompt.orEmpty(),style=MaterialTheme.typography.bodyLarge)
         }
         }
@@ -255,6 +241,19 @@ import com.alpha.assistant.ui.Glyph
             }
         }
     }
+    }
+}
+
+/** The immersive sheet and the inline pane share this wiring and differ only in `enabled`. ToolContent has default parameters, so a missed hook still compiles. */
+@Composable private fun MiniAppContent(controller: ToolController, tool: ToolRecord, displayed: ToolRecord?, heading: String,
+    navigationContext: android.content.Context, navigationForeground: () -> Boolean, enabled: Boolean) {
+    val current=checkNotNull(displayed)
+    val calendarHost=remember(current.id,current.revision,current.stateVersion,controller.grants,controller.effects) {
+        controller.calendarUiHost(current,navigationForeground) {intent ->check(navigationForeground());navigationContext.startActivity(intent)}
+    }
+    ToolContent(current.ui,current.state,enabled,heading=heading,calendarHost=calendarHost,
+        imageVersion=(tool.id to controller.grants),imageLoader={controller.nativeImage(tool.id,it)},imageAvailable={controller.nativeImageAvailable(tool.id,it)}) {id,value ->
+        controller.interact(current,id,value,navigationForeground) {intent ->check(navigationForeground());navigationContext.startActivity(intent)}
     }
 }
 
