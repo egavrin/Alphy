@@ -125,9 +125,16 @@ class MiniAppPresentationWorkflowTest {
             repeat(node.childCount) {node.getChild(it)?.let {editable(it)?.let {found -> return found}}}
             return null
         }
-        var node: AccessibilityNodeInfo?=shown(label)
-        while(node != null && editable(node) == null) node=node.parent
-        val field=editable(checkNotNull(node))!!
+        shown(label)
+        var found: AccessibilityNodeInfo?=null
+        // Compose UI 1.12.1 reports a disabled text field as not editable, and the field is disabled while the controller is busy.
+        waitUntil("Missing enabled field: $label") {
+            var node=find(label)
+            while(node != null && editable(node) == null) node=node.parent
+            found=node?.let {editable(it)}
+            found?.isEnabled == true
+        }
+        val field=checkNotNull(found)
         field.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         assertTrue(field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,text)
