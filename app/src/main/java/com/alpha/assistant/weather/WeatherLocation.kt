@@ -60,7 +60,8 @@ class AndroidWeatherLocator(private val context: Context) : WeatherLocator {
     override fun hasPermission() = context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
     override suspend fun locate(): WeatherPlace {
         try {
-            if(!hasPermission()) fail("Нет разрешения на примерную геопозицию.")
+            if(context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED)
+                fail("Нет разрешения на примерную геопозицию.")
             val manager = context.getSystemService(LocationManager::class.java)
             if(manager == null || !manager.isLocationEnabled) fail("Геопозиция устройства выключена или недоступна.")
             return withTimeout(18000) {

@@ -45,7 +45,7 @@ class NativeImageLifecycleTest {
         val owner=object: LifecycleOwner {val registry=LifecycleRegistry(this); override val lifecycle get()=registry}
         val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
         try {ToolStore(context,name).use {store ->
-            val spec=ToolSpec.parse(JSONObject().put("formatVersion",2).put("title","Image lifecycle").put("description","")
+            val spec=ToolSpec.parse(JSONObject().put("formatVersion",3).put("title","Image lifecycle").put("description","")
                 .put("capabilities",JSONArray().put("photo.pick")).put("stateSchema",JSONObject().put("photo","string"))
                 .put("initialState",JSONObject().put("photo","a".repeat(64)))
                 .put("ui",JSONObject("""{"type":"image","text":"Photo","bind":"photo"}"""))

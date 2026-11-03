@@ -41,7 +41,7 @@ class OwnedCalendarWorkflowTest {
     private fun fixture(block: (ToolStore,ToolRecord,Provider,OwnedCalendarCapabilities,(String,JSONObject)->CapabilityResult)->Unit) {
         check(OwnedCalendarCapabilities.hasPermissions(context)) {"Grant READ_CALENDAR and WRITE_CALENDAR before the calendar fixture suite."}
         val name="owned-calendar-${UUID.randomUUID()}.db";val store=ToolStore(context,name);val provider=Provider()
-        val spec=ToolSpec.parse(JSONObject().put("formatVersion",2).put("title","Calendar fixture").put("description","")
+        val spec=ToolSpec.parse(JSONObject().put("formatVersion",3).put("title","Calendar fixture").put("description","")
             .put("capabilities",JSONArray(OwnedCalendarContract.ids.toList())).put("initialState",JSONObject("{\"ready\":true}")).put("stateSchema",JSONObject("{\"ready\":\"boolean\"}"))
             .put("ui",JSONObject("{\"type\":\"text\",\"text\":\"Fixture\"}")).put("source","return {state:input.state};").toString())
         val tool=ToolRecord("owner",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)

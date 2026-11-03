@@ -27,7 +27,7 @@ class NavigationWorkflowTest {
         .put("stopId",id).put("label","上海 & $id ? #").put("latE6",31230000 + (id.first().code-65)*10000).put("lonE6",121473000 + (id.first().code-65)*20000).put("coordinateSystem",system)
     private fun request(capability: String, args: JSONObject, id: String = "run") = CapabilityCatalog.request(
         JSONObject().put("id",id).put("capability",capability).put("args",args))
-    private fun tool() = ToolSpec.parse(JSONObject().put("formatVersion",2).put("title","Offline navigation").put("description","")
+    private fun tool() = ToolSpec.parse(JSONObject().put("formatVersion",3).put("title","Offline navigation").put("description","")
         .put("capabilities",JSONArray().put("maps.markReached").put("maps.route")).put("capabilityResults",true)
         .put("stateSchema",JSONObject("{\"ref\":\"string\"}")).put("initialState",JSONObject("{\"ref\":\"\"}"))
         .put("ui",JSONObject("{\"type\":\"button\",\"text\":\"Mark reached A\",\"action\":\"mark\"}"))
@@ -163,9 +163,9 @@ class NavigationWorkflowTest {
         }
     }
     @Test fun schemaFiveUpgradePreservesExistingRows(): Unit = runBlocking { fixture { store, tool ->
-        // Recreate the immediately previous current schema without deleting any tool row.
-        store.writableDatabase.execSQL("DROP TABLE maps_reached")
-        store.writableDatabase.execSQL("DROP TABLE maps_stops")
+        // Schema five predates both navigation and owned-calendar tables.
+        for(table in listOf("maps_reached","maps_stops","owned_calendar_delete_batches","owned_calendar_delete_items",
+            "owned_calendar_selection","owned_calendar_events")) store.writableDatabase.execSQL("DROP TABLE $table")
         store.writableDatabase.version=5
         ToolStore(context,store.databaseName).use { upgraded ->
             assertEquals(tool,upgraded.tool(tool.id)); assertTrue(upgraded.granted(tool.id,"maps.route"))

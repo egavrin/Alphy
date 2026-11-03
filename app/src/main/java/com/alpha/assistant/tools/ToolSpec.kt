@@ -5,8 +5,8 @@ import org.json.JSONObject
 
 internal enum class ToolValidationCategory(val id: String, val guidance: String) {
     JSON("tool_json", "Return one JSON object without Markdown. Keep the object within 65536 bytes and nesting depth 24."),
-    FIELDS("tool_fields", "Use exactly these fields: formatVersion, title, description, capabilities, stateSchema, initialState, ui, source. Optional surface enables one isolated native drawing session. Optional capabilityResults and collections enable local typed results and private durable records. Remove other extra fields and include missing fields."),
-    VERSION("tool_version", "Set formatVersion to the integer 2."),
+    FIELDS("tool_fields", "Use exactly these fields: formatVersion, title, description, capabilities, stateSchema, initialState, ui, source. Optional surfaces declares identified native drawing surfaces. Optional presentation selects app or immersive mode. Optional capabilityResults and collections enable local typed results and private durable records. Remove other extra fields and include missing fields."),
+    VERSION("tool_version", "Set formatVersion to the integer 3. Incompatible saved artifacts remain unavailable with their data intact."),
     METADATA("tool_metadata", "Use a title string with 1 to 100 characters and a description string with at most 500 characters."),
     CAPABILITIES("tool_capabilities", "Use an array of unique capability IDs from the supplied catalog. For local counters, use an empty array."),
     STATE_SCHEMA("tool_state_schema", "Use 1 to 40 named fields with scalar types number, string, or boolean, or documented bounded list, object, and array definitions. Do not use JSON Schema objects for scalars."),
@@ -33,7 +33,7 @@ internal fun <T> validateTool(category: ToolValidationCategory, details: ToolVal
 
 /** Generated data describes native controls. Generated code never runs in the host process. */
 data class ToolSpec(val json: String, val title: String, val description: String, val source: String,
-    val schema: JSONObject, val initialState: String, val ui: JSONObject, val capabilities: Set<String>, val capabilityResults: Boolean = false, val collections: JSONObject = JSONObject(), val surface: ToolSurface? = null) {
+    val schema: JSONObject, val initialState: String, val ui: JSONObject, val capabilities: Set<String>, val capabilityResults: Boolean = false, val collections: JSONObject = JSONObject(), val surfaces: Map<String,ToolSurface> = emptyMap(), val presentation: String = "app") {
     fun validateState(value: String): JSONObject {
         require(value.toByteArray().size <= 49152) { "Данные инструмента превышают 48 КиБ" }
         val state = SandboxContract.objectFrom(value)
@@ -52,6 +52,8 @@ data class ToolSpec(val json: String, val title: String, val description: String
     }
     fun action(ui: JSONObject, id: String): JSONObject? = ToolUiCatalog.action(ui,id)
     companion object {
+        fun available(raw: String): ToolSpec? = try {parse(raw)} catch(_: IllegalArgumentException) {null} catch(_: IllegalStateException) {null} catch(_: org.json.JSONException) {null}
+        fun storedTitle(raw: String): String = runCatching {JSONObject(raw).optString("title").take(100).ifBlank {"Unavailable mini-app"}}.getOrDefault("Unavailable mini-app")
         /** Refinements may add fields, but cannot remove, retype, or reset stored values. */
         fun stateForRevision(previous: ToolSpec, next: ToolSpec, raw: String): String {
             val state = previous.validateState(raw)
@@ -71,10 +73,10 @@ data class ToolSpec(val json: String, val title: String, val description: String
             validateTool(ToolValidationCategory.FIELDS) {
                 val required = setOf("formatVersion", "title", "description", "capabilities", "stateSchema", "initialState", "ui", "source")
                 val fields = j.keys().asSequence().toSet()
-                require(fields.containsAll(required) && fields.all { it in required || it in setOf("capabilityResults","collections","surface") })
+                require(fields.containsAll(required) && fields.all { it in required || it in setOf("capabilityResults","collections","surfaces","presentation") })
                 require(!j.has("capabilityResults") || j.get("capabilityResults") is Boolean) { "Неверные поля инструмента" }
             }
-            validateTool(ToolValidationCategory.VERSION) { require(j.get("formatVersion") is Int && j.getInt("formatVersion") == 2) }
+            validateTool(ToolValidationCategory.VERSION) { require(j.get("formatVersion") is Int && j.getInt("formatVersion") == 3) }
             validateTool(ToolValidationCategory.METADATA) {
                 require(j.get("title") is String && j.getString("title").length in 1..100)
                 require(j.get("description") is String && j.getString("description").length <= 500)
@@ -94,10 +96,18 @@ data class ToolSpec(val json: String, val title: String, val description: String
             val source = validateTool(ToolValidationCategory.SOURCE) {
                 j.getString("source").also { require(it.isNotBlank() && it.toByteArray().size <= 32768) }
             }
-            val surface = validateTool(ToolValidationCategory.SOURCE) {
-                (if(j.has("surface")) GraphicsContract.declaration(j.getJSONObject("surface"),schema) else null).also {
-                    require(source.toByteArray().size + (it?.source?.toByteArray()?.size ?: 0) <= 32768) { "Combined source exceeds 32 KiB." }
-                }
+            val surfaces = validateTool(ToolValidationCategory.SOURCE) {
+                val declarations=if(j.has("surfaces")) j.getJSONArray("surfaces") else org.json.JSONArray()
+                require(declarations.length() <= 4) {"At most four surfaces are permitted."}
+                (0 until declarations.length()).map {GraphicsContract.declaration(declarations.getJSONObject(it),schema)}
+                    .also {require(it.map(ToolSurface::id).distinct().size == it.size)}.associateBy(ToolSurface::id)
+            }
+            validateTool(ToolValidationCategory.SOURCE) {require(surfaces.values.none {it.sizing=="viewport"} || surfaces.size==1 && surfaces.values.single().x==null) {"Viewport sizing requires one unpositioned surface."}}
+            val presentation=validateTool(ToolValidationCategory.FIELDS) {
+                if(j.has("presentation")) j.getJSONObject("presentation").let {
+                    require(it.keys().asSequence().toSet()==setOf("mode") && it.get("mode") in setOf("app","immersive"))
+                    it.getString("mode")
+                } else "app"
             }
             val initialState = validateTool(ToolValidationCategory.INITIAL_STATE) { j.getJSONObject("initialState").toString() }
             val ui = try {validateTool(ToolValidationCategory.UI_STRUCTURE) { j.getJSONObject("ui") }}
@@ -107,7 +117,7 @@ data class ToolSpec(val json: String, val title: String, val description: String
                     throw ToolValidationFailure(failure.category,failure.details,trace.failure(failure.category))
                 }
             return ToolSpec(j.toString(), j.getString("title"), j.getString("description"), source, schema,
-                initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surface).also {
+                initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surfaces,presentation).also {
                 validateTool(ToolValidationCategory.INITIAL_STATE) { it.validateState(it.initialState) }
                 it.validateUi(it.ui,JSONObject(it.initialState),ToolUiValidationStage.DEFINITION,observer)
             }

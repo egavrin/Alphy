@@ -24,7 +24,10 @@ class CapabilityWorkflowTest {
         assertEquals(CapabilityCatalog.ids, (0 until implemented.length()).map { implemented.getJSONObject(it).getString("id") }.toSet())
         assertEquals(CapabilityAction.entries.toSet(), CapabilityCatalog.definitions.map { it.action }.toSet())
         val planned = discovery.getJSONArray("planned")
-        assertTrue(planned.length() >= 8)
+        assertEquals(setOf("source.searchFetch","document.readShare","media.control","location.once","device.context","artifact.data"),
+            CapabilityCatalog.planned.map { it.id }.toSet())
+        assertEquals(CapabilityCatalog.planned.map { it.json().toString() },
+            (0 until planned.length()).map { planned.getJSONObject(it).toString() })
         repeat(planned.length()) {
             val entry = planned.getJSONObject(it)
             assertFalse(entry.getBoolean("callable"))
@@ -43,7 +46,8 @@ class CapabilityWorkflowTest {
             assertTrue(entry.has("result"))
         }
         val guidance = CapabilityCatalog.modelGuidance()
-        assertTrue(ChatToolReply.instructions(emptyList()).contains(guidance))
+        val chatPrompt = ChatToolReply.instructions(emptyList())
+        assertTrue(chatPrompt.contains(guidance))
         val name = "catalog-${UUID.randomUUID()}.db"
         var generationPrompt = ""
         val provider = object : ChatProvider {
@@ -57,6 +61,13 @@ class CapabilityWorkflowTest {
             val draft = engine.createDraft("Catalog fixture",null)
             engine.generate(draft.id,"fixture",emptyList(),CloudSession())
             assertTrue(generationPrompt.contains(guidance))
+            listOf(chatPrompt,generationPrompt).forEach { prompt ->
+                val callable = JSONArray(prompt.substringAfter("Alphy Android callable catalog (device availability is checked at execution): ")
+                    .substringBefore(". Declare only these implemented IDs."))
+                val callableIds = (0 until callable.length()).map { callable.getJSONObject(it).getString("id") }.toSet()
+                assertEquals(CapabilityCatalog.ids,callableIds)
+                CapabilityCatalog.planned.forEach { assertFalse(it.id in callableIds) }
+            }
             assertTrue(store.effects(draft.id).isEmpty())
             val before = AndroidCapabilities(context).discover().toString()
             assertEquals(before,AndroidCapabilities(context).discover().toString())
@@ -101,7 +112,7 @@ class CapabilityWorkflowTest {
         context.deleteDatabase(name)
     }
     private fun spec(source: String = "if(input.event.type==='action'){input.state.items.push({id:String(input.state.items.length),text:'Milk',done:false});return {state:input.state,effects:[{id:'notice',capability:'notification.post',args:{title:'List',text:'Updated'}}]};}return {state:input.state};") = JSONObject()
-        .put("formatVersion",2).put("title","Shopping").put("description","Typed list")
+        .put("formatVersion",3).put("title","Shopping").put("description","Typed list")
         .put("capabilities",JSONArray().put("notification.post"))
         .put("stateSchema",JSONObject("""{"items":{"type":"list","maxItems":100,"fields":{"id":"string","text":"string","done":"boolean"}}}"""))
         .put("initialState",JSONObject("""{"items":[]}"""))

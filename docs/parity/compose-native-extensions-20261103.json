@@ -1,0 +1,407 @@
+{
+  "schema_version": 1,
+  "inventory_id": "compose-installed-20261103",
+  "record_id": "compose-native-extensions-20261103",
+  "git_base_revision": "62179af217478075a1d7a10960c949440dcc4ad8",
+  "snapshot": "uncommitted working tree; source hashes below identify the compiled package",
+  "scope": "Finite native interfaces across all 40 installed toolkit families. No full upstream API parity claim.",
+  "status_definitions": {
+    "partial": "A finite native contract exists. Remaining family gaps are listed.",
+    "host_only": "Host facility; unavailable as generated host code.",
+    "unavailable": "No generated interface. Remaining work needs a new contract.",
+    "implemented": "The stated finite interface exists in code. This status alone does not prove rendered behavior."
+  },
+  "verification": {
+    "command": "./gradlew :app:compileDebugKotlin :app:compileDebugAndroidTestKotlin --console=plain",
+    "expected": "Both production and instrumentation Kotlin sources compile.",
+    "observed": "BUILD SUCCESSFUL",
+    "evidence": "docs/parity/compose-native-extensions-check.txt",
+    "workflow_status": "not_run_by_this_package",
+    "device_provider_calls": 0
+  },
+  "source_sha256": {
+    "app/src/main/java/com/alpha/assistant/tools/ToolUiCatalog.kt": "7ccc1522221967c05f47d6d183531ae0a5f272f9f964ee15206011e790f47396",
+    "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt": "311837a68f7eab3f375bdc7f6086a9b995ac3295fadd414a76d776640cdb37bc",
+    "app/src/main/java/com/alpha/assistant/tools/NativeUiMotion.kt": "6da192d9c9c9217c98480d5604f75b620cb8cc8d31f682261b8ccb3df3792d7d",
+    "app/src/main/java/com/alpha/assistant/tools/ToolGenerationSmoke.kt": "011547bd091d4e4dac62a677647ef3805089abf3697e4638edf3fe5525426c65",
+    "app/src/androidTest/java/com/alpha/assistant/tools/NativeMaterialWorkflowTest.kt": "b8a7abdd6257f401dd61bdcd654021dc909ba9fec6ea297a6d2e75c4ad6fa325",
+    "app/src/androidTest/java/com/alpha/assistant/tools/NativeLayoutTextWorkflowTest.kt": "2fde5836d4b45ad666cb50d8facd4a8287976b465171a7313a4cead821968b01"
+  },
+  "families": [
+    {
+      "id": "layout-basic",
+      "family": "Linear, flow, and overlay layout",
+      "status": "partial",
+      "implemented_contract": "column, nonwrapping row, flowRow, box overlay, adaptive grid, scroll; parent weight/alignment",
+      "remaining_gap": "No arbitrary layout callbacks, custom measurement, or ConstraintLayout API.",
+      "source_or_test": "NativeLayoutTextWorkflowTest",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "layout-size",
+      "family": "Constraints, dimensions, and insets",
+      "status": "partial",
+      "implemented_contract": "Bounded dimensions, constraints, aspect ratio, finite insets and arrangement",
+      "remaining_gap": "No breakpoint expressions, intrinsic measurement, or arbitrary modifier chain.",
+      "source_or_test": "NativeLayoutTextWorkflowTest",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "collections-lazy",
+      "family": "Lazy lists and stable identity",
+      "status": "partial",
+      "implemented_contract": "lazyList, stable keys, bounded viewport, selected/scroll target key",
+      "remaining_gap": "No item-visibility callbacks, prefetch policy, or unbounded collections.",
+      "source_or_test": "NativeLayoutTextWorkflowTest",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "collections-grid",
+      "family": "Lazy grids and staggered grids",
+      "status": "partial",
+      "implemented_contract": "lazyGrid, responsive column count, rowTemplate, groupBy, validated spanField",
+      "remaining_gap": "No staggered grid or arbitrary span callback.",
+      "source_or_test": "NativeMaterialWorkflowTest.collectionAffordancesAndMotionStayBounded",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "collections-pager",
+      "family": "Pagers, snapping, and page state",
+      "status": "partial",
+      "implemented_contract": "Native HorizontalPager, bounded page index event, previous/next actions, current-page action authority",
+      "remaining_gap": "No infinite pager, fractional scroll callback, or route stack.",
+      "source_or_test": "NativeMaterialWorkflowTest.nativeMaterialChoiceModalPagerAndReopenWorkflow",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "collections-groups",
+      "family": "Grouped rows and semantic compositions",
+      "status": "partial",
+      "implemented_contract": "groupBy, lazyList stickyHeaders, lazyGrid full-width group headers, swipeAction references visible rowActions",
+      "remaining_gap": "No free drag reorder or drag/drop. Explicit row actions can reorder script state with stable keys.",
+      "source_or_test": "NativeMaterialWorkflowTest.collectionAffordancesAndMotionStayBounded",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "material-actions",
+      "family": "Buttons, icon buttons, and floating actions",
+      "status": "partial",
+      "implemented_contract": "Native filled/outlined/text/tonal/elevated buttons, FAB and extended FAB, bounded glyphs",
+      "remaining_gap": "No loading-button state machine or Material icon pack. Disabled FAB uses a disabled tonal button.",
+      "source_or_test": "NativeMaterialWorkflowTest.materialShellSearchStatusAndButtonVariantsRemainClosed",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "material-chips",
+      "family": "Chips",
+      "status": "partial",
+      "implemented_contract": "actionChip assist/suggestion variants; boolean chip filter/input variants; optional remove action",
+      "remaining_gap": "No avatar or arbitrary leading/trailing slots. Input-chip removal remains a script state decision.",
+      "source_or_test": "NativeMaterialWorkflowTest.materialShellSearchStatusAndButtonVariantsRemainClosed",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "material-choice",
+      "family": "Radio, segmented, and tri-state controls",
+      "status": "partial",
+      "implemented_contract": "singleChoice radio group, segmented single choice, multiChoice complete typed selected array, toggle and checkbox",
+      "remaining_gap": "No tri-state checkbox or multi-select segmented row.",
+      "source_or_test": "NativeMaterialWorkflowTest.choicesRangesAndNavigationHaveTypedFiniteEvents",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "material-ranges",
+      "family": "Sliders and range controls",
+      "status": "partial",
+      "implemented_contract": "rangeSlider with two ordered bounded numbers and optional step, Apply event",
+      "remaining_gap": "No tick-label formatter, drag stream, or distinct drag-finished event.",
+      "source_or_test": "NativeMaterialWorkflowTest.choicesRangesAndNavigationHaveTypedFiniteEvents",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "material-containers",
+      "family": "Cards, surfaces, and dividers",
+      "status": "partial",
+      "implemented_contract": "card, section, listItem, semantic containers, theme-scoped bounded shapes",
+      "remaining_gap": "No generated Surface, arbitrary elevation, border, or slot functions.",
+      "source_or_test": "NativeUiWorkflowTest",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "material-overlays",
+      "family": "Dialogs, bottom sheets, popups, and tooltips",
+      "status": "partial",
+      "implemented_contract": "Script-controlled dialog/bottomSheet with visibleBind, unique dismiss action, validated child controls",
+      "remaining_gap": "No arbitrary popup, tooltip, modal stack, or persistent sheet offset.",
+      "source_or_test": "NativeMaterialWorkflowTest.nativeMaterialChoiceModalPagerAndReopenWorkflow",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "material-shell",
+      "family": "Scaffold, app bars, and navigation",
+      "status": "partial",
+      "implemented_contract": "Native appBar/bottomBar, typed navigationBar/navigationRail; host retains scaffold and authority",
+      "remaining_gap": "No navigation drawer, generated route stack, collapsible app-bar scroll behavior, or independent system bars.",
+      "source_or_test": "NativeMaterialWorkflowTest.materialShellSearchStatusAndButtonVariantsRemainClosed",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "material-menu-tabs",
+      "family": "Menus and tabs",
+      "status": "partial",
+      "implemented_contract": "Typed native menu/select popup, tabs, segmented choices",
+      "remaining_gap": "No menu groups, separators, item icons, or script-controlled popup position.",
+      "source_or_test": "NativeMaterialWorkflowTest.choicesRangesAndNavigationHaveTypedFiniteEvents",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "material-status",
+      "family": "Progress, badges, loading, and snackbars",
+      "status": "partial",
+      "implemented_contract": "Determinate/indeterminate linear/ring progress, spinner, badge, snackbar, banner, skeleton",
+      "remaining_gap": "No SnackbarHost queue/duration, anchored badge layout, or shimmer policy.",
+      "source_or_test": "NativeMaterialWorkflowTest.materialShellSearchStatusAndButtonVariantsRemainClosed",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "material-pickers",
+      "family": "Date and time pickers",
+      "status": "partial",
+      "implemented_contract": "Native date/time dialogs; Material date-range dialog emits ordered ISO pair, years 0001..9999",
+      "remaining_gap": "No selectable-date predicate, picker style selector, time-zone field, or Material time-picker option.",
+      "source_or_test": "NativeMaterialWorkflowTest.choicesRangesAndNavigationHaveTypedFiniteEvents",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "material-discovery",
+      "family": "Search, carousel, and pull refresh",
+      "status": "partial",
+      "implemented_contract": "Bounded search input and Search/IME event; pager supplies bounded swipe pages",
+      "remaining_gap": "No suggestions contract, expanded SearchBar, carousel, or pull-refresh event.",
+      "source_or_test": "NativeMaterialWorkflowTest.materialShellSearchStatusAndButtonVariantsRemainClosed",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "text-display",
+      "family": "Plain text and formatting",
+      "status": "partial",
+      "implemented_contract": "Bounded line count/height, overflow, wrap, selectable text, scalar formats",
+      "remaining_gap": "No generated locale formatter or downloadable font policy.",
+      "source_or_test": "NativeLayoutTextWorkflowTest",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "text-rich-selection",
+      "family": "Annotated text, links, and selection",
+      "status": "partial",
+      "implemented_contract": "Static ordered rich spans, SelectionContainer, validated link actions through existing capability broker",
+      "remaining_gap": "No inline composable content, editable rich text, or generated clipboard service.",
+      "source_or_test": "NativeLayoutTextWorkflowTest",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "text-editing",
+      "family": "Text fields and state-based editing",
+      "status": "partial",
+      "implemented_contract": "input/search keyboard/IME choices, maxLines, password masking, explicit Apply/Search; numeric fields",
+      "remaining_gap": "No read-only flag, transformation callbacks, selection/composition API, or custom validation message contract. Password masking does not encrypt state.",
+      "source_or_test": "NativeMaterialWorkflowTest.materialShellSearchStatusAndButtonVariantsRemainClosed",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "theme-colors",
+      "family": "Color schemes and dynamic color",
+      "status": "partial",
+      "implemented_contract": "Preset and system/light/dark mode; bounded opaque color pairs with contrast validation",
+      "remaining_gap": "No dynamic-color opt-in, arbitrary color role, or user contrast-preference API.",
+      "source_or_test": "NativeLayoutTextWorkflowTest",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "theme-type-shape",
+      "family": "Typography, shapes, and theme tokens",
+      "status": "partial",
+      "implemented_contract": "Bounded theme typeScale/cornerRadius; host font scaling retained",
+      "remaining_gap": "No generated font files, arbitrary TextStyle, or per-component custom shape.",
+      "source_or_test": "NativeLayoutTextWorkflowTest",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "input-gestures",
+      "family": "Pointer, gestures, scroll, and drag/drop",
+      "status": "partial",
+      "implemented_contract": "Node click/longClick/doubleClick; collection horizontal swipe; pager swipe; labeled accessibility alternatives",
+      "remaining_gap": "No node drag stream, zoom, drag/drop payload, arbitrary pointerInput, or generated nested-scroll policy.",
+      "source_or_test": "NativeMaterialWorkflowTest.interactionsAndSemanticsKeepCurrentAuthority",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "input-focus-ime",
+      "family": "Focus, keyboard, and IME",
+      "status": "partial",
+      "implemented_contract": "Focus-state boolean event, finite key shortcuts, native focusability, input keyboard/IME choice",
+      "remaining_gap": "No focus request/order API, keyboard show/hide command, or draft selection restoration.",
+      "source_or_test": "NativeMaterialWorkflowTest.interactionsAndSemanticsKeepCurrentAuthority",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "input-clipboard-autofill",
+      "family": "Clipboard and autofill",
+      "status": "host_only",
+      "implemented_contract": "Platform editing and text selection retain native host behavior",
+      "remaining_gap": "No generated clipboard read/write, autofill hints, or credential service.",
+      "source_or_test": "NativeToolUi.kt#NativeInput",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "input-semantics",
+      "family": "Semantics and accessible actions",
+      "status": "partial",
+      "implemented_contract": "Label, heading, stateDescription, polite/assertive liveRegion; long/double custom accessibility actions; native choice/range semantics",
+      "remaining_gap": "No explicit traversal order/group, custom role enumeration, or collection metadata API. TalkBack workflow remains unrun.",
+      "source_or_test": "NativeMaterialWorkflowTest.interactionsAndSemanticsKeepCurrentAuthority",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "graphics-drawing",
+      "family": "Canvas, paths, brushes, and clipping",
+      "status": "partial",
+      "implemented_contract": "Existing validated native drawing-surface command contract and scoped input",
+      "remaining_gap": "No arbitrary DrawScope, shader source, composable Canvas callbacks, or host drawing code.",
+      "source_or_test": "GraphicsBoundariesTest",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "graphics-images",
+      "family": "Images, vectors, and icons",
+      "status": "partial",
+      "implemented_contract": "Owner-scoped opaque resource handles, bounded image decode, lifecycle/revocation checks, bounded glyph set",
+      "remaining_gap": "No URL image fetch, generated vector paths, animated image, custom painter, or Material icon pack.",
+      "source_or_test": "NativeImageLifecycleTest",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "graphics-effects",
+      "family": "Graphics layers and render effects",
+      "status": "partial",
+      "implemented_contract": "Bounded transform pose, opacity, size and shared stage perspective",
+      "remaining_gap": "No generated blur, RenderEffect, blend mode, runtime shader, or arbitrary graphicsLayer.",
+      "source_or_test": "NativeComposeContractTest",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "motion-transitions",
+      "family": "Visibility, content, and size transitions",
+      "status": "partial",
+      "implemented_contract": "transition boolean visibility with fade/fadeSlide/expand, bounded duration, reduced-motion zero duration, immediate hidden-action rejection",
+      "remaining_gap": "No keyed content replacement or generic crossfade/shared-content identity contract.",
+      "source_or_test": "NativeMaterialWorkflowTest.collectionAffordancesAndMotionStayBounded",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "motion-state",
+      "family": "Property animation and simulation clock",
+      "status": "partial",
+      "implemented_contract": "Existing finite decorative motion presets and eight-value transform interpolation",
+      "remaining_gap": "No arbitrary easing, spring, keyframe, or infinite transition. Physical frame rate and touch latency remain unmeasured.",
+      "source_or_test": "NativeComposeContractTest",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "motion-shared",
+      "family": "Shared-element transitions",
+      "status": "unavailable",
+      "implemented_contract": "No generated shared-element transition contract",
+      "remaining_gap": "A future bounded shared-element identity and lifecycle design needs separate planning.",
+      "source_or_test": "NativeUiMotion.kt",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "runtime-state",
+      "family": "Composition state and snapshots",
+      "status": "host_only",
+      "implemented_contract": "Declared validated durable artifact state; host controls Compose snapshot state",
+      "remaining_gap": "No generated snapshot/remember/derivedStateOf API or durable JavaScript globals.",
+      "source_or_test": "ToolSpec.kt#validateState",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "runtime-effects",
+      "family": "Effects, flow, and composition lifecycle",
+      "status": "host_only",
+      "implemented_contract": "Existing broker, subscriptions and validated effects; host controls Compose effects",
+      "remaining_gap": "Composition, focus, gestures, and control presence grant no native privilege or automatic capability authorization.",
+      "source_or_test": "ToolEngine.kt#validateResult",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "runtime-restoration",
+      "family": "Saveable and retained state",
+      "status": "partial",
+      "implemented_contract": "Durable artifact state; native lazy and pager state; declarative selected/page/scroll targets",
+      "remaining_gap": "No general focus/draft/offset restoration guarantee. Known controller cancellation defect remains outside this package.",
+      "source_or_test": "NativeLayoutTextWorkflowTest; NativeMaterialWorkflowTest.nativeMaterialChoiceModalPagerAndReopenWorkflow",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "android-back",
+      "family": "Back and predictive back",
+      "status": "partial",
+      "implemented_contract": "Existing backHandler action and native modal dismissal",
+      "remaining_gap": "No generated predictive-back progress/cancel contract.",
+      "source_or_test": "NativeUiWorkflowTest",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "android-results",
+      "family": "Activity results and native capabilities",
+      "status": "host_only",
+      "implemented_contract": "Existing capability-specific result adapters retain host ownership",
+      "remaining_gap": "Missing native services require explicit capability, authority and result contracts.",
+      "source_or_test": "CapabilityOutcomeWorkflowTest",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "android-lifecycle",
+      "family": "Lifecycle-aware composition",
+      "status": "host_only",
+      "implemented_contract": "Host lifecycle controls images, sandbox subscriptions and native composition",
+      "remaining_gap": "Process-death, background subscriptions, and revocation require device workflow acceptance.",
+      "source_or_test": "NativeImageLifecycleTest",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "android-interop",
+      "family": "Android View interoperability",
+      "status": "host_only",
+      "implemented_contract": "AndroidView remains a native host implementation facility",
+      "remaining_gap": "No generated AndroidView, WebView, view-binding, arbitrary Android API, or host code.",
+      "source_or_test": "NativeToolSurface.kt",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    },
+    {
+      "id": "developer-facilities",
+      "family": "Compiler, inspection, preview, and UI tests",
+      "status": "unavailable",
+      "implemented_contract": "Existing Android instrumentation compiles with the application",
+      "remaining_gap": "No resolved Compose tooling/test-rule modules or Material2 contract. Instrumentation compilation does not prove rendered execution.",
+      "source_or_test": "app/build.gradle.kts",
+      "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"
+    }
+  ],
+  "repair": {
+    "reason": "Reviewer found Float range bounds could produce rejected endpoint payloads. Root instrumentation also found smoke fixture state transitions missing and a mismatched fixture database.",
+    "changed_sources": {
+      "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt": "bb6dff2a668dd33ec6068c7ae082b049ee10dc8e74a1bcb21da5046218f5794e",
+      "app/src/androidTest/java/com/alpha/assistant/tools/NativeMaterialWorkflowTest.kt": "04765500e3db53b37031fb5f06899fb246f99f5cb498860626a81af8a385214a"
+    },
+    "check": {
+      "command": "./gradlew :app:compileDebugKotlin :app:compileDebugAndroidTestKotlin --console=plain",
+      "observed": "BUILD SUCCESSFUL",
+      "workflow_status": "new regression and repaired workflows not run by this package",
+      "evidence": "docs/parity/compose-native-extensions-check.txt#repair"
+    },
+    "regression": "NativeMaterialWorkflowTest.nativeRangeFractionsPreserveDeclaredBoundsAndSteps",
+    "root_prior_failure_evidence": "evidence/compose-fullscreen-acceptance-20261103/focused-instrumentation.log"
+  }
+}

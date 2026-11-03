@@ -1,6 +1,7 @@
 package com.alpha.assistant.tools
 
 import android.os.Bundle
+import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
@@ -19,14 +20,15 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.util.UUID
 
-/** Failure cases: wrong search, lost state/history, stale writes, pending effects, active rules, stale widget actions, recovery auto-enables rules. */
+/** Failure cases: wrong search, stale accessibility trees, lost state/history, stale writes, pending effects, active rules, stale widget actions, recovery auto-enables rules. */
 class LibraryManagementWorkflowTest {
+    private val diagnostics = UiFailureDiagnostics("library")
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val app = instrumentation.targetContext.applicationContext as android.app.Application
     private val offline = object : ChatProvider {
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) { error("Library must not call the cloud") }
     }
-    private fun counter(id: String, title: String) = ToolSpec.parse("""{"formatVersion":2,"title":"$title","description":"Fixture","capabilities":["notification.post"],"stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"column","children":[{"type":"text","text":"Счёт","bind":"count"},{"type":"button","text":"Добавить","action":"add"}]},"source":"if(input.event.type==='action') input.state.count++; return {state:input.state};"}""").let {
+    private fun counter(id: String, title: String) = ToolSpec.parse("""{"formatVersion":3,"title":"$title","description":"Fixture","capabilities":["notification.post"],"stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"column","children":[{"type":"text","text":"Счёт","bind":"count"},{"type":"button","text":"Добавить","action":"add"}]},"source":"if(input.event.type==='action') input.state.count++; return {state:input.state};"}""").let {
         ToolRecord(id,1,1,it.json,"""{"count":7}""",it.ui.toString(),null,true,createdAt=1000)
     }
     private fun rule(tools: ToolRecord) = JSONObject("""{"name":"Зависимый сценарий","trigger":{"type":"manual"},"conditions":{},"actions":[{"id":"notice","capability":"notification.post","args":{"title":"Fixture","text":"Fixture"}},{"id":"set","capability":"tool.state.set","args":{"toolId":"${tools.id}","revision":${tools.revision},"field":"count","value":9}}]}""")
@@ -135,12 +137,15 @@ class LibraryManagementWorkflowTest {
                 tools.commitTool(counter("second","Покупки"),null,true)
                 AutomationStore(app,rulesName).use { rules -> val dependency=rules.save(null,rule(first));rules.approve(dependency.id,dependency.revision) }
             }
-            CloudTestActivity.factory={ application -> ShellViewModel(application,offline,shell,keys).also {model=it} }
+            CloudTestActivity.factory={ application -> ShellViewModel(application,offline,shell,keys).also {
+                model=it
+                diagnostics.state={"loading=${model.loading} busy=${model.tools.busy} selected=${model.tools.selectedId} tools=${model.tools.tools.map {item -> item.id to item.archived}}"}
+            } }
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitUntil {!model.loading && !model.tools.busy}
                 click("Создать")
                 edit("Search mini-apps","  СЧЁТ  ")
-                waitFor("Мой счётчик"); waitUntil { find(instrumentation.uiAutomation.rootInActiveWindow,"Покупки") == null }
+                waitFor("Мой счётчик"); waitUntil { find(diagnostics.freshRoot(),"Покупки") == null }
                 click("Мой счётчик"); waitFor("Счёт: 7")
                 click("Mini-app options");click("Archive");waitFor("Зависимый сценарий");click("Отмена")
                 assertFalse(model.tools.tools.first {it.id=="first"}.archived)
@@ -155,7 +160,7 @@ class LibraryManagementWorkflowTest {
                 click("Restore from archive");waitFor("Счёт: 7")
                 waitUntil {!model.tools.busy}
                 AutomationStore(app,rulesName).use {assertFalse(it.rules().single().enabled)}
-                click("Mini-app library");edit("Search mini-apps","не найдено");waitFor("No matches")
+                click("Mini-app library");edit("Search mini-apps","не найдено");waitFor("No matches");diagnostics.capture("empty-search-result")
             }
         } finally {
             CloudTestActivity.factory=null;shell.close();keys.clear()
@@ -188,10 +193,11 @@ class LibraryManagementWorkflowTest {
         return false
     }
     private fun waitFor(label: String): AccessibilityNodeInfo {
+        diagnostics.target(label)
         var found: AccessibilityNodeInfo? = null
         var direction = AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
         try { waitUntil {
-            val root = instrumentation.uiAutomation.rootInActiveWindow
+            val root = diagnostics.freshRoot()
             found = find(root,label)
             if(found == null) {
                 if(!scroll(root,direction)) direction = if(direction == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
@@ -203,7 +209,9 @@ class LibraryManagementWorkflowTest {
             fun dump(node: AccessibilityNodeInfo?): String = if(node == null) "" else
                 "[text=${node.text}, description=${node.contentDescription}, scrollable=${node.isScrollable}, actions=${node.actionList.map { it.id }}]" +
                     (0 until node.childCount).joinToString("") { dump(node.getChild(it)) }
-            throw AssertionError("Missing $label; tree=${dump(instrumentation.uiAutomation.rootInActiveWindow)}",failure)
+            val cachedTree=dump(instrumentation.uiAutomation.rootInActiveWindow)
+            diagnostics.capture("wait-timeout")
+            throw AssertionError("Missing $label; tree=$cachedTree",failure)
         }
         return found!!
     }

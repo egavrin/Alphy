@@ -19,8 +19,8 @@ object ChatToolReply {
     data class Reply(val text: String, val intent: Intent?, val kind: String, val search: String)
 
     fun instructions(known: List<ToolRecord>, userText: String = "", available: Boolean = true): String {
-        val active = known.filter { !it.archived }
-        val titles = active.associate { it.id to ToolSpec.parse(it.spec).title }
+        val active = known.filter { ToolSpec.available(it.spec)!=null && !it.archived }
+        val titles = active.associate { it.id to ToolSpec.storedTitle(it.spec) }
         val counts = titles.values.groupingBy { it.lowercase(java.util.Locale.ROOT) }.eachCount()
         val matches = titleMatches(titles,userText)
         val named = active.filter { it.id == matches.singleOrNull() }
@@ -85,17 +85,17 @@ The native renderer supports text, buttons, inputs, toggles and lists with local
     fun parse(raw: String, known: List<ToolRecord>, userText: String, conversationId: String? = null, hostTargetId: String? = null): Reply {
         val decision = decode(raw)
         val target = if(decision.kind == "refine") {
-            val tool = known.singleOrNull { it.id == decision.targetId && !it.archived && (conversationId == null || it.conversationId == conversationId) }
+            val tool = known.singleOrNull { ToolSpec.available(it.spec)!=null && it.id == decision.targetId && !it.archived && (conversationId == null || it.conversationId == conversationId) }
                 ?: fail("The requested tool is unavailable in this conversation. Name an active tool and retry.")
-            val active = known.filter { !it.archived && (conversationId == null || it.conversationId == conversationId) }
+            val active = known.filter { ToolSpec.available(it.spec)!=null && !it.archived && (conversationId == null || it.conversationId == conversationId) }
             val ids = active.filter { namesId(userText,it.id) }.map { it.id }.toSet()
-            val titles = titleMatches(active.associate { it.id to ToolSpec.parse(it.spec).title },userText)
+            val titles = titleMatches(active.associate { it.id to ToolSpec.storedTitle(it.spec) },userText)
             val explicit = ids.singleOrNull() ?: hostTargetId
             // An exact identity resolves duplicate titles, but cannot override another full named title.
-            val spans = active.flatMap { item -> titlePattern(ToolSpec.parse(item.spec).title).findAll(userText).map { item.id to it.range }.toList() }
+            val spans = active.flatMap { item -> titlePattern(ToolSpec.storedTitle(item.spec)).findAll(userText).map { item.id to it.range }.toList() }
             val fullTitles = spans.filter { (_,range) -> spans.none { (_,other) -> other != range && other.first <= range.first && other.last >= range.last } }
                 .map { it.first }.toSet()
-            val namedTitles = active.filter { it.id in fullTitles }.map { ToolSpec.parse(it.spec).title.lowercase(java.util.Locale.ROOT) }.toSet()
+            val namedTitles = active.filter { it.id in fullTitles }.map { ToolSpec.storedTitle(it.spec).lowercase(java.util.Locale.ROOT) }.toSet()
             val authorized = when {
                 ids.size > 1 -> null
                 explicit != null -> explicit.takeIf { fullTitles.isEmpty() || (it in fullTitles && namedTitles.size == 1) }

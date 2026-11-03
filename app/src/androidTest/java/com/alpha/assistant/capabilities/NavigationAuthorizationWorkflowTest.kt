@@ -1,5 +1,6 @@
 package com.alpha.assistant.capabilities
 
+import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
@@ -23,6 +24,7 @@ import java.util.UUID
  * ToolController, and isolated JavaScript. Offline and private fixture databases only, without a provider/key.
  */
 class NavigationAuthorizationWorkflowTest {
+    private val diagnostics = UiFailureDiagnostics("navigation")
     private val instrumentation=InstrumentationRegistry.getInstrumentation()
     private val context get()=instrumentation.targetContext
     private val automation get()=instrumentation.uiAutomation
@@ -33,6 +35,7 @@ class NavigationAuthorizationWorkflowTest {
     private fun waitUntil(test: ()->Boolean) {
         val end=SystemClock.uptimeMillis()+15000
         while(SystemClock.uptimeMillis()<end) {if(test())return;SystemClock.sleep(30)}
+        diagnostics.capture("wait-timeout")
         fail("Navigation authorization workflow timed out")
     }
     private fun find(label: String,node: AccessibilityNodeInfo?=automation.rootInActiveWindow): AccessibilityNodeInfo? {
@@ -42,10 +45,11 @@ class NavigationAuthorizationWorkflowTest {
         return null
     }
     private fun click(label: String) {
+        diagnostics.target(label)
         var node: AccessibilityNodeInfo?=null
         waitUntil {node=find(label); if(node?.isVisibleToUser != true) node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id); node?.isVisibleToUser==true}
         while(node != null && node?.isClickable != true)node=node?.parent
-        assertTrue(node?.performAction(AccessibilityNodeInfo.ACTION_CLICK)==true)
+        assertTrue(diagnostics.click(label,node))
     }
     private fun fixture(node: JSONObject, output: JSONObject?, block: (ShellViewModel,ToolStore,ToolRecord)->Unit) {
         val name="navigation-authorization-${UUID.randomUUID()}"
@@ -53,7 +57,7 @@ class NavigationAuthorizationWorkflowTest {
         val keys=SecureKeyStore(context,name,name)
         val capability=node.optString("capability","maps.markReached")
         val source="if(input.event.type==='action')return {state:input.state,effects:[{id:'navigation',capability:'$capability',args:${(output ?: stop("A"))}}]}; return {state:input.state};"
-        val spec=ToolSpec.parse(JSONObject().put("formatVersion",2).put("title","Authorization fixture").put("description","")
+        val spec=ToolSpec.parse(JSONObject().put("formatVersion",3).put("title","Authorization fixture").put("description","")
             .put("capabilities",JSONArray().put("maps.markReached").put("maps.route")).put("capabilityResults",true)
             .put("stateSchema",JSONObject("{\"name\":\"string\"}")).put("initialState",JSONObject("{\"name\":\"\"}"))
             .put("ui",node).put("source",source).toString())
@@ -85,11 +89,18 @@ class NavigationAuthorizationWorkflowTest {
             repeat(node.childCount) {editable(node.getChild(it))?.let {found -> return found}}
             return null
         }
+        diagnostics.target("Name")
+        // A full snapshot clears the accessibility cache, so capture it before selecting the action node.
+        diagnostics.capture("before-set-text")
         var field: AccessibilityNodeInfo?=null
         waitUntil {field=editable(automation.rootInActiveWindow);field!=null}
-        assertTrue(field!!.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,android.os.Bundle().apply {
-            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,"Changed")
-        }))
+        try {
+            assertTrue(field!!.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,android.os.Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,"Changed")
+            }))
+        } finally {
+            diagnostics.capture("after-set-text",field)
+        }
         click("Apply: Name");waitUntil {!model.tools.busy && store.effects(tool.id).isNotEmpty()}
         assertEquals("pending",store.effects(tool.id).single().phase)
         assertEquals(0,store.readableDatabase.rawQuery("SELECT COUNT(*) FROM maps_reached",null).use {it.moveToFirst();it.getInt(0)})

@@ -1,0 +1,83 @@
+Compose inventory verification — 2026-11-03
+
+Tested Git base: 62179af217478075a1d7a10960c949440dcc4ad8
+Snapshot: pre-extension uncommitted working tree; native source hashes are in compose-installed-inventory.json.
+Scope: dependency graph, versioned public source identity, inventory integrity. No device or provider operation.
+
+Dependency command:
+./gradlew :app:dependencies --configuration debugRuntimeClasspath --console=plain
+Expected: BUILD SUCCESSFUL, no failed dependency.
+Observed: BUILD SUCCESSFUL, no failed dependency.
+Saved graph: docs/parity/compose-dependencies-20261103.txt
+
+Exact command:
+python3 - <<'PY_CHECK_SOURCES'
+from pathlib import Path
+import hashlib, json, tempfile, urllib.request, zipfile
+data = json.loads(Path("docs/parity/compose-installed-inventory.json").read_text())
+with tempfile.TemporaryDirectory(prefix="alpha-compose-sources-") as directory:
+    archives = {}
+    for item in data["upstream_source_archives"]:
+        payload = urllib.request.urlopen(item["url"], timeout=60).read()
+        assert hashlib.sha256(payload).hexdigest() == item["sha256"], item["coordinate"]
+        path = Path(directory) / item["url"].rsplit("/", 1)[-1]
+        path.write_bytes(payload)
+        archives[item["coordinate"]] = path
+    for item in data["upstream_source_declarations"].values():
+        with zipfile.ZipFile(archives[item["archive"]]) as archive:
+            payload = archive.read(item["path"])
+        assert hashlib.sha256(payload).hexdigest() == item["file_sha256"], item["path"]
+        assert item["symbol"] in payload.decode().splitlines()[item["line"] - 1], item["symbol"]
+print("PASS: 14 versioned archives and 103 source declarations")
+PY_CHECK_SOURCES
+Expected: PASS for named check only.
+Observed:
+PASS: 14 versioned archives and 103 source declarations
+Exit status: 0
+
+Exact command:
+python3 - <<'PY_CHECK_INVENTORY'
+from pathlib import Path
+import hashlib, json, re
+root = Path.cwd()
+data = json.loads((root / "docs/parity/compose-installed-inventory.json").read_text())
+report = (root / data["dependency_report"]["path"]).read_bytes()
+assert hashlib.sha256(report).hexdigest() == data["dependency_report"]["sha256"]
+assert b"BUILD SUCCESSFUL" in report and not re.search(rb"\bFAILED\b", report)
+selected = set()
+for line in report.decode().splitlines():
+    if " (c)" in line:
+        continue
+    match = re.search(r"(androidx\.(?:compose[^:]*|activity|lifecycle|savedstate|navigationevent)):(\S+?)(?::([\w.\-]+))? (?:-> ([\w.\-]+))?(?: |$)", line + " ")
+    if match:
+        group, artifact, requested, resolved = match.groups()
+        if resolved or requested:
+            selected.add(f"{group}:{artifact}:{resolved or requested}")
+assert selected == {item["coordinate"] for item in data["resolved_components"]}
+families = data["families"]
+assert len({item["id"] for item in families}) == len(families) == 40
+assert set(data["catalog_types"]) == {kind for item in families for kind in item["native_types"]}
+assert all(item["workflow_status"] == "not_run_for_this_inventory" for item in families)
+assert all(item["acceptance_criteria"] and item["gaps"] for item in families)
+assert all(item["upstream"] and item["native_contract"]["source"] for item in families)
+assert all(item["disposition"] in data["status_definitions"] for item in families)
+assert all(item["evidence_status"] in data["status_definitions"] for item in families)
+assert all(item["archive"] in selected for item in data["upstream_source_declarations"].values())
+assert all(key in data["upstream_source_declarations"] for item in families for key in item["upstream"])
+assert all(key in data["native_source_references"] for item in families for key in item["native_contract"]["source"])
+assert not any(item.split(":")[0] + ":" + item.split(":")[1] in data["excluded_unresolved_modules"] for item in selected)
+print(f"PASS: {len(families)} families; {len(selected)} resolved coordinates; 49 native types; no unrun workflow promoted")
+PY_CHECK_INVENTORY
+Expected: PASS for named check only.
+Observed:
+PASS: 40 families; 63 resolved coordinates; 49 native types; no unrun workflow promoted
+Exit status: 0
+
+Whitespace command: git diff --check -- docs/parity/compose-installed-inventory.md docs/parity/compose-installed-inventory.json docs/parity/compose-dependencies-20261103.txt
+Observed: exit 0. New files remain untracked, so the inventory check supplies their content validation.
+
+Unchecked: native rendering, TalkBack, provider effects, release APK contents, physical performance, and canonical real-generation scenarios.
+Risk: source mappings describe a dated pre-extension snapshot. Later code requires its own evidence.
+
+Post-correction focused recheck: the exact PY_CHECK_INVENTORY command above passed after the image fit spelling changed from contain/crop to the source identifier fit/crop.
+PASS: 40 families; 63 resolved coordinates; 49 native types; no unrun workflow promoted

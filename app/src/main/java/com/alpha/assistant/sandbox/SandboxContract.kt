@@ -82,7 +82,17 @@ internal object SandboxContract {
         require(json.getString("artifactId").length in 1..128)
         require(json.get("revision") is Int && json.getInt("revision") > 0)
         val event=json.getJSONObject("event")
-        require(event.getString("type") in setOf("action","preview","render","capabilityResults","recordResults"))
+        val type=event.getString("type")
+        when(type) {
+            "preview","render","open" -> require(event.keys().asSequence().toSet()==setOf("type"))
+            "action" -> {
+                require(event.keys().asSequence().toSet().containsAll(setOf("type","actionId","value")))
+                require(event.keys().asSequence().toSet().all {it in setOf("type","actionId","value","calendar","medicine","navigation")})
+                require(event.get("actionId") is String && event.getString("actionId").matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")))
+            }
+            "capabilityResults","recordResults" -> Unit
+            else -> com.alpha.assistant.tools.GraphicsContract.validateEvent(event)
+        }
         if(event.getString("type") == "capabilityResults") {
             require(event.keys().asSequence().toSet() == setOf("type","deliveryId","entries"))
             require(event.getString("deliveryId").matches(Regex("[0-9a-f-]{36}")))
@@ -104,9 +114,13 @@ internal object SandboxContract {
 
     fun validateResult(result: String) {
         val json = objectFrom(result)
-        require(json.keys().asSequence().toSet().all { it in setOf("state", "ui", "effects", "records") })
+        require(json.keys().asSequence().toSet().all { it in setOf("state", "ui", "effects", "records", "surfaces", "frames", "timers", "playback") })
         json.getJSONObject("state")
         if (json.has("ui")) json.getJSONObject("ui")
+        if(json.has("surfaces")) json.getJSONObject("surfaces")
+        if(json.has("frames")) json.getJSONArray("frames")
+        if(json.has("timers")) json.getJSONArray("timers")
+        if(json.has("playback")) com.alpha.assistant.tools.ArtifactProtocol.validatePlayback(json.get("playback"))
         if(json.has("records")) com.alpha.assistant.tools.ToolRecords.validateOperations(json.getJSONArray("records"))
         if (json.has("effects")) {
             val effects = json.getJSONArray("effects")

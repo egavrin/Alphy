@@ -27,7 +27,7 @@ class CapabilityResultsWorkflowTest {
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) = error("Offline fixture")
     }
     private fun spec(results: Boolean = true, handler: String = "input.state.count+=input.event.entries.length;input.state.secret=input.event.entries.map(x=>x.requestId).join(',');return {state:input.state};") = ToolSpec.parse(JSONObject()
-        .put("formatVersion",2).put("title","Results fixture").put("description","")
+        .put("formatVersion",3).put("title","Results fixture").put("description","")
         .put("capabilities",JSONArray().put("vibration.play").put("notification.post").put("photo.pick").put("camera.capture"))
         .put("stateSchema",JSONObject("{\"count\":\"number\",\"secret\":\"string\"}"))
         .put("initialState",JSONObject("{\"count\":0,\"secret\":\"\"}"))
@@ -291,7 +291,7 @@ class CapabilityResultsWorkflowTest {
         assertNull(restarted.active); assertNull(restarted.consume(later.token))
     }
     @Test fun additiveUpgradeRetainsEveryExistingTableAndRejectsUnsupportedVersions() {
-        for(version in listOf(2,3,7)) {
+        for(version in listOf(2,3,8)) {
             val name="upgrade-${UUID.randomUUID()}.db"
             val path=context.getDatabasePath(name); path.parentFile!!.mkdirs()
             SQLiteDatabase.openOrCreateDatabase(path,null).use { db ->
@@ -311,7 +311,7 @@ class CapabilityResultsWorkflowTest {
             }
             try {
                 ToolStore(context,name).use { store ->
-                    if(version == 3) { assertEquals(7,store.draft("receipt")!!.acceptedRevision); assertTrue(store.granted("owner","photo.pick")); assertEquals(6,store.readableDatabase.version); assertEquals(1,store.tools().size); assertEquals(1,store.revisions(store.tools().single().id).size); assertEquals("unknownOutcome",store.effect("kept-effect")!!.result.status); assertEquals("terminal",store.effect("kept-effect")!!.phase) }
+                    if(version == 3) { assertEquals(7,store.draft("receipt")!!.acceptedRevision); assertTrue(store.granted("owner","photo.pick")); assertEquals(7,store.readableDatabase.version); assertEquals(1,store.tools().size); assertEquals(1,store.revisions(store.tools().single().id).size); assertEquals("unknownOutcome",store.effect("kept-effect")!!.result.status); assertEquals("terminal",store.effect("kept-effect")!!.phase) }
                     else assertTrue(runCatching { store.readableDatabase }.isFailure)
                 }
                 SQLiteDatabase.openDatabase(path.path,null,SQLiteDatabase.OPEN_READONLY).use { db ->

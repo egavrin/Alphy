@@ -58,8 +58,8 @@ private fun actionText(d: AutomationDefinition, tools: ToolController): String =
         "notification.post" -> "Уведомление Alphy: «${a.getString("title") }» — ${a.getString("text") }"
         "calendar.read" -> "Календарь ${a.getLong("calendarId")}: ${date(a.getLong("from"))} — ${date(a.getLong("to"))}. До 50 событий, только на устройстве."
         "calendar.read.rolling" -> "Каждый запуск: календарь ${a.getLong("calendarId")}, от начала текущего дня на ${a.getInt("days")} дн., ${if(a.getString("zone") == "device") "часовой пояс устройства" else a.getString("zone")}. До 50 событий, только на устройстве."
-        "tool.records.calendar" -> "Результат «${a.getString("source") }» → список «${a.getString("field") }» инструмента ${tools.tools.find { it.id == a.getString("toolId") }?.let { ToolSpec.parse(it.spec).title } ?: a.getString("toolId")}, версия ${a.getInt("revision")}. Импортированные записи этого календаря заменяются текущими. Ручные записи сохраняются."
-        "tool.state.set" -> "Инструмент ${tools.tools.find { it.id == a.getString("toolId") }?.let { ToolSpec.parse(it.spec).title } ?: a.getString("toolId")}, версия ${a.getInt("revision")}: ${a.getString("field")} = ${a.get("value")}"
+        "tool.records.calendar" -> "Результат «${a.getString("source") }» → список «${a.getString("field") }» инструмента ${tools.tools.find { it.id == a.getString("toolId") }?.let { ToolSpec.storedTitle(it.spec) } ?: a.getString("toolId")}, версия ${a.getInt("revision")}. Импортированные записи этого календаря заменяются текущими. Ручные записи сохраняются."
+        "tool.state.set" -> "Инструмент ${tools.tools.find { it.id == a.getString("toolId") }?.let { ToolSpec.storedTitle(it.spec) } ?: a.getString("toolId")}, версия ${a.getInt("revision")}: ${a.getString("field")} = ${a.get("value")}"
         "app.open" -> "Открыть: ${a.getString("app")}. В фоне ожидает пользователя."
         "link.open" -> "Ссылка: ${a.getString("url")}. В фоне ожидает пользователя."
         "maps.open" -> "Карта: ${a.getString("query")}. В фоне ожидает пользователя."
@@ -316,9 +316,9 @@ private fun conditionText(d: AutomationDefinition): String = buildList {
             if(calendars.isEmpty()) Text("Сначала разреши чтение календаря на основном экране автоматизаций.")
             Field("Период от начала текущего дня, 1–30 дней",rollingDays) {rollingDays=it}
             Field("Часовой пояс периода: device или Europe/Moscow",rollingZone) {rollingZone=it}
-            Choices(toolId,tools.tools.filterNot { it.archived }.associate {it.id to ToolSpec.parse(it.spec).title}) {toolId=it; field=""}
+            Choices(toolId,tools.tools.filter { !it.archived && ToolSpec.available(it.spec)!=null }.associate {it.id to ToolSpec.storedTitle(it.spec)}) {toolId=it; field=""}
             val selectedTool=tools.tools.find {it.id == toolId}
-            val spec=selectedTool?.let {ToolSpec.parse(it.spec)}
+            val spec=selectedTool?.let {ToolSpec.available(it.spec)}
             val fields=spec?.schema?.keys()?.asSequence()?.filter {key -> runCatching {AutomationDataflow.validateCollection(spec,key)}.isSuccess}?.associateWith {it}.orEmpty()
             Choices(field,fields) {field=it}
             TextButton(enabled=!creatingTool,onClick={
@@ -344,9 +344,9 @@ private fun conditionText(d: AutomationDefinition): String = buildList {
             Text("Выбранный период фиксирован, до 31 дня. События остаются в журнале на устройстве.")
         }
         "tool.state.set" -> {
-            Choices(toolId,tools.tools.filterNot { it.archived }.associate { it.id to ToolSpec.parse(it.spec).title }) {toolId=it; field=""}
+            Choices(toolId,tools.tools.filter { !it.archived && ToolSpec.available(it.spec)!=null }.associate { it.id to ToolSpec.storedTitle(it.spec) }) {toolId=it; field=""}
             val tool=tools.tools.find { it.id == toolId }
-            val schema=tool?.let { ToolSpec.parse(it.spec).schema }
+            val schema=tool?.let { ToolSpec.available(it.spec)?.schema }
             Choices(field,schema?.keys()?.asSequence()?.filter { schema.get(it) is String }?.associateWith { it }.orEmpty()) {field=it}
             Field("Новое значение поля",value) {value=it}
             Text("Изменяется только выбранное скалярное поле. Для логического поля: true или false. После изменения версии инструмента сценарий требует проверки.")

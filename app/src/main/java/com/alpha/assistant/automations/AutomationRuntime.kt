@@ -75,6 +75,7 @@ object AutomationRuntime {
             when {
                 target == null -> "Целевой инструмент недоступен. Все действия сценария остановлены."
                 target.archived -> "Целевой инструмент в архиве. Восстанови его и включи сценарий вручную."
+                ToolSpec.available(target.spec)==null -> "The target artifact protocol is unavailable. Its saved data remains intact."
                 target.revision != action.args.getInt("revision") -> "Версия целевого инструмента изменилась. Проверь сценарий."
                 else -> null
             }
@@ -97,14 +98,18 @@ object AutomationRuntime {
     }
     /** Uses the same gate as rule effects. Persist pauses first, so interruption cannot enable background work. */
     suspend fun archiveTool(tools: ToolStore, rules: AutomationStore, expected: ToolRecord) = mutex.withLock {
-        check(tools.tool(expected.id) == expected && !expected.archived) { "Инструмент изменился. Открой текущую версию." }
+      ArtifactCoordinator.get(tools,expected.id).ordered {
+        check(current(tools,expected.id)==expected && !expected.archived) { "Инструмент изменился. Открой текущую версию." }
+        close(tools,expected.revision)
+        val saved=checkNotNull(tools.tool(expected.id))
         rules.transaction {
             rules.rules().filter { dependencies(it,expected.id) }.forEach {
                 rules.attention(it.id,it.revision,"Инструмент в архиве. После восстановления включи сценарий вручную.")
                 rules.setState("approval-archive:${it.id}",java.util.UUID.randomUUID().toString())
             }
         }
-        ToolStore.effectMutex.withLock { tools.setArchived(expected,true) }
+        ToolStore.effectMutex.withLock { tools.setArchived(saved,true) }
+      }
     }
     private fun dependencyFailure(context: Context, rule: AutomationRule) = ToolStore(context).use { dependencyFailure(it,rule) }
     fun actionFailure(context: Context, action: CapabilityRequest): String? {
@@ -140,7 +145,7 @@ object AutomationRuntime {
     private suspend fun perform(context: Context, store: AutomationStore, rule: AutomationRule, action: CapabilityRequest, step: AutomationStep): CapabilityResult {
         if(!step.dry && !store.active(rule.id,rule.revision)) return CapabilityResult("cancelled","Сценарий остановлен.")
         if(action.capability in setOf("tool.state.set","tool.records.calendar")) {
-            val result=ToolStore(context).use { tools -> AutomationTools.execute(tools,rule.definition,action,step,AutomationTools.renderer(context)) {store.active(rule.id,rule.revision)} }
+            val result=ToolStore(context).use { tools -> AutomationTools.execute(tools,rule.definition,action,step,AutomationTools.renderer(context,tools)) {store.active(rule.id,rule.revision)} }
             if(!step.dry) {
                 ToolWidgets.updateAll(context)
                 context.sendBroadcast(Intent(SurfaceEntry.TOOLS_CHANGED).setPackage(context.packageName))

@@ -34,7 +34,10 @@ class SyntheticSchemaDiagnosticTest {
             "ui_object" to "object", "ui_bytes" to "bytes_at_most_32768", "node_depth_limit" to "nodes_256_depth_8",
             "component_type" to "catalog_component", "component_properties" to "catalog_properties", "component_flag" to "boolean",
             "component_text" to "string_length_1_300", "component_style" to "catalog_style", "accessible_label" to "label_present",
-            "component_binding" to "declared_binding_and_state", "component_action" to "unique_ascii_action",
+            "component_binding" to "declared_binding_and_state",
+            "component_binding_missing_path" to "declared_path_in_schema_and_state",
+            "component_binding_schema_type" to "compatible_schema_type",
+            "component_binding_state_value" to "schema_valid_state_value", "component_action" to "unique_ascii_action",
             "component_contract" to "catalog_component_contract", "theme_preset" to "catalog_preset", "grid_columns" to "integer_1_4",
             "spacer_size" to "integer_0_64", "icon_name" to "catalog_icon", "button_icon" to "catalog_icon",
             "input_length" to "integer_1_2048", "text_format" to "number_or_clock_format", "selection_options" to "options_1_30",
@@ -121,7 +124,7 @@ class SyntheticSchemaDiagnosticTest {
         val fixture=checkNotNull(uiOperations().last().base)
         val spec=ToolSpec.parse(fixture.spec)
         spec.validateState(fixture.state); spec.validateUi(JSONObject(fixture.ui),JSONObject(fixture.state))
-        assertTrue(spec.capabilities.isEmpty()); assertNull(spec.surface); assertEquals(0,spec.collections.length())
+        assertTrue(spec.capabilities.isEmpty()); assertTrue(spec.surfaces.isEmpty()); assertEquals(0,spec.collections.length())
         assertEquals(listOf(ARKANOID_REQUEST,ARKANOID_REQUEST,REFINEMENT_REQUEST),uiOperations().map {it.prompt})
     }
 
@@ -148,7 +151,7 @@ class SyntheticSchemaDiagnosticTest {
                 operation.base?.let {base ->
                     val spec=ToolSpec.parse(base.spec)
                     spec.validateState(base.state); spec.validateUi(JSONObject(base.ui),JSONObject(base.state))
-                    check(spec.capabilities.isEmpty() && spec.surface == null && spec.collections.length() == 0)
+                    check(spec.capabilities.isEmpty() && spec.surfaces.isEmpty() && spec.collections.length() == 0)
                     store.saveTool(base,true)
                 }
                 val tools=store.tools(); val revisions=operation.base?.let {store.revisions(it.id)}
@@ -186,7 +189,7 @@ class SyntheticSchemaDiagnosticTest {
         val context get() = base?.let {"\nCurrent tool: ${it.spec}\nCurrent state: ${it.state}"}.orEmpty()
     }
     private fun uiOperations(): List<UiOperation> {
-        val spec=ToolSpec.parse("""{"formatVersion":2,"title":"Synthetic medication tracker","description":"Synthetic diagnostic fixture","capabilities":[],"stateSchema":{"medicine":"string","taken":"boolean","history":{"type":"list","maxItems":10,"fields":{"id":"string","at":"string"}}},"initialState":{"medicine":"Synthetic medicine","taken":false,"history":[{"id":"synthetic1","at":"2026-01-01"}]},"ui":{"type":"column","children":[{"type":"input","text":"Medicine","bind":"medicine","action":"medicine"},{"type":"checkbox","text":"Taken","bind":"taken","action":"taken"},{"type":"list","text":"History","bind":"history"}]},"source":"return {state:input.state};"}""")
+        val spec=ToolSpec.parse("""{"formatVersion":3,"title":"Synthetic medication tracker","description":"Synthetic diagnostic fixture","capabilities":[],"stateSchema":{"medicine":"string","taken":"boolean","history":{"type":"list","maxItems":10,"fields":{"id":"string","at":"string"}}},"initialState":{"medicine":"Synthetic medicine","taken":false,"history":[{"id":"synthetic1","at":"2026-01-01"}]},"ui":{"type":"column","children":[{"type":"input","text":"Medicine","bind":"medicine","action":"medicine"},{"type":"checkbox","text":"Taken","bind":"taken","action":"taken"},{"type":"list","text":"History","bind":"history"}]},"source":"return {state:input.state};"}""")
         return listOf(UiOperation(ARKANOID_REQUEST),UiOperation(ARKANOID_REQUEST),UiOperation(REFINEMENT_REQUEST,
             ToolRecord("synthetic-medication",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true,createdAt=0)))
     }

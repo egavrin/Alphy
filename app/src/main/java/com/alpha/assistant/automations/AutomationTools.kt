@@ -9,36 +9,43 @@ import org.json.JSONObject
 import java.util.UUID
 
 object AutomationTools {
-    fun renderer(context: Context): suspend (ToolRecord,String) -> ToolPreview {
+    fun renderer(context: Context,tools: ToolStore): suspend (ToolRecord,String) -> ToolPreview {
         val offline=object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) { error("Автоматизации не обращаются к облаку") }
         }
         val generation=ToolGenerationService(offline,SandboxClient(context))
-        return { tool,state -> generation.evaluate(ToolSpec.parse(tool.spec),tool.id,tool.revision,state,JSONObject().put("type","render"),tool.ui) }
+        return { tool,state ->
+            ArtifactCoordinator.get(tools,tool.id).evaluate(generation,tool.copy(state=state),JSONObject().put("type","render"))
+        }
     }
     suspend fun execute(tools: ToolStore, definition: AutomationDefinition, action: CapabilityRequest, step: AutomationStep,
-        render: suspend (ToolRecord,String) -> ToolPreview, stillApproved: () -> Boolean): CapabilityResult {
-        val old=checkNotNull(tools.tool(action.args.getString("toolId"))) { "Инструмент недоступен" }
+        render: suspend (ToolRecord,String) -> ToolPreview, stillApproved: () -> Boolean): CapabilityResult = ArtifactCoordinator.get(tools,action.args.getString("toolId")).ordered {
+        current(tools,action.args.getString("toolId"))
+        if(!step.dry)flush(tools)
+        val old=current(tools,action.args.getString("toolId"))
+        check(!tools.artifactWorkPending(old.id)) {"A native result must finish before automation can change state."}
         check(!old.archived) { "Инструмент в архиве" }
         check(old.revision == action.args.getInt("revision")) { "Версия инструмента изменилась" }
         val spec=ToolSpec.parse(old.spec)
         val state=if(action.capability == "tool.state.set") spec.validateState(JSONObject(old.state).put(action.args.getString("field"),action.args.get("value")).toString()).toString()
             else AutomationDataflow.calendarState(spec,old.state,definition,action,step.previous)
-        val rendered=render(old,state)
+        val rendered=prepareOutput(render(old,state))
         require(rendered.effects.isEmpty() && JSONObject(rendered.state).toString() == JSONObject(state).toString()) { "Отображение изменило данные или запросило системное действие" }
         spec.validateState(rendered.state); spec.validateUi(JSONObject(rendered.ui),JSONObject(rendered.state))
         if(!step.dry) {
             check(stillApproved()) { "Сценарий выключен или изменён" }
-            tools.commitTool(old.copy(state=rendered.state,ui=rendered.ui,stateVersion=old.stateVersion+1),old,false)
+            val next=old.copy(state=rendered.state,ui=rendered.ui,stateVersion=old.stateVersion+1)
+            tools.commitTool(next,old,false,autonomous=true)
+            committed(next,rendered)
         }
         val preview=if(action.capability == "tool.records.calendar") {
             val list=JSONObject(state).getJSONArray(action.args.getString("field"))
             "Список «${action.args.getString("field")}»: ${list.length()} записей.\n"+(0 until list.length()).joinToString("\n") { list.getJSONObject(it).getString("text") }
         } else "${action.args.getString("field")} = ${action.args.get("value")}"
-        return CapabilityResult("succeeded",if(step.dry) "Изменения рассчитаны без сохранения." else "Данные и интерфейс инструмента обновлены.",JSONObject().put("preview",preview).put("state",JSONObject(state)).put("ui",JSONObject(rendered.ui)))
+        CapabilityResult("succeeded",if(step.dry) "Изменения рассчитаны без сохранения." else "Данные и интерфейс инструмента обновлены.",JSONObject().put("preview",preview).put("state",JSONObject(state)).put("ui",JSONObject(rendered.ui)))
     }
     fun createDayTool(store: ToolStore): ToolRecord {
-        val spec=ToolSpec.parse("""{"formatVersion":2,"title":"Мой день","description":"Локальные события выбранного календаря","capabilities":[],"stateSchema":{"title":"string","events":{"type":"list","maxItems":100,"fields":{"id":"string","text":"string","done":"boolean","start":"number","end":"number"}}},"initialState":{"title":"Мой день","events":[]},"ui":{"type":"column","children":[{"type":"text","text":"Мой день","bind":"title"},{"type":"text","text":"События: 0"},{"type":"list","text":"События календаря","bind":"events"}]},"source":"return {state:input.state,ui:{type:'column',children:[{type:'text',text:'Мой день',bind:'title'},{type:'text',text:'События: '+input.state.events.length},{type:'list',text:'События календаря',bind:'events'}]}};"}""")
+        val spec=ToolSpec.parse("""{"formatVersion":3,"title":"Мой день","description":"Локальные события выбранного календаря","capabilities":[],"stateSchema":{"title":"string","events":{"type":"list","maxItems":100,"fields":{"id":"string","text":"string","done":"boolean","start":"number","end":"number"}}},"initialState":{"title":"Мой день","events":[]},"ui":{"type":"column","children":[{"type":"text","text":"Мой день","bind":"title"},{"type":"text","text":"События: 0"},{"type":"list","text":"События календаря","bind":"events"}]},"source":"return {state:input.state,ui:{type:'column',children:[{type:'text',text:'Мой день',bind:'title'},{type:'text',text:'События: '+input.state.events.length},{type:'list',text:'События календаря',bind:'events'}]}};"}""")
         return ToolRecord(UUID.randomUUID().toString(),1,1,spec.json,spec.initialState,spec.ui.toString(),null,true).also { store.commitTool(it,null,true) }
     }
 }

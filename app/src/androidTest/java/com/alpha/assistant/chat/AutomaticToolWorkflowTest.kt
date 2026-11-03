@@ -6,6 +6,9 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
+import com.alpha.assistant.capabilities.CapabilityBroker
+import com.alpha.assistant.capabilities.CapabilityRequest
+import com.alpha.assistant.capabilities.CapabilityResult
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.data.*
 import com.alpha.assistant.tools.*
@@ -37,7 +40,7 @@ class AutomaticToolWorkflowTest {
         while (SystemClock.uptimeMillis() < deadline) { if (condition()) return; SystemClock.sleep(30) }
         fail("Automatic tool workflow timed out")
     }
-    private fun spec(title: String = "Counter") = """{"formatVersion":2,"title":"$title","description":"Local counter","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"column","children":[{"type":"text","text":"Count","bind":"count"},{"type":"button","text":"Add","action":"add"}]},"source":"if(input.event.type==='action')input.state.count++;return {state:input.state};"}"""
+    private fun spec(title: String = "Counter") = """{"formatVersion":3,"title":"$title","description":"Local counter","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"column","children":[{"type":"text","text":"Count","bind":"count"},{"type":"button","text":"Add","action":"add"}]},"source":"if(input.event.type==='action')input.state.count++;return {state:input.state};"}"""
     private fun boundedListSpec(maxItems: Int) = JSONObject(spec("Synthetic log")).apply {
         getJSONObject("stateSchema").put("observations",JSONObject().put("type","list").put("maxItems",maxItems)
             .put("fields",JSONObject().put("id","string").put("text","string")))
@@ -509,7 +512,11 @@ class AutomaticToolWorkflowTest {
                 CloudFailure("auth","Fixture authorization failure"), CloudFailure("quota","Fixture quota failure"),
                 java.io.IOException("Fixture network failure"), java.net.SocketTimeoutException("Fixture timeout"),
                 CloudFailure("cancelled","Fixture cancellation"), CloudFailure("empty_response","Fixture blank response"),
-                CloudFailure("incomplete","Fixture truncated response"), IllegalStateException("Fixture unexpected failure")
+                CloudFailure("incomplete","Fixture truncated response"), IllegalStateException("Fixture unexpected failure"),
+                CloudFailure("javascript_unavailable","Fixture unavailable runtime"),
+                CloudFailure("javascript_busy","Fixture busy runtime"),
+                CloudFailure("javascript_sandbox_died","Fixture sandbox death"),
+                CloudFailure("javascript_memory_limit","Fixture memory limit")
             ).forEach { problem ->
                 calls = 0; failure = problem; f.send("Create a counter"); f.idle()
                 assertEquals(problem.javaClass.simpleName,1,calls)
@@ -519,11 +526,75 @@ class AutomaticToolWorkflowTest {
             calls = 0; answer = "é".repeat(40000)
             f.send("Create a counter"); f.idle()
             assertEquals(1,calls); assertEquals("widget_response_size",f.last.errorCode); assertTrue(f.toolStore.tools().isEmpty())
-            listOf("while(true){};", "throw new Error('REJECTED_OUTPUT_ONLY');").forEach { source ->
-                calls = 0; answer = JSONObject(spec()).put("source",source).toString()
+            calls = 0; answer = spec()
+            val occupied = runBlocking { com.alpha.assistant.sandbox.AndroidJsRuntime.get(app).acquire(false,com.alpha.assistant.sandbox.SandboxContract.MAX_BYTES) }
+            try {
                 f.send("Create a counter"); f.idle()
-                assertEquals(1,calls); assertEquals("widget_preview",f.last.errorCode)
-                assertFalse(f.last.error.contains("REJECTED_OUTPUT_ONLY")); assertTrue(f.toolStore.tools().isEmpty())
+                assertEquals(1,calls); assertEquals("javascript_busy",f.last.errorCode)
+                assertTrue(f.toolStore.tools().isEmpty()); assertTrue(f.toolStore.drafts().isEmpty())
+            } finally { occupied.close() }
+        }
+    }
+    @Test fun generatedScriptErrorsAndTimeoutsReceiveOnlyOneCorrectionWithoutStateOrEffectReplay() {
+        var calls = 0
+        var nativeExecutions = 0
+        lateinit var executedKey: String
+        var rejected = ""
+        var repair = true
+        val requests = CopyOnWriteArrayList<CloudRequest>()
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision("Update the counter","existing")))
+                else {
+                    requests += request
+                    emit(CloudEvent.Text(if(++calls == 2 && repair) spec() else rejected))
+                }
+            }
+        }
+        Fixture(provider) { shell, tools ->
+            val parsed = ToolSpec.parse(JSONObject(spec()).put("capabilities",org.json.JSONArray().put("vibration.play")).toString())
+            tools.commitTool(ToolRecord("existing",1,1,parsed.json,"{\"count\":4}",parsed.ui.toString(),"recovery",true),null,true,
+                effects=listOf(CapabilityRequest("prior","vibration.play",JSONObject().put("milliseconds",1))))
+            tools.grant("existing","vibration.play",true)
+            executedKey = tools.effects("existing").single().key
+            runBlocking { assertEquals("succeeded",CapabilityBroker(app,tools).execute(executedKey,true) {
+                nativeExecutions++; CapabilityResult("succeeded","Fixture action completed")
+            }.status) }
+            shell.saveConversation(Conversation("recovery","Recovery",1,1)); shell.saveSetting("selected","recovery")
+        }.use { f ->
+            for(source in listOf("while(true){}; // REJECTED_OUTPUT_ONLY", "throw new Error('REJECTED_OUTPUT_ONLY');")) {
+                for(succeeds in listOf(true,false)) {
+                    calls = 0; repair = succeeds; requests.clear()
+                    rejected = JSONObject(spec()).put("source",source).toString()
+                    val before = f.toolStore.tool("existing")!!
+                    val revisions = f.toolStore.revisions(before.id)
+                    f.send("Update tool [existing]"); f.idle()
+                    assertEquals(2,calls)
+                    assertEquals(requests.first().turns.first(),requests.last().turns.first())
+                    assertEquals(rejected,requests.last().turns[1].text)
+                    val feedback = requests.last().turns.last().text
+                    assertTrue(feedback,feedback.contains("Smoke event: preview."))
+                    assertFalse(feedback.contains("REJECTED_OUTPUT_ONLY")); assertFalse(feedback.contains("while(true)"))
+                    if(succeeds) {
+                        assertEquals("complete",f.last.status); assertEquals(before.id,f.last.toolId)
+                        val accepted = f.toolStore.tool(before.id)!!
+                        assertEquals(before.revision+1,accepted.revision); assertEquals(before.state,accepted.state)
+                        assertEquals(revisions.size+1,f.toolStore.revisions(before.id).size)
+                    } else {
+                        assertEquals("error",f.last.status); assertEquals("widget_preview",f.last.errorCode)
+                        assertNull(f.last.toolId); assertEquals(before,f.toolStore.tool(before.id))
+                        assertEquals(revisions,f.toolStore.revisions(before.id))
+                    }
+                    assertFalse(f.last.error.contains("REJECTED_OUTPUT_ONLY")); assertFalse(f.last.error.contains("while(true)"))
+                    assertEquals(1,f.toolStore.tools().size); assertTrue(f.toolStore.drafts().isEmpty())
+                    val effect = f.toolStore.effects(before.id).single()
+                    assertEquals(executedKey,effect.key); assertEquals("terminal",effect.phase)
+                    assertEquals("succeeded",effect.result.status)
+                    runBlocking { assertEquals("succeeded",CapabilityBroker(app,f.toolStore).execute(executedKey,true) {
+                        nativeExecutions++; error("A generation correction replayed a completed native action")
+                    }.status) }
+                    assertEquals(1,nativeExecutions)
+                }
             }
         }
     }

@@ -30,7 +30,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 @Composable fun ToolCapabilityGrants(controller: ToolController, tool: ToolRecord) {
-    val spec = remember(tool.spec) { ToolSpec.parse(tool.spec) }
+    val spec = remember(tool.spec) { ToolSpec.available(tool.spec) } ?: return
     if(spec.capabilities.isNotEmpty()) {
         Text("Доступы инструмента",style = MaterialTheme.typography.titleMedium)
         Text("Каждый доступ действует только для этого инструмента. Внешние действия требуют подтверждения. Scoped calendar grants permit explicit native calendar buttons without repeated confirmation. Доступы maps.markReached и maps.route разрешают прямые кнопки навигации в открытом Alphy без повторного подтверждения. Результаты остаются на устройстве.")
@@ -242,7 +242,7 @@ private data class CapabilityCameraPreview(val launch: CapabilitySelectionLaunch
     if(android.os.Build.VERSION.SDK_INT>=31) TextButton(onClick={context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,Uri.parse("package:${context.packageName}")))}) {Text("Exact alarm access")}
     TextButton(onClick={context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,context.packageName))}) {Text("Medicine notification settings")}
     Text("Доступы для каждого инструмента",style = MaterialTheme.typography.titleLarge)
-    controller.tools.forEach { tool -> if(ToolSpec.parse(tool.spec).capabilities.isNotEmpty()) { Text(ToolSpec.parse(tool.spec).title); ToolCapabilityGrants(controller,tool) } }
+    controller.tools.forEach { tool -> if(ToolSpec.available(tool.spec)?.capabilities?.isNotEmpty()==true) { Text(ToolSpec.storedTitle(tool.spec)); ToolCapabilityGrants(controller,tool) } }
     Text("Запланировано · недоступно приложениям",style = MaterialTheme.typography.titleMedium)
     CapabilityCatalog.planned.forEach { definition ->
         OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp),verticalArrangement = Arrangement.spacedBy(5.dp)) {

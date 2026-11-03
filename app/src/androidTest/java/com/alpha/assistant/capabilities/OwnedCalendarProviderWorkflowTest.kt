@@ -44,13 +44,13 @@ internal class SyntheticOwnedCalendar(private val context: Context): AutoCloseab
 
 @RunWith(AndroidJUnit4::class)
 class OwnedCalendarProviderWorkflowTest {
-    @Test fun realProviderBatchReadbackAndGuardedDelete()=runBlocking {
+    @Test fun realProviderBatchReadbackAndGuardedDelete(): Unit=runBlocking {
         val instrumentation=InstrumentationRegistry.getInstrumentation();val context=instrumentation.targetContext
         val name="owned-calendar-provider-${UUID.randomUUID()}.db";val store=ToolStore(context,name)
         val evidence=JSONObject().put("command","am instrument -w -e class com.alpha.assistant.capabilities.OwnedCalendarProviderWorkflowTest com.alpha.assistant.test/androidx.test.runner.AndroidJUnitRunner")
             .put("expected","exact event/reminder readback, one insert for duplicate key, guarded deletion, neighboring event retained")
         try {SyntheticOwnedCalendar(context).use {fixture ->
-            val spec=ToolSpec.parse(JSONObject().put("formatVersion",2).put("title","Synthetic calendar provider fixture").put("description","")
+            val spec=ToolSpec.parse(JSONObject().put("formatVersion",3).put("title","Synthetic calendar provider fixture").put("description","")
                 .put("capabilities",JSONArray(OwnedCalendarContract.ids.toList())).put("stateSchema",JSONObject("{\"ready\":\"boolean\"}")).put("initialState",JSONObject("{\"ready\":true}"))
                 .put("ui",JSONObject("{\"type\":\"text\",\"text\":\"Fixture\"}")).put("source","return {state:input.state};").toString())
             store.saveTool(ToolRecord("provider",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true),true)

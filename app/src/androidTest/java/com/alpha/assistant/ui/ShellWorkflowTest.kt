@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Rect
 import java.io.File
 import android.os.Bundle
+import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.view.ViewCompat
@@ -22,6 +23,8 @@ import org.junit.Test
 
 /** Black-box device workflow. UiAutomation avoids Espresso's removed Android 17 input API. */
 class ShellWorkflowTest {
+    private val diagnostics = UiFailureDiagnostics("shell")
+    private var keyboardComparison = "Assertion bounds: not sampled"
     private val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -79,6 +82,7 @@ class ShellWorkflowTest {
         if (keyboardTop != null) {
             val send = Rect().also { waitFor("Отправить сообщение").getBoundsInScreen(it) }
             val maxGap = (32 * context.resources.displayMetrics.density).toInt()
+            keyboardComparison = "Assertion uptimeMs=${SystemClock.uptimeMillis()} keyboardTop=$keyboardTop sendBounds=$send maxGap=$maxGap"
             assertTrue("Composer stays above the keyboard", send.bottom <= keyboardTop)
             assertTrue("Composer is adjacent to the keyboard: gap=${keyboardTop - send.bottom}", keyboardTop - send.bottom <= maxGap)
         }
@@ -97,26 +101,79 @@ class ShellWorkflowTest {
             click("Отправить сообщение")
             assertTrue(waitFor("Navigation fixture response").isVisibleToUser)
             edit("Сообщение ассистенту", "Existing conversation draft")
+            val imeFrames = java.util.concurrent.CopyOnWriteArrayList<String>()
+            scenario.onActivity { activity ->
+                val decor = activity.window.decorView
+                decor.viewTreeObserver.addOnPreDrawListener {
+                    val insets = ViewCompat.getRootWindowInsets(decor)
+                    val bounds = Rect().also { rect -> val location = IntArray(2); decor.getLocationOnScreen(location); rect.set(location[0], location[1], location[0] + decor.width, location[1] + decor.height) }
+                    imeFrames += "uptimeMs=${SystemClock.uptimeMillis()} imeVisible=${insets?.isVisible(WindowInsetsCompat.Type.ime())} " +
+                        "imeBottom=${insets?.getInsets(WindowInsetsCompat.Type.ime())?.bottom} decorBounds=$bounds animation=unknown"
+                    if (imeFrames.size > 30) imeFrames.removeAt(0)
+                    true
+                }
+                diagnostics.state = {
+                    var current = "unknown"
+                    scenario.onActivity { currentActivity ->
+                        val currentDecor = currentActivity.window.decorView
+                        val insets = ViewCompat.getRootWindowInsets(currentDecor)
+                        val bounds = Rect().also { rect -> val location = IntArray(2); currentDecor.getLocationOnScreen(location); rect.set(location[0], location[1], location[0] + currentDecor.width, location[1] + currentDecor.height) }
+                        current = "uptimeMs=${SystemClock.uptimeMillis()} imeVisible=${insets?.isVisible(WindowInsetsCompat.Type.ime())} " +
+                            "imeBottom=${insets?.getInsets(WindowInsetsCompat.Type.ime())?.bottom} decorBounds=$bounds animation=unknown"
+                    }
+                    "$keyboardComparison\nCurrent insets: $current\nPassive frame samples:\n${imeFrames.joinToString("\n")}\nSettled animation: unknown"
+                }
+            }
+            val imeAnimating = java.util.concurrent.atomic.AtomicBoolean(false)
+            scenario.onActivity { activity ->
+                ViewCompat.setWindowInsetsAnimationCallback(activity.window.decorView,
+                    object : androidx.core.view.WindowInsetsAnimationCompat.Callback(DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+                        override fun onPrepare(animation: androidx.core.view.WindowInsetsAnimationCompat) {
+                            if (animation.typeMask and WindowInsetsCompat.Type.ime() != 0) imeAnimating.set(true)
+                        }
+                        override fun onProgress(insets: WindowInsetsCompat, runningAnimations: MutableList<androidx.core.view.WindowInsetsAnimationCompat>): WindowInsetsCompat = insets
+                        override fun onEnd(animation: androidx.core.view.WindowInsetsAnimationCompat) {
+                            if (animation.typeMask and WindowInsetsCompat.Type.ime() != 0) imeAnimating.set(false)
+                        }
+                    })
+            }
             field("Сообщение ассистенту").performAction(AccessibilityNodeInfo.ACTION_CLICK)
             automation.waitForIdle(100, 3000)
             var keyboardTop = 0
             var statusBarBottom = 0
+            var previousLayout = ""
+            var stableSince = SystemClock.uptimeMillis()
             waitUntil {
+                var layoutReady = false
                 scenario.onActivity { activity ->
-                    val insets = ViewCompat.getRootWindowInsets(activity.window.decorView)
+                    val decor = activity.window.decorView
+                    val insets = ViewCompat.getRootWindowInsets(decor)
                     if (insets?.isVisible(WindowInsetsCompat.Type.ime()) == true) {
                         val screenBottom = if (android.os.Build.VERSION.SDK_INT >= 30) activity.windowManager.currentWindowMetrics.bounds.bottom
                             else android.content.res.Resources.getSystem().displayMetrics.heightPixels
                         keyboardTop = screenBottom - insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
                         statusBarBottom = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
+                        layoutReady = !decor.isLayoutRequested && !imeAnimating.get()
                     }
                 }
-                keyboardTop > 0
+                val send = find(diagnostics.freshRoot(), "Отправить сообщение")
+                val bounds = Rect().also { send?.getBoundsInScreen(it) }
+                val sample = "$keyboardTop:$statusBarBottom:$bounds"
+                val now = SystemClock.uptimeMillis()
+                if (!layoutReady || send == null || sample != previousLayout) stableSince = now
+                previousLayout = sample
+                keyboardComparison = "Settled-layout sample uptimeMs=$now imeAnimating=${imeAnimating.get()} layoutReady=$layoutReady keyboardTop=$keyboardTop sendBounds=$bounds"
+                keyboardTop > 0 && layoutReady && send != null && now - stableSince >= 200
             }
             screenshot("header-with-keyboard")
             val evidence = File(context.getExternalFilesDir(null), "shell-header-evidence").apply { mkdirs() }
-            File(evidence, "keyboard-frame.txt").writeText("Tested revision: ${InstrumentationRegistry.getArguments().getString("testedRevision", "not supplied")}\nCommand: connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.alpha.assistant.ui.ShellWorkflowTest\nInput: focus the existing chat draft with the keyboard enabled.\nExpected: visible header below status icons; composer gap at most 32dp.\nObserved insets: statusBarBottom=$statusBarBottom; keyboardTop=$keyboardTop\n")
-            assertHeaderAndComposer(statusBarBottom, keyboardTop)
+            File(evidence, "keyboard-frame.txt").writeText("Tested revision: ${InstrumentationRegistry.getArguments().getString("testedRevision", "not supplied")}\nCommand: adb -s emulator-5556 shell am instrument -w -r -e class com.alpha.assistant.ui.ShellWorkflowTest#draftsHistoryAndNavigation com.alpha.assistant.test/androidx.test.runner.AndroidJUnitRunner\nInput: focus the existing chat draft with the keyboard enabled.\nExpected: visible header below status icons; composer gap at most 32dp.\nObserved insets: statusBarBottom=$statusBarBottom; keyboardTop=$keyboardTop\n$keyboardComparison\n")
+            try { assertHeaderAndComposer(statusBarBottom, keyboardTop) }
+            catch (failure: Throwable) {
+                diagnostics.capture("keyboard-assertion-failed")
+                diagnostics.capture("keyboard-after-failure-capture")
+                throw failure
+            }
             click("Меню")
             click("Новый чат")
             assertEquals("", field("Сообщение ассистенту").text?.toString().orEmpty())
@@ -157,10 +214,11 @@ class ShellWorkflowTest {
         var node: AccessibilityNodeInfo? = waitFor(label)
         while (node != null && !node.isClickable) node = node.parent
         assertNotNull("No clickable node for $label", node)
-        assertTrue(node!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        assertTrue(diagnostics.click(label,node))
         automation.waitForIdle(100, 3000)
     }
     private fun waitFor(label: String): AccessibilityNodeInfo {
+        diagnostics.target(label)
         var result: AccessibilityNodeInfo? = null
         waitUntil { result = find(automation.rootInActiveWindow, label); result != null }
         return result!!
@@ -177,6 +235,7 @@ class ShellWorkflowTest {
             if (condition()) return
             SystemClock.sleep(50)
         }
+        diagnostics.capture("wait-timeout")
         fail("UI condition did not complete within 10 seconds")
     }
 }

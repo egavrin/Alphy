@@ -18,7 +18,7 @@ import java.util.UUID
 @RunWith(AndroidJUnit4::class)
 class StructuredStateWorkflowTest {
     private fun spec(source: String = "return {state:input.state};"): ToolSpec = ToolSpec.parse(JSONObject("""{
-      "formatVersion":2,"title":"Travel and medication","description":"Local records","capabilities":[],
+      "formatVersion":3,"title":"Travel and medication","description":"Local records","capabilities":[],
       "collections":{"history":{"type":"object","fields":{"at":"number","dose":"string"}}},
       "stateSchema":{"trip":{"type":"object","fields":{"stops":{"type":"array","maxItems":8,"items":"string"},"at":"number"}},"board":{"type":"array","maxItems":9,"items":"number"},"count":"number"},
       "initialState":{"trip":{"stops":["Home","Clinic"],"at":1793577600000},"board":[0,1,0],"count":0},
@@ -306,12 +306,12 @@ class StructuredStateWorkflowTest {
             database.rawQuery("SELECT * FROM $table ORDER BY rowid",null).use { c -> buildList { while(c.moveToNext()) add((0 until c.columnCount).map { if(c.isNull(it)) null else c.getString(it) }) } }
         }
         val before=snapshot(db)
-        for(table in listOf("artifact_collections","artifact_records","artifact_cursors","artifact_record_deliveries","maps_stops","maps_reached")) db.execSQL("DROP TABLE $table")
+        for(table in listOf("artifact_collections","artifact_records","artifact_cursors","artifact_record_deliveries","maps_stops","maps_reached","owned_calendar_selection","owned_calendar_events","owned_calendar_delete_batches","owned_calendar_delete_items")) db.execSQL("DROP TABLE $table")
         db.version=4; store.close()
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         var retained=before
         ToolStore(context,name).use { upgraded ->
-            assertEquals(6,upgraded.readableDatabase.version); assertEquals(before,snapshot(upgraded.readableDatabase))
+            assertEquals(7,upgraded.readableDatabase.version); assertEquals(before,snapshot(upgraded.readableDatabase))
             val offline=object: ChatProvider {override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent)->Unit) = error("Upgrade result stays local")}
             val engine=ToolEngine(upgraded,ToolGenerationService(offline,SandboxClient(context)),permissionCheck={true})
             runBlocking {engine.deliverCapabilityResults(old.id)}
@@ -319,9 +319,9 @@ class StructuredStateWorkflowTest {
             val delivered=upgraded.tool(old.id); runBlocking {engine.deliverCapabilityResults(old.id)}; assertEquals(delivered,upgraded.tool(old.id))
             retained=snapshot(upgraded.readableDatabase)
         }
-        android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path,null,0).use { it.version=7 }
+        android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path,null,0).use { it.version=8 }
         ToolStore(context,name).use { unsupported -> assertTrue(runCatching { unsupported.readableDatabase }.isFailure) }
-        android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path,null,android.database.sqlite.SQLiteDatabase.OPEN_READONLY).use { assertEquals(retained,snapshot(it)); assertEquals(6,it.version) }
+        android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path,null,android.database.sqlite.SQLiteDatabase.OPEN_READONLY).use { assertEquals(retained,snapshot(it)); assertEquals(8,it.version) }
     }
     @Test fun artifactRecordCountAndByteQuotasRollbackTheWholeAction() = withStore { store,_ ->
         fun configured(bytes: Boolean): ToolSpec {

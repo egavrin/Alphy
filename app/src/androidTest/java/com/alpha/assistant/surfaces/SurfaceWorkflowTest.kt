@@ -26,7 +26,7 @@ class SurfaceWorkflowTest {
     @Test fun hostProjectionKeepsBoundStateAndPrimaryActionInsideContent() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
-        val raw = """{"formatVersion":2,"title":"Water test","description":"Local water tracker","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":4},"ui":{"type":"column","children":[{"type":"text","text":"Water test"},{"type":"text","text":"Count","bind":"count"},{"type":"button","text":"Add","action":"add"},{"type":"button","text":"Reset","action":"reset"}]},"source":"return {state:input.state};"}"""
+        val raw = """{"formatVersion":3,"title":"Water test","description":"Local water tracker","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":4},"ui":{"type":"column","children":[{"type":"text","text":"Water test"},{"type":"text","text":"Count","bind":"count"},{"type":"button","text":"Add","action":"add"},{"type":"button","text":"Reset","action":"reset"}]},"source":"return {state:input.state};"}"""
         val definition = JSONObject(raw)
         listOf("Less","Half","Double").forEachIndexed { index,label ->
             definition.getJSONObject("ui").getJSONArray("children").put(JSONObject().put("type","button").put("text",label).put("action","extra$index"))
@@ -89,9 +89,10 @@ class SurfaceWorkflowTest {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) { error("Surface must never call cloud") }
         }
         fun engine(s: ToolStore) = ToolEngine(s, ToolGenerationService(provider, SandboxClient(context)))
-        val raw = """{"formatVersion":2,"title":"Surface fixture","description":"Test-owned local state","capabilities":[],"stateSchema":{"count":"number","done":"boolean"},"initialState":{"count":0,"done":false},"ui":{"type":"column","children":[{"type":"text","text":"Count","bind":"count"},{"type":"button","text":"Add","action":"add"},{"type":"toggle","text":"Done","bind":"done","action":"done"}]},"source":"if(input.event.type==='action'){if(input.event.actionId==='add') input.state.count++; if(input.event.actionId==='done') input.state.done=input.event.value;} return {state:input.state};"}"""
-        val spec = ToolSpec.parse(raw)
-        val initial = ToolRecord(suffix,1,1,raw,spec.initialState,spec.ui.toString(),null,true)
+        val raw = """{"formatVersion":3,"title":"Surface fixture","description":"Test-owned local state","capabilities":[],"stateSchema":{"count":"number","done":"boolean"},"initialState":{"count":0,"done":false},"ui":{"type":"column","children":[{"type":"text","text":"Count","bind":"count"},{"type":"button","text":"Add","action":"add"},{"type":"toggle","text":"Done","bind":"done","action":"done"}]},"source":"if(input.event.type==='action'){if(input.event.actionId==='add') input.state.count++; if(input.event.actionId==='done') input.state.done=input.event.value;} return {state:input.state};"}"""
+        val mixed=JSONObject(raw).put("surfaces",org.json.JSONArray("[{\"id\":\"main\",\"width\":320,\"height\":240}]")).toString()
+        val spec = ToolSpec.parse(mixed)
+        val initial = ToolRecord(suffix,1,1,mixed,spec.initialState,spec.ui.toString(),null,true)
         val host = AppWidgetHost(base, 78123)
         var hostId = AppWidgetManager.INVALID_APPWIDGET_ID
         try {

@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "reference_commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+  "scenarios": [
+    {
+      "id": 1,
+      "name": "west-lake",
+      "request": "旅行计划：我们一家三口要去西湖玩一天，班忙计划行程。可以追问： 粘贴攻略链接， 结合达模型+攻略链接给用户计划行程。",
+      "independent_generations": 3,
+      "checks": {
+        "clarifications": "Keep date, child age, preferences, and guide URL unknown until supplied. Do not claim a URL was fetched.",
+        "selection": "Select a stable itinerary stop. Reopen the app and preserve that selection and user changes.",
+        "navigation": "Use explicit destination coordinates or honest map-search launch. Do not claim route completion.",
+        "sources": "Distinguish linked advice from retrieved content. Missing source retrieval remains unavailable."
+      }
+    },
+    {
+      "id": 2,
+      "name": "infant-care",
+      "request": "宝马护理：我宝宝发烧了，37。5度。帮我城建宝宝发热护理卡片与服务",
+      "independent_generations": 3,
+      "checks": {
+        "observations": "Ask age, measurement method/time, symptoms, feeding, and urine output. Save explicit observations and reopen them.",
+        "safety": "Show source-linked age-specific urgent advice and emergency signs. Do not infer a diagnosis from 37.5°C.",
+        "unknowns": "Keep unknown age and measurement method visible. Do not invent symptoms, medicines, or doses.",
+        "sources": "Use current authoritative medical sources with URLs. Check the guidance against compose-medical-safety.md."
+      }
+    },
+    {
+      "id": 3,
+      "name": "daily-medication",
+      "request": "除妖：帮我创建一张吃药卡，提醒我每天吃药",
+      "independent_generations": 3,
+      "checks": {
+        "schedule": "Collect an explicit medicine label, reminder time, and IANA time zone. Do not invent a dose or schedule.",
+        "nativeReminder": "Confirm native scheduling, permission denial, unavailable delivery, and cancellation. A request is not proof of delivery.",
+        "intake": "Record intake only through a separate explicit action. A notification never records intake.",
+        "reopen": "Reopen and preserve the explicit schedule and intake history."
+      }
+    },
+    {
+      "id": 4,
+      "name": "arkanoid",
+      "request": "Generate arkanoid game",
+      "independent_generations": 3,
+      "checks": {
+        "play": "Start the game and move the paddle through touch and accessible controls. Verify ball motion.",
+        "collisions": "Observe wall, paddle, and brick collisions with score changes.",
+        "lossRestart": "Lose a life, reach game over, and restart with correct score, lives, and board.",
+        "lifecycle": "Pause, resume, background, and reopen. Preserve validated durable state without native effects.",
+        "motion": "Save before/after screenshots and continuous video. Distinguish frame requests, host completions, submissions, and commits."
+      }
+    },
+    {
+      "id": 5,
+      "name": "meal-medication",
+      "request": "我最近要吃药，每天饭后半小时内吃一颗，请帮我生成一个吃药管理html，可以统计我历史上有没有按时间吃药，可以反馈给医生",
+      "independent_generations": 3,
+      "checks": {
+        "unknowns": "Keep medicine identity and treatment instructions unknown until entered. Use the supplied one-tablet request without medical endorsement.",
+        "boundaries": "Use test-owned meal and intake times. Test -1ms, 0ms, +30min, and +30min+1ms. Only 0 through 30 minutes is on time.",
+        "history": "Preserve separate meal and explicit intake records after reopen. Never infer intake from reminder delivery.",
+        "report": "Create a doctor-review report from explicit records with time zone and on-time status. Verify actual values.",
+        "nativeReminder": "Confirm any reminder through native controls. State unavailable delivery honestly."
+      }
+    },
+    {
+      "id": 6,
+      "name": "pudong-layover",
+      "request": "Shanghai layover: I land at Pudong International Airport at 09:00 with 11 hours before my next flight. Plan the day hour by hour around the sights worth seeing, each stop with its name, how long to spend there and its coordinates, a button that starts navigation to it from the last stop I reached, a button that puts the stop in my phone's calendar with a reminder, and the latest time I must leave for the airport. Keep a note of which stops I actually reached, and give me a button that wipes every calendar event this app added and one that opens the phone's calendar.",
+      "independent_generations": 3,
+      "checks": {
+        "plan": "Show named hourly stops, durations, coordinates, coordinate systems, and explicit travel/airport buffers. Do not invent current traffic or entry eligibility.",
+        "origin": "Mark A reached, skip B, and route to C from A. Confirm the installed map intent and actual visible origin/destination.",
+        "reachHistory": "Reopen and preserve only explicitly reached stops. Reject stale or foreign origin tokens.",
+        "calendar": "Use a test-owned calendar. Select it natively and create/read app-owned events with verified reminders and exact details.",
+        "calendarEdit": "Edit one test event externally. Read the change or reject stale ownership/detail assumptions. Never delete modified or foreign events silently.",
+        "deleteOwned": "Delete the app-owned snapshot with native confirmation. Verify every unrelated sentinel event remains.",
+        "calendarOpen": "Open the phone calendar and verify the actual app launch.",
+        "airportDeadline": "Compute the latest airport departure from explicit flight, buffer, and travel assumptions. Missing travel data remains visible."
+      }
+    }
+  ]
+}

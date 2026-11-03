@@ -1,0 +1,3262 @@
+{
+  "schema_version": 1,
+  "inventory_id": "compose-installed-20261103",
+  "captured_date": "2026-11-03",
+  "git_base_revision": "62179af217478075a1d7a10960c949440dcc4ad8",
+  "working_tree": "uncommitted; SHA-256 identifies this pre-extension snapshot",
+  "scope": "Installed debug runtime API families versus the bounded native mini-app interface. No full API, OHOS, visual, device, or performance parity claim.",
+  "configuration": "debugRuntimeClasspath",
+  "dependency_command": "./gradlew :app:dependencies --configuration debugRuntimeClasspath --console=plain",
+  "dependency_report": {
+    "path": "docs/parity/compose-dependencies-20261103.txt",
+    "sha256": "d52688b3875cfcdaa0b985947d43358bf8c6453ada08b35f05ffa1e348a71989",
+    "result": "BUILD SUCCESSFUL",
+    "constraint_policy": "Exclude (c) constraint-only rows. Follow selected versions after ->. Cache files count only after the coordinate resolves."
+  },
+  "platform": {
+    "minSdk": 29,
+    "targetSdk": 37,
+    "compileSdk": 37,
+    "compose_bom": "2025.12.00",
+    "compose_compiler_plugin": "2.4.0"
+  },
+  "status_definitions": {
+    "verified": "The explicitly named check passed for its exact scope and snapshot.",
+    "partial": "A native contract exists, but the family has gaps or incomplete workflow evidence.",
+    "planned": "A bounded native extension is recommended. It is not callable at this snapshot.",
+    "host_only": "Installed or available only to native host code. It is not a generated-code API.",
+    "unavailable": "No current generated-artifact contract exists. No extension is claimed.",
+    "source_verified": "Resolved dependency and matching source declaration inspected. This is not rendered workflow verification.",
+    "source_verified_workflow_partial": "Native source mapping inspected. Earlier workflow evidence is partial, failed, or not family-specific.",
+    "not_run_for_this_inventory": "This package performed no device, provider, accessibility-service, or visual workflow run."
+  },
+  "dependency_verification_status": "verified",
+  "families": [
+    {
+      "id": "layout-basic",
+      "category": "layout",
+      "family": "Linear, flow, and overlay layout",
+      "upstream": [
+        "foundation-layout-android/Column.kt#Column",
+        "foundation-layout-android/Row.kt#Row",
+        "foundation-layout-android/FlowLayout.kt#FlowRow",
+        "foundation-layout-android/Box.kt#Box"
+      ],
+      "native_types": [
+        "column",
+        "row",
+        "grid",
+        "scroll",
+        "spacer"
+      ],
+      "native_contract": {
+        "properties": "children; style.align/padding/gap; grid.columns; spacer.size",
+        "events": "Child actions only.",
+        "limits": "32 KiB UI; 256 structural nodes; depth 8; 1..50 children; grid 1..4 columns; spacer 0..64 dp.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No Box/overlay node; row is FlowRow, not arbitrary RowScope. No weight or per-child alignment contract.",
+      "representative_workflow": "Compose a counter card with overlapping badge and wrapped actions.",
+      "acceptance_criteria": [
+        "Retain wrapping at narrow width and large font.",
+        "Validate bounded overlay children and alignment if introduced.",
+        "Reject arbitrary modifiers and unknown fields."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "layout-size",
+      "category": "layout",
+      "family": "Constraints, dimensions, and insets",
+      "upstream": [
+        "foundation-layout-android/BoxWithConstraints.kt#BoxWithConstraints",
+        "foundation-layout-android/Size.kt#widthIn",
+        "foundation-layout-android/Padding.kt#padding",
+        "foundation-layout-android/WindowInsets.kt#WindowInsets"
+      ],
+      "native_types": [
+        "grid",
+        "scroll",
+        "transform",
+        "stage"
+      ],
+      "native_contract": {
+        "properties": "grid.columns; transform.size; stage.height; finite style.padding",
+        "events": "No size or inset event.",
+        "limits": "Grid reduces columns at 144 dp per column; scroll viewport maximum 480 dp; stage height 64..1024.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No general bounded width/height, aspect ratio, constraints, inset policy, or responsive breakpoint contract. Host owns screen insets.",
+      "representative_workflow": "Render the same form at narrow width, landscape, keyboard open, and large font.",
+      "acceptance_criteria": [
+        "Keep actions visible and reachable with keyboard and system bars.",
+        "Define finite dimensions and precedence before any new catalog fields.",
+        "Reject nonfinite, negative, excessive, and unknown dimensions."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "collections-lazy",
+      "category": "collections",
+      "family": "Lazy lists and stable identity",
+      "upstream": [
+        "foundation-android/LazyDsl.kt#LazyColumn",
+        "foundation-android/LazyDsl.kt#LazyRow"
+      ],
+      "native_types": [
+        "list",
+        "groupedList",
+        "table"
+      ],
+      "native_contract": {
+        "properties": "bind; columns; rowTemplate; rowActions; groupBy; emptyText",
+        "events": "Selection sends current stable key; template sends {key,value}.",
+        "limits": "Eager Column rendering; shared 2048 render units; tables <=50 rows and 8 columns.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeRecords",
+          "ToolUiCatalog.kt#validateAction"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No lazy viewport, scroll position, item visibility, or scroll command contract. Stable keys alone do not prove virtualization.",
+      "representative_workflow": "Edit a row, reorder records, scroll, and reopen the mini-app.",
+      "acceptance_criteria": [
+        "Actions resolve the current stable key after reorder.",
+        "Draft state does not move to a different record.",
+        "Retain bounded work and stale/hidden/disabled action rejection."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "collections-grid",
+      "category": "collections",
+      "family": "Lazy grids and staggered grids",
+      "upstream": [
+        "foundation-android/LazyGridDsl.kt#LazyVerticalGrid",
+        "foundation-android/LazyStaggeredGridDsl.kt#LazyVerticalStaggeredGrid"
+      ],
+      "native_types": [
+        "grid"
+      ],
+      "native_contract": {
+        "properties": "children; columns",
+        "events": "Child actions only.",
+        "limits": "Eager rows; 1..4 requested columns; catalog structural and render limits.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No bound grid item template, lazy grid, span, or staggered layout contract.",
+      "representative_workflow": "Show stable photo-card records at two widths without loss of selection.",
+      "acceptance_criteria": [
+        "Keep stable identity across column changes.",
+        "Reject invalid span/column values if introduced.",
+        "Retain image and aggregate work limits."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "collections-pager",
+      "category": "collections",
+      "family": "Pagers, snapping, and page state",
+      "upstream": [
+        "foundation-android/Pager.kt#HorizontalPager",
+        "foundation-android/Pager.kt#VerticalPager"
+      ],
+      "native_types": [
+        "tabs"
+      ],
+      "native_contract": {
+        "properties": "tabs.bind/action/options",
+        "events": "Tabs send selected scalar.",
+        "limits": "1..30 unique scalar options.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "planned",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "Tabs do not expose swipe pages, snap behavior, or pager position.",
+      "representative_workflow": "Move between three bounded detail pages through tabs and swipe.",
+      "acceptance_criteria": [
+        "Tabs and page position remain consistent.",
+        "Disabled and removed pages reject stale actions.",
+        "Reopen preserves only declared page state."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "collections-groups",
+      "category": "collections",
+      "family": "Grouped rows and semantic compositions",
+      "upstream": [
+        "foundation-android/LazyDsl.kt#LazyListScope",
+        "material3-android/ListItem.kt#ListItem"
+      ],
+      "native_types": [
+        "listGroup",
+        "groupedList",
+        "listItem",
+        "facts",
+        "fact",
+        "timeline",
+        "timelineItem",
+        "form",
+        "banner",
+        "emptyState"
+      ],
+      "native_contract": {
+        "properties": "children; relative row bindings; groupBy; detail/time and bindings",
+        "events": "Optional listItem/timelineItem actions; template typed values.",
+        "limits": "No nested collections, images, stages, back handlers, or privileged controls in row templates.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeRecords",
+          "ToolUiCatalog.kt#validate",
+          "ToolUiCatalog.kt#validateAction"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No sticky group headers, reorder gesture, swipe dismissal, or arbitrary ListItem slots.",
+      "representative_workflow": "Group tasks by day, toggle a current row, and render empty groups.",
+      "acceptance_criteria": [
+        "Render group headings and current values accessibly.",
+        "Handle empty rows without a schema exception.",
+        "Reject forged keys and unsupported template children."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "material-actions",
+      "category": "material",
+      "family": "Buttons, icon buttons, and floating actions",
+      "upstream": [
+        "material3-android/Button.kt#Button",
+        "material3-android/IconButton.kt#IconButton",
+        "material3-android/FloatingActionButton.kt#FloatingActionButton"
+      ],
+      "native_types": [
+        "button",
+        "icon"
+      ],
+      "native_contract": {
+        "properties": "text; action; icon/name from fixed glyph set",
+        "events": "Action sends null.",
+        "limits": "Unique ASCII action <=48 characters; minimum 48 dp action targets.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No button variant, FAB, extended FAB, or controlled loading button contract. Custom Alpha glyphs are not Material icon packs.",
+      "representative_workflow": "Submit an enabled form, show busy state, then restore its action.",
+      "acceptance_criteria": [
+        "Visible disabled controls reject programmatic actions.",
+        "Keep labels and 48 dp targets across variants.",
+        "Expose only finite variants if extended."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "material-chips",
+      "category": "material",
+      "family": "Chips",
+      "upstream": [
+        "material3-android/Chip.kt#AssistChip",
+        "material3-android/Chip.kt#FilterChip",
+        "material3-android/Chip.kt#InputChip"
+      ],
+      "native_types": [],
+      "native_contract": {
+        "properties": "No chip node.",
+        "events": "No chip selection or removal event.",
+        "limits": "Current schema rejects unknown chip types.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "planned",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "Assist, filter, input, and suggestion chips lack a native contract.",
+      "representative_workflow": "Select bounded filters, remove one input token, and reopen.",
+      "acceptance_criteria": [
+        "Preserve typed selected values and stable token identity.",
+        "Give removal a separate labeled action.",
+        "Reject unknown options and stale tokens."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "material-choice",
+      "category": "material",
+      "family": "Radio, segmented, and tri-state controls",
+      "upstream": [
+        "material3-android/RadioButton.kt#RadioButton",
+        "material3-android/SegmentedButton.kt#SegmentedButton",
+        "material3-android/Checkbox.kt#TriStateCheckbox"
+      ],
+      "native_types": [
+        "toggle",
+        "checkbox",
+        "select",
+        "tabs"
+      ],
+      "native_contract": {
+        "properties": "bind; action; select/tabs.options",
+        "events": "Boolean or selected scalar.",
+        "limits": "Checkbox is Boolean only; select/tabs allow 1..30 unique values.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "planned",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No radio group, segmented choice, multi-select option set, or indeterminate checkbox state.",
+      "representative_workflow": "Choose one travel mode and multiple bounded amenities.",
+      "acceptance_criteria": [
+        "Keep single-choice and multiple-choice types distinct.",
+        "Expose selected/indeterminate semantics.",
+        "Reject wrong types, duplicate values, and values outside current options."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "material-ranges",
+      "category": "material",
+      "family": "Sliders and range controls",
+      "upstream": [
+        "material3-android/Slider.kt#Slider",
+        "material3-android/Slider.kt#RangeSlider"
+      ],
+      "native_types": [
+        "slider",
+        "numberInput"
+      ],
+      "native_contract": {
+        "properties": "bind; min; max; step; action",
+        "events": "Finite scalar on Apply; draft remains local.",
+        "limits": "Slider defaults 0..100; finite bounded numeric values; positive step.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No range pair, dual thumb contract, tick labels, or drag-finished event.",
+      "representative_workflow": "Choose an inclusive price interval with accessible alternatives.",
+      "acceptance_criteria": [
+        "Validate ordered finite endpoints and current bounds.",
+        "Keep draft versus committed value explicit.",
+        "Reject invalid step and forged values."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "material-containers",
+      "category": "material",
+      "family": "Cards, surfaces, and dividers",
+      "upstream": [
+        "material3-android/Card.kt#Card",
+        "material3-android/Surface.kt#Surface",
+        "material3-android/Divider.kt#HorizontalDivider"
+      ],
+      "native_types": [
+        "card",
+        "section",
+        "listItem",
+        "banner",
+        "emptyState",
+        "divider"
+      ],
+      "native_contract": {
+        "properties": "children; text; finite tone/alignment/padding/gap",
+        "events": "Optional listItem action sends null.",
+        "limits": "Fixed host shapes and padding; common UI limits.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No generic Surface type, arbitrary elevation, border, shape, or clickable Card contract. Existing named compositions do not expose all upstream slots.",
+      "representative_workflow": "Render summary, warning, and empty-state cards at large font.",
+      "acceptance_criteria": [
+        "Retain readable contrast and headings.",
+        "Validate finite styles without arbitrary modifiers.",
+        "Preserve click enablement and labels."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "material-overlays",
+      "category": "material",
+      "family": "Dialogs, bottom sheets, popups, and tooltips",
+      "upstream": [
+        "material3-android/AlertDialog.kt#AlertDialog",
+        "material3-android/ModalBottomSheet.kt#ModalBottomSheet",
+        "material3-android/Tooltip.kt#PlainTooltip",
+        "ui-android/Popup.kt#Popup"
+      ],
+      "native_types": [],
+      "native_contract": {
+        "properties": "No generic overlay node or overlay state binding.",
+        "events": "No generated confirm/cancel/dismiss event.",
+        "limits": "Date/time dialogs remain dedicated host controls; capability review remains native.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "planned",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No declarative dialog, sheet, popup, or tooltip contract. Existing native review dialogs do not grant generated modal support.",
+      "representative_workflow": "Open a bounded edit sheet, cancel it, then confirm a valid local change.",
+      "acceptance_criteria": [
+        "Define open/close state and separate confirm/cancel/dismiss events.",
+        "Back closes the active overlay once and restores focus.",
+        "Retain authority checks for privileged actions."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "material-shell",
+      "category": "material",
+      "family": "Scaffold, app bars, and navigation",
+      "upstream": [
+        "material3-android/Scaffold.kt#Scaffold",
+        "material3-android/AppBar.kt#TopAppBar",
+        "material3-android/NavigationBar.kt#NavigationBar",
+        "material3-android/NavigationRail.kt#NavigationRail",
+        "material3-android/NavigationDrawer.kt#ModalNavigationDrawer"
+      ],
+      "native_types": [
+        "row",
+        "tabs",
+        "backHandler"
+      ],
+      "native_contract": {
+        "properties": "Bounded compositions; tabs current option; backHandler.action",
+        "events": "Null back action or selected scalar.",
+        "limits": "Mini-app remains within host screen; no activity or arbitrary destination.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "planned",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No mini-app scaffold, top/bottom app bar, navigation bar/rail/drawer, route stack, or scroll behavior contract. navigation type means maps capabilities.",
+      "representative_workflow": "Switch local sections and return through a bounded screen hierarchy.",
+      "acceptance_criteria": [
+        "Keep host exit distinct from local navigation.",
+        "Validate destinations against a finite declared set.",
+        "Preserve state and accessible selected labels."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "material-menu-tabs",
+      "category": "material",
+      "family": "Menus and tabs",
+      "upstream": [
+        "material3-android/Menu.kt#DropdownMenu",
+        "material3-android/Tab.kt#Tab",
+        "material3-android/TabRow.kt#ScrollableTabRow"
+      ],
+      "native_types": [
+        "select",
+        "tabs"
+      ],
+      "native_contract": {
+        "properties": "bind; text; action; options",
+        "events": "Selected typed scalar.",
+        "limits": "1..30 options; select popup state is local and temporary.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No explicit menu groups, separators, menu item icons, or independent popup lifecycle.",
+      "representative_workflow": "Select a current option, dismiss the menu, and switch tabs.",
+      "acceptance_criteria": [
+        "Dismiss without a selection leaves state unchanged.",
+        "Selected semantics match the bound value.",
+        "Reject removed options and disabled actions."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "material-status",
+      "category": "material",
+      "family": "Progress, badges, loading, and snackbars",
+      "upstream": [
+        "material3-android/ProgressIndicator.kt#LinearProgressIndicator",
+        "material3-android/ProgressIndicator.kt#CircularProgressIndicator",
+        "material3-android/Badge.kt#Badge",
+        "material3-android/SnackbarHost.kt#SnackbarHost"
+      ],
+      "native_types": [
+        "progress",
+        "progressRing",
+        "badge",
+        "skeleton",
+        "spinner",
+        "snackbar"
+      ],
+      "native_contract": {
+        "properties": "Numeric progress bind/min/max; scalar badge; snackbar text/action",
+        "events": "Snackbar action sends null.",
+        "limits": "Progress clamps to bound range; snackbar is inline; skeleton is static.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No SnackbarHost queue/duration, indeterminate mode option, badge anchor, or animated placeholder contract.",
+      "representative_workflow": "Complete a local task and show bounded progress and dismissible status.",
+      "acceptance_criteria": [
+        "Keep current status readable without animation.",
+        "Dismiss affects only the current message.",
+        "Do not claim a host snackbar queue from an inline snackbar."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "material-pickers",
+      "category": "material",
+      "family": "Date and time pickers",
+      "upstream": [
+        "material3-android/DatePicker.kt#DatePicker",
+        "material3-android/TimePicker.kt#TimePicker"
+      ],
+      "native_types": [
+        "dateInput",
+        "timeInput"
+      ],
+      "native_contract": {
+        "properties": "bind; text; action",
+        "events": "ISO date string or local minutes integer.",
+        "limits": "Date is valid YYYY-MM-DD; time is integer 0..1439; Android platform dialogs render controls.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No Compose DatePicker/TimePicker style, date range, selectable-date policy, or time zone field.",
+      "representative_workflow": "Choose a date and local time, cancel a second edit, and reopen.",
+      "acceptance_criteria": [
+        "Cancel preserves the committed value.",
+        "Use explicit time zone in any separate scheduling capability.",
+        "Reject invalid dates and out-of-range minutes."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "material-discovery",
+      "category": "material",
+      "family": "Search, carousel, and pull refresh",
+      "upstream": [
+        "material3-android/SearchBar.kt#SearchBar",
+        "material3-android/Carousel.kt#HorizontalMultiBrowseCarousel",
+        "material3-android/PullToRefresh.kt#PullToRefreshBox"
+      ],
+      "native_types": [
+        "input",
+        "list",
+        "grid"
+      ],
+      "native_contract": {
+        "properties": "Separate input and record controls only.",
+        "events": "Explicit Apply and row actions.",
+        "limits": "No native search/refresh/loading lifecycle; bounded record and image budgets.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "planned",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No search suggestions/expanded state, carousel item state, or pull-refresh event contract. Some upstream declarations require experimental opt-in.",
+      "representative_workflow": "Filter a local record set, refresh through an explicit action, and browse results.",
+      "acceptance_criteria": [
+        "Keep search and refresh events typed and bounded.",
+        "Retain stable selection after results change.",
+        "Do not infer external network authority from search UI."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "text-display",
+      "category": "text",
+      "family": "Plain text and formatting",
+      "upstream": [
+        "foundation-android/BasicText.kt#BasicText",
+        "ui-text-android/TextStyle.kt#TextStyle"
+      ],
+      "native_types": [
+        "text",
+        "metric",
+        "fact",
+        "timelineItem",
+        "badge"
+      ],
+      "native_contract": {
+        "properties": "text; scalar bind; format number/clock; finite emphasis/tone/align",
+        "events": "No text callback.",
+        "limits": "Static labels 1..300; declared dotted object paths; no array/expression binding.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No maxLines, overflow, line height, selectable flag, span styles, or locale-format contract.",
+      "representative_workflow": "Show long labels, a numeric metric, and a clock at large font.",
+      "acceptance_criteria": [
+        "Keep essential content readable without clipping.",
+        "Validate finite formatting choices and typed binding.",
+        "Preserve scalar state in compact projection."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "text-rich-selection",
+      "category": "text",
+      "family": "Annotated text, links, and selection",
+      "upstream": [
+        "ui-text-android/AnnotatedString.kt#AnnotatedString",
+        "ui-text-android/LinkAnnotation.kt#LinkAnnotation",
+        "foundation-android/SelectionContainer.kt#SelectionContainer"
+      ],
+      "native_types": [
+        "text"
+      ],
+      "native_contract": {
+        "properties": "Plain text only.",
+        "events": "No inline link or selection event.",
+        "limits": "No arbitrary HTML, markup execution, or composable span content.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "planned",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No rich spans, inline validated links, selection container, or copy policy. Chat Markdown support does not expose mini-app rich text.",
+      "representative_workflow": "Read source-linked instructions and copy a bounded text range.",
+      "acceptance_criteria": [
+        "Validate span ranges and HTTPS targets before display.",
+        "Use the existing capability boundary for external links.",
+        "Expose equivalent accessible text and reject unsupported markup."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "text-editing",
+      "category": "text",
+      "family": "Text fields and state-based editing",
+      "upstream": [
+        "foundation-android/BasicTextField.kt#BasicTextField",
+        "foundation-android/BasicSecureTextField.kt#BasicSecureTextField",
+        "foundation-android/TextFieldState.kt#TextFieldState"
+      ],
+      "native_types": [
+        "input",
+        "numberInput"
+      ],
+      "native_contract": {
+        "properties": "String/number bind; action; maxLength; numeric bounds",
+        "events": "Apply or IME Done commits valid changed draft.",
+        "limits": "String <=2048; numeric draft <=40 characters; no direct state mutation.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeInput",
+          "ToolUiCatalog.kt#validateAction"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No keyboard/IME choices, read-only/password mode, input transformation, selection/composition contract, or rich validation message.",
+      "representative_workflow": "Edit a multiline note and a numeric value, then submit through IME.",
+      "acceptance_criteria": [
+        "Preserve draft and commit semantics explicitly.",
+        "Reject invalid length, nonfinite number, and disabled action.",
+        "Keep any password behavior within an explicit local contract."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "theme-colors",
+      "category": "theme",
+      "family": "Color schemes and dynamic color",
+      "upstream": [
+        "material3-android/MaterialTheme.kt#MaterialTheme",
+        "material3-android/ColorScheme.kt#ColorScheme"
+      ],
+      "native_types": [
+        "theme"
+      ],
+      "native_contract": {
+        "properties": "preset clean/soft/expressive/editorial/technical/playful; finite tone",
+        "events": "No theme change event except declared local actions.",
+        "limits": "Host uses fixed preset color values; no generated ColorScheme or Android object.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativePreset"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No bounded custom palette, dark-mode selector, dynamic-color opt-in, or contrast preference contract.",
+      "representative_workflow": "Show the same form under each current preset and host appearance.",
+      "acceptance_criteria": [
+        "Preserve readable text and disabled contrast.",
+        "Persist only declared appearance state.",
+        "Do not expose arbitrary code or unrestricted theme objects."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "theme-type-shape",
+      "category": "theme",
+      "family": "Typography, shapes, and theme tokens",
+      "upstream": [
+        "material3-android/Typography.kt#Typography",
+        "material3-android/Shapes.kt#Shapes",
+        "ui-graphics-android/Shape.kt#Shape"
+      ],
+      "native_types": [
+        "text",
+        "card",
+        "section"
+      ],
+      "native_contract": {
+        "properties": "Finite emphasis names; renderer-owned shapes.",
+        "events": "No typography or shape callback.",
+        "limits": "No downloadable fonts, arbitrary font paths, shape code, or token objects.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No bounded typography scale, corner choices, or per-component shape contract.",
+      "representative_workflow": "Render headings and cards with accessibility font scaling.",
+      "acceptance_criteria": [
+        "Keep font scale effective and labels readable.",
+        "Expose finite style tokens if needed.",
+        "Reject unknown tokens rather than silently accepting them."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "input-gestures",
+      "category": "input_accessibility",
+      "family": "Pointer, gestures, scroll, and drag/drop",
+      "upstream": [
+        "foundation-android/TapGestureDetector.kt#detectTapGestures",
+        "foundation-android/DragGestureDetector.kt#detectDragGestures",
+        "foundation-android/Transformable.kt#transformable",
+        "ui-android/PointerEvent.kt#PointerEvent"
+      ],
+      "native_types": [
+        "scroll"
+      ],
+      "native_contract": {
+        "properties": "Scroll is host-managed; protocol surfaces expose bounded pointer/control events.",
+        "events": "Surface pointer down/move/up/cancel; pointer IDs 0..1; control left/right.",
+        "limits": "Surface pointer coordinates 0..2048; frame/event limits; no gesture may bypass action authority.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "GraphicsContract.kt#GraphicsContract",
+          "ArtifactProtocol.kt#ArtifactProtocol"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No node tap/long-press/drag/zoom, nested-scroll policy, or drag/drop payload contract. Surface input does not expose arbitrary pointerInput.",
+      "representative_workflow": "Drag a game paddle and operate equivalent accessible buttons.",
+      "acceptance_criteria": [
+        "Deliver cancel on interrupted interaction.",
+        "Keep coordinate mapping consistent with positioned surfaces.",
+        "Autonomous and gesture events cannot request privileged effects."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "input-focus-ime",
+      "category": "input_accessibility",
+      "family": "Focus, keyboard, and IME",
+      "upstream": [
+        "ui-android/FocusRequester.kt#FocusRequester",
+        "ui-android/KeyInputModifier.kt#onKeyEvent",
+        "ui-android/SoftwareKeyboardController.kt#SoftwareKeyboardController"
+      ],
+      "native_types": [
+        "input",
+        "numberInput"
+      ],
+      "native_contract": {
+        "properties": "Renderer keyboard types Text/Decimal and IME Done.",
+        "events": "IME Done commits valid changed draft.",
+        "limits": "Host controls focus and keyboard; no generated key listeners.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeInput",
+          "NativeToolUi.kt#NativeNode"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No focus request/order/state, keyboard shortcuts, keyboard visibility, or IME action contract.",
+      "representative_workflow": "Complete a form with keyboard only and return focus after a modal closes.",
+      "acceptance_criteria": [
+        "All actions remain reachable in a predictable focus order.",
+        "Do not consume host back/exit keys silently.",
+        "Preserve IME composition and explicit commit."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "input-clipboard-autofill",
+      "category": "input_accessibility",
+      "family": "Clipboard and autofill",
+      "upstream": [
+        "ui-android/Clipboard.kt#Clipboard",
+        "ui-android/ContentType.kt#ContentType"
+      ],
+      "native_types": [],
+      "native_contract": {
+        "properties": "No generated clipboard/autofill node properties or direct calls.",
+        "events": "No clipboard or autofill events.",
+        "limits": "Host text fields may provide platform editing behavior; generated code receives only validated committed values.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "host_only",
+      "evidence_status": "source_verified",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No explicit clipboard read/write or autofill hint contract. Platform editing behavior is not an exposed host service.",
+      "representative_workflow": "Copy displayed public text through native selection, then paste into a local note.",
+      "acceptance_criteria": [
+        "Require explicit user actions for clipboard service extensions.",
+        "Keep private state outside unsolicited clipboard writes.",
+        "Validate pasted text through the existing input boundary."
+      ],
+      "priority": "P3"
+    },
+    {
+      "id": "input-semantics",
+      "category": "input_accessibility",
+      "family": "Semantics and accessible actions",
+      "upstream": [
+        "ui-android/SemanticsProperties.kt#SemanticsProperties"
+      ],
+      "native_types": [
+        "button",
+        "icon",
+        "toggle",
+        "checkbox",
+        "tabs",
+        "text",
+        "chart"
+      ],
+      "native_contract": {
+        "properties": "Required leaf text; host roles, headings, selected state and content descriptions.",
+        "events": "Typed native actions and surface accessible controls.",
+        "limits": "Common schema lacks semantic overrides; action targets use host sizing.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No live region, stateDescription, traversal grouping/order, custom accessible action, or collection metadata contract. TalkBack workflow remains unrun here.",
+      "representative_workflow": "Navigate a grouped form through an accessibility service at large font.",
+      "acceptance_criteria": [
+        "Labels, roles, selected values, errors, and status changes are understandable.",
+        "No duplicate or hidden actionable semantics.",
+        "Retain an equivalent action path for decorative graphics."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "graphics-drawing",
+      "category": "graphics_motion",
+      "family": "Canvas, paths, brushes, and clipping",
+      "upstream": [
+        "foundation-android/Canvas.kt#Canvas",
+        "ui-graphics-android/Path.kt#Path",
+        "ui-graphics-android/Brush.kt#Brush"
+      ],
+      "native_types": [
+        "chart"
+      ],
+      "native_contract": {
+        "properties": "Protocol surfaces; closed drawing commands; chart kind/categories/series.",
+        "events": "frame; pointer; control; lifecycle surface events.",
+        "limits": "<=4 surfaces, 64..2048 dimensions; aggregate 32 KiB, 512 commands, depth 6, 2048 pairs/chars; paths <=512 segments.",
+        "source": [
+          "GraphicsContract.kt#GraphicsContract",
+          "ArtifactProtocol.kt#ArtifactProtocol",
+          "ToolUiCatalog.kt#components"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No arbitrary DrawScope, custom shaders, composable Canvas callbacks, or unrestricted clipping/effect objects.",
+      "representative_workflow": "Draw and animate a bounded game board with gradients and accessible score.",
+      "acceptance_criteria": [
+        "Reject malformed path, gradient, transform, and aggregate overflow.",
+        "Clip each surface and restore group transforms.",
+        "Record actual interaction and state evidence before workflow acceptance."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "graphics-images",
+      "category": "graphics_motion",
+      "family": "Images, vectors, and icons",
+      "upstream": [
+        "foundation-android/Image.kt#Image",
+        "ui-android/ImageVector.kt#ImageVector"
+      ],
+      "native_types": [
+        "image",
+        "icon"
+      ],
+      "native_contract": {
+        "properties": "Owner-scoped resourceId/bind; fit fit/crop; fixed icon names.",
+        "events": "Optional icon action; image has no generated load callback.",
+        "limits": "<=4 images; 1024-pixel edge; 4 MiB each; access checked across lifecycle.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No generated vector path asset, URL image fetch, animated image, custom painter, or Material icon-pack contract.",
+      "representative_workflow": "Display a selected image, revoke its resource, pause, and resume.",
+      "acceptance_criteria": [
+        "Show placeholder after revocation and pause cleanup.",
+        "Keep ownership, MIME, byte, and allocation validation.",
+        "Do not use image display to request permission or network access."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "graphics-effects",
+      "category": "graphics_motion",
+      "family": "Graphics layers and render effects",
+      "upstream": [
+        "ui-android/GraphicsLayerModifier.kt#graphicsLayer",
+        "ui-graphics-android/RenderEffect.kt#RenderEffect"
+      ],
+      "native_types": [
+        "transform",
+        "stage"
+      ],
+      "native_contract": {
+        "properties": "pose/poseBind; durationMs; size; solid; stage perspective/floor/height",
+        "events": "Declared local actions change pose state.",
+        "limits": "Eight finite pose numbers; stage noninteractive; duration <=10000 ms; bounded layer geometry.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeUiMotion.kt#NativeTransform",
+          "NativeUiMotion.kt#NativeStage"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No blend mode, blur, RenderEffect, shadow, arbitrary graphicsLayer modifier, or runtime shader contract.",
+      "representative_workflow": "Display transformed cards with an accessible control outside the stage.",
+      "acceptance_criteria": [
+        "Keep transformed layer bounds and alpha finite.",
+        "Stage content remains noninteractive.",
+        "Reduced motion produces the final stable pose."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "motion-transitions",
+      "category": "graphics_motion",
+      "family": "Visibility, content, and size transitions",
+      "upstream": [
+        "animation-android/AnimatedVisibility.kt#AnimatedVisibility",
+        "animation-android/AnimatedContent.kt#AnimatedContent",
+        "animation-android/AnimationModifier.kt#animateContentSize"
+      ],
+      "native_types": [
+        "motion"
+      ],
+      "native_contract": {
+        "properties": "preset; numeric trigger; animateInitial",
+        "events": "Trigger changes start decoration; no arbitrary animation callback.",
+        "limits": "Six presets; no nested motion; initial animation off unless requested.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeUiMotion.kt#NativeMotion"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No animated visibility/content replacement, crossfade, size transition, or bounded transition specification.",
+      "representative_workflow": "Expand details and replace status while reduced motion is enabled.",
+      "acceptance_criteria": [
+        "Final visible content and accessible actions match declared state.",
+        "Reduce or remove decorative delays under reduced motion.",
+        "Reject invalid transition values and nested unsupported motion."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "motion-state",
+      "category": "graphics_motion",
+      "family": "Property animation and simulation clock",
+      "upstream": [
+        "animation-core-android/Animatable.kt#Animatable",
+        "animation-core-android/AnimateAsState.kt#animateFloatAsState",
+        "animation-core-android/InfiniteTransition.kt#rememberInfiniteTransition"
+      ],
+      "native_types": [
+        "motion",
+        "transform",
+        "stage"
+      ],
+      "native_contract": {
+        "properties": "Preset trigger and pose state; protocol frame subscriptions and timers.",
+        "events": "dt 0..50 ms; timer IDs; lifecycle start/pause/resume/restart/stop.",
+        "limits": "<=8 timers, intervals 16..60000 ms; 25 ms continuous evaluation deadline; foreground clock.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeUiMotion.kt#NativeMotion",
+          "ArtifactProtocol.kt#ArtifactProtocol",
+          "GraphicsContract.kt#GraphicsContract"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No arbitrary easing/spring/keyframe/infinite transition contract. Fixed displayed frame rate and touch latency remain unverified.",
+      "representative_workflow": "Pause and resume a moving board, then reopen saved game state.",
+      "acceptance_criteria": [
+        "Stop autonomous updates outside the allowed lifecycle.",
+        "Use actual dt and preserve declared state on pause/reopen.",
+        "Keep autonomous effects and records forbidden."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "motion-shared",
+      "category": "graphics_motion",
+      "family": "Shared-element transitions",
+      "upstream": [
+        "animation-android/SharedTransitionScope.kt#SharedTransitionLayout"
+      ],
+      "native_types": [],
+      "native_contract": {
+        "properties": "No shared-element key or transition scope.",
+        "events": "No shared-transition events.",
+        "limits": "Arbitrary composable scopes remain unavailable.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "unavailable",
+      "evidence_status": "source_verified",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No bounded shared-element transition contract.",
+      "representative_workflow": "Open a selected card detail without requiring animation for operation.",
+      "acceptance_criteria": [
+        "Stable selection and focus work without motion.",
+        "No source or destination can escape the mini-app boundary.",
+        "Any future shared key must be finite and validated."
+      ],
+      "priority": "P3"
+    },
+    {
+      "id": "runtime-state",
+      "category": "runtime_state",
+      "family": "Composition state and snapshots",
+      "upstream": [
+        "runtime-android/Composables.kt#remember",
+        "runtime-android/SnapshotState.kt#mutableStateOf",
+        "runtime-android/DerivedState.kt#derivedStateOf"
+      ],
+      "native_types": [],
+      "native_contract": {
+        "properties": "Declared JSON stateSchema/initialState; validated state output.",
+        "events": "One artifact function handles native events.",
+        "limits": "1..40 top-level fields; bounded nested schemas; state <=48 KiB; no host object references.",
+        "source": [
+          "ToolSpec.kt#ToolSpec",
+          "ArtifactProtocol.kt#ArtifactProtocol"
+        ]
+      },
+      "disposition": "host_only",
+      "evidence_status": "source_verified",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "Compose snapshot APIs are host implementation facilities. Generated JavaScript globals are transient and cannot replace durable declared state.",
+      "representative_workflow": "Increment a counter, edit a row, close the screen, and reopen.",
+      "acceptance_criteria": [
+        "Only declared validated values persist.",
+        "Rejected output leaves the last valid snapshot intact.",
+        "Generated code cannot invoke Compose state or arbitrary Kotlin."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "runtime-effects",
+      "category": "runtime_state",
+      "family": "Effects, flow, and composition lifecycle",
+      "upstream": [
+        "runtime-android/Effects.kt#LaunchedEffect",
+        "runtime-android/Effects.kt#DisposableEffect",
+        "runtime-android/SnapshotFlow.kt#snapshotFlow"
+      ],
+      "native_types": [],
+      "native_contract": {
+        "properties": "Protocol subscriptions; explicit validated native effects.",
+        "events": "Foreground frames/timers; typed capability result events.",
+        "limits": "No generated coroutine/Flow/composition callback; no JavaScript promises or timers.",
+        "source": [
+          "ToolSpec.kt#ToolSpec",
+          "ArtifactProtocol.kt#ArtifactProtocol"
+        ]
+      },
+      "disposition": "host_only",
+      "evidence_status": "source_verified",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "Compose effects are host-only. Native effect authority comes from validated foreground actions, not composition or timer presence.",
+      "representative_workflow": "Start a local timer, leave the mini-app, and return.",
+      "acceptance_criteria": [
+        "Cleanup ends or suspends host subscriptions correctly.",
+        "Autonomous events cannot perform privileged effects.",
+        "Separate native request, launch, provider readback, and physical outcomes."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "runtime-restoration",
+      "category": "runtime_state",
+      "family": "Saveable and retained state",
+      "upstream": [
+        "runtime-saveable-android/RememberSaveable.kt#rememberSaveable",
+        "runtime-retain-android/Retain.kt#retain",
+        "savedstate-compose-android/LocalSavedStateRegistryOwner.kt#LocalSavedStateRegistryOwner"
+      ],
+      "native_types": [],
+      "native_contract": {
+        "properties": "Artifact snapshot and durable record contracts; renderer drafts use remember.",
+        "events": "Open/pause/close and committed action state.",
+        "limits": "Continuous snapshots flush within 250 ms; pause/close flush immediately under protocol guidance.",
+        "source": [
+          "ToolSpec.kt#ToolSpec",
+          "ArtifactProtocol.kt#ArtifactProtocol",
+          "NativeToolUi.kt#NativeInput"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "rememberSaveable/retain are not generated APIs. No general UI scroll/focus/draft restoration contract; pre-existing controller cancellation leak remains unresolved.",
+      "representative_workflow": "Commit values, reopen the mini-app, and distinguish committed state from transient drafts.",
+      "acceptance_criteria": [
+        "Persist declared state and private records without data loss.",
+        "Document any draft/scroll restoration before exposing it.",
+        "Do not claim process-death or leak acceptance from source inspection."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "android-back",
+      "category": "android_integration",
+      "family": "Back and predictive back",
+      "upstream": [
+        "activity-compose/BackHandler.kt#BackHandler",
+        "activity-compose/PredictiveBackHandler.kt#PredictiveBackHandler"
+      ],
+      "native_types": [
+        "backHandler"
+      ],
+      "native_contract": {
+        "properties": "action; visible/enabled and bound flags",
+        "events": "Enabled visible handler sends null.",
+        "limits": "No generated activity object or navigation stack.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No predictive-back progress/cancel contract. BackHandler support does not expose predictive back APIs.",
+      "representative_workflow": "Navigate a local detail screen, cancel back gesture, then complete back.",
+      "acceptance_criteria": [
+        "Hidden/disabled handlers do not dispatch.",
+        "Completed back dispatches once.",
+        "Keep host exit and local back behavior explicit."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "android-results",
+      "category": "android_integration",
+      "family": "Activity results and native capabilities",
+      "upstream": [
+        "activity-compose/ActivityResultRegistry.kt#rememberLauncherForActivityResult"
+      ],
+      "native_types": [
+        "calendar",
+        "medicine",
+        "navigation"
+      ],
+      "native_contract": {
+        "properties": "Closed capability/args descriptors; private resource handles.",
+        "events": "Validated native click, confirmation/grant and typed result.",
+        "limits": "No arbitrary Intent, ActivityResultContract, Android object, screen capture, or unrestricted SDK call.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "partial",
+      "evidence_status": "source_verified_workflow_partial",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "Activity result plumbing is host-only. Each missing capability needs its own explicit adapter, authority, and result contract.",
+      "representative_workflow": "Pick a file, cancel a second picker, and display only an authorized image.",
+      "acceptance_criteria": [
+        "Retain permission/grant checks and cancellation distinction.",
+        "Reject forged resource handles and unauthorized results.",
+        "Do not promote intent resolution to completed external action."
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "android-lifecycle",
+      "category": "android_integration",
+      "family": "Lifecycle-aware composition",
+      "upstream": [
+        "lifecycle-runtime-compose-android/FlowExt.kt#collectAsStateWithLifecycle",
+        "lifecycle-runtime-compose-android/LifecycleEffect.kt#LifecycleStartEffect"
+      ],
+      "native_types": [
+        "image"
+      ],
+      "native_contract": {
+        "properties": "Host lifecycle ownership and resume-scoped image access.",
+        "events": "Protocol foreground lifecycle events; no generated lifecycle callbacks.",
+        "limits": "No lifecycle owner or unrestricted service access.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "host_only",
+      "evidence_status": "source_verified",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "Host APIs are installed. Background subscriptions, process recreation, and image revocation each need workflow evidence.",
+      "representative_workflow": "Background a running mini-app, revoke access, and resume.",
+      "acceptance_criteria": [
+        "Pause autonomous work and clear image pixels when required.",
+        "Resume only current authorized resources.",
+        "Report unavailable physical outcomes separately."
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "android-interop",
+      "category": "android_integration",
+      "family": "Android View interoperability",
+      "upstream": [
+        "ui-android/AndroidView.android.kt#AndroidView"
+      ],
+      "native_types": [],
+      "native_contract": {
+        "properties": "No View class or factory node.",
+        "events": "No generated View callbacks.",
+        "limits": "No arbitrary Kotlin, Android object, class import, or direct host call.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "host_only",
+      "evidence_status": "source_verified",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "AndroidView is installed for native host code only. ui-viewbinding and WebView mini-app content are not exposed.",
+      "representative_workflow": "Reject a generated AndroidView/WebView node with a stable validation category.",
+      "acceptance_criteria": [
+        "Unknown node types fail before rendering.",
+        "Existing valid native state remains intact after rejection.",
+        "No compatibility wrapper or code generation bypasses the closed catalog."
+      ],
+      "priority": "P3"
+    },
+    {
+      "id": "developer-facilities",
+      "category": "developer_facilities",
+      "family": "Compiler, inspection, preview, and UI tests",
+      "upstream": [
+        "ui-android/SemanticsProperties.kt#SemanticsProperties"
+      ],
+      "native_types": [],
+      "native_contract": {
+        "properties": "Compose compiler Gradle plugin 2.4.0; host AndroidJUnitRunner and native diagnostics.",
+        "events": "No generated compiler or tooling APIs.",
+        "limits": "debugRuntimeClasspath excludes tooling/preview/UI test modules; androidTest uses androidx.test runner/ext JUnit.",
+        "source": [
+          "ToolUiCatalog.kt#components",
+          "NativeToolUi.kt#NativeNode",
+          "ToolUiCatalog.kt#validate"
+        ]
+      },
+      "disposition": "host_only",
+      "evidence_status": "source_verified",
+      "workflow_status": "not_run_for_this_inventory",
+      "gaps": "No resolved ui-tooling, ui-tooling-preview, ui-test-junit4, ui-test-manifest, or Compose Material2 component module. Existing instrumentation does not imply Compose test-rule availability.",
+      "representative_workflow": "Compile a valid native fixture and capture repeatable semantics/state evidence through the existing runner.",
+      "acceptance_criteria": [
+        "Record exact source/APK identity, command, input, expected and observed result.",
+        "Use existing instrumentation facilities unless a separately approved dependency is necessary.",
+        "Do not classify unrun preview, accessibility, or device workflows as passed."
+      ],
+      "priority": "P1"
+    }
+  ],
+  "resolved_components": [
+    {
+      "coordinate": "androidx.activity:activity:1.12.2",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/activity/activity/1.12.2/activity-1.12.2.pom",
+      "files": [
+        {
+          "name": "activity-1.12.2.aar",
+          "sha256": "1d37a19022454f1e4a60fd982b3dc0256457d25257a6343c771acae864d15cd9",
+          "kind": "aar"
+        },
+        {
+          "name": "activity-1.12.2.pom",
+          "sha256": "89c72299ea3b8efb43f631b2198a44c0b3121e61110628640ae9696cdd592d1c",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.activity:activity-compose:1.12.2",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/activity/activity-compose/1.12.2/activity-compose-1.12.2.pom",
+      "files": [
+        {
+          "name": "activity-compose-1.12.2.pom",
+          "sha256": "a8616698d9e391de616e9f22318b44eca0d40ff527357329c88391846dd80bfc",
+          "kind": "pom"
+        },
+        {
+          "name": "activity-compose-1.12.2.aar",
+          "sha256": "8538db6f4ead968e5e768f62db9ca4ea787c4105ad87e6518f67bf293ec04776",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.activity:activity-ktx:1.12.2",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/activity/activity-ktx/1.12.2/activity-ktx-1.12.2.pom",
+      "files": [
+        {
+          "name": "activity-ktx-1.12.2.aar",
+          "sha256": "43107c7fcc04dff804b7541cf78f4432e813ff77a7dea7d500548f3420f29449",
+          "kind": "aar"
+        },
+        {
+          "name": "activity-ktx-1.12.2.pom",
+          "sha256": "2a9f045fba8813838d2d8d8bb5768aba8b22fb8d1c4d2c13ad38b1390b56adfb",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.animation:animation:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/animation/animation/1.10.0/animation-1.10.0.pom",
+      "files": [
+        {
+          "name": "animation-1.10.0.pom",
+          "sha256": "ac1c3ef4e26c377b0947e5a054a075ec0614b87823629b6bce0ca50b08ee56e4",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.animation:animation-android:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/animation/animation-android/1.10.0/animation-android-1.10.0.pom",
+      "files": [
+        {
+          "name": "animation.aar",
+          "sha256": "8a559dabdae5a4dcd45b9eba7fbc90df093135e43c7e29de2769911eec76eef9",
+          "kind": "aar"
+        },
+        {
+          "name": "animation-android-1.10.0.pom",
+          "sha256": "0df8729ef973d6efbd3bb70a59475619e5ac534166ee749d9bbafbc637be8ac6",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.animation:animation-core:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/animation/animation-core/1.10.0/animation-core-1.10.0.pom",
+      "files": [
+        {
+          "name": "animation-core-1.10.0.pom",
+          "sha256": "cb5efb3eafb71a7cb0d0150bab4ea377d6788ac397d30a9cb94c3d77c130788f",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.animation:animation-core-android:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/animation/animation-core-android/1.10.0/animation-core-android-1.10.0.pom",
+      "files": [
+        {
+          "name": "animation-core-android-1.10.0.pom",
+          "sha256": "f51a15d1041900dac6b83fb64b8b291d4743d38511c6b7b07321542fafb91108",
+          "kind": "pom"
+        },
+        {
+          "name": "animation-core.aar",
+          "sha256": "55d7bd5ba5796bc07d0552256734789a5be039555cd93991d0d26ce1a7671fef",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.foundation:foundation:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/foundation/foundation/1.10.0/foundation-1.10.0.pom",
+      "files": [
+        {
+          "name": "foundation-1.10.0.pom",
+          "sha256": "ce51c3ad01ae0b99a1b6c224c37ec2ff844a7f11a29f898c1a055b84b34d6601",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.foundation:foundation-android:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/foundation/foundation-android/1.10.0/foundation-android-1.10.0.pom",
+      "files": [
+        {
+          "name": "foundation-android-1.10.0.pom",
+          "sha256": "e1abf54347a061e9dc57216c0dae704f421b912e895f0126ec7f1d4993a06b60",
+          "kind": "pom"
+        },
+        {
+          "name": "foundation.aar",
+          "sha256": "c7366032bb88f90f307ab50f58e3c87ad93e278f50cfdbd9bedb6f10bc6217a3",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.foundation:foundation-layout:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/foundation/foundation-layout/1.10.0/foundation-layout-1.10.0.pom",
+      "files": [
+        {
+          "name": "foundation-layout-1.10.0.pom",
+          "sha256": "1c5d36f0b8b1fb516b5835b240e04bf3b2b72a2d7468fbaebbf1e9c534e01265",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.foundation:foundation-layout-android:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/foundation/foundation-layout-android/1.10.0/foundation-layout-android-1.10.0.pom",
+      "files": [
+        {
+          "name": "foundation-layout.aar",
+          "sha256": "85513652dc9e458be47683dc0e61473e0bbbe24417d18c4eaf15b0c25a60318c",
+          "kind": "aar"
+        },
+        {
+          "name": "foundation-layout-android-1.10.0.pom",
+          "sha256": "c98f8a732ce325841e522123fa9fff2ef34c4aaaefad6982b51e2c9d10a4010a",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.material3:material3:1.4.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/material3/material3/1.4.0/material3-1.4.0.pom",
+      "files": [
+        {
+          "name": "material3-1.4.0.pom",
+          "sha256": "672b431f59c8e0a8522690b2f46f1b7966710638893c60c31c5f19f8472d62cc",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.material3:material3-android:1.4.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/material3/material3-android/1.4.0/material3-android-1.4.0.pom",
+      "files": [
+        {
+          "name": "material3.aar",
+          "sha256": "3a37e8b36df3822fe1e6059f0f9fafda8800388860477624ac1b9422c418a36e",
+          "kind": "aar"
+        },
+        {
+          "name": "material3-android-1.4.0.pom",
+          "sha256": "cc0362653240708a010de50fee8caf884a610fbb10b6013e86694d77c43febc7",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.material:material-ripple:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/material/material-ripple/1.10.0/material-ripple-1.10.0.pom",
+      "files": [
+        {
+          "name": "material-ripple-1.10.0.pom",
+          "sha256": "3c64b2927940790bbdcd0894b05ac9e066c4aa5e791c48c61b995bc2eb4bcef2",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.material:material-ripple-android:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/material/material-ripple-android/1.10.0/material-ripple-android-1.10.0.pom",
+      "files": [
+        {
+          "name": "material-ripple-android-1.10.0.pom",
+          "sha256": "d93096692e8c155e1bd4616bee6ec4e179c6fda62f69af6a4859689881ff1878",
+          "kind": "pom"
+        },
+        {
+          "name": "material-ripple.aar",
+          "sha256": "ad7c12b3256ada337533ebb422c03a203e6e0d4226f83315d2abad16616d80be",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.runtime:runtime:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/runtime/runtime/1.10.0/runtime-1.10.0.pom",
+      "files": [
+        {
+          "name": "runtime-1.10.0.pom",
+          "sha256": "f3def3171b012b8b616e2cdf4ada2bc9445999411d080cfb22b8522ba64e3acb",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.runtime:runtime-android:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/runtime/runtime-android/1.10.0/runtime-android-1.10.0.pom",
+      "files": [
+        {
+          "name": "runtime-android-1.10.0.pom",
+          "sha256": "1b27134b632fc4b3993d411eb82a801440b2798373323d91fc84db553f1c9ee5",
+          "kind": "pom"
+        },
+        {
+          "name": "runtime.aar",
+          "sha256": "612d36c21865a0008e889a2515c088cbd3b2210891f23acfe458abb63030d92a",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.runtime:runtime-annotation:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/runtime/runtime-annotation/1.10.0/runtime-annotation-1.10.0.pom",
+      "files": [
+        {
+          "name": "runtime-annotation-1.10.0.pom",
+          "sha256": "85fbb72b3bd2eec47a92327f5bcfdffcccdd492be366d7b5ca6923fcc065750f",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.runtime:runtime-annotation-android:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/runtime/runtime-annotation-android/1.10.0/runtime-annotation-android-1.10.0.pom",
+      "files": [
+        {
+          "name": "runtime-annotation.aar",
+          "sha256": "8b875f9d2e87cc927bef19dec3e6f3ff6db97d67a87f07573abc44c1e707992d",
+          "kind": "aar"
+        },
+        {
+          "name": "runtime-annotation-android-1.10.0.pom",
+          "sha256": "3c1bb50eb9ac796a75d43d36efa2f284ae0dc818214344499b72274d2c8d4c71",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.runtime:runtime-retain:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/runtime/runtime-retain/1.10.0/runtime-retain-1.10.0.pom",
+      "files": [
+        {
+          "name": "runtime-retain-1.10.0.pom",
+          "sha256": "f23be7d957ad233d7dcf1313ab16edc108e8dbda1bbce9e06d185a6256c8b2f6",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.runtime:runtime-retain-android:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/runtime/runtime-retain-android/1.10.0/runtime-retain-android-1.10.0.pom",
+      "files": [
+        {
+          "name": "runtime-retain-android-1.10.0.pom",
+          "sha256": "64fbe0525621d9060b1e0691d06d46e06e5527ecff89e4adb19c6f1a06408048",
+          "kind": "pom"
+        },
+        {
+          "name": "runtime-retain.aar",
+          "sha256": "fd03f002bd47edf80902e62cafb660bc1d93800fc6a7c9bcc16e620e46c4b86f",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.runtime:runtime-saveable:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/runtime/runtime-saveable/1.10.0/runtime-saveable-1.10.0.pom",
+      "files": [
+        {
+          "name": "runtime-saveable-1.10.0.pom",
+          "sha256": "13a0e832251e583d6b45cac205465906c245959477cf55bebb837ffe099aeeac",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.runtime:runtime-saveable-android:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/runtime/runtime-saveable-android/1.10.0/runtime-saveable-android-1.10.0.pom",
+      "files": [
+        {
+          "name": "runtime-saveable-android-1.10.0.pom",
+          "sha256": "b0b61249f8bd5d125666e00945bcff639666961483b2a416f59a74bc0f80f48b",
+          "kind": "pom"
+        },
+        {
+          "name": "runtime-saveable.aar",
+          "sha256": "f4c34f0e72eb6bb590811468bda832832a57edd678a0afa8373f505a619b3a36",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.ui:ui:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui/1.10.0/ui-1.10.0.pom",
+      "files": [
+        {
+          "name": "ui-1.10.0.pom",
+          "sha256": "319b5077e116cbd57446207e62de9ff86ff4b078a73cf0cf73b50a0510fedf1b",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.ui:ui-android:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-android/1.10.0/ui-android-1.10.0.pom",
+      "files": [
+        {
+          "name": "ui.aar",
+          "sha256": "d5a7ae5986b9d32bdf6f7174eb2293c4eb894f5b4cdcebff4e1e42cd4aec00c8",
+          "kind": "aar"
+        },
+        {
+          "name": "ui-android-1.10.0.pom",
+          "sha256": "0c1e66c5a8ef34ed0bd7b638c891645709a68a470cfc1995c651d001432bfc12",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.ui:ui-geometry:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-geometry/1.10.0/ui-geometry-1.10.0.pom",
+      "files": [
+        {
+          "name": "ui-geometry-1.10.0.pom",
+          "sha256": "0e9d249938e89772b298b8f1153f7ba5ed5b3c3b9625faafa3b24f7cbd5834ca",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.ui:ui-geometry-android:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-geometry-android/1.10.0/ui-geometry-android-1.10.0.pom",
+      "files": [
+        {
+          "name": "ui-geometry.aar",
+          "sha256": "40749b3f14b055cfd4438a59fef1cf9dffd01ae38df55ac981ffd890b5aab3a0",
+          "kind": "aar"
+        },
+        {
+          "name": "ui-geometry-android-1.10.0.pom",
+          "sha256": "8297119d6867ccd7244996bb3c42714d8f15d2f5ce99bc1ee2522ca3d77d57f9",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.ui:ui-graphics:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-graphics/1.10.0/ui-graphics-1.10.0.pom",
+      "files": [
+        {
+          "name": "ui-graphics-1.10.0.pom",
+          "sha256": "2050afa2832e5a2efa55361bbe765d803a735a5abe7e99ac2213d6c781debd54",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.ui:ui-graphics-android:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-graphics-android/1.10.0/ui-graphics-android-1.10.0.pom",
+      "files": [
+        {
+          "name": "ui-graphics.aar",
+          "sha256": "b787d8795e4dee10a09d96fc5f8b99b087262b29004aaa40502dbde50971a8ae",
+          "kind": "aar"
+        },
+        {
+          "name": "ui-graphics-android-1.10.0.pom",
+          "sha256": "1755cab302f45596b38e8fe1cce64641742487af8b938d352c807a435685ffe0",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.ui:ui-text:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-text/1.10.0/ui-text-1.10.0.pom",
+      "files": [
+        {
+          "name": "ui-text-1.10.0.pom",
+          "sha256": "aa612a600a243c1258c7bcb0ed09e160b2d638a3023c45c18e876cc81e5b623e",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.ui:ui-text-android:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-text-android/1.10.0/ui-text-android-1.10.0.pom",
+      "files": [
+        {
+          "name": "ui-text.aar",
+          "sha256": "626714ee7a6120adbebad6c57d743087aed173fe4769fea2ccee71b4770c1c70",
+          "kind": "aar"
+        },
+        {
+          "name": "ui-text-android-1.10.0.pom",
+          "sha256": "727c9e9def4e4a1420cfe3ce7f693046365fead4d1db9682eb11cd23946f5c6a",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.ui:ui-unit:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-unit/1.10.0/ui-unit-1.10.0.pom",
+      "files": [
+        {
+          "name": "ui-unit-1.10.0.pom",
+          "sha256": "a5b90de028f81b39eed1ea893afa1010936476d12e35604971cf5049c601c913",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.ui:ui-unit-android:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-unit-android/1.10.0/ui-unit-android-1.10.0.pom",
+      "files": [
+        {
+          "name": "ui-unit.aar",
+          "sha256": "b2a256118b29007709790d6f36e36cb139cd88b5796502c656d071ebebbee762",
+          "kind": "aar"
+        },
+        {
+          "name": "ui-unit-android-1.10.0.pom",
+          "sha256": "54c45c00df55d2b7f949208e47ce89a60f9cc19662943f40adcb35a060ec2127",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.ui:ui-util:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-util/1.10.0/ui-util-1.10.0.pom",
+      "files": [
+        {
+          "name": "ui-util-1.10.0.pom",
+          "sha256": "01cf1677f1ce77c8e8c975483fa34e1bde9dbf94123ef11b51e1e16290684063",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose.ui:ui-util-android:1.10.0",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-util-android/1.10.0/ui-util-android-1.10.0.pom",
+      "files": [
+        {
+          "name": "ui-util-android-1.10.0.pom",
+          "sha256": "20227336a29be197b0e9d90c6fb18a3b77d5d1f710ca213609d2b4b8c4a67f75",
+          "kind": "pom"
+        },
+        {
+          "name": "ui-util.aar",
+          "sha256": "75259f110f0dc1272977e02e4eb591e71ebbdee136e0b21d76c9fd326372c909",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.compose:compose-bom:2025.12.00",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/compose/compose-bom/2025.12.00/compose-bom-2025.12.00.pom",
+      "files": [
+        {
+          "name": "compose-bom-2025.12.00.pom",
+          "sha256": "08809b3b7ae43ba6bbd16bc22ef049561acda6968db4c0e8e6f2690907af0f17",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-common:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-common/2.9.4/lifecycle-common-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-common-2.9.4.pom",
+          "sha256": "0e3a0c8798d26f49238550a3dc4d6bd465d49b82bcb759ca3c463a31600e721c",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-common-java8:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-common-java8/2.9.4/lifecycle-common-java8-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-common-java8-2.9.4.jar",
+          "sha256": "497dd84de9f2fd46324f25f9a3af032d3a23d087e87af515c4b19435f6d6a651",
+          "kind": "jar"
+        },
+        {
+          "name": "lifecycle-common-java8-2.9.4.pom",
+          "sha256": "f7a0077f2b20312c30ea74c9fe77626fbe2ad09bb48922851cde20bcd1a33266",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-common-jvm:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-common-jvm/2.9.4/lifecycle-common-jvm-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-common-jvm-2.9.4.pom",
+          "sha256": "31735e9953aaeeab4e07fcffa4c6ab3519f90b331c4b1da8173df911607d3906",
+          "kind": "pom"
+        },
+        {
+          "name": "lifecycle-common-jvm-2.9.4.jar",
+          "sha256": "37d89b2101f074ac6c260917dabb185607645ee200aa3018c7c5bde70edcf184",
+          "kind": "jar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-livedata:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-livedata/2.9.4/lifecycle-livedata-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-livedata-2.9.4.pom",
+          "sha256": "24f8b944549912ab683aa70e61d32b5e1aa83c2f1f9d42f09e8eda3237760ab1",
+          "kind": "pom"
+        },
+        {
+          "name": "lifecycle-livedata-2.9.4.aar",
+          "sha256": "f240c2c94a96d4a5eae5d379c2a8589d426a33b989d83ae9f0e01f69502c0181",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-livedata-core:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-livedata-core/2.9.4/lifecycle-livedata-core-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-livedata-core-2.9.4.pom",
+          "sha256": "cec1161148e3f6c4b7d513aa989729e84a8ee9471f0c47c03478b3fb3c49ea21",
+          "kind": "pom"
+        },
+        {
+          "name": "lifecycle-livedata-core-2.9.4.aar",
+          "sha256": "ea866f0c379d1f92837994010ab5ac0a5d5499dbab521efc71b3bc2b497d6ba4",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-livedata-core-ktx:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-livedata-core-ktx/2.9.4/lifecycle-livedata-core-ktx-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-livedata-core-ktx-2.9.4.pom",
+          "sha256": "ca2073ac46d364107fdf4d832c5b729e610cdc7d12e736d9151b5a5119be80b9",
+          "kind": "pom"
+        },
+        {
+          "name": "lifecycle-livedata-core-ktx-2.9.4.aar",
+          "sha256": "f55b7a8d433e9b8163154ccaa42fa2be55c70cd1ede5eeea521a4b4b884dd4fe",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-process:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-process/2.9.4/lifecycle-process-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-process-2.9.4.aar",
+          "sha256": "4784b8d083c211e076d9115bfa1737f7e0f62b553e801cf50caa4400e34a95d6",
+          "kind": "aar"
+        },
+        {
+          "name": "lifecycle-process-2.9.4.pom",
+          "sha256": "5eac5a0a27138477f40f0aa0e749cd07fbf5580d4a9adc6d2d59db64cac49b10",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-runtime:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-runtime/2.9.4/lifecycle-runtime-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-runtime-2.9.4.pom",
+          "sha256": "d617a519ddb36a308213f5b9af99163b0a3a3739ce0381b6c8d0fa6814613a08",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-runtime-android:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-runtime-android/2.9.4/lifecycle-runtime-android-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-runtime-android-2.9.4.pom",
+          "sha256": "271e54009fdf3a2cd5ab414e8a09e6af4251b63d484a42c530ab868974a5ea1f",
+          "kind": "pom"
+        },
+        {
+          "name": "lifecycle-runtime-release.aar",
+          "sha256": "86f16a1330eb23600ba90d0334b3e1db38d3a30c8b1efcd92ca21aa85afa8173",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-runtime-compose:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-runtime-compose/2.9.4/lifecycle-runtime-compose-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-runtime-compose-2.9.4.pom",
+          "sha256": "0ef3fb28f89b80b90c78ad6ba345164d5590889ee3459b027f26695936291575",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-runtime-compose-android:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-runtime-compose-android/2.9.4/lifecycle-runtime-compose-android-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-runtime-compose-release.aar",
+          "sha256": "b6803f906a89fd85c77df343dd4aeeb349125ca79e12d55d68d4cf42f42231f6",
+          "kind": "aar"
+        },
+        {
+          "name": "lifecycle-runtime-compose-android-2.9.4.pom",
+          "sha256": "a7a073c7db10974627ba883f648a34fe8053f50c294d9192e183c901daea8c65",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-runtime-ktx:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-runtime-ktx/2.9.4/lifecycle-runtime-ktx-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-runtime-ktx-2.9.4.pom",
+          "sha256": "0af68ccd282a3f98d832f391b6655098d476f19d91f40f909d3c695814a11cab",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-runtime-ktx-android:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-runtime-ktx-android/2.9.4/lifecycle-runtime-ktx-android-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-runtime-ktx.aar",
+          "sha256": "970199c9ed1ac13d620aa8de7f8abbc28ce80653c3ce328d0ac2f15272b56e1b",
+          "kind": "aar"
+        },
+        {
+          "name": "lifecycle-runtime-ktx-android-2.9.4.pom",
+          "sha256": "78aace79fbced8eb8c17e0b02b2d55be9906fbdda053e6a617ee6e595fcace14",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-viewmodel:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-viewmodel/2.9.4/lifecycle-viewmodel-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-viewmodel-2.9.4.pom",
+          "sha256": "054db6f92d9230103b3aca8b0dabcc0d63de26e440ff98eb5b19a2555d3eb037",
+          "kind": "pom"
+        },
+        {
+          "name": "lifecycle-viewmodel-2.9.4.aar",
+          "sha256": "cab404b05d5faed209104a2aef14c0cbb316ab9fabe4a8f037b043e5d2f43435",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-viewmodel-android:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-viewmodel-android/2.9.4/lifecycle-viewmodel-android-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-viewmodel-android-2.9.4.pom",
+          "sha256": "9660b5a2d80ffe0f0e5b4f993b581d15972a8c14aae51784b6097bc97be0379e",
+          "kind": "pom"
+        },
+        {
+          "name": "lifecycle-viewmodel-release.aar",
+          "sha256": "4b236b2e504db5ca5d09334fef05aa8cdc31ee35a433c3aa4d0420efa9613332",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-viewmodel-ktx/2.9.4/lifecycle-viewmodel-ktx-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-viewmodel-ktx-2.9.4.aar",
+          "sha256": "b7d58bb86bb8e2ccc607d1f8570e714810f7cfb3feba37d375ff1646383435a1",
+          "kind": "aar"
+        },
+        {
+          "name": "lifecycle-viewmodel-ktx-2.9.4.pom",
+          "sha256": "0ccd0e9d361ad69b6a7253ab4ed2124a3bd4fbf9b338e36c1431b3c5ee7bc794",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-viewmodel-savedstate:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-viewmodel-savedstate/2.9.4/lifecycle-viewmodel-savedstate-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-viewmodel-savedstate-2.9.4.pom",
+          "sha256": "6912b55c745c579ec6fcbeb0065d5a17d8b5f06dd0a58788037d41e40db50202",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-viewmodel-savedstate-android:2.9.4",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-viewmodel-savedstate-android/2.9.4/lifecycle-viewmodel-savedstate-android-2.9.4.pom",
+      "files": [
+        {
+          "name": "lifecycle-viewmodel-savedstate-release.aar",
+          "sha256": "079441c43fa3ff8ea7a02df3b12eec483c3e57583f832cfaff663750527c1421",
+          "kind": "aar"
+        },
+        {
+          "name": "lifecycle-viewmodel-savedstate-android-2.9.4.pom",
+          "sha256": "34ab8491e6b631123ce5f7f0ae06dfa238c211dcf3e71033ed61656f9d47718c",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.navigationevent:navigationevent:1.0.1",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/navigationevent/navigationevent/1.0.1/navigationevent-1.0.1.pom",
+      "files": [
+        {
+          "name": "navigationevent-1.0.1.pom",
+          "sha256": "87db83dc104cf4178a9e8bf75b2e389db9176b5883a13b8d7a2a84106906f7d9",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.navigationevent:navigationevent-android:1.0.1",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/navigationevent/navigationevent-android/1.0.1/navigationevent-android-1.0.1.pom",
+      "files": [
+        {
+          "name": "navigationevent-android-1.0.1.pom",
+          "sha256": "e390907e065ef8c342cb88b3974ea57272d822124dc45d33b9fa7947c489e50d",
+          "kind": "pom"
+        },
+        {
+          "name": "navigationevent.aar",
+          "sha256": "c2acf20ffb1da29fa622b0ebb3b1a87eca889ba4cc724d24bcd7e09867e8cafc",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.navigationevent:navigationevent-compose:1.0.1",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/navigationevent/navigationevent-compose/1.0.1/navigationevent-compose-1.0.1.pom",
+      "files": [
+        {
+          "name": "navigationevent-compose-1.0.1.pom",
+          "sha256": "cc8901d17e26060bfaf5c00226f00ca9eb05e5d3a9065a627f23eadf4394d01d",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.navigationevent:navigationevent-compose-android:1.0.1",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/navigationevent/navigationevent-compose-android/1.0.1/navigationevent-compose-android-1.0.1.pom",
+      "files": [
+        {
+          "name": "navigationevent-compose-android-1.0.1.pom",
+          "sha256": "390ce22a9857947bc8be827ab6669301ae630c67bebad0ddbbff6ea02dac53e8",
+          "kind": "pom"
+        },
+        {
+          "name": "navigationevent-compose.aar",
+          "sha256": "582cce7129aa0f6db8b2c7e067268c1ae1341d8b30ff14cf3b4b59dd109e97c1",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.savedstate:savedstate:1.3.2",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/savedstate/savedstate/1.3.2/savedstate-1.3.2.pom",
+      "files": [
+        {
+          "name": "savedstate-1.3.2.pom",
+          "sha256": "950c897dca07c256745da55b861b9e8a57fe7a41758ba098a3c30821d941e7f8",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.savedstate:savedstate-android:1.3.2",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/savedstate/savedstate-android/1.3.2/savedstate-android-1.3.2.pom",
+      "files": [
+        {
+          "name": "savedstate-release.aar",
+          "sha256": "1e26f137705596d09d3f4f52559a29026d9a1a6688be7f1a948316a4f1e39b20",
+          "kind": "aar"
+        },
+        {
+          "name": "savedstate-android-1.3.2.pom",
+          "sha256": "df09758721e2fe8d5714a2101dcc0941ac824a424b08466e2818876851cdb826",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.savedstate:savedstate-compose:1.3.2",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/savedstate/savedstate-compose/1.3.2/savedstate-compose-1.3.2.pom",
+      "files": [
+        {
+          "name": "savedstate-compose-1.3.2.pom",
+          "sha256": "95ffc22b591ec37aeab8c7738f434d0ecd8831da2084f207396839a7f71c0083",
+          "kind": "pom"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.savedstate:savedstate-compose-android:1.3.2",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/savedstate/savedstate-compose-android/1.3.2/savedstate-compose-android-1.3.2.pom",
+      "files": [
+        {
+          "name": "savedstate-compose-android-1.3.2.pom",
+          "sha256": "701c5a665f8f3d29bd7c622481f6e34785338738e899de3c44c3ce362f03d90a",
+          "kind": "pom"
+        },
+        {
+          "name": "savedstate-compose.aar",
+          "sha256": "93426691f25441cc3179494b25f401a8a468aabbee4c40b90c0327413fd65523",
+          "kind": "aar"
+        }
+      ]
+    },
+    {
+      "coordinate": "androidx.savedstate:savedstate-ktx:1.3.2",
+      "pom_url": "https://dl.google.com/dl/android/maven2/androidx/savedstate/savedstate-ktx/1.3.2/savedstate-ktx-1.3.2.pom",
+      "files": [
+        {
+          "name": "savedstate-ktx-1.3.2.pom",
+          "sha256": "7c0d5190b3ea64e14782bcf93d9a8f336a026f5609bdaa1f35f63ff426015081",
+          "kind": "pom"
+        },
+        {
+          "name": "savedstate-ktx-1.3.2.aar",
+          "sha256": "1c300732ece8e9d0001fb19cc693b0f77f19e77cdf90ca5c4cd56d5e6951d02b",
+          "kind": "aar"
+        }
+      ]
+    }
+  ],
+  "upstream_source_archives": [
+    {
+      "coordinate": "androidx.compose.foundation:foundation-android:1.10.0",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/compose/foundation/foundation-android/1.10.0/foundation-android-1.10.0-sources.jar",
+      "sha256": "741aed4a8fb21b91c03238dc6eddc9c2b10f57b0770c9d711dbdc1b7cf61b7e5",
+      "bytes": 1084664
+    },
+    {
+      "coordinate": "androidx.compose.foundation:foundation-layout-android:1.10.0",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/compose/foundation/foundation-layout-android/1.10.0/foundation-layout-android-1.10.0-sources.jar",
+      "sha256": "2078cb0647875e51b6a84ada6bd120a81f29ab977899d457f2b11656f4248e50",
+      "bytes": 109065
+    },
+    {
+      "coordinate": "androidx.compose.material3:material3-android:1.4.0",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/compose/material3/material3-android/1.4.0/material3-android-1.4.0-sources.jar",
+      "sha256": "3e3209422a382566a780e2c1410edd866e4474498098fdbcf942c690ade1ddaa",
+      "bytes": 703105
+    },
+    {
+      "coordinate": "androidx.compose.ui:ui-android:1.10.0",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-android/1.10.0/ui-android-1.10.0-sources.jar",
+      "sha256": "a47331ac10dc5080b12f08d182fcdb2ce11158b689090aae7ab1a38832c5bdb2",
+      "bytes": 978444
+    },
+    {
+      "coordinate": "androidx.compose.ui:ui-text-android:1.10.0",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-text-android/1.10.0/ui-text-android-1.10.0-sources.jar",
+      "sha256": "9440b0cae0c4d7f811d840bde40c3eeeb466d53a78a266932fe5f4b3ce6503a5",
+      "bytes": 344100
+    },
+    {
+      "coordinate": "androidx.compose.ui:ui-graphics-android:1.10.0",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-graphics-android/1.10.0/ui-graphics-android-1.10.0-sources.jar",
+      "sha256": "963de783dc1a7f8274e9eb9e3125092238cd784d4470e78a34d01fcf1624c0e7",
+      "bytes": 276989
+    },
+    {
+      "coordinate": "androidx.compose.animation:animation-android:1.10.0",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/compose/animation/animation-android/1.10.0/animation-android-1.10.0-sources.jar",
+      "sha256": "a9491a146c1715139444d74876897186699f5c8e49edf66f42d7df721f0f781d",
+      "bytes": 96452
+    },
+    {
+      "coordinate": "androidx.compose.animation:animation-core-android:1.10.0",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/compose/animation/animation-core-android/1.10.0/animation-core-android-1.10.0-sources.jar",
+      "sha256": "12c1db9f74f744f4c33d04ab7272226dc1e67a1e5cfafbe808036718ac954fe1",
+      "bytes": 115164
+    },
+    {
+      "coordinate": "androidx.compose.runtime:runtime-android:1.10.0",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/compose/runtime/runtime-android/1.10.0/runtime-android-1.10.0-sources.jar",
+      "sha256": "7596b9060c0d4271a37d2b4ff5e60eaabb663469f86bfcf3429d49083c70703d",
+      "bytes": 462036
+    },
+    {
+      "coordinate": "androidx.compose.runtime:runtime-saveable-android:1.10.0",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/compose/runtime/runtime-saveable-android/1.10.0/runtime-saveable-android-1.10.0-sources.jar",
+      "sha256": "6d8d50f5fbdf4ae9ba0602328c9cd9e3ac1beaf64fe40d8890712d7b208fe39d",
+      "bytes": 22402
+    },
+    {
+      "coordinate": "androidx.compose.runtime:runtime-retain-android:1.10.0",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/compose/runtime/runtime-retain-android/1.10.0/runtime-retain-android-1.10.0-sources.jar",
+      "sha256": "5acfa51320a00d8db46a2c54f67beaf636c5320274f4d76b3499161b0b7eb018",
+      "bytes": 31336
+    },
+    {
+      "coordinate": "androidx.activity:activity-compose:1.12.2",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/activity/activity-compose/1.12.2/activity-compose-1.12.2-sources.jar",
+      "sha256": "fdb89810cdd86fa710bbadd6c895ff8917e316ee347b0e70ebb0fb3447bd51e9",
+      "bytes": 21223
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-runtime-compose-android:2.9.4",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-runtime-compose-android/2.9.4/lifecycle-runtime-compose-android-2.9.4-sources.jar",
+      "sha256": "60f77ad98798c212db32fc534e3e481f7f517b002ab293a31ba36f749dc7e8d1",
+      "bytes": 15314
+    },
+    {
+      "coordinate": "androidx.savedstate:savedstate-compose-android:1.3.2",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/savedstate/savedstate-compose-android/1.3.2/savedstate-compose-android-1.3.2-sources.jar",
+      "sha256": "e5e73c5468cb23da524156e64051417342e21c9bcfdefc1ae3a939a54c7ad5f5",
+      "bytes": 12210
+    }
+  ],
+  "upstream_source_declarations": {
+    "foundation-layout-android/Column.kt#Column": {
+      "archive": "androidx.compose.foundation:foundation-layout-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/layout/Column.kt",
+      "symbol": "Column",
+      "line": 82,
+      "file_sha256": "39db25a17bf1e24ae0e9b89c1fe38ecb453cf10b5d6b2e41d6d7ae2e411325d0"
+    },
+    "foundation-layout-android/Row.kt#Row": {
+      "archive": "androidx.compose.foundation:foundation-layout-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/layout/Row.kt",
+      "symbol": "Row",
+      "line": 94,
+      "file_sha256": "b99bebf459ee935dfe3e97dc9d2ae8dfdcd6236fb8f00951891bc0d058544d42"
+    },
+    "foundation-layout-android/FlowLayout.kt#FlowRow": {
+      "archive": "androidx.compose.foundation:foundation-layout-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/layout/FlowLayout.kt",
+      "symbol": "FlowRow",
+      "line": 91,
+      "file_sha256": "fd03b17b8961b0a7c782b8199588e9b183eb8801d5f9768c8ad97649b8e11895"
+    },
+    "foundation-layout-android/Box.kt#Box": {
+      "archive": "androidx.compose.foundation:foundation-layout-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/layout/Box.kt",
+      "symbol": "Box",
+      "line": 65,
+      "file_sha256": "b82a52e046622231f4dd5d2c0de41681410649397fc5ec3309cb69eeca022297"
+    },
+    "foundation-layout-android/BoxWithConstraints.kt#BoxWithConstraints": {
+      "archive": "androidx.compose.foundation:foundation-layout-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/layout/BoxWithConstraints.kt",
+      "symbol": "BoxWithConstraints",
+      "line": 57,
+      "file_sha256": "ac117f055442c48101122b2cebcdab73ee9cb2578ef80dfcfb539d20fcd76c24"
+    },
+    "foundation-layout-android/Size.kt#widthIn": {
+      "archive": "androidx.compose.foundation:foundation-layout-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/layout/Size.kt",
+      "symbol": "widthIn",
+      "line": 182,
+      "file_sha256": "a49e02712a0ed36c452caa62e2dddccc57b5618c59aafe3f2fdf6cf1924d94e8"
+    },
+    "foundation-layout-android/Padding.kt#padding": {
+      "archive": "androidx.compose.foundation:foundation-layout-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/layout/Padding.kt",
+      "symbol": "padding",
+      "line": 53,
+      "file_sha256": "15d748ab4dd97c2b8300ae6fb20066cf9cf43bd55bbb0facb71688128203f74d"
+    },
+    "foundation-layout-android/WindowInsets.kt#WindowInsets": {
+      "archive": "androidx.compose.foundation:foundation-layout-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/layout/WindowInsets.kt",
+      "symbol": "WindowInsets",
+      "line": 44,
+      "file_sha256": "640bae276ae048211be3c98bd731005a1d528088e45798304572318e90630224"
+    },
+    "foundation-android/LazyDsl.kt#LazyColumn": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/lazy/LazyDsl.kt",
+      "symbol": "LazyColumn",
+      "line": 388,
+      "file_sha256": "3cb30e3f06fab64d7a694d79ce338db9a00842f163f97dac98ff4f0de09a7913"
+    },
+    "foundation-android/LazyDsl.kt#LazyRow": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/lazy/LazyDsl.kt",
+      "symbol": "LazyRow",
+      "line": 328,
+      "file_sha256": "3cb30e3f06fab64d7a694d79ce338db9a00842f163f97dac98ff4f0de09a7913"
+    },
+    "foundation-android/LazyGridDsl.kt#LazyVerticalGrid": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/lazy/grid/LazyGridDsl.kt",
+      "symbol": "LazyVerticalGrid",
+      "line": 67,
+      "file_sha256": "2fc5ba5658f92c10516a0a27b52921f0ff4d1a68a473866c317cc06c3e10657a"
+    },
+    "foundation-android/LazyStaggeredGridDsl.kt#LazyVerticalStaggeredGrid": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/lazy/staggeredgrid/LazyStaggeredGridDsl.kt",
+      "symbol": "LazyVerticalStaggeredGrid",
+      "line": 70,
+      "file_sha256": "3303d35a9c34f8252950f80a66239ddadfc90d98fdba2ae771a9ce8fe9b2ddc5"
+    },
+    "foundation-android/Pager.kt#HorizontalPager": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/pager/Pager.kt",
+      "symbol": "HorizontalPager",
+      "line": 114,
+      "file_sha256": "0dd0bc518f807abbd1223232cf29404d07604cc2b58d8e92939a3e47014b701a"
+    },
+    "foundation-android/Pager.kt#VerticalPager": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/pager/Pager.kt",
+      "symbol": "VerticalPager",
+      "line": 244,
+      "file_sha256": "0dd0bc518f807abbd1223232cf29404d07604cc2b58d8e92939a3e47014b701a"
+    },
+    "foundation-android/LazyDsl.kt#LazyListScope": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/lazy/LazyDsl.kt",
+      "symbol": "LazyListScope",
+      "line": 34,
+      "file_sha256": "3cb30e3f06fab64d7a694d79ce338db9a00842f163f97dac98ff4f0de09a7913"
+    },
+    "material3-android/ListItem.kt#ListItem": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/ListItem.kt",
+      "symbol": "ListItem",
+      "line": 95,
+      "file_sha256": "1f658528ede9751c0e0fa67df2c5115c0364a1c2cab3222ba542e923ff4678db"
+    },
+    "material3-android/Button.kt#Button": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Button.kt",
+      "symbol": "Button",
+      "line": 111,
+      "file_sha256": "c379b30a478b84c2b16669f0a7f7e1f48292886c88b70f9bd4569d8221c06355"
+    },
+    "material3-android/IconButton.kt#IconButton": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/IconButton.kt",
+      "symbol": "IconButton",
+      "line": 87,
+      "file_sha256": "00b7dc8585d25ce48b46ae88d1af754f5668b57a0009817fc1b9cc6ae097ff7f"
+    },
+    "material3-android/FloatingActionButton.kt#FloatingActionButton": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/FloatingActionButton.kt",
+      "symbol": "FloatingActionButton",
+      "line": 109,
+      "file_sha256": "60364d266870aaf9de8e3c60b2f7cba1680ecf05443ac1996228a24171524474"
+    },
+    "material3-android/Chip.kt#AssistChip": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Chip.kt",
+      "symbol": "AssistChip",
+      "line": 134,
+      "file_sha256": "de7ace1d2db4a4ed512a3b7f4919645372069b22ac3573d42f4ce3b290797bd3"
+    },
+    "material3-android/Chip.kt#FilterChip": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Chip.kt",
+      "symbol": "FilterChip",
+      "line": 461,
+      "file_sha256": "de7ace1d2db4a4ed512a3b7f4919645372069b22ac3573d42f4ce3b290797bd3"
+    },
+    "material3-android/Chip.kt#InputChip": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Chip.kt",
+      "symbol": "InputChip",
+      "line": 632,
+      "file_sha256": "de7ace1d2db4a4ed512a3b7f4919645372069b22ac3573d42f4ce3b290797bd3"
+    },
+    "material3-android/RadioButton.kt#RadioButton": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/RadioButton.kt",
+      "symbol": "RadioButton",
+      "line": 74,
+      "file_sha256": "6e20b7465644b394a311bf98dee2d2c91889cfa917182343d73411985f4eb6d2"
+    },
+    "material3-android/SegmentedButton.kt#SegmentedButton": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/SegmentedButton.kt",
+      "symbol": "SegmentedButton",
+      "line": 130,
+      "file_sha256": "0155b56ccf5c96682949e66b3ac3cd6837e5966b2be331a19fa1843edceb9c55"
+    },
+    "material3-android/Checkbox.kt#TriStateCheckbox": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Checkbox.kt",
+      "symbol": "TriStateCheckbox",
+      "line": 208,
+      "file_sha256": "97589bf0c3512923e3cf32df285639a7f0ba208d8aff9175d5d8875d35ecd2ee"
+    },
+    "material3-android/Slider.kt#Slider": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Slider.kt",
+      "symbol": "Slider",
+      "line": 182,
+      "file_sha256": "7d934ad8abe4345e9e959dd84fd94826e91661d5e715671ad3c1bd99405d6a90"
+    },
+    "material3-android/Slider.kt#RangeSlider": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Slider.kt",
+      "symbol": "RangeSlider",
+      "line": 490,
+      "file_sha256": "7d934ad8abe4345e9e959dd84fd94826e91661d5e715671ad3c1bd99405d6a90"
+    },
+    "material3-android/Card.kt#Card": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Card.kt",
+      "symbol": "Card",
+      "line": 80,
+      "file_sha256": "787d3e376da19be07b42949b32899ce8887f0c001f0f9f274ddeab450d028ff6"
+    },
+    "material3-android/Surface.kt#Surface": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Surface.kt",
+      "symbol": "Surface",
+      "line": 96,
+      "file_sha256": "0e17037ad5ea3f97def48556ed3941715947ea639d333d0bed08806a9c636099"
+    },
+    "material3-android/Divider.kt#HorizontalDivider": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Divider.kt",
+      "symbol": "HorizontalDivider",
+      "line": 49,
+      "file_sha256": "94badb7d72502c8d557b1e82c3df457f2cf8784c22dc8d4906b9791eab3ac419"
+    },
+    "material3-android/AlertDialog.kt#AlertDialog": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/AlertDialog.kt",
+      "symbol": "AlertDialog",
+      "line": 95,
+      "file_sha256": "eea8a9328eb935eca69a87d8fc90a0ef18cdeed6fbfe48252aba626d674c9ac8"
+    },
+    "material3-android/ModalBottomSheet.kt#ModalBottomSheet": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/ModalBottomSheet.kt",
+      "symbol": "ModalBottomSheet",
+      "line": 123,
+      "file_sha256": "d8cb7dba0d34bf6ab7dcda1f4cfe0d7ab065a8e3aee9691b1c3972e6f22fc18d"
+    },
+    "material3-android/Tooltip.kt#PlainTooltip": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Tooltip.kt",
+      "symbol": "PlainTooltip",
+      "line": 379,
+      "file_sha256": "d4230decd5a432b896ab8a2ed75f5d32a8e19dc6d7ab793019424abcf7da87bf"
+    },
+    "ui-android/Popup.kt#Popup": {
+      "archive": "androidx.compose.ui:ui-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/window/Popup.kt",
+      "symbol": "Popup",
+      "line": 124,
+      "file_sha256": "061ebbd3a93bb6d96cbeafb05f2f3854c9f45c9ce4428e44b73505536de385c3"
+    },
+    "material3-android/Scaffold.kt#Scaffold": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Scaffold.kt",
+      "symbol": "Scaffold",
+      "line": 83,
+      "file_sha256": "135d9e9a3ada4cb52671b6dced12b4c8a3a014fe8dd8100a9dd38caa8452927e"
+    },
+    "material3-android/AppBar.kt#TopAppBar": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/AppBar.kt",
+      "symbol": "TopAppBar",
+      "line": 160,
+      "file_sha256": "a2fc1d9e990df4c4725a0925e2b67c31157d5771c620cd56c5de9c8b1b0f5fec"
+    },
+    "material3-android/NavigationBar.kt#NavigationBar": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/NavigationBar.kt",
+      "symbol": "NavigationBar",
+      "line": 112,
+      "file_sha256": "05196bf694271e4944d75bc1fc8a0eddf7d1b802b458647db50eac53d16cefd7"
+    },
+    "material3-android/NavigationRail.kt#NavigationRail": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/NavigationRail.kt",
+      "symbol": "NavigationRail",
+      "line": 120,
+      "file_sha256": "7f576a14cc57dc5260acbae4e469427e0e6f0182bea8d32d2ec72b1e97f5f58a"
+    },
+    "material3-android/NavigationDrawer.kt#ModalNavigationDrawer": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/NavigationDrawer.kt",
+      "symbol": "ModalNavigationDrawer",
+      "line": 332,
+      "file_sha256": "f2db43e468373a9360e518dee0330de23377871dac98bf450979cb14d36f127a"
+    },
+    "material3-android/Menu.kt#DropdownMenu": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Menu.kt",
+      "symbol": "DropdownMenu",
+      "line": 123,
+      "file_sha256": "9fc1776c3c54d76dacffe9103ef33b5256560cfc7bf2c35acc7331b2a928fcbb"
+    },
+    "material3-android/Tab.kt#Tab": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Tab.kt",
+      "symbol": "Tab",
+      "line": 91,
+      "file_sha256": "0725804cacef2533e1a1e5c9ccf4e1669d1760020776b833da6533e42c1a35b6"
+    },
+    "material3-android/TabRow.kt#ScrollableTabRow": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/TabRow.kt",
+      "symbol": "ScrollableTabRow",
+      "line": 1400,
+      "file_sha256": "c1c902a7299b7ba80e5086ab7d9cefc510efee7dcb4eeee856210ccb8200ee82"
+    },
+    "material3-android/ProgressIndicator.kt#LinearProgressIndicator": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/ProgressIndicator.kt",
+      "symbol": "LinearProgressIndicator",
+      "line": 95,
+      "file_sha256": "d0e4627fef5b340b1c4750cc69e7857fa0db7a2502d165bd1f17f5797d4af718"
+    },
+    "material3-android/ProgressIndicator.kt#CircularProgressIndicator": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/ProgressIndicator.kt",
+      "symbol": "CircularProgressIndicator",
+      "line": 474,
+      "file_sha256": "d0e4627fef5b340b1c4750cc69e7857fa0db7a2502d165bd1f17f5797d4af718"
+    },
+    "material3-android/Badge.kt#Badge": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Badge.kt",
+      "symbol": "Badge",
+      "line": 151,
+      "file_sha256": "744103a846d9cf6cd933b4843e612bac3db3b39a8f49464d1d9a935094e42b32"
+    },
+    "material3-android/SnackbarHost.kt#SnackbarHost": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/SnackbarHost.kt",
+      "symbol": "SnackbarHost",
+      "line": 217,
+      "file_sha256": "a409aeac1e9c86bf51f99b4f2cef19fd2368de225f6b5f643ba415b7fd2c8cb5"
+    },
+    "material3-android/DatePicker.kt#DatePicker": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/DatePicker.kt",
+      "symbol": "DatePicker",
+      "line": 168,
+      "file_sha256": "1b1a9a12c4104b722b3e2563b2355bde5de66670d1cc9003e6fe357d4a5b4952"
+    },
+    "material3-android/TimePicker.kt#TimePicker": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/TimePicker.kt",
+      "symbol": "TimePicker",
+      "line": 220,
+      "file_sha256": "2ff796273fc2b563ee85576cfc47d0f443aaa2fec14c7037aaae6593579e8e1c"
+    },
+    "material3-android/SearchBar.kt#SearchBar": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/SearchBar.kt",
+      "symbol": "SearchBar",
+      "line": 225,
+      "file_sha256": "aa951a21edf55485dee0b3b6b9ecea0656ec1d99d35d2caa60abf04dd73d36f4"
+    },
+    "material3-android/Carousel.kt#HorizontalMultiBrowseCarousel": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/carousel/Carousel.kt",
+      "symbol": "HorizontalMultiBrowseCarousel",
+      "line": 109,
+      "file_sha256": "bb455e398677802268aaef2b9a2ab7f8a8a4b4c76692e176e598137b3c5519b8"
+    },
+    "material3-android/PullToRefresh.kt#PullToRefreshBox": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/pulltorefresh/PullToRefresh.kt",
+      "symbol": "PullToRefreshBox",
+      "line": 120,
+      "file_sha256": "a0c53b2d61af8b02ad1a80e186ea06358e27bcfe23debb785551fd16def9f0b9"
+    },
+    "foundation-android/BasicText.kt#BasicText": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/text/BasicText.kt",
+      "symbol": "BasicText",
+      "line": 92,
+      "file_sha256": "92df0f194316e605dca53913ee2fd05d274441648550715ac966893513e0895c"
+    },
+    "ui-text-android/TextStyle.kt#TextStyle": {
+      "archive": "androidx.compose.ui:ui-text-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/text/TextStyle.kt",
+      "symbol": "TextStyle",
+      "line": 57,
+      "file_sha256": "b182e86d3b4e782d265b5e7eaa67c234074c73e64723fa2cecf40159d519c17b"
+    },
+    "ui-text-android/AnnotatedString.kt#AnnotatedString": {
+      "archive": "androidx.compose.ui:ui-text-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/text/AnnotatedString.kt",
+      "symbol": "AnnotatedString",
+      "line": 49,
+      "file_sha256": "0c561ff1e8d3a7b59338eb8465745ae5085425d93a1c5f3c62861905b043bff1"
+    },
+    "ui-text-android/LinkAnnotation.kt#LinkAnnotation": {
+      "archive": "androidx.compose.ui:ui-text-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/text/LinkAnnotation.kt",
+      "symbol": "LinkAnnotation",
+      "line": 24,
+      "file_sha256": "24956b2d39c841b0859f82896c338f6347fcf62069ef9f5fda890e99f1e1a816"
+    },
+    "foundation-android/SelectionContainer.kt#SelectionContainer": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/text/selection/SelectionContainer.kt",
+      "symbol": "SelectionContainer",
+      "line": 57,
+      "file_sha256": "c8174fae75e9344c919286ac574e0ad88ff06b9f274ad74354ce45c6ac715ea2"
+    },
+    "foundation-android/BasicTextField.kt#BasicTextField": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/text/BasicTextField.kt",
+      "symbol": "BasicTextField",
+      "line": 184,
+      "file_sha256": "a2db39cd0218e314de85a4981e4b301701d0b55b3b286a51b73c6c4d023a247f"
+    },
+    "foundation-android/BasicSecureTextField.kt#BasicSecureTextField": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/text/BasicSecureTextField.kt",
+      "symbol": "BasicSecureTextField",
+      "line": 122,
+      "file_sha256": "ba2ba363e6ad0ac51f172f0477ecd612e1c6754fd158caefc915a653eccbe10a"
+    },
+    "foundation-android/TextFieldState.kt#TextFieldState": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/text/input/TextFieldState.kt",
+      "symbol": "TextFieldState",
+      "line": 60,
+      "file_sha256": "73e1143a7282a47f9f2ea745b725da5dbf54059fca8abcef3bb590766b245174"
+    },
+    "material3-android/MaterialTheme.kt#MaterialTheme": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/MaterialTheme.kt",
+      "symbol": "MaterialTheme",
+      "line": 54,
+      "file_sha256": "980b62a57cc0c49605d9751fd67865c31b218f3a1336918e82115bf3ec415569"
+    },
+    "material3-android/ColorScheme.kt#ColorScheme": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/ColorScheme.kt",
+      "symbol": "ColorScheme",
+      "line": 148,
+      "file_sha256": "71514025bb08c75bf69cca52d49150ff0a550caf7634515b4383e5d8afb8442a"
+    },
+    "material3-android/Typography.kt#Typography": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Typography.kt",
+      "symbol": "Typography",
+      "line": 87,
+      "file_sha256": "cb5ef01f5ab733e2a65036999a3d20907c1c38e91f87f6914235a0f8124557f4"
+    },
+    "material3-android/Shapes.kt#Shapes": {
+      "archive": "androidx.compose.material3:material3-android:1.4.0",
+      "path": "commonMain/androidx/compose/material3/Shapes.kt",
+      "symbol": "Shapes",
+      "line": 73,
+      "file_sha256": "55a896427c50483396aa7c0fb36ddedb22246a2123d276826dfb5219de11f82d"
+    },
+    "ui-graphics-android/Shape.kt#Shape": {
+      "archive": "androidx.compose.ui:ui-graphics-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/graphics/Shape.kt",
+      "symbol": "Shape",
+      "line": 26,
+      "file_sha256": "7e9d8f53a002606cb7ae06e957c4a4c9e3b62fe45777ba03e7e2686647d2ebb3"
+    },
+    "foundation-android/TapGestureDetector.kt#detectTapGestures": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/gestures/TapGestureDetector.kt",
+      "symbol": "detectTapGestures",
+      "line": 95,
+      "file_sha256": "1b5d32947a1210c4411d9952053a74847bbeaa5154005581c05c965af675582d"
+    },
+    "foundation-android/DragGestureDetector.kt#detectDragGestures": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/gestures/DragGestureDetector.kt",
+      "symbol": "detectDragGestures",
+      "line": 171,
+      "file_sha256": "910077e1e222ba6e8b4ff8b27b1d4c1af95637a2593f70424c9250de8ee792a5"
+    },
+    "foundation-android/Transformable.kt#transformable": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/gestures/Transformable.kt",
+      "symbol": "transformable",
+      "line": 71,
+      "file_sha256": "265901a1eaf98abf0351ced5e4362c994241f8ceedd36f3ced30ffd83f9e9f1a"
+    },
+    "ui-android/PointerEvent.kt#PointerEvent": {
+      "archive": "androidx.compose.ui:ui-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/input/pointer/PointerEvent.kt",
+      "symbol": "PointerEvent",
+      "line": 104,
+      "file_sha256": "8370bf7246ae422e974969b04afc4647f8128f7be18fd1e852a51581dc8c95d1"
+    },
+    "ui-android/FocusRequester.kt#FocusRequester": {
+      "archive": "androidx.compose.ui:ui-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/focus/FocusRequester.kt",
+      "symbol": "FocusRequester",
+      "line": 54,
+      "file_sha256": "422ce9372e696b2de56d37e9f07e5777de0c32885501170d696c11663611d797"
+    },
+    "ui-android/KeyInputModifier.kt#onKeyEvent": {
+      "archive": "androidx.compose.ui:ui-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/input/key/KeyInputModifier.kt",
+      "symbol": "onKeyEvent",
+      "line": 32,
+      "file_sha256": "8e893e45fe3864954b5dfc97b5e837b6270540e8fecfb4527317c7fa60288f6a"
+    },
+    "ui-android/SoftwareKeyboardController.kt#SoftwareKeyboardController": {
+      "archive": "androidx.compose.ui:ui-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/platform/SoftwareKeyboardController.kt",
+      "symbol": "SoftwareKeyboardController",
+      "line": 26,
+      "file_sha256": "831e43d1ab50cb3c0f0fe120208317bc3b3bf7de02056bb5ebeeea6477d2f779"
+    },
+    "ui-android/Clipboard.kt#Clipboard": {
+      "archive": "androidx.compose.ui:ui-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/platform/Clipboard.kt",
+      "symbol": "Clipboard",
+      "line": 19,
+      "file_sha256": "a8a8b2e7f7a091fe3a8379ebdd3e18d8df6ff7e9c0dc0d419b30bdacd2b7af66"
+    },
+    "ui-android/ContentType.kt#ContentType": {
+      "archive": "androidx.compose.ui:ui-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/autofill/ContentType.kt",
+      "symbol": "ContentType",
+      "line": 26,
+      "file_sha256": "9d0d90ea9c4e4e8e4387bcec5eb55ed11f32ebb5ab9a3de2be62b1eb2e221e55"
+    },
+    "ui-android/SemanticsProperties.kt#SemanticsProperties": {
+      "archive": "androidx.compose.ui:ui-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/semantics/SemanticsProperties.kt",
+      "symbol": "SemanticsProperties",
+      "line": 39,
+      "file_sha256": "f89ddedc3e03df4ca079f239dde8d1567c13a8f626c2b13a77e94d7fa2aad9ec"
+    },
+    "foundation-android/Canvas.kt#Canvas": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/Canvas.kt",
+      "symbol": "Canvas",
+      "line": 41,
+      "file_sha256": "a021fe7e88c488a3358bc2a96634a103703fbb1d0f0277e4b51b6929d4d29d8c"
+    },
+    "ui-graphics-android/Path.kt#Path": {
+      "archive": "androidx.compose.ui:ui-graphics-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/graphics/Path.kt",
+      "symbol": "Path",
+      "line": 24,
+      "file_sha256": "67cd64116f2705a0ca7f53fd63538da9f159e2cd211c0f583c21b6435dc56a66"
+    },
+    "ui-graphics-android/Brush.kt#Brush": {
+      "archive": "androidx.compose.ui:ui-graphics-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/graphics/Brush.kt",
+      "symbol": "Brush",
+      "line": 35,
+      "file_sha256": "bbc4159dd45372543e06a3d2fdd03f322b6c93afb5a4639c6bc34c20c20b026d"
+    },
+    "foundation-android/Image.kt#Image": {
+      "archive": "androidx.compose.foundation:foundation-android:1.10.0",
+      "path": "commonMain/androidx/compose/foundation/Image.kt",
+      "symbol": "Image",
+      "line": 91,
+      "file_sha256": "c09bb691790cb42475d0b2fdbe599ec0bfcbe1cce7ddc283b45adce00a0393ba"
+    },
+    "ui-android/ImageVector.kt#ImageVector": {
+      "archive": "androidx.compose.ui:ui-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/graphics/vector/ImageVector.kt",
+      "symbol": "ImageVector",
+      "line": 37,
+      "file_sha256": "3951104bf8e7dcb8356c527ba690af8eafba87c5ef0966b31086bb1b12e31051"
+    },
+    "ui-android/GraphicsLayerModifier.kt#graphicsLayer": {
+      "archive": "androidx.compose.ui:ui-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/graphics/GraphicsLayerModifier.kt",
+      "symbol": "graphicsLayer",
+      "line": 91,
+      "file_sha256": "5391748efd3e73c2d2a2b14064d86d9011b086647366cb7624c549479174c9f2"
+    },
+    "ui-graphics-android/RenderEffect.kt#RenderEffect": {
+      "archive": "androidx.compose.ui:ui-graphics-android:1.10.0",
+      "path": "commonMain/androidx/compose/ui/graphics/RenderEffect.kt",
+      "symbol": "RenderEffect",
+      "line": 28,
+      "file_sha256": "8d7820c1e03d6e66a0fcd5664ed15493daad8774310b046ae89a4447c39aa0c6"
+    },
+    "animation-android/AnimatedVisibility.kt#AnimatedVisibility": {
+      "archive": "androidx.compose.animation:animation-android:1.10.0",
+      "path": "commonMain/androidx/compose/animation/AnimatedVisibility.kt",
+      "symbol": "AnimatedVisibility",
+      "line": 124,
+      "file_sha256": "10178f64897f2c8742ec0bca58ba12caf79356ce6254551704457ea4e4e45b3c"
+    },
+    "animation-android/AnimatedContent.kt#AnimatedContent": {
+      "archive": "androidx.compose.animation:animation-android:1.10.0",
+      "path": "commonMain/androidx/compose/animation/AnimatedContent.kt",
+      "symbol": "AnimatedContent",
+      "line": 129,
+      "file_sha256": "e1585722c7d1c7484309e21cdef1d34d9b01e7d17114e732ad35d1dcf95dc287"
+    },
+    "animation-android/AnimationModifier.kt#animateContentSize": {
+      "archive": "androidx.compose.animation:animation-android:1.10.0",
+      "path": "commonMain/androidx/compose/animation/AnimationModifier.kt",
+      "symbol": "animateContentSize",
+      "line": 69,
+      "file_sha256": "49b5c3096f0e3c0a8dc267538ab864328271ef8e5c2de098e073079d11ea1d23"
+    },
+    "animation-core-android/Animatable.kt#Animatable": {
+      "archive": "androidx.compose.animation:animation-core-android:1.10.0",
+      "path": "commonMain/androidx/compose/animation/core/Animatable.kt",
+      "symbol": "Animatable",
+      "line": 50,
+      "file_sha256": "1561378b721a147fd9b016fc1ec70cfe7bd3f89f64abf0aac92ebb538179bcc7"
+    },
+    "animation-core-android/AnimateAsState.kt#animateFloatAsState": {
+      "archive": "androidx.compose.animation:animation-core-android:1.10.0",
+      "path": "commonMain/androidx/compose/animation/core/AnimateAsState.kt",
+      "symbol": "animateFloatAsState",
+      "line": 62,
+      "file_sha256": "90b923cecebf80140db4ca88a118cf4768e91725d3573bdd10da2bdf045cc282"
+    },
+    "animation-core-android/InfiniteTransition.kt#rememberInfiniteTransition": {
+      "archive": "androidx.compose.animation:animation-core-android:1.10.0",
+      "path": "commonMain/androidx/compose/animation/core/InfiniteTransition.kt",
+      "symbol": "rememberInfiniteTransition",
+      "line": 45,
+      "file_sha256": "570ff75ce3e826eb0ed0cc14e5db98cabf2f02885afa1f70216aa7cf267fc801"
+    },
+    "animation-android/SharedTransitionScope.kt#SharedTransitionLayout": {
+      "archive": "androidx.compose.animation:animation-android:1.10.0",
+      "path": "commonMain/androidx/compose/animation/SharedTransitionScope.kt",
+      "symbol": "SharedTransitionLayout",
+      "line": 118,
+      "file_sha256": "a897fdfa336fdcb7a0cf505e505626c27faa3d10e3592ef1401fd3f37029399b"
+    },
+    "runtime-android/Composables.kt#remember": {
+      "archive": "androidx.compose.runtime:runtime-android:1.10.0",
+      "path": "commonMain/androidx/compose/runtime/Composables.kt",
+      "symbol": "remember",
+      "line": 24,
+      "file_sha256": "8a4e6891107cadeb47795ba3631edafb514f5a918c073fe1caba508274a643bf"
+    },
+    "runtime-android/SnapshotState.kt#mutableStateOf": {
+      "archive": "androidx.compose.runtime:runtime-android:1.10.0",
+      "path": "commonMain/androidx/compose/runtime/SnapshotState.kt",
+      "symbol": "mutableStateOf",
+      "line": 62,
+      "file_sha256": "49cdcb601a745210e508e9a610051b62402dd8a84a63b7b84bff65a3ee4c50af"
+    },
+    "runtime-android/DerivedState.kt#derivedStateOf": {
+      "archive": "androidx.compose.runtime:runtime-android:1.10.0",
+      "path": "commonMain/androidx/compose/runtime/DerivedState.kt",
+      "symbol": "derivedStateOf",
+      "line": 335,
+      "file_sha256": "38a824b185d1a7e8faa666076f6bb668c033ebade7fb81cc358a43f5a18e7856"
+    },
+    "runtime-android/Effects.kt#LaunchedEffect": {
+      "archive": "androidx.compose.runtime:runtime-android:1.10.0",
+      "path": "commonMain/androidx/compose/runtime/Effects.kt",
+      "symbol": "LaunchedEffect",
+      "line": 317,
+      "file_sha256": "3523b052dbdcc8cf591907267771833e485e6b28c14883b8ef0fb2dc221a0f7a"
+    },
+    "runtime-android/Effects.kt#DisposableEffect": {
+      "archive": "androidx.compose.runtime:runtime-android:1.10.0",
+      "path": "commonMain/androidx/compose/runtime/Effects.kt",
+      "symbol": "DisposableEffect",
+      "line": 120,
+      "file_sha256": "3523b052dbdcc8cf591907267771833e485e6b28c14883b8ef0fb2dc221a0f7a"
+    },
+    "runtime-android/SnapshotFlow.kt#snapshotFlow": {
+      "archive": "androidx.compose.runtime:runtime-android:1.10.0",
+      "path": "commonMain/androidx/compose/runtime/SnapshotFlow.kt",
+      "symbol": "snapshotFlow",
+      "line": 109,
+      "file_sha256": "0c14cc1cb5afd7c66a3b461d5062575639cc07b2b5083fdf21bb67e92b63a66d"
+    },
+    "runtime-saveable-android/RememberSaveable.kt#rememberSaveable": {
+      "archive": "androidx.compose.runtime:runtime-saveable-android:1.10.0",
+      "path": "commonMain/androidx/compose/runtime/saveable/RememberSaveable.kt",
+      "symbol": "rememberSaveable",
+      "line": 75,
+      "file_sha256": "d6fc0e8522179d33229668e038e10c944a92dbba95fbbd5e7bc10307829ceb38"
+    },
+    "runtime-retain-android/Retain.kt#retain": {
+      "archive": "androidx.compose.runtime:runtime-retain-android:1.10.0",
+      "path": "commonMain/androidx/compose/runtime/retain/Retain.kt",
+      "symbol": "retain",
+      "line": 97,
+      "file_sha256": "92ea75c1d36f49e81f74321b6d0268673e3912ffe913024ade6f416528017dd1"
+    },
+    "savedstate-compose-android/LocalSavedStateRegistryOwner.kt#LocalSavedStateRegistryOwner": {
+      "archive": "androidx.savedstate:savedstate-compose-android:1.3.2",
+      "path": "commonMain/androidx/savedstate/compose/LocalSavedStateRegistryOwner.kt",
+      "symbol": "LocalSavedStateRegistryOwner",
+      "line": 23,
+      "file_sha256": "26a634ab165d2aae999c956e4c3c2547e48b065797690ca8a593127dddd68f47"
+    },
+    "activity-compose/BackHandler.kt#BackHandler": {
+      "archive": "androidx.activity:activity-compose:1.12.2",
+      "path": "androidx/activity/compose/BackHandler.kt",
+      "symbol": "BackHandler",
+      "line": 107,
+      "file_sha256": "383447ff076f065f57feac984efea57b8349af89ffbf8582d4d29c80fafbb735"
+    },
+    "activity-compose/PredictiveBackHandler.kt#PredictiveBackHandler": {
+      "archive": "androidx.activity:activity-compose:1.12.2",
+      "path": "androidx/activity/compose/PredictiveBackHandler.kt",
+      "symbol": "PredictiveBackHandler",
+      "line": 112,
+      "file_sha256": "a258a9ffc4afb144b3f0eff7fa4303f9b1f123cdf694f015c1a0c97ebce83fbf"
+    },
+    "activity-compose/ActivityResultRegistry.kt#rememberLauncherForActivityResult": {
+      "archive": "androidx.activity:activity-compose:1.12.2",
+      "path": "androidx/activity/compose/ActivityResultRegistry.kt",
+      "symbol": "rememberLauncherForActivityResult",
+      "line": 80,
+      "file_sha256": "0eeadc877c11aa4f911ae9a3e0c7b2e5a57c4a8c9ce5fc031f3422e001b32f31"
+    },
+    "lifecycle-runtime-compose-android/FlowExt.kt#collectAsStateWithLifecycle": {
+      "archive": "androidx.lifecycle:lifecycle-runtime-compose-android:2.9.4",
+      "path": "commonMain/androidx/lifecycle/compose/FlowExt.kt",
+      "symbol": "collectAsStateWithLifecycle",
+      "line": 58,
+      "file_sha256": "b6617fdaf8016362d6473988cd0308290f7587d9a3e43875043ab88c059d6f86"
+    },
+    "lifecycle-runtime-compose-android/LifecycleEffect.kt#LifecycleStartEffect": {
+      "archive": "androidx.lifecycle:lifecycle-runtime-compose-android:2.9.4",
+      "path": "commonMain/androidx/lifecycle/compose/LifecycleEffect.kt",
+      "symbol": "LifecycleStartEffect",
+      "line": 126,
+      "file_sha256": "e8246521d1cd527eb44f1edd7a98d5a64153f1651c52e6c0fd1ac2caace4e0f0"
+    },
+    "ui-android/AndroidView.android.kt#AndroidView": {
+      "archive": "androidx.compose.ui:ui-android:1.10.0",
+      "path": "androidMain/androidx/compose/ui/viewinterop/AndroidView.android.kt",
+      "symbol": "AndroidView",
+      "line": 101,
+      "file_sha256": "734200eb27f7db1f35ccd90ca0b0f82e49b31ad6dfc9f4f2421d4de492336256"
+    }
+  },
+  "native_source_references": {
+    "ToolUiCatalog.kt#components": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/ToolUiCatalog.kt",
+      "symbol": "components",
+      "line": 38
+    },
+    "ToolUiCatalog.kt#validate": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/ToolUiCatalog.kt",
+      "symbol": "validate",
+      "line": 118
+    },
+    "ToolUiCatalog.kt#validateAction": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/ToolUiCatalog.kt",
+      "symbol": "validateAction",
+      "line": 436
+    },
+    "NativeToolUi.kt#NativeNode": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt",
+      "symbol": "NativeNode",
+      "line": 83
+    },
+    "NativeToolUi.kt#NativeRecords": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt",
+      "symbol": "NativeRecords",
+      "line": 370
+    },
+    "NativeToolUi.kt#NativeInput": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt",
+      "symbol": "NativeInput",
+      "line": 353
+    },
+    "NativeToolUi.kt#NativePreset": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt",
+      "symbol": "NativePreset",
+      "line": 474
+    },
+    "NativeUiMotion.kt#NativeMotion": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/NativeUiMotion.kt",
+      "symbol": "NativeMotion",
+      "line": 59
+    },
+    "NativeUiMotion.kt#NativeTransform": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/NativeUiMotion.kt",
+      "symbol": "NativeTransform",
+      "line": 85
+    },
+    "NativeUiMotion.kt#NativeStage": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/NativeUiMotion.kt",
+      "symbol": "NativeStage",
+      "line": 99
+    },
+    "GraphicsContract.kt#GraphicsContract": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/GraphicsContract.kt",
+      "symbol": "GraphicsContract",
+      "line": 9
+    },
+    "ArtifactProtocol.kt#ArtifactProtocol": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/ArtifactProtocol.kt",
+      "symbol": "ArtifactProtocol",
+      "line": 6
+    },
+    "ToolSpec.kt#ToolSpec": {
+      "path": "app/src/main/java/com/alpha/assistant/tools/ToolSpec.kt",
+      "symbol": "ToolSpec",
+      "line": 35
+    }
+  },
+  "native_source_sha256": {
+    "app/build.gradle.kts": "6aadbbc09c01f83b445b1a70ac874a52be6d428d5b06ad2d53366edd3009649a",
+    "app/src/main/java/com/alpha/assistant/tools/ArtifactProtocol.kt": "9b65f56f6b824ec984d55c285fe6b5e3af466c1dfe80756127a8cc4a339c8a3c",
+    "app/src/main/java/com/alpha/assistant/tools/GraphicsContract.kt": "3fc077b915e82dcc839771f394f6a94f4a3943c68947f566e0987546f55e41e4",
+    "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt": "2cdd89d572bdc1c5a1874a190b16fec2117ee3b81a5e1002afe1e609f78e0f48",
+    "app/src/main/java/com/alpha/assistant/tools/NativeUiMotion.kt": "03556159417714a566b8ca962fac703c40830de3f1f38ea7826d2e1ee715c916",
+    "app/src/main/java/com/alpha/assistant/tools/ToolSpec.kt": "994ee3716aece837847030c2907b12001c4c9c49f9a3be62bb139687597cb449",
+    "app/src/main/java/com/alpha/assistant/tools/ToolUiCatalog.kt": "ec434e3d677055ce79524a6959c2e161ce034feb25019b204760bb50d80e2e49",
+    "build.gradle.kts": "550f33bcb1803a424b0f80a42c8f5dae40c75126bbfdb43769a69e20c2ad67c5"
+  },
+  "catalog_types": [
+    "backHandler",
+    "badge",
+    "banner",
+    "button",
+    "calendar",
+    "card",
+    "chart",
+    "checkbox",
+    "column",
+    "dateInput",
+    "divider",
+    "emptyState",
+    "fact",
+    "facts",
+    "form",
+    "grid",
+    "groupedList",
+    "icon",
+    "image",
+    "input",
+    "list",
+    "listGroup",
+    "listItem",
+    "medicine",
+    "metric",
+    "motion",
+    "navigation",
+    "numberInput",
+    "progress",
+    "progressRing",
+    "row",
+    "scroll",
+    "section",
+    "select",
+    "skeleton",
+    "slider",
+    "snackbar",
+    "spacer",
+    "spinner",
+    "stage",
+    "table",
+    "tabs",
+    "text",
+    "theme",
+    "timeInput",
+    "timeline",
+    "timelineItem",
+    "toggle",
+    "transform"
+  ],
+  "excluded_unresolved_modules": [
+    "androidx.compose.material:material",
+    "androidx.compose.material:material-icons-core",
+    "androidx.compose.material:material-icons-extended",
+    "androidx.compose.ui:ui-tooling",
+    "androidx.compose.ui:ui-tooling-preview",
+    "androidx.compose.ui:ui-test",
+    "androidx.compose.ui:ui-test-junit4",
+    "androidx.compose.ui:ui-test-manifest",
+    "androidx.compose.ui:ui-viewbinding",
+    "androidx.navigation:navigation-compose",
+    "androidx.compose.material3.adaptive:adaptive"
+  ],
+  "evidence_limits": [
+    "No new rendered workflow, device operation, provider call, physical latency, or physical frame-rate measurement ran.",
+    "Earlier continuation evidence records 262 instrumentation tests and incomplete real scenarios. Those results do not certify every family.",
+    "Controller cancellation leak and navigation diagnostic defect remain unresolved. They are outside this package.",
+    "This is the pre-extension snapshot. Later source changes require new evidence and explicit status updates.",
+    "Public source archives match resolved coordinates. Their presence does not expose arbitrary composables, generated Kotlin, or Android objects."
+  ],
+  "existing_evidence": [
+    "evidence/compose-execution/continuation-20261103.md",
+    "evidence/compose-execution/coverage-verification.md",
+    "docs/parity/compose-acceptance.md",
+    "docs/parity/compose-coverage.json"
+  ]
+}

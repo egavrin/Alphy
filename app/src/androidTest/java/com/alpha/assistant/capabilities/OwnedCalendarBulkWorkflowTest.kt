@@ -18,7 +18,7 @@ class OwnedCalendarBulkWorkflowTest {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val name="calendar-bulk-${UUID.randomUUID()}.db";val store=ToolStore(context,name)
         try {SyntheticOwnedCalendar(context).use {fixture ->
-            val spec=ToolSpec.parse(JSONObject().put("formatVersion",2).put("title","Bulk calendar fixture").put("description","")
+            val spec=ToolSpec.parse(JSONObject().put("formatVersion",3).put("title","Bulk calendar fixture").put("description","")
                 .put("capabilities",JSONArray(OwnedCalendarContract.ids.toList())).put("stateSchema",JSONObject("{\"ready\":\"boolean\"}")).put("initialState",JSONObject("{\"ready\":true}"))
                 .put("ui",JSONObject("{\"type\":\"calendar\",\"action\":\"removeAll\",\"capability\":\"calendar.deleteAllOwned\",\"args\":{\"version\":1}}"))
                 .put("source","return {state:input.state};").toString())

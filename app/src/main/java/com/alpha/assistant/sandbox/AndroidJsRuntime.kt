@@ -146,15 +146,19 @@ internal class AndroidJsRuntime internal constructor(context: Context,private va
             val seq=synchronized(stateLock) {++sequence}
             try {
                 val result=suspendCancellableCoroutine<String> {continuation ->
+                    val startedAtNs=System.nanoTime()
+                    val deadlineNs=TimeUnit.MILLISECONDS.toNanos(deadlineMs)
                     val completed=AtomicBoolean(false)
+                    fun expire() {
+                        close("TIMEOUT")
+                        if(continuation.isActive)continuation.resumeWithException(RuntimeFailure(status ?: "TIMEOUT"))
+                    }
                     val timeout=watchdog.schedule({
-                        if(completed.compareAndSet(false,true)) {
-                            close("TIMEOUT")
-                            if(continuation.isActive)continuation.resumeWithException(RuntimeFailure("TIMEOUT"))
-                        }
+                        if(completed.compareAndSet(false,true))expire()
                     },deadlineMs,TimeUnit.MILLISECONDS)
                     continuation.invokeOnCancellation {completed.set(true);timeout.cancel(false);close("CLOSED")}
                     try {
+                        if(!continuation.isActive)return@suspendCancellableCoroutine
                         val future=native.evaluateJavaScriptAsync(source)
                         future.addListener({
                             if(completed.compareAndSet(false,true)) {
@@ -162,8 +166,12 @@ internal class AndroidJsRuntime internal constructor(context: Context,private va
                                 if(continuation.isActive) {
                                     val stale=synchronized(stateLock) {terminal!=null || sequence!=seq}
                                     if(stale)continuation.resumeWithException(RuntimeFailure(status ?: "CLOSED"))
-                                    else try {continuation.resume(future.get())}
-                                        catch(failure: Exception) {continuation.resumeWithException(cause(failure))}
+                                    else {
+                                        val output=runCatching {future.get()}
+                                        // A delayed watchdog must not let a late callback publish its result.
+                                        if(System.nanoTime()-startedAtNs>=deadlineNs)expire()
+                                        else output.fold(continuation::resume) {continuation.resumeWithException(cause(it))}
+                                    }
                                 }
                             }
                         },direct)
@@ -202,7 +210,7 @@ internal class AndroidJsRuntime internal constructor(context: Context,private va
         fun get(context: Context): AndroidJsRuntime=instance ?: synchronized(this) {instance ?: AndroidJsRuntime(context).also {instance=it}}
         internal fun hasRequiredFeatures(supports: (String)->Boolean)=listOf(JavaScriptSandbox.JS_FEATURE_ISOLATE_MAX_HEAP_SIZE,
             JavaScriptSandbox.JS_FEATURE_ISOLATE_TERMINATION,JavaScriptSandbox.JS_FEATURE_EVALUATE_WITHOUT_TRANSACTION_LIMIT).all(supports)
-        private fun cause(error: Exception): Throwable=if(error is ExecutionException)error.cause ?: error else error
+        private fun cause(error: Throwable): Throwable=if(error is ExecutionException)error.cause ?: error else error
         private suspend fun <T> ListenableFuture<T>.awaitResult(): T=suspendCancellableCoroutine {continuation ->
             addListener({if(continuation.isActive)try {continuation.resume(get())}catch(failure: Exception) {continuation.resumeWithException(cause(failure))}},direct)
         }

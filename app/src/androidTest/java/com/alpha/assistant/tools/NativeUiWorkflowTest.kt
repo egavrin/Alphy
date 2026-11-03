@@ -19,7 +19,7 @@ import java.util.UUID
 @RunWith(AndroidJUnit4::class)
 class NativeUiWorkflowTest {
     private fun definition(ui: String, schema: String = "{\"count\":\"number\"}", state: String = "{\"count\":0}") = JSONObject()
-        .put("formatVersion",2).put("title","Native fixture").put("description","Local UI fixture").put("capabilities",JSONArray())
+        .put("formatVersion",3).put("title","Native fixture").put("description","Local UI fixture").put("capabilities",JSONArray())
         .put("stateSchema",JSONObject(schema)).put("initialState",JSONObject(state)).put("ui",JSONObject(ui))
         .put("source","return {state:input.state};").toString()
     private fun rejects(block: () -> Unit) { assertTrue(runCatching(block).isFailure) }
@@ -185,7 +185,7 @@ class NativeUiWorkflowTest {
         rejects {validate(JSONObject(ItineraryFixture.ui).put("rowActions",actions).toString(),ItineraryFixture.schema,ItineraryFixture.state)}
         val state=JSONObject(ItineraryFixture.state).put("stops",ItineraryFixture.rows(512)).toString()
         rejects {validate(ItineraryFixture.ui,ItineraryFixture.schema,state)}
-        val withoutActions=JSONObject(ItineraryFixture.ui).apply {remove("rowActions")}
+        val withoutActions=JSONObject(ItineraryFixture.ui).apply {remove("rowActions");remove("columns")}
         validate(withoutActions.toString(),ItineraryFixture.schema,state)
         val collision=JSONObject().put("type","column").put("children",JSONArray().put(JSONObject(ItineraryFixture.ui))
             .put(JSONObject("""{"type":"button","text":"Collision","action":"mapStop"}""")))
@@ -376,7 +376,7 @@ internal object ItineraryFixture {
     fun rows(count: Int)=JSONArray().apply {repeat(count) {put(JSONObject().put("id","stop$it").put("name","Stop $it").put("detail","Walk by the lake for 20 minutes").put("available",true))}}
     val state=JSONObject().put("stops",rows(24)).toString()
     val ui="""{"type":"list","text":"Day plan","bind":"stops","action":"selectStop","columns":[{"text":"Stop","field":"name"},{"text":"Plan","field":"detail"}],"rowActions":[{"action":"mapStop","text":"Search maps","emphasis":"primary","enabledField":"available"},{"action":"calendarStop","text":"Open calendar form","emphasis":"secondary"}]}"""
-    fun spec(title: String="Lake day")=JSONObject().put("formatVersion",2).put("title",title).put("description","A quiet walk beside the lake")
+    fun spec(title: String="Lake day")=JSONObject().put("formatVersion",3).put("title",title).put("description","A quiet walk beside the lake")
         .put("capabilities",JSONArray()).put("stateSchema",JSONObject(schema)).put("initialState",JSONObject(state)).put("ui",JSONObject(ui))
         .put("source","return {state:input.state};").toString()
 }

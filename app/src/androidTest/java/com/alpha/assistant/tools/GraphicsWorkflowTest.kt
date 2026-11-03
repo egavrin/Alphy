@@ -21,50 +21,38 @@ class GraphicsWorkflowTest {
     private fun rejects(block: () -> Unit) {assertTrue(runCatching(block).isFailure)}
     @Test fun strictDrawingAndCheckpointBoundaries() {
         val spec=ToolSpec.parse(ArkanoidFixture.spec())
-        assertNotNull(spec.surface)
+        assertTrue(spec.surfaces.isNotEmpty())
         for(raw in listOf("{\"commands\":[{\"type\":\"html\"}]}","{\"commands\":[],\"effects\":[]}","{\"commands\":[],\"checkpoint\":{\"score\":3}}")) rejects {GraphicsContract.frame(raw,"frame")}
         rejects {GraphicsContract.frame("{\"commands\":[{\"type\":\"circle\",\"x\":0,\"y\":0,\"radius\":-1,\"color\":\"#ffffff\"}]}","frame")}
         rejects {GraphicsContract.frame(JSONObject().put("commands",JSONArray().apply {repeat(513) {put(JSONObject("{\"type\":\"rect\",\"x\":0,\"y\":0,\"width\":1,\"height\":1,\"color\":\"#ffffff\"}"))}}).toString(),"frame")}
-        rejects {GraphicsContract.patch(spec,JSONObject("{\"secret\":1}"))}
-        rejects {GraphicsContract.patch(spec,JSONObject("{\"score\":\"bad\"}"))}
+        rejects {spec.validateState("{\"secret\":1}")}
+        rejects {spec.validateState("{\"score\":\"bad\",\"lives\":3}")}
         rejects {ToolSpec.parse(ArkanoidFixture.spec().replace("\"width\":320","\"width\":0"))}
     }
     @Test fun retainedIsolatedArkanoidMovesCollidesLosesAndRestarts(): Unit=runBlocking {
         val spec=ToolSpec.parse(ArkanoidFixture.spec())
         val session=GraphicsSession(context)
         try {
-            val start=session.open(checkNotNull(spec.surface).source,spec.initialState)
+            val start=session.open(spec.source,spec.initialState)
             assertEquals("OK",start.status); assertEquals("androidx.javascriptengine",start.engine)
-            var frame=GraphicsContract.frame(checkNotNull(start.json),"start")
+            var frame=JSONObject(checkNotNull(start.json)).getJSONObject("surfaces").getJSONObject("main")
             fun ball()=frame.getJSONArray("commands").getJSONObject(1).getDouble("y")
             val initial=ball()
-            repeat(12) {frame=GraphicsContract.frame(checkNotNull(session.event(GraphicsContract.event("frame",33)).json),"frame")}
+            repeat(12) {frame=JSONObject(checkNotNull(session.event(GraphicsContract.event("frame",33)).json)).getJSONObject("surfaces").getJSONObject("main")}
             assertNotEquals(initial,ball(),0.01)
             session.event(GraphicsContract.event("pointer",x=80.0,y=380.0,phase="down"))
-            frame=GraphicsContract.frame(checkNotNull(session.event(GraphicsContract.event("frame",33)).json),"frame")
+            frame=JSONObject(checkNotNull(session.event(GraphicsContract.event("frame",33)).json)).getJSONObject("surfaces").getJSONObject("main")
             assertEquals(48.0,frame.getJSONArray("commands").getJSONObject(0).getDouble("x"),0.01)
             repeat(600) {session.event(GraphicsContract.event("frame",33))}
-            val saved=GraphicsContract.frame(checkNotNull(session.event(GraphicsContract.event("checkpoint")).json),"checkpoint").getJSONObject("checkpoint")
+            val saved=JSONObject(checkNotNull(session.event(GraphicsContract.event("pause")).json)).getJSONObject("state")
             assertTrue(saved.getInt("score") >= 10); assertTrue(saved.getInt("lives") < 3)
             session.event(GraphicsContract.event("restart"))
-            val reset=GraphicsContract.frame(checkNotNull(session.event(GraphicsContract.event("checkpoint")).json),"checkpoint").getJSONObject("checkpoint")
+            val reset=JSONObject(checkNotNull(session.event(GraphicsContract.event("pause")).json)).getJSONObject("state")
             assertEquals(0,reset.getInt("score")); assertEquals(3,reset.getInt("lives"))
             println("GRAPHICS_GAME collisionScore=${saved.getInt("score")} remainingLives=${saved.getInt("lives")} restart=PASS")
         } finally {session.close()}
     }
-    @Test fun checkpointRejectsDuplicateAndConcurrentState(): Unit=runBlocking {
-        val name="graphics-${UUID.randomUUID()}.db"
-        val provider=object: ChatProvider {override suspend fun respond(key:String,request:CloudRequest,session:CloudSession,emit:suspend(CloudEvent)->Unit)=error("Offline")}
-        try {ToolStore(context,name).use {store ->
-            val spec=ToolSpec.parse(ArkanoidFixture.spec()); val record=ToolRecord("game",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)
-            store.saveTool(record,true); val engine=ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))
-            val next=engine.checkpoint(record,JSONObject("{\"score\":10}"))
-            assertEquals(2,next.stateVersion); assertEquals(10,JSONObject(next.state).getInt("score"))
-            assertTrue(runCatching {engine.checkpoint(record,JSONObject("{\"score\":20}"))}.isFailure)
-            assertEquals(next,store.tool("game"))
-        }} finally {context.deleteDatabase(name)}
-    }
-    @Test fun graphicalWidgetsOnlyOpenTheExactApp(): Unit=runBlocking {
+    @Test fun mixedGraphicsWidgetsKeepLocalControlsAndOpenTheExactApp(): Unit=runBlocking {
         val name="graphics-widget-${UUID.randomUUID()}.db";val widget=0x4545
         val provider=object: ChatProvider {override suspend fun respond(key:String,request:CloudRequest,session:CloudSession,emit:suspend(CloudEvent)->Unit)=error("Offline")}
         try {ToolStore(context,name).use {store ->
@@ -73,13 +61,15 @@ class GraphicsWorkflowTest {
             store.saveTool(tool,true)
             com.alpha.assistant.surfaces.ToolWidgets.bind(context,widget,tool.id,com.alpha.assistant.surfaces.WidgetPreferences())
             val intent=com.alpha.assistant.surfaces.ToolWidgets.actionIntent(context,widget,tool,"run",null)
-            assertFalse(com.alpha.assistant.surfaces.ToolWidgets.perform(context,intent,store,ToolEngine(store,ToolGenerationService(provider,SandboxClient(context))),locked=false))
-            assertEquals(tool,store.tool(tool.id))
+            assertTrue(com.alpha.assistant.surfaces.ToolWidgets.perform(context,intent,store,ToolEngine(store,ToolGenerationService(provider,SandboxClient(context))),locked=false))
+            val saved=checkNotNull(store.tool(tool.id))
+            assertEquals(tool.state,saved.state);assertEquals(tool.revision,saved.revision)
+            assertTrue(store.effects(tool.id).isEmpty())
             assertEquals(tool.id,com.alpha.assistant.surfaces.ToolWidgets.openIntent(context,tool.id).getStringExtra("tool_id"))
         }} finally {com.alpha.assistant.surfaces.ToolWidgets.remove(context,widget);context.deleteDatabase(name)}
     }
     @Test fun loopOversizeAndClosedSessionFailSafely(): Unit=runBlocking {
-        for(source in listOf("return () => {while(true){}};","return () => ({commands:[],text:'x'.repeat(40000)});","return () => {const a=[];while(true)a.push(new Uint8Array(1048576));};")) {
+        for(source in listOf("while(true){}","return {state:input.state,text:'x'.repeat(70000)};","const a=[];while(true)a.push(new Uint8Array(1048576));")) {
             val session=GraphicsSession(context)
             try {assertNotEquals("OK",session.open(source,"{}").status)} finally {session.close()}
             assertEquals("CLOSED",session.event(GraphicsContract.event("frame",33)).status)
@@ -87,7 +77,7 @@ class GraphicsWorkflowTest {
     }
 }
 
-/** Offline playable fixture. Frames have no durable effects. Checkpoint is an explicit native button. */
+/** Offline playable fixture. Every permitted runtime event returns validated local state without native effects. */
 internal object ArkanoidFixture {
     val source="""
         let frames=0,paddle=128,x=160,y=320,vx=90,vy=-180,score=0,lives=3,bricks;
@@ -113,10 +103,10 @@ internal object ArkanoidFixture {
             return event.type==='checkpoint'?{commands,checkpoint:{score,lives}}:{commands};
         };
     """.trimIndent()
-    fun spec()=JSONObject().put("formatVersion",2).put("title","Arkanoid").put("description","Move the paddle. Break the bricks.")
+    fun spec()=JSONObject().put("formatVersion",3).put("title","Arkanoid").put("description","Move the paddle. Break the bricks.")
         .put("capabilities",JSONArray()).put("stateSchema",JSONObject("{\"score\":\"number\",\"lives\":\"number\"}"))
         .put("initialState",JSONObject("{\"score\":0,\"lives\":3}"))
         .put("ui",JSONObject("{\"type\":\"text\",\"text\":\"Saved score\",\"bind\":\"score\"}"))
-        .put("source","return {state:input.state};")
-        .put("surface",JSONObject().put("width",320).put("height",420).put("source",source).put("checkpointFields",JSONArray("[\"score\",\"lives\"]"))).toString()
+        .put("source","if(!globalThis.game)globalThis.game=(function(state){$source})(input.state); const frame=globalThis.game(input.event); const saved=globalThis.game({type:'checkpoint'}).checkpoint; if(input.event.type!=='preview' && input.event.type!=='render'){input.state.score=saved.score;input.state.lives=saved.lives;} return {state:input.state,surfaces:{main:{commands:frame.commands}},frames:['main']};")
+        .put("surfaces",JSONArray().put(JSONObject().put("id","main").put("width",320).put("height",420))).toString()
 }

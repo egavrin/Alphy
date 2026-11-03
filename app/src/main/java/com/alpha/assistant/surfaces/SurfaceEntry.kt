@@ -36,9 +36,9 @@ object SurfaceEntry {
                 .setData(android.net.Uri.parse("alpha-pin://result/$token")),flags)
     }
     fun pin(context: Context, tool: ToolRecord, widget: Boolean, prefs: WidgetPreferences): Pair<String,String> {
-        require(tool.saved && !tool.archived)
         val token = UUID.randomUUID().toString()
-        val spec = ToolSpec.parse(tool.spec)
+        val spec = ToolSpec.available(tool.spec)
+        if(!tool.saved || tool.archived || spec==null)return token to "This mini-app is unavailable for pinning. Its saved data remains intact."
         val supported = if(widget) AppWidgetManager.getInstance(context).isRequestPinAppWidgetSupported
             else context.getSystemService(ShortcutManager::class.java).isRequestPinShortcutSupported
         if(!supported) return token to "This launcher does not support pin requests. Use its widget or shortcut picker."

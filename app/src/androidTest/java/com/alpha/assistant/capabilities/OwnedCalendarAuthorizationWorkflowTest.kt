@@ -1,5 +1,6 @@
 package com.alpha.assistant.capabilities
 
+import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import android.os.SystemClock
 import android.provider.CalendarContract
 import android.view.accessibility.AccessibilityNodeInfo
@@ -20,25 +21,44 @@ import java.util.UUID
 
 /** Actual native clicks, isolated JavaScript, native grants and ordinary Calendar Provider writes. */
 class OwnedCalendarAuthorizationWorkflowTest {
+    private val diagnostics = UiFailureDiagnostics("calendar")
     private val instrumentation=InstrumentationRegistry.getInstrumentation()
     private val context get()=instrumentation.targetContext
     private val automation get()=instrumentation.uiAutomation
     private fun waitUntil(check: ()->Boolean) {
         val end=SystemClock.uptimeMillis()+20000
         while(SystemClock.uptimeMillis()<end) {if(check())return;SystemClock.sleep(30)}
+        diagnostics.capture("wait-timeout")
         fail("Owned calendar UI workflow timed out")
     }
-    private fun find(label: String,node: AccessibilityNodeInfo?=automation.rootInActiveWindow): AccessibilityNodeInfo? {
+    private fun find(label: String,node: AccessibilityNodeInfo?=diagnostics.freshRoot()): AccessibilityNodeInfo? {
         if(node==null)return null
         if(node.text?.toString()==label || node.contentDescription?.toString()==label)return node
         repeat(node.childCount) {find(label,node.getChild(it))?.let {found->return found}}
         return null
     }
-    private fun click(label: String) {
+    private fun shown(label: String): AccessibilityNodeInfo {
+        diagnostics.target(label)
         var node: AccessibilityNodeInfo?=null
-        waitUntil {node=find(label);if(node?.isVisibleToUser!=true)node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id);node?.isVisibleToUser==true}
+        var direction=AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+        waitUntil {
+            node=find(label)
+            if(node?.isVisibleToUser==true)return@waitUntil true
+            if(node!=null)node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+            else find("Mini-app content")?.let { viewport ->
+                if(viewport.actionList.none {it.id==direction})direction=if(direction==AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                    AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD else AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                if(viewport.actionList.any {it.id==direction})assertTrue("Scroll Mini-app content",viewport.performAction(direction))
+            }
+            automation.waitForIdle(100,2000)
+            false
+        }
+        return checkNotNull(node)
+    }
+    private fun click(label: String) {
+        var node: AccessibilityNodeInfo?=shown(label)
         while(node!=null && node?.isClickable!=true)node=node?.parent
-        assertTrue(node?.performAction(AccessibilityNodeInfo.ACTION_CLICK)==true)
+        assertTrue(diagnostics.click(label,node))
     }
     private fun workflow(semantic: Boolean,substitute: Boolean,grant: Boolean,bulk: Boolean=false,lateCreate: Boolean=false) {
         val name="owned-calendar-ui-${UUID.randomUUID()}"
@@ -55,7 +75,7 @@ class OwnedCalendarAuthorizationWorkflowTest {
                 else JSONObject("{\"type\":\"button\",\"text\":\"Show details\",\"action\":\"run\"}")
             val output=JSONObject(selectedArgs.toString()).apply {if(substitute)put("title","Substituted event")}
             val source="if(input.event.type==='action')return {state:input.state,effects:[{id:'calendar',capability:'$capability',args:$output}]};return {state:input.state};"
-            val spec=ToolSpec.parse(JSONObject().put("formatVersion",2).put("title","Owned calendar UI fixture").put("description","")
+            val spec=ToolSpec.parse(JSONObject().put("formatVersion",3).put("title","Owned calendar UI fixture").put("description","")
                 .put("capabilities",JSONArray().put("calendar.createOwned").put("calendar.deleteAllOwned")).put("stateSchema",JSONObject("{\"ready\":\"boolean\"}")).put("initialState",JSONObject("{\"ready\":true}"))
                 .put("ui",node).put("source",source).toString())
             var tool=ToolRecord("calendar-ui",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)
@@ -81,12 +101,21 @@ class OwnedCalendarAuthorizationWorkflowTest {
                 waitUntil {!model.loading && !model.tools.busy}
                 instrumentation.runOnMainSync {model.openSurface(tool.id)}
                 waitUntil {!model.tools.busy}
+                diagnostics.state = {
+                    val snapshot = runCatching { OwnedCalendarLedger(store).snapshot(store.tool(tool.id)!!) }
+                    "controllerBusy=${model.tools.busy} ledgerSnapshotPresent=${snapshot.isSuccess} " +
+                        "ledgerSnapshotCount=${snapshot.getOrNull()?.entries?.size} " +
+                        "ledgerSnapshotException=${snapshot.exceptionOrNull()?.javaClass?.name ?: "none"} " +
+                        "uiSnapshotException=unknown uiSnapshotPresence=unknown"
+                }
                 if(lateCreate) {
-                    waitUntil {find("Delete all 0 owned events")!=null}
+                    diagnostics.target("Delete all 0 owned events")
+                    shown("Delete all 0 owned events")
                     click("Просмотреть действие");click("Выполнить это действие")
                     waitUntil {!model.tools.busy && store.effects(tool.id).last().result.status=="succeeded"}
                     assertEquals(tool.stateVersion,store.tool(tool.id)!!.stateVersion)
-                    waitUntil {find("Delete all 1 owned events")!=null}
+                    diagnostics.target("Delete all 1 owned events")
+                    shown("Delete all 1 owned events")
                 }
                 val label=if(bulk)"Delete all ${if(lateCreate)1 else 5} owned events" else if(semantic)OwnedCalendarContract.label(OwnedCalendarContract.request(node)) else "Show details"
                 click(label)

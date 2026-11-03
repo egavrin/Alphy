@@ -14,7 +14,7 @@ import java.util.UUID
 @RunWith(AndroidJUnit4::class)
 class ToolWorkflowTest {
     private fun spec(label: String = "Count", bad: Boolean = false): String = JSONObject()
-        .put("formatVersion", 2).put("title", label).put("description", "Local counter")
+        .put("formatVersion", 3).put("title", label).put("description", "Local counter")
         .put("capabilities", org.json.JSONArray().apply { if (bad) put("calendar") })
         .put("stateSchema", JSONObject().put("count", "number"))
         .put("initialState", JSONObject().put("count", 0))
@@ -58,8 +58,8 @@ class ToolWorkflowTest {
                 """{"count":"number","items":{"type":"list","maxItems":10,"fields":{"id":"string","nested":{"type":"list","fields":{}}}}}"""
             )
             // Preserve raw literals here. JSONObject serialization would convert integral doubles to integers.
-            val numericBoundaries = listOf("2.0","2e0","null","2147483648","0","3").map {
-                objectSchema.replace("\"formatVersion\":2,","\"formatVersion\":$it,")
+            val numericBoundaries = listOf("3.0","3e0","null","2147483648","0","2").map {
+                objectSchema.replace("\"formatVersion\":3,","\"formatVersion\":$it,")
             } + listOf("10.0","1e1","null","2147483648","0","101").map {
                 objectSchema.replace("\"maxItems\":10,","\"maxItems\":$it,")
             }
@@ -202,9 +202,10 @@ class ToolWorkflowTest {
             assertEquals(live, store.tool(live.id)); assertNull(store.draft(failed.id)!!.candidate)
             answer = JSONObject(spec()).put("source", "if(input.event.type==='action') while(true){}; return {state:input.state};").toString()
             val slow = engine.createDraft("slow action", live.id)
-            engine.generate(slow.id, "fixture", emptyList(), CloudSession())
-            val accepted = engine.accept(slow.id)
-            assertTrue(runCatching { engine.interact(accepted.id, accepted.revision, accepted.stateVersion, "add", null) }.isFailure)
+            assertTrue(runCatching { engine.generate(slow.id, "fixture", emptyList(), CloudSession()) }.exceptionOrNull() is CloudFailure)
+            assertNull(store.draft(slow.id)!!.candidate)
+            engine.reject(slow.id)
+            val accepted = live
             assertEquals(accepted, store.tool(live.id))
             val stale = engine.createDraft("rename", live.id)
             answer = spec("Changed")
@@ -255,7 +256,18 @@ class ToolWorkflowTest {
         }
         fun waitFor(text: String): android.view.accessibility.AccessibilityNodeInfo {
             var found: android.view.accessibility.AccessibilityNodeInfo? = null
-            waitUntil { found = find(instrumentation.uiAutomation.rootInActiveWindow,text); found != null }
+            var direction=android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+            waitUntil {
+                val root=instrumentation.uiAutomation.rootInActiveWindow
+                found=find(root,text)
+                if(found?.isVisibleToUser != true) found?.performAction(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+                if(found?.isVisibleToUser != true) {
+                    val viewport=find(root,"Mini-app content") ?: find(root,"Mini-app library content")
+                    if(viewport != null && !viewport.performAction(direction)) direction=if(direction == android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                        android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD else android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                }
+                found?.isVisibleToUser == true
+            }
             return found!!
         }
         fun click(text: String) {
@@ -295,8 +307,16 @@ class ToolWorkflowTest {
             assertEquals(1,JSONObject(model.tools.tools.single().state).getInt("count"))
             scenario.recreate()
             waitUntil { !model.loading && !model.tools.busy }
-            waitFor("Count")
+            assertTrue(waitFor("Count").isVisibleToUser)
+            assertNull("Recreation keeps the requested library page",model.tools.selectedId)
+            assertEquals(1,JSONObject(model.tools.tools.single().state).getInt("count"))
             assertEquals(1,calls)
+            val evidence=java.io.File(app.getExternalFilesDir(null),"mini-app-evidence").apply {mkdirs()}
+            instrumentation.uiAutomation.takeScreenshot()?.let {image ->
+                java.io.File(evidence,"compose-library-recreated.png").outputStream().use {image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)}
+                image.recycle()
+            }
+            println("NATIVE_LIBRARY recreation=PASS visibleSavedCount=PASS stateCount=1 providerCalls=1")
         } catch (failure: Throwable) {
             fun dump(node: android.view.accessibility.AccessibilityNodeInfo?): String {
                 if(node == null) return ""

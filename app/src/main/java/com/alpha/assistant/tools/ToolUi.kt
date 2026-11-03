@@ -26,11 +26,11 @@ import com.alpha.assistant.ui.Glyph
 /** Chat cards contain metadata only. Native controls and resource loaders exist only in the focused pane. */
 @Composable fun ArtifactCard(tool: ToolRecord, revision: Int = tool.revision, historical: Boolean = false,
     open: () -> Unit, refine: (() -> Unit)? = null) {
-    val spec=remember(tool.spec) {ToolSpec.parse(tool.spec)}
+    val spec=remember(tool.spec) {ToolSpec.available(tool.spec)}
     Card(onClick=open,modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(20.dp),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text(spec.title,style=MaterialTheme.typography.titleMedium)
-            Text(spec.description,style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(spec?.title ?: ToolSpec.storedTitle(tool.spec),style=MaterialTheme.typography.titleMedium)
+            Text(spec?.description ?: "Unavailable artifact protocol · saved data is preserved",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
             Text(when {
                 historical -> "Historical result · revision $revision · opens the current mini-app"
                 tool.archived -> "Archived · data preserved"
@@ -39,14 +39,14 @@ import com.alpha.assistant.ui.Glyph
             },style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 Button(onClick=open,modifier=Modifier.heightIn(min=48.dp)) {Text("Open")}
-                if(refine != null && !historical && !tool.archived) TextButton(onClick=refine,modifier=Modifier.heightIn(min=48.dp)) {Text("Refine")}
+                if(refine != null && spec!=null && !historical && !tool.archived) TextButton(onClick=refine,modifier=Modifier.heightIn(min=48.dp)) {Text("Refine")}
             }
         }
     }
 }
 
 @Composable fun ToolsPane(controller: ToolController, conversationId: String?, chatText: String,
-    images: List<Attachment>, close: () -> Unit) {
+    images: List<Attachment>, immersive: Boolean=false, exitImmersive: () -> Unit = {}, close: () -> Unit) {
     val draft=controller.drafts.find {it.id == controller.selectedDraftId}
     val tool=controller.tools.find {it.id == (controller.selectedId ?: draft?.toolId)}
     var requests by rememberSaveable(controller.requestPrompt) {mutableStateOf(mapOf("new" to controller.requestPrompt))}
@@ -67,8 +67,8 @@ import com.alpha.assistant.ui.Glyph
         sendImages=false
     }
     if(tool != null || draft != null) {
-        FocusedToolPane(controller,tool,draft,prompt,edit,submit,{archiveConfirm=true},close)
-    } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+        FocusedToolPane(controller,tool,draft,prompt,edit,submit,{archiveConfirm=true},immersive,exitImmersive,close)
+    } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).semantics {contentDescription="Mini-app library content"}.padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
             Text("Mini-apps",Modifier.weight(1f),style=MaterialTheme.typography.headlineMedium)
             TextButton(onClick=close) {Text("Chat")}
@@ -92,12 +92,12 @@ import com.alpha.assistant.ui.Glyph
             FilterChip(!showArchive,{showArchive=false},{Text("Saved")})
             FilterChip(showArchive,{showArchive=true},{Text("Archive")})
         }
-        val visible=controller.tools.filter {it.saved && it.archived == showArchive && ToolSpec.parse(it.spec).title.contains(query.trim(),ignoreCase=true)}
+        val visible=controller.tools.filter {it.saved && it.archived == showArchive && ToolSpec.storedTitle(it.spec).contains(query.trim(),ignoreCase=true)}
         if(visible.isEmpty()) Text(if(query.isNotBlank()) "No matches" else if(showArchive) "No archived mini-apps" else "Apply a preview to save your first mini-app.")
         visible.forEach {item -> ToolCard(item) {controller.select(item.id)}}
     }
     if(archiveConfirm && tool != null && !tool.archived) AlertDialog(onDismissRequest = { archiveConfirm = false },
-        title = { Text("Архивировать «${ToolSpec.parse(tool.spec).title}»?") },text = {
+        title = { Text("Архивировать «${ToolSpec.storedTitle(tool.spec)}»?") },text = {
             Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Инструмент исчезнет из активной библиотеки. Данные, версии и черновики сохранятся. Его можно восстановить из архива.")
                 Text("Все зависимые сценарии будут остановлены. Сохранение фоновой работы в архиве пока не поддерживается. После восстановления включи сценарии вручную.")
@@ -111,19 +111,48 @@ import com.alpha.assistant.ui.Glyph
 
 }
 
+@OptIn(ExperimentalMaterial3Api::class,ExperimentalLayoutApi::class)
 @Composable private fun FocusedToolPane(controller: ToolController, tool: ToolRecord?, draft: ToolDraft?,
-    prompt: String, edit: (String) -> Unit, submit: () -> Unit, archive: () -> Unit, close: () -> Unit) {
+    prompt: String, edit: (String) -> Unit, submit: () -> Unit, archive: () -> Unit, immersive: Boolean, exitImmersive: () -> Unit, close: () -> Unit) {
     val navigationContext=androidx.compose.ui.platform.LocalContext.current
     val navigationLifecycle=androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     val navigationForeground = { navigationLifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) && !com.alpha.assistant.surfaces.ToolWidgets.isLocked(navigationContext) }
-    val spec=remember(tool?.spec) {tool?.let {ToolSpec.parse(it.spec)}}
-    val candidate=remember(draft?.candidate) {draft?.candidate?.let(ToolSpec::parse)}
+    val spec=remember(tool?.spec) {tool?.let {ToolSpec.available(it.spec)}}
+    var artifactSnapshot by remember(tool?.id,tool?.revision) {mutableStateOf<ArtifactSnapshot?>(null)}
+    val displayed=artifactSnapshot?.tool?.takeIf {it.id == tool?.id && it.revision == tool.revision && it.stateVersion >= tool.stateVersion} ?: tool
+    val candidate=remember(draft?.candidate) {draft?.candidate?.let(ToolSpec::available)}
     val preview=candidate != null && draft?.previewUi != null && draft.previewState != null
     var menu by remember {mutableStateOf(false)}
     var details by rememberSaveable(tool?.id) {mutableStateOf<String?>(null)}
+    var appControls by remember(tool?.id,tool?.revision) {mutableStateOf(false)}
+    var controlsReady by remember(tool?.id,tool?.revision) {mutableStateOf(false)}
+    if(immersive && tool!=null && spec!=null && !preview) {
+        BackHandler {if(appControls)appControls=false else exitImmersive()}
+        NativeToolSurface(tool,spec,!tool.archived,0.dp,controller.artifactHost(tool),immersive=true,covered=appControls,onCoverReady={controlsReady=it},topControls={
+            FlowRow(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
+                TextButton(onClick=exitImmersive,modifier=Modifier.heightIn(min=48.dp)) {Text("Exit full screen")}
+                TextButton(onClick={controlsReady=false;appControls=true},modifier=Modifier.heightIn(min=48.dp)) {Text("App controls")}
+            }
+        }) {artifactSnapshot=it}
+        if(appControls) ModalBottomSheet(onDismissRequest={appControls=false}) {
+            Column(Modifier.fillMaxWidth().heightIn(max=600.dp).verticalScroll(rememberScrollState()).padding(16.dp)) {
+                val current=checkNotNull(displayed)
+                val calendarHost=remember(current.id,current.revision,current.stateVersion,controller.grants,controller.effects) {
+                    controller.calendarUiHost(current,navigationForeground) {intent ->check(navigationForeground());navigationContext.startActivity(intent)}
+                }
+                ToolContent(current.ui,current.state,controlsReady && !controller.busy,heading=spec.title,calendarHost=calendarHost,
+                    imageVersion=(tool.id to controller.grants),imageLoader={controller.nativeImage(tool.id,it)},imageAvailable={controller.nativeImageAvailable(tool.id,it)}) {id,value ->
+                    controller.interact(current,id,value,navigationForeground) {intent ->check(navigationForeground());navigationContext.startActivity(intent)}
+                }
+            }
+        }
+        return
+    }
     val scroll=rememberScrollState()
     LaunchedEffect(details,preview) {scroll.scrollTo(0)}
     BackHandler {if(details != null) details=null else controller.select(null)}
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val refinementHeight=minOf(240.dp,maxHeight*0.45f)
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal=8.dp,vertical=4.dp),verticalAlignment=Alignment.CenterVertically) {
             IconButton(onClick={controller.select(null)},modifier=Modifier.sizeIn(minWidth=48.dp,minHeight=48.dp).semantics {contentDescription="Mini-app library"}) {AlphaIcon(Glyph.Back)}
@@ -159,9 +188,9 @@ import com.alpha.assistant.ui.Glyph
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
         // Reserve the metadata, status, two native control rows, saved summary, and pane spacing.
         val canvasHeight=(maxHeight-330.dp).coerceAtLeast(120.dp)
-        Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.fillMaxSize().verticalScroll(scroll).semantics {contentDescription="Mini-app content"}.padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
             if(preview) Text("Preview · controls are disabled",style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.primary)
-            Text((if(preview) candidate.title else spec?.title) ?: "New mini-app",Modifier.semantics {heading()},style=MaterialTheme.typography.headlineLarge)
+            Text((if(preview) candidate.title else spec?.title) ?: tool?.let {ToolSpec.storedTitle(it.spec)} ?: "New mini-app",Modifier.semantics {heading()},style=MaterialTheme.typography.headlineLarge)
             ((if(preview) candidate.description else spec?.description))?.let {Text(it,style=MaterialTheme.typography.bodyLarge,color=MaterialTheme.colorScheme.onSurfaceVariant)}
             if(preview && spec != null) Text("Changes to ${spec.title} · saved version stays unchanged until Apply",style=MaterialTheme.typography.bodySmall)
             if(details != null) {
@@ -175,11 +204,11 @@ import com.alpha.assistant.ui.Glyph
                 if(tool != null && details == "details") {
                     Text("Revision ${tool.revision} · data version ${tool.stateVersion}",style=MaterialTheme.typography.bodySmall)
                     Text("Changes send this mini-app’s code and current data to DeepSeek. Previews perform no external actions.",style=MaterialTheme.typography.bodySmall)
-                    if(tool.saved && !tool.archived) com.alpha.assistant.surfaces.PinToolButton(tool)
+                    if(tool.saved && !tool.archived && spec!=null) com.alpha.assistant.surfaces.PinToolButton(tool)
                     if(!tool.saved && !tool.archived) Button(onClick={controller.save(tool.id)},enabled=!controller.busy) {Text("Save to library")}
                 }
             }
-            if(tool != null) {
+            if(tool != null && spec != null) {
                 controller.effects.lastOrNull()?.let {effect ->
                     Text(effect.result.message,style=MaterialTheme.typography.bodySmall,color=if(effect.result.status in setOf("failed","denied","revoked","unavailable")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -191,23 +220,28 @@ import com.alpha.assistant.ui.Glyph
                     Text("Archived · data and versions are preserved. Restore this mini-app to use its controls.")
                     Button(onClick={controller.recover(tool)},enabled=!controller.busy) {Text("Restore from archive")}
                 }
-                if(spec?.surface != null) NativeToolSurface(tool,spec,!controller.busy && draft == null && !tool.archived && details == null,canvasHeight,controller::checkpoint)
-                val calendarHost=remember(tool.id,tool.revision,tool.stateVersion,controller.grants,controller.effects) {
-                    controller.calendarUiHost(tool,navigationForeground) {intent ->check(navigationForeground());navigationContext.startActivity(intent)}
+                if(spec != null) NativeToolSurface(tool,spec,draft == null && !tool.archived && details == null,canvasHeight,controller.artifactHost(tool)) {artifactSnapshot=it}
+                if(spec == null) Text("This artifact uses an unavailable protocol. Its saved data, versions, records, and access grants remain intact.")
+                if(spec != null) {
+                val current=checkNotNull(displayed)
+                val calendarHost=remember(current.id,current.revision,current.stateVersion,controller.grants,controller.effects) {
+                    controller.calendarUiHost(current,navigationForeground) {intent ->check(navigationForeground());navigationContext.startActivity(intent)}
                 }
-                ToolContent(tool.ui,tool.state,!controller.busy && draft == null && !tool.archived,heading=spec?.title,calendarHost=calendarHost,
-                    imageVersion=(tool.id to controller.grants),imageLoader={controller.nativeImage(tool.id,it)},imageAvailable={controller.nativeImageAvailable(tool.id,it)}) {id,value ->controller.interact(tool,id,value,navigationForeground) { intent -> check(navigationForeground()); navigationContext.startActivity(intent) }}
+                ToolContent(current.ui,current.state,!controller.busy && draft == null && !tool.archived,heading=spec.title,calendarHost=calendarHost,
+                    imageVersion=(tool.id to controller.grants),imageLoader={controller.nativeImage(tool.id,it)},imageAvailable={controller.nativeImageAvailable(tool.id,it)}) {id,value ->controller.interact(current,id,value,navigationForeground) { intent -> check(navigationForeground()); navigationContext.startActivity(intent) }}
+                }
             } else Text(draft?.prompt.orEmpty(),style=MaterialTheme.typography.bodyLarge)
         }
         }
         Surface(color=MaterialTheme.colorScheme.surface,tonalElevation=2.dp,shadowElevation=4.dp) {
-            Column(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.fillMaxWidth().heightIn(max=refinementHeight).verticalScroll(rememberScrollState())
+                .semantics {contentDescription="Mini-app refinement"}.padding(horizontal=16.dp,vertical=12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 if(preview) {
                     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick={controller.reject(draft.id)},enabled=!controller.busy,modifier=Modifier.weight(1f).heightIn(min=48.dp)) {Text("Discard preview")}
                         Button(onClick={controller.accept(draft.id)},enabled=!controller.busy,modifier=Modifier.weight(1f).heightIn(min=48.dp)) {Text("Apply changes")}
                     }
-                } else if(tool?.archived != true) {
+                } else if(tool?.archived != true && (tool == null || spec != null)) {
                     OutlinedTextField(prompt,edit,enabled=!controller.busy,label={Text(if(tool == null) "Request for a mini-app" else "Refine this mini-app")},
                         modifier=Modifier.fillMaxWidth().heightIn(max=140.dp),maxLines=4,shape=RoundedCornerShape(20.dp))
                     Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -220,5 +254,43 @@ import com.alpha.assistant.ui.Glyph
                 }
             }
         }
+    }
+    }
+}
+
+@Composable internal fun ImmersiveSystemBars(enabled: Boolean) {
+    val context=androidx.compose.ui.platform.LocalContext.current
+    val view=androidx.compose.ui.platform.LocalView.current
+    val lifecycle=androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    val activity=generateSequence(context) {(it as? android.content.ContextWrapper)?.baseContext}.filterIsInstance<android.app.Activity>().firstOrNull()
+    DisposableEffect(activity,view,lifecycle,enabled) {
+        val window=activity?.window
+        val controller=window?.let {androidx.core.view.WindowCompat.getInsetsController(it,view)}
+        val insets=androidx.core.view.ViewCompat.getRootWindowInsets(view)
+        val bars=androidx.core.view.WindowInsetsCompat.Type.systemBars()
+        val status=androidx.core.view.WindowInsetsCompat.Type.statusBars()
+        val navigation=androidx.core.view.WindowInsetsCompat.Type.navigationBars()
+        val behavior=controller?.systemBarsBehavior
+        fun restore() {
+            if(enabled && controller!=null) {
+                controller.systemBarsBehavior=checkNotNull(behavior)
+                for(type in listOf(status,navigation)) {
+                    if(insets?.isVisible(type)!=false)controller.show(type) else controller.hide(type)
+                }
+            }
+        }
+        fun hide() {
+            if(enabled && controller!=null) {
+                controller.systemBarsBehavior=androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(bars)
+            }
+        }
+        val observer=androidx.lifecycle.LifecycleEventObserver {_,event ->
+            if(event==androidx.lifecycle.Lifecycle.Event.ON_RESUME)hide()
+            if(event==androidx.lifecycle.Lifecycle.Event.ON_PAUSE)restore()
+        }
+        lifecycle.addObserver(observer)
+        if(lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED))hide()
+        onDispose {lifecycle.removeObserver(observer);restore()}
     }
 }

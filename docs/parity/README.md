@@ -1,5 +1,9 @@
 # Reference parity contract
 
+The protocol-3 implementation has a separate [current Compose coverage record](compose-coverage.md).
+The [acceptance harness](compose-acceptance.md) preserves the six exact user requests and separates real and synthetic evidence.
+The status statements below describe the recorded historical baseline.
+
 This inventory describes the pinned reference commit `7ee06af1941729b00a110493ad9d1d9b5b127d17`.
 It records source behavior, not device certification.
 The Alphy baseline describes the existing working tree above commit `cbf25f0ba107b9b028580a5a83235b6a5537427d`.

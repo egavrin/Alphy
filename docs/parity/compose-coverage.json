@@ -1,0 +1,1199 @@
+{
+  "schema_version": 1,
+  "reference_commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+  "base_revision": "62179af217478075a1d7a10960c949440dcc4ad8",
+  "scope": "Bounded native mappings, not complete Compose or reference parity. Device status requires the evidence record.",
+  "source_sha256": {
+    "app/src/main/java/com/alpha/assistant/tools/ToolUiCatalog.kt": "7ccc1522221967c05f47d6d183531ae0a5f272f9f964ee15206011e790f47396",
+    "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt": "bb6dff2a668dd33ec6068c7ae082b049ee10dc8e74a1bcb21da5046218f5794e",
+    "app/src/main/java/com/alpha/assistant/tools/ArtifactProtocol.kt": "34bc57a523feb409c89c973afe7a298beb7a8749353e7f8936364b8b82c44869",
+    "app/src/main/java/com/alpha/assistant/tools/GraphicsContract.kt": "1baf485bc059c146d89f4bb231eff4a288028792a7ee0de28c39b6278db59e51",
+    "app/src/main/java/com/alpha/assistant/capabilities/CapabilityContract.kt": "2f939fc9281ec2453e550b1dac8ed4aaf9f9a916cd8e33a3b1c87483b776a19d",
+    "app/src/main/java/com/alpha/assistant/capabilities/MedicineCapabilities.kt": "9d6faa8f0abe1d8e17871bef2cbca3d12d1397ceae5564956fa020782d340276",
+    "app/build.gradle.kts": "6aadbbc09c01f83b445b1a70ac874a52be6d428d5b06ad2d53366edd3009649a"
+  },
+  "catalog_types": [
+    "backHandler",
+    "badge",
+    "banner",
+    "button",
+    "calendar",
+    "card",
+    "chart",
+    "checkbox",
+    "column",
+    "dateInput",
+    "divider",
+    "emptyState",
+    "fact",
+    "facts",
+    "form",
+    "grid",
+    "groupedList",
+    "icon",
+    "image",
+    "input",
+    "list",
+    "listGroup",
+    "listItem",
+    "medicine",
+    "metric",
+    "motion",
+    "navigation",
+    "numberInput",
+    "progress",
+    "progressRing",
+    "row",
+    "scroll",
+    "section",
+    "select",
+    "skeleton",
+    "slider",
+    "snackbar",
+    "spacer",
+    "spinner",
+    "stage",
+    "table",
+    "tabs",
+    "text",
+    "theme",
+    "timeInput",
+    "timeline",
+    "timelineItem",
+    "toggle",
+    "transform"
+  ],
+  "reference_ui": [
+    {
+      "reference": "ActionBar",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 419,
+        "end_line": 423
+      },
+      "native_contract": "row button icon",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "AdaptiveColumns",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 304,
+        "end_line": 308
+      },
+      "native_contract": "grid",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "AppTheme",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 293,
+        "end_line": 297
+      },
+      "native_contract": "theme",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "BackHandler",
+      "family": "inputs",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 257,
+        "end_line": 260
+      },
+      "native_contract": "backHandler",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Badge",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 469,
+        "end_line": 473
+      },
+      "native_contract": "badge",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Button",
+      "family": "inputs",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 172,
+        "end_line": 174
+      },
+      "native_contract": "button",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Canvas",
+      "family": "graphics_and_motion",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 215,
+        "end_line": 218
+      },
+      "native_contract": "surfaces",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "GraphicsBoundariesTest",
+        "GraphicsWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Card",
+      "family": "primitives",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 158,
+        "end_line": 159
+      },
+      "native_contract": "card",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Cell",
+      "family": "inputs",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 175,
+        "end_line": 177
+      },
+      "native_contract": "listItem",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Checkbox",
+      "family": "inputs",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 206,
+        "end_line": 209
+      },
+      "native_contract": "checkbox",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "ClockText",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 380,
+        "end_line": 385
+      },
+      "native_contract": "text",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Column",
+      "family": "primitives",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 154,
+        "end_line": 155
+      },
+      "native_contract": "column",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "DateField",
+      "family": "inputs",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 405,
+        "end_line": 409
+      },
+      "native_contract": "dateInput",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Divider",
+      "family": "primitives",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 256,
+        "end_line": 256
+      },
+      "native_contract": "divider",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "EmptyState",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 339,
+        "end_line": 345
+      },
+      "native_contract": "emptyState",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeComposeContractTest",
+        "MiniAppPresentationWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Grid",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 219,
+        "end_line": 222
+      },
+      "native_contract": "grid",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Header",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 309,
+        "end_line": 314
+      },
+      "native_contract": "section text",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Hero",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 298,
+        "end_line": 303
+      },
+      "native_contract": "section text",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Icon",
+      "family": "primitives",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 458,
+        "end_line": 461
+      },
+      "native_contract": "icon",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "IconButton",
+      "family": "inputs",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 462,
+        "end_line": 468
+      },
+      "native_contract": "icon button",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Image",
+      "family": "primitives",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 166,
+        "end_line": 167
+      },
+      "native_contract": "image",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "InsetBanner",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 332,
+        "end_line": 338
+      },
+      "native_contract": "banner",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeComposeContractTest",
+        "MiniAppPresentationWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "KeyValueGroup",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 445,
+        "end_line": 449
+      },
+      "native_contract": "facts",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeComposeContractTest",
+        "MiniAppPresentationWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "KeyValueItem",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 475,
+        "end_line": 480
+      },
+      "native_contract": "fact",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeComposeContractTest",
+        "MiniAppPresentationWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "ListGroup",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 327,
+        "end_line": 331
+      },
+      "native_contract": "listGroup groupedList",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeComposeContractTest",
+        "MiniAppPresentationWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "ListItem",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 245,
+        "end_line": 250
+      },
+      "native_contract": "listItem",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "MetricGroup",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 352,
+        "end_line": 356
+      },
+      "native_contract": "grid metric",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Motion",
+      "family": "graphics_and_motion",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 223,
+        "end_line": 227
+      },
+      "native_contract": "motion",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeComposeContractTest",
+        "MiniAppPresentationWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "NumberField",
+      "family": "inputs",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 394,
+        "end_line": 399
+      },
+      "native_contract": "numberInput",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "NumberListItem",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 410,
+        "end_line": 418
+      },
+      "native_contract": "listItem metric",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "NumberStat",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 386,
+        "end_line": 393
+      },
+      "native_contract": "metric",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "NumberText",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 373,
+        "end_line": 379
+      },
+      "native_contract": "text",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Path",
+      "family": "graphics_and_motion",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 168,
+        "end_line": 171
+      },
+      "native_contract": "path drawing command",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "GraphicsBoundariesTest",
+        "GraphicsWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Progress",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 261,
+        "end_line": 263
+      },
+      "native_contract": "progress",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "ProgressRing",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 264,
+        "end_line": 269
+      },
+      "native_contract": "progressRing",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Row",
+      "family": "primitives",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 156,
+        "end_line": 157
+      },
+      "native_contract": "row",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Scroll",
+      "family": "primitives",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 160,
+        "end_line": 161
+      },
+      "native_contract": "scroll",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Section",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 315,
+        "end_line": 320
+      },
+      "native_contract": "section",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "SectionHeader",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 321,
+        "end_line": 326
+      },
+      "native_contract": "section text",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Select",
+      "family": "inputs",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 270,
+        "end_line": 273
+      },
+      "native_contract": "select",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Skeleton",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 500,
+        "end_line": 505
+      },
+      "native_contract": "skeleton",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Slider",
+      "family": "inputs",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 210,
+        "end_line": 214
+      },
+      "native_contract": "slider",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Snackbar",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 511,
+        "end_line": 516
+      },
+      "native_contract": "snackbar",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Spacer",
+      "family": "primitives",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 164,
+        "end_line": 165
+      },
+      "native_contract": "spacer",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Sparkline",
+      "family": "graphics_and_motion",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 521,
+        "end_line": 532
+      },
+      "native_contract": "chart",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "GraphicsBoundariesTest",
+        "GraphicsWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Spinner",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 506,
+        "end_line": 510
+      },
+      "native_contract": "spinner",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Stage",
+      "family": "graphics_and_motion",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 234,
+        "end_line": 238
+      },
+      "native_contract": "stage transform",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeComposeContractTest",
+        "MiniAppPresentationWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Stat",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 346,
+        "end_line": 351
+      },
+      "native_contract": "metric",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Surface",
+      "family": "graphics_and_motion",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 239,
+        "end_line": 244
+      },
+      "native_contract": "surfaces",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "GraphicsBoundariesTest",
+        "GraphicsWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Table",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 485,
+        "end_line": 490
+      },
+      "native_contract": "table",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "TableRow",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 491,
+        "end_line": 495
+      },
+      "native_contract": "table bound record",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Tabs",
+      "family": "inputs",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 274,
+        "end_line": 279
+      },
+      "native_contract": "tabs",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Text",
+      "family": "primitives",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 162,
+        "end_line": 163
+      },
+      "native_contract": "text",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "TextField",
+      "family": "inputs",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 181,
+        "end_line": 201
+      },
+      "native_contract": "input",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Ticker",
+      "family": "graphics_and_motion",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 251,
+        "end_line": 255
+      },
+      "native_contract": "timer subscription text",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "GraphicsBoundariesTest",
+        "GraphicsWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Tile",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 363,
+        "end_line": 368
+      },
+      "native_contract": "card",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "TileGrid",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 358,
+        "end_line": 362
+      },
+      "native_contract": "grid card",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "TimeField",
+      "family": "inputs",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 400,
+        "end_line": 404
+      },
+      "native_contract": "timeInput",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Timeline",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 431,
+        "end_line": 435
+      },
+      "native_contract": "timeline",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeComposeContractTest",
+        "MiniAppPresentationWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "TimelineItem",
+      "family": "composites",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 436,
+        "end_line": 443
+      },
+      "native_contract": "timelineItem",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeComposeContractTest",
+        "MiniAppPresentationWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Toggle",
+      "family": "inputs",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 202,
+        "end_line": 205
+      },
+      "native_contract": "toggle",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeUiWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    },
+    {
+      "reference": "Transform",
+      "family": "graphics_and_motion",
+      "source": {
+        "path": "entry/src/main/ets/vera/VeraUiCatalog.ets",
+        "symbol": "CATALOG",
+        "commit": "7ee06af1941729b00a110493ad9d1d9b5b127d17",
+        "line": 228,
+        "end_line": 233
+      },
+      "native_contract": "transform",
+      "status": "bounded_native_mapping",
+      "test_owners": [
+        "NativeComposeContractTest",
+        "MiniAppPresentationWorkflowTest"
+      ],
+      "device_status": "partial_or_not_run",
+      "evidence": "evidence/compose-execution/coverage-verification.md"
+    }
+  ]
+}

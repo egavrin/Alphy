@@ -17,11 +17,11 @@ class AndroidXRuntimeProbeTest {
         assertEquals("OK",SandboxClient(context).availability().status)
         val session=GraphicsSession(context)
         try {
-            assertEquals("OK",session.open("let n=0;return ()=>({commands:[{type:'text',x:1,y:20,text:String(++n),size:12,color:'#ffffff'}]});","{}").status)
+            assertEquals("OK",session.open("globalThis.n=(globalThis.n||0)+1;return {state:input.state,surfaces:{main:{commands:[{type:'text',x:1,y:20,text:String(globalThis.n),size:12,color:'#ffffff'}]}}};","{}").status)
             val begin=System.nanoTime()
             repeat(100) {
                 val result=session.event(GraphicsContract.event("frame",33));assertEquals("OK",result.status)
-                assertEquals((it+2).toString(),JSONObject(result.json!!).getJSONArray("commands").getJSONObject(0).getString("text"))
+                assertEquals((it+2).toString(),JSONObject(result.json!!).getJSONObject("surfaces").getJSONObject("main").getJSONArray("commands").getJSONObject(0).getString("text"))
             }
             val elapsed=(System.nanoTime()-begin)/1_000_000.0
             println("ANDROIDX_PRODUCTION retained=100 elapsedMs=$elapsed meanMs=${elapsed/100}")

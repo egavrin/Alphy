@@ -47,6 +47,6 @@ class CapabilityBroker(private val context: Context, private val store: ToolStor
         catch(_: SecurityException) { CapabilityResult("denied","Android отказал в доступе. Проверь разрешения приложения.") }
         catch(_: Exception) { CapabilityResult("unknownOutcome","Системная функция не подтвердила результат. Проверь его перед повторным действием.") }
         store.finishEffect(key,result)
-        return if(effect.request.capability=="calendar.deleteAllOwned") checkNotNull(store.effect(key)).result else result
+        return checkNotNull(store.effect(key)).result
     }
 }

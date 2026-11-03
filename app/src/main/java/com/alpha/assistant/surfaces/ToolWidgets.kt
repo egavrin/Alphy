@@ -57,7 +57,6 @@ object ToolWidgets {
         return runCatching {
             val actionId = intent.getStringExtra("action_id") ?: return false
             val spec = ToolSpec.parse(tool.spec)
-            if(spec.surface != null)return false
             val ui = spec.validateUi(JSONObject(tool.ui),JSONObject(tool.state))
             val node = spec.action(ui,actionId) ?: return false
             if (node.getString("type") !in listOf("button","toggle")) return false
@@ -103,10 +102,10 @@ object ToolWidgets {
             views.setInt(R.id.widget_title,"setHeight",(titleHeight*context.resources.displayMetrics.density).toInt())
             views.setViewVisibility(R.id.widget_subtitle,View.GONE)
             views.setViewVisibility(R.id.widget_settings,if(width >= 220) View.VISIBLE else View.GONE)
-            val nodes = if(validated.first.surface != null) listOf(JSONObject().put("type","text").put("text","Interactive surface · Open in Alphy")) else ToolUiCatalog.widgetNodes(ui)
+            val nodes = ToolUiCatalog.widgetNodes(ui,state) + if(validated.first.surfaces.isNotEmpty()) listOf(JSONObject().put("type","text").put("text","Interactive surface · Open in Alphy")) else emptyList()
             val capacity = ((height-FIXED_HEIGHT_DP-if(showTitle) titleHeight else 0)/rowHeight).coerceIn(0,if(wide) 6 else 3)
             val candidates = nodes.filter { node ->
-                node.getString("type") != "text" || node.has("bind") ||
+                node.getString("type") != "text" || node.has("bind") || node.has("spans") ||
                     (prefs.details && !node.getString("text").equals(validated.first.title,ignoreCase = true))
             }
             val selected = (listOfNotNull(candidates.firstOrNull { it.has("bind") },

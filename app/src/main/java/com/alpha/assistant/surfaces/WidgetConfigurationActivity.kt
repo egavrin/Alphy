@@ -41,7 +41,7 @@ class WidgetConfigurationActivity : ComponentActivity() {
                         Text("Alphy widget",style = MaterialTheme.typography.headlineMedium)
                         Text("Choose a saved tool. Each widget has its own appearance and shares the tool state.")
                         tools.forEach { tool ->
-                            Row { RadioButton(selected == tool.id,{ selected = tool.id }); TextButton(onClick = { selected = tool.id }) { Text(ToolSpec.parse(tool.spec).title) } }
+                            Row { RadioButton(selected == tool.id,{ selected = tool.id }); TextButton(onClick = { selected = tool.id }) { Text(ToolSpec.storedTitle(tool.spec)) } }
                         }
                         if(loaded && tools.isEmpty()) Text("No saved tools. Save a tool in Alphy first.")
                         WidgetOptions(prefs) { prefs = it }
@@ -50,7 +50,7 @@ class WidgetConfigurationActivity : ComponentActivity() {
                         Button(onClick = {
                             runCatching {
                                 ToolStore(this@WidgetConfigurationActivity).use { store ->
-                                    check(selected?.let(store::tool)?.let { it.saved && !it.archived } == true) { "Choose a saved tool" }
+                                    check(selected?.let(store::tool)?.let { it.saved && !it.archived && ToolSpec.available(it.spec)!=null } == true) { "Choose a saved tool" }
                                     ToolWidgets.bind(this@WidgetConfigurationActivity,id,selected!!,prefs)
                                     ToolWidgets.update(this@WidgetConfigurationActivity,id,store)
                                 }

@@ -19,6 +19,9 @@ data class ToolDraft(val id: String, val toolId: String?, val baseRevision: Int,
 
 /** Separate storage leaves all conversation and credential data untouched. */
 class ToolStore(private val context: Context, name: String = "alpha-tools.db") : SQLiteOpenHelper(context, name, null, 7) {
+    internal val artifactIdentity=context.getDatabasePath(name).absolutePath
+    internal fun artifactWorkPending(owner: String): Boolean =
+        effects(owner).any {it.phase!="terminal"} || deliveries(owner).any {it.phase in setOf("pending","claimed")} || ToolRecords(this).pending(owner)!=null
     companion object {
         internal val effectMutex = kotlinx.coroutines.sync.Mutex()
         internal val deliveryMutex = kotlinx.coroutines.sync.Mutex()
@@ -68,7 +71,7 @@ class ToolStore(private val context: Context, name: String = "alpha-tools.db") :
     fun permissionGranted(capability: String) = AndroidCapabilities(context).permissionGranted(capability)
     fun privateResults(owner: String) = readableDatabase.rawQuery("SELECT 1 FROM capability_private_owners WHERE owner=?",arrayOf(owner)).use { it.moveToFirst() }
     private fun retainResultPrivacy(tool: ToolRecord) {
-        if(ToolSpec.parse(tool.spec).let { it.capabilityResults || it.collections.length() > 0 || it.capabilities.any { id -> id in NavigationContract.ids || id in OwnedCalendarContract.ids } }) writableDatabase.insertWithOnConflict("capability_private_owners",null,
+        if(ToolSpec.available(tool.spec)?.let { it.capabilityResults || it.collections.length() > 0 || it.capabilities.any { id -> id in NavigationContract.ids || id in OwnedCalendarContract.ids } }==true) writableDatabase.insertWithOnConflict("capability_private_owners",null,
             ContentValues().apply { put("owner",tool.id) },SQLiteDatabase.CONFLICT_IGNORE)
     }
     fun tools(): List<ToolRecord> = readableDatabase.rawQuery("SELECT * FROM tools ORDER BY rowid DESC", null).use { c ->
@@ -98,8 +101,12 @@ class ToolStore(private val context: Context, name: String = "alpha-tools.db") :
         if(revision) put("revisions", ContentValues().apply { put("tool_id",t.id); put("revision",t.revision); put("spec",t.spec); put("state",t.state); put("ui",t.ui) })
     } }
     /** SQLite tokens protect writes across foreground and widget engine instances. */
-    fun commitTool(t: ToolRecord, old: ToolRecord?, revision: Boolean, draft: ToolDraft? = null, effects: List<CapabilityRequest> = emptyList(), retainReceipt: Boolean = false, recordDeliveryId: String? = null) = transaction {
+    fun commitTool(t: ToolRecord, old: ToolRecord?, revision: Boolean, draft: ToolDraft? = null, effects: List<CapabilityRequest> = emptyList(), retainReceipt: Boolean = false, recordDeliveryId: String? = null, capabilityDeliveryId: String? = null, autonomous: Boolean = false) = transaction {
         check(!t.archived && old?.archived != true) { "Инструмент в архиве. Сначала восстанови его." }
+        if(autonomous) {
+            check(this.effects(t.id).none {it.phase!="terminal"}) {"A native action must finish before another state change."}
+            check(deliveries(t.id).none {it.phase in setOf("pending","claimed") && it.id!=capabilityDeliveryId}) {"A native result must finish before another state change."}
+        }
         ToolRecords(this).beforeCommit(t,old,recordDeliveryId)
         retainResultPrivacy(t)
         if (draft != null) check(draft(draft.id) == draft) { "Черновик изменился" }
@@ -192,7 +199,7 @@ class ToolStore(private val context: Context, name: String = "alpha-tools.db") :
         }
     }
     private fun boundedResult(effect: CapabilityEffect, result: CapabilityResult): CapabilityResult {
-        if(tool(effect.owner)?.let { ToolSpec.parse(it.spec).capabilityResults } != true) return result
+        if(tool(effect.owner)?.let { ToolSpec.available(it.spec)?.capabilityResults } != true) return result
         return try {
             CapabilityResultEvent.data(effect.request.capability,result)
             result
@@ -209,7 +216,7 @@ class ToolStore(private val context: Context, name: String = "alpha-tools.db") :
     fun effectTargetValid(effect: CapabilityEffect): Boolean {
         val target=tool(effect.owner) ?: return false
         return !target.archived && target.revision == effect.revision && target.stateVersion == effect.stateVersion &&
-            effect.request.capability in ToolSpec.parse(target.spec).capabilities && granted(effect.owner,effect.request.capability)
+            effect.request.capability in ToolSpec.available(target.spec)?.capabilities.orEmpty() && granted(effect.owner,effect.request.capability)
     }
     /** Persist the running phase before the adapter starts. A crash never authorizes an automatic retry. */
     fun claimEffect(key: String, confirmed: Boolean): CapabilityEffect? {
@@ -221,7 +228,7 @@ class ToolStore(private val context: Context, name: String = "alpha-tools.db") :
             val result = when {
                 tool == null || tool.archived || tool.revision != effect.revision || tool.stateVersion != effect.stateVersion -> CapabilityResult("cancelled","Инструмент изменился. Повтори действие в текущей версии.")
                 !confirmed -> CapabilityResult("cancelled","Ты отменил действие.")
-                !ToolSpec.parse(tool.spec).capabilities.contains(effect.request.capability) -> CapabilityResult("denied","Инструмент не объявил эту системную функцию.")
+                ToolSpec.available(tool.spec)?.capabilities?.contains(effect.request.capability)!=true -> CapabilityResult("denied","Инструмент не объявил эту системную функцию.")
                 !granted(effect.owner,effect.request.capability) -> if(grantRevoked(effect.owner,effect.request.capability)) CapabilityResult("revoked","Доступ этого инструмента к системной функции отозван.")
                     else CapabilityResult("denied","Перед новым действием выдай инструменту доступ к этой функции.")
                 else -> null
@@ -287,7 +294,7 @@ class ToolStore(private val context: Context, name: String = "alpha-tools.db") :
     private fun deliveryValid(delivery: CapabilityDelivery, access: ResultAccess): Boolean {
         val target=tool(delivery.owner) ?: return false
         if(target.archived || target.revision != delivery.revision || target.stateVersion != delivery.stateVersion) return false
-        val spec=ToolSpec.parse(target.spec)
+        val spec=ToolSpec.available(target.spec) ?: return false
         val batch=effects(delivery.owner).filter { it.revision == delivery.revision && it.stateVersion == delivery.stateVersion }
         return spec.capabilityResults && batch.size in 1..3 && batch.all {
             it.phase == "terminal" && it.request.capability in spec.capabilities && granted(delivery.owner,it.request.capability) && it.request.capability in access.capabilities &&
@@ -311,7 +318,7 @@ class ToolStore(private val context: Context, name: String = "alpha-tools.db") :
         transaction {
             for(delivery in deliveries(owner).filter { it.phase == "pending" }) {
                 val target=tool(owner)
-                if(target == null || target.archived || target.revision != delivery.revision || target.stateVersion != delivery.stateVersion || !ToolSpec.parse(target.spec).capabilityResults) {
+                if(target == null || target.archived || target.revision != delivery.revision || target.stateVersion != delivery.stateVersion || ToolSpec.available(target.spec)?.capabilityResults!=true) {
                     rejectDelivery(delivery.id); continue
                 }
                 val batch=effects(owner).filter { it.revision == delivery.revision && it.stateVersion == delivery.stateVersion }
@@ -350,7 +357,7 @@ class ToolStore(private val context: Context, name: String = "alpha-tools.db") :
             val spec=ToolSpec.parse(old.spec); spec.validateState(next.state); spec.validateUi(JSONObject(next.ui),JSONObject(next.state))
             // Android permission changes cannot be atomic with SQLite. Check immediately after the final cancellation guard.
             if(!canCommit() || !deliveryValid(delivery,access) || !immediateResultAccess(delivery,permissionCheck)) { rejectDelivery(delivery.id); return@transaction }
-            commitTool(next,old,false)
+            commitTool(next,old,false,capabilityDeliveryId=delivery.id)
             check(writableDatabase.update("capability_deliveries",ContentValues().apply { put("phase","committed") },
                 "delivery_id=? AND phase='claimed' AND attempts=?",arrayOf(delivery.id,delivery.attempts.toString())) == 1)
             committed=true

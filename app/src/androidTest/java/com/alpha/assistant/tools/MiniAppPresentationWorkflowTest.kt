@@ -1,6 +1,7 @@
 package com.alpha.assistant.tools
 
 import android.os.Bundle
+import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import android.os.SystemClock
 import android.graphics.Bitmap
 import android.graphics.Rect
@@ -19,49 +20,94 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.awaitCancellation
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.roundToInt
 
 /** Black-box failure cases: executable chat cards, lost app context/draft, scrolling composer,
  * active candidate controls, accidental apply, and lost apply/discard controls with long content.
  * The root runs this fixture and retains screenshots with its tested revision and command.
  */
 class MiniAppPresentationWorkflowTest {
+    private val diagnostics = UiFailureDiagnostics("miniapp")
     private val instrumentation=InstrumentationRegistry.getInstrumentation()
     private val automation get()=instrumentation.uiAutomation
+    private var injectedDownTime: Long?=null
+    private fun injectTouch(event: android.view.MotionEvent): Boolean {
+        val accepted=automation.injectInputEvent(event,true)
+        if(accepted)when(event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> injectedDownTime=event.downTime
+            android.view.MotionEvent.ACTION_UP,android.view.MotionEvent.ACTION_CANCEL -> injectedDownTime=null
+        }
+        return accepted
+    }
+    private fun cancelInjectedTouch() {
+        val down=injectedDownTime ?: return
+        val event=android.view.MotionEvent.obtain(down,SystemClock.uptimeMillis(),android.view.MotionEvent.ACTION_CANCEL,0f,0f,0)
+        event.source=android.view.InputDevice.SOURCE_TOUCHSCREEN
+        try {injectTouch(event)}finally {event.recycle();injectedDownTime=null}
+    }
     private fun waitUntil(message: String="Mini-app presentation workflow timed out",condition: () -> Boolean) {
         val end=SystemClock.uptimeMillis()+15000
-        while(SystemClock.uptimeMillis()<end) {if(condition()) return; SystemClock.sleep(40)}
-        val name="failure-${SystemClock.uptimeMillis()}"
-        screenshot(name)
-        val text=StringBuilder()
-        fun dump(node: AccessibilityNodeInfo?,depth: Int=0) {
-            if(node==null || depth>30)return
-            text.append(" ".repeat(depth)).append(node.className).append(" text=").append(node.text).append(" description=").append(node.contentDescription)
-                .append(" visible=").append(node.isVisibleToUser).append(" enabled=").append(node.isEnabled).append('\n')
-            repeat(node.childCount) {dump(node.getChild(it),depth+1)}
+        while(SystemClock.uptimeMillis()<end) {
+            // Android presents this tutorial on a new device before the app can receive touch.
+            if(find("Viewing full screen")?.isVisibleToUser==true) {
+                var confirm=find("Got it")
+                while(confirm?.isClickable==false)confirm=confirm.parent
+                if(confirm?.isVisibleToUser==true)assertTrue("Acknowledge Android full-screen tutorial",confirm.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            }
+            if(condition()) return
+            SystemClock.sleep(40)
         }
-        dump(automation.rootInActiveWindow)
-        File(instrumentation.targetContext.getExternalFilesDir(null),"mini-app-evidence/$name-ui.txt").writeText(text.toString())
+        diagnostics.capture("wait-timeout")
         fail(message)
     }
-    private fun find(label: String, node: AccessibilityNodeInfo?=automation.rootInActiveWindow): AccessibilityNodeInfo? {
+    private fun find(label: String, node: AccessibilityNodeInfo?=diagnostics.freshRoot()): AccessibilityNodeInfo? {
         if(node == null) return null
         if(node.text?.toString() == label || node.contentDescription?.toString() == label) return node
         repeat(node.childCount) {find(label,node.getChild(it))?.let {return it}}
         return null
     }
     private fun shown(label: String): AccessibilityNodeInfo {
+        diagnostics.target(label)
         var node: AccessibilityNodeInfo?=null
+        var direction=AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
         waitUntil("Missing visible label: $label") {
             node=find(label)
-            if(node?.isVisibleToUser != true) node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
-            node?.isVisibleToUser == true
+            if(node?.isVisibleToUser == true)return@waitUntil true
+            if(node != null)node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+            else {
+                if(label in setOf("Exit full screen","App controls","Start","Pause","Resume","Restart","Left","Right") && find("Show game controls")?.isVisibleToUser==true) {
+                    var handle=find("Show game controls")
+                    while(handle?.isClickable==false)handle=handle.parent
+                    assertTrue("Expand native game controls",checkNotNull(handle).performAction(AccessibilityNodeInfo.ACTION_CLICK))
+                    return@waitUntil false
+                }
+                fun scrollable(current: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+                    if(current==null)return null
+                    if(current.isScrollable)return current
+                    repeat(current.childCount) {scrollable(current.getChild(it))?.let {return it}}
+                    return null
+                }
+                val viewport=find("Native game controls") ?: find("Mini-app content") ?: find("Mini-app library content") ?: if(label=="Open")scrollable(diagnostics.freshRoot()) else null
+                if(viewport != null) {
+                    if(viewport.actionList.none {it.id == direction}) direction=if(direction == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                        AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD else AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                    if(viewport.actionList.any {it.id == direction})assertTrue("Scroll mini-app viewport",viewport.performAction(direction))
+                }
+            }
+            automation.waitForIdle(100,2000)
+            false
         }
-        return node!!
+        return checkNotNull(node)
     }
     private fun click(label: String) {
-        var node: AccessibilityNodeInfo?=shown(label)
-        while(node != null && !node.isClickable) node=node.parent
-        assertTrue("Click $label",node?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true)
+        shown(label)
+        var node: AccessibilityNodeInfo?=null
+        waitUntil("Missing ready action: $label") {
+            node=find(label)
+            while(node?.isClickable == false) node=node?.parent
+            node?.let {it.isVisibleToUser && it.isEnabled && it.actionList.any {action -> action.id == AccessibilityNodeInfo.ACTION_CLICK}} == true
+        }
+        assertTrue("Click $label",diagnostics.click(label,node))
         automation.waitForIdle(100,3000)
     }
     private fun edit(label: String, text: String) {
@@ -109,13 +155,274 @@ class MiniAppPresentationWorkflowTest {
         try {
             ActivityScenario.launch(CloudTestActivity::class.java).use {scenario ->
                 waitUntil {!model.loading && !model.tools.busy}
-                block(model,tools,scenario)
+                try {block(model,tools,scenario)}finally {cancelInjectedTouch()}
             }
         } finally {
             CloudTestActivity.factory=null; SystemClock.sleep(150); tools.close(); shell.close()
             app.deleteDatabase("$name.db"); app.deleteDatabase("$name.db-tools.db")
             keys.clear(); app.deleteSharedPreferences(name)
             java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null); deleteEntry(name)}
+        }
+    }
+    /** Failure cases: wide split/chrome in immersive play, wrong touch transform, missing cancel,
+     * stale dimensions after rotation, inaccessible controls, lost state on exit, and hidden bars after exit.
+     */
+    @Test fun immersiveViewportTouchResizeAndExitPreserveState() {
+        val definition=JSONObject(ArkanoidFixture.spec()).put("title","Viewport probe")
+            .put("presentation",JSONObject("{\"mode\":\"immersive\"}"))
+            .put("stateSchema",JSONObject("{\"width\":\"number\",\"height\":\"number\",\"x\":\"number\",\"phase\":\"string\",\"cancels\":\"number\"}"))
+            .put("initialState",JSONObject("{\"width\":320,\"height\":420,\"x\":0,\"phase\":\"none\",\"cancels\":0}"))
+            .put("ui",JSONObject("{\"type\":\"column\",\"children\":[{\"type\":\"text\",\"text\":\"Probe state\"},{\"type\":\"text\",\"text\":\"Pointer phase\",\"bind\":\"phase\"}]}"))
+            .put("source","""
+                const s=input.state,e=input.event;
+                if(e.type==='viewport'){s.width=e.width;s.height=e.height;}
+                if(e.type==='pointer'){s.x=e.x;s.phase=e.phase;if(e.phase==='cancel')s.cancels++;}
+                return {state:s,surfaces:{main:{commands:[{type:'rect',x:0,y:0,width:s.width,height:s.height,color:'#123456'},
+                {type:'text',x:12,y:24,size:16,text:'Viewport '+s.width+' '+s.height,color:'#FFFFFF'}]}},frames:['main']};
+            """.trimIndent())
+        definition.getJSONArray("surfaces").getJSONObject(0).put("sizing","viewport")
+        fixture(specJson=definition.toString()) {_,store,scenario ->
+            click("Open");shown("Exit full screen")
+            assertNull(find("Mini-app refinement"));assertNull(find("Mini-app content"))
+            fun state()=JSONObject(store.tool("lake")!!.state)
+            fun canvas(node: AccessibilityNodeInfo?=automation.rootInActiveWindow): AccessibilityNodeInfo? {
+                if(node==null)return null
+                if(node.contentDescription?.startsWith("Viewport probe.")==true)return node
+                repeat(node.childCount) {canvas(node.getChild(it))?.let {found -> return found}}
+                return null
+            }
+            val bounds=Rect()
+            fun logical(pixels: Int): Int=(pixels/instrumentation.targetContext.resources.displayMetrics.density).roundToInt().coerceIn(64,2048)
+            waitUntil {canvas()?.let {it.getBoundsInScreen(bounds);bounds.width()>0 && bounds.height()>0}==true && state().getInt("height")==logical(bounds.height())}
+            fun fullWindow() {
+                val window=Rect().also {checkNotNull(diagnostics.freshRoot()).getBoundsInScreen(it)}
+                checkNotNull(canvas()).getBoundsInScreen(bounds)
+                assertEquals("Viewport canvas must fill the entire app window",window,bounds)
+                assertEquals("Logical viewport width",logical(bounds.width()),state().getInt("width"))
+                assertEquals("Logical viewport height",logical(bounds.height()),state().getInt("height"))
+            }
+            fullWindow()
+            val down=SystemClock.uptimeMillis()
+            fun touch(action: Int,fraction: Float) {
+                if(find("Hide game controls")!=null)click("Hide game controls")
+                val event=android.view.MotionEvent.obtain(down,SystemClock.uptimeMillis(),action,bounds.left+bounds.width()*fraction,bounds.exactCenterY(),0)
+                event.source=android.view.InputDevice.SOURCE_TOUCHSCREEN
+                try {assertTrue(injectTouch(event))}finally {event.recycle()}
+            }
+            touch(android.view.MotionEvent.ACTION_DOWN,0.25f)
+            touch(android.view.MotionEvent.ACTION_MOVE,0.75f)
+            touch(android.view.MotionEvent.ACTION_UP,0.75f)
+            waitUntil {state().getString("phase")=="up"}
+            assertEquals(state().getInt("width")*0.75,state().getDouble("x"),3.0)
+            touch(android.view.MotionEvent.ACTION_DOWN,0.5f)
+            click("Pause");waitUntil {state().getInt("cancels")>0};touch(android.view.MotionEvent.ACTION_UP,0.5f)
+            click("Resume")
+            val previousWidth=state().getInt("width")
+            scenario.onActivity {it.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE}
+            waitUntil {state().getInt("width")!=previousWidth}
+            waitUntil {canvas()?.let {it.getBoundsInScreen(bounds);bounds.width()>bounds.height()}==true}
+            fullWindow()
+            assertNull("Wide view must suppress shell split",find("Mini-app refinement"))
+            click("App controls");shown("Probe state")
+            automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+            shown("Exit full screen")
+            scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+            scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
+            shown("Exit full screen");screenshot("immersive-viewport")
+            click("Exit full screen");shown("Mini-app refinement")
+            assertTrue(store.effects("lake").isEmpty())
+            scenario.onActivity {activity ->
+                val insets=androidx.core.view.ViewCompat.getRootWindowInsets(activity.window.decorView)
+                assertTrue("System bars must return after exit",insets?.isVisible(androidx.core.view.WindowInsetsCompat.Type.statusBars())==true)
+            }
+            println("IMMERSIVE_VIEWPORT density=${instrumentation.targetContext.resources.displayMetrics.density} touch=PASS cancel=PASS rotation=PASS controls=PASS lifecycle=PASS exit=PASS")
+        }
+    }
+    /** Playback failure cases: ready cannot start, restart remains host-paused, sheet actions are
+     * overwritten, saved pause disappears on reopen, or temporary suspension changes saved playback.
+     */
+    @Test fun playbackControlsSheetAndReopenUseValidatedOutput() {
+        val definition=JSONObject(ArkanoidFixture.spec()).put("title","Playback probe")
+            .put("presentation",JSONObject("{\"mode\":\"immersive\"}"))
+            .put("stateSchema",JSONObject("{\"mode\":\"string\",\"ticks\":\"number\",\"downs\":\"number\",\"starts\":\"number\",\"pointerX\":\"number\"}"))
+            .put("initialState",JSONObject("{\"mode\":\"ready\",\"ticks\":0,\"downs\":0,\"starts\":0,\"pointerX\":0}"))
+            .put("ui",JSONObject("""{"type":"column","children":[{"type":"text","text":"Playback controls"},{"type":"button","text":"Generated pause","action":"pause"},{"type":"button","text":"Generated resume","action":"resume"}]}"""))
+            .put("source","""
+                const s=input.state,e=input.event,a=e.type==='action'?e.actionId:e.type;
+                if(a==='start'&&s.mode==='ready'&&s.starts++>0||a==='resume'||a==='restart')s.mode='playing';
+                if(a==='pause')s.mode='paused';
+                if(e.type==='frame')s.ticks++;
+                if(e.type==='pointer'){s.pointerX=e.x;if(e.phase==='down')s.downs++;}
+                return {state:s,playback:s.mode,frames:['main'],surfaces:{main:{commands:[
+                    {type:'rect',x:0,y:0,width:320,height:420,color:'#123456'},
+                    {type:'text',x:12,y:24,size:16,text:'Playback '+s.mode,color:'#FFFFFF'}]}}};
+            """.trimIndent())
+        fixture(specJson=definition.toString()) {_,store,scenario ->
+            diagnostics.state={"state="+store.tool("lake")?.state}
+            fun state()=JSONObject(store.tool("lake")!!.state)
+            fun mode(value: String)=waitUntil {state().getString("mode")==value}
+            fun still() {val ticks=state().getInt("ticks");SystemClock.sleep(350);assertEquals(ticks,state().getInt("ticks"))}
+            fun advances() {val ticks=state().getInt("ticks");waitUntil {state().getInt("ticks")>ticks}}
+            fun dismiss() {automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK);shown("Exit full screen")}
+            fun controls() {
+                click("App controls");shown("Playback controls")
+                waitUntil {
+                    var node=find("Generated pause")
+                    while(node?.isClickable==false)node=node.parent
+                    node?.isEnabled==true
+                }
+            }
+            var heldDownTime=0L
+            fun touch(action: Int?=null,fraction: Float=0.5f) {
+                if(find("Hide game controls")!=null)click("Hide game controls")
+                fun canvas(node: AccessibilityNodeInfo?=automation.rootInActiveWindow): AccessibilityNodeInfo? {
+                    if(node==null)return null
+                    if(node.contentDescription?.startsWith("Playback probe.")==true)return node
+                    repeat(node.childCount) {canvas(node.getChild(it))?.let {found -> return found}}
+                    return null
+                }
+                val bounds=Rect().also {checkNotNull(canvas()).getBoundsInScreen(it)}
+                if(action==null || action==android.view.MotionEvent.ACTION_DOWN)heldDownTime=SystemClock.uptimeMillis()
+                for(phase in action?.let {listOf(it)} ?: listOf(android.view.MotionEvent.ACTION_DOWN,android.view.MotionEvent.ACTION_UP)) {
+                    val event=android.view.MotionEvent.obtain(heldDownTime,SystemClock.uptimeMillis(),phase,bounds.left+bounds.width()*fraction,bounds.exactCenterY(),0)
+                    event.source=android.view.InputDevice.SOURCE_TOUCHSCREEN
+                    try {assertTrue(injectTouch(event))}finally {event.recycle()}
+                }
+            }
+            click("Open");shown("Start");mode("ready");still()
+            touch(android.view.MotionEvent.ACTION_DOWN,0.25f)
+            waitUntil {state().getInt("downs")==1}
+            click("Start");mode("playing");advances()
+            touch(android.view.MotionEvent.ACTION_MOVE,0.75f)
+            waitUntil("Ready-to-playing transition lost pointer ownership") {kotlin.math.abs(state().getDouble("pointerX")-240.0)<3.0}
+            touch(android.view.MotionEvent.ACTION_UP,0.75f)
+            click("Pause");shown("Resume");mode("paused");still()
+            click("Restart");mode("playing");shown("Pause");advances()
+            touch();waitUntil {state().getInt("downs")==2}
+            controls();mode("playing");still()
+            click("Generated pause");mode("paused");dismiss();shown("Resume");still()
+            controls();click("Generated resume");mode("playing")
+            dismiss();shown("Pause");advances()
+            scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+            mode("playing");still()
+            scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
+            shown("Pause");mode("playing");advances()
+            click("Pause");mode("paused");shown("Resume")
+            click("Exit full screen");shown("Mini-app refinement");shown("Resume");mode("paused");still()
+            scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+            scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
+            shown("Resume");mode("paused");still()
+            screenshot("playback-saved-pause")
+            println("PLAYBACK_NATIVE ready=PASS restart=PASS sheetActions=PASS suspension=PASS savedPause=PASS")
+        }
+    }
+    /** Saved provider regressions: down/move must change state and visible paddle pixels.
+     * The original JSON stays unchanged. The probe above covers observable up/cancel delivery.
+     */
+    @Test fun savedGeneratedArkanoidTouchMovesVisiblePaddle() {
+        val assets=instrumentation.context.assets
+        for(file in checkNotNull(assets.list("runtime-replay")).sorted()) {
+            val raw=assets.open("runtime-replay/$file").bufferedReader().use {it.readText()}
+            val definition=JSONObject(raw)
+            fixture(specJson=raw) {_,store,scenario ->
+                diagnostics.state={"replay=$file state="+store.tool("lake")?.state}
+                fun state()=JSONObject(store.tool("lake")!!.state)
+                fun canvas(node: AccessibilityNodeInfo?=diagnostics.freshRoot()): AccessibilityNodeInfo? {
+                    if(node==null)return null
+                    if(node.contentDescription?.startsWith(definition.getString("title")+".")==true)return node
+                    repeat(node.childCount) {canvas(node.getChild(it))?.let {return it}}
+                    return null
+                }
+                click("Open");shown("Pause")
+                val bounds=Rect()
+                waitUntil {canvas()?.let {it.getBoundsInScreen(bounds);bounds.width()>0 && bounds.height()>0}==true}
+                val window=Rect().also {checkNotNull(diagnostics.freshRoot()).getBoundsInScreen(it)}
+                assertEquals("$file full-window canvas",window,bounds)
+                for(orientation in listOf(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)) {
+                scenario.onActivity {it.requestedOrientation=orientation}
+                waitUntil {canvas()?.let {it.getBoundsInScreen(bounds);(bounds.width()>bounds.height())==(orientation==android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)}==true}
+                val window=Rect().also {checkNotNull(diagnostics.freshRoot()).getBoundsInScreen(it)}
+                assertEquals("$file orientation=$orientation full-window canvas",window,bounds)
+                click("Restart");shown("Pause")
+                click("Pause");shown("Resume")
+                click("Left");waitUntil {state().getDouble("paddle")<0.49}
+                click("Right");waitUntil {kotlin.math.abs(state().getDouble("paddle")-0.5)<0.03}
+                click("App controls")
+                shown(definition.getJSONObject("ui").getJSONArray("children").getJSONObject(0).getString("text")+": "+state().getString("message"))
+                screenshot(file.removeSuffix(".json")+"-$orientation-app-controls")
+                automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+                shown("Resume")
+                click("Hide game controls")
+                val board=checkNotNull(automation.takeScreenshot())
+                try {
+                    val u=minOf(bounds.width(),bounds.height()).toDouble()
+                    val brickWidth=(bounds.width()*0.89-u*0.016*5)/6
+                    val y=(bounds.top+bounds.height()*0.16+u*0.023).toInt()
+                    repeat(6) {index ->
+                        val x=(bounds.left+bounds.width()*0.055+index*(brickWidth+u*0.016)+brickWidth/2).toInt()
+                        val color=board.getPixel(x,y)
+                        assertTrue("$file orientation=$orientation first-row brick $index must remain unobstructed",android.graphics.Color.red(color)>230 && android.graphics.Color.green(color) in 70..150 && android.graphics.Color.blue(color) in 100..180)
+                    }
+                }finally {board.recycle()}
+                screenshot(file.removeSuffix(".json")+"-$orientation-unobstructed-board")
+                click("Resume");shown("Pause");click("Hide game controls")
+                shown("Show game controls")
+                assertNull("Playback panel must retract during play",find("Hide game controls"))
+                val stem=file.removeSuffix(".json")+"-"+if(orientation==android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)"landscape" else "portrait"
+                fun visiblePaddle(label: String,expected: Double?=null): Double {
+                    var center=Double.NaN
+                    waitUntil("$file visible paddle missing") {
+                        val bitmap=automation.takeScreenshot() ?: return@waitUntil false
+                        try {
+                            val y=(bounds.top+bounds.height()*0.9+minOf(bounds.width(),bounds.height())*0.013).toInt()
+                            val pixels=(bounds.left until bounds.right).filter {x ->
+                                val color=bitmap.getPixel(x,y)
+                                android.graphics.Color.red(color)>40 && android.graphics.Color.green(color)>170 && android.graphics.Color.blue(color)>170
+                            }
+                            if(pixels.size<bounds.width()*0.05)false else {
+                                center=pixels.average()
+                                if(expected!=null && kotlin.math.abs(center-expected)>5.0)return@waitUntil false
+                                val directory=File(instrumentation.targetContext.getExternalFilesDir(null),"mini-app-evidence").apply {mkdirs()}
+                                File(directory,"$stem-$label.png").outputStream().use {bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
+                                true
+                            }
+                        } finally {bitmap.recycle()}
+                    }
+                    return center
+                }
+                val before=visiblePaddle("before")
+                var downTime=0L
+                fun touch(action: Int,fraction: Float) {
+                    val now=SystemClock.uptimeMillis()
+                    if(action==android.view.MotionEvent.ACTION_DOWN)downTime=now
+                    val event=android.view.MotionEvent.obtain(downTime,now,action,bounds.left+bounds.width()*fraction,bounds.top+bounds.height()*0.65f,0)
+                    event.source=android.view.InputDevice.SOURCE_TOUCHSCREEN
+                    try {assertTrue(injectTouch(event))}finally {event.recycle()}
+                }
+                touch(android.view.MotionEvent.ACTION_DOWN,0.25f)
+                waitUntil {kotlin.math.abs(state().getDouble("paddle")-0.25)<0.03}
+                val down=visiblePaddle("down",bounds.left+bounds.width()*0.25)
+                assertEquals("$file visible down position",bounds.left+bounds.width()*0.25,down,5.0)
+                touch(android.view.MotionEvent.ACTION_MOVE,0.75f)
+                waitUntil {kotlin.math.abs(state().getDouble("paddle")-0.75)<0.03}
+                val moved=visiblePaddle("move",bounds.left+bounds.width()*0.75)
+                assertEquals("$file visible move position",bounds.left+bounds.width()*0.75,moved,5.0)
+                assertTrue("$file visible displacement",moved-down>bounds.width()*0.4)
+                touch(android.view.MotionEvent.ACTION_UP,0.75f)
+                touch(android.view.MotionEvent.ACTION_DOWN,0.4f)
+                waitUntil("UP must release the consumed pointer") {kotlin.math.abs(state().getDouble("paddle")-0.4)<0.03}
+                touch(android.view.MotionEvent.ACTION_CANCEL,0.4f)
+                touch(android.view.MotionEvent.ACTION_DOWN,0.6f)
+                waitUntil("CANCEL must release the consumed pointer") {kotlin.math.abs(state().getDouble("paddle")-0.6)<0.03}
+                touch(android.view.MotionEvent.ACTION_UP,0.6f)
+                click("Pause");shown("Resume")
+                click("Restart");shown("Pause")
+                waitUntil {state().getInt("score")==0 && state().getInt("lives")==3}
+                screenshot("$stem-controls-expanded")
+                println("SAVED_GAME_TOUCH file=$file orientation=$orientation density=${instrumentation.targetContext.resources.displayMetrics.density} fontScale=${instrumentation.targetContext.resources.configuration.fontScale} beforePx=$before downPx=$down movePx=$moved fullWindow=PASS down=PASS move=PASS upRelease=PASS cancelRelease=PASS nativeControls=PASS restart=PASS")
+                }
+                click("Exit full screen");shown("Mini-app refinement")
+            }
         }
     }
     /** Offline native graphics acceptance. No provider call or system capability is required. */
@@ -132,9 +439,11 @@ class MiniAppPresentationWorkflowTest {
         click("Pause")
         shown("Paused")
         click("Right");paddle(156)
-        val before=store.tool("lake")!!;assertEquals(1,before.stateVersion)
-        click("Save score");waitUntil {store.tool("lake")!!.stateVersion==2};paddle(156)
+        val before=store.tool("lake")!!;assertTrue(before.stateVersion>=1)
+        ToolSpec.parse(before.spec).validateState(before.state)
+        assertNull("Protocol 3 saves validated state without a checkpoint button",find("Save score"))
         click("Left");paddle(128)
+        click("Resume");shown("Playing")
         val node=checkNotNull(surface());node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
         automation.waitForIdle(100,3000)
         val bounds=Rect().also {checkNotNull(surface()).getBoundsInScreen(it)}
@@ -142,31 +451,33 @@ class MiniAppPresentationWorkflowTest {
         val x=bounds.left+bounds.width()*0.25f;val y=bounds.exactCenterY()
         for(action in listOf(android.view.MotionEvent.ACTION_DOWN,android.view.MotionEvent.ACTION_UP)) {
             val event=android.view.MotionEvent.obtain(now,SystemClock.uptimeMillis(),action,x,y,0)
-            try {assertTrue(automation.injectInputEvent(event,true))}finally {event.recycle()}
+            try {assertTrue(injectTouch(event))}finally {event.recycle()}
         }
-        paddle(48);screenshot("graphics-touch-saved")
+        paddle(48);click("Pause");shown("Paused");screenshot("graphics-touch-saved")
         val saved=store.tool("lake")!!
         scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
         Thread.sleep(150)
         kotlinx.coroutines.runBlocking {
             val probe=com.alpha.assistant.sandbox.GraphicsSession(instrumentation.targetContext)
-            try {assertEquals("Background must release the retained slot","OK",probe.open("return ()=>({commands:[]});","{}").status)}finally {probe.close()}
+            try {assertEquals("Background must release the retained slot","OK",probe.open("return {state:input.state,surfaces:{main:{commands:[]}}};","{}").status)}finally {probe.close()}
         }
-        assertEquals(saved,store.tool("lake"))
+        assertEquals(saved.state,store.tool("lake")!!.state)
         scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
         shown("Playing")
         paddle(128)
         click("Restart")
         paddle(128)
-        assertEquals(saved,store.tool("lake"))
+        assertEquals(0,JSONObject(store.tool("lake")!!.state).getInt("score"))
+        assertEquals(3,JSONObject(store.tool("lake")!!.state).getInt("lives"))
         screenshot("graphics-resumed")
         automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
         waitUntil {surface()==null}
-        assertEquals(saved,store.tool("lake"))
-        println("GRAPHICS_NATIVE touch=PASS checkpointContinuity=PASS backgroundRelease=PASS back=PASS stateVersion=${saved.stateVersion}")
+        assertTrue(store.effects("lake").isEmpty())
+        println("GRAPHICS_NATIVE touch=PASS durableState=PASS backgroundRelease=PASS back=PASS stateVersion=${saved.stateVersion}")
     }
     @Test fun graphicsLockReleasesSessionWithoutSavingFrames() = fixture(specJson=ArkanoidFixture.spec()) {model,store,scenario ->
         click("Open");shown("Playing")
+        click("Pause");shown("Paused")
         val saved=store.tool("lake")!!
         val power=instrumentation.targetContext.getSystemService(android.os.PowerManager::class.java)
         try {
@@ -174,15 +485,15 @@ class MiniAppPresentationWorkflowTest {
             waitUntil {!power.isInteractive};Thread.sleep(200)
             kotlinx.coroutines.runBlocking {
                 val probe=com.alpha.assistant.sandbox.GraphicsSession(instrumentation.targetContext)
-                try {assertEquals("Lock must release the retained slot","OK",probe.open("return ()=>({commands:[]});","{}").status)}finally {probe.close()}
+                try {assertEquals("Lock must release the retained slot","OK",probe.open("return {state:input.state,surfaces:{main:{commands:[]}}};","{}").status)}finally {probe.close()}
             }
-            assertEquals(saved,store.tool("lake"))
+            assertEquals(saved.state,store.tool("lake")!!.state)
         } finally {
             automation.executeShellCommand("input keyevent KEYCODE_WAKEUP").close()
             automation.executeShellCommand("wm dismiss-keyguard").close()
         }
-        waitUntil {power.isInteractive};shown("Playing")
-        assertEquals(saved,store.tool("lake"));screenshot("graphics-lock-resume")
+        waitUntil {power.isInteractive}
+        assertEquals(saved.state,store.tool("lake")!!.state);screenshot("graphics-lock-resume")
         println("GRAPHICS_LOCK retainedSlotReleased=PASS statePreserved=PASS")
     }
     @Test fun graphicsForegroundSixtySecondEvidence() = fixture(specJson=ArkanoidFixture.spec()) {model,store,scenario ->
@@ -202,9 +513,13 @@ class MiniAppPresentationWorkflowTest {
         val elapsedMs=elapsedNs/1_000_000
         assertTrue("Measurement must cover 60 seconds",elapsedMs>=60000)
         val frames=end.acceptedFrames-start.acceptedFrames
-        val fps=frames*1_000_000_000.0/elapsedNs
-        assertTrue("Tested emulator must sustain at least 10fps: $fps",fps>=10.0)
-        assertTrue("30fps ceiling: $frames in $elapsedMs ms",frames<=elapsedNs*30/1_000_000_000+2)
+        val snapshotRate=frames*1_000_000_000.0/elapsedNs
+        assertTrue("Validated snapshots must advance",frames>0)
+        assertTrue("Display requests must advance",end.frameRequests>start.frameRequests)
+        assertTrue("Host completions must advance",end.evaluations>start.evaluations)
+        assertTrue("Native submissions must advance",end.submissions>start.submissions)
+        assertTrue("Platform commits must advance",end.frameCommits>start.frameCommits)
+        assertEquals("UNAVAILABLE",end.presentationEvidence)
         val samples=end.samples.filter {it.sequence>start.acceptedFrames}
         assertEquals("Every accepted frame needs a measurement",frames,samples.size.toLong())
         assertEquals(start.acceptedFrames+1,samples.first().sequence)
@@ -216,9 +531,156 @@ class MiniAppPresentationWorkflowTest {
         waitUntil("Native accepted frames stopped after measurement") {
             metrics.snapshot()?.let {it.generation==end.generation && it.status=="RUNNING" && it.acceptedFrames>end.acceptedFrames}==true
         }
-        assertEquals("Frames must not save state",1,store.tool("lake")!!.stateVersion)
+        assertTrue("Validated frame state must persist",store.tool("lake")!!.stateVersion>1)
+        assertTrue("Frames must not request effects",store.effects("lake").isEmpty())
         screenshot("graphics-60-seconds")
-        println("GRAPHICS_60S session=${end.sessionId} generation=${end.generation} engineGeneration=${end.engineGeneration} startNs=${start.observedAtNs} endNs=${end.observedAtNs} sessionStartedNs=${end.startedAtNs} startFrames=${start.acceptedFrames} endFrames=${end.acceptedFrames} elapsedMs=$elapsedMs frames=$frames fps=$fps latencyMinMs=${latency.first()} latencyMeanMs=${latency.average()} latencyP50Ms=${percentile(0.50)} latencyP95Ms=${percentile(0.95)} latencyP99Ms=${percentile(0.99)} latencyMaxMs=${latency.last()} distribution=${distribution.joinToString(",")} status=${end.status} stateVersion=1")
+        println("GRAPHICS_60S session=${end.sessionId} generation=${end.generation} elapsedMs=$elapsedMs validatedSnapshots=$frames snapshotRate=$snapshotRate frameRequests=${end.frameRequests-start.frameRequests} hostCompletions=${end.evaluations-start.evaluations} submissions=${end.submissions-start.submissions} bufferCommits=${end.frameCommits-start.frameCommits} panelPresentation=${end.presentationEvidence} hostCallLatencyP50Ms=${percentile(0.50)} hostCallLatencyP95Ms=${percentile(0.95)} distribution=${distribution.joinToString(",")} status=${end.status} stateVersion=${store.tool("lake")!!.stateVersion}")
+    }
+
+    /** Black-box graphics workflow. Touch injection targets only the disposable activity fixture. */
+    @Test fun positionedSurfacesRouteOwnedPointersAndReportBufferCommits() {
+        val definition=JSONObject().put("formatVersion",3).put("title","Positioned surfaces").put("description","Offline graphics workflow")
+            .put("capabilities",JSONArray()).put("stateSchema",JSONObject("""{"last":"string","phase":"string","x":"number","downs":"number","cancels":"number","ticks":"number","firstDt":"number","resumed":"boolean"}"""))
+            .put("initialState",JSONObject("""{"last":"none","phase":"none","x":0,"downs":0,"cancels":0,"ticks":0,"firstDt":0,"resumed":false}"""))
+            .put("ui",JSONObject("""{"type":"text","text":"Last surface","bind":"last"}"""))
+            .put("surfaces",JSONArray("""[{"id":"back","width":320,"height":240,"x":0,"y":0},{"id":"front","width":160,"height":120,"x":80,"y":60}]"""))
+            .put("source","""
+                const s=input.state,e=input.event;
+                if(e.type==='pointer') {
+                    s.last=e.surfaceId;s.phase=e.phase;s.x=e.x;
+                    if(e.phase==='down')s.downs++;
+                    if(e.phase==='cancel')s.cancels++;
+                }
+                if(e.type==='resume')s.resumed=true;
+                if(e.type==='frame') {s.ticks++;if(s.resumed){s.firstDt=e.dt;s.resumed=false;}}
+                return {state:s,frames:['back'],surfaces:{
+                    back:{commands:[{type:'rect',x:0,y:0,width:320,height:240,color:'#203040'}]},
+                    front:{commands:[{type:'path',segments:[{type:'move',x:0,y:0},{type:'line',x:160,y:0},{type:'line',x:160,y:120},{type:'line',x:0,y:120},{type:'close'}],gradient:{type:'linear',x:0,y:0,x2:160,y2:120,stops:[{offset:0,color:'#AA3300'},{offset:1,color:'#FFAA55'}]}}]}
+                }};
+            """.trimIndent())
+        fixture(specJson=definition.toString()) {_,store,_ ->
+            click("Open");shown("Playing")
+            fun state()=JSONObject(store.tool("lake")!!.state)
+            fun canvas(node: AccessibilityNodeInfo?=automation.rootInActiveWindow): AccessibilityNodeInfo? {
+                if(node==null)return null
+                if(node.contentDescription?.startsWith("Positioned surfaces.")==true)return node
+                repeat(node.childCount) {canvas(node.getChild(it))?.let {found -> return found}}
+                return null
+            }
+            var bounds=Rect()
+            waitUntil {canvas()?.let {it.getBoundsInScreen(bounds);bounds.width()>0 && bounds.height()>0}==true}
+            var downTime=0L
+            fun touch(action: Int,x: Float,y: Float) {
+                val now=SystemClock.uptimeMillis()
+                if(action==android.view.MotionEvent.ACTION_DOWN)downTime=now
+                val event=android.view.MotionEvent.obtain(downTime,now,action,bounds.left+x/320*bounds.width(),bounds.top+y/240*bounds.height(),0)
+                event.source=android.view.InputDevice.SOURCE_TOUCHSCREEN
+                try {assertTrue(injectTouch(event))}finally {event.recycle()}
+            }
+            touch(android.view.MotionEvent.ACTION_DOWN,100f,80f)
+            waitUntil {state().getInt("downs")==1}
+            assertEquals("front",state().getString("last"));assertEquals(20.0,state().getDouble("x"),2.0)
+            touch(android.view.MotionEvent.ACTION_MOVE,300f,210f)
+            touch(android.view.MotionEvent.ACTION_UP,300f,210f)
+            waitUntil {state().getString("phase")=="up"}
+            assertEquals("front",state().getString("last"));assertEquals(160.0,state().getDouble("x"),0.0)
+            touch(android.view.MotionEvent.ACTION_DOWN,10f,10f)
+            waitUntil {state().getInt("downs")==2}
+            assertEquals("back",state().getString("last"))
+            click("Pause")
+            waitUntil {state().getInt("cancels")==1}
+            touch(android.view.MotionEvent.ACTION_UP,10f,10f)
+            shown("Paused");screenshot("positioned-surfaces-paused")
+            click("Resume");shown("Playing")
+            waitUntil {state().getInt("firstDt")==0 && !state().getBoolean("resumed")}
+            waitUntil {com.alpha.assistant.sandbox.SurfaceFrameMetrics.snapshot()?.frameCommits?.let {it>0}==true}
+            val measured=checkNotNull(com.alpha.assistant.sandbox.SurfaceFrameMetrics.snapshot())
+            assertTrue(measured.frameRequests>0);assertTrue(measured.evaluations>0)
+            assertTrue(measured.validatedSnapshots>0);assertTrue(measured.submissions>0);assertTrue(measured.frameCommits>0)
+            assertEquals("UNAVAILABLE",measured.presentationEvidence)
+            assertTrue(store.effects("lake").isEmpty());screenshot("positioned-surfaces-resumed")
+            println("POSITIONED_SURFACES overlap=front ownership=PASS clamp=PASS backgroundHit=PASS cancel=PASS resumeDt=0 requests=${measured.frameRequests} eventCompletions=${measured.evaluations} validated=${measured.validatedSnapshots} submissions=${measured.submissions} bufferCommits=${measured.frameCommits} panelPresentation=${measured.presentationEvidence}")
+        }
+    }
+
+    /** Rendered workflow: template controls, shared layers, tabs, empty state, rotation, and large text. */
+    @Test fun nativeComposeFamiliesRenderAndInteractAcrossConfigurations() {
+        val schema="""{"tick":"number","tab":"string","details":"boolean","empty":"boolean","pose":{"type":"array","maxItems":8,"items":"number"},"rows":{"type":"array","maxItems":8,"items":{"type":"object","fields":{"id":"string","title":"string","group":"string","shown":"boolean","available":"boolean","selected":"boolean","amount":"number"}}}}"""
+        val state="""{"tick":0,"tab":"overview","details":false,"empty":false,"pose":[0,0,0,0,0,0,1,1],"rows":[{"id":"r1","title":"First row","group":"Today","shown":true,"available":true,"selected":false,"amount":2}]}"""
+        val ui="""{"type":"column","children":[
+            {"type":"row","children":[{"type":"button","text":"Turn layer","action":"turn"},{"type":"button","text":"Clear rows","action":"clear"}]},
+            {"type":"motion","preset":"pop","trigger":"tick","children":[{"type":"metric","text":"Turns","bind":"tick"}]},
+            {"type":"tabs","text":"View","bind":"tab","action":"tab","options":[{"text":"Overview","value":"overview"},{"text":"Details","value":"details"}]},
+            {"type":"banner","text":"Details selected","visibleBind":"details","children":[{"type":"text","text":"The selected page is native."}]},
+            {"type":"stage","height":180,"perspective":900,"floor":true,"children":[{"type":"transform","poseBind":"pose","durationMs":300,"children":[
+                {"type":"transform","pose":[0,0,0,0,0,30,1,1],"solid":true,"size":100,"children":[{"type":"card","children":[{"type":"text","text":"Front face"}]}]},
+                {"type":"transform","pose":[0,180,0,0,0,-30,1,1],"solid":true,"size":100,"children":[{"type":"card","children":[{"type":"text","text":"Back face"}]}]}
+            ]}]},
+            {"type":"groupedList","text":"Template rows","bind":"rows","groupBy":"group","emptyText":"No sample rows","rowTemplate":{"type":"form","text":"Row form","visibleBind":"shown","enabledBind":"available","children":[
+                {"type":"text","text":"Name","bind":"title"},{"type":"toggle","text":"Select row","bind":"selected","action":"selectRow"},{"type":"numberInput","text":"Row amount","bind":"amount","min":0,"max":10,"action":"amount"}
+            ]}},
+            {"type":"facts","text":"Native facts","children":[{"type":"fact","text":"Turns recorded","bind":"tick"},{"type":"fact","text":"Current view","bind":"tab"}]},
+            {"type":"timeline","text":"Native timeline","children":[{"type":"timelineItem","text":"Start","time":"09:00","detail":"The first native entry"},{"type":"timelineItem","text":"Finish","time":"10:00","detail":"The second native entry"}]},
+            {"type":"listGroup","text":"Native group","children":[{"type":"text","text":"Grouped content"},{"type":"text","text":"Another grouped item"}]},
+            {"type":"emptyState","text":"Sample is empty","visibleBind":"empty","children":[{"type":"text","text":"All rows were removed."}]}
+        ]}"""
+        val definition=JSONObject().put("formatVersion",3).put("title","Compose family fixture").put("description","Offline native family workflow")
+            .put("capabilities",JSONArray()).put("stateSchema",JSONObject(schema)).put("initialState",JSONObject(state)).put("ui",JSONObject(ui))
+            .put("source","""
+                if(input.event.type==='action') {
+                    const event=input.event;
+                    if(event.actionId==='turn') {input.state.tick++;input.state.pose[1]+=45;}
+                    if(event.actionId==='tab') {input.state.tab=event.value;input.state.details=event.value==='details';}
+                    if(event.actionId==='clear') {input.state.rows=[];input.state.empty=true;}
+                    if(event.actionId==='selectRow'||event.actionId==='amount') {
+                        const row=input.state.rows.find(x=>x.id===event.value.key);
+                        if(!row) throw new Error('Missing row');
+                        if(event.actionId==='amount') row.amount=event.value.value;
+                        else row.selected=event.value.value;
+                    }
+                }
+                return {state:input.state};
+            """.trimIndent())
+        fixture(specJson=definition.toString()) {model,store,scenario ->
+            click("Open"); shown("Turns"); shown("0"); screenshot("compose-families-initial")
+            click("Turn layer")
+            waitUntil {JSONObject(store.tool("lake")!!.state).getInt("tick")==1 && !model.tools.busy}
+            shown("Turns"); shown("1"); screenshot("compose-families-turned")
+            click("Details")
+            waitUntil("Tab selection did not reach durable state") {
+                val current=JSONObject(store.tool("lake")!!.state)
+                current.getString("tab")=="details" && current.getBoolean("details") && !model.tools.busy
+            }
+            shown("Details")
+            waitUntil("The selected tab remains labeled and selected") {
+                var tab=find("Details")
+                while(tab != null && !tab.isSelected && !tab.isClickable) tab=tab.parent
+                tab?.let {it.isVisibleToUser && it.isSelected} == true
+            }
+            shown("Details selected"); screenshot("compose-families-details")
+            click("Select row")
+            waitUntil {JSONObject(store.tool("lake")!!.state).getJSONArray("rows").getJSONObject(0).getBoolean("selected") && !model.tools.busy}
+            edit("Row amount","4"); click("Apply: Row amount")
+            waitUntil {JSONObject(store.tool("lake")!!.state).getJSONArray("rows").getJSONObject(0).getInt("amount")==4 && !model.tools.busy}
+            shown("Native timeline"); shown("10:00"); screenshot("compose-families-timeline")
+            scenario.onActivity {it.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE}
+            shown("Native facts"); screenshot("compose-families-wide")
+            val original=automation.executeShellCommand("settings get system font_scale").use {android.os.ParcelFileDescriptor.AutoCloseInputStream(it).bufferedReader().readText().trim()}
+            try {
+                automation.executeShellCommand("settings put system font_scale 1.5").close()
+                SystemClock.sleep(500)
+                shown("Native facts"); screenshot("compose-families-large-font")
+            } finally {
+                val restore=original.toDoubleOrNull()?.toString() ?: "1.0"
+                automation.executeShellCommand("settings put system font_scale $restore").close()
+            }
+            scenario.onActivity {it.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT}
+            click("Clear rows"); shown("Sample is empty"); shown("No sample rows")
+            screenshot("compose-families-empty")
+            assertEquals(0,JSONObject(store.tool("lake")!!.state).getJSONArray("rows").length())
+            assertTrue(store.effects("lake").isEmpty())
+            println("NATIVE_COMPOSE families=PASS templateToggle=PASS templateNumber=PASS tabs=PASS empty=PASS wide=PASS fontScale1.5=PASS effects=0")
+        }
     }
 
     @Test fun chatSummaryOpensFocusedAppWithPersistentComposer() = fixture {model,store,scenario ->

@@ -72,7 +72,7 @@ class MedicineWorkflowTest {
         val medicineName=MedicineRuntime.database(tools)
         val medicine=MedicineStore(context,medicineName)
         val platform=Platform()
-        val spec=ToolSpec.parse(JSONObject().put("formatVersion",2).put("title","Medicine fixture").put("description","")
+        val spec=ToolSpec.parse(JSONObject().put("formatVersion",3).put("title","Medicine fixture").put("description","")
             .put("capabilities",JSONArray(MedicineContract.ids.toList())).put("initialState",JSONObject("{\"ready\":true}"))
             .put("stateSchema",JSONObject("{\"ready\":\"boolean\"}"))
             .put("ui",JSONObject("{\"type\":\"text\",\"text\":\"Fixture\"}")).put("source","return {state:input.state};").toString())

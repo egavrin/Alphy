@@ -73,7 +73,7 @@ class AutomationRepairWorkflowTest {
             assertEquals(Instant.parse("2026-10-30T00:00:00Z").toEpochMilli(),resolved.args.getLong("from"))
             assertEquals(Instant.parse("2026-10-31T00:00:00Z").toEpochMilli(),resolved.args.getLong("to"))
             assertNotEquals(resolved.args.getLong("from"),AutomationDataflow.resolveRead(read,day+86400000).args.getLong("from"))
-            val render=AutomationTools.renderer(context)
+            val render=AutomationTools.renderer(context,tools)
             var writes=0
             val executor=AutomationExecutor(store,{null},{_,_->null},preview={ owner,action,step ->
                 if(action.capability == "calendar.read.rolling") calendarFixture()
@@ -143,7 +143,7 @@ class AutomationRepairWorkflowTest {
             tools.commitTool(bad,initial,true)
             val action=CapabilityRequest("set","tool.state.set",JSONObject().put("toolId",bad.id).put("revision",bad.revision).put("field","title").put("value","Changed"))
             val definition=AutomationDefinition.parse(notice(JSONObject().put("type","manual")).put("actions",JSONArray().put(action.json())))
-            assertTrue(runCatching {AutomationTools.execute(tools,definition,action,AutomationStep("fixture",0,emptyMap(),false),AutomationTools.renderer(context)) {true}}.isFailure)
+            assertTrue(runCatching {AutomationTools.execute(tools,definition,action,AutomationStep("fixture",0,emptyMap(),false),AutomationTools.renderer(context,tools)) {true}}.isFailure)
             assertEquals(bad,tools.tool(bad.id))
             val proposal=AutomationDrafts.fromChat("Обновляй Мой день из календаря каждые 15 минут")
             assertEquals("interval",proposal.trigger.getString("type")); assertEquals(15,proposal.trigger.getInt("minutes"))

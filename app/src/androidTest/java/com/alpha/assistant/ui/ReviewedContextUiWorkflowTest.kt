@@ -3,6 +3,7 @@ package com.alpha.assistant.ui
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Bundle
+import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
@@ -19,6 +20,7 @@ import java.util.UUID
 /** Black-box workflow: reviewed paste survives recreation, cancellation preserves
  * existing attachments, notes sharing remains explicit, and menu access does not send. */
 class ReviewedContextUiWorkflowTest {
+    private val diagnostics = UiFailureDiagnostics("reviewed-context")
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val automation = instrumentation.uiAutomation
 
@@ -86,14 +88,28 @@ class ReviewedContextUiWorkflowTest {
         return null
     }
     private fun waitFor(label: String): AccessibilityNodeInfo {
+        diagnostics.target(label)
         var match: AccessibilityNodeInfo? = null
-        waitUntil { match = find(automation.rootInActiveWindow, label); match != null }
+        waitUntil {
+            val root = diagnostics.freshRoot()
+            match = find(root, label)
+            if (match?.isVisibleToUser == true) return@waitUntil true
+            if (label == "Выбрать текст для заметки") {
+                var chat = find(root, "Text selected for my note")
+                while (chat != null && chat.actionList.none { it.id == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD }) chat = chat.parent
+                if (chat != null) {
+                    assertTrue("Scroll the originating message", chat.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD))
+                    automation.waitForIdle(100, 2000)
+                }
+            }
+            false
+        }
         return checkNotNull(match)
     }
     private fun click(label: String) {
         var node: AccessibilityNodeInfo? = waitFor(label)
         while (node != null && !node.isClickable) node = node.parent
-        assertTrue("Clickable action: $label", node?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true)
+        assertTrue("Clickable action: $label", diagnostics.click(label,node))
         automation.waitForIdle(100, 3000)
     }
     private fun field(label: String): AccessibilityNodeInfo {
@@ -115,6 +131,7 @@ class ReviewedContextUiWorkflowTest {
     private fun waitUntil(check: () -> Boolean) {
         val deadline = SystemClock.uptimeMillis() + 10000
         while (SystemClock.uptimeMillis() < deadline) { if (check()) return; SystemClock.sleep(50) }
+        diagnostics.capture("wait-timeout")
         fail("UI condition did not complete within 10 seconds")
     }
 }

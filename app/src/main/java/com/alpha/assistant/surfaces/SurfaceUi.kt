@@ -68,7 +68,7 @@ import com.alpha.assistant.tools.ToolSpec
                     FilterChip(!widget,{ widget = false },{ Text("Shortcut") })
                 }
                 if(widget) { WidgetOptions(prefs) { prefs = it }; WidgetPreview(tool,prefs) }
-                else { Text(ToolSpec.parse(tool.spec).title,style = MaterialTheme.typography.titleLarge); Text("Opens this tool in Alphy.") }
+                else { Text(ToolSpec.storedTitle(tool.spec),style = MaterialTheme.typography.titleLarge); Text("Opens this tool in Alphy.") }
                 Text("Shared state, separate appearance. Text input and hidden controls open in Alphy. Only local buttons and toggles run here.")
                 status?.let { Text(it) }
             }

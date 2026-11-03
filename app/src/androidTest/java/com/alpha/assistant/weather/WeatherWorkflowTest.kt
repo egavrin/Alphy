@@ -97,12 +97,14 @@ class WeatherWorkflowTest {
                     model.weatherVisibilityChanged(false, nextSurface)
                     model.weatherHidden(nextSurface)
                 }
+                var canceledConversationId: String? = null
                 for(action in listOf("cancel", "draft", "switch")) {
                     pending = CompletableDeferred()
                     val expected = entered + 1
                     main { model.select(null); model.editDraft(Draft("weather here")); model.send() }
                     waitUntil { entered == expected }
-                    val original = model.snapshot.selectedId
+                    val original = model.snapshot.selectedId!!
+                    if(action == "cancel") canceledConversationId = original
                     main { when(action) {
                         "cancel" -> model.cancelRequest()
                         "draft" -> model.editDraft(Draft("Keep my new draft"))
@@ -116,7 +118,7 @@ class WeatherWorkflowTest {
                     if(action == "draft") assertEquals("Keep my new draft", model.snapshot.draft.text)
                     if(action == "switch") assertNull(model.snapshot.selectedId)
                 }
-                val canceled = model.snapshot.conversations.last()
+                val canceled = model.snapshot.conversations.single { it.id == canceledConversationId }
                 pending = CompletableDeferred()
                 val expected = entered + 1
                 main { model.select(canceled.id); model.retry(canceled.messages.last().id) }

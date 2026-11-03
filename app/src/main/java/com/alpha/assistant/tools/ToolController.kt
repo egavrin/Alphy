@@ -35,7 +35,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     var error by mutableStateOf<String?>(null); private set
     var requestPrompt by mutableStateOf(""); private set
     fun preparePrompt(text: String) { requestPrompt = text; select(null) }
-    private var closing = false
+    @Volatile private var closing = false
     private var job: Job? = null
     private val session = AtomicReference<CloudSession?>(null)
     init { run { refresh() } }
@@ -146,8 +146,33 @@ class ToolController(private val app: Application, private val scope: CoroutineS
             image
         } catch(cancel: CancellationException) {throw cancel} catch(_: Exception) {null}
     }
-    suspend fun checkpoint(t: ToolRecord, patch: org.json.JSONObject): ToolRecord = withContext(Dispatchers.IO) {
-        engine.checkpoint(t,patch).also {refresh(deliverResults=false)}
+    fun artifactHost(t: ToolRecord)=object: ArtifactUiHost {
+        private var generation: Long?=null
+        private suspend fun publish(snapshot: ArtifactSnapshot): ArtifactSnapshot {
+            withContext(Dispatchers.Main) {tools=tools.map {if(it.id==snapshot.tool.id) snapshot.tool else it}}
+            return snapshot
+        }
+        override suspend fun open(): ArtifactSnapshot {
+            var acquired: Long?=null
+            try {
+                return withContext(Dispatchers.IO) {
+                    check(!closing) {"The artifact owner is closed."}
+                    val snapshot=engine.openArtifact(t)
+                    acquired=snapshot.sessionGeneration;generation=snapshot.sessionGeneration
+                    publish(snapshot)
+                }
+            } catch(failure: Throwable) {
+                withContext(NonCancellable+Dispatchers.IO) {
+                    try {acquired?.let {engine.closeArtifact(t.id,t.revision,it)}}
+                    catch(cleanup: Exception) {failure.addSuppressed(cleanup)}
+                }
+                throw failure
+            }
+        }
+        override suspend fun snapshot(): ArtifactSnapshot=withContext(Dispatchers.IO) {publish(engine.artifactSnapshot(t.id,t.revision,checkNotNull(generation)))}
+        override suspend fun flush(): ArtifactSnapshot=withContext(Dispatchers.IO) {publish(engine.flushArtifact(t.id,t.revision,checkNotNull(generation)))}
+        override suspend fun event(event: org.json.JSONObject): ArtifactSnapshot=withContext(Dispatchers.IO) {publish(engine.artifactEvent(t.id,t.revision,event,checkNotNull(generation)))}
+        override suspend fun close()=withContext(Dispatchers.IO) {generation?.let {engine.closeArtifact(t.id,t.revision,it)};Unit}
     }
     fun interact(t: ToolRecord, action: String, value: Any?, foreground: ()->Boolean = { false }, launch: ((android.content.Intent)->Unit)? = null) {
         interactNative(t,action,value,foreground,launch,null)
@@ -230,7 +255,14 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         }
     }
     fun cancel() { automaticCancel?.invoke(); session.getAndSet(null)?.cancel(); job?.cancel() }
-    fun close() { closing = true; cancel(); (automaticJob ?: job)?.invokeOnCompletion { store.close() } ?: store.close() }
+    fun close() {
+        closing=true;cancel()
+        CoroutineScope(Dispatchers.IO).launch {
+            (automaticJob ?: job)?.join()
+            try {engine.closeArtifacts()} catch(failure: Exception) {android.util.Log.e("ArtifactRuntime","Local snapshot close failed",failure)}
+            finally {store.close()}
+        }
+    }
     private fun run(block: suspend () -> Unit) {
         if(busy || closing) return
         busy = true; error = null
@@ -253,7 +285,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         }
         val history = selectedId?.let(store::revisions).orEmpty()
         val actions = selectedId?.let(store::effects).orEmpty()
-        val allowed = loaded.flatMap { tool -> ToolSpec.parse(tool.spec).capabilities.filter { broker.granted(tool.id,it) }.map { tool.id + ":" + it } }.toSet()
+        val allowed = loaded.flatMap { tool -> ToolSpec.available(tool.spec)?.capabilities.orEmpty().filter { broker.granted(tool.id,it) }.map { tool.id + ":" + it } }.toSet()
         if (store.databaseName == "alpha-tools.db") com.alpha.assistant.surfaces.ToolWidgets.updateAll(app)
         withContext(Dispatchers.Main) {
             tools = loaded; drafts = pending; dependentRules = dependencies; revisions = history; effects = actions; grants = allowed

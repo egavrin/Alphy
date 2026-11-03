@@ -92,10 +92,14 @@ import java.util.Date
             }
         } else {
             val focusedMiniApp=page == "tools" && (model.tools.selectedId != null || model.tools.selectedDraftId != null)
-            Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+            val selectedTool=model.tools.tools.find {it.id==model.tools.selectedId}
+            val selectedSpec=remember(selectedTool?.spec) {selectedTool?.let {com.alpha.assistant.tools.ToolSpec.available(it.spec)}}
+            var immersiveExited by rememberSaveable(selectedTool?.id,selectedTool?.revision,page) {mutableStateOf(false)}
+            val immersive=focusedMiniApp && model.tools.selectedDraftId==null && selectedTool?.archived==false && selectedSpec?.presentation=="immersive" && !immersiveExited
+            Column(Modifier.fillMaxSize().then(if(immersive)Modifier else Modifier.safeDrawingPadding())) {
                 if (!focusedMiniApp) ShellHeader(page != "chat", { navigate("chat") },
                     { sheet = "menu"; focus.clearFocus() }, { navigate("history") })
-                if (model.saveFailed) {
+                if (model.saveFailed && !immersive) {
                     Surface(color = MaterialTheme.colorScheme.errorContainer) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("Изменения не сохранены", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
@@ -104,16 +108,16 @@ import java.util.Date
                     }
                 }
                 BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.TopCenter) {
-                    val split = maxWidth >= 640.dp && page == "tools"
+                    val split = maxWidth >= 640.dp && page == "tools" && !immersive
                     if (split) {
                         Row(Modifier.fillMaxSize()) {
                             Column(Modifier.weight(1f).fillMaxHeight()) { ChatPane(model, { navigate("tools") }, { sheet = "context" }) { request -> automationRequest=request; navigate("automation") } }
                             VerticalDivider()
-                            Column(Modifier.weight(1f)) { com.alpha.assistant.tools.ToolsPane(model.tools, snapshot.selectedId, snapshot.draft.text, snapshot.draft.attachments.filter { it.contextText == null }) { navigate("chat") } }
+                            Column(Modifier.weight(1f)) { com.alpha.assistant.tools.ToolsPane(model.tools, snapshot.selectedId, snapshot.draft.text, snapshot.draft.attachments.filter { it.contextText == null },immersive=immersive,exitImmersive={immersiveExited=true}) { navigate("chat") } }
                         }
                     } else when (page) {
                         "chat" -> ChatPane(model, { navigate("tools") }, { sheet = "context" }) { request -> automationRequest=request; navigate("automation") }
-                        "tools" -> com.alpha.assistant.tools.ToolsPane(model.tools, snapshot.selectedId, snapshot.draft.text, snapshot.draft.attachments.filter { it.contextText == null }) { navigate("chat") }
+                        "tools" -> com.alpha.assistant.tools.ToolsPane(model.tools, snapshot.selectedId, snapshot.draft.text, snapshot.draft.attachments.filter { it.contextText == null },immersive=immersive,exitImmersive={immersiveExited=true}) { navigate("chat") }
                         "automation" -> com.alpha.assistant.automations.AutomationsPane(model.tools,automationRequest) {automationRequest=null}
                         "capabilities" -> CapabilitiesPane(model.tools)
                         "history" -> HistoryPane(snapshot.conversations, search, { search = it }, { model.select(it); navigate("chat") }, { model.select(null); navigate("chat") }, model::renameConversation, model::deleteConversation, model::clearHistory)

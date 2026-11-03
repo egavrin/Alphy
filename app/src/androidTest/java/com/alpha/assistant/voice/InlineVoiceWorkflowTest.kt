@@ -1,5 +1,6 @@
 package com.alpha.assistant.voice
 
+import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
@@ -20,8 +21,23 @@ import java.util.UUID
 /** Failure cases: Stop discards recognition, Cancel loses a draft, a late result
  * replaces edited text or another conversation, or Send submits more than once. */
 class InlineVoiceWorkflowTest {
+    private val diagnostics = UiFailureDiagnostics("voice")
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val automation = instrumentation.uiAutomation
+    private val actions = StringBuilder()
+    private var voiceState: () -> String = { "uninitialized" }
+
+    @Test fun diagnosticFailuresPreserveFailedClickAssertion() {
+        for (failure in listOf(java.io.IOException("Fixture write failed"), IllegalStateException("Fixture activity closed"))) {
+            var captures = 0
+            val assertion = assertThrows(AssertionError::class.java) {
+                assertClickResult(false) { captures++; throw failure }
+            }
+            assertEquals(1, captures)
+            assertNull(assertion.cause)
+        }
+        assertClickResult(true) { fail("Successful clicks must not capture failure diagnostics") }
+    }
 
     @Test fun stopReviewSendCancelAndLateResultsPreserveDrafts() {
         val context = instrumentation.targetContext
@@ -47,6 +63,18 @@ class InlineVoiceWorkflowTest {
         }
         try {
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
+                voiceState = {
+                    var state = ""
+                    scenario.onActivity { activity ->
+                        state = "active=${model.voice.active} phase=${model.voice.phase} preparations=$preparations " +
+                            "permission=${context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)} lifecycle=${activity.lifecycle.currentState}"
+                    }
+                    state
+                }
+                diagnostics.state = {
+                    "voiceActive=${model.voice.active} voicePhase=${model.voice.phase} " +
+                        "requestBusy=${model.activeConversationId != null} attachmentBusy=${model.attachmentBusy} loading=${model.loading}"
+                }
                 waitUntil { !model.loading }
                 click("Голосовой запрос")
                 allowMicrophone()
@@ -102,12 +130,13 @@ class InlineVoiceWorkflowTest {
                 assertEquals(selectedDraft, model.snapshot.draft)
                 assertEquals(changed, model.snapshot.newDraft)
                 assertEquals(4, preparations)
+                File(context.getExternalFilesDir(null), "inline-voice-actions.txt").writeText(actions.toString() + voiceState())
                 scenario.onActivity { model.voice.permissionDenied(); model.voice.stop() }
                 assertTrue("Permission recovery must remain available", model.voice.permissionRequired)
                 waitUntil { find(automation.rootInActiveWindow, "Разрешите микрофон в настройках Android и повторите запись.") != null }
                 File(context.getExternalFilesDir(null), "inline-voice-workflow.txt").writeText(
                     "Revision: ${InstrumentationRegistry.getArguments().getString("testedRevision", "not supplied")}\n" +
-                    "Command: connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.alpha.assistant.voice.InlineVoiceWorkflowTest\n" +
+                    "Command: adb -s emulator-5556 shell am instrument -w -r -e class com.alpha.assistant.voice.InlineVoiceWorkflowTest com.alpha.assistant.test/androidx.test.runner.AndroidJUnitRunner\n" +
                     "Inputs: isolated draft/attachment and controlled local transcripts; no cloud credentials.\n" +
                     "Expected and observed: cancel preserves draft; Stop creates review; Send creates one user message; late results preserve edits and conversation.\n")
             }
@@ -125,11 +154,32 @@ class InlineVoiceWorkflowTest {
         return null
     }
     private fun click(label: String) {
-        var node: AccessibilityNodeInfo? = null
-        waitUntil { node = find(automation.rootInActiveWindow, label); node != null }
-        while (node != null && !node!!.isClickable) node = node!!.parent
-        assertTrue(node?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true)
+        diagnostics.target(label)
         automation.waitForIdle(100, 3000)
+        var node: AccessibilityNodeInfo? = null
+        waitUntil {
+            // The recorder replaces the composer, so a cached microphone can refer to a removed node.
+            node = find(diagnostics.freshRoot(), label)
+            while (node != null && !node!!.isClickable) node = node!!.parent
+            node?.let { it.isVisibleToUser && it.isEnabled && it.actionList.any { action -> action.id == AccessibilityNodeInfo.ACTION_CLICK } } == true
+        }
+        val identity = node?.hashCode()
+        val clicked = diagnostics.click(label,node)
+        actions.appendLine("action=${label} cachedIdentity=$identity result=$clicked")
+        assertClickResult(clicked) {
+            val refreshed = node?.refresh()
+            val current = find(diagnostics.freshRoot(), label)
+            actions.appendLine("failedNodeRefresh=$refreshed currentIdentity=${current?.hashCode()} sameNode=${node == current}")
+            actions.appendLine(voiceState())
+            File(instrumentation.targetContext.getExternalFilesDir(null), "inline-voice-actions.txt").writeText(actions.toString())
+        }
+        automation.waitForIdle(100, 3000)
+    }
+    private fun assertClickResult(clicked: Boolean, captureFailure: () -> Unit) {
+        if (!clicked) runCatching(captureFailure).onFailure {
+            println("VOICE_DIAGNOSTIC captureFailure=${it.javaClass.name}")
+        }
+        assertTrue(clicked)
     }
     private fun allowMicrophone() {
         fun allow(node: AccessibilityNodeInfo?): Boolean {
@@ -147,6 +197,7 @@ class InlineVoiceWorkflowTest {
     private fun waitUntil(check: () -> Boolean) {
         val deadline = SystemClock.uptimeMillis() + 10000
         while (SystemClock.uptimeMillis() < deadline) { if (check()) return; SystemClock.sleep(50) }
+        diagnostics.capture("wait-timeout")
         fail("Workflow condition did not complete within 10 seconds")
     }
 }

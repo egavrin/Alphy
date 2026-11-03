@@ -18,8 +18,8 @@ class SandboxIsolationTest {
     private val context get()=InstrumentationRegistry.getInstrumentation().targetContext
     private fun input(event: String="{\"type\":\"action\",\"actionId\":\"run\",\"value\":null}")=
         """{"artifactId":"smoke","revision":1,"event":$event,"state":{"count":1}}"""
-    private val game="let n=0;return e=>({commands:[{type:'text',x:1,y:20,text:String(++n),size:12,color:'#ffffff'}]});"
-    private fun counter(result: SandboxResult)=JSONObject(checkNotNull(result.json)).getJSONArray("commands").getJSONObject(0).getString("text").toInt()
+    private val game="globalThis.n=(globalThis.n||0)+1;return {state:input.state,surfaces:{main:{commands:[{type:'text',x:1,y:20,text:String(globalThis.n),size:12,color:'#ffffff'}]}}};"
+    private fun counter(result: SandboxResult)=JSONObject(checkNotNull(result.json)).getJSONObject("surfaces").getJSONObject("main").getJSONArray("commands").getJSONObject(0).getString("text").toInt()
     @Test fun ordinaryEventTypesAndFreshGlobals(): Unit=runBlocking {
         val client=SandboxClient(context)
         val events=listOf("{\"type\":\"preview\"}","{\"type\":\"render\"}","{\"type\":\"action\",\"actionId\":\"run\",\"value\":null}",
@@ -47,7 +47,7 @@ class SandboxIsolationTest {
     }
     @Test fun cancelGraphicsLeavesOrdinaryAvailableAndOldSessionClosed(): Unit=runBlocking {
         val graphics=GraphicsSession(context)
-        val job=launch(Dispatchers.Default) {graphics.open("return ()=>{while(true){}};","{}")}
+        val job=launch(Dispatchers.Default) {graphics.open("while(true){}","{}")}
         delay(10);job.cancelAndJoin();graphics.close()
         assertEquals("CLOSED",graphics.event(GraphicsContract.event("frame",33)).status)
         assertEquals("OK",SandboxClient(context).execute("return {state:input.state};",input()).status)
@@ -95,6 +95,65 @@ class SandboxIsolationTest {
             assertEquals("Native execution must stop while Main cannot dispatch","TIMEOUT",observed.get())
             assertEquals("TIMEOUT",task.await().status)
         } finally {isolate.close();task.cancel();observer.join(1000)}
+    }
+    /** Failures: continuous callers disagree, a short completion is rejected, delayed watchdog dispatch
+     * accepts a late result, runaway work survives, cancellation publishes, or a terminal session retries.
+     */
+    @Test fun continuousWatchdogIsSharedByRetainedAndDisposableEvents(): Unit=runBlocking {
+        assertEquals(100L,GraphicsContract.EVALUATION_MS)
+        assertEquals(500L,SandboxContract.EVALUATION_MS)
+        val source="const until=Date.now()+40;while(Date.now()<until){};return {state:input.state};"
+        val events=listOf(GraphicsContract.event("frame",16),GraphicsContract.event("pointer",x=1.0,y=1.0,phase="down"),
+            GraphicsContract.event("control",direction="left"),JSONObject().put("type","timer").put("timerId","clock"))
+        val graphics=GraphicsSession(context)
+        try {
+            assertEquals("OK",graphics.open(source,"{\"count\":1}").status)
+            for(event in events)assertEquals(event.toString(),"OK",graphics.event(event).status)
+            SandboxClient(context).disposable {evaluate ->
+                for(event in events)assertEquals(event.toString(),"OK",evaluate(source,input(event.toString())).status)
+                assertEquals("OK",evaluate(source,input()).status)
+            }
+        } finally {graphics.close()}
+    }
+    @Test fun monotonicCutoffRejectsLateResultWhenWatchdogCannotDispatch(): Unit=runBlocking {
+        val runtime=AndroidJsRuntime.get(context)
+        val isolate=runtime.acquire(retained=true,maxReturnBytes=32768)
+        // A real isolate plus a blocked watchdog selects the otherwise nondeterministic callback race.
+        val field=AndroidJsRuntime::class.java.getDeclaredField("watchdog").apply {isAccessible=true}
+        val watchdog=field.get(runtime) as java.util.concurrent.ScheduledThreadPoolExecutor
+        val entered=java.util.concurrent.CountDownLatch(1)
+        val release=java.util.concurrent.CountDownLatch(1)
+        watchdog.execute {entered.countDown();release.await(2,java.util.concurrent.TimeUnit.SECONDS)}
+        try {
+            assertTrue(entered.await(1,java.util.concurrent.TimeUnit.SECONDS))
+            val start=System.nanoTime()
+            val result=isolate.evaluate("globalThis.attempt=(globalThis.attempt||0)+1;const until=Date.now()+160;while(Date.now()<until){};String(globalThis.attempt);",100)
+            println("ANDROIDX_LATE_RESULT status=${result.status} elapsedMs=${(System.nanoTime()-start)/1_000_000.0} watchdog=blocked")
+            assertEquals("TIMEOUT",result.status);assertNull(result.json)
+            assertEquals("TIMEOUT",isolate.status)
+            assertEquals("A terminal isolate must not retry or evaluate again","TIMEOUT",isolate.evaluate("'must not run'",500).status)
+        } finally {release.countDown();isolate.close()}
+        val next=runtime.acquire(retained=true,maxReturnBytes=32768)
+        try {assertEquals("OK",next.evaluate("'fresh'",500).status)} finally {next.close()}
+    }
+    @Test fun continuousRunawayAndCancellationReleaseTheirOnlyLease(): Unit=runBlocking {
+        for(cancel in listOf(false,true)) {
+            val graphics=GraphicsSession(context)
+            try {
+                assertEquals("OK",graphics.open("if(input.event.type==='frame')while(true){};return {state:input.state};","{}").status)
+                val task=async(Dispatchers.Default) {graphics.event(GraphicsContract.event("frame",16))}
+                if(cancel) {
+                    delay(20);task.cancelAndJoin()
+                    assertTrue(task.isCancelled)
+                } else {
+                    val result=withTimeout(2000) {task.await()}
+                    assertEquals("TIMEOUT",result.status);assertNull(result.json)
+                }
+                assertEquals("CLOSED",graphics.event(GraphicsContract.event("frame",16)).status)
+            } finally {graphics.close()}
+            val next=GraphicsSession(context)
+            try {assertEquals("OK",next.open("return {state:input.state};","{}").status)} finally {next.close()}
+        }
     }
     @Test fun unavailableIsStableWithoutCreatingEngine(): Unit=runBlocking {
         val runtime=AndroidJsRuntime(context,supported={false})
