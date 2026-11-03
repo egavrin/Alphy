@@ -303,7 +303,9 @@ def suite_outcome(stdout, known, known_skipped=frozenset()):
             status = {}
     counts = re.findall(r"^(?:OK \((\d+) tests?\)|Tests run: (\d+))", stdout, re.M)
     finished = bool(re.search(r"^INSTRUMENTATION_CODE: -1\s*$", stdout, re.M) and re.search(r"^(?:OK \(|FAILURES!!!)", stdout, re.M))
-    passed = finished and failures <= set(known) and skipped <= set(known_skipped)
+    # A class-level failure, such as one in @AfterClass, reaches the JUnit summary without a test block.
+    unattributed = bool(re.search(r"^FAILURES!!!", stdout, re.M)) and not failures
+    passed = finished and not unattributed and failures <= set(known) and skipped <= set(known_skipped)
     return {"observed": "passed" if passed else "failed", "tests": int("".join(counts[-1])) if counts else 0,
             "failures": sorted(failures), "skipped": sorted(skipped)}
 
@@ -348,6 +350,10 @@ def installed_apk_hash(adb, commands, log):
 
 def suite(args):
     """Build both APKs, replace-install them on emulator-5556, and run device tests. The app keeps its data and key."""
+    for target in args.targets:
+        # adb joins its arguments into one device shell line, so a space or a $ would change the am command.
+        if not re.fullmatch(r"[A-Za-z0-9_.]+(#[A-Za-z0-9_]+)?", target):
+            raise SystemExit(f"The target {target!r} is not a class or method name. Use com.alpha.assistant.<package>.<Class>[#<method>].")
     started = time.monotonic()
     baseline = json.loads(args.baseline.read_text()) if args.baseline else {"failures": [], "skipped": []}
     known, known_skipped = set(baseline["failures"]), set(baseline["skipped"])

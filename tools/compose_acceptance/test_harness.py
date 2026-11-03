@@ -264,6 +264,72 @@ class HarnessBoundaries(unittest.TestCase):
             self.assertIsNone(record["apks"])
             self.assertIsNone(record["installedApkSha256"])
 
+    def test_suite_outcome_fails_a_failure_summary_without_a_failed_test(self):
+        unattributed = ("INSTRUMENTATION_STATUS: class=a.B\nINSTRUMENTATION_STATUS: test=x\nINSTRUMENTATION_STATUS_CODE: 0\n"
+                        "INSTRUMENTATION_RESULT: stream=\n\nFAILURES!!!\nTests run: 1,  Failures: 1\n\n\nINSTRUMENTATION_CODE: -1\n")
+        self.assertEqual({"observed": "failed", "tests": 1, "failures": [], "skipped": []}, harness.suite_outcome(unattributed, set()))
+        self.assertEqual("failed", harness.suite_outcome(unattributed, {"a.B#x"})["observed"])
+
+    def test_suite_refuses_shell_words_in_targets_and_a_used_label_before_any_command(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            (Path(temporary) / "used").mkdir()
+            for targets, named in ((["a.B$c"], "a.B$c"), (["a.B#x -e syntheticSchemaDiagnostic true"], "syntheticSchemaDiagnostic"),
+                                   (["a.B#x", "c.D"], "used")):
+                with self.subTest(targets=targets):
+                    args = harness.argparse.Namespace(label="used", expect="passed", baseline=None, targets=targets,
+                                                      adb="/nonexistent/adb", output=Path(temporary))
+                    with patch.object(harness.subprocess, "run") as execute, self.assertRaises(SystemExit) as refused:
+                        harness.suite(args)
+                    execute.assert_not_called()
+                    self.assertIn(named, str(refused.exception))
+
+    SUITE_PASSED = "INSTRUMENTATION_RESULT: stream=\n\nOK (1 test)\n\n\nINSTRUMENTATION_CODE: -1\n"
+    SUITE_FAILED = ("INSTRUMENTATION_STATUS: class=a.B\nINSTRUMENTATION_STATUS: test=x\nINSTRUMENTATION_STATUS_CODE: -2\n"
+                    "INSTRUMENTATION_RESULT: stream=\n\nFAILURES!!!\nTests run: 1,  Failures: 1\n\n\nINSTRUMENTATION_CODE: -1\n")
+
+    def fake_suite(self, output, label, instrumentation=SUITE_PASSED, installed="f" * 64, test_install=0, baseline=None):
+        """Run suite() against a fake device whose built and installed APK hashes are "f" * 64 unless changed."""
+        calls = []
+        def execute(command, **options):
+            calls.append((command, options))
+            if "instrument" in command:
+                options["stdout"].write(instrumentation)
+            replies = {"pm": "package:/data/app/base.apk\n", "sha256sum": installed + "  /data/app/base.apk\n"}
+            return Mock(returncode=test_install if command[-1] == harness.APKS[1] else 0,
+                        stdout=next((reply for word, reply in replies.items() if word in command), ""))
+        args = harness.argparse.Namespace(label=label, expect="passed", baseline=baseline, targets=["a.B#x"],
+                                          adb="/nonexistent/adb", output=output)
+        with patch.object(harness.subprocess, "run", side_effect=execute), patch.object(harness, "digest", return_value="f" * 64), \
+                contextlib.redirect_stdout(io.StringIO()):
+            code = harness.suite(args)
+        return code, json.loads((output / label / "run.json").read_text())["observed"], calls
+
+    def test_suite_fails_when_the_device_does_not_hold_the_built_apks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            self.assertEqual((0, "passed"), self.fake_suite(output, "same")[:2])
+            self.assertEqual((1, "failed"), self.fake_suite(output, "other-installed-hash", installed="0" * 64)[:2])
+            self.assertEqual((1, "failed"), self.fake_suite(output, "test-install-failed", test_install=1)[:2])
+
+    def test_suite_passes_only_failures_that_the_baseline_knows(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            (output / "baseline.json").write_text(json.dumps({"failures": ["a.B#x"], "skipped": []}))
+            self.assertEqual((1, "failed"), self.fake_suite(output, "unknown", self.SUITE_FAILED)[:2])
+            self.assertEqual((0, "passed"), self.fake_suite(output, "known", self.SUITE_FAILED, baseline=output / "baseline.json")[:2])
+
+    def test_suite_gives_the_key_to_no_command_and_the_build_paths_only_to_gradle(self):
+        environment = {key: value for key, value in harness.os.environ.items() if key not in ("JAVA_HOME", "ANDROID_HOME")}
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.dict(harness.os.environ, {**environment, "DEEPSEEK_API_KEY": "test-value"}, clear=True):
+            _, observed, calls = self.fake_suite(Path(temporary), "environment")
+        self.assertEqual("passed", observed)
+        self.assertEqual([], [command for command, options in calls if "DEEPSEEK_API_KEY" in options["env"]])
+        self.assertNotIn("test-value", json.dumps([command for command, _ in calls]))
+        build_paths = [(command[0], options["env"].get("JAVA_HOME"), options["env"].get("ANDROID_HOME"))
+                       for command, options in calls if {"JAVA_HOME", "ANDROID_HOME"} & options["env"].keys()]
+        self.assertEqual([("./gradlew", "/opt/homebrew/opt/openjdk@17", "/opt/homebrew/share/android-commandlinetools")], build_paths)
+
 
 if __name__ == "__main__":
     unittest.main()
