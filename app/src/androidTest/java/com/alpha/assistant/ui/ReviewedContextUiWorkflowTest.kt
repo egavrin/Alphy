@@ -90,6 +90,7 @@ class ReviewedContextUiWorkflowTest {
     private fun waitFor(label: String): AccessibilityNodeInfo {
         diagnostics.target(label)
         var match: AccessibilityNodeInfo? = null
+        var refused = false
         waitUntil {
             val root = diagnostics.freshRoot()
             match = find(root, label)
@@ -98,7 +99,8 @@ class ReviewedContextUiWorkflowTest {
                 var chat = find(root, "Text selected for my note")
                 while (chat != null && chat.actionList.none { it.id == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD }) chat = chat.parent
                 if (chat != null) {
-                    assertTrue("Scroll the originating message", chat.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD))
+                    // A refused scroll is not a failure: a running scroll animation can move the range after the read.
+                    if (!chat.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) && !refused) { refused = true; diagnostics.capture("scroll-refused", chat) }
                     automation.waitForIdle(100, 2000)
                 }
             }

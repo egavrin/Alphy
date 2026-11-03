@@ -127,13 +127,15 @@ class NativeLayoutTextWorkflowTest {
             diagnostics.target(label)
             var node: AccessibilityNodeInfo?=null
             var direction=AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+            var refused=false
             await("Missing visible $label") {
                 node=find(label)
                 if(node?.isVisibleToUser==true)return@await true
                 if(node!=null)node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
                 else find("Mini-app content")?.let {viewport ->
                     if(viewport.actionList.none {it.id==direction})direction=if(direction==AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD else AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-                    if(viewport.actionList.any {it.id==direction})assertTrue("Scroll outer mini-app content",viewport.performAction(direction))
+                    // A refused scroll is not a failure: a running scroll animation can move the range after the read.
+                    if(viewport.actionList.any {it.id==direction} && !viewport.performAction(direction) && !refused) {refused=true;diagnostics.capture("scroll-refused",viewport)}
                 }
                 instrumentation.uiAutomation.waitForIdle(100,2000)
                 false

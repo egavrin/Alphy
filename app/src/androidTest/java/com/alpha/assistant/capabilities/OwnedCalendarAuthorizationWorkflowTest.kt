@@ -41,6 +41,7 @@ class OwnedCalendarAuthorizationWorkflowTest {
         diagnostics.target(label)
         var node: AccessibilityNodeInfo?=null
         var direction=AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+        var refused=false
         waitUntil {
             node=find(label)
             if(node?.isVisibleToUser==true)return@waitUntil true
@@ -48,7 +49,8 @@ class OwnedCalendarAuthorizationWorkflowTest {
             else find("Mini-app content")?.let { viewport ->
                 if(viewport.actionList.none {it.id==direction})direction=if(direction==AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                     AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD else AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-                if(viewport.actionList.any {it.id==direction})assertTrue("Scroll Mini-app content",viewport.performAction(direction))
+                // A refused scroll is not a failure: a running scroll animation can move the range after the read.
+                if(viewport.actionList.any {it.id==direction} && !viewport.performAction(direction) && !refused) {refused=true;diagnostics.capture("scroll-refused",viewport)}
             }
             automation.waitForIdle(100,2000)
             false

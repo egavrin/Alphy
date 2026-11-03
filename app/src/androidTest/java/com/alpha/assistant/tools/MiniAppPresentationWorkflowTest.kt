@@ -66,10 +66,18 @@ class MiniAppPresentationWorkflowTest {
         repeat(node.childCount) {find(label,node.getChild(it))?.let {return it}}
         return null
     }
+    // material3 1.5.0-beta02 ignores Back until a modal sheet passes half of its enter animation. A tall sheet offers Expand only after it settles.
+    private fun offersExpand(node: AccessibilityNodeInfo?=diagnostics.freshRoot()): Boolean {
+        if(node == null) return false
+        if(node.actionList.any {it.id == AccessibilityNodeInfo.ACTION_EXPAND}) return true
+        repeat(node.childCount) {if(offersExpand(node.getChild(it))) return true}
+        return false
+    }
     private fun shown(label: String): AccessibilityNodeInfo {
         diagnostics.target(label)
         var node: AccessibilityNodeInfo?=null
         var direction=AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+        var refused=false
         waitUntil("Missing visible label: $label") {
             node=find(label)
             if(node?.isVisibleToUser == true)return@waitUntil true
@@ -91,7 +99,8 @@ class MiniAppPresentationWorkflowTest {
                 if(viewport != null) {
                     if(viewport.actionList.none {it.id == direction}) direction=if(direction == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                         AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD else AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-                    if(viewport.actionList.any {it.id == direction})assertTrue("Scroll mini-app viewport",viewport.performAction(direction))
+                    // A refused scroll is not a failure: a running scroll animation can move the range after the read.
+                    if(viewport.actionList.any {it.id == direction} && !viewport.performAction(direction) && !refused) {refused=true;diagnostics.capture("scroll-refused",viewport)}
                 }
             }
             automation.waitForIdle(100,2000)
@@ -349,21 +358,25 @@ class MiniAppPresentationWorkflowTest {
                 click("Right");waitUntil {kotlin.math.abs(state().getDouble("paddle")-0.5)<0.03}
                 click("App controls")
                 shown(definition.getJSONObject("ui").getJSONArray("children").getJSONObject(0).getString("text")+": "+state().getString("message"))
+                waitUntil("App controls sheet did not settle") {offersExpand()}
                 screenshot(file.removeSuffix(".json")+"-$orientation-app-controls")
                 automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
                 shown("Resume")
                 click("Hide game controls")
-                val board=checkNotNull(automation.takeScreenshot())
-                try {
-                    val u=minOf(bounds.width(),bounds.height()).toDouble()
-                    val brickWidth=(bounds.width()*0.89-u*0.016*5)/6
-                    val y=(bounds.top+bounds.height()*0.16+u*0.023).toInt()
-                    repeat(6) {index ->
-                        val x=(bounds.left+bounds.width()*0.055+index*(brickWidth+u*0.016)+brickWidth/2).toInt()
-                        val color=board.getPixel(x,y)
-                        assertTrue("$file orientation=$orientation first-row brick $index must remain unobstructed",android.graphics.Color.red(color)>230 && android.graphics.Color.green(color) in 70..150 && android.graphics.Color.blue(color) in 100..180)
-                    }
-                }finally {board.recycle()}
+                shown("Show game controls")
+                waitUntil("$file orientation=$orientation first-row bricks must remain unobstructed") {
+                    val board=automation.takeScreenshot() ?: return@waitUntil false
+                    try {
+                        val u=minOf(bounds.width(),bounds.height()).toDouble()
+                        val brickWidth=(bounds.width()*0.89-u*0.016*5)/6
+                        val y=(bounds.top+bounds.height()*0.16+u*0.023).toInt()
+                        (0 until 6).all {index ->
+                            val x=(bounds.left+bounds.width()*0.055+index*(brickWidth+u*0.016)+brickWidth/2).toInt()
+                            val color=board.getPixel(x,y)
+                            android.graphics.Color.red(color)>230 && android.graphics.Color.green(color) in 70..150 && android.graphics.Color.blue(color) in 100..180
+                        }
+                    }finally {board.recycle()}
+                }
                 screenshot(file.removeSuffix(".json")+"-$orientation-unobstructed-board")
                 click("Resume");shown("Pause");click("Hide game controls")
                 shown("Show game controls")
