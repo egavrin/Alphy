@@ -103,9 +103,10 @@ class HistoryManagementWorkflowTest {
                 edit("Сообщение ассистенту", "Running fixture")
                 click("Отправить сообщение")
                 waitUntil { entered.isCompleted }
+                waitUntil { robot.composed(scenario, "chat") }
                 click(robot.text(R.string.new_chat))
                 // The Chat entry leaves composition at the end of the pop transition.
-                waitUntil { !robot.composedText(scenario, "DeepSeek отвечает…") }
+                waitUntil { !robot.composed(scenario, "chat") }
                 edit("Сообщение ассистенту", "Keep independent draft")
                 store.writableDatabase.execSQL("CREATE TRIGGER fixture_reject_delete BEFORE DELETE ON conversations BEGIN SELECT RAISE(ABORT, 'fixture'); END")
                 openSearch(scenario); click("Действия разговора Running fixture"); click("Удалить разговор"); click("Удалить")

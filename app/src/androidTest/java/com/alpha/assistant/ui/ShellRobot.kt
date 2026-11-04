@@ -2,6 +2,7 @@ package com.alpha.assistant.ui
 
 import android.Manifest
 import android.accessibilityservice.AccessibilityService
+import android.app.Activity
 import android.app.Application
 import android.app.Instrumentation
 import android.app.UiAutomation
@@ -13,18 +14,28 @@ import android.graphics.Rect
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import android.view.Choreographer
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.annotation.StringRes
 import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsConfiguration
+import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getAllSemanticsNodes
 import androidx.compose.ui.semantics.getOrNull
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.navigationevent.NavigationEvent
+import androidx.navigationevent.NavigationEventDispatcherOwner
+import androidx.navigationevent.NavigationEventInput
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.ChatProvider
@@ -44,6 +55,8 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 internal typealias VoiceFactory = (Application, CoroutineScope, (String) -> Unit) -> VoiceSession
 
@@ -83,6 +96,13 @@ internal class ShellFixture(prefix: String) {
         store.close(); context.deleteDatabase("$name.db"); context.deleteDatabase("$name.db-tools.db"); context.deleteDatabase("$name.db-tools.db-automations.db"); keys.clear(); context.deleteSharedPreferences(name)
         java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(name) }
     }
+}
+
+/** Sends Back events to a dispatcher, as the system Back input does. Call it on the main thread. */
+internal class TestBackInput : NavigationEventInput() {
+    fun start(event: NavigationEvent) = dispatchOnBackStarted(event)
+    fun progress(event: NavigationEvent) = dispatchOnBackProgressed(event)
+    fun complete() = dispatchOnBackCompleted()
 }
 
 /** Black-box UiAutomation helpers. Each lookup reads a fresh tree, so a poll never reads stale cached nodes. */
@@ -168,10 +188,18 @@ internal class ShellRobot(fixture: String) {
         while (node != null && !node.isClickable) node = node.parent
         assertNotNull("No clickable node for $label", node)
         val bounds = Rect().also { node!!.getBoundsInScreen(it) }
-        val screen = Rect().also { diagnostics.freshRoot()?.getBoundsInScreen(it) }
+        // The safe area is the window without the system bars and the display cutout, as ShellWorkflowTest bounds the status bar.
+        val safe = Rect()
+        instrumentation.runOnMainSync {
+            val decor = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).single().window.decorView
+            val origin = IntArray(2).also { decor.getLocationOnScreen(it) }
+            val insets = checkNotNull(ViewCompat.getRootWindowInsets(decor))
+                .getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            safe.set(origin[0] + insets.left, origin[1] + insets.top, origin[0] + decor.width - insets.right, origin[1] + decor.height - insets.bottom)
+        }
         val minSize = (48 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
         assertTrue("Target is visible: $label", node!!.isVisibleToUser)
-        assertTrue("Target $bounds is inside the screen $screen: $label", screen.contains(bounds))
+        assertTrue("Target $bounds is inside the safe area $safe: $label", safe.contains(bounds))
         assertTrue("48dp touch target $bounds: $label", bounds.width() >= minSize && bounds.height() >= minSize)
     }
     fun bounds(label: String): Rect = Rect().also { waitFor(label).getBoundsInScreen(it) }
@@ -181,8 +209,37 @@ internal class ShellRobot(fixture: String) {
         waitUntil {
             var orientation = Configuration.ORIENTATION_UNDEFINED
             scenario.onActivity { orientation = it.resources.configuration.orientation }
-            orientation == expected
+            val root = Rect().also { diagnostics.freshRoot()?.getBoundsInScreen(it) }
+            orientation == expected && if (landscape) root.width() > root.height() else root.height() > root.width()
         }
+    }
+    /** Runs [block] with a test Back input on the activity dispatcher, and removes the input after the block. */
+    fun <T> withBackInput(scenario: ActivityScenario<*>, block: (TestBackInput) -> T): T {
+        val input = TestBackInput()
+        scenario.onActivity { (it as NavigationEventDispatcherOwner).navigationEventDispatcher.addInput(input) }
+        try { return block(input) } finally { scenario.onActivity { (it as NavigationEventDispatcherOwner).navigationEventDispatcher.removeInput(input) } }
+    }
+    /** Waits for [count] Choreographer frames. A frame count is a condition, not a fixed sleep. */
+    fun awaitFrames(count: Int) {
+        val frames = CountDownLatch(count)
+        instrumentation.runOnMainSync {
+            Choreographer.getInstance().postFrameCallback(object : Choreographer.FrameCallback {
+                override fun doFrame(frameTimeNanos: Long) {
+                    frames.countDown()
+                    if (frames.count > 0) Choreographer.getInstance().postFrameCallback(this)
+                }
+            })
+        }
+        assertTrue("$count frames did not pass within 10 seconds", frames.await(10, TimeUnit.SECONDS))
+    }
+    /** Main thread only. A drawer row is on the screen. The top bar title has no click action, so it does not count. */
+    fun drawerRowShown(activity: Activity): Boolean = nodes(activity, merged = true).any { node ->
+        node.config.getOrNull(SemanticsProperties.Text)?.any { it.text == text(R.string.search) } == true &&
+            SemanticsActions.OnClick in node.config && node.boundsInRoot.width > 0f
+    }
+    /** Main thread only. The scrim has its label only while the drawer is settled open. */
+    fun scrimLabeled(activity: Activity): Boolean = activity.getString(androidx.compose.ui.R.string.close_drawer).let { label ->
+        nodes(activity).any { it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(label) == true }
     }
     /** [composed] and [composedText] read the composed nodes, also the nodes that a covering NavDisplay entry hides from accessibility. */
     fun composed(scenario: ActivityScenario<*>, tag: String): Boolean = composedNode(scenario) { it.getOrNull(SemanticsProperties.TestTag) == tag }
@@ -219,13 +276,14 @@ internal class ShellRobot(fixture: String) {
         return label
     }
     private fun composedNode(scenario: ActivityScenario<*>, match: (SemanticsConfiguration) -> Boolean): Boolean {
+        var composed = false
+        scenario.onActivity { activity -> composed = nodes(activity).any { match(it.config) } }
+        return composed
+    }
+    private fun nodes(activity: Activity, merged: Boolean = false): List<SemanticsNode> {
         fun root(view: View): ViewRootForTest? = view as? ViewRootForTest
             ?: (view as? ViewGroup)?.let { group -> (0 until group.childCount).firstNotNullOfOrNull { root(group.getChildAt(it)) } }
-        var composed = false
-        scenario.onActivity { activity ->
-            composed = root(activity.window.decorView)!!.semanticsOwner.getAllSemanticsNodes(mergingEnabled = false).any { match(it.config) }
-        }
-        return composed
+        return root(activity.window.decorView)!!.semanticsOwner.getAllSemanticsNodes(mergingEnabled = merged)
     }
     private fun find(node: AccessibilityNodeInfo?, label: String): AccessibilityNodeInfo? {
         if (node == null) return null

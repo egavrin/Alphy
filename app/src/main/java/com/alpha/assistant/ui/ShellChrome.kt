@@ -29,6 +29,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -69,7 +70,7 @@ import com.alpha.assistant.data.Conversation
         Destination(ShellDestination.Access, Glyph.Shield)
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             // The name follows, so the initial is decorative for TalkBack.
-            Box(Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape).clearAndSetSemantics { hideFromAccessibility() }, contentAlignment = Alignment.Center) {
                 Text(profileName.firstOrNull(Char::isLetter)?.uppercase().orEmpty(), color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.titleMedium)
             }
             Text(profileName, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)

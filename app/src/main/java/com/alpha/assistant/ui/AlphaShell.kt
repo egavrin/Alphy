@@ -54,6 +54,10 @@ import androidx.navigation3.runtime.NavEntryDecorator
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
+import androidx.navigationevent.NavigationEventDispatcher
+import androidx.navigationevent.NavigationEventHandler
+import androidx.navigationevent.NavigationEventInfo
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import com.alpha.assistant.R
 import com.alpha.assistant.data.Attachment
 import com.alpha.assistant.data.Conversation
@@ -84,6 +88,13 @@ import java.util.Date
     fun notice(text: String) { scope.launch { snackbar.showSnackbar(text) } }
     fun navigate(target: ShellDestination?) { contextSheet = false; destination = target; focus.clearFocus() }
     fun closeDrawer() { scope.launch { drawerState.close() } }
+    // An overlay handler comes before NavDisplay and the entry handlers, so the drawer takes Back while it targets Open.
+    val handler = remember { object : NavigationEventHandler<NavigationEventInfo.None>(NavigationEventInfo.None, false) { override fun onBackCompleted() = closeDrawer() } }
+    // The composition reads targetValue, because a read inside SideEffect causes no recomposition.
+    val drawerTargetsOpen = drawerState.targetValue == DrawerValue.Open
+    SideEffect { handler.isBackEnabled = drawerTargetsOpen }
+    val dispatcher = checkNotNull(LocalNavigationEventDispatcherOwner.current).navigationEventDispatcher
+    DisposableEffect(dispatcher) { dispatcher.addHandler(handler, NavigationEventDispatcher.PRIORITY_OVERLAY); onDispose { handler.remove() } }
     fun back() { if (destination != null) navigate(null) else model.select(null) }
     val backStack = listOfNotNull(ShellRoute.Desktop, snapshot.selected?.let { ShellRoute.Chat(it.id) }, destination)
     VoiceVisibility(model.voice)
@@ -134,11 +145,10 @@ import java.util.Date
                     } }
                     // NavDisplay gives each entry fixed constraints. The Box loosens them, so a pane keeps its maximum width and stays centered.
                     val centerEntry = remember { NavEntryDecorator<ShellRoute> { entry -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) { entry.Content() } } }
-                    // NavDisplay gets Back before the drawer handler, so an open drawer closes first here.
-                    NavDisplay(backStack, Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter, onBack = { if (drawerState.isOpen) closeDrawer() else back() }, entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), keepShellLifecycle, centerEntry), entryProvider = entryProvider {
+                    NavDisplay(backStack, Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter, onBack = ::back, entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), keepShellLifecycle, centerEntry), entryProvider = entryProvider {
                         entry<ShellRoute.Desktop>(clazzContentKey = { it.toString() }) { Box(Modifier.testTag("desktop")) { ChatEntry(null) } }
                         // The route gives the conversation, so a chat keeps its messages during its exit animation.
-                        entry<ShellRoute.Chat>(clazzContentKey = { it.toString() }) { route -> ChatEntry(snapshot.conversations.find { it.id == route.id }) }
+                        entry<ShellRoute.Chat>(clazzContentKey = { it.toString() }) { route -> Box(Modifier.testTag("chat")) { ChatEntry(snapshot.conversations.find { it.id == route.id }) } }
                         entry<ShellDestination>(clazzContentKey = { it.toString() }) { route ->
                             when (route) {
                                 ShellDestination.Search -> HistoryPane(snapshot.conversations, search, { search = it }, { model.select(it); navigate(null) }, { model.select(null); navigate(null) }, model::renameConversation, model::deleteConversation, model::clearHistory)
