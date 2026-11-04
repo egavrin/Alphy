@@ -2,17 +2,17 @@ package com.alpha.assistant
 
 import android.app.Application
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.alpha.assistant.ui.AlphaShell
 import com.alpha.assistant.ui.AlphaTheme
+import com.alpha.assistant.ui.AlphyActivity
 import com.alpha.assistant.ui.ShellViewModel
 
 /** Only the instrumentation harness supplies this factory. This activity is absent from release builds. */
-class CloudTestActivity : ComponentActivity() {
+class CloudTestActivity : AlphyActivity() {
     companion object { var factory: ((Application) -> ShellViewModel)? = null }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

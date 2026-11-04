@@ -4,7 +4,6 @@ import android.app.KeyguardManager
 import android.content.*
 import android.os.Bundle
 import android.view.WindowManager
-import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -31,7 +30,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** System session activity uses the same chat owner as MainActivity, including active requests. */
-class AssistantActivity : ComponentActivity() {
+class AssistantActivity : AlphyActivity() {
     private var invocation by mutableStateOf<String?>(null)
     private var unlocked by mutableStateOf(false)
     private val screenOff = object : BroadcastReceiver() {

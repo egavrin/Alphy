@@ -1,15 +1,15 @@
 package com.alpha.assistant
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.Text
+import com.alpha.assistant.ui.AlphyActivity
 import com.alpha.assistant.ui.VoiceVisibility
 import com.alpha.assistant.voice.VoiceSession
 import kotlinx.coroutines.*
 
 /** Isolated lifecycle fixture. It never constructs chat storage or reads credentials. */
-class VoiceTestActivity : ComponentActivity() {
+class VoiceTestActivity : AlphyActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     lateinit var voice: VoiceSession; private set
     override fun onCreate(savedInstanceState: Bundle?) {

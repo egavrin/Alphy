@@ -9,7 +9,7 @@
     "app/src/main/java/com/alpha/assistant/tools/ArtifactProtocol.kt": "34bc57a523feb409c89c973afe7a298beb7a8749353e7f8936364b8b82c44869",
     "app/src/main/java/com/alpha/assistant/tools/GraphicsContract.kt": "1baf485bc059c146d89f4bb231eff4a288028792a7ee0de28c39b6278db59e51",
     "app/src/main/java/com/alpha/assistant/capabilities/CapabilityContract.kt": "2f939fc9281ec2453e550b1dac8ed4aaf9f9a916cd8e33a3b1c87483b776a19d",
-    "app/src/main/java/com/alpha/assistant/capabilities/MedicineCapabilities.kt": "9d6faa8f0abe1d8e17871bef2cbca3d12d1397ceae5564956fa020782d340276",
+    "app/src/main/java/com/alpha/assistant/capabilities/MedicineCapabilities.kt": "efc4ab4585f41385a144b5c6d9cd7c2f73879444e5a09c7007d4f400283c775c",
     "app/build.gradle.kts": "4baac4dbdfbb9b7e92af87accbaefb5bbafd7d4d93d9d761a280ae4654e5ae7d"
   },
   "catalog_types": [

@@ -7,14 +7,14 @@ import android.content.Intent
 import android.content.IntentFilter
 import com.alpha.assistant.surfaces.SurfaceEntry
 import com.alpha.assistant.surfaces.ToolWidgets
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.alpha.assistant.ui.AlphaShell
 import com.alpha.assistant.ui.AlphaTheme
+import com.alpha.assistant.ui.AlphyActivity
 import com.alpha.assistant.ui.ShellViewModel
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AlphyActivity() {
     private lateinit var model: ShellViewModel
     private val surfaceUpdates = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {

@@ -6,7 +6,6 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.net.Uri
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -17,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import com.alpha.assistant.automations.AutomationDefinition
 import com.alpha.assistant.automations.AutomationRuntime
 import com.alpha.assistant.tools.ToolStore
+import com.alpha.assistant.ui.AlphyActivity
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.*
@@ -341,7 +341,7 @@ class MedicineReceiver: BroadcastReceiver() {
 }
 
 /** A frozen native report never enters generated UI or the model. Only a separate review click opens the chooser. */
-class MedicineReportActivity: ComponentActivity() {
+class MedicineReportActivity: AlphyActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val token=intent.getStringExtra("token") ?: return finish()
