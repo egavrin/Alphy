@@ -22,7 +22,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.alpha.assistant.R
 import com.alpha.assistant.data.Attachment
 import com.alpha.assistant.ui.*
 import kotlinx.coroutines.Dispatchers
@@ -96,7 +98,7 @@ class AssistantActivity : AlphyActivity() {
     WeatherLocationAccess(model)
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxWidth().heightIn(max = 200.dp).verticalScroll(rememberScrollState())) {
-            ShellHeader(false, {}, { sheet = "menu" }, { sheet = "history" })
+            ShellTopBar(stringResource(R.string.app_name), { sheet = "menu" }) { model.select(null) }
             FlowRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
                 TextButton(onClick = full) { Text("Продолжить в приложении") }
                 TextButton(onClick = dismiss) { Text("Закрыть") }

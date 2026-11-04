@@ -6,6 +6,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
+import com.alpha.assistant.R
 import com.alpha.assistant.data.*
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.tools.ToolStore
@@ -22,6 +23,7 @@ import java.util.UUID
 
 class HistoryManagementWorkflowTest {
     private val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+    private val robot = ShellRobot("history")
 
     @Test fun renameDeleteAndClearRespectDataBoundaries() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -44,7 +46,7 @@ class HistoryManagementWorkflowTest {
             }, store, keys) }
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitFor("Сообщение ассистенту")
-                click("История"); click("Действия разговора First fixture"); click("Переименовать")
+                openSearch(scenario); click("Действия разговора First fixture"); click("Переименовать")
                 edit("Название разговора", " ")
                 assertFalse(button("Сохранить название").isEnabled)
                 edit("Название разговора", "Renamed fixture"); click("Сохранить название")
@@ -52,7 +54,7 @@ class HistoryManagementWorkflowTest {
                 scenario.recreate(); waitFor("Renamed fixture")
                 edit("Поиск разговоров", "Renamed fixture"); click("Renamed fixture")
                 assertEquals("first draft", field("Сообщение ассистенту").text.toString())
-                click("История"); edit("Поиск разговоров", "")
+                openSearch(scenario); edit("Поиск разговоров", "")
                 click("Действия разговора Renamed fixture"); click("Удалить разговор"); click("Отмена")
                 assertEquals(2, store.load().conversations.size)
                 click("Действия разговора Renamed fixture"); click("Удалить разговор"); click("Удалить")
@@ -60,7 +62,7 @@ class HistoryManagementWorkflowTest {
                 assertNull(store.load().selectedId)
                 assertEquals(second, store.load().conversations.single())
                 click("Новый чат"); assertEquals(newDraft.text, field("Сообщение ассистенту").text.toString())
-                click("История"); click("Очистить историю"); click("Отмена")
+                openSearch(scenario); click("Очистить историю"); click("Отмена")
                 assertEquals(second, store.load().conversations.single())
                 click("Очистить историю"); waitFor("Черновик нового чата, инструменты и их данные, автоматизации, API-ключи и исходные файлы сохранятся."); click("Очистить всё")
                 waitUntil { store.load().conversations.isEmpty() }
@@ -97,13 +99,16 @@ class HistoryManagementWorkflowTest {
                     withContext(NonCancellable) { release.await(); emit(CloudEvent.Text("Late deleted response")); delivered.complete(Unit) }
                 }
             }, store, keys) }
-            ActivityScenario.launch(CloudTestActivity::class.java).use {
+            ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 edit("Сообщение ассистенту", "Running fixture")
                 click("Отправить сообщение")
                 waitUntil { entered.isCompleted }
-                click("Меню"); click("Новый чат"); edit("Сообщение ассистенту", "Keep independent draft")
+                click(robot.text(R.string.new_chat))
+                // The Chat entry leaves composition at the end of the pop transition.
+                waitUntil { !robot.composedText(scenario, "DeepSeek отвечает…") }
+                edit("Сообщение ассистенту", "Keep independent draft")
                 store.writableDatabase.execSQL("CREATE TRIGGER fixture_reject_delete BEFORE DELETE ON conversations BEGIN SELECT RAISE(ABORT, 'fixture'); END")
-                click("История"); click("Действия разговора Running fixture"); click("Удалить разговор"); click("Удалить")
+                openSearch(scenario); click("Действия разговора Running fixture"); click("Удалить разговор"); click("Удалить")
                 waitFor("Изменения не сохранены")
                 assertEquals(1, store.load().conversations.size)
                 release.complete(Unit); waitUntil { delivered.isCompleted }
@@ -123,6 +128,11 @@ class HistoryManagementWorkflowTest {
         }
     }
 
+    private fun openSearch(scenario: ActivityScenario<*>) {
+        robot.openDrawer(scenario)
+        robot.click(robot.text(R.string.search))
+        robot.awaitDrawerClosed(scenario)
+    }
     private fun edit(label: String, text: String) {
         val node = field(label)
         assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
@@ -154,7 +164,8 @@ class HistoryManagementWorkflowTest {
     }
     private fun waitFor(label: String): AccessibilityNodeInfo {
         var result: AccessibilityNodeInfo? = null
-        waitUntil { result = find(automation.rootInActiveWindow, label); result != null }
+        // A fresh root holds no cached node of an entry that a transition covers or removes.
+        waitUntil { result = find(robot.diagnostics.freshRoot(), label); result != null }
         return result!!
     }
     private fun find(node: AccessibilityNodeInfo?, label: String): AccessibilityNodeInfo? {

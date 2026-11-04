@@ -9,6 +9,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
+import com.alpha.assistant.R
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.data.*
 import com.alpha.assistant.ui.ShellRobot
@@ -723,7 +724,7 @@ class MiniAppPresentationWorkflowTest {
         click("Refine")
         shown("Day plan"); shown("Refine this mini-app")
         assertNull("Focused app owns its top bar", find("Меню"))
-        assertNull("Focused app has no shell history action", find("История"))
+        assertNull("Focused app has no shell new-chat action", find(instrumentation.targetContext.getString(R.string.new_chat)))
         assertNull(find("История версий"))
         edit("Refine this mini-app","Keep my request")
         val before=Rect().also {shown("Preview changes").getBoundsInScreen(it)}

@@ -138,7 +138,6 @@ private fun conditionText(d: AutomationDefinition): String = buildList {
         } }) {Text("Разрешить и включить")}},dismissButton={TextButton(onClick={approval=null}) {Text("Отмена")}})
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal=20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-        Text("Автоматизации",style=MaterialTheme.typography.headlineSmall)
         Text("Локальные сценарии. Android может задерживать фоновые события. После принудительной остановки открой Alphy. Пропущенные события питания и уведомления не воспроизводятся.",style=MaterialTheme.typography.bodySmall)
         if(error != null) Text(error!!,color=MaterialTheme.colorScheme.error)
         if(editing) {

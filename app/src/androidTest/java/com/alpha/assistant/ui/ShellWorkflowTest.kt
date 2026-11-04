@@ -12,6 +12,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
+import com.alpha.assistant.R
 import com.alpha.assistant.data.ShellStore
 import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.cloud.*
@@ -46,10 +47,10 @@ class ShellWorkflowTest {
         java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(fixtureName) }
     }
     // Failure cases: duplicate or bottom navigation, clipped touch targets, obsolete composer controls,
-    // keyboard-blocked navigation, or a lost draft after the header opens a sheet or history.
+    // keyboard-blocked navigation, or a lost draft after the top bar or the drawer changes the route.
     private fun assertHeaderAndComposer(statusBarBottom: Int = 0, keyboardTop: Int? = null) {
         val input = Rect().also { waitFor("Сообщение ассистенту").getBoundsInScreen(it) }
-        for (label in listOf("Меню", "История")) {
+        for (label in listOf(context.getString(R.string.menu), context.getString(R.string.new_chat))) {
             var node: AccessibilityNodeInfo? = waitFor(label)
             while (node != null && !node.isClickable) node = node.parent
             assertNotNull("Accessible header action $label", node)
@@ -61,7 +62,7 @@ class ShellWorkflowTest {
             assertTrue("48dp touch target: $label", bounds.width() >= minSize && bounds.height() >= minSize)
             fun count(current: AccessibilityNodeInfo?): Int {
                 if (current == null) return 0
-                var found = if (current.text?.toString() == label) 1 else 0
+                var found = if (current.text?.toString() == label || current.contentDescription?.toString() == label) 1 else 0
                 repeat(current.childCount) { found += count(current.getChild(it)) }
                 return found
             }
@@ -177,20 +178,20 @@ class ShellWorkflowTest {
                 diagnostics.capture("keyboard-after-failure-capture")
                 throw failure
             }
-            click("Меню")
-            click("Новый чат")
+            click(robot.text(R.string.new_chat))
             // The Chat entry leaves composition at the end of the pop transition.
             waitUntil { !robot.composedText(scenario, "Navigation fixture response") }
             assertEquals("", field("Сообщение ассистенту").text?.toString().orEmpty())
             edit("Сообщение ассистенту", "Separate new draft")
-            click("История")
+            robot.openDrawer(scenario)
+            robot.click(robot.text(R.string.search))
+            robot.awaitDrawerClosed(scenario)
             edit("Поиск разговоров", "Shell workflow")
             click("Shell workflow message")
             assertEquals("Existing conversation draft", field("Сообщение ассистенту").text.toString())
             scenario.recreate()
             assertEquals("Existing conversation draft", field("Сообщение ассистенту").text.toString())
-            click("Меню")
-            click("Новый чат")
+            click(robot.text(R.string.new_chat))
             assertEquals("Separate new draft", field("Сообщение ассистенту").text.toString())
         }
     }

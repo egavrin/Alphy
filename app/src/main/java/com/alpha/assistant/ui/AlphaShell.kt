@@ -61,18 +61,20 @@ import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable fun AlphaShell(model: ShellViewModel) {
     var destination by rememberSaveable { mutableStateOf<ShellDestination?>(null) }
-    var sheet by rememberSaveable { mutableStateOf<String?>(null) }
+    var contextSheet by rememberSaveable { mutableStateOf(false) }
     var automationRequest by rememberSaveable { mutableStateOf<String?>(null) }
     var search by rememberSaveable { mutableStateOf("") }
     var consumedSurface by rememberSaveable { mutableStateOf(0) }
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
     LaunchedEffect(model.surfaceSequence) {
+        // A recreation consumes no entry, because consumedSurface is saved, so a rotation keeps an open drawer open.
         if (model.surfaceSequence > 0 && model.surfaceSequence != consumedSurface) {
             destination = if (model.surfaceToolId != null) ShellDestination.MiniApps else null
-            sheet = null
+            contextSheet = false
             consumedSurface = model.surfaceSequence
+            drawerState.snapTo(DrawerValue.Closed)
         }
     }
     val snapshot = model.snapshot
@@ -80,7 +82,8 @@ import java.util.Date
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     fun notice(text: String) { scope.launch { snackbar.showSnackbar(text) } }
-    fun navigate(target: ShellDestination?) { sheet = null; destination = target; focus.clearFocus() }
+    fun navigate(target: ShellDestination?) { contextSheet = false; destination = target; focus.clearFocus() }
+    fun closeDrawer() { scope.launch { drawerState.close() } }
     fun back() { if (destination != null) navigate(null) else model.select(null) }
     val backStack = listOfNotNull(ShellRoute.Desktop, snapshot.selected?.let { ShellRoute.Chat(it.id) }, destination)
     VoiceVisibility(model.voice)
@@ -90,33 +93,36 @@ import java.util.Date
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         } else if (model.loadFailed) {
             Column(Modifier.safeDrawingPadding().padding(28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("Не удалось открыть данные", style = MaterialTheme.typography.headlineSmall)
-                Text("Сохранённые данные не удалены. Повторите попытку.")
-                Button(onClick = model::load) { Text("Повторить") }
+                Text(stringResource(R.string.load_failed), style = MaterialTheme.typography.headlineSmall)
+                Text(stringResource(R.string.load_failed_text))
+                Button(onClick = model::load) { Text(stringResource(R.string.retry)) }
             }
-        } else {
+        } else ModalNavigationDrawer({
+            ShellDrawerSheet(drawerState, snapshot.conversations, snapshot.selectedId, destination, stringResource(R.string.profile),
+                { navigate(it); closeDrawer() }, { model.select(it); navigate(null); closeDrawer() }) { model.select(null); navigate(null); closeDrawer() }
+        }, drawerState = drawerState, gesturesEnabled = drawerState.isOpen || backStack.last() !is ShellDestination) {
             val focusedMiniApp=destination == ShellDestination.MiniApps && (model.tools.selectedId != null || model.tools.selectedDraftId != null)
             val selectedTool=model.tools.tools.find {it.id==model.tools.selectedId}
             val selectedSpec=remember(selectedTool?.spec) {selectedTool?.let {com.alpha.assistant.tools.ToolSpec.available(it.spec)}}
             var immersiveExited by rememberSaveable(selectedTool?.id,selectedTool?.revision,destination == ShellDestination.MiniApps) {mutableStateOf(false)}
             val immersive=focusedMiniApp && model.tools.selectedDraftId==null && selectedTool?.archived==false && selectedSpec?.presentation=="immersive" && !immersiveExited
             Column(Modifier.fillMaxSize().then(if(immersive)Modifier else Modifier.safeDrawingPadding())) {
-                if (!focusedMiniApp) ShellHeader(destination != null, { navigate(null) },
-                    { sheet = "menu"; focus.clearFocus() }, { navigate(ShellDestination.Search) })
+                if (!focusedMiniApp) ShellTopBar(stringResource(destination?.title ?: R.string.app_name),
+                    { focus.clearFocus(); scope.launch { drawerState.open() } }) { model.select(null); navigate(null) }
                 if (model.saveFailed && !immersive) {
                     Surface(color = MaterialTheme.colorScheme.errorContainer) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("Изменения не сохранены", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                            TextButton(onClick = model::retrySave) { Text("Повторить") }
+                            Text(stringResource(R.string.save_failed), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                            TextButton(onClick = model::retrySave) { Text(stringResource(R.string.retry)) }
                         }
                     }
                 }
                 BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.TopCenter) {
                     val split = maxWidth >= 640.dp && destination == ShellDestination.MiniApps && !immersive
                     // A session continues while the shell shows a composer or VoiceControls.
-                    val voiceShown = backStack.last() !is ShellDestination || split || sheet == "voice"
+                    val voiceShown = backStack.last() !is ShellDestination || split || backStack.last() == ShellDestination.Settings
                     LaunchedEffect(voiceShown) { if (!voiceShown) model.voice.stop() }
-                    @Composable fun ChatEntry(conversation: Conversation?) = ChatPane(model, conversation, { navigate(ShellDestination.MiniApps) }, { sheet = "context" }) { request -> automationRequest=request; navigate(ShellDestination.Automations) }
+                    @Composable fun ChatEntry(conversation: Conversation?) = ChatPane(model, conversation, { navigate(ShellDestination.MiniApps) }, { contextSheet = true }) { request -> automationRequest=request; navigate(ShellDestination.Automations) }
                     @Composable fun ToolsEntry() = com.alpha.assistant.tools.ToolsPane(model.tools, snapshot.selectedId, snapshot.draft.text, snapshot.draft.attachments.filter { it.contextText == null },immersive=immersive,exitImmersive={immersiveExited=true}) { navigate(null) }
                     // The tool and capability gates read RESUMED as "Alphy is in the foreground". NavDisplay holds a scene at STARTED
                     // during its transition, so each entry in the back stack keeps the shell lifecycle. A leaving entry is CREATED, as in Navigation 3.
@@ -128,7 +134,8 @@ import java.util.Date
                     } }
                     // NavDisplay gives each entry fixed constraints. The Box loosens them, so a pane keeps its maximum width and stays centered.
                     val centerEntry = remember { NavEntryDecorator<ShellRoute> { entry -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) { entry.Content() } } }
-                    NavDisplay(backStack, Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter, onBack = ::back, entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), keepShellLifecycle, centerEntry), entryProvider = entryProvider {
+                    // NavDisplay gets Back before the drawer handler, so an open drawer closes first here.
+                    NavDisplay(backStack, Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter, onBack = { if (drawerState.isOpen) closeDrawer() else back() }, entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), keepShellLifecycle, centerEntry), entryProvider = entryProvider {
                         entry<ShellRoute.Desktop>(clazzContentKey = { it.toString() }) { Box(Modifier.testTag("desktop")) { ChatEntry(null) } }
                         // The route gives the conversation, so a chat keeps its messages during its exit animation.
                         entry<ShellRoute.Chat>(clazzContentKey = { it.toString() }) { route -> ChatEntry(snapshot.conversations.find { it.id == route.id }) }
@@ -155,58 +162,9 @@ import java.util.Date
         Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.BottomCenter) { SnackbarHost(snackbar, Modifier.padding(16.dp)) }
     }
     model.requestError?.let { error ->
-        AlertDialog(onDismissRequest = model::clearRequestError, title = { Text("Не удалось отправить") }, text = { Text(error) }, confirmButton = { TextButton(onClick = model::clearRequestError) { Text("Понятно") } })
+        AlertDialog(onDismissRequest = model::clearRequestError, title = { Text(stringResource(R.string.send_failed)) }, text = { Text(error) }, confirmButton = { TextButton(onClick = model::clearRequestError) { Text(stringResource(R.string.understood)) } })
     }
-    if (sheet == "context" && !model.loadFailed && !model.loading) ReviewedContextDialog(model) { sheet = null }
-    if (sheet != null && sheet != "context" && !model.loadFailed && !model.loading) {
-        ModalBottomSheet(onDismissRequest = { sheet = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = MaterialTheme.colorScheme.surface) {
-            Column(Modifier.fillMaxWidth().heightIn(max = 650.dp).navigationBarsPadding()) {
-                val title = when (sheet) { "voice" -> "Голосовой сеанс"; "context" -> "Добавить к запросу"; else -> "Alphy" }
-                Text(title, Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.headlineSmall)
-                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp)) {
-                    when (sheet) {
-                        "voice" -> VoiceControls(model)
-
-                        "menu" -> {
-                            MenuRow("Новый чат", "Отдельный черновик", Glyph.Plus) { model.select(null); navigate(null) }
-                            MenuRow("Мои инструменты", "Сохранённое из разговоров", Glyph.Grid) { navigate(ShellDestination.MiniApps) }
-                            MenuRow("Автоматизации", "Расписания и журнал", Glyph.Repeat) { navigate(ShellDestination.Automations) }
-                            MenuRow("Непрерывный голосовой сеанс", "T-one и локальные ответы Silero", Glyph.Mic) { sheet = "voice" }
-                            MenuRow("Разрешения и функции", "Доступ Android и мини-приложений", Glyph.Settings) { navigate(ShellDestination.Access) }
-                            Text("ИСТОРИЯ БЕСЕД", Modifier.padding(top = 28.dp, bottom = 10.dp), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (snapshot.conversations.isEmpty()) Text("Пока нет разговоров", Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            snapshot.conversations.take(5).forEach { c -> MenuRow(c.title, if (c.draft.text.isNotEmpty() || c.draft.attachments.isNotEmpty()) "Есть черновик" else "Сохранено на устройстве", Glyph.History) { model.select(c.id); navigate(null) } }
-                            TextButton(onClick = { navigate(ShellDestination.Search) }) { Text("Вся история") }
-                        }
-
-
-                    }
-                }
-                if (sheet == "menu") {
-                    HorizontalDivider(Modifier.padding(top = 10.dp))
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Локальный профиль", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                        TextButton(onClick = { navigate(ShellDestination.Settings) }) { AlphaIcon(Glyph.Settings); Spacer(Modifier.width(7.dp)); Text(stringResource(R.string.settings)) }
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable internal fun ShellHeader(back: Boolean, home: () -> Unit, menu: () -> Unit, history: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = menu, modifier = Modifier.heightIn(min = 48.dp)) { AlphaIcon(Glyph.Menu); Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.menu)) }
-            Text("Alphy", Modifier.weight(1f), fontSize = 27.sp, fontWeight = FontWeight.Medium, letterSpacing = (-1).sp)
-        }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (back) TextButton(onClick = home, modifier = Modifier.heightIn(min = 48.dp)) { AlphaIcon(Glyph.Back); Text("Чат") }
-            TextButton(onClick = history, modifier = Modifier.heightIn(min = 48.dp)) { AlphaIcon(Glyph.History); Spacer(Modifier.width(7.dp)); Text("История") }
-        }
-    }
+    if (contextSheet && !model.loadFailed && !model.loading) ReviewedContextDialog(model) { contextSheet = false }
 }
 
 @Composable internal fun ChatPane(model: ShellViewModel, conversation: Conversation?, tools: () -> Unit, context: () -> Unit, automation: (String) -> Unit) {
@@ -338,15 +296,6 @@ import java.util.Date
     }
 }
 
-@Composable private fun MenuRow(title: String, detail: String, glyph: Glyph, action: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = action).padding(vertical = 15.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-        AlphaIcon(glyph)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text(title, fontSize = 15.sp); if (detail.isNotEmpty()) Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        AlphaIcon(Glyph.Chevron, Modifier.size(15.dp))
-    }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-}
-
 @Composable private fun EmptyPane(kicker: String, title: String, glyph: Glyph, heading: String, text: String) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(26.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         Text(kicker, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -439,6 +388,8 @@ import java.util.Date
         Notice("Текст и выбранные изображения обрабатывает DeepSeek после подтверждения отправки. Веб-поиск доступен в каждом запросе. Сохранение ключа не отправляет данные и не проверяет баланс.")
         com.alpha.assistant.surfaces.SystemEntrySettings()
         Text("Alphy · 0.1.0", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // NavDisplay places all children of an entry at one origin, so a second child of the Settings entry would draw over this page.
+        VoiceControls(model)
     }
     if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("Удалить API-ключ?") }, text = { Text("Разговоры и черновики сохранятся.") }, confirmButton = { TextButton(onClick = { model.clearKey(); confirmClear = false }) { Text("Удалить") } }, dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Отмена") } })
 }

@@ -20,7 +20,7 @@ A late result cannot replace a changed draft.
 One-shot recognition neither initializes Silero nor restarts the microphone after a reply.
 Microphone denial shows a retry action and an Android settings link.
 
-The menu also provides an explicit continuous voice session.
+«Настройки» also give an explicit continuous voice session.
 This session starts only with an empty draft and no active cloud request.
 Alpha verifies and copies the packaged T-one and Silero models into its private no-backup directory.
 The complete bundle requires about 281 MB of additional device storage.

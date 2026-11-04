@@ -9,6 +9,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
+import com.alpha.assistant.R
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.data.*
 import com.alpha.assistant.surfaces.AssistContext
@@ -23,6 +24,7 @@ class ReviewedContextUiWorkflowTest {
     private val diagnostics = UiFailureDiagnostics("reviewed-context")
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val automation = instrumentation.uiAutomation
+    private val robot = ShellRobot("reviewed-context")
 
     @Test fun reviewedPasteAndMenuPreserveTheOriginatingDraft() {
         val context = instrumentation.targetContext
@@ -63,8 +65,8 @@ class ReviewedContextUiWorkflowTest {
                 assertEquals(reviewed, store.load().draft)
                 click("Выбрать текст для заметки"); waitFor("Передать выбранный текст в заметки"); click("Закрыть")
                 assertEquals(reviewed, store.load().draft)
-                click("Меню"); click("Разрешения и функции")
-                waitFor("Доступ Android")
+                robot.openDrawer(scenario); robot.click(robot.text(R.string.access)); robot.awaitDrawerClosed(scenario)
+                waitFor(robot.text(R.string.access))
                 assertEquals(reviewed, store.load().draft)
                 assertEquals(0, sends)
                 val evidence = File(context.getExternalFilesDir(null), "reviewed-context-evidence").apply { mkdirs() }

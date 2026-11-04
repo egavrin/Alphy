@@ -17,8 +17,9 @@ class ShellNavigationWorkflowTest {
     @After fun remove() = fixture.remove()
 
     private fun openSettings(scenario: ActivityScenario<*>) {
-        robot.click(robot.text(R.string.menu))
+        robot.openDrawer(scenario)
         robot.click(robot.text(R.string.settings))
+        robot.awaitDrawerClosed(scenario)
         robot.waitUntil { robot.secure(scenario) }
     }
 

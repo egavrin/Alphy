@@ -3,4 +3,17 @@
     <string name="app_name">Alphy</string>
     <string name="menu">Меню</string>
     <string name="settings">Настройки</string>
+    <string name="new_chat">Новый чат</string>
+    <string name="search">Поиск</string>
+    <string name="mini_apps">Мини-приложения</string>
+    <string name="automations">Автоматизации</string>
+    <string name="recent">Недавние</string>
+    <string name="access">Доступ и функции</string>
+    <string name="profile">Профиль</string>
+    <string name="load_failed">Не удалось открыть данные</string>
+    <string name="load_failed_text">Сохранённые данные не удалены. Повторите попытку.</string>
+    <string name="retry">Повторить</string>
+    <string name="save_failed">Изменения не сохранены</string>
+    <string name="send_failed">Не удалось отправить</string>
+    <string name="understood">Понятно</string>
 </resources>

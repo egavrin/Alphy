@@ -6,7 +6,10 @@ import android.app.Application
 import android.app.Instrumentation
 import android.app.UiAutomation
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.Rect
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
@@ -23,6 +26,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
+import com.alpha.assistant.R
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudRequest
@@ -153,6 +157,33 @@ internal class ShellRobot(fixture: String) {
         scenario.onActivity { flags = it.window.attributes.flags }
         return (flags and WindowManager.LayoutParams.FLAG_SECURE) != 0
     }
+    // The scrim gets its label only after the drawer settles open, and loses it only after the drawer settles closed.
+    fun openDrawer(scenario: ActivityScenario<*>) {
+        click(text(R.string.menu))
+        waitFor(closeDrawerLabel(scenario))
+    }
+    fun awaitDrawerClosed(scenario: ActivityScenario<*>) = waitGone(closeDrawerLabel(scenario))
+    fun assertTarget(label: String) {
+        var node: AccessibilityNodeInfo? = waitFor(label)
+        while (node != null && !node.isClickable) node = node.parent
+        assertNotNull("No clickable node for $label", node)
+        val bounds = Rect().also { node!!.getBoundsInScreen(it) }
+        val screen = Rect().also { diagnostics.freshRoot()?.getBoundsInScreen(it) }
+        val minSize = (48 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
+        assertTrue("Target is visible: $label", node!!.isVisibleToUser)
+        assertTrue("Target $bounds is inside the screen $screen: $label", screen.contains(bounds))
+        assertTrue("48dp touch target $bounds: $label", bounds.width() >= minSize && bounds.height() >= minSize)
+    }
+    fun bounds(label: String): Rect = Rect().also { waitFor(label).getBoundsInScreen(it) }
+    fun rotate(scenario: ActivityScenario<*>, landscape: Boolean) {
+        scenario.onActivity { it.requestedOrientation = if (landscape) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
+        val expected = if (landscape) Configuration.ORIENTATION_LANDSCAPE else Configuration.ORIENTATION_PORTRAIT
+        waitUntil {
+            var orientation = Configuration.ORIENTATION_UNDEFINED
+            scenario.onActivity { orientation = it.resources.configuration.orientation }
+            orientation == expected
+        }
+    }
     /** [composed] and [composedText] read the composed nodes, also the nodes that a covering NavDisplay entry hides from accessibility. */
     fun composed(scenario: ActivityScenario<*>, tag: String): Boolean = composedNode(scenario) { it.getOrNull(SemanticsProperties.TestTag) == tag }
     fun composedText(scenario: ActivityScenario<*>, text: String): Boolean =
@@ -181,6 +212,12 @@ internal class ShellRobot(fixture: String) {
     fun shell(command: String): String =
         automation.executeShellCommand(command).use { ParcelFileDescriptor.AutoCloseInputStream(it).bufferedReader().readText().trim() }
 
+    // A library label comes from the activity resources, which have the Russian app locale.
+    private fun closeDrawerLabel(scenario: ActivityScenario<*>): String {
+        var label = ""
+        scenario.onActivity { label = it.getString(androidx.compose.ui.R.string.close_drawer) }
+        return label
+    }
     private fun composedNode(scenario: ActivityScenario<*>, match: (SemanticsConfiguration) -> Boolean): Boolean {
         fun root(view: View): ViewRootForTest? = view as? ViewRootForTest
             ?: (view as? ViewGroup)?.let { group -> (0 until group.childCount).firstNotNullOfOrNull { root(group.getChildAt(it)) } }

@@ -33,7 +33,9 @@ internal enum class Glyph(val path: String) {
     Screen("M3 4H21V17H3ZM8 21H16M12 17V21"),
     Camera("M3 6H7L9 3H15L17 6H21V20H3ZM16 13A4 4 0 1 1 8 13A4 4 0 1 1 16 13"),
     Bell("M6 9A6 6 0 0 1 18 9V15L21 18H3L6 15ZM10 21H14"),
-    Check("M5 12L10 17L20 7")
+    Check("M5 12L10 17L20 7"),
+    Compose("M4 20L5 15L16 4L20 8L9 19ZM14 6L18 10M5 15L9 19"),
+    Shield("M12 3L19 6V11C19 15.5 16 19.5 12 21C8 19.5 5 15.5 5 11V6Z")
 }
 
 @Composable internal fun AlphaIcon(glyph: Glyph, modifier: Modifier = Modifier, accent: Boolean = false) {

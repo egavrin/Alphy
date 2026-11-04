@@ -69,10 +69,6 @@ import com.alpha.assistant.ui.Glyph
     if(tool != null || draft != null) {
         FocusedToolPane(controller,tool,draft,prompt,edit,submit,{archiveConfirm=true},immersive,exitImmersive,close)
     } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).semantics {contentDescription="Mini-app library content"}.padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
-        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-            Text("Mini-apps",Modifier.weight(1f),style=MaterialTheme.typography.headlineMedium)
-            TextButton(onClick=close) {Text("Chat")}
-        }
         Text("Create a mini-app",style=MaterialTheme.typography.titleLarge)
         Text("Describe what you need. Preview the result before you apply it.",color=MaterialTheme.colorScheme.onSurfaceVariant)
         OutlinedTextField(prompt,edit,label={Text("Request for a mini-app")},modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(16.dp))
