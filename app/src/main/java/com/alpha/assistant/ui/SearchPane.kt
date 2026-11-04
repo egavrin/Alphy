@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -90,11 +92,11 @@ import java.util.Date
         dismissButton = { TextButton(onClick = { renameId = null }) { Text(stringResource(R.string.cancel)) } })
     val deleting = conversations.find { it.id == deleteId }
     if (deleting != null) AlertDialog(onDismissRequest = { deleteId = null }, title = { Text(stringResource(R.string.conversation_delete_title)) }, text = {
-        Text(stringResource(R.string.conversation_delete_text, deleting.title))
+        Column(Modifier.verticalScroll(rememberScrollState())) { Text(stringResource(R.string.conversation_delete_text, deleting.title)) }
     }, confirmButton = { TextButton(onClick = { delete(deleting.id); deleteId = null }) { Text(stringResource(R.string.delete)) } },
         dismissButton = { TextButton(onClick = { deleteId = null }) { Text(stringResource(R.string.cancel)) } })
     if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text(stringResource(R.string.clear_history_title)) }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(stringResource(R.string.clear_history_text))
             Text(stringResource(R.string.clear_history_kept))
         }

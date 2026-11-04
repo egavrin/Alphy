@@ -8,11 +8,14 @@ import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
+import com.alpha.assistant.data.Conversation
+import com.alpha.assistant.data.Message
 import com.alpha.assistant.data.ShellStore
 import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.cloud.*
@@ -193,6 +196,39 @@ class ShellWorkflowTest {
             assertEquals("Existing conversation draft", field("Сообщение ассистенту").text.toString())
             click(robot.text(R.string.new_chat))
             assertEquals("Separate new draft", field("Сообщение ассистенту").text.toString())
+        }
+    }
+
+    // Failure case: in landscape with the keyboard, the composer gets no height, so its field and buttons are not usable.
+    @Test fun landscapeKeyboardKeepsComposerUsable() {
+        val robot = ShellRobot("shell")
+        store.saveConversation(Conversation("landscape", "Landscape chat", 1L, 1L, messages = listOf(Message("landscape-u", "user", "Landscape message", 1L, "sent"))))
+        store.saveSetting("selected", "landscape")
+        ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
+            try {
+                robot.waitFor("Landscape message")
+                robot.rotate(scenario, landscape = true)
+                val labels = listOf(R.string.composer_label, R.string.composer_add_context, R.string.composer_voice, R.string.composer_send).map { robot.text(it) }
+                assertTrue(robot.field(labels[0]).performAction(AccessibilityNodeInfo.ACTION_CLICK))
+                robot.waitUntil { robot.keyboardTop(scenario) != null }
+                robot.edit(labels[0], "Первая строка\nВторая строка\nТретья строка")
+                // The keyboard inset animates, so the check waits until the keyboard top and the bounds stay the same for 500 ms.
+                var last = ""
+                var since = SystemClock.uptimeMillis()
+                robot.waitUntil {
+                    val sample = "${robot.keyboardTop(scenario)} " + labels.map { label -> robot.find(label)?.let { node -> Rect().also { node.getBoundsInScreen(it) } } }
+                    if (sample != last) { last = sample; since = SystemClock.uptimeMillis() }
+                    robot.keyboardTop(scenario) != null && SystemClock.uptimeMillis() - since >= 500
+                }
+                val keyboardTop = checkNotNull(robot.keyboardTop(scenario))
+                for (label in labels) {
+                    val bounds = robot.assertTarget(label)
+                    assertTrue("$label $bounds ends at or above the keyboard top $keyboardTop", bounds.bottom <= keyboardTop)
+                }
+            } finally {
+                scenario.onActivity { WindowCompat.getInsetsController(it.window, it.window.decorView).hide(WindowInsetsCompat.Type.ime()) }
+                robot.rotate(scenario, landscape = false)
+            }
         }
     }
 

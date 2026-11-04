@@ -98,9 +98,10 @@ import com.alpha.assistant.voice.VoiceSession
         if (voice.phase == "review") {
             val reviewLabel = stringResource(R.string.voice_review_label)
             BasicTextField(voice.partial, voice::editTranscript,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 43.dp, max = 150.dp).padding(7.dp).semantics { contentDescription = reviewLabel },
+                // The vertical space is inside the decoration, so the field node keeps the 48 dp minimum height, as in Composer.
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 150.dp).padding(horizontal = 7.dp).semantics { contentDescription = reviewLabel },
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary))
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), decorationBox = { inner -> Box(Modifier.padding(vertical = 5.dp)) { inner() } })
             Text(stringResource(R.string.voice_send_hint), style = MaterialTheme.typography.labelSmall)
         } else if (voice.partial.isNotBlank()) Text(voice.partial, maxLines = 2, style = MaterialTheme.typography.bodySmall)
         val cancelLabel = stringResource(R.string.voice_cancel)

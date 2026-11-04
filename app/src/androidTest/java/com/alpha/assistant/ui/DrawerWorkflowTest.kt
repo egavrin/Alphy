@@ -11,6 +11,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import kotlin.math.roundToInt
 
 class DrawerWorkflowTest {
     private val fixture = ShellFixture("drawer")
@@ -75,6 +76,26 @@ class DrawerWorkflowTest {
                     robot.assertTarget(robot.text(id))
                 }
             } finally { robot.rotate(scenario, landscape = false) }
+        }
+    }
+
+    // Failure case: a swipe opens the drawer, and the keyboard stays open over it.
+    @Test fun swipeOpenDrawerHidesKeyboard() {
+        fixture.seedChat("alpha", "Alpha chat", "Alpha message", selected = true)
+        fixture.launch().use { scenario ->
+            robot.waitFor("Alpha message")
+            assertTrue(robot.field(robot.text(R.string.composer_label)).performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            robot.waitUntil { robot.keyboardTop(scenario) != null }
+            // The swipe starts 60 dp from the left edge, outside the system Back gesture area, as probe B did.
+            val dp = robot.instrumentation.targetContext.resources.displayMetrics.density
+            robot.shell("input swipe ${(60 * dp).roundToInt()} ${(173 * dp).roundToInt()} ${(260 * dp).roundToInt()} ${(173 * dp).roundToInt()} 300")
+            robot.awaitDrawerOpen(scenario)
+            robot.waitUntil { robot.keyboardTop(scenario) == null }
+            robot.back()
+            robot.awaitDrawerClosed(scenario)
+            robot.waitFor("Alpha message")
+            assertTrue(robot.composed(scenario, "chat"))
+            assertEquals("alpha", selectedId(scenario))
         }
     }
 

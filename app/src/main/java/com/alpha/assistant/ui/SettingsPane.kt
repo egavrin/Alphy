@@ -100,7 +100,7 @@ import com.alpha.assistant.capabilities.AssistantSettingsRow
         Text(stringResource(R.string.app_version, version), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text(stringResource(R.string.key_delete_title)) },
-        text = { Text(stringResource(R.string.key_delete_text)) },
+        text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(stringResource(R.string.key_delete_text)) } },
         confirmButton = { TextButton(onClick = { model.clearKey(); confirmDelete = false }) { Text(stringResource(R.string.delete)) } },
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.cancel)) } })
 }

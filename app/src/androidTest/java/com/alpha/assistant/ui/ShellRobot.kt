@@ -184,10 +184,25 @@ internal class ShellRobot(fixture: String) {
     // The scrim gets its label only after the drawer settles open, and loses it only after the drawer settles closed.
     fun openDrawer(scenario: ActivityScenario<*>) {
         click(text(R.string.menu))
-        waitFor(closeDrawerLabel(scenario))
+        awaitDrawerOpen(scenario)
     }
+    fun awaitDrawerOpen(scenario: ActivityScenario<*>) = waitFor(closeDrawerLabel(scenario))
     fun awaitDrawerClosed(scenario: ActivityScenario<*>) = waitGone(closeDrawerLabel(scenario))
-    fun assertTarget(label: String) {
+    /** The top of the keyboard in screen pixels, or null while the keyboard is hidden. */
+    fun keyboardTop(scenario: ActivityScenario<*>): Int? {
+        var top: Int? = null
+        scenario.onActivity { activity ->
+            val decor = activity.window.decorView
+            val insets = ViewCompat.getRootWindowInsets(decor)
+            if (insets?.isVisible(WindowInsetsCompat.Type.ime()) == true) {
+                val origin = IntArray(2).also { decor.getLocationOnScreen(it) }
+                top = origin[1] + decor.height - insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            }
+        }
+        return top
+    }
+    /** Returns the screen bounds of the checked clickable node. */
+    fun assertTarget(label: String): Rect {
         var node: AccessibilityNodeInfo? = waitFor(label)
         while (node != null && !node.isClickable) node = node.parent
         assertNotNull("No clickable node for $label", node)
@@ -205,6 +220,7 @@ internal class ShellRobot(fixture: String) {
         assertTrue("Target is visible: $label", node!!.isVisibleToUser)
         assertTrue("Target $bounds is inside the safe area $safe: $label", safe.contains(bounds))
         assertTrue("48dp touch target $bounds: $label", bounds.width() >= minSize && bounds.height() >= minSize)
+        return bounds
     }
     fun bounds(label: String): Rect = Rect().also { waitFor(label).getBoundsInScreen(it) }
     fun rotate(scenario: ActivityScenario<*>, landscape: Boolean) {

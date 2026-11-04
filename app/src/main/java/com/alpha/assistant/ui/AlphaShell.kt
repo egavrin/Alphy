@@ -35,6 +35,7 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -77,6 +78,12 @@ import kotlinx.coroutines.launch
     }
     val snapshot = model.snapshot
     val focus = LocalFocusManager.current
+    val density = LocalDensity.current
+    val ime = WindowInsets.ime
+    val window = LocalWindowInfo.current
+    // Implementation choice: a window below 480 dp high is a phone in landscape, so the keyboard leaves room for one composer row only.
+    // derivedStateOf keeps the keyboard animation from recomposing the shell in each frame.
+    val compact by remember(ime, density, window) { derivedStateOf { ime.getBottom(density) > 0 && window.containerSize.height < with(density) { 480.dp.roundToPx() } } }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     fun notice(text: String) { scope.launch { snackbar.showSnackbar(text) } }
@@ -88,6 +95,8 @@ import kotlinx.coroutines.launch
     // The composition reads targetValue, because a read inside SideEffect causes no recomposition.
     val drawerTargetsOpen = drawerState.targetValue == DrawerValue.Open
     SideEffect { handler.isBackEnabled = drawerTargetsOpen }
+    // A swipe opens the drawer without «Меню», so the drawer also clears the focus, and the keyboard closes.
+    LaunchedEffect(drawerTargetsOpen) { if (drawerTargetsOpen) focus.clearFocus() }
     val dispatcher = checkNotNull(LocalNavigationEventDispatcherOwner.current).navigationEventDispatcher
     DisposableEffect(dispatcher) { dispatcher.addHandler(handler, NavigationEventDispatcher.PRIORITY_OVERLAY); onDispose { handler.remove() } }
     fun back() { if (destination != null) navigate(null) else model.select(null) }
@@ -113,9 +122,9 @@ import kotlinx.coroutines.launch
             var immersiveExited by rememberSaveable(selectedTool?.id,selectedTool?.revision,destination == ShellDestination.MiniApps) {mutableStateOf(false)}
             val immersive=focusedMiniApp && model.tools.selectedDraftId==null && selectedTool?.archived==false && selectedSpec?.presentation=="immersive" && !immersiveExited
             Column(Modifier.fillMaxSize().then(if(immersive)Modifier else Modifier.safeDrawingPadding())) {
-                if (!focusedMiniApp) ShellTopBar(stringResource(destination?.title ?: R.string.app_name),
+                if (!focusedMiniApp && !compact) ShellTopBar(stringResource(destination?.title ?: R.string.app_name),
                     { focus.clearFocus(); scope.launch { drawerState.open() } }) { model.select(null); navigate(null) }
-                if (model.saveFailed && !immersive) {
+                if (model.saveFailed && !immersive && !compact) {
                     Surface(color = MaterialTheme.colorScheme.errorContainer) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                             ProvideTextStyle(MaterialTheme.typography.bodySmall) {
@@ -155,7 +164,7 @@ import kotlinx.coroutines.launch
                                     Row(Modifier.fillMaxSize()) {
                                         Column(Modifier.weight(1f).fillMaxHeight()) {
                                             ChatEntry(snapshot.selected, Modifier.weight(1f))
-                                            Composer(model, { contextSheet = true }, ::automate)
+                                            Composer(model, { contextSheet = true }, ::automate, Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp))
                                         }
                                         VerticalDivider()
                                         Column(Modifier.weight(1f)) { ToolsEntry() }
@@ -170,13 +179,13 @@ import kotlinx.coroutines.launch
                 }
                 // One call place keeps the voice start state when the Chat route replaces the Desktop route.
                 if (backStack.last() !is ShellDestination) Composer(model, { contextSheet = true }, ::automate,
-                    Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp).fillMaxWidth().testTag("composer"))
+                    Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp).fillMaxWidth().testTag("composer"), compact = compact)
             }
         }
         Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.BottomCenter) { SnackbarHost(snackbar, Modifier.padding(16.dp)) }
     }
     model.requestError?.let { error ->
-        AlertDialog(onDismissRequest = model::clearRequestError, title = { Text(stringResource(R.string.send_failed)) }, text = { Text(error) }, confirmButton = { TextButton(onClick = model::clearRequestError) { Text(stringResource(R.string.understood)) } })
+        AlertDialog(onDismissRequest = model::clearRequestError, title = { Text(stringResource(R.string.send_failed)) }, text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(error) } }, confirmButton = { TextButton(onClick = model::clearRequestError) { Text(stringResource(R.string.understood)) } })
     }
     if (contextSheet && !model.loadFailed && !model.loading) ReviewedContextDialog(model) { contextSheet = false }
 }

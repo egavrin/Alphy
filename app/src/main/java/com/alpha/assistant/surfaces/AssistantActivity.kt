@@ -122,7 +122,7 @@ class AssistantActivity : AlphyActivity() {
         else if(model.loadFailed) Column(Modifier.padding(24.dp)) { Text("Не удалось открыть чат. Сохранённые данные не удалены."); Button(onClick = model::load) { Text("Повторить") } }
         else {
             ChatPane(model, model.snapshot.selected, tools = full, automation = { full() }, settings = settings, modifier = Modifier.weight(1f))
-            Composer(model, context = { sheet = "context" }, automation = { full() })
+            Composer(model, context = { sheet = "context" }, automation = { full() }, modifier = Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp))
         }
     }
     model.requestError?.let { error ->
