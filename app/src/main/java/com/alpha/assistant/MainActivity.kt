@@ -35,6 +35,6 @@ class MainActivity : AlphyActivity() {
         val filter = IntentFilter(SurfaceEntry.TOOLS_CHANGED).apply { addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_USER_PRESENT) }
         androidx.core.content.ContextCompat.registerReceiver(this,surfaceUpdates,filter,androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
         if(savedInstanceState == null) receiveEntry(intent)
-        setContent { AlphaTheme(model.snapshot.theme) { AlphaShell(model) } }
+        setContent { AlphaTheme { AlphaShell(model) } }
     }
 }

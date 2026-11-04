@@ -21,6 +21,6 @@ class CloudTestActivity : AlphyActivity() {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = checkNotNull(factory)(application) as T
         })[ShellViewModel::class.java]
-        setContent { AlphaTheme(model.snapshot.theme) { AlphaShell(model) } }
+        setContent { AlphaTheme { AlphaShell(model) } }
     }
 }

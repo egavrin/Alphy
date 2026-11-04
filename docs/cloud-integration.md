@@ -30,7 +30,7 @@ The composer shows a sampled image preview and a removal action. The app reads a
 
 ## Durable state and cancellation
 
-The SQLite schema remains version 1. Existing conversation rows remain readable. New JSON message fields are optional when decoded: `replyTo`, `search`, `searchStatus`, `sources`, `error`, and `errorCode`. A source contains `title`, `url`, and bounded `summary`. No credential enters this database. Existing processing-mode settings remain readable for compatibility, but the UI no longer offers processing modes.
+The SQLite schema remains version 1. Existing conversation rows remain readable. New JSON message fields are optional when decoded: `replyTo`, `search`, `searchStatus`, `sources`, `error`, and `errorCode`. A source contains `title`, `url`, and bounded `summary`. No credential enters this database. Stale processing-mode rows can stay in the `settings` table, and the app ignores them.
 
 A submission atomically stores the new conversation and consumes its draft, or replaces the selected conversation row. It records the user message and a stable assistant placeholder before a network call. A failed initial write blocks transmission. Assistant statuses are `pending`, `streaming`, `complete`, `error`, `cancelled`, and `interrupted`. The user status distinguishes an unsent message from a submitted request. Existing `not_sent` messages remain local history.
 

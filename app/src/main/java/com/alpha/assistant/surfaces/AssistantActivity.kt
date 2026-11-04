@@ -48,7 +48,7 @@ class AssistantActivity : AlphyActivity() {
         unlocked = !ToolWidgets.isLocked(this)
         registerReceiver(screenOff,IntentFilter(Intent.ACTION_SCREEN_OFF),Context.RECEIVER_NOT_EXPORTED)
         setContent {
-            AlphaTheme("system") {
+            AlphaTheme {
                 Box(Modifier.fillMaxSize()) {
                     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.25f)).clickable { finish() })
                     Box(Modifier.fillMaxSize().safeDrawingPadding()) {

@@ -15,6 +15,7 @@ class HistoryStorageTest {
         val draft = Draft("new draft", listOf(Attachment("content://fixture/source", "source", "text/plain")))
         try {
             store.saveConversation(a); store.saveConversation(b); store.saveNewDraft(draft)
+            // Stale theme and mode rows from earlier versions must not block load.
             store.saveSetting("selected", "b"); store.saveSetting("theme", "dark"); store.saveSetting("mode", "cloud")
             assertTrue(runCatching { store.renameConversation("a", " ") }.isFailure)
             assertEquals(a, store.load().conversations.find { it.id == "a" })
@@ -35,7 +36,7 @@ class HistoryStorageTest {
             store.close(); store = ShellStore(context, name)
             val cleared = store.load()
             assertTrue(cleared.conversations.isEmpty()); assertNull(cleared.selectedId)
-            assertEquals(draft, cleared.newDraft); assertEquals("dark", cleared.theme); assertEquals("cloud", cleared.mode)
+            assertEquals(draft, cleared.newDraft)
         } finally { store.close(); context.deleteDatabase(name) }
     }
 }

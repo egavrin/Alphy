@@ -395,10 +395,6 @@ import java.util.Date
     var confirmClear by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(25.dp), verticalArrangement = Arrangement.spacedBy(17.dp)) {
         Text("Настройки", style = MaterialTheme.typography.headlineMedium)
-        Text("Оформление", style = MaterialTheme.typography.titleMedium)
-        listOf("system" to "Как в системе", "light" to "Светлая тема", "dark" to "Тёмная тема").forEach { (value, title) ->
-            Row(Modifier.fillMaxWidth().clickable { model.setting("theme", value) }, verticalAlignment = Alignment.CenterVertically) { RadioButton(selected = model.snapshot.theme == value, onClick = { model.setting("theme", value) }); Text(title) }
-        }
         HorizontalDivider()
         Text("DeepSeek", style = MaterialTheme.typography.titleLarge)
         Text(model.keyStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

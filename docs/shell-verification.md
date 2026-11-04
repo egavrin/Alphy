@@ -3,7 +3,7 @@
 Failure cases recorded before implementation:
 
 - A new-chat draft must remain separate from every conversation draft.
-- A conversation ID, messages, attachment metadata, selected conversation, mode, and theme must survive a database reopen.
+- A conversation ID, messages, attachment metadata, and selected conversation must survive a database reopen.
 - A database write must preserve other conversations and drafts.
 - A blank credential must fail without replacing an existing credential.
 - A saved credential must round-trip through Android Keystore encryption. Preferences must not contain plaintext.

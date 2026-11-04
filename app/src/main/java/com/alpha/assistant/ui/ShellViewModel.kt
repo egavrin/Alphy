@@ -194,8 +194,6 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 current.conversations.forEach(store::saveConversation)
                 store.saveNewDraft(current.newDraft)
                 store.saveSetting("selected", current.selectedId.orEmpty())
-                store.saveSetting("theme", current.theme)
-                store.saveSetting("mode", current.mode)
                 store.writableDatabase.setTransactionSuccessful()
             } finally { store.writableDatabase.endTransaction() }
         }
@@ -465,10 +463,6 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         active?.session?.let { session -> Thread { session.cancel() }.start() }
         writes.close()
         super.onCleared()
-    }
-    fun setting(name: String, value: String) {
-        snapshot = when (name) { "theme" -> snapshot.copy(theme = value); "mode" -> snapshot.copy(mode = value); else -> return }
-        writes.trySend { store.saveSetting(name, value) }
     }
     private fun replace(conversation: Conversation) {
         snapshot = snapshot.copy(conversations = (snapshot.conversations.filterNot { it.id == conversation.id } + conversation).sortedByDescending { it.updatedAt })

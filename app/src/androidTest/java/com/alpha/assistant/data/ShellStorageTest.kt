@@ -19,6 +19,7 @@ class ShellStorageTest {
             val chat = Conversation("chat-a", "A", 1L, 2L, Draft("follow-up"), listOf(Message("message-a", "user", "hello", 1L, "not_sent")))
             store.saveConversation(chat)
             store.saveSetting("selected", chat.id)
+            // Stale theme and mode rows from earlier versions must not block load.
             store.saveSetting("theme", "dark")
             store.saveSetting("mode", "local")
             store.close()
@@ -28,8 +29,6 @@ class ShellStorageTest {
             assertEquals("new.txt", restored.newDraft.attachments.single().name)
             assertEquals(chat, restored.conversations.single())
             assertEquals("chat-a", restored.selectedId)
-            assertEquals("dark", restored.theme)
-            assertEquals("local", restored.mode)
             store.saveNewDraft(Draft("changed"))
             assertEquals(chat, store.load().conversations.single())
         } finally {

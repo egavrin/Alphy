@@ -25,7 +25,7 @@ class WidgetConfigurationActivity : AlphyActivity() {
         val info = AppWidgetManager.getInstance(this).getAppWidgetInfo(id)
         if(id == AppWidgetManager.INVALID_APPWIDGET_ID || info?.provider != ComponentName(this,ToolWidgetProvider::class.java)) { finish(); return }
         setContent {
-            AlphaTheme("system") {
+            AlphaTheme {
                 var tools by remember { mutableStateOf<List<ToolRecord>>(emptyList()) }
                 var loaded by remember { mutableStateOf(false) }
                 var selected by remember { mutableStateOf(ToolWidgets.toolId(this,id)) }

@@ -8,7 +8,7 @@ Failure cases recorded before the repair:
 - Deletion of the current conversation must return selection to the independent new-chat draft.
 - Deletion of another conversation must preserve the current selection and draft.
 - Clear-history must require explicit confirmation and identify the exact scope.
-- Clear-history must preserve the new-chat draft, themes, modes, credentials, tools, tool data, automation rules, and attachment source files.
+- Clear-history must preserve the new-chat draft, credentials, tools, tool data, automation rules, and attachment source files.
 - An active cloud request must be cancelled before its conversation is removed. A late response must not recreate it.
 - A failed database deletion must remain visible as an unsaved change. Retry must repeat the deletion rather than resurrect the conversation.
 
