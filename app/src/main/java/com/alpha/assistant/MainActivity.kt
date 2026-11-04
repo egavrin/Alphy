@@ -23,6 +23,8 @@ class MainActivity : AlphyActivity() {
         }
     }
     private fun receiveEntry(intent: Intent) {
+        // A launch from Recents repeats the extras of the old entry.
+        if(intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
         if(intent.action in listOf(Intent.ACTION_MAIN,Intent.ACTION_ASSIST,Intent.ACTION_VIEW)) model.openSurface(intent.getStringExtra("tool_id"),intent.getBooleanExtra("settings",false))
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); receiveEntry(intent) }

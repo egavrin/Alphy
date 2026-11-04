@@ -61,18 +61,17 @@ import kotlinx.coroutines.launch
     var contextSheet by rememberSaveable { mutableStateOf(false) }
     var automationRequest by rememberSaveable { mutableStateOf<String?>(null) }
     var search by rememberSaveable { mutableStateOf("") }
-    var consumedSurface by rememberSaveable { mutableStateOf(0) }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     LaunchedEffect(model.surfaceSequence) {
-        // A recreation consumes no entry, because consumedSurface is saved, so a rotation keeps an open drawer open.
-        if (model.surfaceSequence > 0 && model.surfaceSequence != consumedSurface) {
+        // The model applies each entry once. So a recreation or a new activity applies no entry again, and a rotation keeps an open drawer open.
+        if (model.surfacePending) {
+            model.consumeSurface()
             destination = when {
                 model.surfaceSettings -> ShellDestination.Settings
                 model.surfaceToolId != null -> ShellDestination.MiniApps
                 else -> null
             }
             contextSheet = false
-            consumedSurface = model.surfaceSequence
             drawerState.snapTo(DrawerValue.Closed)
         }
     }

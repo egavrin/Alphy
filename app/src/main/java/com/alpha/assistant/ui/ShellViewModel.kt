@@ -61,12 +61,16 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     var surfaceSequence by mutableStateOf(0); private set
     var surfaceToolId by mutableStateOf<String?>(null); private set
     var surfaceSettings by mutableStateOf(false); private set
+    /** The model outlives each activity, so it holds the entry until a shell applies it. */
+    var surfacePending by mutableStateOf(false); private set
     fun openSurface(toolId: String?, settings: Boolean = false) {
         surfaceToolId = toolId
         surfaceSettings = settings
+        surfacePending = true
         surfaceSequence++
         tools.select(toolId)
     }
+    fun consumeSurface() { surfacePending = false }
     var snapshot by mutableStateOf(ShellSnapshot()); private set
     var loading by mutableStateOf(true); private set
     var loadFailed by mutableStateOf(false); private set
