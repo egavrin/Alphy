@@ -35,12 +35,13 @@ import com.alpha.assistant.voice.VoiceSession
 @Composable fun VoiceVisibility(voice: VoiceSession) {
     val context = LocalContext.current
     val owner = context as? ComponentActivity
+    val locked = stringResource(R.string.voice_screen_locked)
     DisposableEffect(owner, voice) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) voice.stop()
         }
         val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) { voice.stop("Экран заблокирован · микрофон выключен") }
+            override fun onReceive(context: Context?, intent: Intent?) { voice.stop(locked) }
         }
         owner?.lifecycle?.addObserver(observer)
         context.registerReceiver(receiver, IntentFilter(Intent.ACTION_SCREEN_OFF), Context.RECEIVER_NOT_EXPORTED)
@@ -78,13 +79,13 @@ import com.alpha.assistant.voice.VoiceSession
 
 @Composable internal fun MicrophonePermissionGuidance(voice: VoiceSession, retry: () -> Unit) {
     val context = LocalContext.current
-    Text("Разрешите микрофон в настройках Android и повторите запись.", style = MaterialTheme.typography.bodySmall)
+    Text(stringResource(R.string.voice_mic_permission), style = MaterialTheme.typography.bodySmall)
     Row {
-        TextButton(onClick = retry) { Text("Разрешить микрофон") }
+        TextButton(onClick = retry) { Text(stringResource(R.string.voice_mic_allow)) }
         TextButton(onClick = {
             runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
                 .onFailure { voice.permissionDenied() }
-        }) { Text("Настройки Android") }
+        }) { Text(stringResource(R.string.voice_android_settings)) }
     }
 }
 
@@ -92,19 +93,24 @@ import com.alpha.assistant.voice.VoiceSession
     val voice = model.voice
     val color = MaterialTheme.colorScheme.onSurfaceVariant
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(voice.status, style = MaterialTheme.typography.labelSmall)
+        ProvideTextStyle(MaterialTheme.typography.labelSmall) { StatusLine(Glyph.Mic, color, voice.status) }
         if (voice.phase == "preparing" || voice.phase == "recognizing") LinearProgressIndicator(Modifier.fillMaxWidth())
         if (voice.phase == "review") {
+            val reviewLabel = stringResource(R.string.voice_review_label)
             BasicTextField(voice.partial, voice::editTranscript,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 43.dp, max = 150.dp).padding(7.dp).semantics { contentDescription = "Проверить голосовой текст" },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 43.dp, max = 150.dp).padding(7.dp).semantics { contentDescription = reviewLabel },
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary))
-            Text("Только текст и выбранные вложения отправятся после нажатия ↑.", style = MaterialTheme.typography.labelSmall)
+            Text(stringResource(R.string.voice_send_hint), style = MaterialTheme.typography.labelSmall)
         } else if (voice.partial.isNotBlank()) Text(voice.partial, maxLines = 2, style = MaterialTheme.typography.bodySmall)
+        val cancelLabel = stringResource(R.string.voice_cancel)
+        val levelLabel = stringResource(R.string.voice_level)
+        val finishLabel = stringResource(R.string.voice_finish)
+        val sendLabel = stringResource(R.string.voice_send)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { voice.stop() }, modifier = Modifier.size(48.dp).semantics { contentDescription = "Отменить запись" }) { AlphaIcon(Glyph.Close) }
+            IconButton(onClick = { voice.stop() }, modifier = Modifier.size(48.dp).semantics { contentDescription = cancelLabel }) { AlphaIcon(Glyph.Close) }
             Canvas(Modifier.weight(1f).height(40.dp).semantics {
-                contentDescription = "Уровень микрофона"
+                contentDescription = levelLabel
                 progressBarRangeInfo = ProgressBarRangeInfo(voice.levels.lastOrNull() ?: 0f, 0f..1f)
             }) {
                 val spacing = size.width / 48
@@ -115,9 +121,10 @@ import com.alpha.assistant.voice.VoiceSession
                     drawLine(color, Offset(x, (size.height - height) / 2), Offset(x, (size.height + height) / 2), minOf(3.dp.toPx(), spacing * 0.6f), StrokeCap.Round)
                 }
             }
-            IconButton(onClick = voice::finishRecording, enabled = voice.phase == "listening", modifier = Modifier.size(48.dp).semantics { contentDescription = "Завершить запись" }) { Text("■") }
+            // The button content color dims a disabled glyph and keeps the contrast on the primary container.
+            IconButton(onClick = voice::finishRecording, enabled = voice.phase == "listening", modifier = Modifier.size(48.dp).semantics { contentDescription = finishLabel }) { AlphaIcon(Glyph.Stop, color = LocalContentColor.current) }
             FilledIconButton(onClick = model::sendVoice, enabled = voice.phase == "review" && voice.partial.isNotBlank() && !model.attachmentBusy,
-                modifier = Modifier.size(48.dp).semantics { contentDescription = "Отправить голосовой текст" }) { Text("↑", style = MaterialTheme.typography.titleLarge) }
+                modifier = Modifier.size(48.dp).semantics { contentDescription = sendLabel }) { AlphaIcon(Glyph.Arrow, color = LocalContentColor.current) }
         }
     }
 }

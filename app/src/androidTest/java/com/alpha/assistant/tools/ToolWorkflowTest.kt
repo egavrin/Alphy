@@ -2,8 +2,10 @@ package com.alpha.assistant.tools
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.alpha.assistant.R
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.ui.ShellRobot
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -292,7 +294,10 @@ class ToolWorkflowTest {
         }
         try {
             waitUntil { !model.loading && !model.tools.busy }
-            click("Создать")
+            val robot = ShellRobot("tool-ui")
+            robot.openDrawer(scenario)
+            click(app.getString(R.string.mini_apps))
+            robot.awaitDrawerClosed(scenario)
             instrumentation.runOnMainSync { model.tools.preparePrompt("Create a counter") }
             waitFor("Create a counter")
             click("Create preview")

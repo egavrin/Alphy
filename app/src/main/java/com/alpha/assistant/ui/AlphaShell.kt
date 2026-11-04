@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,7 +24,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import android.graphics.BitmapFactory
@@ -42,7 +40,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -89,6 +86,7 @@ import java.util.Date
     val snackbar = remember { SnackbarHostState() }
     fun notice(text: String) { scope.launch { snackbar.showSnackbar(text) } }
     fun navigate(target: ShellDestination?) { contextSheet = false; destination = target; focus.clearFocus() }
+    fun automate(request: String) { automationRequest = request; navigate(ShellDestination.Automations) }
     fun closeDrawer() { scope.launch { drawerState.close() } }
     // An overlay handler comes before NavDisplay and the entry handlers, so the drawer takes Back while it targets Open.
     val handler = remember { object : NavigationEventHandler<NavigationEventInfo.None>(NavigationEventInfo.None, false) { override fun onBackCompleted() = closeDrawer() } }
@@ -137,8 +135,8 @@ import java.util.Date
                     // A session continues while the shell shows a composer or VoiceControls.
                     val voiceShown = backStack.last() !is ShellDestination || split || backStack.last() == ShellDestination.Settings
                     LaunchedEffect(voiceShown) { if (!voiceShown) model.voice.stop() }
-                    @Composable fun ChatEntry(conversation: Conversation?) = ChatPane(model, conversation, { navigate(ShellDestination.MiniApps) }, { contextSheet = true },
-                        automation = { request -> automationRequest=request; navigate(ShellDestination.Automations) }, settings = { navigate(ShellDestination.Settings) })
+                    @Composable fun ChatEntry(conversation: Conversation?, modifier: Modifier = Modifier) = ChatPane(model, conversation, { navigate(ShellDestination.MiniApps) },
+                        automation = ::automate, settings = { navigate(ShellDestination.Settings) }, modifier = modifier)
                     @Composable fun ToolsEntry() = com.alpha.assistant.tools.ToolsPane(model.tools, snapshot.selectedId, snapshot.draft.text, snapshot.draft.attachments.filter { it.contextText == null },immersive=immersive,exitImmersive={immersiveExited=true},
                         settings = { navigate(ShellDestination.Settings) }) { navigate(null) }
                     // The tool and capability gates read RESUMED as "Alphy is in the foreground". NavDisplay holds a scene at STARTED
@@ -152,7 +150,7 @@ import java.util.Date
                     // NavDisplay gives each entry fixed constraints. The Box loosens them, so a pane keeps its maximum width and stays centered.
                     val centerEntry = remember { NavEntryDecorator<ShellRoute> { entry -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) { entry.Content() } } }
                     NavDisplay(backStack, Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter, onBack = ::back, entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), keepShellLifecycle, centerEntry), entryProvider = entryProvider {
-                        entry<ShellRoute.Desktop>(clazzContentKey = { it.toString() }) { Box(Modifier.testTag("desktop")) { ChatEntry(null) } }
+                        entry<ShellRoute.Desktop>(clazzContentKey = { it.toString() }) { Box(Modifier.testTag("desktop")) { DesktopPane(model, ::navigate, ::automate) } }
                         // The route gives the conversation, so a chat keeps its messages during its exit animation.
                         entry<ShellRoute.Chat>(clazzContentKey = { it.toString() }) { route -> Box(Modifier.testTag("chat")) { ChatEntry(snapshot.conversations.find { it.id == route.id }) } }
                         entry<ShellDestination>(clazzContentKey = { it.toString() }) { route ->
@@ -160,7 +158,10 @@ import java.util.Date
                                 ShellDestination.Search -> HistoryPane(snapshot.conversations, search, { search = it }, { model.select(it); navigate(null) }, { model.select(null); navigate(null) }, model::renameConversation, model::deleteConversation, model::clearHistory)
                                 ShellDestination.MiniApps -> if (split) {
                                     Row(Modifier.fillMaxSize()) {
-                                        Column(Modifier.weight(1f).fillMaxHeight()) { ChatEntry(snapshot.selected) }
+                                        Column(Modifier.weight(1f).fillMaxHeight()) {
+                                            ChatEntry(snapshot.selected, Modifier.weight(1f))
+                                            Composer(model, { contextSheet = true }, ::automate)
+                                        }
                                         VerticalDivider()
                                         Column(Modifier.weight(1f)) { ToolsEntry() }
                                     }
@@ -172,7 +173,9 @@ import java.util.Date
                         }
                     })
                 }
-
+                // One call place keeps the voice start state when the Chat route replaces the Desktop route.
+                if (backStack.last() !is ShellDestination) Composer(model, { contextSheet = true }, ::automate,
+                    Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp).fillMaxWidth().testTag("composer"))
             }
         }
         Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.BottomCenter) { SnackbarHost(snackbar, Modifier.padding(16.dp)) }
@@ -183,27 +186,15 @@ import java.util.Date
     if (contextSheet && !model.loadFailed && !model.loading) ReviewedContextDialog(model) { contextSheet = false }
 }
 
-@Composable internal fun ChatPane(model: ShellViewModel, conversation: Conversation?, tools: () -> Unit, context: () -> Unit, automation: (String) -> Unit, settings: () -> Unit) {
-    val snapshot = model.snapshot
+@Composable internal fun ChatPane(model: ShellViewModel, conversation: Conversation?, tools: () -> Unit, automation: (String) -> Unit,
+    settings: () -> Unit, modifier: Modifier = Modifier) {
     val uriHandler = LocalUriHandler.current
     var shareText by rememberSaveable { mutableStateOf<String?>(null) }
     var linkError by remember { mutableStateOf(false) }
     val busy = model.activeConversationId != null
-    val startVoice = rememberVoiceStart(model, oneShot = true)
     if (linkError) AlertDialog(onDismissRequest = { linkError = false }, title = { Text("Не удалось открыть ссылку") }, text = { Text("Проверьте наличие браузера на устройстве.") }, confirmButton = { TextButton(onClick = { linkError = false }) { Text("Понятно") } })
-    Column(Modifier.fillMaxHeight().widthIn(max = 620.dp).fillMaxWidth()) {
-        if (conversation == null) {
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 27.dp)) {
-                Spacer(Modifier.height(65.dp))
-                Text("Привет.", fontSize = 34.sp, lineHeight = 43.sp, letterSpacing = (-1).sp)
-                Text("Чем займёмся?", fontSize = 34.sp, lineHeight = 43.sp, letterSpacing = (-1).sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.weight(1f))
-                Row(Modifier.padding(top = 42.dp, bottom = 22.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StartCard("Создать", "Свой инструмент\nили виджет", Glyph.Spark, Modifier.weight(1f), tools)
-                    StartCard("Мой день", "Подключить календарь\nи составить план", Glyph.Calendar, Modifier.weight(1f)) {automation("Обновляй Мой день из календаря каждый день в 08:00")}
-                }
-            }
-        } else {
+    Column(modifier.fillMaxHeight().widthIn(max = 620.dp).fillMaxWidth()) {
+        if (conversation != null) {
             val chat = conversation
             val listState = rememberLazyListState()
             LaunchedEffect(chat.id, chat.messages.size, chat.messages.lastOrNull()?.text?.length) {
@@ -257,61 +248,8 @@ import java.util.Date
                 }
             }
         }
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp)) {
-            if (model.voice.active && !model.voice.oneShot) {
-                Text(model.voice.status, style = MaterialTheme.typography.bodySmall)
-                if (model.voice.partial.isNotBlank()) Text(model.voice.partial, style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { model.voice.stop() }) { Text("Остановить сеанс") }
-            }
-            Column(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
-                snapshot.draft.attachments.forEach { attachment ->
-                    ImagePreview(attachment)
-                    InputChip(selected = true, onClick = { model.editDraft(snapshot.draft.copy(attachments = snapshot.draft.attachments - attachment)) }, label = { Text(attachment.name, maxLines = 1) }, leadingIcon = { AlphaIcon(Glyph.File) }, trailingIcon = { AlphaIcon(Glyph.Close) }, modifier = Modifier.semantics { contentDescription = "Убрать файл ${attachment.name}" })
-                }
-            }
-            if (model.voice.permissionRequired) MicrophonePermissionGuidance(model.voice, startVoice)
-            else if (!model.voice.active && model.voice.hasAttempted) Text(model.voice.status, style = MaterialTheme.typography.bodySmall)
-            if(snapshot.draft.text.isNotBlank()) TextButton(onClick={automation(snapshot.draft.text)}) {Text("Сценарий из запроса · локальная проверка")}
-            if (model.attachmentBusy) Text("Проверка изображения…", style = MaterialTheme.typography.labelSmall)
-            Surface(shape = RoundedCornerShape(27.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                Column(Modifier.padding(12.dp)) {
-                    if (model.voice.active && model.voice.oneShot) InlineVoiceRecorder(model)
-                    else {
-                        val composerLabel = stringResource(R.string.composer_label)
-                        BasicTextField(value = snapshot.draft.text, onValueChange = { model.editDraft(snapshot.draft.copy(text = it)) }, modifier = Modifier.fillMaxWidth().heightIn(min = 43.dp, max = 150.dp).padding(horizontal = 7.dp, vertical = 5.dp).semantics { contentDescription = composerLabel }, textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface), cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), decorationBox = { inner ->
-                            if (snapshot.draft.text.isEmpty()) Text("Спроси о чём угодно", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 16.sp)
-                            inner()
-                        })
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            RoundAction(Glyph.Plus, "Добавить контекст", context)
-                            Spacer(Modifier.weight(1f))
-                            RoundAction(Glyph.Mic, "Голосовой запрос", startVoice, enabled = !busy && !model.attachmentBusy && !model.voice.active)
-                            Spacer(Modifier.width(5.dp))
-                            if (busy) RoundAction(Glyph.Close, "Остановить ответ", model::cancelRequest)
-                            else RoundAction(Glyph.Arrow, stringResource(R.string.composer_send), { model.send() }, primary = true, enabled = !model.attachmentBusy && (snapshot.draft.text.isNotBlank() || snapshot.draft.attachments.isNotEmpty()))
-                        }
-                    }
-                }
-            }
-        }
     }
     shareText?.let { ShareTextToNotes(it) { shareText = null } }
-}
-
-@Composable private fun StartCard(title: String, subtitle: String, glyph: Glyph, modifier: Modifier, action: () -> Unit) {
-    Surface(onClick = action, modifier = modifier, shape = RoundedCornerShape(23.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-        Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            AlphaIcon(glyph, accent = true)
-            Text(title, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable private fun RoundAction(glyph: Glyph, label: String, action: () -> Unit, primary: Boolean = false, enabled: Boolean = true) {
-    FilledIconButton(onClick = action, enabled = enabled, modifier = Modifier.size(46.dp).semantics { contentDescription = label }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = if (primary) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)) {
-        if (primary) Text("↑", color = MaterialTheme.colorScheme.onPrimary, fontSize = 26.sp) else AlphaIcon(glyph)
-    }
 }
 
 @Composable private fun EmptyPane(kicker: String, title: String, glyph: Glyph, heading: String, text: String) {
@@ -408,6 +346,6 @@ import java.util.Date
             })?.asImageBitmap()
         }.getOrNull() }
     }
-    if (preview != null) Image(preview!!, contentDescription = "Предпросмотр ${attachment.name}", modifier = modifier.clip(RoundedCornerShape(12.dp)))
-    else Text("Предпросмотр недоступен: ${attachment.name}. При отправке доступ будет проверен снова.", style = MaterialTheme.typography.bodySmall)
+    if (preview != null) Image(preview!!, contentDescription = stringResource(R.string.image_preview, attachment.name), modifier = modifier.clip(RoundedCornerShape(12.dp)))
+    else Text(stringResource(R.string.image_preview_unavailable, attachment.name), style = MaterialTheme.typography.bodySmall)
 }

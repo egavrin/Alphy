@@ -120,7 +120,10 @@ class AssistantActivity : AlphyActivity() {
         }
         if(model.loading) Box(Modifier.weight(1f).fillMaxWidth(),contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         else if(model.loadFailed) Column(Modifier.padding(24.dp)) { Text("Не удалось открыть чат. Сохранённые данные не удалены."); Button(onClick = model::load) { Text("Повторить") } }
-        else Box(Modifier.weight(1f)) { ChatPane(model,model.snapshot.selected,tools = full,context = { sheet = "context" },automation = { full() },settings = settings) }
+        else {
+            ChatPane(model, model.snapshot.selected, tools = full, automation = { full() }, settings = settings, modifier = Modifier.weight(1f))
+            Composer(model, context = { sheet = "context" }, automation = { full() })
+        }
     }
     model.requestError?.let { error ->
         AlertDialog(onDismissRequest = model::clearRequestError,title = { Text("Вложение или запрос недоступны") },text = { Text(error) },

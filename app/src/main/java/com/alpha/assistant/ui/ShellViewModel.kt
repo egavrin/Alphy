@@ -40,7 +40,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         } else if (snapshot.draft.text.isBlank() && snapshot.draft.attachments.isEmpty()) editDraft(snapshot.draft.copy(text = text))
         else voiceDraftConflict()
     }
-    private fun voiceDraftConflict() { voice.stop("Черновик изменился. Голосовой ввод остановлен, ваш текст сохранён.") }
+    private fun voiceDraftConflict() { voice.stop(getApplication<Application>().getString(R.string.voice_draft_changed)) }
     fun startVoice(oneShot: Boolean = true) {
         if (loading || loadFailed || attachmentBusy) return
         voiceOrigin = snapshot.selectedId to snapshot.draft

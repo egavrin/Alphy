@@ -7,12 +7,14 @@ import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
+import com.alpha.assistant.R
 import com.alpha.assistant.automations.*
 import com.alpha.assistant.capabilities.*
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.data.*
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.surfaces.*
+import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -23,6 +25,7 @@ import java.util.UUID
 /** Failure cases: wrong search, stale accessibility trees, lost state/history, stale writes, pending effects, active rules, stale widget actions, recovery auto-enables rules. */
 class LibraryManagementWorkflowTest {
     private val diagnostics = UiFailureDiagnostics("library")
+    private val robot = ShellRobot("library")
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val app = instrumentation.targetContext.applicationContext as android.app.Application
     private val offline = object : ChatProvider {
@@ -143,7 +146,7 @@ class LibraryManagementWorkflowTest {
             } }
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitUntil {!model.loading && !model.tools.busy}
-                click("Создать")
+                robot.openDrawer(scenario);click(app.getString(R.string.mini_apps));robot.awaitDrawerClosed(scenario)
                 edit("Search mini-apps","  СЧЁТ  ")
                 waitFor("Мой счётчик"); waitUntil { find(diagnostics.freshRoot(),"Покупки") == null }
                 click("Мой счётчик"); waitFor("Счёт: 7")
@@ -153,9 +156,9 @@ class LibraryManagementWorkflowTest {
                 waitFor("Archived · data and versions are preserved. Restore this mini-app to use its controls.")
                 scenario.recreate(); waitFor("Archived · data and versions are preserved. Restore this mini-app to use its controls.")
             }
-            ActivityScenario.launch(CloudTestActivity::class.java).use {
+            ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitUntil {!model.loading && !model.tools.busy}
-                click("Создать");click("Archive")
+                robot.openDrawer(scenario);click(app.getString(R.string.mini_apps));robot.awaitDrawerClosed(scenario);click("Archive")
                 waitFor("Мой счётчик");click("Мой счётчик")
                 click("Restore from archive");waitFor("Счёт: 7")
                 waitUntil {!model.tools.busy}

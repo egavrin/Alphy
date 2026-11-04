@@ -20,6 +20,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.annotation.StringRes
+import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsConfiguration
@@ -57,6 +58,7 @@ import org.junit.Assert.fail
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
 
 internal typealias VoiceFactory = (Application, CoroutineScope, (String) -> Unit) -> VoiceSession
 
@@ -245,6 +247,17 @@ internal class ShellRobot(fixture: String) {
     fun composed(scenario: ActivityScenario<*>, tag: String): Boolean = composedNode(scenario) { it.getOrNull(SemanticsProperties.TestTag) == tag }
     fun composedText(scenario: ActivityScenario<*>, text: String): Boolean =
         composedNode(scenario) { config -> config.getOrNull(SemanticsProperties.Text)?.any { it.text.trimEnd() == text } == true }
+    /** The window bounds of the composed node with [tag] and the width of its Compose root, in pixels. */
+    fun composedBounds(scenario: ActivityScenario<*>, tag: String): Pair<Rect, Int> {
+        var result: Pair<Rect, Int>? = null
+        scenario.onActivity { activity ->
+            val node = nodes(activity).single { it.config.getOrNull(SemanticsProperties.TestTag) == tag }
+            val bounds = node.boundsInWindow
+            result = Rect(bounds.left.roundToInt(), bounds.top.roundToInt(), bounds.right.roundToInt(), bounds.bottom.roundToInt()) to
+                node.layoutInfo.coordinates.findRootCoordinates().size.width
+        }
+        return checkNotNull(result)
+    }
     // The OPPO device blocks shell grants, so the helper answers the permission dialog.
     fun allowMicrophone(scenario: ActivityScenario<*>) {
         fun granted() = instrumentation.targetContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED

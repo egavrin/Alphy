@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.media.*
 import androidx.compose.runtime.*
+import com.alpha.assistant.R
 import com.offlineassistant.app.voice.AudioTranscriber
 import com.offlineassistant.app.speech.SileroSpeechSynthesizer
 import kotlinx.coroutines.*
@@ -25,7 +26,7 @@ class VoiceSession internal constructor(
     var permissionRequired by mutableStateOf(false); private set
     var active by mutableStateOf(false); private set
     var phase by mutableStateOf("idle"); private set
-    var status by mutableStateOf("Звук остаётся на устройстве · проверяйте текст перед отправкой"); private set
+    var status by mutableStateOf(context.getString(R.string.voice_local_note)); private set
     var partial by mutableStateOf(""); private set
     private val worker = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val releaseScope = CoroutineScope(SupervisorJob() + worker)
@@ -40,16 +41,16 @@ class VoiceSession internal constructor(
     private val captureLock = Any()
     private val audioManager = context.getSystemService(AudioManager::class.java)
     private var focus: AudioFocusRequest? = null
-    fun permissionDenied() { hasAttempted = true; stop("Разрешите микрофон в настройках Android и повторите запись."); permissionRequired = true }
+    fun permissionDenied() { hasAttempted = true; stop(context.getString(R.string.voice_mic_permission)); permissionRequired = true }
     fun start(draftEmpty: Boolean, busy: Boolean, oneShot: Boolean = false) {
         if (active) return
         hasAttempted = true
-        if ((!oneShot && !draftEmpty) || busy) { status = "Отправьте или очистите черновик и дождитесь ответа."; return }
+        if ((!oneShot && !draftEmpty) || busy) { status = context.getString(R.string.voice_draft_busy); return }
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { permissionDenied(); return }
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-            .setOnAudioFocusChangeListener { if (it != AudioManager.AUDIOFOCUS_GAIN) scope.launch { stop("Голосовой ввод прерван другим приложением. Повторите запись.") } }.build()
-        if (audioManager.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) { status = "Микрофон занят другим приложением. Повторите попытку."; return }
+            .setOnAudioFocusChangeListener { if (it != AudioManager.AUDIOFOCUS_GAIN) scope.launch { stop(context.getString(R.string.voice_interrupted)) } }.build()
+        if (audioManager.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) { status = context.getString(R.string.voice_mic_busy); return }
         focus = request
         this.oneShot = oneShot
         permissionRequired = false
@@ -58,7 +59,7 @@ class VoiceSession internal constructor(
         partial = ""
         active = true
         phase = "preparing"
-        status = if (oneShot) "Подготовка T-one · распознавание на устройстве" else "Подготовка T-one и Silero · распознавание и ответы на устройстве"
+        status = context.getString(if (oneShot) R.string.voice_preparing else R.string.voice_preparing_session)
         val token = ++generation
         job = scope.launch {
             try {
@@ -73,20 +74,20 @@ class VoiceSession internal constructor(
                 }
                 if (active && token == generation) listen(token)
             } catch (error: CancellationException) { throw error }
-            catch (error: Throwable) { if (token == generation) stop("Не удалось включить голосовой ввод. Повторите попытку.") }
+            catch (error: Throwable) { if (token == generation) stop(context.getString(R.string.voice_start_failed)) }
         }
     }
     private suspend fun listen(token: Int) {
         if (!active || token != generation) return
         finishRequested = false
-        phase = "listening"; status = if (oneShot) "Микрофон включён · завершите запись для проверки текста" else "Микрофон включён · говорите, затем сделайте паузу"; partial = ""
+        phase = "listening"; status = context.getString(if (oneShot) R.string.voice_listening else R.string.voice_listening_session); partial = ""
         val result = if (captureAudio != null) captureAudio.invoke() else withContext(worker) { record(token) }
         if (!active || token != generation) return
         val text = result.text
-        if (text.isNullOrBlank()) { stop("Не удалось распознать речь. Повторите запись."); return }
+        if (text.isNullOrBlank()) { stop(context.getString(R.string.voice_not_recognized)); return }
         partial = text
         if (oneShot) releaseFocus()
-        phase = "review"; status = "Микрофон выключен · проверьте текст перед отправкой"
+        phase = "review"; status = context.getString(R.string.voice_review)
         transcript(text)
     }
     fun editTranscript(text: String) { if (active && oneShot && phase == "review") partial = text }
@@ -94,14 +95,14 @@ class VoiceSession internal constructor(
         if (!active || !oneShot || phase != "listening") return
         finishRequested = true
         phase = "recognizing"
-        status = "Микрофон выключен · распознавание на устройстве"
+        status = context.getString(R.string.voice_recognizing)
         synchronized(captureLock) { runCatching { recorder?.stop() } }
     }
-    fun submitted() { if (oneShot && active) stop() else if (active && phase == "review") { phase = "waiting"; status = "Микрофон выключен · дождитесь ответа DeepSeek" } else if (active) stop() }
+    fun submitted() { if (oneShot && active) stop() else if (active && phase == "review") { phase = "waiting"; status = context.getString(R.string.voice_waiting) } else if (active) stop() }
     fun reply(text: String) {
         if (!active || oneShot || phase != "waiting") return
         val token = generation
-        phase = "speaking"; status = "Микрофон выключен · ответ звучит на устройстве"
+        phase = "speaking"; status = context.getString(R.string.voice_speaking)
         job = scope.launch {
             try {
                 // Bound each synthesis chunk so long replies do not allocate one large alignment matrix.
@@ -114,10 +115,10 @@ class VoiceSession internal constructor(
                 delay(350)
                 listen(token)
             } catch (error: CancellationException) { throw error }
-            catch (error: Throwable) { if (token == generation) stop("Не удалось озвучить ответ. Текст ответа сохранён в чате.") }
+            catch (error: Throwable) { if (token == generation) stop(context.getString(R.string.voice_speech_failed)) }
         }
     }
-    fun requestFailed() { if (active) stop("Голосовой сеанс остановлен: ответ не получен. Ваш текст сохранён в истории.") }
+    fun requestFailed() { if (active) stop(context.getString(R.string.voice_request_failed)) }
     fun stop(message: String = "") {
         generation++; active = false; phase = "idle"; status = message; hasAttempted = message.isNotBlank(); partial = ""; levels = emptyList()
         job?.cancel(); job = null
@@ -165,7 +166,7 @@ class VoiceSession internal constructor(
             }
             runCatching { input.stop() }; recorder = null
             check(active && token == generation) { "Voice stopped" }
-            scope.launch { if (active && token == generation) { phase = "recognizing"; status = "Микрофон выключен · распознавание на устройстве" } }
+            scope.launch { if (active && token == generation) { phase = "recognizing"; status = context.getString(R.string.voice_recognizing) } }
             if (!speech) return com.offlineassistant.app.voice.AudioTranscription(null, "No speech detected", 0)
             val result = streaming.finish()
             completed = true
