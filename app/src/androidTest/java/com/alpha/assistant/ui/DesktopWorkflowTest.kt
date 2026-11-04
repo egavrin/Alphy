@@ -31,7 +31,7 @@ class DesktopWorkflowTest {
             robot.back()
             robot.click(robot.text(R.string.now_day_title))
             robot.waitFor(robot.text(R.string.automations))
-            assertEquals(0, fixture.provider.calls)
+            robot.waitFor("Предложение из запроса: $MY_DAY_REQUEST")
         }
     }
 
@@ -86,6 +86,7 @@ class DesktopWorkflowTest {
         } finally {
             // "settings get" prints "null" when the value is unset, and "settings put … null" does not restore that state.
             robot.shell(if (scale.toFloatOrNull() == null) "settings delete system font_scale" else "settings put system font_scale $scale")
+            robot.waitUntil { Resources.getSystem().configuration.fontScale == (scale.toFloatOrNull() ?: 1f) }
             assertEquals(scale, robot.shell("settings get system font_scale"))
         }
     }

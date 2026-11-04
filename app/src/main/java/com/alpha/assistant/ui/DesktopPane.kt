@@ -43,8 +43,12 @@ internal const val MY_DAY_REQUEST = "Обновляй Мой день из ка�
         Text(if (name.isEmpty()) greeting else stringResource(R.string.greeting_named, greeting, name), style = MaterialTheme.typography.headlineMedium)
         Text(stringResource(R.string.desktop_prompt), color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(stringResource(R.string.now_title), Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-        if (model.keyStatus == KeyStatus.Ready) NowCard(Glyph.Grid, R.string.now_mini_app_title, R.string.now_mini_app_text) { open(ShellDestination.MiniApps) }
-        else NowCard(Glyph.Cloud, R.string.now_connect_title, R.string.now_connect_text) { open(ShellDestination.Settings) }
+        when (model.keyStatus) {
+            KeyStatus.Ready -> NowCard(Glyph.Grid, R.string.now_mini_app_title, R.string.now_mini_app_text) { open(ShellDestination.MiniApps) }
+            // The model reads a saved key after the start, so the strip offers no first card before the status is known.
+            KeyStatus.Checking -> Unit
+            else -> NowCard(Glyph.Cloud, R.string.now_connect_title, R.string.now_connect_text) { open(ShellDestination.Settings) }
+        }
         NowCard(Glyph.Calendar, R.string.now_day_title, R.string.now_day_text) { automation(MY_DAY_REQUEST) }
     }
 }
@@ -55,7 +59,7 @@ internal const val MY_DAY_REQUEST = "Обновляй Мой день из ка�
             AlphaIcon(glyph, color = LocalContentColor.current)
             Column {
                 Text(stringResource(title), style = MaterialTheme.typography.titleMedium.merge(RussianHyphenation))
-                Text(stringResource(text), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(text), style = MaterialTheme.typography.bodyMedium.merge(RussianHyphenation))
             }
         }
     }

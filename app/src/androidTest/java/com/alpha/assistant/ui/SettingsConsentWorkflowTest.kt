@@ -6,6 +6,10 @@ import android.provider.Settings
 import androidx.test.core.app.ActivityScenario
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.CloudFailure
+import com.alpha.assistant.data.Conversation
+import com.alpha.assistant.data.Message
+import com.alpha.assistant.tools.ToolController
+import com.alpha.assistant.tools.ToolStore
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -38,6 +42,17 @@ class SettingsConsentWorkflowTest {
         robot.waitFor(robot.text(R.string.key_ready))
     }
     private fun dropConsent() = check(preferences.edit().remove("consent").commit())
+    /** Starts a mini-app generation and returns the tool controller. */
+    private fun startGeneration(): ToolController {
+        val tools = fixture.model!!.tools
+        robot.waitUntil {
+            var started = false
+            // run() ignores a call while the controller is busy, so check and start in one main-thread step.
+            robot.instrumentation.runOnMainSync { if (!tools.busy) { tools.generate("Счётчик", null, null, emptyList()); started = true } }
+            started
+        }
+        return tools
+    }
 
     @Test fun keyEntryRecordsConsentAndEnablesCloud() {
         fixture.install(saveKey = false)
@@ -68,13 +83,7 @@ class SettingsConsentWorkflowTest {
             robot.openDrawer(scenario)
             robot.click(robot.text(R.string.mini_apps))
             robot.awaitDrawerClosed(scenario)
-            val tools = fixture.model!!.tools
-            robot.waitUntil {
-                var started = false
-                // run() ignores a call while the controller is busy, so check and start in one main-thread step.
-                robot.instrumentation.runOnMainSync { if (!tools.busy) { tools.generate("Счётчик", null, null, emptyList()); started = true } }
-                started
-            }
+            val tools = startGeneration()
             robot.waitUntil { tools.errorCode == "consent" }
             assertEquals(0, fixture.provider.calls)
             robot.click(robot.text(R.string.open_settings))
@@ -160,6 +169,74 @@ class SettingsConsentWorkflowTest {
             robot.instrumentation.waitForIdleSync()
             assertNull(fixture.model!!.snapshot.selected?.messages?.find { it.text == "Fixture response" })
             assertEquals(1, fixture.provider.calls)
+        }
+    }
+
+    // Failure case: a mini-app generation keeps the key in memory, so it runs to its end after «Удалить ключ».
+    @Test fun deleteKeyStopsRunningGeneration() {
+        fixture.provider.gate = CompletableDeferred()
+        fixture.install()
+        fixture.launch().use { scenario ->
+            robot.waitFor(robot.text(R.string.desktop_prompt))
+            val tools = startGeneration()
+            robot.waitUntil { fixture.provider.calls == 1 }
+            openSettings(scenario)
+            robot.reveal(robot.text(R.string.key_delete))
+            robot.click(robot.text(R.string.key_delete))
+            robot.click(robot.text(R.string.delete))
+            robot.waitFor(robot.text(R.string.key_missing))
+            fixture.provider.gate!!.complete(Unit)
+            robot.waitUntil { !tools.busy }
+            robot.instrumentation.waitForIdleSync()
+            assertEquals(1, fixture.provider.calls)
+            // The draft row exists before the provider call, so the check is that no generated candidate reached the store.
+            ToolStore(fixture.context, "${fixture.name}.db-tools.db").use { store ->
+                assertTrue(store.tools().isEmpty())
+                assertTrue(store.drafts().none { it.candidate != null })
+            }
+        }
+    }
+
+    // Failure case: the chat card offers «Открыть настройки» for an error that the key cannot fix.
+    @Test fun networkErrorOffersNoSettings() {
+        fixture.install()
+        fixture.store.saveConversation(Conversation("network", "Network chat", 1L, 2L, messages = listOf(
+            Message("network-u", "user", "Network question", 1L, "sent"),
+            Message("network-a", "assistant", "", 2L, "error", error = "Fixture network failure", errorCode = "network"))))
+        fixture.store.saveSetting("selected", "network")
+        fixture.launch().use { scenario ->
+            robot.waitFor("Fixture network failure")
+            assertFalse(robot.composedText(scenario, robot.text(R.string.open_settings)))
+        }
+    }
+
+    // Failure case: a recreation keeps a typed key that the user did not save.
+    @Test fun typedKeyDoesNotSurviveRecreation() {
+        fixture.install(saveKey = false)
+        fixture.launch().use { scenario ->
+            openSettings(scenario)
+            robot.reveal(robot.text(R.string.key_label))
+            // A password field shows dots, so the check compares the field text with its text before the entry.
+            fun keyText() = robot.field(robot.text(R.string.key_label)).text?.toString()
+            val empty = keyText()
+            robot.enter(robot.text(R.string.key_label), "alpha-test-only")
+            robot.waitUntil { keyText() != empty }
+            scenario.recreate()
+            robot.waitUntil { robot.secure(scenario) }
+            robot.reveal(robot.text(R.string.key_label))
+            robot.waitUntil { keyText() == empty }
+        }
+    }
+
+    // Failure case: the 40-character cut of the name keeps half of an emoji.
+    @Test fun longNameKeepsWholeCharacters() {
+        fixture.install()
+        fixture.launch().use { scenario ->
+            openSettings(scenario)
+            robot.reveal(robot.text(R.string.settings_name_label))
+            val letters = "а".repeat(39)
+            robot.enter(robot.text(R.string.settings_name_label), letters + "\uD83D\uDE00")
+            robot.waitUntil { fixture.store.load().userName == letters }
         }
     }
 
