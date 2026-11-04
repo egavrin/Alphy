@@ -16,7 +16,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.NavigationDrawerItem
@@ -49,7 +48,7 @@ import com.alpha.assistant.data.Conversation
     destination: ShellDestination?, profileName: String, open: (ShellDestination) -> Unit, openChat: (String) -> Unit, newChat: () -> Unit) {
     // A full-width sheet would cover the scrim, and Compose then gives the scrim no accessibility node.
     ModalDrawerSheet(drawerState, Modifier.widthIn(max = LocalConfiguration.current.screenWidthDp.dp - 56.dp)) {
-        @Composable fun Item(label: String, glyph: Glyph, selected: Boolean, onClick: () -> Unit) = NavigationDrawerItem({ Text(label, style = LocalTextStyle.current.merge(RussianHyphenation)) }, selected, onClick,
+        @Composable fun Item(label: String, glyph: Glyph, selected: Boolean, onClick: () -> Unit) = NavigationDrawerItem({ Text(label, style = MaterialTheme.typography.labelLarge.merge(RussianHyphenation)) }, selected, onClick,
             Modifier.padding(NavigationDrawerItemDefaults.ItemPadding), icon = { AlphaIcon(glyph) })
         @Composable fun Destination(target: ShellDestination, glyph: Glyph) = Item(stringResource(target.title), glyph, target == destination) { open(target) }
         // The parts below the list have no weight, so the column measures them first and a short window clips only the list.
@@ -63,7 +62,7 @@ import com.alpha.assistant.data.Conversation
                     style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             items(conversations, key = { it.id }) { chat ->
-                NavigationDrawerItem({ Text(chat.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, destination == null && chat.id == selectedId,
+                NavigationDrawerItem({ Text(chat.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge) }, destination == null && chat.id == selectedId,
                     { openChat(chat.id) }, Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
             }
         }
