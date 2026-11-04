@@ -73,6 +73,15 @@ class MiniAppPresentationWorkflowTest {
         repeat(node.childCount) {if(offersExpand(node.getChild(it))) return true}
         return false
     }
+    // A modal sheet ignores Back until it passes half of its enter animation, so wait until it rests.
+    private fun settled(label: String) {
+        fun bounds()=find(label,diagnostics.freshRoot())?.let {node -> Rect().also {node.getBoundsInScreen(it)}}
+        waitUntil("Sheet did not settle: $label") {
+            val before=bounds()
+            SystemClock.sleep(100)
+            before != null && before == bounds()
+        }
+    }
     private fun shown(label: String): AccessibilityNodeInfo {
         diagnostics.target(label)
         var node: AccessibilityNodeInfo?=null
@@ -240,6 +249,7 @@ class MiniAppPresentationWorkflowTest {
             fullWindow()
             assertNull("Wide view must suppress shell split",find("Mini-app refinement"))
             click("App controls");shown("Probe state")
+            settled("Probe state")
             automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
             shown("Exit full screen")
             scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
@@ -279,7 +289,7 @@ class MiniAppPresentationWorkflowTest {
             fun mode(value: String)=waitUntil {state().getString("mode")==value}
             fun still() {val ticks=state().getInt("ticks");SystemClock.sleep(350);assertEquals(ticks,state().getInt("ticks"))}
             fun advances() {val ticks=state().getInt("ticks");waitUntil {state().getInt("ticks")>ticks}}
-            fun dismiss() {automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK);shown("Exit full screen")}
+            fun dismiss() {settled("Playback controls");automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK);shown("Exit full screen")}
             fun controls() {
                 click("App controls");shown("Playback controls")
                 waitUntil {
@@ -492,6 +502,7 @@ class MiniAppPresentationWorkflowTest {
         screenshot("graphics-resumed")
         automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
         waitUntil {surface()==null}
+        shown("Mini-app library content")
         assertTrue(store.effects("lake").isEmpty())
         println("GRAPHICS_NATIVE touch=PASS durableState=PASS backgroundRelease=PASS back=PASS stateVersion=${saved.stateVersion}")
     }

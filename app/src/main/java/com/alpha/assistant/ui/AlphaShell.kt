@@ -5,7 +5,6 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.view.WindowManager
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -39,6 +38,7 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +46,12 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.navigation3.runtime.NavEntryDecorator
+import androidx.navigation3.runtime.entryProvider
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
+import androidx.navigation3.ui.NavDisplay
+import com.alpha.assistant.R
 import com.alpha.assistant.data.Attachment
 import com.alpha.assistant.data.Conversation
 import kotlinx.coroutines.launch
@@ -54,33 +60,28 @@ import java.util.Date
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable fun AlphaShell(model: ShellViewModel) {
-    var page by rememberSaveable { mutableStateOf("chat") }
+    var destination by rememberSaveable { mutableStateOf<ShellDestination?>(null) }
     var sheet by rememberSaveable { mutableStateOf<String?>(null) }
     var automationRequest by rememberSaveable { mutableStateOf<String?>(null) }
     var search by rememberSaveable { mutableStateOf("") }
     var consumedSurface by rememberSaveable { mutableStateOf(0) }
     LaunchedEffect(model.surfaceSequence) {
         if (model.surfaceSequence > 0 && model.surfaceSequence != consumedSurface) {
-            page = if (model.surfaceToolId != null) "tools" else "chat"
+            destination = if (model.surfaceToolId != null) ShellDestination.MiniApps else null
             sheet = null
             consumedSurface = model.surfaceSequence
         }
     }
     val snapshot = model.snapshot
-    val context = LocalContext.current
     val focus = LocalFocusManager.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     fun notice(text: String) { scope.launch { snackbar.showSnackbar(text) } }
-    fun navigate(destination: String) { sheet = null; page = destination; focus.clearFocus() }
-    BackHandler(sheet != null || page != "chat") { if (sheet != null) sheet = null else page = "chat" }
-    val activity = context as? Activity
+    fun navigate(target: ShellDestination?) { sheet = null; destination = target; focus.clearFocus() }
+    fun back() { if (destination != null) navigate(null) else model.select(null) }
+    val backStack = listOfNotNull(ShellRoute.Desktop, snapshot.selected?.let { ShellRoute.Chat(it.id) }, destination)
     VoiceVisibility(model.voice)
     WeatherLocationAccess(model)
-    DisposableEffect(page) {
-        if (page == "settings") activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        onDispose { activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
-    }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         if (model.loading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -91,14 +92,14 @@ import java.util.Date
                 Button(onClick = model::load) { Text("Повторить") }
             }
         } else {
-            val focusedMiniApp=page == "tools" && (model.tools.selectedId != null || model.tools.selectedDraftId != null)
+            val focusedMiniApp=destination == ShellDestination.MiniApps && (model.tools.selectedId != null || model.tools.selectedDraftId != null)
             val selectedTool=model.tools.tools.find {it.id==model.tools.selectedId}
             val selectedSpec=remember(selectedTool?.spec) {selectedTool?.let {com.alpha.assistant.tools.ToolSpec.available(it.spec)}}
-            var immersiveExited by rememberSaveable(selectedTool?.id,selectedTool?.revision,page) {mutableStateOf(false)}
+            var immersiveExited by rememberSaveable(selectedTool?.id,selectedTool?.revision,destination == ShellDestination.MiniApps) {mutableStateOf(false)}
             val immersive=focusedMiniApp && model.tools.selectedDraftId==null && selectedTool?.archived==false && selectedSpec?.presentation=="immersive" && !immersiveExited
             Column(Modifier.fillMaxSize().then(if(immersive)Modifier else Modifier.safeDrawingPadding())) {
-                if (!focusedMiniApp) ShellHeader(page != "chat", { navigate("chat") },
-                    { sheet = "menu"; focus.clearFocus() }, { navigate("history") })
+                if (!focusedMiniApp) ShellHeader(destination != null, { navigate(null) },
+                    { sheet = "menu"; focus.clearFocus() }, { navigate(ShellDestination.Search) })
                 if (model.saveFailed && !immersive) {
                     Surface(color = MaterialTheme.colorScheme.errorContainer) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -108,21 +109,36 @@ import java.util.Date
                     }
                 }
                 BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.TopCenter) {
-                    val split = maxWidth >= 640.dp && page == "tools" && !immersive
-                    if (split) {
-                        Row(Modifier.fillMaxSize()) {
-                            Column(Modifier.weight(1f).fillMaxHeight()) { ChatPane(model, { navigate("tools") }, { sheet = "context" }) { request -> automationRequest=request; navigate("automation") } }
-                            VerticalDivider()
-                            Column(Modifier.weight(1f)) { com.alpha.assistant.tools.ToolsPane(model.tools, snapshot.selectedId, snapshot.draft.text, snapshot.draft.attachments.filter { it.contextText == null },immersive=immersive,exitImmersive={immersiveExited=true}) { navigate("chat") } }
+                    val split = maxWidth >= 640.dp && destination == ShellDestination.MiniApps && !immersive
+                    // A session continues while the shell shows a composer or VoiceControls.
+                    val voiceShown = backStack.last() !is ShellDestination || split || sheet == "voice"
+                    LaunchedEffect(voiceShown) { if (!voiceShown) model.voice.stop() }
+                    @Composable fun ChatEntry(conversation: Conversation?) = ChatPane(model, conversation, { navigate(ShellDestination.MiniApps) }, { sheet = "context" }) { request -> automationRequest=request; navigate(ShellDestination.Automations) }
+                    @Composable fun ToolsEntry() = com.alpha.assistant.tools.ToolsPane(model.tools, snapshot.selectedId, snapshot.draft.text, snapshot.draft.attachments.filter { it.contextText == null },immersive=immersive,exitImmersive={immersiveExited=true}) { navigate(null) }
+                    // The tool and capability gates read RESUMED as "Alphy is in the foreground".
+                    // NavDisplay holds a scene at STARTED during its transition, so each entry keeps the shell lifecycle.
+                    val shellLifecycle = LocalLifecycleOwner.current
+                    val keepShellLifecycle = remember(shellLifecycle) { NavEntryDecorator<ShellRoute> { entry -> CompositionLocalProvider(LocalLifecycleOwner provides shellLifecycle) { entry.Content() } } }
+                    NavDisplay(backStack, Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter, onBack = ::back, entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), keepShellLifecycle), entryProvider = entryProvider {
+                        entry<ShellRoute.Desktop> { ChatEntry(null) }
+                        // The route gives the conversation, so a chat keeps its messages during its exit animation.
+                        entry<ShellRoute.Chat> { route -> ChatEntry(snapshot.conversations.find { it.id == route.id }) }
+                        entry<ShellDestination> { route ->
+                            when (route) {
+                                ShellDestination.Search -> HistoryPane(snapshot.conversations, search, { search = it }, { model.select(it); navigate(null) }, { model.select(null); navigate(null) }, model::renameConversation, model::deleteConversation, model::clearHistory)
+                                ShellDestination.MiniApps -> if (split) {
+                                    Row(Modifier.fillMaxSize()) {
+                                        Column(Modifier.weight(1f).fillMaxHeight()) { ChatEntry(snapshot.selected) }
+                                        VerticalDivider()
+                                        Column(Modifier.weight(1f)) { ToolsEntry() }
+                                    }
+                                } else ToolsEntry()
+                                ShellDestination.Automations -> com.alpha.assistant.automations.AutomationsPane(model.tools,automationRequest) {automationRequest=null}
+                                ShellDestination.Access -> CapabilitiesPane(model.tools)
+                                ShellDestination.Settings -> SecureWindow { SettingsPane(model) }
+                            }
                         }
-                    } else when (page) {
-                        "chat" -> ChatPane(model, { navigate("tools") }, { sheet = "context" }) { request -> automationRequest=request; navigate("automation") }
-                        "tools" -> com.alpha.assistant.tools.ToolsPane(model.tools, snapshot.selectedId, snapshot.draft.text, snapshot.draft.attachments.filter { it.contextText == null },immersive=immersive,exitImmersive={immersiveExited=true}) { navigate("chat") }
-                        "automation" -> com.alpha.assistant.automations.AutomationsPane(model.tools,automationRequest) {automationRequest=null}
-                        "capabilities" -> CapabilitiesPane(model.tools)
-                        "history" -> HistoryPane(snapshot.conversations, search, { search = it }, { model.select(it); navigate("chat") }, { model.select(null); navigate("chat") }, model::renameConversation, model::deleteConversation, model::clearHistory)
-                        "settings" -> SettingsPane(model)
-                    }
+                    })
                 }
 
             }
@@ -143,15 +159,15 @@ import java.util.Date
                         "voice" -> VoiceControls(model)
 
                         "menu" -> {
-                            MenuRow("Новый чат", "Отдельный черновик", Glyph.Plus) { model.select(null); navigate("chat") }
-                            MenuRow("Мои инструменты", "Сохранённое из разговоров", Glyph.Grid) { navigate("tools") }
-                            MenuRow("Автоматизации", "Расписания и журнал", Glyph.Repeat) { navigate("automation") }
+                            MenuRow("Новый чат", "Отдельный черновик", Glyph.Plus) { model.select(null); navigate(null) }
+                            MenuRow("Мои инструменты", "Сохранённое из разговоров", Glyph.Grid) { navigate(ShellDestination.MiniApps) }
+                            MenuRow("Автоматизации", "Расписания и журнал", Glyph.Repeat) { navigate(ShellDestination.Automations) }
                             MenuRow("Непрерывный голосовой сеанс", "T-one и локальные ответы Silero", Glyph.Mic) { sheet = "voice" }
-                            MenuRow("Разрешения и функции", "Доступ Android и мини-приложений", Glyph.Settings) { navigate("capabilities") }
+                            MenuRow("Разрешения и функции", "Доступ Android и мини-приложений", Glyph.Settings) { navigate(ShellDestination.Access) }
                             Text("ИСТОРИЯ БЕСЕД", Modifier.padding(top = 28.dp, bottom = 10.dp), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if (snapshot.conversations.isEmpty()) Text("Пока нет разговоров", Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            snapshot.conversations.take(5).forEach { c -> MenuRow(c.title, if (c.draft.text.isNotEmpty() || c.draft.attachments.isNotEmpty()) "Есть черновик" else "Сохранено на устройстве", Glyph.History) { model.select(c.id); navigate("chat") } }
-                            TextButton(onClick = { navigate("history") }) { Text("Вся история") }
+                            snapshot.conversations.take(5).forEach { c -> MenuRow(c.title, if (c.draft.text.isNotEmpty() || c.draft.attachments.isNotEmpty()) "Есть черновик" else "Сохранено на устройстве", Glyph.History) { model.select(c.id); navigate(null) } }
+                            TextButton(onClick = { navigate(ShellDestination.Search) }) { Text("Вся история") }
                         }
 
 
@@ -161,7 +177,7 @@ import java.util.Date
                     HorizontalDivider(Modifier.padding(top = 10.dp))
                     Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("Локальный профиль", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                        TextButton(onClick = { navigate("settings") }) { AlphaIcon(Glyph.Settings); Spacer(Modifier.width(7.dp)); Text("Настройки") }
+                        TextButton(onClick = { navigate(ShellDestination.Settings) }) { AlphaIcon(Glyph.Settings); Spacer(Modifier.width(7.dp)); Text(stringResource(R.string.settings)) }
                     }
                 }
                 Spacer(Modifier.height(12.dp))
@@ -174,7 +190,7 @@ import java.util.Date
 @Composable internal fun ShellHeader(back: Boolean, home: () -> Unit, menu: () -> Unit, history: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = menu, modifier = Modifier.heightIn(min = 48.dp)) { AlphaIcon(Glyph.Menu); Spacer(Modifier.width(6.dp)); Text("Меню") }
+            TextButton(onClick = menu, modifier = Modifier.heightIn(min = 48.dp)) { AlphaIcon(Glyph.Menu); Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.menu)) }
             Text("Alphy", Modifier.weight(1f), fontSize = 27.sp, fontWeight = FontWeight.Medium, letterSpacing = (-1).sp)
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -184,17 +200,16 @@ import java.util.Date
     }
 }
 
-@Composable internal fun ChatPane(model: ShellViewModel, tools: () -> Unit, context: () -> Unit, automation: (String) -> Unit) {
+@Composable internal fun ChatPane(model: ShellViewModel, conversation: Conversation?, tools: () -> Unit, context: () -> Unit, automation: (String) -> Unit) {
     val snapshot = model.snapshot
     val uriHandler = LocalUriHandler.current
     var shareText by rememberSaveable { mutableStateOf<String?>(null) }
     var linkError by remember { mutableStateOf(false) }
     val busy = model.activeConversationId != null
     val startVoice = rememberVoiceStart(model, oneShot = true)
-    DisposableEffect(model.voice) { onDispose { model.voice.stop() } }
     if (linkError) AlertDialog(onDismissRequest = { linkError = false }, title = { Text("Не удалось открыть ссылку") }, text = { Text("Проверьте наличие браузера на устройстве.") }, confirmButton = { TextButton(onClick = { linkError = false }) { Text("Понятно") } })
     Column(Modifier.fillMaxHeight().widthIn(max = 620.dp).fillMaxWidth()) {
-        if (snapshot.selected == null) {
+        if (conversation == null) {
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 27.dp)) {
                 Spacer(Modifier.height(65.dp))
                 Text("Привет.", fontSize = 34.sp, lineHeight = 43.sp, letterSpacing = (-1).sp)
@@ -206,7 +221,7 @@ import java.util.Date
                 }
             }
         } else {
-            val chat = snapshot.selected!!
+            val chat = conversation
             val listState = rememberLazyListState()
             LaunchedEffect(chat.id, chat.messages.size, chat.messages.lastOrNull()?.text?.length) {
                 val last = chat.messages.size
@@ -388,6 +403,15 @@ import java.util.Date
         Text("Только выбранные источники", color = MaterialTheme.colorScheme.onSurfaceVariant)
         com.alpha.assistant.capabilities.CapabilitySettings(controller)
     }
+}
+
+@Composable private fun SecureWindow(content: @Composable () -> Unit) {
+    val window = (LocalContext.current as? Activity)?.window
+    DisposableEffect(Unit) {
+        window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
+    }
+    content()
 }
 
 @Composable private fun SettingsPane(model: ShellViewModel) {

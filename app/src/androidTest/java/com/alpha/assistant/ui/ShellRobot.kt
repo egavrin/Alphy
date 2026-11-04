@@ -1,12 +1,16 @@
 package com.alpha.assistant.ui
 
+import android.Manifest
+import android.accessibilityservice.AccessibilityService
 import android.app.Application
 import android.app.Instrumentation
 import android.app.UiAutomation
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.annotation.StringRes
 import androidx.test.core.app.ActivityScenario
@@ -37,7 +41,7 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
     @Volatile var failure: Exception? = null              // thrown after the count
     @Volatile var gate: CompletableDeferred<Unit>? = null // awaited before the answer
     override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-        calls++
+        synchronized(this) { calls++ }
         failure?.let { throw it }
         gate?.await()
         emit(CloudEvent.RoundComplete("""{"kind":"answer","text":${JSONObject.quote(reply)},"brief":"","targetId":null,"search":"none"}""", false))
@@ -77,6 +81,7 @@ internal class ShellRobot(fixture: String) {
     val diagnostics: UiFailureDiagnostics = UiFailureDiagnostics(fixture)
 
     // Without arguments, the text is not formatted, as stringResource(id) does.
+    /** Gives app strings only. A test reads a library label from the activity resources. */
     fun text(@StringRes id: Int, vararg args: Any): String =
         if (args.isEmpty()) instrumentation.targetContext.getString(id) else instrumentation.targetContext.getString(id, *args)
     fun find(label: String): AccessibilityNodeInfo? = find(diagnostics.freshRoot(), label)
@@ -86,9 +91,13 @@ internal class ShellRobot(fixture: String) {
         waitUntil { result = find(label); result != null }
         return result!!
     }
+    // A null root or another app's window is not proof that the label left the app.
     fun waitGone(label: String) {
         diagnostics.target(label)
-        waitUntil { find(label) == null }
+        waitUntil {
+            val root = diagnostics.freshRoot()
+            root?.packageName?.toString() == instrumentation.targetContext.packageName && find(root, label) == null
+        }
     }
     fun waitUntil(condition: () -> Boolean) {
         val deadline = SystemClock.uptimeMillis() + 10000
@@ -100,20 +109,23 @@ internal class ShellRobot(fixture: String) {
         fail("UI condition did not complete within 10 seconds")
     }
     // Compose UI 1.12.1 marks only an enabled field as editable, so a field that is disabled for a short time needs a wait.
+    // The climb stops at the nearest field, so an enabled neighbor never replaces a disabled target.
     fun field(label: String): AccessibilityNodeInfo {
-        fun editable(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-            if (node.isEditable) return node
-            repeat(node.childCount) { node.getChild(it)?.let { child -> editable(child)?.let { return it } } }
+        fun textField(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+            if (node.className?.toString() == "android.widget.EditText") return node
+            repeat(node.childCount) { node.getChild(it)?.let { child -> textField(child)?.let { return it } } }
             return null
         }
         diagnostics.target(label)
         var result: AccessibilityNodeInfo? = null
         waitUntil {
             var node = find(label)
-            while (node != null && result == null) {
-                result = editable(node)
+            var nearest: AccessibilityNodeInfo? = null
+            while (node != null && nearest == null) {
+                nearest = textField(node)
                 node = node.parent
             }
+            result = nearest?.takeIf { it.isEditable }
             result != null
         }
         return result!!
@@ -124,6 +136,29 @@ internal class ShellRobot(fixture: String) {
         assertNotNull("No clickable node for $label", node)
         assertTrue(diagnostics.click(label,node))
         automation.waitForIdle(100, 3000)
+    }
+    fun back() {
+        assertTrue(automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK))
+        automation.waitForIdle(100, 3000)
+    }
+    fun secure(scenario: ActivityScenario<*>): Boolean {
+        var flags = 0
+        scenario.onActivity { flags = it.window.attributes.flags }
+        return (flags and WindowManager.LayoutParams.FLAG_SECURE) != 0
+    }
+    // The OPPO device blocks shell grants, so the helper answers the permission dialog.
+    fun allowMicrophone(scenario: ActivityScenario<*>) {
+        fun granted() = instrumentation.targetContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        if (granted()) return
+        scenario.onActivity { it.requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 0) }
+        fun allow(node: AccessibilityNodeInfo?): Boolean {
+            if (node == null) return false
+            if (node.viewIdResourceName?.endsWith(":id/permission_allow_foreground_only_button") == true)
+                return node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            repeat(node.childCount) { if (allow(node.getChild(it))) return true }
+            return false
+        }
+        waitUntil { allow(diagnostics.freshRoot()); granted() }
     }
     fun edit(label: String, value: String) {
         val node = field(label)
