@@ -54,7 +54,7 @@ internal const val MY_DAY_REQUEST = "Обновляй Мой день из ка�
         Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
             AlphaIcon(glyph, color = LocalContentColor.current)
             Column {
-                Text(stringResource(title), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(title), style = MaterialTheme.typography.titleMedium.merge(RussianHyphenation))
                 Text(stringResource(text), style = MaterialTheme.typography.bodyMedium)
             }
         }

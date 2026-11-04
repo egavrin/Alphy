@@ -1,10 +1,10 @@
 package com.alpha.assistant.ui
 
-import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.view.WindowManager
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -259,7 +259,7 @@ import kotlinx.coroutines.launch
 }
 
 @Composable private fun SecureWindow(content: @Composable () -> Unit) {
-    val window = (LocalContext.current as? Activity)?.window
+    val window = LocalActivity.current?.window
     DisposableEffect(Unit) {
         window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }

@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.intl.LocaleList
+import androidx.compose.ui.text.style.Hyphens
 import androidx.compose.ui.unit.dp
 
 // The TonalSpot scheme from the seed #7652DF, for API 29 and 30, which have no dynamic color.
@@ -67,6 +69,11 @@ private val AlphaTypography = Typography().run {
         headlineLarge = semiBold(headlineLarge), headlineMedium = semiBold(headlineMedium), headlineSmall = semiBold(headlineSmall),
         titleLarge = semiBold(titleLarge), titleMedium = semiBold(titleMedium), titleSmall = semiBold(titleSmall))
 }
+
+// For a word that does not fit, as at a large font scale. Without hyphenation, Android breaks the word anywhere and adds
+// no hyphen, and it does not break after the hyphen of «Мини-». AlphyActivity keeps the device locale as the default,
+// so the Russian patterns need the locale here.
+internal val RussianHyphenation = TextStyle(hyphens = Hyphens.Auto, localeList = LocaleList("ru"))
 
 /** Light and dark follow the system. */
 @Composable

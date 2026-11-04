@@ -55,7 +55,8 @@ import com.alpha.assistant.R
         else if (!model.voice.active && model.voice.hasAttempted) ProvideTextStyle(MaterialTheme.typography.bodySmall) { StatusLine(Glyph.Mic, MaterialTheme.colorScheme.onSurfaceVariant, model.voice.status) }
         if (snapshot.draft.text.isNotBlank()) TextButton(onClick = { automation(snapshot.draft.text) }) { Text(stringResource(R.string.composer_automation)) }
         if (model.attachmentBusy) ProvideTextStyle(MaterialTheme.typography.labelSmall) { StatusLine(Glyph.File, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.composer_image_check)) }
-        Surface(shape = RoundedCornerShape(27.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+        // A dark Material scheme gives outlineVariant the tone of surfaceVariant, so the round actions need a container of another tone.
+        Surface(shape = RoundedCornerShape(27.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
             Column(Modifier.padding(12.dp)) {
                 if (model.voice.active && model.voice.oneShot) InlineVoiceRecorder(model)
                 else {

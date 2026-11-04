@@ -20,6 +20,7 @@ class AlphaThemeContrastTest {
             "onSurfaceVariant/surfaceContainer" to (s.onSurfaceVariant to s.surfaceContainer),
             "onSurfaceVariant/surfaceContainerHigh" to (s.onSurfaceVariant to s.surfaceContainerHigh),
             "onSurfaceVariant/surfaceVariant" to (s.onSurfaceVariant to s.surfaceVariant),
+            "onSurfaceVariant/surfaceContainerHighest" to (s.onSurfaceVariant to s.surfaceContainerHighest),
             "primary/surfaceVariant" to (s.primary to s.surfaceVariant),
             "primary/primaryContainer" to (s.primary to s.primaryContainer),
             "onPrimary/primary" to (s.onPrimary to s.primary),
