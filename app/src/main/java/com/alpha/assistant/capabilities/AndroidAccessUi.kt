@@ -51,7 +51,8 @@ private fun Context.activity(): Activity? = when (this) {
     return revision
 }
 
-@Composable internal fun AndroidPermissionControl(title: String, permissions: List<String>, feature: String? = null, onChanged: () -> Unit = {}) {
+@Composable internal fun AndroidPermissionControl(title: String, permissions: List<String>, feature: String? = null,
+    @StringRes partial: Int = R.string.access_partial, onChanged: () -> Unit = {}) {
     val context = LocalContext.current
     val revision = platformAccessRevision()
     var resultRevision by remember { mutableIntStateOf(0) }
@@ -67,7 +68,7 @@ private fun Context.activity(): Activity? = when (this) {
         when {
             !available -> StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.access_no_hardware))
             missing.isEmpty() -> StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(R.string.access_granted))
-            granted.isNotEmpty() -> StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.access_partial))
+            granted.isNotEmpty() -> StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(partial))
             blocked -> StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.access_blocked))
             missing.any { asked.getBoolean(it, false) } -> StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.access_denied))
             else -> StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.access_not_asked))
@@ -141,6 +142,8 @@ private fun Context.activity(): Activity? = when (this) {
     }
     HorizontalDivider()
     AndroidPermissionControl(stringResource(R.string.access_calendar), listOf(Manifest.permission.READ_CALENDAR))
+    AndroidPermissionControl(stringResource(R.string.access_owned_calendar), listOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR),
+        partial = R.string.access_owned_calendar_partial)
     AndroidPermissionControl(stringResource(R.string.access_camera), listOf(Manifest.permission.CAMERA), PackageManager.FEATURE_CAMERA_ANY)
     if (Build.VERSION.SDK_INT >= 33) AndroidPermissionControl(stringResource(R.string.access_notification_permission), listOf(Manifest.permission.POST_NOTIFICATIONS), onChanged = { refresh++ })
     AccessSettingRow(R.string.access_notifications_title, if (notifications) R.string.access_notifications_on else R.string.access_notifications_off, notifications, R.string.access_notifications_open) {

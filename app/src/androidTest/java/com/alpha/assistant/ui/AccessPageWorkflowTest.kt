@@ -27,6 +27,7 @@ class AccessPageWorkflowTest {
                 repeat(15) { if (!end) { shown += robot.texts(); end = !robot.scrollForward() } }
                 assertTrue("The access page ends within 15 scrolls", end)
                 assertTrue(robot.text(R.string.access_note) in shown)
+                assertTrue(robot.text(R.string.access_owned_calendar) in shown)
                 val technical = Regex("""[a-z]+\.[a-z_.]+|Android API|API \d+|android\.permission|Реализовано|Запланировано""")
                 assertEquals(emptyList<String>(), shown.filter { technical.containsMatchIn(it) })
                 robot.click(robot.text(R.string.access_system_settings))

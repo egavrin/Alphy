@@ -154,6 +154,8 @@
     <string name="access_background_next">Следующий этап: фоновый доступ</string>
     <string name="access_background_open">Настроить фоновый доступ</string>
     <string name="access_calendar">Календарь для контекста чата · только чтение</string>
+    <string name="access_owned_calendar">События Alphy в календаре</string>
+    <string name="access_owned_calendar_partial">Частичный доступ: для событий Alphy нужны чтение и изменение календаря.</string>
     <string name="access_camera">Камера</string>
     <string name="access_notification_permission">Разрешение на уведомления</string>
     <string name="access_notifications_title">Уведомления</string>
