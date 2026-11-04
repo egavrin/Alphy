@@ -3,8 +3,6 @@ package com.alpha.assistant.capabilities
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
-import android.net.Uri
-import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -18,15 +16,12 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.alpha.assistant.tools.ToolController
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.surfaces.ToolWidgets
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 @Composable fun ToolCapabilityGrants(controller: ToolController, tool: ToolRecord) {
@@ -197,65 +192,6 @@ private data class CapabilityCameraPreview(val launch: CapabilitySelectionLaunch
         }
     }
 }
-
-@Composable fun CapabilitySettings(controller: ToolController) {
-    val context = LocalContext.current
-    val native = remember(context) { AndroidCapabilities(context) }
-    var refresh by remember { mutableIntStateOf(0) }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _, event -> if(event == Lifecycle.Event.ON_RESUME) refresh++ }
-        lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
-    }
-    var status by remember { mutableStateOf("") }
-    var calendars by remember { mutableStateOf<List<Pair<Long,String>>>(emptyList()) }
-    val scope = rememberCoroutineScope()
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed ->
-        status = if(allowed) "Разрешение Android выдано. Доступ для каждого инструмента включается отдельно." else "Разрешение Android не выдано. Остальные инструменты и данные доступны."
-        refresh++
-    }
-    val calendarPermissions=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        status=if(OwnedCalendarCapabilities.hasPermissions(context)) "Both calendar permissions are available. Select a calendar separately in the app." else "Both calendar permissions are required."
-        refresh++
-    }
-    AndroidAccessOverview()
-    Text("Каталог функций Android для Alphy",style = MaterialTheme.typography.titleLarge)
-    Text("Системные разрешения не включают доступ для мини-приложений. Выбранный контекст чата отправляется с обычным запросом.")
-    if(status.isNotEmpty()) Text(status)
-    CapabilityCatalog.definitions.forEach { definition ->
-        OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp),verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(definition.title,style = MaterialTheme.typography.titleMedium)
-            Text(definition.id,style = MaterialTheme.typography.labelSmall)
-            Text("Реализовано · Android API ${definition.minApi}+",style = MaterialTheme.typography.labelSmall)
-            Text(definition.resultDescription,style = MaterialTheme.typography.bodySmall)
-            Text(definition.explanation,style = MaterialTheme.typography.bodySmall)
-            Text(remember(refresh) { native.status(definition.id) },style = MaterialTheme.typography.bodySmall)
-            if(definition.permission != null) TextButton(onClick = { if(definition.id in OwnedCalendarContract.ids) calendarPermissions.launch(arrayOf(android.Manifest.permission.READ_CALENDAR,android.Manifest.permission.WRITE_CALENDAR)) else permission.launch(definition.permission) }) { Text("Запросить разрешение Android") }
-        } }
-    }
-    TextButton(onClick = { scope.launch { calendars = withContext(Dispatchers.IO) { runCatching { native.calendars() }.getOrDefault(emptyList()) }; status = if(calendars.isEmpty()) "Доступных календарей нет. Проверь разрешение календаря в Android и настройки аккаунта." else "Укажи идентификатор выбранного календаря в запросе для инструмента." } }) { Text("Показать календари на устройстве") }
-    calendars.forEach { (id,title) -> Text("$title · идентификатор календаря: $id") }
-    TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:${context.packageName}"))); refresh++ }) { Text("Открыть настройки Alphy в Android") }
-    Text("Medicine reminders",style=MaterialTheme.typography.titleMedium)
-    Text("Exact reminders require Android alarm access and the medicine notification channel. No notification confirms intake.")
-    if(android.os.Build.VERSION.SDK_INT>=31) TextButton(onClick={context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,Uri.parse("package:${context.packageName}")))}) {Text("Exact alarm access")}
-    TextButton(onClick={context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,context.packageName))}) {Text("Medicine notification settings")}
-    Text("Доступы для каждого инструмента",style = MaterialTheme.typography.titleLarge)
-    controller.tools.forEach { tool -> if(ToolSpec.available(tool.spec)?.capabilities?.isNotEmpty()==true) { Text(ToolSpec.storedTitle(tool.spec)); ToolCapabilityGrants(controller,tool) } }
-    Text("Запланировано · недоступно приложениям",style = MaterialTheme.typography.titleMedium)
-    CapabilityCatalog.planned.forEach { definition ->
-        OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp),verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(definition.title,style = MaterialTheme.typography.titleMedium)
-            Text(definition.id,style = MaterialTheme.typography.labelSmall)
-            Text(definition.constraint,style = MaterialTheme.typography.bodySmall)
-        } }
-    }
-    Text("Другие недоступные функции",style = MaterialTheme.typography.titleMedium)
-    CapabilityCatalog.unavailable.filterKeys { key -> CapabilityCatalog.planned.none { it.id == key } }.forEach { (id,reason) -> Text("$id: $reason",style = MaterialTheme.typography.bodySmall) }
-    Text("Микрофон: включи голосовой ввод в чате. Распознавание работает на устройстве. Alphy не слушает микрофон в фоне.")
-}
-
 
 private fun resultLabel(status: String) = when(status) {
     "succeeded" -> "Выполнено"

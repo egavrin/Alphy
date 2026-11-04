@@ -71,7 +71,7 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
         val definition = CapabilityCatalog.definition(r.capability)
         val available = availability(r.capability).getString("state")
         if(available in setOf("unsupportedApi","missingHardware")) return CapabilityResult("unavailable",status(r.capability))
-        if(!permissionGranted(r.capability)) return CapabilityResult("denied","Требуется разрешение Android. Запроси его в разделе «Контекст и функции».")
+        if(!permissionGranted(r.capability)) return CapabilityResult("denied",context.getString(com.alpha.assistant.R.string.capability_permission_required))
         val args = r.args
         suspend fun open(intent: Intent, selection: Boolean = false): CapabilityResult {
             if(!foreground) return CapabilityResult("awaitingUser","Открой Alphy, чтобы продолжить системное действие.")

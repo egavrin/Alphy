@@ -16,7 +16,10 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -52,45 +55,61 @@ private fun Context.activity(): Activity? = when (this) {
     val context = LocalContext.current
     val revision = platformAccessRevision()
     var resultRevision by remember { mutableIntStateOf(0) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<Int?>(null) }
     val asked = remember { context.getSharedPreferences("android-access-requests", Context.MODE_PRIVATE) }
     val available = feature == null || context.packageManager.hasSystemFeature(feature)
     val granted = remember(revision, resultRevision) { permissions.filter { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED } }
     val missing = permissions - granted.toSet()
     val blocked = missing.any { asked.getBoolean(it, false) && context.activity()?.let { activity -> !ActivityCompat.shouldShowRequestPermissionRationale(activity, it) } == true }
     val request = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { resultRevision++; onChanged() }
-    OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(when {
-                !available -> "Недоступно: нужного оборудования нет."
-                missing.isEmpty() -> "Разрешение Android выдано."
-                granted.isNotEmpty() -> "Частичный доступ: доступна приблизительная геопозиция. Точная геопозиция не разрешена."
-                blocked -> "Доступ не выдан. Если Android больше не показывает запрос, включите разрешение в настройках приложения."
-                missing.any { asked.getBoolean(it, false) } -> "Доступ отклонён. Можно повторить запрос или открыть настройки."
-                else -> "Разрешение Android ещё не выдано."
-            })
-            if (available && missing.isNotEmpty()) TextButton(onClick = {
-                asked.edit().apply { permissions.forEach { putBoolean(it, true) } }.apply()
-                runCatching { request.launch(permissions.toTypedArray()) }.onFailure { error = "Android не смог открыть запрос разрешения." }
-            }) { Text("Запросить доступ") }
-            TextButton(onClick = {
-                runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
-                    .onFailure { error = "Настройки приложения недоступны на этом устройстве." }
-            }) { Text("Настройки приложения") }
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        when {
+            !available -> StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.access_no_hardware))
+            missing.isEmpty() -> StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(R.string.access_granted))
+            granted.isNotEmpty() -> StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.access_partial))
+            blocked -> StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.access_blocked))
+            missing.any { asked.getBoolean(it, false) } -> StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.access_denied))
+            else -> StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.access_not_asked))
         }
+        if (available && missing.isNotEmpty()) TextButton(onClick = {
+            asked.edit().apply { permissions.forEach { putBoolean(it, true) } }.apply()
+            runCatching { request.launch(permissions.toTypedArray()) }.onFailure { error = R.string.access_request_failed }
+        }) { Text(stringResource(R.string.access_request)) }
+        TextButton(onClick = {
+            runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
+                .onFailure { error = R.string.access_app_settings_failed }
+        }) { Text(stringResource(R.string.access_app_settings)) }
+        error?.let { StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(it)) }
+    }
+    HorizontalDivider()
+}
+
+/** «Доступ и функции». The top bar shows the title, so the page has none. */
+@Composable fun AccessPane() {
+    val context = LocalContext.current
+    var openFailed by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        AndroidAccessOverview()
+        Text(stringResource(R.string.access_note))
+        OutlinedButton(onClick = {
+            openFailed = try {
+                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))); false
+            } catch (_: ActivityNotFoundException) { true }
+        }) { Text(stringResource(R.string.access_system_settings)) }
+        if (openFailed) StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.access_app_settings_failed))
     }
 }
 
+/** The access rows, emitted into the column of the caller. */
 @Composable fun AndroidAccessOverview() {
     val context = LocalContext.current
     val revision = platformAccessRevision()
     var refresh by remember { mutableIntStateOf(0) }
-    var message by remember { mutableStateOf<String?>(null) }
+    var message by remember { mutableStateOf<Int?>(null) }
     val activityResult = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { refresh++ }
     fun open(intent: Intent) {
-        runCatching { activityResult.launch(intent) }.onFailure { message = "Системное окно недоступно на этом устройстве." }
+        runCatching { activityResult.launch(intent) }.onFailure { message = R.string.access_window_failed }
     }
     fun granted(permission: String) = context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
     // Reading these values on resume keeps Android as the source of truth.
@@ -102,44 +121,42 @@ private fun Context.activity(): Activity? = when (this) {
     val exact = remember(revision, refresh) { Build.VERSION.SDK_INT < 31 || context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms() }
     val listener = remember(revision, refresh) { notificationManager.isNotificationListenerAccessGranted(
         ComponentName(context, com.alpha.assistant.automations.AutomationNotificationListener::class.java)) }
-    val roles = context.getSystemService(RoleManager::class.java)
-    val roleAvailable = roles?.isRoleAvailable(RoleManager.ROLE_ASSISTANT) == true
-    val assistant = remember(revision, refresh) { roles?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true }
-    Text("Доступ Android", style = MaterialTheme.typography.titleLarge)
-    Text("Системные разрешения и доступы мини-приложений включаются отдельно. Контекст отправляется только с выбранным запросом после обычной кнопки «Отправить».")
-    AndroidPermissionControl("Микрофон", listOf(Manifest.permission.RECORD_AUDIO), PackageManager.FEATURE_MICROPHONE)
-    AndroidPermissionControl("Геопозиция при использовании", listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION), PackageManager.FEATURE_LOCATION, onChanged = { refresh++ })
-    OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp)) {
-            Text("Геопозиция в фоне", style = MaterialTheme.typography.titleMedium)
-            Text(when { !context.packageManager.hasSystemFeature(PackageManager.FEATURE_LOCATION) -> "Оборудование недоступно."
-                background -> "Фоновый доступ выдан."
-                !foreground -> "Сначала выдайте доступ к геопозиции при использовании."
-                else -> "Фоновый доступ не выдан. В настройках выберите «Разрешить в любом режиме», если этот вариант доступен." })
-            if (Build.VERSION.SDK_INT == 29 && foreground && !background) {
-                AndroidPermissionControl("Следующий этап: фоновый доступ", listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), onChanged = { refresh++ })
-            } else TextButton(onClick = { open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) },
-                enabled = foreground && context.packageManager.hasSystemFeature(PackageManager.FEATURE_LOCATION)) { Text("Настроить фоновый доступ") }
-        }
+    val locationHardware = context.packageManager.hasSystemFeature(PackageManager.FEATURE_LOCATION)
+    Text(stringResource(R.string.access_intro))
+    AndroidPermissionControl(stringResource(R.string.access_microphone), listOf(Manifest.permission.RECORD_AUDIO), PackageManager.FEATURE_MICROPHONE)
+    AndroidPermissionControl(stringResource(R.string.access_location), listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION), PackageManager.FEATURE_LOCATION, onChanged = { refresh++ })
+    Column(Modifier.fillMaxWidth()) {
+        Text(stringResource(R.string.access_background_title), style = MaterialTheme.typography.titleMedium)
+        // Android does not tell the app that the user denied background access, so no state shows Close.
+        if (locationHardware && background) StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(R.string.access_background_granted))
+        else StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(when {
+            !locationHardware -> R.string.access_background_no_hardware
+            !foreground -> R.string.access_background_needs_location
+            else -> R.string.access_background_missing
+        }))
+        if (Build.VERSION.SDK_INT == 29 && foreground && !background) {
+            AndroidPermissionControl(stringResource(R.string.access_background_next), listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), onChanged = { refresh++ })
+        } else TextButton(onClick = { open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) },
+            enabled = foreground && locationHardware) { Text(stringResource(R.string.access_background_open)) }
     }
-    AndroidPermissionControl("Календарь для контекста чата · только чтение", listOf(Manifest.permission.READ_CALENDAR))
-    AndroidPermissionControl("Камера", listOf(Manifest.permission.CAMERA), PackageManager.FEATURE_CAMERA_ANY)
-    if (Build.VERSION.SDK_INT >= 33) AndroidPermissionControl("Разрешение на уведомления", listOf(Manifest.permission.POST_NOTIFICATIONS), onChanged = { refresh++ })
-    AccessSettingCard("Уведомления", if (notifications) "Уведомления разрешены. Отдельные каналы могут быть выключены." else "Уведомления выключены или разрешение не выдано.", "Настроить уведомления") {
+    HorizontalDivider()
+    AndroidPermissionControl(stringResource(R.string.access_calendar), listOf(Manifest.permission.READ_CALENDAR))
+    AndroidPermissionControl(stringResource(R.string.access_camera), listOf(Manifest.permission.CAMERA), PackageManager.FEATURE_CAMERA_ANY)
+    if (Build.VERSION.SDK_INT >= 33) AndroidPermissionControl(stringResource(R.string.access_notification_permission), listOf(Manifest.permission.POST_NOTIFICATIONS), onChanged = { refresh++ })
+    AccessSettingRow(R.string.access_notifications_title, if (notifications) R.string.access_notifications_on else R.string.access_notifications_off, notifications, R.string.access_notifications_open) {
         open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
     }
-    AccessSettingCard("Точные напоминания", if (exact) "Android разрешает точные напоминания." else "Точный будильник не разрешён.", "Настроить точные напоминания") {
+    AccessSettingRow(R.string.access_exact_title, if (exact) R.string.access_exact_on else R.string.access_exact_off, exact, R.string.access_exact_open) {
         if (Build.VERSION.SDK_INT >= 31) open(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))
-        else message = "В этой версии Android отдельный системный доступ не требуется."
+        else message = R.string.access_exact_not_needed
     }
-    AccessSettingCard("Чтение уведомлений для сценариев", if (listener) "Системный доступ выдан." else "Системный доступ не выдан.", "Настроить чтение уведомлений") {
+    AccessSettingRow(R.string.access_listener_title, if (listener) R.string.access_listener_on else R.string.access_listener_off, listener, R.string.access_listener_open) {
         open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
     }
-    AccessSettingCard("Системный ассистент", when { !roleAvailable -> "Выбор роли недоступен на этом устройстве."; assistant -> "Alphy выбран системным ассистентом."; else -> "Alphy не выбран системным ассистентом." }, "Выбрать ассистента") {
-        if (roleAvailable) open(roles.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT)) else open(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
-    }
-    Text("Выдача доступа не запускает микрофон, камеру, чтение календаря или сценарий. Файлы и фотографии выбираются в системном окне без доступа ко всей медиатеке.", style = MaterialTheme.typography.bodySmall)
-    message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    AssistantSettingsRow()
+    HorizontalDivider()
+    Text(stringResource(R.string.access_scope_note), style = MaterialTheme.typography.bodySmall)
+    message?.let { StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(it)) }
 }
 
 /** The assistant role is not requestable, so the row opens the Android assistant settings and tells the user to pick Alphy there. */
@@ -161,10 +178,13 @@ private fun Context.activity(): Activity? = when (this) {
     }
 }
 
-@Composable private fun AccessSettingCard(title: String, status: String, action: String, open: () -> Unit) {
-    OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        Text(status)
-        TextButton(onClick = open) { Text(action) }
-    } }
+/** These settings have no denied state, so a missing access shows Shield. */
+@Composable private fun AccessSettingRow(@StringRes title: Int, @StringRes status: Int, granted: Boolean, @StringRes action: Int, open: () -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(stringResource(title), style = MaterialTheme.typography.titleMedium)
+        if (granted) StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(status))
+        else StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(status))
+        TextButton(onClick = open) { Text(stringResource(action)) }
+    }
+    HorizontalDivider()
 }

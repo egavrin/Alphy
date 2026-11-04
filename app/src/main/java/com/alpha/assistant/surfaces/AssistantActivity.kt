@@ -159,7 +159,10 @@ class AssistantActivity : AlphyActivity() {
         Column(Modifier.navigationBarsPadding().imePadding().padding(20.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             when (sheet) {
                 "voice" -> VoiceControls(model)
-                "permissions" -> com.alpha.assistant.capabilities.AndroidAccessOverview()
+                "permissions" -> {
+                    Text(stringResource(R.string.access), style = MaterialTheme.typography.headlineSmall)
+                    com.alpha.assistant.capabilities.AndroidAccessOverview()
+                }
                 "history" -> {
                     Text("История", style = MaterialTheme.typography.titleLarge)
                     OutlinedTextField(historySearch, { historySearch = it }, label = { Text("Поиск в истории") }, modifier = Modifier.fillMaxWidth())
@@ -174,7 +177,7 @@ class AssistantActivity : AlphyActivity() {
                     TextButton(onClick = { sheet = "history" }) { Text("История") }
                     TextButton(onClick = { sheet = "context" }) { Text("Добавить контекст") }
                     TextButton(onClick = { sheet = "voice" }) { Text("Непрерывный голосовой сеанс") }
-                    TextButton(onClick = { sheet = "permissions" }) { Text("Разрешения Android") }
+                    TextButton(onClick = { sheet = "permissions" }) { Text(stringResource(R.string.access)) }
                     TextButton(onClick = full) { Text("Все функции в приложении") }
                 }
             }

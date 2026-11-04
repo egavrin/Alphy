@@ -118,6 +118,8 @@ internal class ShellRobot(fixture: String) {
     fun text(@StringRes id: Int, vararg args: Any): String =
         if (args.isEmpty()) instrumentation.targetContext.getString(id) else instrumentation.targetContext.getString(id, *args)
     fun find(label: String): AccessibilityNodeInfo? = find(diagnostics.freshRoot(), label)
+    /** The text and contentDescription values of all nodes in the active window. A node outside a scroll viewport has no accessibility node. */
+    fun texts(): List<String> = texts(diagnostics.freshRoot())
     fun waitFor(label: String): AccessibilityNodeInfo {
         diagnostics.target(label)
         var result: AccessibilityNodeInfo? = null
@@ -336,4 +338,6 @@ internal class ShellRobot(fixture: String) {
         repeat(node.childCount) { find(node.getChild(it), label)?.let { match -> return match } }
         return null
     }
+    private fun texts(node: AccessibilityNodeInfo?): List<String> = if (node == null) emptyList() else
+        listOfNotNull(node.text?.toString(), node.contentDescription?.toString()) + (0 until node.childCount).flatMap { texts(node.getChild(it)) }
 }

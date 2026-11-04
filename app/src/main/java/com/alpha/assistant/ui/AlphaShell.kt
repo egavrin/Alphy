@@ -162,7 +162,7 @@ import kotlinx.coroutines.launch
                                     }
                                 } else ToolsEntry()
                                 ShellDestination.Automations -> com.alpha.assistant.automations.AutomationsPane(model.tools,automationRequest) {automationRequest=null}
-                                ShellDestination.Access -> CapabilitiesPane(model.tools)
+                                ShellDestination.Access -> com.alpha.assistant.capabilities.AccessPane()
                                 ShellDestination.Settings -> SecureWindow { SettingsPane(model) }
                             }
                         }
@@ -255,14 +255,6 @@ import kotlinx.coroutines.launch
         AlphaIcon(glyph, Modifier.size(38.dp), accent = true)
         Text(heading, style = MaterialTheme.typography.titleLarge)
         Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 25.sp)
-    }
-}
-
-@Composable private fun CapabilitiesPane(controller: com.alpha.assistant.tools.ToolController) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(25.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("Контекст и функции", style = MaterialTheme.typography.headlineMedium)
-        Text("Только выбранные источники", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        com.alpha.assistant.capabilities.CapabilitySettings(controller)
     }
 }
 
