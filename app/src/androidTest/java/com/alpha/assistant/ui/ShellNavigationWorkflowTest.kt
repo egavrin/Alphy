@@ -1,9 +1,12 @@
 package com.alpha.assistant.ui
 
+import android.accessibilityservice.AccessibilityService
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import com.alpha.assistant.R
 import org.junit.After
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -44,6 +47,22 @@ class ShellNavigationWorkflowTest {
             robot.waitUntil { !robot.secure(scenario) }
             robot.back()
             robot.waitUntil { scenario.state == Lifecycle.State.DESTROYED }
+        }
+    }
+
+    @Test fun settingsStaySecureUntilTheyLeave() {
+        fixture.launch().use { scenario ->
+            openSettings(scenario)
+            robot.waitUntil { robot.composed(scenario, "secure") }
+            assertTrue(robot.automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK))
+            robot.waitUntil {
+                // Read the flag first. The tagged content leaves composition in the frame that clears the flag.
+                val secure = robot.secure(scenario)
+                val shown = robot.composed(scenario, "secure")
+                assertTrue("Settings content shows without FLAG_SECURE", secure || !shown)
+                !shown
+            }
+            assertFalse(robot.secure(scenario))
         }
     }
 }

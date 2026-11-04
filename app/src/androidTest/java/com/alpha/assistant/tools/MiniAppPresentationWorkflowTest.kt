@@ -11,6 +11,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.data.*
+import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
 import org.junit.Assert.*
 import org.junit.Test
@@ -742,6 +743,24 @@ class MiniAppPresentationWorkflowTest {
         shown("Preview changes")
         screenshot("long-itinerary")
         assertEquals("lake",model.tools.selectedId)
+    }
+    @Test fun quickBackAfterChatMenuLeavesTheChat() = fixture {model,_,scenario ->
+        val robot=ShellRobot("presentation")
+        instrumentation.runOnMainSync {model.openSurface("lake")}
+        waitUntil {!model.tools.busy}
+        shown("Mini-app content")
+        // Only the Chat entry shows this message. The push fade to MiniApps ends first.
+        robot.waitUntil {!robot.composedText(scenario,"Your day plan is ready.")}
+        click("Mini-app options")
+        var chat: AccessibilityNodeInfo?=shown("Chat")
+        while(chat?.isClickable == false) chat=chat.parent
+        // No idle wait, so the pop fade still runs at the Back.
+        assertTrue("Click Chat",diagnostics.click("Chat",chat))
+        robot.waitUntil {robot.composedText(scenario,"Your day plan is ready.")}
+        // The closing menu window gets a Back while it has the window focus.
+        waitUntil { var focus = false; scenario.onActivity { focus = it.window.decorView.hasWindowFocus() }; focus }
+        assertTrue(automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
+        robot.waitUntil {model.snapshot.selectedId == null}
     }
     @Test fun candidateIsExplicitAndDiscardReturnsToSavedApp() = fixture(true) {model,store,_ ->
         instrumentation.runOnMainSync {model.tools.selectDraft("candidate"); model.openSurface("lake")}

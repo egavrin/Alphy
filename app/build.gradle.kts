@@ -38,6 +38,7 @@ dependencies {
     implementation("androidx.compose.material3:material3:1.5.0-beta02")
     implementation("androidx.navigation3:navigation3-runtime:1.2.0")
     implementation("androidx.navigation3:navigation3-ui:1.2.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.compose.ui:ui")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("androidx.javascriptengine:javascriptengine:1.1.1")

@@ -38,6 +38,7 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -46,7 +47,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.rememberLifecycleOwner
 import androidx.navigation3.runtime.NavEntryDecorator
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
@@ -115,15 +118,21 @@ import java.util.Date
                     LaunchedEffect(voiceShown) { if (!voiceShown) model.voice.stop() }
                     @Composable fun ChatEntry(conversation: Conversation?) = ChatPane(model, conversation, { navigate(ShellDestination.MiniApps) }, { sheet = "context" }) { request -> automationRequest=request; navigate(ShellDestination.Automations) }
                     @Composable fun ToolsEntry() = com.alpha.assistant.tools.ToolsPane(model.tools, snapshot.selectedId, snapshot.draft.text, snapshot.draft.attachments.filter { it.contextText == null },immersive=immersive,exitImmersive={immersiveExited=true}) { navigate(null) }
-                    // The tool and capability gates read RESUMED as "Alphy is in the foreground".
-                    // NavDisplay holds a scene at STARTED during its transition, so each entry keeps the shell lifecycle.
+                    // The tool and capability gates read RESUMED as "Alphy is in the foreground". NavDisplay holds a scene at STARTED
+                    // during its transition, so each entry in the back stack keeps the shell lifecycle. A leaving entry is CREATED, as in Navigation 3.
                     val shellLifecycle = LocalLifecycleOwner.current
-                    val keepShellLifecycle = remember(shellLifecycle) { NavEntryDecorator<ShellRoute> { entry -> CompositionLocalProvider(LocalLifecycleOwner provides shellLifecycle) { entry.Content() } } }
-                    NavDisplay(backStack, Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter, onBack = ::back, entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), keepShellLifecycle), entryProvider = entryProvider {
-                        entry<ShellRoute.Desktop> { ChatEntry(null) }
+                    val currentBackStack by rememberUpdatedState(backStack)
+                    val keepShellLifecycle = remember(shellLifecycle) { NavEntryDecorator<ShellRoute> { entry ->
+                        val maxLifecycle = if (currentBackStack.any { it.toString() == entry.contentKey }) Lifecycle.State.RESUMED else Lifecycle.State.CREATED
+                        CompositionLocalProvider(LocalLifecycleOwner provides rememberLifecycleOwner(maxLifecycle, shellLifecycle)) { entry.Content() }
+                    } }
+                    // NavDisplay gives each entry fixed constraints. The Box loosens them, so a pane keeps its maximum width and stays centered.
+                    val centerEntry = remember { NavEntryDecorator<ShellRoute> { entry -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) { entry.Content() } } }
+                    NavDisplay(backStack, Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter, onBack = ::back, entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), keepShellLifecycle, centerEntry), entryProvider = entryProvider {
+                        entry<ShellRoute.Desktop>(clazzContentKey = { it.toString() }) { Box(Modifier.testTag("desktop")) { ChatEntry(null) } }
                         // The route gives the conversation, so a chat keeps its messages during its exit animation.
-                        entry<ShellRoute.Chat> { route -> ChatEntry(snapshot.conversations.find { it.id == route.id }) }
-                        entry<ShellDestination> { route ->
+                        entry<ShellRoute.Chat>(clazzContentKey = { it.toString() }) { route -> ChatEntry(snapshot.conversations.find { it.id == route.id }) }
+                        entry<ShellDestination>(clazzContentKey = { it.toString() }) { route ->
                             when (route) {
                                 ShellDestination.Search -> HistoryPane(snapshot.conversations, search, { search = it }, { model.select(it); navigate(null) }, { model.select(null); navigate(null) }, model::renameConversation, model::deleteConversation, model::clearHistory)
                                 ShellDestination.MiniApps -> if (split) {
@@ -411,7 +420,7 @@ import java.util.Date
         window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
     }
-    content()
+    Box(Modifier.testTag("secure")) { content() }
 }
 
 @Composable private fun SettingsPane(model: ShellViewModel) {

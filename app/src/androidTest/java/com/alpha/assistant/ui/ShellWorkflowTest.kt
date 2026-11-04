@@ -94,12 +94,15 @@ class ShellWorkflowTest {
         bitmap.recycle()
     }
     @Test fun draftsHistoryAndNavigation() {
+        val robot = ShellRobot("shell")
         ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
             assertHeaderAndComposer()
             screenshot("header-and-composer")
             edit("Сообщение ассистенту", "Shell workflow message")
             click("Отправить сообщение")
             assertTrue(waitFor("Navigation fixture response").isVisibleToUser)
+            // The Desktop entry leaves composition at the end of the push transition.
+            waitUntil { !robot.composed(scenario, "desktop") }
             edit("Сообщение ассистенту", "Existing conversation draft")
             val imeFrames = java.util.concurrent.CopyOnWriteArrayList<String>()
             scenario.onActivity { activity ->
@@ -176,6 +179,8 @@ class ShellWorkflowTest {
             }
             click("Меню")
             click("Новый чат")
+            // The Chat entry leaves composition at the end of the pop transition.
+            waitUntil { !robot.composedText(scenario, "Navigation fixture response") }
             assertEquals("", field("Сообщение ассистенту").text?.toString().orEmpty())
             edit("Сообщение ассистенту", "Separate new draft")
             click("История")
@@ -220,7 +225,8 @@ class ShellWorkflowTest {
     private fun waitFor(label: String): AccessibilityNodeInfo {
         diagnostics.target(label)
         var result: AccessibilityNodeInfo? = null
-        waitUntil { result = find(automation.rootInActiveWindow, label); result != null }
+        // A fresh root holds no cached node of an entry that a transition covers or removes.
+        waitUntil { result = find(diagnostics.freshRoot(), label); result != null }
         return result!!
     }
     private fun find(node: AccessibilityNodeInfo?, label: String): AccessibilityNodeInfo? {

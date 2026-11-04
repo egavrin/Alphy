@@ -93,7 +93,8 @@ class NavigationAuthorizationWorkflowTest {
         // A full snapshot clears the accessibility cache, so capture it before selecting the action node.
         diagnostics.capture("before-set-text")
         var field: AccessibilityNodeInfo?=null
-        waitUntil {field=editable(automation.rootInActiveWindow);field!=null}
+        // The covered Desktop composer stays in the window during the push fade, so search only the mini-app content.
+        waitUntil {field=editable(find("Mini-app content"));field!=null}
         try {
             assertTrue(field!!.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,android.os.Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,"Changed")

@@ -10,9 +10,16 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.annotation.StringRes
+import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.semantics.SemanticsConfiguration
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getAllSemanticsNodes
+import androidx.compose.ui.semantics.getOrNull
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
@@ -109,7 +116,7 @@ internal class ShellRobot(fixture: String) {
         fail("UI condition did not complete within 10 seconds")
     }
     // Compose UI 1.12.1 marks only an enabled field as editable, so a field that is disabled for a short time needs a wait.
-    // The climb stops at the nearest field, so an enabled neighbor never replaces a disabled target.
+    // The climb stops at the first ancestor that holds a field and takes the first field in it.
     fun field(label: String): AccessibilityNodeInfo {
         fun textField(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
             if (node.className?.toString() == "android.widget.EditText") return node
@@ -146,6 +153,10 @@ internal class ShellRobot(fixture: String) {
         scenario.onActivity { flags = it.window.attributes.flags }
         return (flags and WindowManager.LayoutParams.FLAG_SECURE) != 0
     }
+    /** [composed] and [composedText] read the composed nodes, also the nodes that a covering NavDisplay entry hides from accessibility. */
+    fun composed(scenario: ActivityScenario<*>, tag: String): Boolean = composedNode(scenario) { it.getOrNull(SemanticsProperties.TestTag) == tag }
+    fun composedText(scenario: ActivityScenario<*>, text: String): Boolean =
+        composedNode(scenario) { config -> config.getOrNull(SemanticsProperties.Text)?.any { it.text.trimEnd() == text } == true }
     // The OPPO device blocks shell grants, so the helper answers the permission dialog.
     fun allowMicrophone(scenario: ActivityScenario<*>) {
         fun granted() = instrumentation.targetContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -170,6 +181,15 @@ internal class ShellRobot(fixture: String) {
     fun shell(command: String): String =
         automation.executeShellCommand(command).use { ParcelFileDescriptor.AutoCloseInputStream(it).bufferedReader().readText().trim() }
 
+    private fun composedNode(scenario: ActivityScenario<*>, match: (SemanticsConfiguration) -> Boolean): Boolean {
+        fun root(view: View): ViewRootForTest? = view as? ViewRootForTest
+            ?: (view as? ViewGroup)?.let { group -> (0 until group.childCount).firstNotNullOfOrNull { root(group.getChildAt(it)) } }
+        var composed = false
+        scenario.onActivity { activity ->
+            composed = root(activity.window.decorView)!!.semanticsOwner.getAllSemanticsNodes(mergingEnabled = false).any { match(it.config) }
+        }
+        return composed
+    }
     private fun find(node: AccessibilityNodeInfo?, label: String): AccessibilityNodeInfo? {
         if (node == null) return null
         if (node.text?.toString()?.trimEnd() == label || node.contentDescription?.toString() == label) return node
