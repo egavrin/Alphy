@@ -110,4 +110,24 @@
     <string name="voice_speaking">Микрофон выключен · ответ звучит на устройстве</string>
     <string name="voice_speech_failed">Не удалось озвучить ответ. Текст ответа сохранён в чате.</string>
     <string name="voice_request_failed">Голосовой сеанс остановлен: ответ не получен. Ваш текст сохранён в истории.</string>
+    <string name="search_field">Поиск разговоров</string>
+    <string name="search_placeholder">Поиск в истории</string>
+    <string name="search_empty">Здесь появятся ваши разговоры.</string>
+    <string name="search_none">Ничего не найдено. Попробуйте другой запрос.</string>
+    <string name="search_row_draft">%1$s · черновик</string>
+    <string name="search_row_saved">%1$s · на устройстве</string>
+    <string name="conversation_actions">Действия разговора %1$s</string>
+    <string name="conversation_rename">Переименовать</string>
+    <string name="conversation_delete">Удалить разговор</string>
+    <string name="rename_title">Переименовать разговор</string>
+    <string name="rename_label">Название разговора</string>
+    <string name="rename_placeholder">Введите название</string>
+    <string name="rename_save">Сохранить название</string>
+    <string name="conversation_delete_title">Удалить разговор?</string>
+    <string name="conversation_delete_text">«%1$s»: сообщения и черновик этого разговора будут удалены. Другие разговоры, черновик нового чата, инструменты, автоматизации, API-ключи и исходные файлы сохранятся.</string>
+    <string name="clear_history">Очистить историю</string>
+    <string name="clear_history_title">Очистить всю историю?</string>
+    <string name="clear_history_text">Будут удалены все разговоры, их сообщения и черновики. Активный запрос остановится. Фильтр поиска не ограничивает удаление.</string>
+    <string name="clear_history_kept">Черновик нового чата, инструменты и их данные, автоматизации, API-ключи и исходные файлы сохранятся.</string>
+    <string name="clear_history_confirm">Очистить всё</string>
 </resources>

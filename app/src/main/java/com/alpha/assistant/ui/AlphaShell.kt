@@ -9,7 +9,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -38,8 +37,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -57,8 +54,6 @@ import com.alpha.assistant.R
 import com.alpha.assistant.data.Attachment
 import com.alpha.assistant.data.Conversation
 import kotlinx.coroutines.launch
-import java.text.DateFormat
-import java.util.Date
 
 @Composable fun AlphaShell(model: ShellViewModel) {
     var destination by rememberSaveable { mutableStateOf<ShellDestination?>(null) }
@@ -155,7 +150,7 @@ import java.util.Date
                         entry<ShellRoute.Chat>(clazzContentKey = { it.toString() }) { route -> Box(Modifier.testTag("chat")) { ChatEntry(snapshot.conversations.find { it.id == route.id }) } }
                         entry<ShellDestination>(clazzContentKey = { it.toString() }) { route ->
                             when (route) {
-                                ShellDestination.Search -> HistoryPane(snapshot.conversations, search, { search = it }, { model.select(it); navigate(null) }, { model.select(null); navigate(null) }, model::renameConversation, model::deleteConversation, model::clearHistory)
+                                ShellDestination.Search -> SearchPane(snapshot.conversations, search, { search = it }, { model.select(it); navigate(null) }, model::renameConversation, model::deleteConversation, model::clearHistory)
                                 ShellDestination.MiniApps -> if (split) {
                                     Row(Modifier.fillMaxSize()) {
                                         Column(Modifier.weight(1f).fillMaxHeight()) {
@@ -261,54 +256,6 @@ import java.util.Date
         Text(heading, style = MaterialTheme.typography.titleLarge)
         Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 25.sp)
     }
-}
-
-@Composable private fun HistoryPane(conversations: List<Conversation>, search: String, edit: (String) -> Unit,
-    select: (String) -> Unit, newChat: () -> Unit, rename: (String, String) -> Unit, delete: (String) -> Unit, clear: () -> Unit) {
-    var menuId by rememberSaveable { mutableStateOf<String?>(null) }
-    var renameId by rememberSaveable { mutableStateOf<String?>(null) }
-    var renameText by rememberSaveable { mutableStateOf("") }
-    var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
-    var confirmClear by rememberSaveable { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) { Text("Разговоры", Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium); TextButton(onClick = newChat) { AlphaIcon(Glyph.Plus); Text("Новый чат") } }
-        OutlinedTextField(value = search, onValueChange = edit, placeholder = { Text("Поиск в истории") }, leadingIcon = { AlphaIcon(Glyph.Search) }, modifier = Modifier.fillMaxWidth().padding(vertical = 15.dp).semantics { contentDescription = "Поиск разговоров" }, singleLine = true, shape = RoundedCornerShape(18.dp))
-        val results = conversations.filter { c -> search.isBlank() || c.title.contains(search, true) || c.messages.any { it.text.contains(search, true) } || c.draft.text.contains(search, true) }
-        LazyColumn(Modifier.weight(1f)) {
-            if (results.isEmpty()) item { Text(if (search.isBlank()) "Здесь появятся твои разговоры." else "Ничего не найдено. Попробуй другой запрос.", Modifier.padding(vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            items(results, key = { it.id }) { c ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f).clickable { select(c.id) }.padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text(c.title, fontSize = 15.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                        Text(DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(c.updatedAt)) + if (c.draft.text.isNotEmpty() || c.draft.attachments.isNotEmpty()) " · черновик" else " · на устройстве", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Box {
-                        IconButton(onClick = { menuId = c.id }, modifier = Modifier.semantics { contentDescription = "Действия разговора ${c.title}" }) { Text("⋯", fontSize = 25.sp) }
-                        DropdownMenu(expanded = menuId == c.id, onDismissRequest = { menuId = null }) {
-                            DropdownMenuItem(text = { Text("Переименовать") }, onClick = { renameId = c.id; renameText = c.title; menuId = null })
-                            DropdownMenuItem(text = { Text("Удалить разговор", color = MaterialTheme.colorScheme.error) }, onClick = { deleteId = c.id; menuId = null })
-                        }
-                    }
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            }
-        }
-        TextButton(onClick = { confirmClear = true }, enabled = conversations.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("Очистить историю", color = if (conversations.isNotEmpty()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
-    }
-    if (renameId != null) AlertDialog(onDismissRequest = { renameId = null }, title = { Text("Переименовать разговор") }, text = {
-        OutlinedTextField(value = renameText, onValueChange = { renameText = it }, label = { Text("Название разговора") }, singleLine = true,
-            modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Название разговора" }, isError = renameText.isBlank(), supportingText = { if (renameText.isBlank()) Text("Введи название") })
-    }, confirmButton = { TextButton(onClick = { renameId?.let { rename(it, renameText) }; renameId = null }, enabled = renameText.isNotBlank()) { Text("Сохранить название") } }, dismissButton = { TextButton(onClick = { renameId = null }) { Text("Отмена") } })
-    val deleting = conversations.find { it.id == deleteId }
-    if (deleting != null) AlertDialog(onDismissRequest = { deleteId = null }, title = { Text("Удалить разговор?") }, text = {
-        Text("«${deleting.title}»: сообщения и черновик этого разговора будут удалены. Другие разговоры, черновик нового чата, инструменты, автоматизации, API-ключи и исходные файлы сохранятся.")
-    }, confirmButton = { TextButton(onClick = { delete(deleting.id); deleteId = null }) { Text("Удалить") } }, dismissButton = { TextButton(onClick = { deleteId = null }) { Text("Отмена") } })
-    if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("Очистить всю историю?") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Будут удалены все разговоры, их сообщения и черновики. Активный запрос остановится. Фильтр поиска не ограничивает удаление.")
-            Text("Черновик нового чата, инструменты и их данные, автоматизации, API-ключи и исходные файлы сохранятся.")
-        }
-    }, confirmButton = { TextButton(onClick = { clear(); confirmClear = false }) { Text("Очистить всё") } }, dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Отмена") } })
 }
 
 @Composable private fun CapabilitiesPane(controller: com.alpha.assistant.tools.ToolController) {
