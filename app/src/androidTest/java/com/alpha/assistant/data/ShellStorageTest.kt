@@ -1,5 +1,6 @@
 package com.alpha.assistant.data
 
+import android.database.DatabaseUtils
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.*
@@ -25,6 +26,8 @@ class ShellStorageTest {
             store.close()
             store = ShellStore(context, name)
             val restored = store.load()
+            // The app ignores stale rows but must not delete them.
+            assertEquals(2L, DatabaseUtils.queryNumEntries(store.readableDatabase, "settings", "name IN ('theme','mode')"))
             assertEquals("new text", restored.newDraft.text)
             assertEquals("new.txt", restored.newDraft.attachments.single().name)
             assertEquals(chat, restored.conversations.single())

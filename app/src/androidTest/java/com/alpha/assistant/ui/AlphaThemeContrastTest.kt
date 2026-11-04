@@ -1,5 +1,6 @@
 package com.alpha.assistant.ui
 
+import android.util.Log
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.graphics.ColorUtils
@@ -18,6 +19,9 @@ class AlphaThemeContrastTest {
             "onSurfaceVariant/surface" to (s.onSurfaceVariant to s.surface),
             "onSurfaceVariant/surfaceContainer" to (s.onSurfaceVariant to s.surfaceContainer),
             "onSurfaceVariant/surfaceContainerHigh" to (s.onSurfaceVariant to s.surfaceContainerHigh),
+            "onSurfaceVariant/surfaceVariant" to (s.onSurfaceVariant to s.surfaceVariant),
+            "primary/surfaceVariant" to (s.primary to s.surfaceVariant),
+            "primary/primaryContainer" to (s.primary to s.primaryContainer),
             "onPrimary/primary" to (s.onPrimary to s.primary),
             "onPrimaryContainer/primaryContainer" to (s.onPrimaryContainer to s.primaryContainer),
             "onSecondaryContainer/secondaryContainer" to (s.onSecondaryContainer to s.secondaryContainer),
@@ -27,6 +31,7 @@ class AlphaThemeContrastTest {
             "primary/surface" to (s.primary to s.surface),
             "inverseOnSurface/inverseSurface" to (s.inverseOnSurface to s.inverseSurface))) {
             val ratio = ColorUtils.calculateContrast(colors.first.toArgb(), colors.second.toArgb())
+            Log.i("AlphaThemeContrast", "$name $pair $ratio")
             assertTrue("$name $pair is $ratio:1", ratio >= 4.5)
         }
         assertEquals(Color(0xFF63568F), AlphaLightColors.primary)

@@ -1,5 +1,6 @@
 package com.alpha.assistant.data
 
+import android.database.DatabaseUtils
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.*
 import org.junit.Test
@@ -35,6 +36,8 @@ class HistoryStorageTest {
             store.clearHistory()
             store.close(); store = ShellStore(context, name)
             val cleared = store.load()
+            // The app ignores stale rows but must not delete them.
+            assertEquals(2L, DatabaseUtils.queryNumEntries(store.readableDatabase, "settings", "name IN ('theme','mode')"))
             assertTrue(cleared.conversations.isEmpty()); assertNull(cleared.selectedId)
             assertEquals(draft, cleared.newDraft)
         } finally { store.close(); context.deleteDatabase(name) }

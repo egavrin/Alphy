@@ -8,7 +8,7 @@ Package 3A connects the native shell to DeepSeek. It keeps the native sandbox un
 
 `DeepSeekProvider` uses `POST https://api.deepseek.com/chat/completions`, model `deepseek-flash`, non-thinking mode, and streamed SSE responses. It sends the user key as a bearer header. It does not log requests, responses, keys, or image data. It rejects redirects. The implementation requires a terminal stream marker and a successful finish reason. Empty, malformed, truncated, and token-limited responses produce explicit errors. Network operations use IO dispatchers, connection timeouts, and read timeouts.
 
-The composer shows a cloud-processing indicator. Each send or retry requires a confirmation. That confirmation identifies the selected chat, text history scope, image scope, optional search scope, and the user's provider tariff. The app sends at most 20 completed question-and-answer pairs, within a 48,000-character history budget. It sends the current message separately. Previous image bytes and document URIs never enter later requests automatically. Current messages have a 16,000-character limit.
+Each send or retry requires a confirmation. That confirmation identifies the selected chat, text history scope, image scope, optional search scope, and the user's provider tariff. The app sends at most 20 completed question-and-answer pairs, within a 48,000-character history budget. It sends the current message separately. Previous image bytes and document URIs never enter later requests automatically. Current messages have a 16,000-character limit.
 
 Reference contracts checked for this package:
 

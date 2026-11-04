@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import com.alpha.assistant.automations.AutomationDefinition
 import com.alpha.assistant.automations.AutomationRuntime
 import com.alpha.assistant.tools.ToolStore
+import com.alpha.assistant.ui.AlphaTheme
 import com.alpha.assistant.ui.AlphyActivity
 import org.json.JSONArray
 import org.json.JSONObject
@@ -352,7 +353,7 @@ class MedicineReportActivity: AlphyActivity() {
             }
         }}
         val body=snapshot() ?: return finish()
-        setContent {MaterialTheme {Column(Modifier.fillMaxSize().padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+        setContent {AlphaTheme {Surface(Modifier.fillMaxSize()) {Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             Text("Review medicine report",style=MaterialTheme.typography.titleLarge)
             Text("Only explicit records appear. A missing record does not prove missed intake. Select Share after review.")
             Text(body,Modifier.weight(1f).verticalScroll(rememberScrollState()))
@@ -360,6 +361,6 @@ class MedicineReportActivity: AlphyActivity() {
                 try {startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,body),"Share reviewed medicine report"))} catch(_: ActivityNotFoundException) {android.widget.Toast.makeText(this@MedicineReportActivity,"No share app is available.",android.widget.Toast.LENGTH_LONG).show()}
             }}) {Text("Share reviewed report")}
             TextButton(onClick={finish()}) {Text("Close")}
-        }}}
+        }}}}
     }
 }

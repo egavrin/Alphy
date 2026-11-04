@@ -22,7 +22,7 @@ Settings accepts a replacement key without displaying the stored key. A successf
 
 `ui/AlphaShell.kt` owns navigation and the Compose surfaces. The composer, bottom menu, and history remain visible without chat scrolling. The app uses safe drawing and IME insets. Light and dark follow the system. `AlphaTheme` uses dynamic color on API 31 and later and a fixed palette from `#7652DF` on API 29 and 30. The layout uses available window width. An open tools surface shares the window with chat at 640 dp or greater. A smaller window uses one pane. Navigation and draft state survive activity recreation through saved UI state and the ViewModel.
 
-The tools surface is an empty library until a later package supplies real tools. It currently demonstrates the adaptive pane structure without fake artifacts or calendar entries. Future tool rendering must retain the 640 dp split behavior and document any hinge avoidance requirements. Context, speech, and automation surfaces state their actual status. The composer now shows a cloud indicator.
+The tools surface is an empty library until a later package supplies real tools. It currently demonstrates the adaptive pane structure without fake artifacts or calendar entries. Future tool rendering must retain the 640 dp split behavior and document any hinge avoidance requirements. Context, speech, and automation surfaces state their actual status.
 
 ## Focused verification
 
