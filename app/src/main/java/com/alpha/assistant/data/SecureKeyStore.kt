@@ -10,16 +10,22 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Errors preserve ciphertext. A failed read must never create a replacement key. */
+/** Errors preserve ciphertext. A failed read must never create a replacement key. The consent record is written and removed with the key. */
 class SecureKeyStore(context: Context, name: String = "alpha_credentials", private val alias: String = "alpha.deepseek.v1") {
     private val preferences = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+    // The user saves a key with «Согласиться и сохранить», so one commit stores the key and the consent.
     @Synchronized fun save(value: String): Result<Unit> = runCatching {
         require(value.isNotBlank()) { "API key cannot be blank" }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key(create = true)) }
         val ciphertext = cipher.doFinal(value.trim().toByteArray(Charsets.UTF_8))
         check(preferences.edit().putString("ciphertext", Base64.encodeToString(ciphertext, Base64.NO_WRAP))
-            .putString("iv", Base64.encodeToString(cipher.iv, Base64.NO_WRAP)).commit()) { "Credential write failed" }
+            .putString("iv", Base64.encodeToString(cipher.iv, Base64.NO_WRAP)).putString("consent", "1").commit()) { "Credential write failed" }
     }
+    @Synchronized fun recordConsent(): Result<Unit> = runCatching {
+        check(preferences.contains("ciphertext") && preferences.contains("iv")) { "No stored credential" }
+        check(preferences.edit().putString("consent", "1").commit()) { "Consent write failed" }
+    }
+    @Synchronized fun consented(): Boolean = preferences.getString("consent", null) == "1"
     @Synchronized fun read(): Result<String?> = runCatching {
         val ciphertext = preferences.getString("ciphertext", null)
         val iv = preferences.getString("iv", null)
@@ -31,7 +37,7 @@ class SecureKeyStore(context: Context, name: String = "alpha_credentials", priva
         String(cipher.doFinal(Base64.decode(ciphertext, Base64.NO_WRAP)), Charsets.UTF_8).also { check(it.isNotBlank()) }
     }
     @Synchronized fun clear(): Result<Unit> = runCatching {
-        check(preferences.edit().remove("ciphertext").remove("iv").commit()) { "Credential removal failed" }
+        check(preferences.edit().remove("ciphertext").remove("iv").remove("consent").commit()) { "Credential removal failed" }
     }
     private fun key(create: Boolean): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

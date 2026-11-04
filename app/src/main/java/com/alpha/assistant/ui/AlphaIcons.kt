@@ -1,10 +1,14 @@
 package com.alpha.assistant.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -38,12 +42,20 @@ internal enum class Glyph(val path: String) {
     Shield("M12 3L19 6V11C19 15.5 16 19.5 12 21C8 19.5 5 15.5 5 11V6Z")
 }
 
-@Composable internal fun AlphaIcon(glyph: Glyph, modifier: Modifier = Modifier, accent: Boolean = false) {
-    val color = if (accent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+@Composable internal fun AlphaIcon(glyph: Glyph, modifier: Modifier = Modifier, accent: Boolean = false,
+    color: Color = if (accent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) {
     Canvas(modifier.size(21.dp)) {
         val path = PathParser().parsePathString(glyph.path).toPath()
         scale(size.width / 24f, size.height / 24f, pivot = androidx.compose.ui.geometry.Offset.Zero) {
             drawPath(path, color, style = Stroke(1.7f, cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
+    }
+}
+
+/** A status shows with an icon, a color, and text together. The icon takes the text color, so it keeps the contrast of the text on any container. */
+@Composable internal fun StatusLine(glyph: Glyph, color: Color, text: String, modifier: Modifier = Modifier) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        AlphaIcon(glyph, color = color)
+        Text(text, color = color)
     }
 }

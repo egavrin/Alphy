@@ -23,7 +23,7 @@ class MainActivity : AlphyActivity() {
         }
     }
     private fun receiveEntry(intent: Intent) {
-        if(intent.action in listOf(Intent.ACTION_MAIN,Intent.ACTION_ASSIST,Intent.ACTION_VIEW)) model.openSurface(intent.getStringExtra("tool_id"))
+        if(intent.action in listOf(Intent.ACTION_MAIN,Intent.ACTION_ASSIST,Intent.ACTION_VIEW)) model.openSurface(intent.getStringExtra("tool_id"),intent.getBooleanExtra("settings",false))
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); receiveEntry(intent) }
     override fun onResume() { super.onResume(); model.tools.reload(); com.alpha.assistant.automations.AutomationRuntime.refresh(this) }

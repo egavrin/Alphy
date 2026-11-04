@@ -260,15 +260,47 @@ internal class ShellRobot(fixture: String) {
         waitUntil { allow(diagnostics.freshRoot()); granted() }
     }
     fun edit(label: String, value: String) {
-        val node = field(label)
-        assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
+        enter(label, value)
+        waitUntil { field(label).text?.toString() == value }
+    }
+    // A password field shows dots, so this helper does not compare the text.
+    fun enter(label: String, value: String) {
+        assertTrue(field(label).performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
         }))
-        waitUntil { field(label).text?.toString() == value }
+        automation.waitForIdle(100, 3000)
+    }
+    /** Scrolls the first scrollable node of the window forward. A refused scroll returns false. */
+    fun scrollForward(): Boolean {
+        val scrolled = scrollable(diagnostics.freshRoot())?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) == true
+        if (scrolled) awaitScrollEnd()
+        return scrolled
+    }
+    /** A node outside the scroll viewport has no accessibility node, so this helper scrolls forward until [label] shows. */
+    fun reveal(label: String): AccessibilityNodeInfo {
+        var node = find(label)
+        repeat(10) { if (node == null) { scrollForward(); node = find(label) } }
+        if (node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id) == true) awaitScrollEnd()
+        return waitFor(label)
     }
     fun shell(command: String): String =
         automation.executeShellCommand(command).use { ParcelFileDescriptor.AutoCloseInputStream(it).bufferedReader().readText().trim() }
 
+    private fun scrollable(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (node == null || node.isScrollable) return node
+        repeat(node.childCount) { scrollable(node.getChild(it))?.let { return it } }
+        return null
+    }
+    // A scroll action returns before its animation starts, and waitForIdle can return before the content moves.
+    // After two frames the animation runs, so the scroll is at its end when two reads of the content bounds agree.
+    private fun awaitScrollEnd() {
+        awaitFrames(2)
+        var last: List<Rect>? = null
+        waitUntil {
+            val content = scrollable(diagnostics.freshRoot())?.let { node -> List(node.childCount) { index -> Rect().also { node.getChild(index)?.getBoundsInScreen(it) } } }
+            (content == last).also { last = content }
+        }
+    }
     // A library label comes from the activity resources, which have the Russian app locale.
     private fun closeDrawerLabel(scenario: ActivityScenario<*>): String {
         var label = ""

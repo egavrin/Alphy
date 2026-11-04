@@ -21,6 +21,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.progressBarRangeInfo
@@ -28,6 +29,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.alpha.assistant.R
 import com.alpha.assistant.voice.VoiceSession
 
 @Composable fun VoiceVisibility(voice: VoiceSession) {
@@ -124,13 +126,15 @@ import com.alpha.assistant.voice.VoiceSession
     val voice = model.voice
     val start = rememberVoiceStart(model, oneShot = false)
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(vertical = 12.dp)) {
-        Text("Непрерывный голосовой сеанс", style = MaterialTheme.typography.titleMedium)
-        Text("T-one распознаёт русскую речь на устройстве. Проверьте текст и нажмите «Отправить». Silero озвучит ответ, затем микрофон включится снова. Кнопка «Остановить сеанс» завершает работу.")
-        Text("Модели в приложении: T-one — 144 МБ, Silero Xenia — 137 МБ. Перед установкой проверяются контрольные суммы SHA-256. Требуется ARM64.")
-        Text("Silero v5.5 Xenia разрешён только для личного некоммерческого использования. T-one: Apache-2.0. Лицензии моделей и библиотек включены в приложение.")
-        if (voice.permissionRequired) MicrophonePermissionGuidance(voice, start) else if (voice.status.isNotBlank()) Text(voice.status)
+        Text(stringResource(R.string.voice_session), style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.voice_session_text))
+        Text(stringResource(R.string.voice_models))
+        Text(stringResource(R.string.voice_licenses))
+        if (voice.permissionRequired) MicrophonePermissionGuidance(voice, start)
+        else if (voice.status.isNotBlank()) StatusLine(Glyph.Mic, MaterialTheme.colorScheme.onSurfaceVariant, voice.status)
         if (voice.partial.isNotBlank()) Text(voice.partial)
-        if (voice.active) Button(onClick = { voice.stop() }) { Text("Остановить сеанс") }
-        else Button(onClick = start) { Text("Начать непрерывный сеанс") }
+        // A tonal button keeps the key action of «Настройки» as the one primary action.
+        if (voice.active) FilledTonalButton(onClick = { voice.stop() }) { Text(stringResource(R.string.voice_stop)) }
+        else FilledTonalButton(onClick = start) { Text(stringResource(R.string.voice_start)) }
     }
 }

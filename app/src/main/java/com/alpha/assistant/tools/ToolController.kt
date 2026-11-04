@@ -33,6 +33,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     var revisions by mutableStateOf<List<ToolRevision>>(emptyList()); private set
     var busy by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
+    var errorCode by mutableStateOf<String?>(null); private set // the CloudFailure code of error
     var requestPrompt by mutableStateOf(""); private set
     fun preparePrompt(text: String) { requestPrompt = text; select(null) }
     @Volatile private var closing = false
@@ -42,7 +43,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     fun select(id: String?) { selectedId = id; selectedDraftId = null; run { refresh() } }
     fun reload() { run { refresh() } }
     fun selectDraft(id: String) { selectedDraftId = id; selectedId = drafts.find { it.id == id }?.toolId; run { refresh() } }
-    fun clearError() { error = null }
+    fun clearError() { error = null; errorCode = null }
     fun generate(prompt: String, toolId: String?, conversationId: String?, images: List<Attachment>) {
         run {
             val draft = engine.createDraft(prompt,toolId,conversationId)
@@ -69,7 +70,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         key: String, images: List<String>, call: CloudSession, cancelRequest: () -> Unit,
         prepared: suspend () -> Unit, canCommit: () -> Boolean, committed: (ToolRecord) -> Unit) {
         if(busy || closing) throw CloudFailure("widget_busy","Another tool operation is active. Retry after it completes.")
-        busy = true; error = null; automaticCancel = cancelRequest; automaticJob = currentCoroutineContext()[Job]
+        busy = true; error = null; errorCode = null; automaticCancel = cancelRequest; automaticJob = currentCoroutineContext()[Job]
         var accepted = false
         var created = false
         try {
@@ -90,6 +91,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                     } catch (_: Exception) {
                         error = if(accepted) "The widget is saved. Reopen its details to refresh the display."
                             else "The widget request stopped. Existing saved tools are unchanged."
+                        errorCode = null
                     }
                 }
             } finally { busy = false; automaticJob = null }
@@ -103,7 +105,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         session.set(call)
         try {
             currentCoroutineContext().ensureActive()
-            val key = keys.read().getOrThrow() ?: error("Добавь API-ключ DeepSeek в настройках")
+            val key = keys.cloudKey(app)
             val data = images.map {
                 currentCoroutineContext().ensureActive()
                 readImage(it)
@@ -265,11 +267,14 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     }
     private fun run(block: suspend () -> Unit) {
         if(busy || closing) return
-        busy = true; error = null
+        busy = true; error = null; errorCode = null
         job = scope.launch {
             try { withContext(Dispatchers.IO) { block() } }
             catch(cancel: CancellationException) { throw cancel }
-            catch(failure: Exception) { error = (failure as? CloudFailure)?.message ?: failure.message?.takeIf { message -> message.any { it in 'А'..'я' || it == 'ё' || it == 'Ё' } }?.take(240) ?: "Не удалось выполнить действие инструмента. Сохранённые данные доступны." }
+            catch(failure: Exception) {
+                error = (failure as? CloudFailure)?.message ?: failure.message?.takeIf { message -> message.any { it in 'А'..'я' || it == 'ё' || it == 'Ё' } }?.take(240) ?: "Не удалось выполнить действие инструмента. Сохранённые данные доступны."
+                errorCode = (failure as? CloudFailure)?.code
+            }
             finally {
                 if (!closing) withContext(NonCancellable) { runCatching { withContext(Dispatchers.IO) { refresh(deliverResults = false) } } }
                 busy = false
@@ -289,7 +294,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         if (store.databaseName == "alpha-tools.db") com.alpha.assistant.surfaces.ToolWidgets.updateAll(app)
         withContext(Dispatchers.Main) {
             tools = loaded; drafts = pending; dependentRules = dependencies; revisions = history; effects = actions; grants = allowed
-            if(selectedId != null && loaded.none { it.id == selectedId }) error = "Этот инструмент недоступен. Выбери другой сохранённый инструмент."
+            if(selectedId != null && loaded.none { it.id == selectedId }) { error = "Этот инструмент недоступен. Выбери другой сохранённый инструмент."; errorCode = null }
         }
     }
 }

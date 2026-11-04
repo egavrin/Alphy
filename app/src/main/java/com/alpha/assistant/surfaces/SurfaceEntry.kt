@@ -1,7 +1,6 @@
 package com.alpha.assistant.surfaces
 
 import android.app.PendingIntent
-import android.app.role.RoleManager
 import android.appwidget.AppWidgetManager
 import android.content.*
 import android.content.pm.ShortcutInfo
@@ -20,10 +19,6 @@ object SurfaceEntry {
     fun chatIntent(context: Context) = Intent(context,MainActivity::class.java).apply {
         action = Intent.ACTION_ASSIST
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-    }
-    fun requestAssistant(context: Context): Intent? {
-        val roles = context.getSystemService(RoleManager::class.java)
-        return if(roles.isRoleAvailable(RoleManager.ROLE_ASSISTANT)) roles.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT) else null
     }
     private fun statusPreferences(context: Context) = context.getSharedPreferences("alpha-pin-requests",Context.MODE_PRIVATE)
     fun status(context: Context, token: String) = statusPreferences(context).getString(token,"Not requested") ?: "Not requested"

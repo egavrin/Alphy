@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.AlarmManager
 import android.app.NotificationManager
 import android.app.role.RoleManager
+import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
 import android.content.ContextWrapper
@@ -20,11 +21,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.alpha.assistant.R
+import com.alpha.assistant.ui.Glyph
+import com.alpha.assistant.ui.StatusLine
 
 private fun Context.activity(): Activity? = when (this) {
     is Activity -> this
@@ -135,6 +140,25 @@ private fun Context.activity(): Activity? = when (this) {
     }
     Text("Выдача доступа не запускает микрофон, камеру, чтение календаря или сценарий. Файлы и фотографии выбираются в системном окне без доступа ко всей медиатеке.", style = MaterialTheme.typography.bodySmall)
     message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+}
+
+/** The assistant role is not requestable, so the row opens the Android assistant settings and tells the user to pick Alphy there. */
+@Composable fun AssistantSettingsRow() {
+    val context = LocalContext.current
+    val revision = platformAccessRevision()
+    val selected = remember(revision) { context.getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true }
+    var openFailed by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.assistant_title), style = MaterialTheme.typography.titleMedium)
+        if (selected) StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(R.string.assistant_selected))
+        else StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.assistant_not_selected))
+        Text(stringResource(R.string.assistant_pick_hint))
+        TextButton(onClick = {
+            openFailed = try { context.startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)); false } catch (_: ActivityNotFoundException) { true }
+        }) { Text(stringResource(R.string.assistant_open)) }
+        if (openFailed) StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.assistant_open_failed))
+        Text(stringResource(R.string.assistant_tile_hint))
+    }
 }
 
 @Composable private fun AccessSettingCard(title: String, status: String, action: String, open: () -> Unit) {

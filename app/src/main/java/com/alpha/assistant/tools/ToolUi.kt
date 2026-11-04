@@ -11,10 +11,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.alpha.assistant.R
+import com.alpha.assistant.cloud.KEY_ERRORS
 import com.alpha.assistant.data.Attachment
 import com.alpha.assistant.ui.AlphaIcon
 import com.alpha.assistant.ui.Glyph
@@ -46,7 +49,7 @@ import com.alpha.assistant.ui.Glyph
 }
 
 @Composable fun ToolsPane(controller: ToolController, conversationId: String?, chatText: String,
-    images: List<Attachment>, immersive: Boolean=false, exitImmersive: () -> Unit = {}, close: () -> Unit) {
+    images: List<Attachment>, immersive: Boolean=false, exitImmersive: () -> Unit = {}, settings: () -> Unit, close: () -> Unit) {
     val draft=controller.drafts.find {it.id == controller.selectedDraftId}
     val tool=controller.tools.find {it.id == (controller.selectedId ?: draft?.toolId)}
     var requests by rememberSaveable(controller.requestPrompt) {mutableStateOf(mapOf("new" to controller.requestPrompt))}
@@ -67,7 +70,7 @@ import com.alpha.assistant.ui.Glyph
         sendImages=false
     }
     if(tool != null || draft != null) {
-        FocusedToolPane(controller,tool,draft,prompt,edit,submit,{archiveConfirm=true},immersive,exitImmersive,close)
+        FocusedToolPane(controller,tool,draft,prompt,edit,submit,{archiveConfirm=true},immersive,exitImmersive,settings,close)
     } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).semantics {contentDescription="Mini-app library content"}.padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
         Text("Create a mini-app",style=MaterialTheme.typography.titleLarge)
         Text("Describe what you need. Preview the result before you apply it.",color=MaterialTheme.colorScheme.onSurfaceVariant)
@@ -79,7 +82,11 @@ import com.alpha.assistant.ui.Glyph
         Text("DeepSeek receives the request and selected images. Device actions need separate access and confirmation.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
         Button(onClick=submit,enabled=prompt.isNotBlank() && prompt.length <= 16000 && !controller.busy,modifier=Modifier.heightIn(min=48.dp)) {Text("Create preview")}
         if(controller.busy) {LinearProgressIndicator(Modifier.fillMaxWidth()); TextButton(onClick=controller::cancel) {Text("Cancel")}}
-        controller.error?.let {Text(it,color=MaterialTheme.colorScheme.error); TextButton(onClick=controller::clearError) {Text("Dismiss")}}
+        controller.error?.let {
+            Text(it,color=MaterialTheme.colorScheme.error)
+            if(controller.errorCode in KEY_ERRORS) TextButton(onClick=settings) {Text(stringResource(R.string.open_settings))}
+            TextButton(onClick=controller::clearError) {Text("Dismiss")}
+        }
         if(controller.drafts.isNotEmpty()) Text("Drafts",style=MaterialTheme.typography.titleMedium)
         controller.drafts.forEach {pending -> TextButton(onClick={controller.selectDraft(pending.id)},enabled=!controller.busy) {Text(pending.prompt.take(100))}}
         Text("Library",style=MaterialTheme.typography.titleLarge)
@@ -109,7 +116,7 @@ import com.alpha.assistant.ui.Glyph
 
 @OptIn(ExperimentalMaterial3Api::class,ExperimentalLayoutApi::class)
 @Composable private fun FocusedToolPane(controller: ToolController, tool: ToolRecord?, draft: ToolDraft?,
-    prompt: String, edit: (String) -> Unit, submit: () -> Unit, archive: () -> Unit, immersive: Boolean, exitImmersive: () -> Unit, close: () -> Unit) {
+    prompt: String, edit: (String) -> Unit, submit: () -> Unit, archive: () -> Unit, immersive: Boolean, exitImmersive: () -> Unit, settings: () -> Unit, close: () -> Unit) {
     val navigationContext=androidx.compose.ui.platform.LocalContext.current
     val navigationLifecycle=androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     val navigationForeground = { navigationLifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) && !com.alpha.assistant.surfaces.ToolWidgets.isLocked(navigationContext) }
@@ -168,9 +175,13 @@ import com.alpha.assistant.ui.Glyph
         }
         controller.error?.let {message ->
             Surface(color=MaterialTheme.colorScheme.errorContainer) {
-                Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically) {
-                    Text(message,Modifier.weight(1f),style=MaterialTheme.typography.bodySmall)
-                    TextButton(onClick=controller::clearError) {Text("Dismiss")}
+                Column(Modifier.fillMaxWidth().padding(horizontal=16.dp)) {
+                    Row(verticalAlignment=Alignment.CenterVertically) {
+                        Text(message,Modifier.weight(1f),style=MaterialTheme.typography.bodySmall)
+                        TextButton(onClick=controller::clearError) {Text("Dismiss")}
+                    }
+                    // A row with both buttons leaves too little width for the message on a phone.
+                    if(controller.errorCode in KEY_ERRORS) TextButton(onClick=settings) {Text(stringResource(R.string.open_settings))}
                 }
             }
         }

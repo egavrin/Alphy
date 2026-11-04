@@ -237,6 +237,8 @@ class ToolWorkflowTest {
         lateinit var model: com.alpha.assistant.ui.ShellViewModel
         com.alpha.assistant.CloudTestActivity.factory = { application -> com.alpha.assistant.ui.ShellViewModel(application,provider,store,keys).also { model = it } }
         val scenario = androidx.test.core.app.ActivityScenario.launch(com.alpha.assistant.CloudTestActivity::class.java)
+        // A fresh root holds no cached node of an entry that a transition covers or removes.
+        val diagnostics = com.alpha.assistant.diagnostics.UiFailureDiagnostics("tool-ui")
         fun waitUntil(condition: () -> Boolean) {
             val deadline = android.os.SystemClock.uptimeMillis()+12000
             while(android.os.SystemClock.uptimeMillis()<deadline) { if(condition()) return; android.os.SystemClock.sleep(50) }
@@ -258,7 +260,7 @@ class ToolWorkflowTest {
             var found: android.view.accessibility.AccessibilityNodeInfo? = null
             var direction=android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
             waitUntil {
-                val root=instrumentation.uiAutomation.rootInActiveWindow
+                val root=diagnostics.freshRoot()
                 found=find(root,text)
                 if(found?.isVisibleToUser != true) found?.performAction(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
                 if(found?.isVisibleToUser != true) {
@@ -274,7 +276,7 @@ class ToolWorkflowTest {
             waitUntil { !model.tools.busy }
             var direction = android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
             waitUntil {
-                val root = instrumentation.uiAutomation.rootInActiveWindow
+                val root = diagnostics.freshRoot()
                 var node = find(root,text)
                 if(node == null) {
                     if(!scroll(root,direction)) direction = if(direction == android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
@@ -322,7 +324,7 @@ class ToolWorkflowTest {
                 if(node == null) return ""
                 return "[text=${node.text}, description=${node.contentDescription}, enabled=${node.isEnabled}, scrollable=${node.isScrollable}, actions=${node.actionList.map { it.id }}]" + (0 until node.childCount).joinToString("") { dump(node.getChild(it)) }
             }
-            throw AssertionError("${failure.message}; tool saved=${model.tools.tools.map { it.saved }}; error=${model.tools.error}; tree=${dump(instrumentation.uiAutomation.rootInActiveWindow)}",failure)
+            throw AssertionError("${failure.message}; tool saved=${model.tools.tools.map { it.saved }}; error=${model.tools.error}; tree=${dump(diagnostics.freshRoot())}",failure)
         } finally {
             scenario.close(); com.alpha.assistant.CloudTestActivity.factory = null
             android.os.SystemClock.sleep(150)

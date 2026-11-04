@@ -1,11 +1,13 @@
 package com.alpha.assistant.ui
 
 import android.app.Application
+import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.alpha.assistant.R
 import com.alpha.assistant.data.*
 import com.alpha.assistant.cloud.*
 import kotlinx.coroutines.currentCoroutineContext
@@ -58,8 +60,10 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         com.alpha.assistant.tools.ToolStore(application, if (store.databaseName == "alpha.db") "alpha-tools.db" else "${store.databaseName}-tools.db"))
     var surfaceSequence by mutableStateOf(0); private set
     var surfaceToolId by mutableStateOf<String?>(null); private set
-    fun openSurface(toolId: String?) {
+    var surfaceSettings by mutableStateOf(false); private set
+    fun openSurface(toolId: String?, settings: Boolean = false) {
         surfaceToolId = toolId
+        surfaceSettings = settings
         surfaceSequence++
         tools.select(toolId)
     }
@@ -67,7 +71,8 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     var loading by mutableStateOf(true); private set
     var loadFailed by mutableStateOf(false); private set
     var saveFailed by mutableStateOf(false); private set
-    var keyStatus by mutableStateOf("Проверка ключа…"); private set
+    var keyStatus by mutableStateOf(KeyStatus.Checking); private set
+    @get:StringRes var keyFailure by mutableStateOf<Int?>(null); private set
     var keyBusy by mutableStateOf(false); private set
     var requestError by mutableStateOf<String?>(null); private set
     var attachmentBusy by mutableStateOf(false); private set
@@ -194,6 +199,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 current.conversations.forEach(store::saveConversation)
                 store.saveNewDraft(current.newDraft)
                 store.saveSetting("selected", current.selectedId.orEmpty())
+                store.saveSetting("userName", current.userName)
                 store.writableDatabase.setTransactionSuccessful()
             } finally { store.writableDatabase.endTransaction() }
         }
@@ -204,6 +210,12 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         voice.stop()
         snapshot = snapshot.copy(selectedId = id)
         writes.trySend { store.saveSetting("selected", id.orEmpty()) }
+    }
+    fun setUserName(value: String) {
+        // A cut between the two halves of a surrogate pair would save half of an emoji.
+        val name = value.take(40).let { if (it.lastOrNull()?.isHighSurrogate() == true) it.dropLast(1) else it }
+        snapshot = snapshot.copy(userName = name)
+        writes.trySend { store.saveSetting("userName", name) }
     }
     fun editDraft(draft: Draft) {
         if(active?.weatherDraft != null && draft != snapshot.draft) cancelRequest()
@@ -330,13 +342,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         request.job = viewModelScope.launch {
             try {
                 if (!saved.await()) throw CloudFailure("storage", "Запрос не отправлен: не удалось сохранить историю. Повторите сохранение.")
-                val key = withContext(Dispatchers.IO) {
-                    val result = keys.read()
-                    if (result.isFailure) throw CloudFailure("key_read", "Ключ недоступен. Введите новый ключ в настройках. Сохранённые данные не удалены.")
-                    (result.getOrNull() ?: throw CloudFailure("key_missing", "Добавьте API-ключ DeepSeek в настройках и повторите запрос.")).also {
-                        if (it.any { char -> char.isWhitespace() || char.isISOControl() }) throw CloudFailure("key_format", "API-ключ содержит пробелы или переносы строк. Замените ключ в настройках.")
-                    }
-                }
+                val key = withContext(Dispatchers.IO) { keys.cloudKey(getApplication()) }
                 val images = withContext(Dispatchers.IO) {
                     if (user.attachments.size > ImageInput.MAX_IMAGES) throw CloudFailure("image_count", "Можно отправить не более 4 изображений")
                     user.attachments.filter { it.contextText == null }.map { ImageInput.dataUrl(getApplication<Application>().contentResolver, it) }
@@ -467,27 +473,37 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     private fun replace(conversation: Conversation) {
         snapshot = snapshot.copy(conversations = (snapshot.conversations.filterNot { it.id == conversation.id } + conversation).sortedByDescending { it.updatedAt })
     }
-    fun saveKey(value: String, done: (Boolean) -> Unit) {
+    fun saveKey(value: String, done: (Boolean) -> Unit) = keyAction(R.string.key_save_failed, { keys.save(value) }, done)
+    fun acceptConsent() = keyAction(R.string.consent_failed, keys::recordConsent)
+    // A running request keeps its key in memory, so the cloud work stops before the key goes.
+    fun clearKey() {
+        if (keyBusy) return
+        cancelRequest()
+        tools.cancel()
+        keyAction(R.string.key_delete_failed, keys::clear)
+    }
+    private fun keyAction(@StringRes failure: Int, action: () -> Result<Unit>, done: (Boolean) -> Unit = {}) {
         if (keyBusy) return
         keyBusy = true
+        keyFailure = null
         viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { keys.save(value) }
-            keyStatus = if (result.isSuccess) "Ключ сохранён на устройстве" else "Не удалось сохранить ключ. Сохранённые данные не удалены."
+            val result = withContext(Dispatchers.IO) { action() }
+            if (result.isSuccess) refreshKey() else keyFailure = failure
             keyBusy = false
             done(result.isSuccess)
         }
     }
-    fun clearKey() {
-        if (keyBusy) return
-        keyBusy = true
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { keys.clear() }
-            keyStatus = if (result.isSuccess) "Ключ не задан" else "Не удалось удалить ключ"
-            keyBusy = false
+    private suspend fun refreshKey() {
+        keyStatus = withContext(Dispatchers.IO) {
+            val result = keys.read()
+            when {
+                result.isFailure -> KeyStatus.Unreadable
+                result.getOrNull() == null -> KeyStatus.Missing
+                !keys.consented() -> KeyStatus.NeedsConsent
+                else -> KeyStatus.Ready
+            }
         }
     }
-    private suspend fun refreshKey() {
-        val result = withContext(Dispatchers.IO) { keys.read() }
-        keyStatus = when { result.isFailure -> "Ключ недоступен. Зашифрованные данные сохранены."; result.getOrNull() == null -> "Ключ не задан"; else -> "Ключ сохранён на устройстве" }
-    }
 }
+
+enum class KeyStatus { Checking, Missing, NeedsConsent, Ready, Unreadable }

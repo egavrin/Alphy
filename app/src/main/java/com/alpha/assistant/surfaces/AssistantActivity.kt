@@ -67,7 +67,8 @@ class AssistantActivity : AlphyActivity() {
                                 TextButton(onClick = { finish() }) { Text("Отмена") }
                             } else {
                                 val model = remember { AssistantChat.model(application) }
-                                CompactAssistant(model,invocation,{ startActivity(SurfaceEntry.chatIntent(this@AssistantActivity).putExtra("tool_id",model.tools.selectedId)); finish() },{ finish() })
+                                CompactAssistant(model,invocation,full = { startActivity(SurfaceEntry.chatIntent(this@AssistantActivity).putExtra("tool_id",model.tools.selectedId)); finish() },
+                                    settings = { startActivity(SurfaceEntry.chatIntent(this@AssistantActivity).putExtra("settings",true)); finish() },dismiss = { finish() })
                             }
                         }
                     }
@@ -84,7 +85,7 @@ class AssistantActivity : AlphyActivity() {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun CompactAssistant(model: ShellViewModel, invocation: String?, full: () -> Unit, dismiss: () -> Unit) {
+@Composable private fun CompactAssistant(model: ShellViewModel, invocation: String?, full: () -> Unit, settings: () -> Unit, dismiss: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val capture = AssistantCapture.current?.takeIf { it.id == invocation }
@@ -119,7 +120,7 @@ class AssistantActivity : AlphyActivity() {
         }
         if(model.loading) Box(Modifier.weight(1f).fillMaxWidth(),contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         else if(model.loadFailed) Column(Modifier.padding(24.dp)) { Text("Не удалось открыть чат. Сохранённые данные не удалены."); Button(onClick = model::load) { Text("Повторить") } }
-        else Box(Modifier.weight(1f)) { ChatPane(model,model.snapshot.selected,full,{ sheet = "context" }) { full() } }
+        else Box(Modifier.weight(1f)) { ChatPane(model,model.snapshot.selected,tools = full,context = { sheet = "context" },automation = { full() },settings = settings) }
     }
     model.requestError?.let { error ->
         AlertDialog(onDismissRequest = model::clearRequestError,title = { Text("Вложение или запрос недоступны") },text = { Text(error) },

@@ -15,7 +15,7 @@ data class Message(val id: String, val role: String, val text: String, val creat
     val searchStatus: String = "", val sources: List<Source> = emptyList(), val error: String = "", val errorCode: String = "",
     val toolId: String? = null, val toolRevision: Int? = null, val toolOperationId: String? = null)
 data class Conversation(val id: String, val title: String, val createdAt: Long, val updatedAt: Long, val draft: Draft = Draft(), val messages: List<Message> = emptyList())
-data class ShellSnapshot(val conversations: List<Conversation> = emptyList(), val selectedId: String? = null, val newDraft: Draft = Draft()) {
+data class ShellSnapshot(val conversations: List<Conversation> = emptyList(), val selectedId: String? = null, val newDraft: Draft = Draft(), val userName: String = "") {
     val selected: Conversation? get() = conversations.find { it.id == selectedId }
     val draft: Draft get() = selected?.draft ?: newDraft
 }
@@ -55,7 +55,7 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
         if (needsIdentity) {
             if (newDraftJson == null) saveNewDraft(newDraft) else saveSetting("newDraft", newDraftJson.toString())
         }
-        return ShellSnapshot(conversations, settings["selected"]?.takeIf { id -> conversations.any { it.id == id } }, newDraft)
+        return ShellSnapshot(conversations, settings["selected"]?.takeIf { id -> conversations.any { it.id == id } }, newDraft, settings["userName"] ?: "")
     }
     fun saveConversation(conversation: Conversation) {
         writableDatabase.insertWithOnConflict("conversations", null, ContentValues().apply {

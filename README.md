@@ -4,13 +4,13 @@ Alphy is an Android assistant with cloud chat, local voice processing, generated
 
 ## Features
 
-- Chat with DeepSeek using your own API key. Each request requires confirmation before content is sent.
+- Chat with DeepSeek using your own API key. You give consent one time, at key entry. «Настройки» show the consent text again.
 - Create interactive tools with native controls and isolated JavaScript execution.
 - Use widgets and approved device capabilities, including notifications and calendar access.
 - Configure local automations for schedules, location, charging, and selected notifications.
 - Use T-one for local speech recognition and Silero for continuous-session speech replies when the required model files are present.
 
-Alphy stores conversations and tool data on the device. It stores the provider key with Android Keystore. Cloud requests send the confirmed content to DeepSeek and can incur provider charges. Device actions and permissions require user approval.
+Alphy stores conversations and tool data on the device. It stores the provider key with Android Keystore. Cloud requests send the content that the consent text names to DeepSeek and can incur provider charges. «Удалить ключ» stops all cloud requests. Device actions and permissions require user approval.
 
 ## Requirements
 

@@ -18,7 +18,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -32,6 +31,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import android.graphics.BitmapFactory
 import androidx.compose.ui.platform.LocalUriHandler
 import com.alpha.assistant.cloud.ImageInput
+import com.alpha.assistant.cloud.KEY_ERRORS
 import com.alpha.assistant.cloud.validSourceUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -43,8 +43,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -75,7 +73,11 @@ import java.util.Date
     LaunchedEffect(model.surfaceSequence) {
         // A recreation consumes no entry, because consumedSurface is saved, so a rotation keeps an open drawer open.
         if (model.surfaceSequence > 0 && model.surfaceSequence != consumedSurface) {
-            destination = if (model.surfaceToolId != null) ShellDestination.MiniApps else null
+            destination = when {
+                model.surfaceSettings -> ShellDestination.Settings
+                model.surfaceToolId != null -> ShellDestination.MiniApps
+                else -> null
+            }
             contextSheet = false
             consumedSurface = model.surfaceSequence
             drawerState.snapTo(DrawerValue.Closed)
@@ -109,7 +111,7 @@ import java.util.Date
                 Button(onClick = model::load) { Text(stringResource(R.string.retry)) }
             }
         } else ModalNavigationDrawer({
-            ShellDrawerSheet(drawerState, snapshot.conversations, snapshot.selectedId, destination, stringResource(R.string.profile),
+            ShellDrawerSheet(drawerState, snapshot.conversations, snapshot.selectedId, destination, snapshot.userName.ifBlank { stringResource(R.string.profile) },
                 { navigate(it); closeDrawer() }, { model.select(it); navigate(null); closeDrawer() }) { model.select(null); navigate(null); closeDrawer() }
         }, drawerState = drawerState, gesturesEnabled = drawerState.isOpen || backStack.last() !is ShellDestination) {
             val focusedMiniApp=destination == ShellDestination.MiniApps && (model.tools.selectedId != null || model.tools.selectedDraftId != null)
@@ -123,7 +125,9 @@ import java.util.Date
                 if (model.saveFailed && !immersive) {
                     Surface(color = MaterialTheme.colorScheme.errorContainer) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(stringResource(R.string.save_failed), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                            ProvideTextStyle(MaterialTheme.typography.bodySmall) {
+                                StatusLine(Glyph.Close, MaterialTheme.colorScheme.onErrorContainer, stringResource(R.string.save_failed), Modifier.weight(1f))
+                            }
                             TextButton(onClick = model::retrySave) { Text(stringResource(R.string.retry)) }
                         }
                     }
@@ -133,8 +137,10 @@ import java.util.Date
                     // A session continues while the shell shows a composer or VoiceControls.
                     val voiceShown = backStack.last() !is ShellDestination || split || backStack.last() == ShellDestination.Settings
                     LaunchedEffect(voiceShown) { if (!voiceShown) model.voice.stop() }
-                    @Composable fun ChatEntry(conversation: Conversation?) = ChatPane(model, conversation, { navigate(ShellDestination.MiniApps) }, { contextSheet = true }) { request -> automationRequest=request; navigate(ShellDestination.Automations) }
-                    @Composable fun ToolsEntry() = com.alpha.assistant.tools.ToolsPane(model.tools, snapshot.selectedId, snapshot.draft.text, snapshot.draft.attachments.filter { it.contextText == null },immersive=immersive,exitImmersive={immersiveExited=true}) { navigate(null) }
+                    @Composable fun ChatEntry(conversation: Conversation?) = ChatPane(model, conversation, { navigate(ShellDestination.MiniApps) }, { contextSheet = true },
+                        automation = { request -> automationRequest=request; navigate(ShellDestination.Automations) }, settings = { navigate(ShellDestination.Settings) })
+                    @Composable fun ToolsEntry() = com.alpha.assistant.tools.ToolsPane(model.tools, snapshot.selectedId, snapshot.draft.text, snapshot.draft.attachments.filter { it.contextText == null },immersive=immersive,exitImmersive={immersiveExited=true},
+                        settings = { navigate(ShellDestination.Settings) }) { navigate(null) }
                     // The tool and capability gates read RESUMED as "Alphy is in the foreground". NavDisplay holds a scene at STARTED
                     // during its transition, so each entry in the back stack keeps the shell lifecycle. A leaving entry is CREATED, as in Navigation 3.
                     val shellLifecycle = LocalLifecycleOwner.current
@@ -177,7 +183,7 @@ import java.util.Date
     if (contextSheet && !model.loadFailed && !model.loading) ReviewedContextDialog(model) { contextSheet = false }
 }
 
-@Composable internal fun ChatPane(model: ShellViewModel, conversation: Conversation?, tools: () -> Unit, context: () -> Unit, automation: (String) -> Unit) {
+@Composable internal fun ChatPane(model: ShellViewModel, conversation: Conversation?, tools: () -> Unit, context: () -> Unit, automation: (String) -> Unit, settings: () -> Unit) {
     val snapshot = model.snapshot
     val uriHandler = LocalUriHandler.current
     var shareText by rememberSaveable { mutableStateOf<String?>(null) }
@@ -229,6 +235,7 @@ import java.util.Date
                                     TextButton(onClick = { if (validSourceUrl(source.url)) runCatching { uriHandler.openUri(source.url) }.onFailure { linkError = true } else linkError = true }) { Text("[${index + 1}] ${source.title.ifBlank { source.url }}\n${source.url}", style = MaterialTheme.typography.bodySmall) }
                                 }
                                 if (message.error.isNotBlank()) Text(message.error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                                if (message.role == "assistant" && message.errorCode in KEY_ERRORS) TextButton(onClick = settings) { Text(stringResource(R.string.open_settings)) }
                                 if (message.id == chat.messages.lastOrNull()?.id && message.status in listOf("error", "cancelled", "interrupted")) TextButton(onClick = { model.retry(message.id) }, enabled = !busy) { Text("Повторить запрос") }
                                 if(message.status == "generating") { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Creating your widget…",style = MaterialTheme.typography.labelSmall) }
                                 if (message.role == "assistant" && message.status in listOf("pending", "streaming")) Text(if (model.weatherLocationBusy) "Определяем примерное местоположение…" else if (message.status == "pending") "Подготовка запроса…" else "DeepSeek отвечает…", style = MaterialTheme.typography.labelSmall)
@@ -270,7 +277,8 @@ import java.util.Date
                 Column(Modifier.padding(12.dp)) {
                     if (model.voice.active && model.voice.oneShot) InlineVoiceRecorder(model)
                     else {
-                        BasicTextField(value = snapshot.draft.text, onValueChange = { model.editDraft(snapshot.draft.copy(text = it)) }, modifier = Modifier.fillMaxWidth().heightIn(min = 43.dp, max = 150.dp).padding(horizontal = 7.dp, vertical = 5.dp).semantics { contentDescription = "Сообщение ассистенту" }, textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface), cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), decorationBox = { inner ->
+                        val composerLabel = stringResource(R.string.composer_label)
+                        BasicTextField(value = snapshot.draft.text, onValueChange = { model.editDraft(snapshot.draft.copy(text = it)) }, modifier = Modifier.fillMaxWidth().heightIn(min = 43.dp, max = 150.dp).padding(horizontal = 7.dp, vertical = 5.dp).semantics { contentDescription = composerLabel }, textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface), cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), decorationBox = { inner ->
                             if (snapshot.draft.text.isEmpty()) Text("Спроси о чём угодно", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 16.sp)
                             inner()
                         })
@@ -280,7 +288,7 @@ import java.util.Date
                             RoundAction(Glyph.Mic, "Голосовой запрос", startVoice, enabled = !busy && !model.attachmentBusy && !model.voice.active)
                             Spacer(Modifier.width(5.dp))
                             if (busy) RoundAction(Glyph.Close, "Остановить ответ", model::cancelRequest)
-                            else RoundAction(Glyph.Arrow, "Отправить сообщение", { model.send() }, primary = true, enabled = !model.attachmentBusy && (snapshot.draft.text.isNotBlank() || snapshot.draft.attachments.isNotEmpty()))
+                            else RoundAction(Glyph.Arrow, stringResource(R.string.composer_send), { model.send() }, primary = true, enabled = !model.attachmentBusy && (snapshot.draft.text.isNotBlank() || snapshot.draft.attachments.isNotEmpty()))
                         }
                     }
                 }
@@ -380,32 +388,6 @@ import java.util.Date
         onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
     }
     Box(Modifier.testTag("secure")) { content() }
-}
-
-@Composable private fun SettingsPane(model: ShellViewModel) {
-    var key by remember { mutableStateOf("") }
-    var confirmClear by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(25.dp), verticalArrangement = Arrangement.spacedBy(17.dp)) {
-        Text("Настройки", style = MaterialTheme.typography.headlineMedium)
-        HorizontalDivider()
-        Text("DeepSeek", style = MaterialTheme.typography.titleLarge)
-        Text(model.keyStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        OutlinedTextField(value = key, onValueChange = { key = it }, label = { Text("API-ключ DeepSeek") }, placeholder = { Text("Введи новый ключ") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(17.dp), supportingText = { Text("Ключ хранится на устройстве в зашифрованном виде.") })
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(onClick = { model.saveKey(key) { if (it) key = "" } }, enabled = key.isNotBlank() && !model.keyBusy) { Text("Сохранить ключ") }
-            TextButton(onClick = { confirmClear = true }, enabled = !model.keyBusy) { Text("Удалить ключ") }
-        }
-        Notice("Текст и выбранные изображения обрабатывает DeepSeek после подтверждения отправки. Веб-поиск доступен в каждом запросе. Сохранение ключа не отправляет данные и не проверяет баланс.")
-        com.alpha.assistant.surfaces.SystemEntrySettings()
-        Text("Alphy · 0.1.0", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        // NavDisplay places all children of an entry at one origin, so a second child of the Settings entry would draw over this page.
-        VoiceControls(model)
-    }
-    if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("Удалить API-ключ?") }, text = { Text("Разговоры и черновики сохранятся.") }, confirmButton = { TextButton(onClick = { model.clearKey(); confirmClear = false }) { Text("Удалить") } }, dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Отмена") } })
-}
-
-@Composable private fun Notice(text: String) {
-    Surface(shape = RoundedCornerShape(17.dp), color = MaterialTheme.colorScheme.surfaceVariant) { Text(text, Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall, lineHeight = 20.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 }
 
 @Composable internal fun ImagePreview(attachment: Attachment, modifier: Modifier = Modifier.size(76.dp)) {
