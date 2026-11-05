@@ -7,6 +7,7 @@ import android.database.sqlite.SQLiteOpenHelper
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -345,6 +346,7 @@ class MedicineReceiver: BroadcastReceiver() {
 class MedicineReportActivity: AlphyActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         val token=intent.getStringExtra("token") ?: return finish()
         val database=intent.getStringExtra("toolsDatabase") ?: return finish()
         fun snapshot(): String?=ToolStore(this,database).use {tools ->MedicineStore(this,MedicineRuntime.database(tools)).use {store ->
@@ -353,10 +355,10 @@ class MedicineReportActivity: AlphyActivity() {
             }
         }}
         val body=snapshot() ?: return finish()
-        setContent {AlphaTheme {Surface(Modifier.fillMaxSize()) {Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+        setContent {AlphaTheme {Surface(Modifier.fillMaxSize()) {Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             Text("Review medicine report",style=MaterialTheme.typography.titleLarge)
             Text("Only explicit records appear. A missing record does not prove missed intake. Select Share after review.")
-            Text(body,Modifier.weight(1f).verticalScroll(rememberScrollState()))
+            Text(body)
             Button(onClick={if(!com.alpha.assistant.surfaces.ToolWidgets.isLocked(this@MedicineReportActivity) && snapshot()==body) {
                 try {startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,body),"Share reviewed medicine report"))} catch(_: ActivityNotFoundException) {android.widget.Toast.makeText(this@MedicineReportActivity,"No share app is available.",android.widget.Toast.LENGTH_LONG).show()}
             }}) {Text("Share reviewed report")}

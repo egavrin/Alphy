@@ -22,7 +22,7 @@ Settings accepts a replacement key without displaying the stored key. A successf
 
 `ui/AlphaShell.kt` owns navigation and the Compose surfaces. The desktop (`ui/DesktopPane.kt`) is the home screen. It shows a greeting and «Сейчас» with local start suggestions. A sent message opens the chat. Back and «Новый чат» return to the desktop. The top bar with «Меню» and «Новый чат» and the composer stay visible without chat scrolling. «Меню» opens a drawer from the left. Back closes the drawer, then a page, then the chat. The app uses safe drawing and IME insets. Light and dark follow the system. `AlphaTheme` uses dynamic color on API 31 and later and a fixed palette from `#7652DF` on API 29 and 30. The layout uses available window width. An open tools surface shares the window with chat at 640 dp or greater. A smaller window uses one pane. Navigation and draft state survive activity recreation through saved UI state and the ViewModel.
 
-The tools surface is an empty library until a later package supplies real tools. It currently demonstrates the adaptive pane structure without fake artifacts or calendar entries. Future tool rendering must retain the 640 dp split behavior and document any hinge avoidance requirements. Context, speech, and automation surfaces state their actual status.
+The tools surface is the «Мини-приложения» page (`tools/ToolUi.kt`). It creates a mini-app preview from a request. It also lists the drafts and the saved or archived mini-apps, with a search field. A selected mini-app or draft opens in a focused pane. Future tool rendering must retain the 640 dp split behavior and document any hinge avoidance requirements. Context, speech, and automation surfaces state their actual status.
 
 ## Focused verification
 

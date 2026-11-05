@@ -107,7 +107,7 @@ internal class TestBackInput : NavigationEventInput() {
     fun complete() = dispatchOnBackCompleted()
 }
 
-/** Black-box UiAutomation helpers. Each lookup reads a fresh tree, so a poll never reads stale cached nodes. */
+/** Black-box UiAutomation helpers. On API 34 and later, each lookup reads a fresh tree, so a poll never reads stale cached nodes. */
 internal class ShellRobot(fixture: String) {
     val instrumentation: Instrumentation = InstrumentationRegistry.getInstrumentation()
     val automation: UiAutomation = instrumentation.uiAutomation
@@ -118,7 +118,7 @@ internal class ShellRobot(fixture: String) {
     fun text(@StringRes id: Int, vararg args: Any): String =
         if (args.isEmpty()) instrumentation.targetContext.getString(id) else instrumentation.targetContext.getString(id, *args)
     fun find(label: String): AccessibilityNodeInfo? = find(diagnostics.freshRoot(), label)
-    /** The text and contentDescription values of all nodes in the active window. A node outside a scroll viewport has no accessibility node. */
+    /** The text and contentDescription values of all nodes in the active window. A node outside a scroll viewport can be absent. */
     fun texts(): List<String> = texts(diagnostics.freshRoot())
     fun waitFor(label: String): AccessibilityNodeInfo {
         diagnostics.target(label)
@@ -307,11 +307,13 @@ internal class ShellRobot(fixture: String) {
         if (scrolled) awaitScrollEnd()
         return scrolled
     }
-    /** A node outside the scroll viewport has no accessibility node, so this helper scrolls forward until [label] shows. */
+    /** A node outside the scroll viewport can be absent, so this helper scrolls forward until [label] shows. Then it shows the clickable node of [label], which [assertTarget] measures. */
     fun reveal(label: String): AccessibilityNodeInfo {
         var node = find(label)
         repeat(10) { if (node == null) { scrollForward(); node = find(label) } }
-        if (node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id) == true) awaitScrollEnd()
+        var target = node
+        while (target != null && !target.isClickable) target = target.parent
+        if ((target ?: node)?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id) == true) awaitScrollEnd()
         return waitFor(label)
     }
     fun shell(command: String): String =
@@ -329,7 +331,7 @@ internal class ShellRobot(fixture: String) {
         var last: List<Rect>? = null
         waitUntil {
             val content = scrollable(diagnostics.freshRoot())?.let { node -> List(node.childCount) { index -> Rect().also { node.getChild(index)?.getBoundsInScreen(it) } } }
-            (content == last).also { last = content }
+            (content != null && content == last).also { last = content }
         }
     }
     // A library label comes from the activity resources, which have the Russian app locale.

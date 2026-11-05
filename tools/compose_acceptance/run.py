@@ -123,7 +123,7 @@ def validate_matrix(rows):
 def identity(apks=True):
     paths = sorted(path for parent in ("app/src", "tools/compose_acceptance") for path in (ROOT / parent).rglob("*")
                    if path.is_file() and "__pycache__" not in path.parts)
-    paths += [ROOT / "app/build.gradle.kts", SCENARIOS]
+    paths += [ROOT / "app/build.gradle.kts", ROOT / "docs/parity/compose-coverage.json", SCENARIOS]
     files = {str(path.relative_to(ROOT)): digest(path) for path in paths}
     aggregate = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
     tested = {"revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, env=child_environment()).strip(),

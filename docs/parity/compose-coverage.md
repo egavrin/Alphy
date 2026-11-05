@@ -92,7 +92,7 @@ The columns identify test ownership, not a passing result for every row.
 
 ## Installed Compose features exposed by the catalog
 
-The application installs `androidx.compose:compose-bom:2026.09.00`, `androidx.activity:activity-compose:1.13.0`, `androidx.compose.material3:material3:1.5.0-beta02`, `androidx.lifecycle:lifecycle-runtime-compose:2.10.0`, `androidx.navigation3:navigation3-runtime:1.2.0`, and `androidx.navigation3:navigation3-ui:1.2.0`.
+The application installs `androidx.compose:compose-bom:2026.09.00`, `androidx.activity:activity-compose:1.13.0`, `androidx.compose.material3:material3:1.5.0-beta02`, `androidx.lifecycle:lifecycle-runtime-compose:2.10.0`, `androidx.navigation3:navigation3-runtime:1.2.0`, `androidx.navigation3:navigation3-ui:1.2.0`, and `androidx.navigationevent:navigationevent-compose:1.1.1`.
 Material 3 has its own version. The build resolves Compose UI through the Compose BOM. [Dependency source](../../app/build.gradle.kts)
 Generated artifacts use the closed native catalog. They cannot invoke arbitrary Compose APIs or generate Kotlin.
 

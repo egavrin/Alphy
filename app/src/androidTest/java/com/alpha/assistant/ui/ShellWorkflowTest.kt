@@ -69,11 +69,11 @@ class ShellWorkflowTest {
                 repeat(current.childCount) { found += count(current.getChild(it)) }
                 return found
             }
-            assertEquals("One navigation action: $label", 1, count(automation.rootInActiveWindow))
+            assertEquals("One navigation action: $label", 1, count(diagnostics.freshRoot()))
         }
         for (label in listOf("Веб-поиск DeepSeek", "Облако", "Облачная обработка",
             "DeepSeek processes this chat and current attachments. Widget changes also send that tool’s code and data. History stays on this device.")) {
-            assertNull("Removed composer content: $label", find(automation.rootInActiveWindow, label))
+            assertNull("Removed composer content: $label", find(diagnostics.freshRoot(), label))
         }
         fun checkbox(node: AccessibilityNodeInfo?): Boolean {
             if (node == null) return false
@@ -81,7 +81,7 @@ class ShellWorkflowTest {
             repeat(node.childCount) { if (checkbox(node.getChild(it))) return true }
             return false
         }
-        assertFalse("No search checkbox", checkbox(automation.rootInActiveWindow))
+        assertFalse("No search checkbox", checkbox(diagnostics.freshRoot()))
         waitFor("Добавить контекст"); waitFor("Голосовой запрос"); waitFor("Отправить сообщение")
         if (keyboardTop != null) {
             val send = Rect().also { waitFor("Отправить сообщение").getBoundsInScreen(it) }

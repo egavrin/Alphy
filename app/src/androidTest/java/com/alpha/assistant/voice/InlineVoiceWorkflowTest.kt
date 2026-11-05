@@ -85,8 +85,8 @@ class InlineVoiceWorkflowTest {
                 assertEquals(original, model.snapshot.draft)
                 assertTrue("Cancel must not leave a persistent status", model.voice.status.isBlank())
                 assertFalse("Cancel must not display an idle status", model.voice.hasAttempted)
-                waitUntil { find(automation.rootInActiveWindow, "Сообщение ассистенту") != null }
-                assertNull(find(automation.rootInActiveWindow, "Voice session stopped · microphone off"))
+                waitUntil { find(diagnostics.freshRoot(), "Сообщение ассистенту") != null }
+                assertNull(find(diagnostics.freshRoot(), "Voice session stopped · microphone off"))
                 scenario.onActivity { model.select(null) }
                 assertEquals(original, model.snapshot.draft)
                 assertTrue("Navigation must not restore cancellation status", model.voice.status.isBlank())
@@ -133,7 +133,7 @@ class InlineVoiceWorkflowTest {
                 File(context.getExternalFilesDir(null), "inline-voice-actions.txt").writeText(actions.toString() + voiceState())
                 scenario.onActivity { model.voice.permissionDenied(); model.voice.stop() }
                 assertTrue("Permission recovery must remain available", model.voice.permissionRequired)
-                waitUntil { find(automation.rootInActiveWindow, "Разрешите микрофон в настройках Android и повторите запись.") != null }
+                waitUntil { find(diagnostics.freshRoot(), "Разрешите микрофон в настройках Android и повторите запись.") != null }
                 File(context.getExternalFilesDir(null), "inline-voice-workflow.txt").writeText(
                     "Revision: ${InstrumentationRegistry.getArguments().getString("testedRevision", "not supplied")}\n" +
                     "Command: adb -s emulator-5556 shell am instrument -w -r -e class com.alpha.assistant.voice.InlineVoiceWorkflowTest com.alpha.assistant.test/androidx.test.runner.AndroidJUnitRunner\n" +

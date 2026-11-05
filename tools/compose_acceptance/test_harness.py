@@ -201,6 +201,9 @@ class HarnessBoundaries(unittest.TestCase):
             path.write_text("two")
             self.assertNotEqual(before, harness.digest(path))
 
+    def test_identity_covers_the_coverage_pins(self):
+        self.assertIn("docs/parity/compose-coverage.json", harness.identity(apks=False)["files"])
+
     def test_unavailable_is_not_pass(self):
         case = harness.scenarios()[0]
         rows = [{"id": key, "status": "UNAVAILABLE", "expected": "x", "observed": "not run", "evidence": ["report.json"]} for key in case["checks"]]

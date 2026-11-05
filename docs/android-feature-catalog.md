@@ -3,7 +3,7 @@
 This inventory defines Alphy features for generated Android apps. It does not claim access to every Android API.
 `CapabilityCatalog` is the authoritative native catalog. Reference platform inventories do not establish Android implementation or device availability.
 
-The native settings screen, chat guidance, generator guidance, argument validator, and executor bindings consume this catalog.
+Chat guidance, generator guidance, the argument validator, and executor bindings consume this catalog.
 `CapabilityCatalog.discovery()` returns static metadata. `AndroidCapabilities.discover()` adds current permission, API, notification, and hardware availability.
 Discovery never launches activities, requests permission, posts notifications, or reads calendar events or selected content.
 An available entry still requires its tool grant and an explicit user action. Navigation grants permit direct foreground buttons without another confirmation dialog. An activity handler is checked during execution.

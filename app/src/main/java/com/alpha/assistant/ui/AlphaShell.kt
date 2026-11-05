@@ -39,7 +39,6 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.rememberLifecycleOwner
@@ -84,8 +83,6 @@ import kotlinx.coroutines.launch
     // derivedStateOf keeps the keyboard animation from recomposing the shell in each frame.
     val compact by remember(ime, density, window) { derivedStateOf { ime.getBottom(density) > 0 && window.containerSize.height < with(density) { 480.dp.roundToPx() } } }
     val scope = rememberCoroutineScope()
-    val snackbar = remember { SnackbarHostState() }
-    fun notice(text: String) { scope.launch { snackbar.showSnackbar(text) } }
     fun navigate(target: ShellDestination?) { contextSheet = false; destination = target; focus.clearFocus() }
     fun automate(request: String) { automationRequest = request; navigate(ShellDestination.Automations) }
     fun closeDrawer() { scope.launch { drawerState.close() } }
@@ -146,6 +143,7 @@ import kotlinx.coroutines.launch
                     // during its transition, so each entry in the back stack keeps the shell lifecycle. A leaving entry is CREATED, as in Navigation 3.
                     val shellLifecycle = LocalLifecycleOwner.current
                     val currentBackStack by rememberUpdatedState(backStack)
+                    // Each entry<…> needs clazzContentKey = { it.toString() }, or it stays CREATED.
                     val keepShellLifecycle = remember(shellLifecycle) { NavEntryDecorator<ShellRoute> { entry ->
                         val maxLifecycle = if (currentBackStack.any { it.toString() == entry.contentKey }) Lifecycle.State.RESUMED else Lifecycle.State.CREATED
                         CompositionLocalProvider(LocalLifecycleOwner provides rememberLifecycleOwner(maxLifecycle, shellLifecycle)) { entry.Content() }
@@ -181,7 +179,6 @@ import kotlinx.coroutines.launch
                     Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp).fillMaxWidth().testTag("composer"), compact = compact)
             }
         }
-        Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.BottomCenter) { SnackbarHost(snackbar, Modifier.padding(16.dp)) }
     }
     model.requestError?.let { error ->
         AlertDialog(onDismissRequest = model::clearRequestError, title = { Text(stringResource(R.string.send_failed)) }, text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(error) } }, confirmButton = { TextButton(onClick = model::clearRequestError) { Text(stringResource(R.string.understood)) } })
@@ -253,17 +250,6 @@ import kotlinx.coroutines.launch
         }
     }
     shareText?.let { ShareTextToNotes(it) { shareText = null } }
-}
-
-@Composable private fun EmptyPane(kicker: String, title: String, glyph: Glyph, heading: String, text: String) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(26.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        Text(kicker, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(title, style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(24.dp))
-        AlphaIcon(glyph, Modifier.size(38.dp), accent = true)
-        Text(heading, style = MaterialTheme.typography.titleLarge)
-        Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 25.sp)
-    }
 }
 
 @Composable private fun SecureWindow(content: @Composable () -> Unit) {

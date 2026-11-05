@@ -21,8 +21,8 @@ class UiFailureDiagnostics(private val fixture: String) {
     fun target(label: String) { labels += label; target = label }
 
     fun freshRoot(): AccessibilityNodeInfo? {
-        if (android.os.Build.VERSION.SDK_INT >= 33) automation.clearCache()
-        return automation.rootInActiveWindow?.also { if (android.os.Build.VERSION.SDK_INT < 33) it.refresh() }
+        if (android.os.Build.VERSION.SDK_INT >= 34) automation.clearCache()
+        return automation.rootInActiveWindow?.also { if (android.os.Build.VERSION.SDK_INT < 34) it.refresh() }
     }
 
     private fun safe(value: CharSequence?): String = value?.toString()?.let {
@@ -49,7 +49,7 @@ class UiFailureDiagnostics(private val fixture: String) {
             appendLine("cached ancestor[$depth]: ${node(ancestor)}")
             ancestor = ancestor.parent
         }
-        val cacheCleared = if (android.os.Build.VERSION.SDK_INT >= 33) automation.clearCache() else false
+        val cacheCleared = if (android.os.Build.VERSION.SDK_INT >= 34) automation.clearCache() else false
         val root = automation.rootInActiveWindow
         appendLine("freshTreeUptimeMs=${SystemClock.uptimeMillis()} cacheCleared=$cacheCleared")
         fun dump(current: AccessibilityNodeInfo?, path: String, depth: Int) {
