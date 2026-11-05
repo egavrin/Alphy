@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.os.SystemClock
 import androidx.annotation.StringRes
+import androidx.compose.ui.graphics.toArgb
 import androidx.test.core.app.ActivityScenario
 import com.alpha.assistant.R
 import org.junit.After
@@ -15,6 +16,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import kotlin.math.roundToInt
 
 /**
  * The visual check method for FLAG_SECURE screens (spec 9). Each capture saves a screenshot and the node list of the screen.
@@ -47,7 +49,7 @@ class ShellScreenshotTest {
                             assertEquals(size.toFloat(), it.resources.configuration.fontScale)
                             assertEquals(bits, it.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK)
                         }
-                        captureScreens(scenario, File(root, "$mode-$size").apply { mkdirs() })
+                        captureScreens(scenario, File(root, "$mode-$size").apply { mkdirs() }, dark = bits == Configuration.UI_MODE_NIGHT_YES)
                     }
                 }
             }
@@ -57,10 +59,15 @@ class ShellScreenshotTest {
         }
     }
 
-    private fun captureScreens(scenario: ActivityScenario<*>, directory: File) {
+    private fun captureScreens(scenario: ActivityScenario<*>, directory: File, dark: Boolean) {
         robot.waitFor(robot.text(R.string.desktop_prompt))
+        val desktop = screen(directory, "desktop")
         // Color.BLACK is exactly 0xFF000000, the FLAG_SECURE black. A dark background is not black.
-        assertNotEquals("Desktop center pixel", Color.BLACK, center(screen(directory, "desktop")))
+        assertNotEquals("Desktop center pixel", Color.BLACK, center(desktop))
+        // The Desktop draws no background, so its side padding shows colorScheme.background, the color of the shell Surface (AlphaShell).
+        val expected = alphaColorScheme(fixture.context, dark).background.toArgb()
+        val gutter = desktop.getPixel((12 * fixture.context.resources.displayMetrics.density).roundToInt(), desktop.height / 2)
+        assertEquals("Desktop background pixel", Integer.toHexString(expected), Integer.toHexString(gutter))
         robot.openDrawer(scenario)
         screen(directory, "drawer")
         robot.click(title)
@@ -77,15 +84,22 @@ class ShellScreenshotTest {
         robot.waitUntil { robot.secure(scenario) }
         robot.waitFor(robot.text(R.string.key_ready))
         assertEquals("Settings center pixel", Color.BLACK, center(screen(directory, "settings")))
+        // Only the page counts, because the top bar alone can give 16 colors.
+        val pane = robot.composedBounds(scenario, "secure").first
         var page = 0
-        do {
+        var end = false
+        while (!end && page < 15) {
             val image = settled { draw(scenario) }
             save(directory, "settings-$page", image)
-            val pixels = IntArray(image.width * image.height).also { image.getPixels(it, 0, image.width, 0, 0, image.width, image.height) }
+            val pixels = IntArray(pane.width() * pane.height()).also { image.getPixels(it, 0, pane.width(), pane.left, pane.top, pane.width(), pane.height()) }
             val colors = pixels.toSet().size
             assertTrue("settings-$page has $colors colors", colors >= 16)
             page++
-        } while (robot.scrollForward())
+            end = !robot.scrollForward()
+        }
+        assertTrue("The Settings page ends within 15 pages", end)
+        val version = robot.text(R.string.app_version, "")
+        assertTrue("The last Settings page shows the app version", robot.texts().any { it.startsWith(version) })
     }
 
     private fun open(scenario: ActivityScenario<*>, @StringRes row: Int) {
