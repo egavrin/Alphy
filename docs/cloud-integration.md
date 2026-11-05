@@ -18,9 +18,13 @@ Reference contracts checked for this package:
 
 ## Search permission and results
 
-`ShellViewModel.send()` permits web search for each chat request, because its `search` parameter is `true` by default. A search runs when the typed decision of the model is `optional` or `required`. The consent at key entry covers search queries. The model can call only the typed `web_search` function. The first model round must request that function. The provider validates the function name, call ID, argument shape, and query length. It permits at most two searches and three model rounds. It does not execute arbitrary model commands or infer device permissions.
+`ShellViewModel.send()` permits web search by default. The consent at key entry covers search queries. The provider first validates a complete typed decision. If the decision permits search, a separate round requests typed `web_search` calls. The provider validates each call's name, ID, argument shape, and query length before it runs either search. A request permits at most two searches. Only the latest user request and approved weather context supply search terms.
 
-The provider sends each search to `POST /v1/tools/search` with `count = 5` and `need_content = false`. It accepts only valid HTTP or HTTPS result URLs with a host and no embedded credentials. It sends bounded result summaries to the model as tool results. Result URLs and titles come from the actual search response. The UI shows those sources as buttons. It reports search progress, empty results, and errors separately. Authentication, balance, request-limit, server, malformed-response, and network failures do not become empty search results.
+The provider sends each search to `POST /v1/tools/search` with `count = 5` and `need_content = true`. It accepts HTTP or HTTPS result URLs with a host and no embedded credentials. The last round receives bounded source excerpts in search order. The UI reports search progress, empty results, and errors separately. The provider keeps HTTP and network errors distinct from empty search results.
+
+The chat shows source chips in citation order. Each chip opens the result in the browser. The app requests a provider icon only from a public HTTPS address on port 443. It sends no credentials and follows no redirects. Each request has a four-second limit, and the app cancels the request when its chip leaves the composition. It uses a local icon when the response is absent, invalid, larger than 64 KiB, or more than 256 pixels on either side.
+
+An answer uses a tool-free text completion, including when it needs no search. The text can appear in parts. The original decision fixes the operation and search policy. Before the provider accepts a searched answer, it checks cited URLs, source numbers, numeric support, and verification claims. App creation, app refinement, and clarification decisions stay buffered.
 
 ## Image scope and validation
 
@@ -30,11 +34,11 @@ The composer shows a sampled image preview and a removal action. The app reads a
 
 ## Durable state and cancellation
 
-The SQLite schema remains version 1. Existing conversation rows remain readable. New JSON message fields are optional when decoded: `replyTo`, `search`, `searchStatus`, `sources`, `error`, and `errorCode`. A source contains `title`, `url`, and bounded `summary`. No credential enters this database. Stale processing-mode rows can stay in the `settings` table, and the app ignores them.
+The SQLite schema remains version 1. A source record contains `title`, `url`, and bounded `summary`. When the search response supplies them, the provider also stores a bounded `siteName` and an HTTPS `siteIcon` URL. Older rows load with empty site metadata. Credentials stay in encrypted storage.
 
 A submission atomically stores the new conversation and consumes its draft, or replaces the selected conversation row. It records the user message and a stable assistant placeholder before a network call. A failed initial write blocks transmission. Assistant statuses are `pending`, `streaming`, `complete`, `error`, `cancelled`, and `interrupted`. The user status distinguishes an unsent message from a submitted request. Existing `not_sent` messages remain local history.
 
-The UI updates for each content delta. It queues progress snapshots at most once per 500 ms and always queues terminal state. Normal serial writes preserve draft changes. A process restart converts pending or streaming assistant messages to `interrupted`, retains their saved partial text, and offers retry. The final fraction of a second of streamed text can remain unsaved if the process stops abruptly.
+Live answer fragments stay in memory as incomplete plain text. TalkBack reads the accepted answer when it arrives. Cancellation saves any received text with an incomplete label. If validation fails, the app discards the answer text and keeps the sources and error. Only completed replies enter model history. A restart marks pending or streaming replies as interrupted and offers retry. An abrupt exit loses the live text held in memory.
 
 Each active request owns a connection, coroutine, conversation ID, and assistant message ID. Callbacks check request identity. Cancellation stores a terminal state before it permits another request. It disconnects only the canceled request's connection. A late completion cannot change a new conversation or request. Cancellation cannot undo provider work or charges already incurred.
 

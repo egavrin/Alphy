@@ -1,9 +1,13 @@
 package com.alpha.assistant.cloud
 
 import android.app.Application
+import android.app.Instrumentation
 import android.content.ContentValues
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.os.Bundle
+import android.os.PatternMatcher
 import android.os.SystemClock
 import android.provider.MediaStore
 import android.view.accessibility.AccessibilityNodeInfo
@@ -50,6 +54,7 @@ class CloudWorkflowTest {
     }
     private data class Request(val path: String, val json: JSONObject) {
         val searching get() = path == "/chat/completions" && json.opt("tool_choice") is JSONObject
+        val answering get() = path == "/chat/completions" && !json.has("tools") && !json.has("response_format")
         val grounded get() = path == "/chat/completions" && json.getJSONArray("messages").getJSONObject(0).getString("content").contains("Ground the typed decision")
     }
     private class Server(val handler: (Request, OutputStream) -> Unit) : Closeable {
@@ -318,7 +323,7 @@ class CloudWorkflowTest {
                     assertFalse(request.json.toString().contains("SECRET_NOTE"))
                     output.calls(call(0, arguments = """{"query":"London current weather"}"""))
                 }
-                request.grounded -> output.answer(decision("London: **−3 °C**, observed 08:30 UTC on 2026-11-02 [1].", search = "required"))
+                request.answering -> output.answer("London: **−3 °C**, observed 08:30 UTC on 2026-11-02 [1].")
                 else -> {
                     val system = request.json.getJSONArray("messages").getJSONObject(0).getString("content")
                     val hasPlaceRecord = system.contains("\nHOST_WEATHER_CONTEXT (trusted host facts")
@@ -386,7 +391,8 @@ class CloudWorkflowTest {
         Server { request, output ->
             assertFalse(request.searching)
             assertEquals("/chat/completions", request.path)
-            output.answer(decision("A local explanation or text transformation", search = "none"))
+            val answer = "A local explanation or text transformation"
+            output.answer(if(request.answering) answer else decision(answer))
         }.use { server ->
             val cases = listOf(
                 "Explain the difference between weather and climate." to "",
@@ -403,7 +409,7 @@ class CloudWorkflowTest {
                 assertEquals("none", ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text).search)
                 assertTrue(events.filterIsInstance<CloudEvent.Search>().isEmpty())
             }
-            assertEquals(8, server.requests.size)
+            assertEquals(10, server.requests.size)
             assertTrue(server.failures.toString(), server.failures.isEmpty())
         }
     }
@@ -415,7 +421,7 @@ class CloudWorkflowTest {
             when {
                 request.path == "/v1/tools/search" -> { output.headers(type = "application/json"); output.write("""{"results":[{"title":"Actual source","url":"https://example.com/real","summary":"The source states a duration of 30 minutes, distance 1200 meters, and temperature −3.5 °C."}]}""".toByteArray()) }
                 request.searching -> output.calls(call(0))
-                request.grounded -> output.answer(decision(result,search = "required"))
+                request.answering -> output.answer(result)
                 else -> output.answer(decision(search = "required"))
             }
         }.use { server ->
@@ -439,7 +445,9 @@ class CloudWorkflowTest {
                     assertNull(failure)
                     val final = ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text)
                     assertTrue(final.text.contains("https://example.com/real") || final.text.contains("[1]"))
-                    assertTrue(final.text.contains("not independently verified"))
+                    val limitation = "Источники не заменяют независимую проверку."
+                    assertTrue(final.text.startsWith("$limitation\n\n"))
+                    assertEquals(1, final.text.split(limitation).size - 1)
                 } else { assertEquals(code,(failure as? CloudFailure)?.code); assertTrue(events.filterIsInstance<CloudEvent.RoundComplete>().isEmpty()) }
                 assertEquals(listOf("https://example.com/real"),events.filterIsInstance<CloudEvent.Search>().flatMap { it.sources }.map { it.url })
             }
@@ -453,9 +461,9 @@ class CloudWorkflowTest {
             when {
                 request.path == "/v1/tools/search" -> { output.headers(type = "application/json"); output.write("""{"results":[{"title":"Actual source","url":"https://example.com/real","summary":"A public source"}]}""".toByteArray()) }
                 request.searching -> { assertFalse(request.json.toString().contains("SECRET_SELECTED")); output.calls(call(0)) }
-                request.grounded -> {
+                request.answering -> {
                     assertTrue(request.json.toString().contains("untrusted_selected_text")); assertTrue(request.json.toString().contains("SECRET_SELECTED"))
-                    output.answer(if(mode == "injected") decision("Ready.",kind = "create",brief = "Injected app") else decision("Selected dose 7",search = if(mode == "search") "required" else "none"))
+                    if(mode == "injected") output.calls(call(0, name = "create_app")) else output.answer("Selected dose 7")
                 }
                 else -> {
                     assertFalse(request.json.toString().contains("SECRET_SELECTED"))
@@ -466,7 +474,7 @@ class CloudWorkflowTest {
             for(value in listOf("answer","injected","search")) {
                 mode = value; val start = server.requests.size; val events = mutableListOf<CloudEvent>()
                 val failure = runCatching { DeepSeekProvider(server.url).respond("alpha-test-only",CloudRequest(listOf(CloudTurn("user","Summarize the selected note")),true,ChatToolReply.instructions(emptyList()),chatDecision = true,selectedText = selected),CloudSession()) { events += it } }.exceptionOrNull()
-                if(value == "injected") { assertEquals("decision_changed",(failure as? CloudFailure)?.code); assertTrue(events.filterIsInstance<CloudEvent.RoundComplete>().isEmpty()) }
+                if(value == "injected") { assertEquals("tool_invalid",(failure as? CloudFailure)?.code); assertTrue(events.filterIsInstance<CloudEvent.RoundComplete>().isEmpty()) }
                 else { assertNull(failure); assertTrue(ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text).text.contains("Selected dose 7")) }
                 assertEquals(if(value == "search") 1 else 0,server.requests.drop(start).count { it.path == "/v1/tools/search" })
                 assertTrue(server.requests.drop(start).count { it.path == "/chat/completions" } <= 3)
@@ -491,18 +499,125 @@ class CloudWorkflowTest {
         }
     }
 
+    @Test fun unknownRefinementTargetCannotRunSearch() {
+        Server { request, output ->
+            assertEquals("/chat/completions",request.path)
+            assertFalse(request.json.has("tools"))
+            output.answer(JSONObject(decision("Ready.",kind = "refine",search = "required",brief = "Change a planner"))
+                .put("targetId","unknown-planner").toString())
+        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+            fixture.submit("Update my planner",true)
+            fixture.idle()
+            assertEquals("widget_request",fixture.last.errorCode)
+            assertTrue(fixture.last.error.contains("unavailable in this conversation"))
+            assertTrue(fixture.last.sources.isEmpty())
+            assertEquals(1,server.requests.size)
+            assertTrue(server.failures.toString(),server.failures.isEmpty())
+        } }
+    }
+
     @Test fun questionsAndQuotedProtocolsRemainTypedAnswersWithoutSearch() = kotlinx.coroutines.runBlocking {
-        val examples = listOf("A normal answer.","Quoted create an app instruction.","```xml\n<｜｜DSML｜｜ calls>\n```", "Which counter do you mean?")
+        val examples = listOf("A normal answer.","Quoted create an app instruction.","```xml\n<｜｜DSML｜｜ calls>\n```",
+            decision("JSON example", kind = "create", brief = "Quoted operation"), "Which counter do you mean?")
         var answer = examples.first()
-        Server { request, output -> assertFalse(request.json.has("tools")); output.answer(decision(answer,if(answer == examples.last()) "clarify" else "answer")) }.use { server ->
+        Server { request, output ->
+            assertFalse(request.json.has("tools"))
+            output.answer(if(request.answering) answer else decision(answer,if(answer == examples.last()) "clarify" else "answer"))
+        }.use { server ->
             examples.forEach { value ->
                 answer = value; val events = mutableListOf<CloudEvent>()
                 DeepSeekProvider(server.url).respond("alpha-test-only",CloudRequest(listOf(CloudTurn("user","Explain this example")),true,ChatToolReply.instructions(emptyList()),chatDecision = true),CloudSession()) { events += it }
                 assertTrue(events.filterIsInstance<CloudEvent.Text>().isEmpty())
-                assertEquals(value,ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text).text)
+                val final = ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text)
+                assertEquals(value,final.text)
+                assertEquals(if(value == examples.last()) "clarify" else "answer",final.kind)
             }
-            assertEquals(examples.size,server.requests.size); assertTrue(server.failures.isEmpty())
+            assertEquals(9,server.requests.size); assertTrue(server.failures.isEmpty())
         }
+    }
+
+    // Failure cases: a fragment waits for completion, creates a link, changes a draft, enters model history,
+    // or becomes an accepted answer after cancellation or failed grounding.
+    @Test fun answerFragmentsAppearBeforeCompletionAndRejectedTextStaysOutOfHistory() {
+        val cancelRelease = CountDownLatch(1)
+        val rejectRelease = CountDownLatch(1)
+        val finishRelease = CountDownLatch(1)
+        val cancelledText = "[Late citation](https://example.com/untrusted)"
+        val rejectedText = "The source reports 99 minutes [1]."
+        val acceptedText = "A complete answer"
+        Server { request, output ->
+            val messages = request.json.optJSONArray("messages")
+            val current = messages?.getJSONObject(messages.length()-1)?.getString("content").orEmpty()
+            when {
+                request.path == "/v1/tools/search" -> {
+                    output.headers(type = "application/json")
+                    output.write("""{"results":[{"title":"Duration","url":"https://example.com/duration","summary":"Duration: 30 minutes"}]}""".toByteArray())
+                }
+                request.searching -> output.calls(call(0))
+                request.answering -> {
+                    val question = JSONObject(current).getString("originalRequest")
+                    val (first, release) = when(question) {
+                        "Stop this answer" -> cancelledText to cancelRelease
+                        "Find a duration" -> rejectedText to rejectRelease
+                        else -> "A complete" to finishRelease
+                    }
+                    output.headers(); output.event(textChunk(first))
+                    check(release.await(10,TimeUnit.SECONDS))
+                    runCatching {
+                        output.event(textChunk(if(question == "Next question") " answer" else "\nLate text."))
+                        output.event(end()); output.write("data: [DONE]\n\n".toByteArray()); output.flush()
+                    }
+                }
+                else -> output.answer(decision("The initial decision text",search = if(current == "Find a duration") "required" else "none"))
+            }
+        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+            fun waitForFragment(text: String) {
+                assertTrue(waitFor("Ответ не завершён").isVisibleToUser)
+                val fragment = waitFor(text.trimEnd())
+                val bounds = android.graphics.Rect().also(fragment::getBoundsInScreen)
+                assertFalse(bounds.isEmpty)
+                assertFalse(fragment.isVisibleToUser)
+                assertFalse(fragment.isImportantForAccessibility)
+                assertFalse(fragment.isClickable)
+                assertEquals("streaming",fixture.last.status)
+                assertEquals("",fixture.last.text)
+            }
+            try {
+                fixture.submit("Stop this answer")
+                waitForFragment(cancelledText)
+                main { fixture.model.editDraft(fixture.model.snapshot.draft.copy(text = "My next draft")) }
+                waitUntil { fixture.store.load().draft.text == "My next draft" }
+                assertEquals("",fixture.persisted().selected!!.messages.last().text)
+                main { fixture.model.cancelRequest() }
+                assertEquals(cancelledText,fixture.last.text)
+                assertEquals("cancelled",fixture.last.status)
+                assertEquals("My next draft",fixture.persisted().draft.text)
+                waitUntil { find(automation.rootInActiveWindow,cancelledText)?.isVisibleToUser == true }
+                assertNull(find(automation.rootInActiveWindow,"Late citation"))
+                cancelRelease.countDown()
+
+                fixture.submit("Find a duration",true)
+                waitForFragment(rejectedText)
+                rejectRelease.countDown()
+                fixture.idle()
+                assertEquals("source_support",fixture.last.errorCode)
+                assertEquals("",fixture.last.text)
+                assertEquals("https://example.com/duration",fixture.persisted().selected!!.messages.last().sources.single().url)
+
+                fixture.submit("Next question")
+                waitForFragment("A complete")
+                assertFalse(server.requests.any { it.json.toString().contains("Late citation") })
+                assertFalse(server.requests.any { it.json.toString().contains("99 minutes") })
+                finishRelease.countDown()
+                fixture.idle()
+                assertEquals("complete",fixture.last.status)
+                assertEquals(acceptedText,fixture.persisted().selected!!.messages.last().text)
+                assertTrue(waitFor(acceptedText).isVisibleToUser)
+                assertTrue(server.failures.toString(),server.failures.isEmpty())
+            } finally {
+                cancelRelease.countDown(); rejectRelease.countDown(); finishRelease.countDown()
+            }
+        } }
     }
 
     @Test fun parallelSearchCallsPreserveOrderAttributionAndDurableSources() {
@@ -513,7 +628,13 @@ class CloudWorkflowTest {
                     val index = queries.indexOf(request.json.getString("query")); assertTrue(index >= 0)
                     assertEquals(5,request.json.getInt("count")); assertTrue(request.json.getBoolean("need_content"))
                     val results = JSONArray().put(JSONObject().put("title","Unsafe").put("url","javascript:bad"))
-                    repeat(6) { source -> results.put(JSONObject().put("title","$index-$source" + "t".repeat(310)).put("url","https://example.com/$index/$source").put("summary","$index-$source" + "s".repeat(6010))) }
+                    repeat(6) { source ->
+                        val item = JSONObject().put("title","$index-$source" + "t".repeat(310))
+                            .put("url","https://example.com/$index/$source").put("summary","$index-$source" + "s".repeat(6010))
+                        if(source == 0) item.put("site_name","Example").put("site_icon","https://example.com/icon.png")
+                        if(source == 1) item.put("site_name",JSONObject.NULL).put("site_icon","https://user:secret@example.com/icon.png")
+                        results.put(item)
+                    }
                     output.headers(type = "application/json"); output.write(JSONObject().put("results",results).toString().toByteArray())
                 }
                 request.searching -> {
@@ -528,13 +649,13 @@ class CloudWorkflowTest {
                     }
                     output.event(end("tool_calls")); output.write("data: [DONE]\n\n".toByteArray())
                 }
-                request.grounded -> {
+                request.answering -> {
                     val messages = request.json.getJSONArray("messages")
                     val context = JSONObject(messages.getJSONObject(messages.length()-1).getString("content"))
                     val sources = context.getJSONArray("validatedSources")
                     assertEquals(10,sources.length()); assertFalse(request.json.has("tools"))
                     repeat(10) { index -> assertEquals("https://example.com/${index/5}/${index%5}",sources.getJSONObject(index).getString("url")) }
-                    output.answer(decision("First fact [1], second fact [6]",search = "required"))
+                    output.answer("First fact [1], second fact [6]")
                 }
                 else -> output.answer(decision(search = "required"))
             }
@@ -545,7 +666,14 @@ class CloudWorkflowTest {
             assertEquals(10,fixture.last.sources.size)
             fixture.last.sources.forEachIndexed { index,source -> assertEquals("https://example.com/${index/5}/${index%5}",source.url); assertEquals(300,source.title.length); assertEquals(6000,source.summary.length) }
             assertEquals(fixture.last,fixture.persisted().selected!!.messages.last()); fixture.restart()
-            assertEquals(10,fixture.last.sources.size); assertTrue(server.failures.toString(),server.failures.isEmpty())
+            assertEquals(10,fixture.last.sources.size)
+            assertEquals("Example",fixture.last.sources[0].siteName)
+            assertEquals("https://example.com/icon.png",fixture.last.sources[0].siteIcon)
+            assertNull(fixture.last.sources[1].siteName)
+            assertNull(fixture.last.sources[1].siteIcon)
+            assertNull(fixture.last.sources[2].siteName)
+            assertNull(fixture.last.sources[2].siteIcon)
+            assertTrue(server.failures.toString(),server.failures.isEmpty())
         } }
     }
 
@@ -599,12 +727,12 @@ class CloudWorkflowTest {
             when {
                 request.path == "/v1/tools/search" -> { output.headers(type = "application/json"); output.write("""{"results":[{"title":"Unsafe","url":"javascript:alert(1)"},null,{"title":"Verified","url":"https://example.com/verified","summary":"Fact"},{"title":"Credentials","url":"https://user:secret@example.com"}]}""".toByteArray()) }
                 request.searching -> output.calls(call(0))
-                request.grounded -> output.answer(decision("Source fact [1]",search = "optional"))
+                request.answering -> output.answer(if(mode == "direct") "A local answer" else "Source fact [1]")
                 else -> output.answer(decision("A local answer",search = if(mode == "direct") "none" else "optional"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             fixture.submit("Question about local counters",true); fixture.idle()
-            assertEquals("complete",fixture.last.status); assertEquals(1,server.requests.size); assertTrue(fixture.last.sources.isEmpty())
+            assertEquals("complete",fixture.last.status); assertEquals(2,server.requests.size); assertTrue(fixture.last.sources.isEmpty())
             mode = "mixed"; fixture.submit("Find a fact if useful",true); fixture.idle()
             assertEquals("complete",fixture.last.status); assertEquals("found",fixture.last.searchStatus)
             assertEquals("https://example.com/verified",fixture.last.sources.single().url); assertTrue(server.failures.isEmpty())
@@ -638,6 +766,7 @@ class CloudWorkflowTest {
                     runCatching { output.event(textChunk(reply.drop(20))); output.event(end()); output.write("data: [DONE]\n\n".toByteArray()) }
                 }
                 request.json.toString().contains("Create an itinerary") -> output.answer(decision("Ready.","create","required","A sourced planner"))
+                request.answering -> output.answer("New answer")
                 else -> output.answer(decision("New answer"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
@@ -665,6 +794,7 @@ class CloudWorkflowTest {
                 request.path == "/v1/tools/search" -> { output.headers(type = "application/json"); output.write("""{"results":[{"title":"First","url":"https://example.com/first"}]}""".toByteArray()) }
                 request.searching -> output.calls(call(0),call(1))
                 request.json.toString().contains("Two facts") -> output.answer(decision(search = "required"))
+                request.answering -> output.answer("New answer")
                 else -> output.answer(decision("New answer"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
@@ -679,7 +809,7 @@ class CloudWorkflowTest {
                 assertEquals("cancelled",old.status); assertEquals("",old.text)
                 assertEquals("https://example.com/first",old.sources.single().url)
                 assertEquals(2,server.requests.count { it.path == "/v1/tools/search" })
-                assertFalse(server.requests.any { it.grounded })
+                assertEquals(1,server.requests.count { it.answering }); assertFalse(server.requests.any { it.grounded })
             } finally { release.countDown() }
         } }
     }
@@ -689,7 +819,7 @@ class CloudWorkflowTest {
             when {
                 request.path == "/v1/tools/search" -> { output.headers(type = "application/json"); output.write("""{"results":[{"title":"Verified source","url":"https://example.com/alpha","summary":"Real fixture result"}]}""".toByteArray()) }
                 request.searching -> output.calls(call(0))
-                request.grounded -> output.answer(decision("Ответ по источнику [1]",search = "required"))
+                request.answering -> output.answer("Ответ по источнику [1]")
                 else -> output.answer(decision(search = "required"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
@@ -699,12 +829,25 @@ class CloudWorkflowTest {
             assertEquals("https://example.com/alpha",fixture.last.sources.single().url); assertEquals(4,server.requests.size)
             assertEquals(fixture.last,fixture.persisted().selected!!.messages.last()); fixture.scenario!!.recreate()
             assertTrue(waitFor(fixture.last.text).isVisibleToUser)
-            assertTrue(waitFor("[1] Verified source\nhttps://example.com/alpha").isVisibleToUser); assertTrue(server.failures.isEmpty())
+            val chip = "Источник 1. example.com. Verified source"
+            assertTrue(waitFor(chip).isVisibleToUser)
+            val monitor = instrumentation.addMonitor(IntentFilter(Intent.ACTION_VIEW).apply {
+                addDataScheme("https")
+                addDataAuthority("example.com", null)
+                addDataPath("/alpha", PatternMatcher.PATTERN_LITERAL)
+            }, Instrumentation.ActivityResult(0, null), true)
+            try {
+                click(chip)
+                assertEquals(1,monitor.hits)
+            } finally {
+                instrumentation.removeMonitor(monitor)
+            }
+            assertTrue(server.failures.isEmpty())
         } }
     }
 
     @Test fun imageBytesAreOneTimeAndRevocationIsExplicit() {
-        Server { _, output -> output.answer(decision("Изображение принято")) }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        Server { request, output -> output.answer(if(request.answering) "Изображение принято" else decision("Изображение принято")) }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             val uri = app.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, "alpha-test.png"); put(MediaStore.Images.Media.MIME_TYPE, "image/png")
             })!!
@@ -733,13 +876,17 @@ class CloudWorkflowTest {
                 assertArrayEquals(bytes, android.util.Base64.decode(data.substringAfter(','), android.util.Base64.DEFAULT))
                 fixture.submit("Следующий вопрос")
                 fixture.idle()
-                val next = server.requests[1].json.toString()
-                assertFalse(next.contains("base64")); assertFalse(next.contains(uri.toString()))
+                val currentAnswer = server.requests[1].json.toString()
+                assertTrue(currentAnswer.contains("base64"))
+                assertEquals(4,server.requests.size)
+                server.requests.drop(2).forEach { next ->
+                    assertFalse(next.json.toString().contains("base64")); assertFalse(next.json.toString().contains(uri.toString()))
+                }
                 main { fixture.model.editDraft(Draft("Удалённый файл", listOf(attachment))) }
                 app.contentResolver.delete(uri, null, null)
                 main { fixture.model.send() }; fixture.idle()
                 assertEquals("image_access", fixture.last.errorCode)
-                assertEquals(2, server.requests.size)
+                assertEquals(4, server.requests.size)
                 assertEquals("error", fixture.persisted().selected!!.messages.last().status)
             } finally { runCatching { app.contentResolver.delete(uri, null, null) } }
             assertTrue(server.failures.isEmpty())
@@ -753,7 +900,7 @@ class CloudWorkflowTest {
             when (text) {
                 "slow" -> { output.headers(); output.event(textChunk(decision("Сохранённая часть").take(20))); slowStarted.countDown(); releaseSlow.await(10, TimeUnit.SECONDS); runCatching { output.event(textChunk("Устаревший ответ")); output.event(end()); output.write("data: [DONE]\n\n".toByteArray()) } }
                 "reject" -> { output.headers(401, "application/json"); output.write("{}".toByteArray()) }
-                else -> output.answer(decision("Новый ответ"))
+                else -> output.answer(if(request.answering) "Новый ответ" else decision("Новый ответ"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             fixture.submit("slow"); assertTrue(slowStarted.await(10, TimeUnit.SECONDS))
@@ -781,7 +928,7 @@ class CloudWorkflowTest {
     @Test fun restartMissingKeySearchQuotaAndEmptyResults() {
         var response = "empty"
         Server { request, output ->
-            if(request.grounded) { output.answer(decision("Результаты не найдены",search = "optional")); return@Server }
+            if(request.answering) { output.answer("Результаты не найдены"); return@Server }
             if(request.path == "/chat/completions" && !request.searching) { output.answer(decision(search = "optional")); return@Server }
             if (request.path == "/v1/tools/search") {
                 if (response == "quota") { output.headers(402, "application/json"); output.write("{}".toByteArray()) }

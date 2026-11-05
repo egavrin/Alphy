@@ -1,6 +1,8 @@
 package com.alpha.assistant.ui
 
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
 import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,18 +61,32 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     val tools = com.alpha.assistant.tools.ToolController(application, viewModelScope, provider, keys,
         com.alpha.assistant.tools.ToolStore(application, if (store.databaseName == "alpha.db") "alpha-tools.db" else "${store.databaseName}-tools.db"))
     var surfaceSequence by mutableStateOf(0); private set
-    var surfaceToolId by mutableStateOf<String?>(null); private set
-    var surfaceSettings by mutableStateOf(false); private set
+    internal var surfaceDestination by mutableStateOf<ShellDestination?>(null); private set
+    internal var surfaceAutomationRequest by mutableStateOf<String?>(null); private set
     /** The model outlives each activity, so it holds the entry until a shell applies it. */
     var surfacePending by mutableStateOf(false); private set
     fun openSurface(toolId: String?, settings: Boolean = false) {
-        surfaceToolId = toolId
-        surfaceSettings = settings
+        tools.select(toolId)
+        queueSurface(when {
+            settings -> ShellDestination.Settings
+            toolId != null -> ShellDestination.MiniApps
+            else -> null
+        })
+    }
+    internal fun openCreationSurface(destination: ShellDestination, request: String) {
+        if (destination == ShellDestination.MiniApps) tools.preparePrompt(request)
+        queueSurface(destination, request.takeIf { destination == ShellDestination.Automations && it.isNotBlank() })
+    }
+    private fun queueSurface(destination: ShellDestination?, automationRequest: String? = null) {
+        surfaceDestination = destination
+        surfaceAutomationRequest = automationRequest
         surfacePending = true
         surfaceSequence++
-        tools.select(toolId)
     }
-    fun consumeSurface() { surfacePending = false }
+    fun consumeSurface() {
+        surfacePending = false
+        surfaceAutomationRequest = null
+    }
     var snapshot by mutableStateOf(ShellSnapshot()); private set
     var loading by mutableStateOf(true); private set
     var loadFailed by mutableStateOf(false); private set
@@ -83,6 +99,8 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     var activeConversationId by mutableStateOf<String?>(null); private set
     private data class Active(val conversationId: String, val assistantId: String, val originDraft: Draft, val session: CloudSession = CloudSession(), var job: Job? = null, var weatherDraft: Draft? = null)
     private var active: Active? = null
+    private var answerFragment by mutableStateOf("")
+    fun activeAnswer(messageId: String): String? = answerFragment.takeIf { active?.assistantId == messageId && it.isNotEmpty() }
     var weatherPermissionId by mutableStateOf<String?>(null); private set
     var weatherLocationBusy by mutableStateOf(false); private set
     private var weatherPermission: CompletableDeferred<Boolean>? = null
@@ -264,38 +282,56 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     fun contextDraftKey(): String = snapshot.draft.id
     fun acceptsContext(origin: String): Boolean {
         if (!loading && !loadFailed && origin == contextDraftKey()) return true
-        requestError = "Черновик изменился. Откройте добавление контекста в нужном чате ещё раз."
+        requestError = getApplication<Application>().getString(R.string.context_draft_changed)
         return false
     }
     fun addScreenText(text: String): Boolean = addReviewedText(text, "Текст экрана", contextDraftKey())
     fun addReviewedText(text: String, source: String, origin: String): Boolean {
         if (!acceptsContext(origin)) return false
-        if (attachmentBusy) { requestError = "Дождитесь проверки изображения перед добавлением текста."; return false }
+        if (attachmentBusy) { requestError = getApplication<Application>().getString(R.string.context_wait_for_image_check); return false }
         val attachments = snapshot.draft.attachments
         if (attachments.size >= ImageInput.MAX_IMAGES || attachments.any { it.contextText != null }) {
-            requestError = "Уберите одно вложение или уже добавленный текст перед добавлением контекста."
+            requestError = getApplication<Application>().getString(R.string.context_text_attachment_limit)
             return false
         }
         val attachment = runCatching { com.alpha.assistant.surfaces.AssistContext.textAttachment(text, source) }.getOrElse {
-            requestError = "Текст пуст или превышает 8000 символов."
+            requestError = getApplication<Application>().getString(R.string.context_text_invalid)
             return false
         }
         editDraft(snapshot.draft.copy(attachments = attachments + attachment))
         return true
     }
     fun addAttachment(attachment: Attachment, origin: String = contextDraftKey(), completed: (Boolean) -> Unit = {}) {
-        if (attachmentBusy || !acceptsContext(origin)) { completed(false); return }
+        viewModelScope.launch { completed(attachImage(attachment, origin)) }
+    }
+    internal suspend fun attachImage(attachment: Attachment, origin: String, persistReadAccess: Boolean = false): Boolean {
+        if (attachmentBusy || !acceptsContext(origin)) return false
         if (snapshot.draft.attachments.size >= ImageInput.MAX_IMAGES) {
-            requestError = "Можно выбрать не более 4 вложений"; completed(false); return
+            requestError = getApplication<Application>().getString(R.string.context_attachment_count_limit)
+            return false
         }
+        val resolver = getApplication<Application>().contentResolver
         attachmentBusy = true
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { ImageInput.read(getApplication<Application>().contentResolver, attachment) } }
-            val accepted = result.isSuccess && acceptsContext(origin)
-            if (accepted) editDraft(snapshot.draft.copy(attachments = snapshot.draft.attachments.filterNot { it.uri == attachment.uri } + attachment))
-            else if (result.isFailure) requestError = (result.exceptionOrNull() as? CloudFailure)?.message ?: "Не удалось прочитать изображение"
+        try {
+            val result = withContext(Dispatchers.IO) { runCatching { ImageInput.read(resolver, attachment) } }
+            if (!acceptsContext(origin)) return false
+            val failure = result.exceptionOrNull()
+            if (failure != null) {
+                requestError = (failure as? CloudFailure)?.message ?: getApplication<Application>().getString(R.string.context_image_read_failed)
+                return false
+            }
+            if (persistReadAccess) {
+                try {
+                    resolver.takePersistableUriPermission(Uri.parse(attachment.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (_: SecurityException) {
+                    requestError = getApplication<Application>().getString(R.string.context_image_access)
+                    return false
+                }
+            }
+            editDraft(snapshot.draft.copy(attachments = snapshot.draft.attachments.filterNot { it.uri == attachment.uri } + attachment))
+            return true
+        } finally {
             attachmentBusy = false
-            completed(accepted)
         }
     }
     fun send(search: Boolean = true) {
@@ -364,6 +400,10 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 val knownTools = toolContext?.first
                 val toolStorageWarning = "Tool storage is unavailable. Automatic widgets are disabled for this request. Saved data has not been changed."
                 val toolInstructions = toolContext?.second ?: ChatToolReply.instructions(emptyList(),user.text,available = false)
+                fun parseDecision(decision: ChatToolReply.Decision): ChatToolReply.Reply {
+                    if(knownTools == null && decision.kind in listOf("create","refine")) throw CloudFailure("tool_storage",toolStorageWarning)
+                    return ChatToolReply.parse(decision,knownTools.orEmpty(),user.text,conversationId)
+                }
                 val before = conversation.messages.takeWhile { it.id != user.id }
                 val complete = before.filter { it.role == "assistant" && it.status == "complete" }.mapNotNull { answer ->
                     before.find { it.id == answer.replyTo }?.let { question -> listOf(CloudTurn("user", question.text.ifBlank { "[Изображение из предыдущего запроса не передаётся]" }), CloudTurn("assistant", answer.text)) }
@@ -376,7 +416,10 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 val raw = StringBuilder()
                 var terminal: String? = null
                 withContext(Dispatchers.IO) {
-                    provider.respond(key, CloudRequest(history + CloudTurn("user",user.text,images),assistant.search,toolInstructions,chatDecision = true,selectedText = selectedText,weatherLocation = { resolveWeatherPlace(request,user.text) }), request.session) { event ->
+                    val cloudRequest = CloudRequest(history + CloudTurn("user",user.text,images),assistant.search,toolInstructions,
+                        chatDecision = true,selectedText = selectedText,weatherLocation = { resolveWeatherPlace(request,user.text) },
+                        validateOperation = { parseDecision(it).takeIf { reply -> reply.kind == "clarify" }?.text })
+                    provider.respond(key, cloudRequest, request.session) { event ->
                         withContext(Dispatchers.Main) {
                             if (active === request) {
                                 when (event) {
@@ -385,6 +428,12 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                                         if(raw.length + event.value.length > ChatToolReply.MAX_REPLY) throw CloudFailure("response_size","The reply exceeds the allowed size.")
                                         raw.append(event.value)
                                         // Structured decisions remain buffered until the completed round validates.
+                                    }
+                                    is CloudEvent.AnswerFragment -> {
+                                        terminal = null
+                                        if(answerFragment.length + event.value.length > ChatToolReply.MAX_TEXT)
+                                            throw CloudFailure("response_size","The reply exceeds the allowed size.")
+                                        answerFragment += event.value
                                     }
                                     is CloudEvent.RoundComplete -> {
                                         if(event.text.length > ChatToolReply.MAX_REPLY) throw CloudFailure("response_size","The reply exceeds the allowed size.")
@@ -401,8 +450,9 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 if(active !== request) return@launch
                 val completed = terminal ?: throw CloudFailure("incomplete","The reply has no completed answer. Retry the request.")
                 val decoded = ChatToolReply.decode(completed)
-                if(knownTools == null && decoded.kind in listOf("create","refine")) throw CloudFailure("tool_storage",toolStorageWarning)
-                val parsed = ChatToolReply.parse(completed,knownTools.orEmpty(),user.text,conversationId)
+                if(answerFragment.isNotEmpty() && decoded.kind != "answer")
+                    throw CloudFailure("decision_changed","The assistant changed the requested operation after streaming an answer.")
+                val parsed = parseDecision(decoded)
                 val sources = snapshot.conversations.find { it.id == conversationId }?.messages?.find { it.id == assistant.id }?.sources.orEmpty()
                 if(parsed.search == "required" && !assistant.search) throw CloudFailure("search_disabled","This request requires web search, but search is disabled.")
                 if(parsed.search == "required" && sources.isEmpty()) throw CloudFailure("search_required","No validated search sources were returned. The requested facts could not be verified.")
@@ -414,7 +464,10 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                         cancelRequest = ::cancelRequest,
                         prepared = {
                             val persisted = CompletableDeferred<Boolean>()
-                            updateMessage(request,assistant.id,persist = false) { it.copy(text = if(parsed.kind == "refine") "Updating your app…" else "Creating your app…",status = "generating",toolOperationId = assistant.id) }
+                            val progress = if (parsed.kind == "refine") R.string.chat_app_update_progress else R.string.chat_app_create_progress
+                            updateMessage(request, assistant.id, persist = false) {
+                                it.copy(text = getApplication<Application>().getString(progress), status = "generating", toolOperationId = assistant.id)
+                            }
                             val pending = snapshot.conversations.find { it.id == conversationId } ?: throw CancellationException()
                             writes.trySend {
                                 val result = runCatching { store.saveConversation(pending) }
@@ -429,12 +482,13 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
             } catch (_: CancellationException) {
                 // cancelRequest persists the terminal state before it permits another request.
             } catch (failure: Exception) {
+                if(active !== request) return@launch
                 voice.requestFailed()
                 val known = failure as? CloudFailure
                 updateMessage(request, user.id) { if (it.status == "pending") it.copy(status = "not_sent") else it }
                 updateMessage(request, assistant.id) { it.copy(status = "error", errorCode = known?.code ?: "network", error = known?.message ?: if(it.toolOperationId != null) "The widget could not be created safely. Existing tools and data are unchanged. Retry the request." else "Нет соединения с DeepSeek. Проверьте сеть и повторите запрос.", searchStatus = if (it.searchStatus == "searching") "error" else it.searchStatus) }
             } finally {
-                if (active === request) { active = null; activeConversationId = null }
+                if (active === request) clearActiveRequest()
             }
         }
     }
@@ -454,17 +508,27 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         val answer = snapshot.conversations.find { it.id == request.conversationId }?.messages?.find { it.id == request.assistantId }
         // A completed commit stays complete while its tool list refreshes.
         if(answer?.status == "complete") {
-            active = null; activeConversationId = null
+            clearActiveRequest()
             request.job?.cancel()
             return
         }
         voice.requestFailed()
-        updateMessage(request, request.assistantId) { it.copy(status = "cancelled", errorCode = "cancelled", error = "Запрос остановлен. Полученная часть ответа сохранена.", searchStatus = if (it.searchStatus == "searching") "error" else it.searchStatus) }
+        val partial = answerFragment.takeIf { it.isNotBlank() }.orEmpty()
+        updateMessage(request, request.assistantId) {
+            it.copy(text = partial, status = "cancelled", errorCode = "cancelled",
+                error = if(partial.isEmpty()) "Запрос остановлен." else "Запрос остановлен. Ответ не завершён.",
+                searchStatus = if (it.searchStatus == "searching") "error" else it.searchStatus)
+        }
         val userId = snapshot.conversations.find { it.id == request.conversationId }?.messages?.find { it.id == request.assistantId }?.replyTo
         if (userId != null) updateMessage(request, userId) { if (it.status == "pending") it.copy(status = "not_sent") else it }
-        active = null; activeConversationId = null
+        clearActiveRequest()
         request.job?.cancel()
-        viewModelScope.launch(Dispatchers.IO) { request.session.cancel() }
+        request.session.cancel()
+    }
+    private fun clearActiveRequest() {
+        answerFragment = ""
+        active = null
+        activeConversationId = null
     }
     override fun onCleared() {
         weatherPermission?.cancel()

@@ -67,8 +67,16 @@ class AssistantActivity : AlphyActivity() {
                                 TextButton(onClick = { finish() }) { Text("Отмена") }
                             } else {
                                 val model = remember { AssistantChat.model(application) }
-                                CompactAssistant(model,invocation,full = { startActivity(SurfaceEntry.chatIntent(this@AssistantActivity).putExtra("tool_id",model.tools.selectedId)); finish() },
-                                    settings = { startActivity(SurfaceEntry.chatIntent(this@AssistantActivity).putExtra("settings",true)); finish() },dismiss = { finish() })
+                                CompactAssistant(model, invocation,
+                                    full = { startActivity(SurfaceEntry.chatIntent(this@AssistantActivity).putExtra("tool_id", model.tools.selectedId)); finish() },
+                                    settings = { startActivity(SurfaceEntry.chatIntent(this@AssistantActivity).putExtra("settings", true)); finish() },
+                                    creation = { destination, request ->
+                                        model.openCreationSurface(destination, request)
+                                        // The shared model already holds this entry and its private prompt.
+                                        startActivity(SurfaceEntry.chatIntent(this@AssistantActivity).setAction(null))
+                                        finish()
+                                    },
+                                    dismiss = { finish() })
                             }
                         }
                     }
@@ -85,7 +93,9 @@ class AssistantActivity : AlphyActivity() {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun CompactAssistant(model: ShellViewModel, invocation: String?, full: () -> Unit, settings: () -> Unit, dismiss: () -> Unit) {
+@Composable private fun CompactAssistant(model: ShellViewModel, invocation: String?, full: () -> Unit, settings: () -> Unit,
+    creation: (ShellDestination, String) -> Unit, dismiss: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val capture = AssistantCapture.current?.takeIf { it.id == invocation }
@@ -122,7 +132,7 @@ class AssistantActivity : AlphyActivity() {
         else if(model.loadFailed) Column(Modifier.padding(24.dp)) { Text("Не удалось открыть чат. Сохранённые данные не удалены."); Button(onClick = model::load) { Text("Повторить") } }
         else {
             ChatPane(model, model.snapshot.selected, tools = full, automation = { full() }, settings = settings, modifier = Modifier.weight(1f))
-            Composer(model, context = { sheet = "context" }, automation = { full() }, modifier = Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp))
+            Composer(model, context = { sheet = "context" }, modifier = Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp))
         }
     }
     model.requestError?.let { error ->
@@ -154,7 +164,10 @@ class AssistantActivity : AlphyActivity() {
     },confirmButton = { TextButton(onClick = { review = false }) { Text("Готово") } },dismissButton = {
         TextButton(onClick = { AssistantCapture.clear(capture.id); review = false }) { Text("Убрать контекст экрана") }
     })
-    if (sheet == "context") ReviewedContextDialog(model) { sheet = null }
+    if (sheet == "context" && !model.loading && !model.loadFailed) ReviewedContextDialog(model,
+        createMiniApp = { creation(ShellDestination.MiniApps, it) },
+        automate = { creation(ShellDestination.Automations, it) },
+    ) { sheet = null }
     if (sheet != null && sheet != "context") ModalBottomSheet(onDismissRequest = { sheet = null }) {
         Column(Modifier.navigationBarsPadding().imePadding().padding(20.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             when (sheet) {

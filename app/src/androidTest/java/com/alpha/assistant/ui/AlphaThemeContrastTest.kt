@@ -20,6 +20,8 @@ class AlphaThemeContrastTest {
             "device light" to alphaColorScheme(context, false), "device dark" to alphaColorScheme(context, true))
         for ((name, s) in schemes) for ((pair, colors) in mapOf(
             "onSurface/surface" to (s.onSurface to s.surface),
+            "onSurface/surfaceContainer" to (s.onSurface to s.surfaceContainer),
+            "primary/surfaceContainer" to (s.primary to s.surfaceContainer),
             "onSurfaceVariant/surface" to (s.onSurfaceVariant to s.surface),
             "onSurfaceVariant/surfaceContainer" to (s.onSurfaceVariant to s.surfaceContainer),
             "onSurfaceVariant/surfaceContainerHigh" to (s.onSurfaceVariant to s.surfaceContainerHigh),

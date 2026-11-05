@@ -1,12 +1,10 @@
 package com.alpha.assistant.ui
 
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -18,6 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.sp
+import com.alpha.assistant.R
 import com.alpha.assistant.cloud.validSourceUrl
 import org.commonmark.ext.gfm.strikethrough.Strikethrough
 import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
@@ -28,20 +27,22 @@ import org.commonmark.parser.Parser
 private val markdownParser = Parser.builder().maxOpenBlockParsers(64).maxInlineNesting(64)
     .extensions(listOf(TablesExtension.builder().maxCells(4096).build(),StrikethroughExtension.create())).build()
 
-/** Native selectable text. HTML and image references never execute code or fetch remote content. */
-@Composable internal fun MarkdownText(source: String, modifier: Modifier = Modifier, linkError: () -> Unit = {}) {
+/** HTML and image references remain text. */
+@Composable internal fun rememberMarkdownText(source: String, linkError: () -> Unit): AnnotatedString {
     val uriHandler = LocalUriHandler.current
     val color = MaterialTheme.colorScheme.primary
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
     val document = remember(source) { runCatching { markdownParser.parse(source) }.getOrNull() }
-    val text = remember(document,source,color,codeBackground,uriHandler) {
+    val codeColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val imagePrefix = stringResource(R.string.chat_markdown_image_prefix)
+    return remember(document,source,color,codeBackground,codeColor,uriHandler,linkError,imagePrefix) {
         if(document == null) AnnotatedString(source) else buildAnnotatedString {
             lateinit var render: (Node,Int) -> Unit
             fun children(node: Node, depth: Int) {
                 var child = node.firstChild
                 while(child != null) { render(child,depth); child = child.next }
             }
-            val codeStyle = SpanStyle(fontFamily = FontFamily.Monospace,background = codeBackground)
+            val codeStyle = SpanStyle(fontFamily = FontFamily.Monospace,color = codeColor,background = codeBackground)
             render = { node,depth ->
                 when(node) {
                     is org.commonmark.node.Text -> append(node.literal)
@@ -60,7 +61,7 @@ private val markdownParser = Parser.builder().maxOpenBlockParsers(64).maxInlineN
                             children(node,depth); pop()
                         } else children(node,depth)
                     }
-                    is Image -> { append("[Image: "); children(node,depth); append("]") }
+                    is Image -> { append(imagePrefix); children(node,depth); append("]") }
                     is HtmlInline -> append(node.literal)
                     is HtmlBlock -> { withStyle(codeStyle) { append(node.literal) }; append("\n") }
                     is SoftLineBreak -> append("\n")
@@ -92,5 +93,4 @@ private val markdownParser = Parser.builder().maxOpenBlockParsers(64).maxInlineN
             render(document,0)
         }
     }
-    SelectionContainer { Text(text,modifier,fontSize = 15.sp,lineHeight = 23.sp) }
 }

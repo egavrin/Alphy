@@ -1,0 +1,168 @@
+package com.alpha.assistant.ui
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.net.Uri
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.hideFromAccessibility
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.alpha.assistant.R
+import com.alpha.assistant.cloud.KEY_ERRORS
+import com.alpha.assistant.cloud.validSourceUrl
+import com.alpha.assistant.data.Message
+import com.alpha.assistant.data.Source
+
+@Composable internal fun ChatMessageCard(
+    message: Message,
+    fragment: String?,
+    weatherLocationBusy: Boolean,
+    retry: (() -> Unit)?,
+    retryEnabled: Boolean,
+    createTool: () -> Unit,
+    createAutomation: () -> Unit,
+    share: () -> Unit,
+    settings: () -> Unit,
+    linkError: () -> Unit,
+) {
+    val user = message.role == "user"
+    val accepted = user || message.status == "complete"
+    val hasTextActions = accepted && message.text.isNotBlank()
+    val colors = MaterialTheme.colorScheme
+    val context = LocalContext.current
+    var menuOpen by remember { mutableStateOf(false) }
+    val actionLabel = stringResource(R.string.chat_message_actions)
+    val actions = if (hasTextActions || retry != null) Modifier
+        .pointerInput(Unit) { detectTapGestures(onLongPress = { menuOpen = true }) }
+        .semantics { onLongClick(actionLabel) { menuOpen = true; true } }
+    else Modifier
+    Box {
+        Surface(
+            modifier = Modifier.fillMaxWidth().then(actions),
+            shape = RoundedCornerShape(23.dp),
+            color = if (user) colors.surfaceVariant else colors.surfaceContainer,
+            contentColor = if (user) colors.onSurfaceVariant else colors.onSurface,
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                if (fragment != null || (!accepted && message.text.isNotBlank() && message.status in listOf("cancelled", "interrupted"))) {
+                    Text(stringResource(R.string.chat_answer_incomplete), style = MaterialTheme.typography.labelSmall)
+                }
+                if (message.status == "generating") {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+                val body = fragment ?: message.text
+                if (body.isNotEmpty()) {
+                    val text = if (accepted) rememberMarkdownText(body, linkError) else AnnotatedString(body)
+                    val semantics = when {
+                        fragment != null -> Modifier.semantics { hideFromAccessibility() }
+                        !user && accepted -> PoliteLiveRegion
+                        else -> Modifier
+                    }
+                    Text(text, semantics, fontSize = 15.sp, lineHeight = 23.sp)
+                }
+                message.attachments.forEach {
+                    Text(stringResource(R.string.chat_attachment_history, it.name), style = MaterialTheme.typography.bodySmall)
+                }
+                if (message.searchStatus.isNotEmpty()) {
+                    val status = when (message.searchStatus) {
+                        "searching" -> R.string.chat_search_running
+                        "found" -> R.string.chat_search_found
+                        "empty" -> R.string.chat_search_empty
+                        else -> R.string.chat_search_error
+                    }
+                    Text(stringResource(status), style = MaterialTheme.typography.labelSmall)
+                }
+                if (message.sources.isNotEmpty()) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        message.sources.forEachIndexed { index, source -> SourceChip(source, index + 1, linkError) }
+                    }
+                }
+                if (message.error.isNotBlank()) {
+                    Surface(shape = RoundedCornerShape(12.dp), color = colors.errorContainer, contentColor = colors.onErrorContainer) {
+                        Text(message.error, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                if (!user && message.errorCode in KEY_ERRORS) {
+                    TextButton(onClick = settings) { Text(stringResource(R.string.open_settings)) }
+                }
+                if (!user && message.status in listOf("pending", "streaming")) {
+                    val status = when {
+                        weatherLocationBusy -> R.string.chat_request_location
+                        message.status == "pending" -> R.string.chat_request_preparing
+                        else -> R.string.chat_request_responding
+                    }
+                    Text(stringResource(status), style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        if (hasTextActions || retry != null) {
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                if (hasTextActions) {
+                    val appName = stringResource(R.string.app_name)
+                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_message_copy)) }, onClick = {
+                        menuOpen = false
+                        val clipboard = context.getSystemService(ClipboardManager::class.java)
+                        clipboard.setPrimaryClip(ClipData.newPlainText(appName, message.text))
+                    })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_message_note)) }, onClick = { menuOpen = false; share() })
+                }
+                if (user && hasTextActions) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_message_create_tool)) }, onClick = { menuOpen = false; createTool() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_message_create_automation)) }, onClick = { menuOpen = false; createAutomation() })
+                }
+                if (retry != null) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_message_retry)) },
+                        onClick = { menuOpen = false; retry() }, enabled = retryEnabled)
+                }
+            }
+        }
+    }
+}
+
+@Composable private fun SourceChip(source: Source, number: Int, linkError: () -> Unit) {
+    val uriHandler = LocalUriHandler.current
+    val validUrl = remember(source.url) { validSourceUrl(source.url) }
+    val site = source.siteName?.takeIf { it.isNotBlank() } ?: if (validUrl) Uri.parse(source.url).host.orEmpty() else ""
+    val title = source.title.ifBlank { site.ifBlank { source.url } }
+    val label = listOf(site, title).filter { it.isNotBlank() }.distinct().joinToString(". ")
+    val description = stringResource(R.string.chat_source_description, number, label)
+    val icon = rememberSourceIcon(source.siteIcon)
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        onClick = {
+            if (validUrl) runCatching { uriHandler.openUri(source.url) }.onFailure { linkError() }
+            else linkError()
+        },
+        modifier = Modifier.semantics { contentDescription = description },
+        shape = RoundedCornerShape(16.dp),
+        color = colors.secondaryContainer,
+        contentColor = colors.onSecondaryContainer,
+    ) {
+        Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (icon == null) AlphaIcon(Glyph.Link, Modifier.size(16.dp).testTag("source-fallback-$number"), color = colors.onSecondaryContainer)
+            else Image(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+            Text(stringResource(R.string.chat_source_number, number), Modifier.semantics { hideFromAccessibility() },
+                style = MaterialTheme.typography.labelMedium)
+            Text(site.ifBlank { title }, Modifier.weight(1f, fill = false).semantics { hideFromAccessibility() },
+                maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}

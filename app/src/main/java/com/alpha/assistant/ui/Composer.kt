@@ -35,7 +35,7 @@ import com.alpha.assistant.R
 
 /** The message composer of the shell, the mini-app split, and the assistant half sheet.
  * [compact] puts the field and the round actions in one row and hides the other lines, while the keyboard takes most of a landscape window. */
-@Composable internal fun Composer(model: ShellViewModel, context: () -> Unit, automation: (String) -> Unit, modifier: Modifier = Modifier, compact: Boolean = false) {
+@Composable internal fun Composer(model: ShellViewModel, context: () -> Unit, modifier: Modifier = Modifier, compact: Boolean = false) {
     val snapshot = model.snapshot
     val busy = model.activeConversationId != null
     val startVoice = rememberVoiceStart(model, oneShot = true)
@@ -55,7 +55,6 @@ import com.alpha.assistant.R
             }
             if (model.voice.permissionRequired) MicrophonePermissionGuidance(model.voice, startVoice)
             else if (!model.voice.active && model.voice.hasAttempted) ProvideTextStyle(MaterialTheme.typography.bodySmall) { StatusLine(Glyph.Mic, MaterialTheme.colorScheme.onSurfaceVariant, model.voice.status) }
-            if (snapshot.draft.text.isNotBlank()) TextButton(onClick = { automation(snapshot.draft.text) }) { Text(stringResource(R.string.composer_automation)) }
             if (model.attachmentBusy) ProvideTextStyle(MaterialTheme.typography.labelSmall) { StatusLine(Glyph.File, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.composer_image_check)) }
         }
         // A dark Material scheme gives outlineVariant the tone of surfaceVariant, so the round actions need a container of another tone.

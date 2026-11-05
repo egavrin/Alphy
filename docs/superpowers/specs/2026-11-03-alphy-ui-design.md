@@ -1,12 +1,11 @@
 # Alphy UI design, version 1
 
-Status: approved by the user on 2026-11-03, revision 2. This file is not committed yet. Plan 1 Task 0 commits it.
+Revision 2 records the design that the user approved on 2026-11-03.
+Revision 3 incorporates the approved mini-app work after prerelease `v0.1.0-alpha.2`.
+The [roadmap](../plans/2026-11-03-alphy-ui-roadmap.md) assigns the work and gives the release evidence.
 
-Revision 2 adds the results of a builder check and a code study. Section 10 lists the choices that the user has not seen yet.
-
-Repository: `/Users/egavrin/Documents/alpha`. Code paths below without a root are relative to
-`app/src/main/java/com/alpha/assistant/`. Another session edits some of these files now (section 3), so this
-document names symbols in place of line numbers for those files.
+Repository path: `/Users/egavrin/Documents/alpha`. Code paths without a root are relative to
+`app/src/main/java/com/alpha/assistant/`.
 
 ## 0. How to read this document
 
@@ -14,7 +13,7 @@ Each decision has one of these labels:
 
 - **(User)**: a Requirement. The user stated it, the brief states it, or it is part of an option that the user chose in the design session of 2026-11-03. A sample screen of a chosen option counts for what it shows. Its exact words are a sample, not fixed strings.
 - **(Claude)**: an Implementation choice or a guess that Claude told the user in the session, before the first draft. The user did not object.
-- **(Claude, new)**: an Implementation choice that first appears in this document. The user has not seen it yet. Section 10 lists the important ones.
+- **(Claude, new)**: an Implementation choice that first appeared in revision 2. Section 10 records the original choices and the approved mini-app changes.
 - **(Builder)**: an Implementation choice that this document leaves to the builder.
 - **Assumption**: a statement without direct evidence. Each one has a basis and a test.
 
@@ -66,7 +65,7 @@ Success, as Claude understands it (Assumption, not stated by the user):
 - A new user enters the key, asks for something, and gets a mini-app card that works and looks good, in seconds.
 - (User) One item works the same in the chat card, on the desktop tile, and in the home-screen widget, with one state.
 - A lesson feels personal, because each slide uses the earlier answers.
-- Changes on the phone never surprise the user: one plan, one approval, and a visible stop button.
+- The local agent shows one plan, requests one approval, and keeps a stop button visible during changes.
 - No screen shows technical text or mixed languages.
 
 ## 2. Goals, non-goals, anti-goals
@@ -92,14 +91,14 @@ Success, as Claude understands it (Assumption, not stated by the user):
 - (User, brief) Real Jev calls in release builds. DeepSeek does the Jev role.
 - (User) A confirmation before each cloud message. The user chose one consent at key entry.
 - (User) Trust for one function, such as «Всегда разрешать изменения в календаре», with an undo toast. The user chose one plan approval instead.
-- (User) A preview step with «Применить» and «Отмена» for mini-app changes, and a separate change screen. The user chose changes through the chat.
+- (User) A mandatory «Применить» or «Отмена» step for generated changes. The user chose changes through the chat. Section 5.3 defines the live preview and manual edit.
 - (User) A port of VERA. The user chose route 1. Claude also dropped the DEAL Studio renderer, Google A2UI, and Remote Compose widgets.
 - (Claude, new) Generated UI inside chat answers. A chat answer is text. A search answer shows in the shared card frame with its sources (5.2).
 - (Claude, new) Contacts, calls, SMS, and medicine functions for the agent. Mini-apps keep the medicine functions.
 - (Claude, new) PDF and office files in the «Файл» chip.
-- (Claude, new) Cost or token displays, accounts, sync between devices, and a share function for mini-apps.
+- (Claude, new) Cost or token displays, accounts, and sync between devices. Section 5.3 covers explicit mini-app share, export, and import.
 - (Claude, new) Live Updates notifications for long agent runs. They can come later.
-- (Claude, new) A review schedule for lessons, an embedding model for memory, and an isolate pool for the sandbox.
+- (Claude, new) A review schedule for lessons and an embedding model for memory.
 
 ### 2.3 Anti-goals
 
@@ -108,61 +107,53 @@ These results are failures, even when the code works:
 - (User) A UI that is not simpler than the mock, or not close to ChatGPT («чуть проще, ближе к чатгпт»).
   - The page of the chosen desktop option called it "less minimal than ChatGPT", so the desktop itself is not a failure.
   - (Claude) A plain question and its answer must stay as simple as in ChatGPT.
-- (User) Changes on the phone that the user did not approve, in a plan or with «Включить».
-- (User) Private content that goes to DeepSeek without an explicit user step. The explicit steps are a chip, «Включить» on an automation card that lists the data, and «Запомни…» or an accepted «Запомнить?» for a memory fact.
+- (User) Local agent changes without plan approval, or automation runs without «Включить». Section 5.3 defines the separate mini-app rules.
+- (User) Chat, local agent, or automation uploads of private content without their explicit steps (5.9). Section 5.9 also defines separate mini-app data rules.
+- (User) Mini-app network access without its network grant, or access to device data outside Android permissions and picker scope.
 - (User) Generated items that look different from Alphy. Mini-apps, lessons, and widgets take the app colors and shapes.
 - (Claude, new) Technical data on user screens: IDs, URIs, schema keys, raw coordinates, ISO times, or English diagnostics.
 - (Claude, new) A dead end: a "could not build" screen with no next step.
 
 ## 3. Constraints
 
-From the project and the code:
+Project requirements:
 
-- Requirement (alpha `AGENTS.md`): do not keep compatibility with earlier Alpha versions. Incompatible changes are permitted.
-- Requirement (alpha `AGENTS.md`): do not add migrations only for earlier development versions.
-- Requirement (alpha `AGENTS.md`): do not silently delete user data or credentials.
-- Requirement (`docs/tool-integration.md`): generated JavaScript has no network, files, credentials, Android APIs, or generated Kotlin.
-- Requirement (`docs/parity/compose-coverage.md`): generated code cannot use arbitrary composables, imports, modifiers, or host calls. A new visual ability needs a catalog type or token, with validation and model guidance.
-- Requirement (code): generated JavaScript runs in `JavaScriptSandbox` from androidx.javascriptengine 1.1.1 (`sandbox/AndroidJsRuntime.kt`). The docs that name QuickJS are wrong.
-- The app has one retained isolate and one transient isolate. A request for an occupied slot fails with `BUSY` (`sandbox/AndroidJsRuntime.kt`).
-- Sandbox limits (`sandbox/SandboxContract.kt`, `tools/GraphicsContract.kt`, `docs/tool-integration.md`):
-  - a 16 MiB heap and 64 KiB messages
-  - a 500 ms watchdog for a discrete event, and a 100 ms watchdog for frame, pointer, timer, and control events
-  - 32 KiB for each drawing result
-  - Each watchdog measures the time from submission to the result. It does not measure script CPU time, and it does not guarantee a frame rate.
-  - A timeout closes the isolate and rejects the result. Alphy does not run the event again, and it commits no state or effect.
-  - The retained sessions and the generation test use the same limits.
-- Spec limits (`tools/ToolSpec.kt`, `tools/ToolUiCatalog.kt`): 48 KiB state, 32 KiB source, and 32 KiB UI with 256 nodes and depth 8. Parts and holes must fit in these limits.
-- One `ArtifactCoordinator` for each mini-app orders the events from all hosts. It checks the revision and the state version.
-- A mini-app has one drawing owner at a time. A new `open` moves the ownership (`ArtifactCoordinator`).
-- A refinement only adds state fields (`ToolSpec.stateForRevision`).
-- Only `button` and `toggle` run inside a widget. The device must be unlocked, and tokens protect each action (`surfaces/ToolWidgets.kt`).
-- A mini-app asks for a phone action only from a user event, and only for functions that it declares. The user turns on a grant for each mini-app. Each action needs a confirmation, except a scoped native control that shows the exact details (`docs/native-capabilities.md`).
-- `calendar.read` has no automatic model upload, and capability results stay on the phone (`capabilities/CapabilityContract.kt`, `tools/ToolEngine.kt`).
-- The SDK levels are minSdk 29, targetSdk 37, and compileSdk 37 (`app/build.gradle.kts`).
+- `AGENTS.md` permits breaking changes and prohibits compatibility code or migrations solely for earlier development versions.
+- `AGENTS.md` prohibits silent deletion of user data or credentials.
+- Generated JavaScript runs in AndroidX `JavaScriptSandbox` (`sandbox/AndroidJsRuntime.kt`). It has access only to validated host interfaces.
+- The host mediates network, files, media, AI, and device operations. Generated code has no direct Android APIs, raw sandbox privileges, or access to provider credentials. The host does not execute generated Kotlin.
+- `ToolUiCatalog` validates visual types and tokens. Generated code cannot call arbitrary composables or use arbitrary imports, modifiers, or host calls.
+- Each mini-app has an `ArtifactCoordinator` that orders events across hosts and checks the revision and state version.
+- Alphy bounds memory, messages, execution time, storage, and work queues. It measures supported loads before choosing the new ceilings (5.3, 6.6, 9).
+- If an event times out, Alphy closes its isolate and rejects its result. Alphy does not replay the event or commit its state or effects.
+- Watchdogs measure time from submission to result. Frame rate is a separate measurement.
+- Only `button` and `toggle` run inside a widget. Widget actions require an unlocked device and action tokens (`surfaces/ToolWidgets.kt`).
+- Android permission dialogs, pickers, background limits, and system access restrictions apply to mini-apps.
 
-From the platform (sources in section 13):
+Platform baseline (sources in section 13):
 
+- The release SDK levels are minSdk 29, targetSdk 37, and compileSdk 37 (`app/build.gradle.kts`).
 - Dynamic color needs API 31 or later.
 - Edge-to-edge and predictive back are on for targetSdk 36 and later.
 - With targetSdk 37, Android 17 limits the bitmap memory of RemoteViews to 6 × width × height bytes.
 - The launcher decides about a widget pin. A denial gives no callback, and the caller must be in the foreground.
-- AOSP marks the assistant role as not requestable (`requestable="false"`). An app cannot show a role dialog. It can only open the system settings.
+- AOSP marks the assistant role as not requestable (`requestable="false"`). Alphy opens the Android settings for that role.
 
-From the acceptance rules (`docs/parity/compose-acceptance.md`, Requirement):
+Acceptance requirements ([Compose acceptance procedure](../../parity/compose-acceptance.md), sections 6.8 and 9):
 
-- Each request needs three independent real generations. The normal service permits at most one correction.
-- ADB commands go only to `emulator-5556`. `emulator-5554` must stay untouched.
-- The runner grants no native capability and taps no generated control automatically.
-- The `DEEPSEEK_API_KEY` rules of that file apply.
+- Each request needs three independent real generations. A correction stays in its original generation.
+- ADB commands go only to `emulator-5556`. `emulator-5554` stays untouched.
+- The runner grants no mini-app network access or Android permissions automatically. It does not tap generated controls automatically. Workflows use test data and explicit operation of Android dialogs and pickers.
+- The `DEEPSEEK_API_KEY` rules in the Compose acceptance procedure apply.
 
-From the work state, on 2026-11-03 at 12:53:
+Historical baseline from the 2026-11-04 code comparison of Alpha `7ae425a` with deal-studio-ohos `7ee06af1`:
 
-- HEAD is `62179af`. `git status --short` lists 55 modified and 38 untracked entries.
-- Another session changes the same UI files and their tests, for example `ToolUi.kt`, `NativeToolUi.kt`, `ToolUiCatalog.kt`, `NativeToolSurface.kt`, and `AlphaShell.kt`. Its repair run at 12:02 failed 3 of 3.
-- That session also edited this draft at 12:28. It changed the sandbox limits to match its code change (100 ms in place of 25 ms).
-- This design depends on files that are untracked now: `tools/ArtifactCoordinator.kt`, `tools/ToolGenerationSmoke.kt`, `tools/ArtifactProtocol.kt`, and `docs/parity/compose-coverage.md`.
-- (Claude, new, from the session safety rules) The implementation must not overwrite or discard that work. The plan records HEAD and the status list. Its first step asks the user to commit or finish the work in progress.
+- Alpha had one retained isolate and one transient isolate. An occupied slot returned `BUSY`.
+- The earlier sandbox used a 16 MiB heap, 64 KiB messages, and 32 KiB drawing results. The watchdogs used 500 ms for discrete events and 100 ms for frame, pointer, timer, and control events.
+- The earlier spec limited state to 48 KiB, source and UI to 32 KiB each, UI to 256 nodes and depth 8, images to 4, and drawing to 512 commands per frame. It had no bitmap drawing.
+- Alpha had no mini-app network, file content, media, or AI access. Its device functions used separate grants and Alphy confirmations.
+- Mini-app generation used 4,096 tokens, disabled thinking, and capped the response at 65,536 bytes. It failed on a provider `length` result without correction.
+- The [roadmap](../plans/2026-11-03-alphy-ui-roadmap.md) records the later release baseline and assigns the work to replace these limits.
 
 ## 4. Product shape in one view
 
@@ -227,7 +218,7 @@ Decided by the user:
 - The «⋯» menu has «На рабочий стол», «Виджет на экран», «Версии», and «Удалить».
 - The user changes a mini-app through the chat, for example «сделай кнопку крупнее».
 - The new version shows as v2 in the same card, with «Вернуть v1».
-- There is no preview step and no separate change screen.
+- Generated chat changes have no separate review screen or Apply step. The card shows the live preview as the app builds.
 
 Sample from the chosen screen: «Сделай трекер воды на 8 стаканов» → «Готово. Отмечайте стаканы прямо здесь.» → a card
 «Вода · сегодня · v1» with «5 из 8 стаканов» and «+1 стакан».
@@ -235,11 +226,11 @@ Sample from the chosen screen: «Сделай трекер воды на 8 ст�
 The target of a change (Claude, new):
 
 - The host fixes the target. The model never selects it.
-- The targets are only the mini-app cards in the current chat, as today. Only their titles go to DeepSeek.
+- Only mini-app cards in the current chat are possible targets. Only their titles go to DeepSeek.
 - With one card, or with a request that names the full title of a card, that card is the target.
 - With several cards and no name, Alphy asks one short question with the card titles as buttons. deal-studio-ohos does the same ("Never guess a target", `VeraChat.ets`).
 - «Изменить» in the full view opens the last chat of the mini-app, or a new chat when that chat was deleted. It puts the card there and passes the target through `hostTargetId` of `ChatToolReply.parse`.
-- The composer then opens empty under the card. Today it gets the technical draft `Update tool [<id>]: ` (`ui/ShellViewModel.kt`).
+- The composer then opens empty under the card. The earlier shell added the technical draft `Update tool [<id>]: ` (`ui/ShellViewModel.kt`).
 
 Versions (Claude, new, unless marked):
 
@@ -249,7 +240,7 @@ Versions (Claude, new, unless marked):
   - The current schema always contains the schema of vN, because a refinement only adds fields.
   - The current render check stays, and it must leave the state unchanged.
   - When the code of vN fails that check, «Версии» shows a short reason for that version in place of «Вернуть».
-  - Today a rollback requires that the old schema accepts the current state. This rule changes.
+  - The earlier store required the old schema to accept the current state.
 - When a new version comes from a change or from «Вернуть vN», each automation that writes to the mini-app stops. This is the current approval rule (`docs/automations.md`).
   - The new card names each stopped automation, with a button that opens its card for «Включить».
   - The automation tile and its run log show the same reason.
@@ -262,20 +253,43 @@ Save and delete (Claude, new):
 - «Удалить» asks for confirmation. The dialog names what goes with the mini-app: its data, versions, tiles, and widgets.
 - After a delete, each automation that uses the mini-app stops and shows the reason.
 
-Phone actions from a mini-app (Claude, new):
+Mini-app network, files, and web content (User):
 
-- The current grant and confirmation rules stay (section 3).
-- The confirmation becomes a short sheet with the value before and after, as in the agent plan card.
-- A tap on a tile that needs a confirmation opens the sheet over the desktop.
-- A widget action that needs a phone change opens Alphy, because only `button` and `toggle` run in a widget.
-- A grant stays with the mini-app across versions, as today.
+- The user can enable one network grant per mini-app. It covers all public and local destinations, redirects, and web subresources.
+- The host applies the grant to every network request. Revocation stops new requests and cancels in-flight network work.
+- A granted mini-app can send any data that Android makes accessible to it. Alphy requests no confirmation for individual transfers.
+- The host supports file access through Android permissions and pickers, plus bounded transfers, web content, and URL images.
+- Web content follows the same network grant. The host isolates web content from Android APIs, provider credentials, and other apps' state.
+- «Доступ и функции» explains the full scope, shows the grant status, and lets the user revoke it (5.11).
 
-Hosts that run at the same time (Claude, new):
+Mini-app device, media, and AI operations (User):
 
-- The state is live in every host, because `ArtifactCoordinator` orders the events from all hosts.
-- JavaScript timers and frames run in one host only: the full view, else the card or tile that the user touched last. The other hosts show the last state and the last frame.
-- A queue serializes the work of the transient isolate: taps on other tiles, widget actions, automations, and generation test runs. A busy slot waits and does not fail.
-- A countdown or stopwatch part shows its time with a native catalog element bound to a stored start or end time. A tile then shows the time without JavaScript.
+- Mini-apps use declared, validated host interfaces for device operations. Alphy adds no device-operation grant or confirmation.
+- Android still presents its required permission dialogs, pickers, and other system UI. If an operation needs that UI from a widget, the widget opens Alphy.
+- Device functions cover a read-only device status snapshot, location, sensors, audio, and video. Audio includes short tones. The host bounds samples, media resources, and effects.
+- Foreground timer events can request declared effects, including `vibration.play` and `notification.post`. The host validates and rate-limits those effects.
+- A mini-app can pass Android-accessible device data to host AI without an Alphy prompt. Host AI uses the existing key consent (5.9).
+- General generated code stops when the mini-app goes into the background. Only explicitly activated scheduled actions can run there under Android limits.
+- When a schedule changes, the previous activation expires. The user must activate the changed schedule before it can run.
+- «Удалить» still requires confirmation.
+
+Hosts and interaction (User):
+
+- Several mini-apps can stay open and active. The host bounds concurrent work and isolates their state, resource use, and errors.
+- All hosts for the same mini-app show one state. `ArtifactCoordinator` orders their events. The host coordinates frame ownership for each mini-app.
+- A countdown or stopwatch can show time from a stored start or end time through a native catalog element. This works on a tile without JavaScript.
+- Text fields and sliders can send live input. Alphy bounds the event rate and retains the Apply path for controls that use it.
+- A drawing area appears in the live preview before «Apply changes». Generation and edits show usable previews as soon as validation permits.
+- The catalog supports Markdown, drag reorder, a route stack, and more than line and bar charts. It supports bounded bitmap drawing.
+- Mini-app host controls use Russian UI text. Generated mini-apps use Russian for Russian requests. The workflows verify that controls perform meaningful actions.
+
+Share, export, import, and manual edit (User):
+
+- An explicit export action lets the user choose which app data to include. The user can share the export through Android.
+- The export excludes provider credentials and access grants. Alphy validates imports before it changes any stored data.
+- Import preserves existing data when a name or ID conflicts, or when validation fails. An imported app has no network grant.
+- The library offers manual editing with validation before save. A failed or canceled edit preserves the last good version and its data.
+- Chat remains the entry point for generated refinements. Manual editing is a separate library action.
 
 Other rules:
 
@@ -448,8 +462,12 @@ Left to the builder: the sheet heights, the locked-device state, and the voice s
   - the memory facts that the user saved and that relate to a request («Запомни…» or «Запомнить?»)
   - the code and the declared UI of a mini-app that the user asks to change (the change request)
 - (Claude, new) The «Файл» chip follows the same rule as the other chips.
-- (Claude, new) «Настройки» show the consent text again. «Удалить ключ» stops all cloud functions.
-- (Claude, new) The README and `docs/cloud-integration.md` change to describe this consent. Today they promise a confirmation before each send, and the code has none.
+- (User) These chat, local agent, and automation rules continue to apply to their own requests.
+- (User) A mini-app with its network grant can transfer Android-accessible device data. Alphy requests no separate consent for each transfer.
+- (User) Host AI for mini-apps works independently of the mini-app network grant. It uses the existing provider key consent and requests no mini-app AI confirmation.
+- (User) A mini-app can pass Android-accessible device data to host AI. The host owns the provider credentials and does not expose them to generated code or exports.
+- (Claude, new) «Настройки» shows the consent text again. «Удалить ключ» stops functions that depend on the provider key. The mini-app network grant is separate.
+- (Claude, new) The README and `docs/cloud-integration.md` describe these consent boundaries.
 
 ### 5.10 Memory
 
@@ -468,6 +486,8 @@ Left to the builder: the sheet heights, the locked-device state, and the voice s
 - (Claude, new) The menu also has «Память», «Доступ и функции», and «Настройки».
 - (Claude, new) The library lists mini-apps with search. Each row shows a live thumbnail, the version, and where the item is placed. The thumbnail method comes from DEAL Studio (`GeneratedAppStudioScreen.kt`).
 - (Claude, new) «Доступ и функции» shows Android access in plain words, with no capability IDs or API levels.
+- (User) The page shows each mini-app's network grant and how to revoke it. It explains access to public and local destinations, redirects, subresources, and data transfers.
+- (User) The page distinguishes the network grant from Android permissions and host AI access under the provider key consent.
 - (Claude, new) «Настройки»: the key with the consent text, the assistant settings link, voice, and the user's name. There is no theme switch, because light and dark follow the system.
 - (User) The app name stays «Alphy» (`AndroidManifest.xml` label, and the brief: «Documents/Alpha alphy»).
 - (User) The UI uses the polite form, as the chosen samples show («Спросите что-нибудь», «Отмечайте стаканы прямо здесь»).
@@ -533,12 +553,11 @@ Alphy adds the deal-studio-ohos parts-first steps before DeepSeek writes code.
 6. **Test run and repair.** The current generation test (`tools/ToolGenerationSmoke.kt`) runs the result, and repair edits follow on failure.
    - If repair fails, the card shows a short reason and a next step (6.7).
 
-(Claude, new) A request with the surface flag skips the needs plan. It goes to the current game generator
-(`tools/GameGenerationExample.kt` in the prompt) as the whole-screen hole, then to step 6. Games stay at their current quality.
-Port the deal-studio-ohos surface steps (`AgentSurface.ets`, `AgentSurfaceEdit.ets`) only when the measurement shows a need.
+The parts-first route covers games and scenes inside screens. It can use a whole-screen hole when no part fits a game.
+The guidance includes a game other than Arkanoid. It also shows how to embed an interactive drawing area in a screen.
 
-(Claude) The card shows the assembled parts as soon as step 4 ends. Holes show as placeholders until step 5 ends.
-deal-studio-ohos does the same (`VeraWidgetPreview.ets`).
+(Claude) The card shows validated assembled parts as soon as step 4 ends. Holes show as placeholders until step 5 ends.
+The preview shows a validated drawing area before «Apply changes». The first UI and the completed UI have separate measurements (6.8).
 
 ### 6.2 Outputs of the one route
 
@@ -561,9 +580,9 @@ lesson slides, and automation cards. This document makes it concrete (Claude, ne
 (Claude, new) A change follows deal-studio-ohos, where a change to a program goes to the model as a refine (`docs/agent.md` in deal-studio-ohos):
 
 - A change is a DeepSeek refine of the current `ToolSpec` through the current `ToolEngine.generate` path. It has no new needs plan and no new part selection.
-- `ToolSpec.stateForRevision` keeps every state field and type.
+- `ToolSpec.stateForRevision` keeps every state field and type in a generated refinement.
 - The refine guidance keeps the part IDs. Unchanged parts keep their compact form and widget projection. A changed subtree uses the generic compact form and `widgetNodes`.
-- The request carries the spec with its declared UI and initial values, not the live state values. Today a refine also sends the live state when the mini-app has no private results.
+- The request carries the spec, declared UI, and initial values. It excludes live state. Section 5.9 defines the separate host AI interface.
 - The target rules are in 5.3.
 - The change time is a separate row in the measurement (6.8).
 
@@ -600,31 +619,46 @@ lesson slides, and automation cards. This document makes it concrete (Claude, ne
 - (Claude) Port the DEAL Studio structure rules into that validation: no nested cards, no second hero, no invalid segmented controls, and no placeholder icons (`generatedapp/CanonicalDealUiRuntime.kt` in deal-studio).
 - (Claude, new) An unknown icon fails validation. It does not fall back to a placeholder.
 - (Claude, new) No technical text on the app surface, and no repeated derived text.
+- Mini-app generation uses a larger measured output budget. Its implementation plan records the token and response-byte bounds and the evidence for them.
+- The validator enforces measured limits on UI size, source, state, resources, and drawing. Generation and saved-app execution apply the same contract.
+- Treat a provider `length` result as eligible for the existing single bounded correction. Reject incomplete output before save or execution.
+- `ToolGenerationSmoke` checks meaningful interactions. It checks frame execution and a state or drawing change for games and embedded scenes.
+- For each game example, including the non-Arkanoid example, define the expected rules before testing.
+- Check applicable scoring, collision or other result logic, terminal conditions, and restart. Verify that restart restores the expected initial state.
+- The device tests check accessible controls, input, and visible results. A surface declaration or a screenshot alone does not prove interaction.
 
 ### 6.7 Progress and failure
 
 - (Claude, new) The card status names the current step in plain words. The builder picks the words.
 - (Claude, new) A failure never ends at a dead screen. The card gives a short reason and a next step, for example «Повторить» or a simpler version from parts only.
 - (Claude, new) A stop during generation keeps the last good version.
+- Tests cover cancellation, provider failure, truncated or invalid output, and runtime failure. They check recovery and preservation of the last good version and its state.
 
 ### 6.8 Measurement
 
-- Correction to what Claude told the user: the deal-studio-ohos median of 2.0 s for 88 parts-only builds came from an earlier path. That path used a sketch step and the real Jev on a host, before the needs plan existed.
-  - Source: `docs/agent.md` in deal-studio-ohos. The 121 prompts behind the 88 builds were not tried with the needs plan.
-  - So no measurement exists yet for the route in 6.1 with DeepSeek as the selector.
-- Assumption: the parts-first steps make builds faster and better than a full DeepSeek write.
-  - Basis: the model writes only the holes. The earlier deal-studio-ohos path supports it.
-  - Test: the measurement below.
-- (Claude, new) The measurement:
-  - Measure the Russian request set from 6.4. Report the parts-only rate, the median time, the failure rate, and the change time.
-  - Run the 121 English deal-studio-ohos prompts only for a parity report. Report the `test` split of `compose-fresh.tsv` apart, and never tune on these prompts.
-  - Start the clock at send. Stop it when the card shows the assembled parts (the end of step 4).
-  - Report the stages apart: the decision call, the needs plan, the selector, the holes, and the test run.
-- (Claude, new) The first target is a median of 5 s or less for a parts-only build on the project test device. Change it after the first measurement.
-  - Basis: on simple decisions, DeepSeek Flash was about 2.4 times slower than Jev (`~/Library/Application Support/DesktopVoice/decision-selection.json`, 2026-10-09).
-- Assumption: `deepseek-flash` returns `top_logprobs` when thinking is off.
-  - Basis: the DeepSeek API docs list the fields. No device result confirms it.
-  - Test: send one request with `logprobs: true`, `top_logprobs: 20`, and `thinking: {type: "disabled"}`.
+Historical result: deal-studio-ohos reported a median of 2.0 s for 88 parts-only builds on an earlier host route.
+That route used a sketch step and the real Jev. The result does not establish a baseline for the needs plan with DeepSeek.
+
+Requirement from the approved roadmap:
+
+- Pin the exact runnable deal-studio-ohos revision, workflow inputs, and execution configuration before testing. Record the exact Alphy revision and configuration too.
+- Use the same requests, interaction checks, and success criteria in both products. Identify device and provider differences before comparing results.
+- Use the 121 English requests from the three corpus files in section 13 at deal-studio-ohos `7ee06af1`. Keep the 45 `test` prompts in `compose-fresh.tsv` out of tuning. Report their results separately.
+- Include Russian requests and extra workflows for the approved mini-app capabilities. Freeze their inputs and expected interactions before the final comparison.
+- For each game workflow, define the expected rules from its request. Test applicable scoring, collision or other result logic, terminal conditions, and restart in both products.
+- Run three independent real generations for every request in each product. The English matrix has `121 × 3 × 2 = 726` generations. Track provider calls separately.
+- Use fresh state and record each outcome. Keep failed generations in the results. A model correction belongs to its original generation.
+- Compare functional behavior, blind visual ratings, successful completions, time to first UI, time to completed UI, frame performance, and failure recovery. Hide product labels from visual reviewers.
+- Measure both UI times from send. First UI is the first visible generated UI. Completed UI is the fully usable mini-app after validation.
+- Report route stages, parts-only rate, failure rate, and change time. Keep latency and frame evidence separate from provider and device conditions.
+- Count game-rule checks in the functional results and apply the no-regression gate to them. Require no functional or visual regression in any category.
+- A critical interaction, data-loss, or permissions defect fails the gate.
+- Require no latency regression under comparable conditions. Report incomparable conditions and withhold a latency pass for them.
+
+Assumption: the parts-first route can reduce build time. The model writes code only for holes. The matched comparison tests this assumption.
+
+Assumption: `deepseek-flash` returns `top_logprobs` when thinking is off.
+Test it with `logprobs: true`, `top_logprobs: 20`, and `thinking: {type: "disabled"}` before selecting that pattern.
 
 ## 7. Platform and dependencies
 
@@ -638,7 +672,7 @@ lesson slides, and automation cards. This document makes it concrete (Claude, ne
 | compileSdk | Stays 37. No move to 37.1, so no `material3-a2ui` | (Claude, new) |
 | Key storage | The `EncryptedApiKeyStore` pattern: AES/GCM, a key in AndroidKeyStore, private SharedPreferences | (User, brief) |
 | Key providers | One store for each provider, DeepSeek now and a debug-only TypeSafe slot, as in DEAL Studio | (Claude, new) |
-| Debug key bootstrap | A BuildConfig key copied only in debug builds and only on an explicit start, as in DEAL Studio | (Claude, new) |
+| Debug credentials | Fixture keys for offline tests. The acceptance runner's one-use channel supplies real test keys. BuildConfig contains no keys. | Requirement |
 | Voice | On-device T-One recognition and Silero synthesis stay | Assumption |
 
 - Assumption: "cloud only" in the brief covers the language model, search, and the Jev role, but not speech.
@@ -648,16 +682,20 @@ lesson slides, and automation cards. This document makes it concrete (Claude, ne
   - Basis: its Compose 1.12.0 dependencies need compileSdk 37 and AGP 9.2.0.
   - Test: add the dependency, then run `checkAarMetadata`.
 - (Builder) The Compose BOM version, lifecycle-viewmodel-compose, ui-tooling-preview, and a version catalog.
+- (User) Network, file, web, device, media, and AI access use host interfaces. Android system permissions, pickers, and background execution limits continue to apply.
+- (User) Only explicitly activated scheduled actions can execute in the background. The host enforces Android limits and records the active schedule version.
 
 ## 8. Data and storage changes
 
-- `ToolRevision` gets a change label and a time. Today a revision has neither (`tools/ToolStore.kt`). This needs a new database version.
+- `ToolRevision` gets a change label and a time. The earlier `ToolStore` kept neither value. The new fields require a database version change.
 - Part root nodes in a `ToolSpec` carry their part IDs (6.1).
-- The tool store gets a delete. It removes the data, the versions, the tiles, and the widget bindings. Dependent automations stop.
+- The tool store gets a delete. It removes the data, versions, tiles, and widget bindings of the confirmed mini-app. Dependent automations and its scheduled actions stop.
 - The automation store gets a delete.
 - New stores: the desktop layout, courses (outline, lessons, slides, answers, progress), memory facts, and the consent record.
 - The chat keeps references from cards to items and versions. A mini-app records its last chat, for «Изменить» in the full view.
-- Saved mini-apps change in two places: the `theme` node (5.12) and, if the icon set changes, the glyph names.
+- The renderer requires the current `theme` node (5.12). A change to the icon set can also change the accepted glyph names.
+- Store one network grant per mini-app and the current activation for each scheduled action. Keep grants and provider credentials separate from exported app data.
+- Save imports and manual edits only after validation. An import, edit, or cancellation cannot silently remove or replace existing user data.
 - (Builder) Data from earlier development versions:
   - `AGENTS.md` forbids migrations only for earlier versions, and it forbids a silent delete.
   - When a store cannot open earlier data, Alphy tells the user, and the user deletes it explicitly. The automation screen already does this («Не удалось открыть сценарии. Данные не удалены.», `automations/AutomationUi.kt`).
@@ -674,7 +712,13 @@ Tests:
 - (Claude, new) New tests find nodes through string resources or test tags, not through literal text.
 - Behavior changes get black-box tests of the user flows.
 - Each test run records the revision, the command, the inputs, the expected result, and the observed result.
-- The acceptance rules in section 3 apply: three real generations for each request, and ADB only on `emulator-5556`.
+- Section 3 applies to the acceptance runner. Section 6.8 defines the final comparison across products.
+- Capacity tests cover memory, response size, event delays, frame performance, and several active mini-apps. Record the load and results that justify each ceiling.
+- Interaction tests cover live input, games, embedded scenes, navigation, drag reorder, preview, and Russian UI text. Check the observable result of each control.
+- Test the network grant, public and local requests, redirects, subresources, and revocation. Test data transfer with test-owned files and endpoints.
+- Test system permission and picker denial, foreground timer effects, background suspension, and scheduled actions after activation and schedule changes.
+- Test host AI with and without the network grant, and with no provider key. Verify that credentials stay in the host.
+- Test export selection, share, a valid import, invalid input, collisions, and manual edit failure. Verify that existing data and grants remain intact.
 
 Devices:
 
@@ -698,16 +742,17 @@ Accessibility:
 
 Reports and docs:
 
-- The route measurement report from 6.8.
+- The matched comparison report from 6.8. Record the source identities, provider and device conditions, independent generation results, and evidence for each category.
 - Docs updates:
   - README and `docs/cloud-integration.md`: consent once, streamed text, automatic search
   - `docs/engine-choice.md`: androidx.javascriptengine, not QuickJS
-  - `docs/tool-integration.md` and `docs/parity/compose-coverage.md`: the route and the current catalog size (70 types, not 49)
+  - `docs/tool-integration.md` and `docs/parity/compose-coverage.md`: the route and the validated catalog
+  - `docs/native-capabilities.md` and `docs/parity/compose-acceptance.md`: mini-app permission boundaries and acceptance rules
   - `docs/automations.md`: the DeepSeek step, the resume rule, and the delete
 
-## 10. New choices for the user to check
+## 10. Design choices
 
-These choices change what gets built. Item 2 is a played-back choice that changes a current project rule. The others are (Claude, new). The most important come first.
+Items 1–13 record the choices from revision 2. Items 14–19 record requirements from the approved mini-app roadmap.
 
 1. Agent reads stay on the phone. DeepSeek plans from the request, and the phone puts the real values in the plan card. A task that needs DeepSeek to read the calendar shows a dashed «Календарь» chip (5.7).
 2. An automation may send the data that its card lists to DeepSeek, for example for «Собрать итоги дня». Today no automation can request cloud access (5.6).
@@ -722,6 +767,12 @@ These choices change what gets built. Item 2 is a played-back choice that change
 11. The automation switch resumes an approved, unchanged version without a dialog (5.6).
 12. On-device voice stays in version 1, by the Assumption in section 7.
 13. Russian string resources, a Russian app locale, and Navigation 3 (5.11, 7).
+14. One revocable network grant covers public and local destinations, redirects, subresources, and transfers of Android-accessible data (5.3, 5.9, 5.11).
+15. Mini-app device and AI operations require no Alphy prompts. Android permissions and pickers apply. Host AI uses the existing provider key consent independently of network access (5.3, 5.9).
+16. General generated code stops in the background. Only explicitly activated scheduled actions can run there. Changed schedules require reactivation (5.3, 7).
+17. Share uses an explicit export with data selection. Exports exclude grants and credentials. Imports and manual edits validate before save and preserve existing data (5.3, 8).
+18. Generation uses the parts-first route, measured budgets, and bounded correction. The matched comparison includes English, held-out, Russian, and extra workflows (6).
+19. Mini-app capacity and interactive UI expand under measured limits. Mini-app deletion keeps its confirmation (3, 5.3, 9).
 
 ## 11. Left to the builder
 
@@ -736,19 +787,23 @@ These choices change what gets built. Item 2 is a played-back choice that change
 - The tool-call loop of the agent and the IDs of new functions (5.7).
 - A method for visual checks of `FLAG_SECURE` screens (9).
 - The test structure, within section 9.
+- Exact capacity ceilings, from the measurements in sections 6.6 and 9.
+- The supported capability and archive formats within the boundaries in sections 5.3 and 8.
 
 ## 12. Risks
 
-- No measurement exists for the route with the needs plan and DeepSeek as the selector (6.8).
+- The historical benchmark used a different route and provider. The comparison must pin both implementations and report conditions that prevent a direct latency comparison (6.8).
 - DeepSeek selector answers are calibrated differently from Jev. On bounded-loop cases, Flash scored 25 of 30 against 30 of 30 for Jev. The letter scheme has a 26-choice limit.
 - Beta APIs in material3 1.5.0 can change. Late alphas changed Slider, SplitButton, ButtonGroupScope, and PolygonShape.
 - Assumption: without the three attributes, Android 17 withholds assist data and screenshots.
   - Basis: `res/xml/voice_interaction_service.xml` does not declare them, and the session reads both.
   - Test: compare the received data on the test device with and without the attributes.
 - The plan with match criteria (5.7) can fail on vague requests. The plan card then shows several matches, or Alphy asks.
-- Another session edits the same files now, and its last repair run failed (section 3). A redesign of the same files conflicts with that work.
-- That session already edited this draft once (section 3). This draft is an untracked file in the same working tree, so a commit of all files by that session can include it.
-- Each text or layout change breaks some of the 69 exact test labels.
+- Concurrent sessions, larger state, and graphics can increase memory use and event delays. Capacity tests establish bounds on the supported device (9).
+- Network revocation can race with requests, redirects, and subresources. Test revocation during a transfer, including on local networks (5.3, 9).
+- OS permission denial and background execution limits can prevent scheduled device effects. Report the failed action and verify that an obsolete schedule cannot run.
+- Untrusted imports or invalid edits can damage stored data. Validate first and test preservation of the last good state (8, 9).
+- Changes to text and layout can break tests that use exact labels. Update their selectors with the UI (9).
 - The voice models are for ARM64 only and take about 281 MB.
 
 ## 13. Sources

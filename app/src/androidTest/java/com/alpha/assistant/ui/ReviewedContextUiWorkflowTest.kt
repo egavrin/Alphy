@@ -1,10 +1,16 @@
 package com.alpha.assistant.ui
 
+import android.app.Activity
+import android.app.Instrumentation
+import android.content.ContentValues
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.net.Uri
 import android.os.Bundle
 import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import android.os.SystemClock
+import android.provider.MediaStore
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
@@ -25,6 +31,122 @@ class ReviewedContextUiWorkflowTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val automation = instrumentation.uiAutomation
     private val robot = ShellRobot("reviewed-context")
+
+    /** Wrong MIME, malformed UTF-8, excess text, cancellation, and a stale result
+     * leave the draft intact. Valid text requires review and a separate attach action. */
+    @Test fun fileResultsRequireReviewAndPreserveTheDraft() {
+        val fixture = ShellFixture("context-file")
+        val resolver = fixture.context.contentResolver
+        val documents = mutableListOf<Uri>()
+        fun document(extension: String, mime: String, bytes: ByteArray): Uri {
+            val uri = checkNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, "context-${UUID.randomUUID()}.$extension")
+                put(MediaStore.Downloads.MIME_TYPE, mime)
+            }))
+            documents += uri
+            checkNotNull(resolver.openOutputStream(uri)).use { it.write(bytes) }
+            return uri
+        }
+        val original = Draft("Мой день из календаря ежедневно 09:00")
+        val other = Draft("Other draft")
+        val tooLong = "Ж".repeat(8001).toByteArray()
+        val limit = "Ж".repeat(8000)
+        fixture.store.saveNewDraft(original)
+        fixture.install()
+        try {
+            fixture.launch().use { scenario ->
+                val supported = "Выберите JPEG, PNG, GIF, WebP или текст UTF-8 до 8000 символов."
+                fun rejectFile(uri: Uri) {
+                    pick("Файл", Intent.ACTION_OPEN_DOCUMENT, uri)
+                    waitFor(supported)
+                    assertEquals(original, fixture.store.load().draft)
+                }
+                fun cancelPick(label: String, action: String) {
+                    pick(label, action)
+                    // The previous error must clear, and the source must accept input again.
+                    waitUntil {
+                        val root = diagnostics.freshRoot()
+                        if (find(root, supported) != null) return@waitUntil false
+                        val source = clickTarget(find(root, label))
+                        source?.isEnabled == true && source.isVisibleToUser &&
+                            AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK in source.actionList
+                    }
+                    assertEquals(original, fixture.store.load().draft)
+                }
+                click("Добавить контекст")
+                click("Камера")
+                waitFor("Открыть камеру")
+                click("К источникам")
+                click("Календарь")
+                waitFor("Календарь · только чтение")
+                click("К источникам")
+                rejectFile(document("pdf", "application/pdf", "%PDF-1.4".toByteArray()))
+                cancelPick("Фото", MediaStore.ACTION_PICK_IMAGES)
+                rejectFile(document("txt", "text/plain", byteArrayOf(0xc3.toByte(), 0x28)))
+                cancelPick("Файл", Intent.ACTION_OPEN_DOCUMENT)
+                rejectFile(document("txt", "text/plain", tooLong))
+                cancelPick("Файл", Intent.ACTION_OPEN_DOCUMENT)
+
+                val valid = document("txt", "text/plain", limit.toByteArray())
+                pick("Файл", Intent.ACTION_OPEN_DOCUMENT, valid) { fixture.model!!.editDraft(other) }
+                waitFor("Черновик изменился. Откройте добавление контекста в нужном чате ещё раз.")
+                waitUntil { fixture.store.load().draft == other }
+                click("Отмена")
+                scenario.onActivity { fixture.model!!.editDraft(original) }
+
+                click("Добавить контекст")
+                pick("Файл", Intent.ACTION_OPEN_DOCUMENT, valid)
+                assertEquals(limit, field("Выбранный текст · до 8000 символов").text.toString())
+                assertEquals(original, fixture.store.load().draft)
+                click("Отмена")
+                assertEquals(original, fixture.store.load().draft)
+
+                click("Добавить контекст")
+                pick("Файл", Intent.ACTION_OPEN_DOCUMENT, valid)
+                val excerpt = "Фрагмент для проверки"
+                edit("Выбранный текст · до 8000 символов", excerpt)
+                waitFor("${excerpt.length} / 8000 · проверьте и при необходимости сократите текст")
+                click("Прикрепить проверенный текст")
+                waitUntil { fixture.store.load().draft.attachments.size == 1 }
+                val reviewed = fixture.store.load().draft
+                assertEquals(original, reviewed.copy(attachments = emptyList()))
+                assertEquals(excerpt, reviewed.attachments.single().contextText)
+
+                click("Добавить контекст")
+                click("Мини-приложение")
+                assertEquals(original.text, field("Request for a mini-app").text.toString())
+                scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+                click("Добавить контекст")
+                click("Автоматизация")
+                waitFor("Локальный шаблон «Мой день». Выбери календарь, период, инструмент и список. Проверь все параметры. Запрос не передавался в облако.")
+                assertEquals(reviewed, fixture.store.load().draft)
+                assertEquals(0, fixture.provider.calls)
+            }
+        } finally {
+            documents.forEach { resolver.delete(it, null, null) }
+            fixture.remove()
+        }
+    }
+
+    private fun pick(label: String, action: String, uri: Uri? = null, beforeResult: () -> Unit = {}) {
+        val monitor = object : Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? {
+                if (intent.action != action) return null
+                beforeResult()
+                return Instrumentation.ActivityResult(
+                    if (uri == null) Activity.RESULT_CANCELED else Activity.RESULT_OK,
+                    uri?.let { Intent().setData(it) },
+                )
+            }
+        }
+        instrumentation.addMonitor(monitor)
+        try {
+            click(label)
+            waitUntil { monitor.hits == 1 }
+        } finally {
+            instrumentation.removeMonitor(monitor)
+        }
+    }
 
     @Test fun reviewedPasteAndMenuPreserveTheOriginatingDraft() {
         val context = instrumentation.targetContext
@@ -63,6 +185,10 @@ class ReviewedContextUiWorkflowTest {
                 assertEquals("Explicitly selected note content", reviewed.attachments.last().contextText)
                 click("Добавить контекст"); click("Отмена")
                 assertEquals(reviewed, store.load().draft)
+                val note = "Text selected for my note"
+                val message = robot.find(note)?.takeIf { it.isVisibleToUser } ?: robot.reveal(note)
+                val actions = generateSequence(message) { it.parent }.first { it.isLongClickable }
+                assertTrue(actions.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK))
                 click("Выбрать текст для заметки"); waitFor("Передать выбранный текст в заметки"); click("Закрыть")
                 assertEquals(reviewed, store.load().draft)
                 robot.openDrawer(scenario); robot.click(robot.text(R.string.access)); robot.awaitDrawerClosed(scenario)
@@ -92,28 +218,17 @@ class ReviewedContextUiWorkflowTest {
     private fun waitFor(label: String): AccessibilityNodeInfo {
         diagnostics.target(label)
         var match: AccessibilityNodeInfo? = null
-        var refused = false
         waitUntil {
-            val root = diagnostics.freshRoot()
-            match = find(root, label)
-            if (match?.isVisibleToUser == true) return@waitUntil true
-            if (label == "Выбрать текст для заметки") {
-                var chat = find(root, "Text selected for my note")
-                while (chat != null && chat.actionList.none { it.id == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD }) chat = chat.parent
-                if (chat != null) {
-                    // A refused scroll is not a failure: a running scroll animation can move the range after the read.
-                    if (!chat.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) && !refused) { refused = true; diagnostics.capture("scroll-refused", chat) }
-                    automation.waitForIdle(100, 2000)
-                }
-            }
-            false
+            match = find(diagnostics.freshRoot(), label)
+            match?.isVisibleToUser == true
         }
         return checkNotNull(match)
     }
+    private fun clickTarget(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? =
+        generateSequence(node) { it.parent }.firstOrNull { it.isClickable }
+
     private fun click(label: String) {
-        var node: AccessibilityNodeInfo? = waitFor(label)
-        while (node != null && !node.isClickable) node = node.parent
-        assertTrue("Clickable action: $label", diagnostics.click(label,node))
+        assertTrue("Clickable action: $label", diagnostics.click(label, clickTarget(waitFor(label))))
         automation.waitForIdle(100, 3000)
     }
     private fun field(label: String): AccessibilityNodeInfo {

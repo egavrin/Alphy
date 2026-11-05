@@ -29,6 +29,7 @@ dependencies {
     implementation("org.commonmark:commonmark:0.30.0")
     implementation("org.commonmark:commonmark-ext-gfm-tables:0.30.0")
     implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.30.0")
+    implementation("com.squareup.okhttp3:okhttp:5.5.1")
     implementation(files("libs/sherpa-onnx-static-link-onnxruntime-1.13.4.aar"))
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.27.0")
     implementation("com.github.wendykierp:JTransforms:3.2")

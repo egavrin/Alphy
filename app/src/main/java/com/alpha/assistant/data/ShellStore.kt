@@ -9,7 +9,7 @@ import org.json.JSONObject
 
 data class Attachment(val uri: String, val name: String, val mime: String, val contextText: String? = null)
 data class Draft(val text: String = "", val attachments: List<Attachment> = emptyList(), val id: String = java.util.UUID.randomUUID().toString())
-data class Source(val title: String, val url: String, val summary: String = "")
+data class Source(val title: String, val url: String, val summary: String = "", val siteName: String? = null, val siteIcon: String? = null)
 data class Message(val id: String, val role: String, val text: String, val createdAt: Long, val status: String,
     val attachments: List<Attachment> = emptyList(), val replyTo: String? = null, val search: Boolean = false,
     val searchStatus: String = "", val sources: List<Source> = emptyList(), val error: String = "", val errorCode: String = "",
@@ -114,10 +114,15 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
     }
     private fun encodeConversation(c: Conversation) = JSONObject().put("id", c.id).put("title", c.title).put("createdAt", c.createdAt).put("updatedAt", c.updatedAt)
         .put("draft", encodeDraft(c.draft)).put("messages", JSONArray().apply { c.messages.forEach { m -> put(JSONObject().put("id", m.id).put("role", m.role).put("text", m.text).put("createdAt", m.createdAt).put("status", m.status).put("attachments", encodeAttachments(m.attachments)).put("replyTo", m.replyTo).put("search", m.search)
-            .put("toolId",m.toolId).put("toolRevision",m.toolRevision).put("toolOperationId",m.toolOperationId).put("searchStatus", m.searchStatus).put("error", m.error).put("errorCode", m.errorCode).put("sources", JSONArray().apply { m.sources.forEach { put(JSONObject().put("title", it.title).put("url", it.url).put("summary", it.summary)) } })) } })
+            .put("toolId",m.toolId).put("toolRevision",m.toolRevision).put("toolOperationId",m.toolOperationId).put("searchStatus", m.searchStatus).put("error", m.error).put("errorCode", m.errorCode).put("sources", JSONArray().apply { m.sources.forEach { source ->
+                put(JSONObject().put("title", source.title).put("url", source.url).put("summary", source.summary)
+                    .put("siteName", source.siteName).put("siteIcon", source.siteIcon))
+            } })) } })
     private fun decodeConversation(j: JSONObject) = Conversation(j.getString("id"), j.getString("title"), j.getLong("createdAt"), j.getLong("updatedAt"), decodeDraft(j.getJSONObject("draft")),
         j.getJSONArray("messages").let { a -> List(a.length()) { i -> a.getJSONObject(i).let { Message(it.getString("id"), it.getString("role"), it.getString("text"), it.getLong("createdAt"), it.getString("status"), decodeAttachments(it.getJSONArray("attachments")),
             it.optString("replyTo").takeIf { value -> value.isNotEmpty() && value != "null" }, it.optBoolean("search"), it.optString("searchStatus"),
-            it.optJSONArray("sources")?.let { sources -> List(sources.length()) { index -> sources.getJSONObject(index).let { source -> Source(source.getString("title"), source.getString("url"), source.optString("summary")) } } } ?: emptyList(), it.optString("error"), it.optString("errorCode"), it.optString("toolId").takeIf { value -> value.isNotEmpty() && value != "null" },
+            it.optJSONArray("sources")?.let { sources -> List(sources.length()) { index -> sources.getJSONObject(index).let { source ->
+                Source(source.getString("title"), source.getString("url"), source.optString("summary"), source.opt("siteName") as? String, source.opt("siteIcon") as? String)
+            } } } ?: emptyList(), it.optString("error"), it.optString("errorCode"), it.optString("toolId").takeIf { value -> value.isNotEmpty() && value != "null" },
             if(it.isNull("toolRevision")) null else it.getInt("toolRevision"), it.optString("toolOperationId").takeIf { value -> value.isNotEmpty() && value != "null" }) } } })
 }

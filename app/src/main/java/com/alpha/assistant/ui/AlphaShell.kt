@@ -26,10 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import android.graphics.BitmapFactory
-import androidx.compose.ui.platform.LocalUriHandler
 import com.alpha.assistant.cloud.ImageInput
-import com.alpha.assistant.cloud.KEY_ERRORS
-import com.alpha.assistant.cloud.validSourceUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.platform.LocalDensity
@@ -64,12 +61,9 @@ import kotlinx.coroutines.launch
     LaunchedEffect(model.surfaceSequence) {
         // The model applies each entry once. So a recreation or a new activity applies no entry again, and a rotation keeps an open drawer open.
         if (model.surfacePending) {
+            destination = model.surfaceDestination
+            automationRequest = model.surfaceAutomationRequest
             model.consumeSurface()
-            destination = when {
-                model.surfaceSettings -> ShellDestination.Settings
-                model.surfaceToolId != null -> ShellDestination.MiniApps
-                else -> null
-            }
             contextSheet = false
             drawerState.snapTo(DrawerValue.Closed)
         }
@@ -84,7 +78,7 @@ import kotlinx.coroutines.launch
     val compact by remember(ime, density, window) { derivedStateOf { ime.getBottom(density) > 0 && window.containerSize.height < with(density) { 480.dp.roundToPx() } } }
     val scope = rememberCoroutineScope()
     fun navigate(target: ShellDestination?) { contextSheet = false; destination = target; focus.clearFocus() }
-    fun automate(request: String) { automationRequest = request; navigate(ShellDestination.Automations) }
+    fun automate(request: String) { automationRequest = request.takeIf { it.isNotBlank() }; navigate(ShellDestination.Automations) }
     fun closeDrawer() { scope.launch { drawerState.close() } }
     // An overlay handler comes before NavDisplay and the entry handlers, so the drawer takes Back while it targets Open.
     val handler = remember { object : NavigationEventHandler<NavigationEventInfo.None>(NavigationEventInfo.None, false) { override fun onBackCompleted() = closeDrawer() } }
@@ -126,7 +120,8 @@ import kotlinx.coroutines.launch
                             ProvideTextStyle(MaterialTheme.typography.bodySmall) {
                                 StatusLine(Glyph.Close, MaterialTheme.colorScheme.onErrorContainer, stringResource(R.string.save_failed), Modifier.weight(1f).then(PoliteLiveRegion))
                             }
-                            TextButton(onClick = model::retrySave) { Text(stringResource(R.string.retry)) }
+                            TextButton(onClick = model::retrySave, colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer)) { Text(stringResource(R.string.retry)) }
                         }
                     }
                 }
@@ -161,7 +156,7 @@ import kotlinx.coroutines.launch
                                     Row(Modifier.fillMaxSize()) {
                                         Column(Modifier.weight(1f).fillMaxHeight()) {
                                             ChatEntry(snapshot.selected, Modifier.weight(1f))
-                                            Composer(model, { contextSheet = true }, ::automate, Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp))
+                                            Composer(model, { contextSheet = true }, Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp))
                                         }
                                         VerticalDivider()
                                         Column(Modifier.weight(1f)) { ToolsEntry() }
@@ -175,7 +170,7 @@ import kotlinx.coroutines.launch
                     })
                 }
                 // One call place keeps the voice start state when the Chat route replaces the Desktop route.
-                if (backStack.last() !is ShellDestination) Composer(model, { contextSheet = true }, ::automate,
+                if (backStack.last() !is ShellDestination) Composer(model, { contextSheet = true },
                     Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp).fillMaxWidth().testTag("composer"), compact = compact)
             }
         }
@@ -183,21 +178,32 @@ import kotlinx.coroutines.launch
     model.requestError?.let { error ->
         AlertDialog(onDismissRequest = model::clearRequestError, title = { Text(stringResource(R.string.send_failed)) }, text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(error) } }, confirmButton = { TextButton(onClick = model::clearRequestError) { Text(stringResource(R.string.understood)) } })
     }
-    if (contextSheet && !model.loadFailed && !model.loading) ReviewedContextDialog(model) { contextSheet = false }
+    if (contextSheet && !model.loadFailed && !model.loading) ReviewedContextDialog(model,
+        createMiniApp = { request -> model.tools.preparePrompt(request); navigate(ShellDestination.MiniApps) },
+        automate = ::automate,
+    ) { contextSheet = false }
 }
 
 @Composable internal fun ChatPane(model: ShellViewModel, conversation: Conversation?, tools: () -> Unit, automation: (String) -> Unit,
     settings: () -> Unit, modifier: Modifier = Modifier) {
-    val uriHandler = LocalUriHandler.current
     var shareText by rememberSaveable { mutableStateOf<String?>(null) }
     var linkError by remember { mutableStateOf(false) }
     val busy = model.activeConversationId != null
-    if (linkError) AlertDialog(onDismissRequest = { linkError = false }, title = { Text("Не удалось открыть ссылку") }, text = { Text("Проверьте наличие браузера на устройстве.") }, confirmButton = { TextButton(onClick = { linkError = false }) { Text("Понятно") } })
+    if (linkError) AlertDialog(
+        onDismissRequest = { linkError = false },
+        title = { Text(stringResource(R.string.chat_link_error)) },
+        text = { Text(stringResource(R.string.chat_link_error_detail)) },
+        confirmButton = { TextButton(onClick = { linkError = false }) { Text(stringResource(R.string.understood)) } },
+    )
     Column(modifier.fillMaxHeight().widthIn(max = 620.dp).fillMaxWidth()) {
         if (conversation != null) {
             val chat = conversation
             val listState = rememberLazyListState()
-            LaunchedEffect(chat.id, chat.messages.size, chat.messages.lastOrNull()?.text?.length) {
+            val lastMessage = chat.messages.lastOrNull()
+            val hasAnswerFragment by remember(lastMessage?.id) {
+                derivedStateOf { lastMessage?.let { model.activeAnswer(it.id) } != null }
+            }
+            LaunchedEffect(chat.id, chat.messages.size, lastMessage?.text?.length, hasAnswerFragment) {
                 val last = chat.messages.size
                 if (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let { it >= last - 1 } != false) listState.scrollToItem(last)
             }
@@ -208,30 +214,20 @@ import kotlinx.coroutines.launch
                 }
                 items(chat.messages, key = { it.id }) { message ->
                     Column(Modifier.fillMaxWidth().padding(start = if (message.role == "user") 25.dp else 0.dp)) {
-                        Surface(shape = RoundedCornerShape(23.dp), color = if (message.role == "user") MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primaryContainer) {
-                            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                                if (message.text.isNotEmpty()) {
-                                    MarkdownText(message.text,linkError = { linkError = true })
-                                    TextButton(onClick = { shareText = message.text }) { Text("Выбрать текст для заметки") }
-                                }
-                                if (message.role == "user" && message.text.isNotBlank()) {
-                                    TextButton(onClick = { model.tools.preparePrompt(message.text); tools() }) { Text("Create tool from message") }
-                                    TextButton(onClick = {automation(message.text)}) {Text("Создать сценарий из запроса")}
-                                }
-                                message.attachments.forEach { Text("Вложение · ${it.name} · только в исходном запросе", style = MaterialTheme.typography.bodySmall) }
-                                if (message.searchStatus.isNotEmpty()) Text(when (message.searchStatus) {
-                                    "searching" -> "Поиск в интернете…"; "found" -> "Веб-поиск завершён"; "empty" -> "Поиск не нашёл результатов"; else -> "Ошибка веб-поиска"
-                                }, style = MaterialTheme.typography.labelSmall)
-                                message.sources.forEachIndexed { index, source ->
-                                    TextButton(onClick = { if (validSourceUrl(source.url)) runCatching { uriHandler.openUri(source.url) }.onFailure { linkError = true } else linkError = true }) { Text("[${index + 1}] ${source.title.ifBlank { source.url }}\n${source.url}", style = MaterialTheme.typography.bodySmall) }
-                                }
-                                if (message.error.isNotBlank()) Text(message.error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                                if (message.role == "assistant" && message.errorCode in KEY_ERRORS) TextButton(onClick = settings) { Text(stringResource(R.string.open_settings)) }
-                                if (message.id == chat.messages.lastOrNull()?.id && message.status in listOf("error", "cancelled", "interrupted")) TextButton(onClick = { model.retry(message.id) }, enabled = !busy) { Text("Повторить запрос") }
-                                if(message.status == "generating") { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Creating your widget…",style = MaterialTheme.typography.labelSmall) }
-                                if (message.role == "assistant" && message.status in listOf("pending", "streaming")) Text(if (model.weatherLocationBusy) "Определяем примерное местоположение…" else if (message.status == "pending") "Подготовка запроса…" else "DeepSeek отвечает…", style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
+                        val canRetry = message.role == "assistant" && message.id == lastMessage?.id &&
+                            message.status in listOf("error", "cancelled", "interrupted")
+                        ChatMessageCard(
+                            message,
+                            fragment = if (message.status == "streaming") model.activeAnswer(message.id) else null,
+                            weatherLocationBusy = model.weatherLocationBusy,
+                            retry = if (canRetry) ({ model.retry(message.id) }) else null,
+                            retryEnabled = !busy,
+                            createTool = { model.tools.preparePrompt(message.text); tools() },
+                            createAutomation = { automation(message.text) },
+                            share = { shareText = message.text },
+                            settings = settings,
+                            linkError = { linkError = true },
+                        )
                         if(message.toolId != null && message.toolRevision != null) {
                             val artifact=model.tools.tools.find {it.id == message.toolId}
                             val latest=chat.messages.lastOrNull {it.toolId == message.toolId && it.toolRevision != null}
@@ -241,9 +237,12 @@ import kotlinx.coroutines.launch
                                     historical=latest?.id != message.id || artifact.revision != message.toolRevision,
                                     open={model.tools.select(artifact.id);tools()},
                                     refine={model.tools.select(artifact.id);tools()})
-                            } else Text("Mini-app unavailable · historical revision ${message.toolRevision}",style=MaterialTheme.typography.labelMedium)
+                            } else Text(stringResource(R.string.chat_app_revision_unavailable, message.toolRevision),
+                                style = MaterialTheme.typography.labelMedium)
                         }
-                        if (message.status == "not_sent") Text("Не отправлено · сохранённое локальное сообщение", Modifier.padding(start = 5.dp, top = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (message.status == "not_sent") Text(stringResource(R.string.chat_message_not_sent),
+                            Modifier.padding(start = 5.dp, top = 6.dp), style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }

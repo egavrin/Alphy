@@ -12,7 +12,9 @@ import com.alpha.assistant.capabilities.CapabilityResult
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.data.*
 import com.alpha.assistant.tools.*
+import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -174,19 +176,28 @@ class AutomaticToolWorkflowTest {
     }
 
     @Test fun normalChatAutomaticCreateInteractRefineAndRestart() {
+        // Failure cases: operation progress uses an English default or shows a second status in the card.
+        val robot = ShellRobot("automatic-tool-progress")
         val requests = CopyOnWriteArrayList<CloudRequest>()
         var reply = decision(kind = "answer",text = "Hello.")
         var generated = spec()
+        var releaseGeneration = CompletableDeferred<Unit>()
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
-                if(request.systemInstructions.isEmpty()) emit(CloudEvent.Text(generated))
+                if(request.systemInstructions.isEmpty()) {
+                    releaseGeneration.await()
+                    emit(CloudEvent.Text(generated))
+                }
                 else { emit(CloudEvent.Text(reply.take(9))); emit(CloudEvent.Text(reply.drop(9))) }
             }
         }
         Fixture(provider).use { f ->
             f.send("Hello"); f.idle(); assertEquals("Hello.",f.last.text); assertTrue(f.model.tools.tools.isEmpty())
-            reply = decision(); f.send("Make an interactive counter", search = false); f.idle()
+            reply = decision(); f.send("Make an interactive counter", search = false)
+            robot.waitFor("Создаём мини-приложение…")
+            assertFalse(robot.texts().any { it.startsWith("Creating your ") })
+            releaseGeneration.complete(Unit); f.idle()
             assertEquals("complete",f.last.status); assertEquals("Ready.",f.last.text)
             val first = f.model.tools.tools.single()
             assertEquals(first.id,f.last.toolId); assertEquals(1,f.last.toolRevision); assertTrue(first.saved)
@@ -195,7 +206,13 @@ class AutomaticToolWorkflowTest {
             assertEquals(1,JSONObject(f.model.tools.tools.single().state).getInt("count"))
             val oldMessageId = f.last.id
             reply = decision("Rename the counter to Total",first.id); generated = spec("Total")
-            f.send("Rename tool [${first.id}] to Total", search = false); f.idle()
+            releaseGeneration = CompletableDeferred()
+            f.send("Rename tool [${first.id}] to Total", search = false)
+            val updateStatus = "Обновляем мини-приложение…"
+            if (robot.find(updateStatus) == null) robot.reveal(updateStatus)
+            assertEquals(1, robot.texts().count { it == updateStatus })
+            assertFalse(robot.texts().any { it.startsWith("Updating your ") || it.startsWith("Creating your ") })
+            releaseGeneration.complete(Unit); f.idle()
             assertEquals("complete",f.last.status); assertEquals(first.id,f.last.toolId)
             val second = f.model.tools.tools.single()
             assertEquals(2,second.revision); assertEquals(1,JSONObject(second.state).getInt("count"))
