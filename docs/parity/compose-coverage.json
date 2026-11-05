@@ -10,7 +10,7 @@
     "app/src/main/java/com/alpha/assistant/tools/GraphicsContract.kt": "1baf485bc059c146d89f4bb231eff4a288028792a7ee0de28c39b6278db59e51",
     "app/src/main/java/com/alpha/assistant/capabilities/CapabilityContract.kt": "2f939fc9281ec2453e550b1dac8ed4aaf9f9a916cd8e33a3b1c87483b776a19d",
     "app/src/main/java/com/alpha/assistant/capabilities/MedicineCapabilities.kt": "8770523e999c78806127cdc7e404709058ea6f3ccce399c12c1a23d7a0085706",
-    "app/build.gradle.kts": "ef0d4aa263cd0e2b8420f38ff6709823e6e0b781058d01a37d38ea51b7b0f978"
+    "app/build.gradle.kts": "3fa3473a9494b87401a78fe34d7cb548c2fa9b245eba97e6456408ee8b81ea44"
   },
   "catalog_types": [
     "backHandler",
