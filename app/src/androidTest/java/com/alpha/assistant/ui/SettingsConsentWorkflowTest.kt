@@ -3,6 +3,7 @@ package com.alpha.assistant.ui
 import android.content.Context
 import android.content.IntentFilter
 import android.provider.Settings
+import android.view.View
 import androidx.test.core.app.ActivityScenario
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.CloudFailure
@@ -63,6 +64,8 @@ class SettingsConsentWorkflowTest {
             robot.waitFor(robot.text(R.string.key_missing))
             robot.waitFor(robot.text(R.string.consent_text))
             saveKey()
+            // A polite live region lets TalkBack announce the new key status. The status line merges its icon and text, so its node is the parent of the text node.
+            assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE, robot.waitFor(robot.text(R.string.key_ready)).parent?.liveRegion)
             assertTrue(fixture.keys.consented())
             assertEquals("alpha-test-only", fixture.keys.read().getOrThrow())
             assertEquals(0, fixture.provider.calls)

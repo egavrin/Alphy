@@ -52,13 +52,6 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
             entry.put("availability",availability(entry.getString("id")))
         }
     }
-    fun status(id: String): String = when(availability(id).getString("state")) {
-        "unsupportedApi" -> "Недоступно в этой версии Android"
-        "missingHardware" -> "Нужное оборудование отсутствует"
-        "permissionRequired" -> "Требуется разрешение Android"
-        "disabled" -> "Уведомления или канал выключены в настройках Android"
-        else -> "Реализовано. Доступ инструмента и подтверждение обязательны. Обработчик и оборудование проверяются при выполнении."
-    }
     fun calendars(): List<Pair<Long,String>> {
         if(context.checkSelfPermission(Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) return emptyList()
         return context.contentResolver.query(CalendarContract.Calendars.CONTENT_URI,
@@ -70,7 +63,8 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
         val r = CapabilityCatalog.request(request.json())
         val definition = CapabilityCatalog.definition(r.capability)
         val available = availability(r.capability).getString("state")
-        if(available in setOf("unsupportedApi","missingHardware")) return CapabilityResult("unavailable",status(r.capability))
+        if(available in setOf("unsupportedApi","missingHardware"))
+            return CapabilityResult("unavailable", if (available == "unsupportedApi") "Недоступно в этой версии Android" else "Нужное оборудование отсутствует")
         if(!permissionGranted(r.capability)) return CapabilityResult("denied",context.getString(com.alpha.assistant.R.string.capability_permission_required))
         val args = r.args
         suspend fun open(intent: Intent, selection: Boolean = false): CapabilityResult {

@@ -25,6 +25,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.Lifecycle
@@ -32,6 +35,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.alpha.assistant.R
 import com.alpha.assistant.ui.Glyph
+import com.alpha.assistant.ui.PoliteLiveRegion
 import com.alpha.assistant.ui.StatusLine
 
 private fun Context.activity(): Activity? = when (this) {
@@ -52,7 +56,7 @@ private fun Context.activity(): Activity? = when (this) {
 }
 
 @Composable internal fun AndroidPermissionControl(title: String, permissions: List<String>, feature: String? = null,
-    @StringRes partial: Int = R.string.access_partial, onChanged: () -> Unit = {}) {
+    @StringRes partial: Int = R.string.access_partial, onChanged: () -> Unit = {}, divider: Boolean = true) {
     val context = LocalContext.current
     val revision = platformAccessRevision()
     var resultRevision by remember { mutableIntStateOf(0) }
@@ -64,7 +68,7 @@ private fun Context.activity(): Activity? = when (this) {
     val blocked = missing.any { asked.getBoolean(it, false) && context.activity()?.let { activity -> !ActivityCompat.shouldShowRequestPermissionRationale(activity, it) } == true }
     val request = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { resultRevision++; onChanged() }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
+        Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
         when {
             !available -> StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.access_no_hardware))
             missing.isEmpty() -> StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(R.string.access_granted))
@@ -81,9 +85,9 @@ private fun Context.activity(): Activity? = when (this) {
             runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
                 .onFailure { error = R.string.access_app_settings_failed }
         }) { Text(stringResource(R.string.access_app_settings)) }
-        error?.let { StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(it)) }
+        error?.let { StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(it), PoliteLiveRegion) }
     }
-    HorizontalDivider()
+    if (divider) HorizontalDivider()
 }
 
 /** «Доступ и функции». The top bar shows the title, so the page has none. */
@@ -97,8 +101,8 @@ private fun Context.activity(): Activity? = when (this) {
             openFailed = try {
                 context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))); false
             } catch (_: ActivityNotFoundException) { true }
-        }) { Text(stringResource(R.string.access_system_settings)) }
-        if (openFailed) StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.access_app_settings_failed))
+        }) { Text(stringResource(R.string.access_system_settings), textAlign = TextAlign.Center) }
+        if (openFailed) StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.access_app_settings_failed), PoliteLiveRegion)
     }
 }
 
@@ -126,8 +130,8 @@ private fun Context.activity(): Activity? = when (this) {
     Text(stringResource(R.string.access_intro))
     AndroidPermissionControl(stringResource(R.string.access_microphone), listOf(Manifest.permission.RECORD_AUDIO), PackageManager.FEATURE_MICROPHONE)
     AndroidPermissionControl(stringResource(R.string.access_location), listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION), PackageManager.FEATURE_LOCATION, onChanged = { refresh++ })
-    Column(Modifier.fillMaxWidth()) {
-        Text(stringResource(R.string.access_background_title), style = MaterialTheme.typography.titleMedium)
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(stringResource(R.string.access_background_title), Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
         // Android does not tell the app that the user denied background access, so no state shows Close.
         if (locationHardware && background) StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(R.string.access_background_granted))
         else StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(when {
@@ -136,7 +140,7 @@ private fun Context.activity(): Activity? = when (this) {
             else -> R.string.access_background_missing
         }))
         if (Build.VERSION.SDK_INT == 29 && foreground && !background) {
-            AndroidPermissionControl(stringResource(R.string.access_background_next), listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), onChanged = { refresh++ })
+            AndroidPermissionControl(stringResource(R.string.access_background_next), listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), onChanged = { refresh++ }, divider = false)
         } else TextButton(onClick = { open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) },
             enabled = foreground && locationHardware) { Text(stringResource(R.string.access_background_open)) }
     }
@@ -149,9 +153,9 @@ private fun Context.activity(): Activity? = when (this) {
     AccessSettingRow(R.string.access_notifications_title, if (notifications) R.string.access_notifications_on else R.string.access_notifications_off, notifications, R.string.access_notifications_open) {
         open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
     }
-    AccessSettingRow(R.string.access_exact_title, if (exact) R.string.access_exact_on else R.string.access_exact_off, exact, R.string.access_exact_open) {
+    // Below API 31, Android gives exact alarms without a separate access, so the row has no button.
+    AccessSettingRow(R.string.access_exact_title, if (exact) R.string.access_exact_on else R.string.access_exact_off, exact, if (Build.VERSION.SDK_INT >= 31) R.string.access_exact_open else null) {
         if (Build.VERSION.SDK_INT >= 31) open(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))
-        else message = R.string.access_exact_not_needed
     }
     AccessSettingRow(R.string.access_listener_title, if (listener) R.string.access_listener_on else R.string.access_listener_off, listener, R.string.access_listener_open) {
         open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -159,7 +163,7 @@ private fun Context.activity(): Activity? = when (this) {
     AssistantSettingsRow()
     HorizontalDivider()
     Text(stringResource(R.string.access_scope_note), style = MaterialTheme.typography.bodySmall)
-    message?.let { StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(it)) }
+    message?.let { StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(it), PoliteLiveRegion) }
 }
 
 /** The assistant role is not requestable, so the row opens the Android assistant settings and tells the user to pick Alphy there. */
@@ -169,25 +173,25 @@ private fun Context.activity(): Activity? = when (this) {
     val selected = remember(revision) { context.getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true }
     var openFailed by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(R.string.assistant_title), style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.assistant_title), Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
         if (selected) StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(R.string.assistant_selected))
         else StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.assistant_not_selected))
         Text(stringResource(R.string.assistant_pick_hint))
         TextButton(onClick = {
             openFailed = try { context.startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)); false } catch (_: ActivityNotFoundException) { true }
         }) { Text(stringResource(R.string.assistant_open)) }
-        if (openFailed) StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.assistant_open_failed))
+        if (openFailed) StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.assistant_open_failed), PoliteLiveRegion)
         Text(stringResource(R.string.assistant_tile_hint))
     }
 }
 
 /** These settings have no denied state, so a missing access shows Shield. */
-@Composable private fun AccessSettingRow(@StringRes title: Int, @StringRes status: Int, granted: Boolean, @StringRes action: Int, open: () -> Unit) {
-    Column(Modifier.fillMaxWidth()) {
-        Text(stringResource(title), style = MaterialTheme.typography.titleMedium)
+@Composable private fun AccessSettingRow(@StringRes title: Int, @StringRes status: Int, granted: Boolean, @StringRes action: Int?, open: () -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(stringResource(title), Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
         if (granted) StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(status))
         else StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(status))
-        TextButton(onClick = open) { Text(stringResource(action)) }
+        if (action != null) TextButton(onClick = open) { Text(stringResource(action)) }
     }
     HorizontalDivider()
 }

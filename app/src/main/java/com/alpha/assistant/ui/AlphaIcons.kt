@@ -14,6 +14,9 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 internal enum class Glyph(val path: String) {
@@ -53,6 +56,9 @@ internal enum class Glyph(val path: String) {
         }
     }
 }
+
+/** TalkBack announces a [StatusLine] with this modifier when it shows or changes. A voice line gets none, because TalkBack speech can go into the recognizer. */
+internal val PoliteLiveRegion = Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }
 
 /** A status shows with an icon, a color, and text together. The icon takes the text color, so it keeps the contrast of the text on any container. */
 @Composable internal fun StatusLine(glyph: Glyph, color: Color, text: String, modifier: Modifier = Modifier) {

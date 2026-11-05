@@ -105,7 +105,7 @@ class DrawerWorkflowTest {
             robot.waitFor("Alpha message")
             robot.assertTarget(robot.text(R.string.menu))
             robot.assertTarget(robot.text(R.string.new_chat))
-            robot.waitFor(robot.text(R.string.app_name))
+            assertTrue("The top bar title is a heading", robot.waitFor(robot.text(R.string.app_name)).isHeading)
             robot.click(robot.text(R.string.new_chat))
             robot.waitGone("Alpha message")
             robot.waitUntil { fixture.store.load().selectedId == null }

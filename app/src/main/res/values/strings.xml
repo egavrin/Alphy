@@ -131,7 +131,7 @@
     <string name="clear_history_confirm">Очистить всё</string>
     <string name="access_note">Доступ для мини-приложений настраивается на странице каждого мини-приложения.</string>
     <string name="access_system_settings">Открыть системные настройки Alphy</string>
-    <string name="access_intro">Системные разрешения и доступы мини-приложений включаются отдельно. Контекст отправляется только с выбранным запросом после обычной кнопки «Отправить».</string>
+    <string name="access_intro">Системные разрешения и доступ мини-приложений включаются отдельно. Добавленный контекст отправляется только вместе с запросом, когда вы нажимаете «Отправить».</string>
     <string name="access_no_hardware">Недоступно: нужного оборудования нет.</string>
     <string name="access_granted">Разрешение Android выдано.</string>
     <string name="access_partial">Частичный доступ: доступна приблизительная геопозиция. Точная геопозиция не разрешена.</string>
@@ -165,11 +165,10 @@
     <string name="access_exact_on">Android разрешает точные напоминания.</string>
     <string name="access_exact_off">Точный будильник не разрешён.</string>
     <string name="access_exact_open">Настроить точные напоминания</string>
-    <string name="access_exact_not_needed">В этой версии Android отдельный системный доступ не требуется.</string>
     <string name="access_listener_title">Чтение уведомлений для автоматизаций</string>
     <string name="access_listener_on">Системный доступ выдан.</string>
     <string name="access_listener_off">Системный доступ не выдан.</string>
     <string name="access_listener_open">Настроить чтение уведомлений</string>
-    <string name="access_scope_note">Выдача доступа не запускает микрофон, камеру, чтение календаря или автоматизацию. Файлы и фотографии выбираются в системном окне без доступа ко всей медиатеке.</string>
+    <string name="access_scope_note">Выдача доступа не запускает микрофон, камеру, автоматизацию, чтение или изменение календаря. Файлы и фотографии выбираются в системном окне без доступа ко всей медиатеке.</string>
     <string name="capability_permission_required">Требуется разрешение Android. Выдайте его в разделе «Доступ и функции».</string>
 </resources>

@@ -56,13 +56,13 @@ import com.alpha.assistant.capabilities.AssistantSettingsRow
     Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(horizontal = 24.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Heading(R.string.settings_deepseek)
         when (status) {
-            KeyStatus.Ready -> StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(R.string.key_ready))
-            KeyStatus.Unreadable -> StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.key_unreadable))
+            KeyStatus.Ready -> StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(R.string.key_ready), PoliteLiveRegion)
+            KeyStatus.Unreadable -> StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.key_unreadable), PoliteLiveRegion)
             else -> StatusLine(Glyph.Cloud, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(when (status) {
                 KeyStatus.Missing -> R.string.key_missing
                 KeyStatus.NeedsConsent -> R.string.key_needs_consent
                 else -> R.string.key_checking
-            }))
+            }), PoliteLiveRegion)
         }
         Text(stringResource(R.string.consent_text), style = MaterialTheme.typography.bodyMedium)
         if (status == KeyStatus.Missing || status == KeyStatus.Ready) {
@@ -85,7 +85,7 @@ import com.alpha.assistant.capabilities.AssistantSettingsRow
             if (status == KeyStatus.Ready || status == KeyStatus.NeedsConsent)
                 TextButton(onClick = { confirmDelete = true }, enabled = idle) { Text(stringResource(R.string.key_delete)) }
         }
-        model.keyFailure?.let { StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(it)) }
+        model.keyFailure?.let { StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(it), PoliteLiveRegion) }
         HorizontalDivider()
         val nameLabel = stringResource(R.string.settings_name_label)
         OutlinedTextField(value = model.snapshot.userName, onValueChange = model::setUserName, label = { Text(nameLabel) },

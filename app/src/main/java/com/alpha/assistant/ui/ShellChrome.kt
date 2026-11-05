@@ -39,7 +39,7 @@ import com.alpha.assistant.data.Conversation
 @Composable internal fun ShellTopBar(title: String, onMenu: () -> Unit, onNewChat: () -> Unit) {
     Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         GlyphButton(Glyph.Menu, stringResource(R.string.menu), onMenu)
-        Text(title, Modifier.weight(1f).padding(horizontal = 8.dp), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(title, Modifier.weight(1f).padding(horizontal = 8.dp).semantics { heading() }, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
         GlyphButton(Glyph.Compose, stringResource(R.string.new_chat), onNewChat)
     }
 }

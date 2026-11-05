@@ -127,7 +127,7 @@ import kotlinx.coroutines.launch
                     Surface(color = MaterialTheme.colorScheme.errorContainer) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                             ProvideTextStyle(MaterialTheme.typography.bodySmall) {
-                                StatusLine(Glyph.Close, MaterialTheme.colorScheme.onErrorContainer, stringResource(R.string.save_failed), Modifier.weight(1f))
+                                StatusLine(Glyph.Close, MaterialTheme.colorScheme.onErrorContainer, stringResource(R.string.save_failed), Modifier.weight(1f).then(PoliteLiveRegion))
                             }
                             TextButton(onClick = model::retrySave) { Text(stringResource(R.string.retry)) }
                         }
