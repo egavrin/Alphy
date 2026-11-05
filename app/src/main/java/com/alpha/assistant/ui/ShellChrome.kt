@@ -79,5 +79,5 @@ import com.alpha.assistant.data.Conversation
     }
 }
 
-@Composable private fun GlyphButton(glyph: Glyph, label: String, onClick: () -> Unit) =
+@Composable internal fun GlyphButton(glyph: Glyph, label: String, onClick: () -> Unit) =
     IconButton(onClick = onClick, modifier = Modifier.size(48.dp).semantics { contentDescription = label }) { AlphaIcon(glyph) }

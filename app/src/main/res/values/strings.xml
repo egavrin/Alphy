@@ -111,7 +111,6 @@
     <string name="voice_speech_failed">Не удалось озвучить ответ. Текст ответа сохранён в чате.</string>
     <string name="voice_request_failed">Голосовой сеанс остановлен: ответ не получен. Ваш текст сохранён в истории.</string>
     <string name="search_field">Поиск разговоров</string>
-    <string name="search_placeholder">Поиск в истории</string>
     <string name="search_empty">Здесь появятся ваши разговоры.</string>
     <string name="search_none">Ничего не найдено. Попробуйте другой запрос.</string>
     <string name="search_row_draft">%1$s · черновик</string>

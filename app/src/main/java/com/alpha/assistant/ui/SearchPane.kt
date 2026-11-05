@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -18,7 +17,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -32,7 +30,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,11 +54,12 @@ import java.util.Date
     val dates = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, LocalConfiguration.current.locales[0])
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
         val searchLabel = stringResource(R.string.search_field)
-        OutlinedTextField(value = search, onValueChange = edit, placeholder = { Text(stringResource(R.string.search_placeholder)) }, leadingIcon = { AlphaIcon(Glyph.Search) },
+        OutlinedTextField(value = search, onValueChange = edit, placeholder = { Text(searchLabel) }, leadingIcon = { AlphaIcon(Glyph.Search) },
             modifier = Modifier.fillMaxWidth().padding(vertical = 15.dp).semantics { contentDescription = searchLabel }, singleLine = true, shape = RoundedCornerShape(18.dp))
         val results = conversations.filter { c -> search.isBlank() || c.title.contains(search, true) || c.messages.any { it.text.contains(search, true) } || c.draft.text.contains(search, true) }
         LazyColumn(Modifier.weight(1f)) {
-            if (results.isEmpty()) item { Text(stringResource(if (search.isBlank()) R.string.search_empty else R.string.search_none), Modifier.padding(vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            // A query can stay after «Очистить всё», so an empty history shows search_empty for each query.
+            if (results.isEmpty()) item { Text(stringResource(if (conversations.isEmpty()) R.string.search_empty else R.string.search_none), Modifier.padding(vertical = 24.dp).semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             items(results, key = { it.id }) { c ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).clickable { select(c.id) }.padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -69,7 +70,7 @@ import java.util.Date
                     }
                     Box {
                         val actions = stringResource(R.string.conversation_actions, c.title)
-                        IconButton(onClick = { menuId = c.id }, modifier = Modifier.size(48.dp).semantics { contentDescription = actions }) { AlphaIcon(Glyph.More) }
+                        GlyphButton(Glyph.More, actions) { menuId = c.id }
                         DropdownMenu(expanded = menuId == c.id, onDismissRequest = { menuId = null }) {
                             DropdownMenuItem(text = { Text(stringResource(R.string.conversation_rename)) }, onClick = { renameId = c.id; renameText = c.title; menuId = null })
                             DropdownMenuItem(text = { Text(stringResource(R.string.conversation_delete), color = MaterialTheme.colorScheme.error) }, onClick = { deleteId = c.id; menuId = null })

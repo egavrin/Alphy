@@ -41,7 +41,7 @@ internal enum class Glyph(val path: String) {
     Compose("M4 20L5 15L16 4L20 8L9 19ZM14 6L18 10M5 15L9 19"),
     Shield("M12 3L19 6V11C19 15.5 16 19.5 12 21C8 19.5 5 15.5 5 11V6Z"),
     Stop("M6 6H18V18H6Z"),
-    More("M6 12A1 1 0 1 1 4 12A1 1 0 1 1 6 12M13 12A1 1 0 1 1 11 12A1 1 0 1 1 13 12M20 12A1 1 0 1 1 18 12A1 1 0 1 1 20 12")
+    More("M5.85 12A0.85 0.85 0 1 1 4.15 12A0.85 0.85 0 1 1 5.85 12M12.85 12A0.85 0.85 0 1 1 11.15 12A0.85 0.85 0 1 1 12.85 12M19.85 12A0.85 0.85 0 1 1 18.15 12A0.85 0.85 0 1 1 19.85 12")
 }
 
 @Composable internal fun AlphaIcon(glyph: Glyph, modifier: Modifier = Modifier, accent: Boolean = false,

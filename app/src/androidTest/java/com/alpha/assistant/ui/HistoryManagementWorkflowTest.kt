@@ -19,6 +19,9 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
+import java.text.DateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 
 class HistoryManagementWorkflowTest {
@@ -46,8 +49,11 @@ class HistoryManagementWorkflowTest {
             }, store, keys) }
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitFor("Сообщение ассистенту")
-                openSearch(scenario); click("Действия разговора First fixture"); click("Переименовать")
+                openSearch(scenario)
+                waitFor(robot.text(R.string.search_row_draft, DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, Locale.forLanguageTag("ru")).format(Date(first.updatedAt))))
+                click("Действия разговора First fixture"); click("Переименовать")
                 edit("Название разговора", " ")
+                waitFor("Введите название")
                 assertFalse(button("Сохранить название").isEnabled)
                 edit("Название разговора", "Renamed fixture"); click("Сохранить название")
                 waitUntil { store.load().conversations.find { it.id == first.id }?.title == "Renamed fixture" }
@@ -64,8 +70,11 @@ class HistoryManagementWorkflowTest {
                 click("Новый чат"); assertEquals(newDraft.text, field("Сообщение ассистенту").text.toString())
                 openSearch(scenario); click("Очистить историю"); click("Отмена")
                 assertEquals(second, store.load().conversations.single())
+                // Failure case: a query kept through the clear shows «Ничего не найдено» on an empty history.
+                edit("Поиск разговоров", "Second fixture")
                 click("Очистить историю"); waitFor("Черновик нового чата, инструменты и их данные, автоматизации, API-ключи и исходные файлы сохранятся."); click("Очистить всё")
                 waitUntil { store.load().conversations.isEmpty() }
+                waitFor(robot.text(R.string.search_empty))
                 click("Новый чат"); assertEquals(newDraft.text, field("Сообщение ассистенту").text.toString())
                 assertEquals("history-test-only", keys.read().getOrThrow())
                 assertEquals(tool, tools.tool(tool.id))
