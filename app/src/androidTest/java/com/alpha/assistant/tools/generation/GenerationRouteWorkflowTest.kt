@@ -532,12 +532,15 @@ class GenerationRouteWorkflowTest {
     }
 
     @Test fun connectedControlsAndResultsGenerateOneWorkingScreen(): Unit = runBlocking {
+        val detail = "Calculate the tip, total, and share from the three editable values. " +
+            "Keep the input values editable and recalculate the amounts after each change. ".repeat(9).trimEnd()
+        check(detail.length in 501..2_000)
         val dependency = """
             {"title":"Tip calculator","description":"","language":"en",
              "inputs":[{"id":"bill","label":"Bill","type":"number","value":0},
              {"id":"percent","label":"Tip percent","type":"number","value":0},
              {"id":"people","label":"People","type":"number","value":1}],"constants":[],
-             "needs":[{"id":"result","type":"other","label":"Totals","description":"Calculate the tip, total and share from the three editable values"}],"questions":[]}
+             "needs":[{"id":"result","type":"other","label":"Totals","description":${JSONObject.quote(detail)}}],"questions":[]}
         """.trimIndent()
         val provider = FixtureProvider { turn, _ ->
             when (turn.generationStage) {
@@ -562,7 +565,9 @@ class GenerationRouteWorkflowTest {
         }
         withEngine(provider) { store, engine, _ ->
             val draft = engine.createDraft("Build a tip calculator with a bill, tip slider, people and totals.", null)
-            engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+            // A prior chat correction must leave a valid detailed plan usable.
+            val session = CloudSession().apply { assertTrue(claimCorrection()) }
+            engine.generate(draft.id, "fixture", emptyList(), session)
             assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR,
                 CloudGenerationStage.COMPLETE), provider.stages)
             var saved = engine.accept(draft.id)

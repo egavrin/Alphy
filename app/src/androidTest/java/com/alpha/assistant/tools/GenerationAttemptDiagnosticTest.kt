@@ -126,12 +126,12 @@ class GenerationAttemptDiagnosticTest {
             ResponseShape("plan.description.missing","$.needs[0]","missing") to { row -> row.remove("description") },
             ResponseShape("plan.description.blank","$.needs[0].description","string") to { row -> row.put("description","") },
             ResponseShape("plan.description.blank","$.needs[0].description","string") to { row -> row.put("description"," \n\t") },
-            ResponseShape("plan.description.length","$.needs[0].description","string") to { row -> row.put("description","x".repeat(501)) },
+            ResponseShape("plan.description.length","$.needs[0].description","string") to { row -> row.put("description","x".repeat(2_001)) },
             ResponseShape("plan.description.type","$.needs[0].description","object") to { row -> row.put("description",JSONObject().put("text",secret)) },
             ResponseShape("plan.description.type","$.needs[0].description","null") to { row -> row.put("description",JSONObject.NULL) },
         )
-        val boundary = JSONObject(valid).apply { getJSONArray("needs").getJSONObject(0).put("description","x".repeat(500)) }
-        assertEquals(500,NeedsPlan.parse(boundary.toString()).needs.single().description.length)
+        val boundary = JSONObject(valid).apply { getJSONArray("needs").getJSONObject(0).put("description","x".repeat(2_000)) }
+        assertEquals(2_000,NeedsPlan.parse(boundary.toString()).needs.single().description.length)
         val invalidConstants = listOf(
             ResponseShape("plan.constants.array", "$.constants", "object") to JSONObject(),
             ResponseShape("plan.constants.count", "$.constants", "array") to JSONArray().apply { repeat(25) { put(it) } },
