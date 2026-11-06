@@ -141,8 +141,9 @@ class MemoryShellWorkflowTest {
             }
             robot.waitUntil { robot.composed(scenario, "desktop") }
             openMemory(scenario)
-            val title = robot.reveal(robot.text(R.string.memory_title), forward = null)
-            assertTrue(title.isHeading)
+            val title = robot.text(R.string.memory_title)
+            robot.waitUntil { robot.find(title)?.isHeading == true }
+            robot.assertTarget(robot.text(R.string.memory_add))
             assertEquals(1, robot.texts().count { it == robot.text(R.string.memory_title) })
             robot.assertTarget(robot.text(R.string.menu))
             robot.assertTarget(robot.text(R.string.settings))
@@ -163,7 +164,6 @@ class MemoryShellWorkflowTest {
         robot.awaitDrawerClosed(scenario)
         robot.reveal(title)
         robot.click(title)
-        robot.reveal(robot.text(R.string.memory_add), forward = null)
     }
 
     private fun withFixture(test: (ShellFixture) -> Unit) {

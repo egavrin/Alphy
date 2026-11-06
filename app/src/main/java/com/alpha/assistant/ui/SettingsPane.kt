@@ -137,7 +137,7 @@ private fun SettingsLayout(
                     if (!split) TextButton({
                         if (section == SettingsSection.Memory && model.memoryPage.draft != null) model.memoryPage.cancelEditor()
                         else select(null)
-                    }, Modifier.padding(start = 12.dp).testTag("settings-back")) {
+                    }, Modifier.padding(start = 12.dp).heightIn(min = 48.dp).testTag("settings-back")) {
                         AlphaIcon(Glyph.Back, Modifier.padding(end = 4.dp), accent = true)
                         Text(stringResource(R.string.settings))
                     }

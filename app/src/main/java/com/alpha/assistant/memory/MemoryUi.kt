@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -62,7 +63,8 @@ internal fun MemoryScreen(
         if (state.deleteTarget != null) state.cancelDelete() else state.cancelEditor()
     }
 
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+    BoxWithConstraints(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        val shortPane = maxHeight < 240.dp
         val content = if (settingsPage) Modifier.widthIn(max = SettingsDetailWidth + 40.dp) else Modifier
         if (draft != null) {
             Column(content.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
@@ -89,16 +91,19 @@ internal fun MemoryScreen(
                 when {
                     state.loadFailed -> item { MemoryLoadFailure(state) }
                     facts == null -> item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-                    facts.isEmpty() -> item {
-                        SettingsPanel {
-                            Column(
-                                Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                AlphaIcon(Glyph.Notebook, Modifier.size(28.dp), accent = true)
-                                Text(stringResource(R.string.memory_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                AddFactButton(state)
+                    facts.isEmpty() -> {
+                        if (shortPane) item { AddFactButton(state) }
+                        item {
+                            SettingsPanel {
+                                Column(
+                                    Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    AlphaIcon(Glyph.Notebook, Modifier.size(28.dp), accent = true)
+                                    Text(stringResource(R.string.memory_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    if (!shortPane) AddFactButton(state)
+                                }
                             }
                         }
                     }
