@@ -3,7 +3,9 @@ package com.alpha.assistant.tools
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteDatabaseLockedException
 import android.database.sqlite.SQLiteException
+import android.os.SystemClock
 import java.io.Closeable
 import com.alpha.assistant.capabilities.*
 import com.alpha.assistant.scheduling.SourceRefresh
@@ -60,18 +62,27 @@ class ToolStore private constructor(internal val context: Context, internal val 
                 ToolLibraryStorage.requireCurrent(context, library)
                 return cached
             }
-            return ToolLibraryStorage.open(context, library) {
-                val opened = try {
-                    context.openOrCreateDatabase(databaseName, Context.MODE_PRIVATE, null, ToolLibraryStorage.preserveOnCorruption)
-                } catch (failure: SQLiteException) {
-                    throw ToolLibraryUnavailable(failure)
-                }
+            var retries = 0
+            while (true) {
                 try {
-                    initialize(opened)
-                    database = opened
-                    opened
-                } catch (failure: Exception) {
-                    opened.close()
+                    return ToolLibraryStorage.open(context, library) {
+                        val opened = context.openOrCreateDatabase(databaseName, Context.MODE_PRIVATE, null, ToolLibraryStorage.preserveOnCorruption)
+                        try {
+                            initialize(opened)
+                        } catch (failure: Exception) {
+                            opened.close()
+                            if (failure is SQLiteDatabaseLockedException) throw failure
+                            throw ToolLibraryUnavailable(failure)
+                        }
+                        database = opened
+                        opened
+                    }
+                } catch (failure: SQLiteDatabaseLockedException) {
+                    if (retries == 4) throw ToolLibraryUnavailable(failure)
+                    // Opening can collide with a write from another store. Let it finish outside the library gate.
+                    SystemClock.sleep(20L shl retries)
+                    retries++
+                } catch (failure: SQLiteException) {
                     throw ToolLibraryUnavailable(failure)
                 }
             }
