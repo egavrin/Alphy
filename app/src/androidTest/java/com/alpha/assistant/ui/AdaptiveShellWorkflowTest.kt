@@ -82,6 +82,50 @@ class AdaptiveShellWorkflowTest {
         assertEquals(0, fixture.provider.calls)
     }
 
+    @Test fun librarySelectionKeepsItsCatalogOnWideWindows() = withTool { fixture, tools, scenario ->
+        val size = constrain(scenario, fixture, 420)
+        robot.openDrawer(scenario)
+        robot.click(robot.text(R.string.mini_apps))
+        robot.awaitDrawerClosed(scenario)
+        val library = robot.text(R.string.tool_library_content)
+        val search = robot.text(R.string.tool_search)
+        robot.waitFor(library)
+        robot.edit(search, "Adaptive")
+        robot.click("Adaptive fixture")
+        robot.waitFor(robot.text(R.string.tool_library_back))
+        robot.waitGone(library)
+        robot.waitGone(composer)
+        val session = awaitSession()
+
+        scenario.onActivity { size.value = 900 }
+        robot.waitFor(library)
+        assertEquals("Adaptive", robot.field(search).text.toString())
+        robot.waitGone(composer)
+        robot.waitUntil { !robot.composed(scenario, "chat") }
+        assertSession(session)
+        robot.click(robot.text(R.string.tool_options))
+        robot.waitFor(robot.text(R.string.tool_versions))
+        robot.back()
+        robot.waitGone(robot.text(R.string.tool_versions))
+        robot.waitFor(robot.text(R.string.tool_library_back))
+        assertSession(session)
+        robot.reveal("Increment item")
+        robot.click("Increment item")
+        robot.waitUntil { count(tools) == 1 }
+
+        val book = publishHinge(scenario, FoldingFeature.Orientation.VERTICAL, 450)
+        robot.waitUntil {
+            val catalog = robot.composedBounds(scenario, "mini-app-library").first
+            val app = robot.composedBounds(scenario, "mini-app").first
+            catalog.width() > 0 && app.width() > 0 && catalog.right <= book.left && app.left >= book.right
+        }
+        assertSession(session)
+        robot.back()
+        robot.waitFor(library)
+        robot.waitGone(robot.text(R.string.tool_library_back))
+        assertEquals("Adaptive", robot.field(search).text.toString())
+    }
+
     @Test fun tabletopAndVerticalHingeKeepControlsInTheirPanels() = withTool { fixture, tools, scenario ->
         constrain(scenario, fixture, 900, fontScale = 1.5f)
         openFromChat(scenario)

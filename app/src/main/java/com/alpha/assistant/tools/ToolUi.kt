@@ -6,15 +6,10 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.PowerManager
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -59,7 +54,6 @@ import com.alpha.assistant.tools.generation.NativePresentation
 import com.alpha.assistant.tools.generation.PartClockSample
 import com.alpha.assistant.ui.AlphaIcon
 import com.alpha.assistant.ui.Glyph
-import com.alpha.assistant.ui.MiniAppIcon
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.awaitClose
@@ -324,26 +318,56 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
     }
 }
 
-@Composable private fun MiniAppMenuItems(controller: ToolController, tool: ToolRecord, actions: MiniAppActions, dismiss: () -> Unit) {
+@Composable private fun MiniAppMenuItems(
+    controller: ToolController,
+    tool: ToolRecord,
+    actions: MiniAppActions,
+    item: @Composable (Int, Glyph, Boolean, () -> Unit) -> Unit = { label, _, enabled, action ->
+        DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = action, enabled = enabled)
+    },
+    archive: (() -> Unit)? = null,
+    archiveEnabled: Boolean = false,
+    dismiss: () -> Unit,
+) {
     val available = remember(tool.spec) { ToolSpec.availablePersisted(tool.spec) != null }
+    val enabled = !controller.busy
+    item(R.string.tool_versions, Glyph.History, true) { dismiss(); actions.request = tool.id to MiniAppAction.Versions }
     if (tool.saved && !tool.archived && available) {
-        DropdownMenuItem(text = { Text(stringResource(if (tool.onDesktop) R.string.tool_desktop_remove else R.string.tool_desktop_add)) },
-            onClick = { dismiss(); controller.setDesktopPlacement(tool, !tool.onDesktop) }, enabled = !controller.busy)
-        DropdownMenuItem(text = { Text(stringResource(R.string.tool_shortcut_add)) },
-            onClick = { dismiss(); actions.request = tool.id to MiniAppAction.Shortcut }, enabled = !controller.busy)
-        DropdownMenuItem(text = { Text(stringResource(R.string.tool_widget_add)) },
-            onClick = { dismiss(); actions.request = tool.id to MiniAppAction.Widget }, enabled = !controller.busy)
-        DropdownMenuItem(text = { Text(stringResource(R.string.tool_export)) },
-            onClick = { dismiss(); actions.request = tool.id to MiniAppAction.Export }, enabled = !controller.busy)
-        DropdownMenuItem(text = { Text(stringResource(R.string.tool_manual_edit)) },
-            onClick = { dismiss(); actions.request = tool.id to MiniAppAction.ManualEdit }, enabled = !controller.busy)
-        DropdownMenuItem(text = { Text(stringResource(R.string.recurring_search_title)) },
-            onClick = { dismiss(); actions.request = tool.id to MiniAppAction.RecurringSearch }, enabled = !controller.busy)
+        item(R.string.tool_export, Glyph.Arrow, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.Export }
+        item(R.string.tool_manual_edit, Glyph.Compose, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.ManualEdit }
+        item(if (tool.onDesktop) R.string.tool_desktop_remove else R.string.tool_desktop_add, Glyph.Grid, enabled) {
+            dismiss()
+            controller.setDesktopPlacement(tool, !tool.onDesktop)
+        }
+        item(R.string.tool_shortcut_add, Glyph.Link, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.Shortcut }
+        item(R.string.tool_widget_add, Glyph.Screen, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.Widget }
+        item(R.string.recurring_search_title, Glyph.Repeat, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.RecurringSearch }
     }
-    DropdownMenuItem(text = { Text(stringResource(R.string.tool_versions)) },
-        onClick = { dismiss(); actions.request = tool.id to MiniAppAction.Versions })
-    if (tool.saved) DropdownMenuItem(text = { Text(stringResource(R.string.delete)) },
-        onClick = { dismiss(); actions.request = tool.id to MiniAppAction.Delete }, enabled = !controller.busy)
+    if (archive != null && tool.saved && !tool.archived) {
+        item(R.string.tool_archive_action, Glyph.File, archiveEnabled && enabled) { dismiss(); archive() }
+    }
+    if (tool.saved) item(R.string.delete, Glyph.Close, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.Delete }
+}
+
+@Composable private fun MiniAppActionRow(label: Int, glyph: Glyph, enabled: Boolean = true, action: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val color = when {
+        !enabled -> colors.onSurface.copy(alpha = 0.38f)
+        label == R.string.delete -> colors.error
+        else -> colors.onSurface
+    }
+    Row(
+        Modifier.fillMaxWidth().clickable(enabled = enabled, role = Role.Button, onClick = action)
+            .heightIn(min = 52.dp).padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(Modifier.size(36.dp), shape = RoundedCornerShape(10.dp), color = colors.surfaceContainerHigh) {
+            Box(contentAlignment = Alignment.Center) { AlphaIcon(glyph, color = color) }
+        }
+        Text(stringResource(label), Modifier.weight(1f), color = color, style = MaterialTheme.typography.bodyLarge)
+        AlphaIcon(Glyph.Chevron, color = color)
+    }
+    HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.55f))
 }
 
 @Composable internal fun MiniAppActionDialogs(controller: ToolController, actions: MiniAppActions) {
@@ -527,87 +551,25 @@ private suspend fun <T> readToolDetails(load: suspend () -> T): T? = try { load(
 catch (cancel: CancellationException) { throw cancel }
 catch (_: Exception) { null }
 
-@Composable private fun CatalogTile(tool: ToolRecord, open: () -> Unit) {
-    val available = remember(tool.spec) { ToolSpec.availablePersisted(tool.spec) != null }
-    val title = ToolSpec.storedTitle(tool.spec)
-    Card(onClick = open, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-        Column(Modifier.fillMaxWidth().heightIn(min = 112.dp).padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            MiniAppIcon(title)
-            Text(title, style = MaterialTheme.typography.titleSmall,
-                maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-            if (!available) Text(stringResource(R.string.tool_closed_format), style = MaterialTheme.typography.bodySmall)
-        }
-    }
-}
-
-@Composable internal fun ToolsPane(controller: ToolController, conversationId: String?, actions: MiniAppActions, refine: (String) -> Unit,
-    immersive: Boolean=false, exitImmersive: () -> Unit = {}, settings: () -> Unit, close: () -> Unit) {
+@Composable internal fun ToolsPane(controller: ToolController, conversationId: String?, actions: MiniAppActions,
+    requests: MutableState<Map<String, String>>, refine: (String) -> Unit, immersive: Boolean=false, exitImmersive: () -> Unit = {}, settings: () -> Unit, close: () -> Unit) {
     val draft=controller.drafts.find {it.id == controller.selectedDraftId}
     val tool=controller.tools.find {it.id == (controller.selectedId ?: draft?.toolId)}
-    var requests by rememberSaveable {mutableStateOf(emptyMap<String, String>())}
     val contextId=tool?.id ?: draft?.toolId ?: "new"
-    val prompt=requests[contextId] ?: draft?.prompt.orEmpty()
-    val edit: (String) -> Unit = {requests=requests + (contextId to it)}
+    val prompt=requests.value[contextId] ?: draft?.prompt.orEmpty()
+    val edit: (String) -> Unit = {requests.value=requests.value + (contextId to it)}
     LaunchedEffect(contextId,draft?.id) {
-        if(draft != null && requests[contextId].isNullOrEmpty()) requests=requests + (contextId to draft.prompt)
+        if(draft != null && requests.value[contextId].isNullOrEmpty()) edit(draft.prompt)
     }
-    var query by rememberSaveable {mutableStateOf("")}
-    var showArchive by rememberSaveable {mutableStateOf(false)}
     var archiveConfirm by remember(controller.selectedId) {mutableStateOf(false)}
     val focus=LocalFocusManager.current
-    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) controller.importPortable(uri)
-    }
     val submit={
         focus.clearFocus()
         controller.generate(prompt,tool?.id,conversationId,emptyList())
     }
-    val libraryContentLabel = stringResource(R.string.tool_library_content)
-    val catalogOptions = stringResource(R.string.tool_catalog_options)
-    if(tool != null || draft != null) {
+    if (tool != null || draft != null) key(tool?.id, draft?.id) {
         FocusedToolPane(controller,tool,draft,prompt,edit,submit,{archiveConfirm=true},actions,refine,immersive,exitImmersive,settings,close,
             hostCovered = archiveConfirm)
-    } else Column(Modifier.fillMaxSize().semantics {contentDescription=libraryContentLabel}.padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-        if(controller.busy) {LinearProgressIndicator(Modifier.fillMaxWidth()); TextButton(onClick=controller::cancel) {Text(stringResource(R.string.cancel))}}
-        controller.error?.let {
-            Text(toolErrorMessage(controller.errorCode, it),color=MaterialTheme.colorScheme.error)
-            if(controller.errorCode in KEY_ERRORS) TextButton(onClick=settings) {Text(stringResource(R.string.open_settings))}
-            TextButton(onClick=controller::clearError) {Text(stringResource(R.string.tool_dismiss))}
-        }
-        if(controller.drafts.isNotEmpty()) Text(stringResource(R.string.tool_drafts),style=MaterialTheme.typography.titleMedium)
-        controller.drafts.forEach {pending -> TextButton(onClick={controller.selectDraft(pending.id)},enabled=!controller.busy) {Text(pending.prompt.take(100))}}
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(query, { query = it }, label = { Text(stringResource(R.string.tool_search)) },
-                singleLine = true, modifier = Modifier.weight(1f))
-            var menu by remember { mutableStateOf(false) }
-            Box {
-                IconButton(onClick = { menu = true }, modifier = Modifier.semantics {
-                    contentDescription = catalogOptions
-                }) { AlphaIcon(Glyph.More) }
-                DropdownMenu(menu, { menu = false }) {
-                    DropdownMenuItem(text = { Text(stringResource(if (showArchive) R.string.mini_apps else R.string.tool_archive)) },
-                        onClick = { showArchive = !showArchive; menu = false })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.tool_import)) },
-                        onClick = { menu = false; importer.launch(arrayOf("application/zip", "application/octet-stream")) },
-                        enabled = !controller.busy)
-                }
-            }
-        }
-        val visible = controller.tools.filter {
-            it.saved && it.archived == showArchive && ToolSpec.storedTitle(it.spec).contains(query.trim(), ignoreCase = true)
-        }
-        if (visible.isEmpty()) {
-            Text(stringResource(if (query.isNotBlank()) R.string.tool_no_matches
-                else if (showArchive) R.string.tool_archive_empty else R.string.tool_catalog_empty))
-        } else {
-            LazyVerticalGrid(GridCells.Adaptive(132.dp), modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(bottom = 16.dp)) {
-                items(visible, key = { it.id }) { item -> CatalogTile(item) { controller.select(item.id) } }
-            }
-        }
     }
     if(archiveConfirm && tool != null && !tool.archived) AlertDialog(onDismissRequest = { archiveConfirm = false },
         title = { Text(stringResource(R.string.tool_archive_title, ToolSpec.storedTitle(tool.spec))) },text = {
@@ -639,7 +601,7 @@ catch (_: Exception) { null }
     val preview = rememberDraftPreview(draft, draft?.id?.let(controller::previewFor))
     val readyDraft = draft?.takeIf { preview != null && it.candidate != null && it.previewUi != null && it.previewState != null }
     val candidate = preview?.spec
-    var menu by remember {mutableStateOf(false)}
+    var menu by remember(tool?.id, draft?.id) {mutableStateOf(false)}
     var details by rememberSaveable(tool?.id) {mutableStateOf<String?>(null)}
     var appControls by remember(tool?.id,tool?.revision) {mutableStateOf(false)}
     var controlsReady by remember(tool?.id,tool?.revision) {mutableStateOf(false)}
@@ -702,24 +664,49 @@ catch (_: Exception) { null }
     val scroll=rememberScrollState()
     LaunchedEffect(details,candidate?.json) {scroll.scrollTo(0)}
     BackHandler {if(details != null) details=null else controller.select(null)}
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-    val refinementHeight=minOf(240.dp,maxHeight*0.45f)
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal=8.dp,vertical=4.dp),verticalAlignment=Alignment.CenterVertically) {
-            IconButton(onClick={controller.select(null)},modifier=Modifier.sizeIn(minWidth=48.dp,minHeight=48.dp).semantics {contentDescription=libraryBackLabel}) {AlphaIcon(Glyph.Back)}
-            Text(stringResource(R.string.tool_header),Modifier.weight(1f),style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            Box {
-                IconButton(onClick={menu=true},modifier=Modifier.sizeIn(minWidth=48.dp,minHeight=48.dp).semantics {contentDescription=optionsLabel}) {AlphaIcon(Glyph.More)}
-                DropdownMenu(menu,{menu=false}) {
-                    if(tool != null) {
-                        DropdownMenuItem(text={Text(stringResource(R.string.tool_access_history))},onClick={details="access";menu=false})
-                        MiniAppMenuItems(controller, tool, actions) { menu = false }
-                        DropdownMenuItem(text={Text(stringResource(R.string.tool_details_desktop))},onClick={details="details";menu=false})
-                        if(tool.saved && !tool.archived) DropdownMenuItem(text={Text(stringResource(R.string.tool_archive_action))},onClick={archive();menu=false},enabled=!controller.busy && draft == null)
+    if (menu) {
+        val dismiss = { menu = false }
+        val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val scope = rememberCoroutineScope()
+        ModalBottomSheet(
+            onDismissRequest = dismiss,
+            sheetState = sheet,
+            containerColor = MaterialTheme.colorScheme.surface,
+            properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false),
+        ) {
+            // Android Back is sent to the sheet window, which has its own dispatcher.
+            val dialogOwner = checkNotNull(LocalView.current.findViewTreeNavigationEventDispatcherOwner())
+            CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides dialogOwner) {
+                BackHandler {
+                    scope.launch {
+                        sheet.hide()
+                        if (!sheet.isVisible) dismiss()
                     }
-                    DropdownMenuItem(text={Text(stringResource(R.string.tool_chat))},onClick={menu=false;close()})
                 }
             }
+            Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, bottom = 24.dp)) {
+                Text(optionsLabel, Modifier.padding(bottom = 12.dp).semantics { heading() },
+                    style = MaterialTheme.typography.titleLarge)
+                if (tool != null) {
+                    MiniAppActionRow(R.string.tool_details_desktop, Glyph.Screen) { details = "details"; dismiss() }
+                    MiniAppActionRow(R.string.tool_access_history, Glyph.Shield) { details = "access"; dismiss() }
+                    MiniAppMenuItems(controller, tool, actions, item = { label, glyph, enabled, action ->
+                        MiniAppActionRow(label, glyph, enabled, action)
+                    }, archive = archive, archiveEnabled = draft == null, dismiss = dismiss)
+                }
+                MiniAppActionRow(R.string.tool_chat, Glyph.Back) { dismiss(); close() }
+            }
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+    val refinementHeight=minOf(240.dp,maxHeight*0.45f)
+    Column(Modifier.widthIn(max = 640.dp).fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 8.dp),verticalAlignment=Alignment.CenterVertically) {
+            IconButton(onClick={controller.select(null)},modifier=Modifier.semantics {contentDescription=libraryBackLabel}) {AlphaIcon(Glyph.Back)}
+            val header = if (preview != null) R.string.tool_preview_changes else R.string.mini_apps
+            Text(stringResource(header), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            IconButton(onClick={menu=true},modifier=Modifier.semantics {contentDescription=optionsLabel}) {AlphaIcon(Glyph.More)}
         }
         if(controller.busy) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -743,16 +730,15 @@ catch (_: Exception) { null }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
         // Reserve the metadata, status, two native control rows, saved summary, and pane spacing.
         val canvasHeight=(maxHeight-330.dp).coerceAtLeast(120.dp)
-        Column(Modifier.fillMaxSize().verticalScroll(scroll).semantics {contentDescription=contentLabel}.padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.fillMaxSize().verticalScroll(scroll).semantics {contentDescription=contentLabel}.padding(horizontal = 20.dp, vertical = 16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
             if (preview != null) Text(stringResource(if (readyDraft == null) R.string.tool_preview_provisional else R.string.tool_preview_label),
                 style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(candidate?.title ?: spec?.title ?: tool?.let { ToolSpec.storedTitle(it.spec) } ?: stringResource(R.string.tool_new),
-                    Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
+                    Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
                 if (tool != null && spec != null && tool.saved && !tool.archived && draft == null) {
-                    val editLabel = stringResource(R.string.tool_refine)
-                    IconButton(onClick = { refine(tool.id) }, modifier = Modifier.size(48.dp).semantics { contentDescription = editLabel }) {
-                        AlphaIcon(Glyph.Compose, accent = true)
+                    TextButton(onClick = { refine(tool.id) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text(stringResource(R.string.tool_refine))
                     }
                 }
             }
@@ -783,13 +769,17 @@ catch (_: Exception) { null }
             if(preview != null) preview.Render(canvasHeight)
             else if(tool != null) {
                 if(tool.archived) {
-                    Text(stringResource(R.string.tool_archived_detail))
-                    Button(onClick={controller.recover(tool)},enabled=!controller.busy) {Text(stringResource(R.string.tool_archive_restore))}
+                    Text(stringResource(R.string.tool_archived_detail), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Button(onClick={controller.recover(tool)}, enabled=!controller.busy,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                        Text(stringResource(R.string.tool_archive_restore))
+                    }
                 }
-                if(spec != null && draft == null && graphicsHost != null) CoveredToolSurface(tool,spec,!tool.archived && details == null,canvasHeight,graphicsHost,actions) {artifactSnapshot=it}
+                if(spec != null && draft == null && graphicsHost != null) CoveredToolSurface(tool, spec, !tool.archived,
+                    canvasHeight, graphicsHost, actions, covered = details != null || menu || hostCovered) { artifactSnapshot = it }
                 if(spec == null) Text(stringResource(R.string.tool_closed_format_detail))
                 if(spec != null) MiniAppContent(controller,tool,displayed,spec.title,
-                    enabled=!controller.busy && draft == null && !tool.archived && !actions.covers(tool.id),
+                    enabled=!controller.busy && draft == null && !tool.archived && !menu && !hostCovered && !actions.covers(tool.id),
                     routeSystemBackEnabled = details == null, presentation = spec.nativePresentation,
                     graphicsHost = graphicsHost, graphicsSnapshot = artifactSnapshot,
                     openNonGraphics = draft == null, allowVideo = true,

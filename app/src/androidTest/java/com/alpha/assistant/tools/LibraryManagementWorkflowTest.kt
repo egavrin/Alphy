@@ -438,7 +438,7 @@ class LibraryManagementWorkflowTest {
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitUntil {!model.loading && !model.tools.busy}
                 robot.openDrawer(scenario);click(app.getString(R.string.mini_apps));robot.awaitDrawerClosed(scenario)
-                click(app.getString(R.string.tool_catalog_options));click(app.getString(R.string.tool_archive))
+                click(app.getString(R.string.tool_archive))
                 waitFor("Мой счётчик");click("Мой счётчик")
                 click("Восстановить из архива");waitFor("Счёт: 7")
                 waitUntil {!model.tools.busy}

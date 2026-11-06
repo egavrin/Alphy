@@ -7,6 +7,7 @@ internal sealed interface ShellRoute {
     data object Desktop : ShellRoute
     data class Chat(val id: String) : ShellRoute
     data object NewChat : ShellRoute
+    data object MiniAppLibrary : ShellRoute
 }
 
 internal enum class ShellDestination(@StringRes val title: Int) : ShellRoute {
