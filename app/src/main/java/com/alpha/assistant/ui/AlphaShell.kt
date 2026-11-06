@@ -56,7 +56,10 @@ import androidx.lifecycle.compose.rememberLifecycleOwner
 import androidx.navigation3.runtime.NavEntryDecorator
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
+import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.NavDisplay
+import androidx.navigation3.ui.defaultPopTransitionSpec
+import androidx.navigation3.ui.defaultPredictivePopTransitionSpec
 import androidx.navigation3.ui.defaultTransitionSpec
 import androidx.navigationevent.NavigationEventDispatcher
 import androidx.navigationevent.NavigationEventHandler
@@ -298,12 +301,23 @@ import kotlinx.coroutines.launch
                         } }
                         // NavDisplay gives each entry fixed constraints. The Box loosens them, so a pane keeps its maximum width and stays centered.
                         val centerEntry = remember { NavEntryDecorator<ShellRoute> { entry -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) { entry.Content() } } }
+                        fun Scene<ShellRoute>.hasMiniAppPane() = entries.last().contentKey == ShellDestination.MiniApps.toString()
                         NavDisplay(backStack, Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter, onBack = ::back,
                             sceneStrategies = sceneStrategies,
                             transitionSpec = {
-                                if (initialState.entries.last().contentKey == targetState.entries.last().contentKey) {
+                                if (initialState.hasMiniAppPane() || targetState.hasMiniAppPane()) {
                                     EnterTransition.None togetherWith ExitTransition.None
                                 } else defaultTransitionSpec<ShellRoute>().invoke(this)
+                            },
+                            popTransitionSpec = {
+                                if (initialState.hasMiniAppPane() || targetState.hasMiniAppPane()) {
+                                    EnterTransition.None togetherWith ExitTransition.None
+                                } else defaultPopTransitionSpec<ShellRoute>().invoke(this)
+                            },
+                            predictivePopTransitionSpec = { edge ->
+                                if (initialState.hasMiniAppPane() || targetState.hasMiniAppPane()) {
+                                    EnterTransition.None togetherWith ExitTransition.None
+                                } else defaultPredictivePopTransitionSpec<ShellRoute>().invoke(this, edge)
                             },
                             entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), keepShellLifecycle, centerEntry), entryProvider = entryProvider {
                             entry<ShellRoute.Desktop>(clazzContentKey = { it.toString() }) {
