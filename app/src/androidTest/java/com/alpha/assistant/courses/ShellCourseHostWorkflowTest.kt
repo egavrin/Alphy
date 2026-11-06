@@ -54,7 +54,7 @@ class ShellCourseHostWorkflowTest {
             click(R.string.course_refinement_open)
             assertTrue(provider.calls.isEmpty())
             robot.edit(robot.text(R.string.course_refinement_instruction), "Add an example to the next slide")
-            click(R.string.course_refinement_request)
+            click(R.string.composer_send)
             robot.waitFor(robot.text(R.string.course_refinement_review))
             assertEquals(current, store.course(saved.id))
             click(R.string.course_refinement_apply)
@@ -66,6 +66,7 @@ class ShellCourseHostWorkflowTest {
             assertEquals(savedSlide, store.slide(saved.id, "current"))
             assertEquals(1, provider.calls.size)
 
+            robot.back()
             click(R.string.shell_course_continue)
             robot.waitFor(slideText)
             val plan = provider.calls.single { it.request.generationStage == CloudGenerationStage.PLAN }
@@ -171,7 +172,7 @@ class ShellCourseHostWorkflowTest {
         val provider = CourseProvider()
         withShell(provider) { scenario, model, store, saved -> runBlocking {
             val instruction = "Add a worked example to the second slide."
-            val first = model.courseRefinement.propose(saved.id, saved.revision, instruction)
+            val first = model.courseRefinement.propose(saved.id, saved.revision, Draft(instruction))
             assertEquals(saved, store.course(saved.id))
             val request = provider.calls.single().request
             assertTrue(request.jsonObject)
@@ -187,13 +188,13 @@ class ShellCourseHostWorkflowTest {
             assertEquals(CourseRejection.STALE_REVISION, stale.reason)
             assertEquals(edited, store.course(saved.id))
 
-            val reviewed = model.courseRefinement.propose(saved.id, edited.revision, instruction)
+            val reviewed = model.courseRefinement.propose(saved.id, edited.revision, Draft(instruction))
             scenario.onActivity { model.clearKey() }
             robot.waitUntil { !model.keyBusy && model.keyStatus == com.alpha.assistant.ui.KeyStatus.Missing }
             val applied = model.courseRefinement.apply(reviewed)
             assertEquals(reviewed.outline, applied.outline)
             assertEquals(edited.progress, applied.progress)
-            val missingKey = runCatching { model.courseRefinement.propose(saved.id, applied.revision, instruction) }
+            val missingKey = runCatching { model.courseRefinement.propose(saved.id, applied.revision, Draft(instruction)) }
                 .exceptionOrNull() as CourseOutlineException
             assertEquals(CourseOutlineError.UNAVAILABLE, missingKey.reason)
             assertEquals(2, provider.calls.size)
@@ -292,14 +293,19 @@ class ShellCourseHostWorkflowTest {
             assertTrue(slideCalls.first().request.turns.single().text.contains("Explain the current fraction"))
 
             openTutor("Why do the denominators match?")
+            click(R.string.composer_add_context)
+            click(R.string.context_paste)
+            robot.edit(robot.text(R.string.context_text_label), "My reviewed fraction example")
+            click(R.string.context_text_attach)
             assertEquals(slideCalls, provider.calls.toList())
-            click(R.string.course_tutor_send)
+            click(R.string.composer_send)
             robot.waitFor("Tutor fixture answer")
             val tutor = provider.calls.last()
             assertNull(tutor.request.generationStage)
             assertNotSame(slideCalls.first().session, tutor.session)
             assertTrue(tutor.request.turns.single().text.contains("Why do the denominators match?"))
             assertTrue(tutor.request.turns.single().text.contains(slideText))
+            assertTrue(tutor.request.turns.single().text.contains("My reviewed fraction example"))
             provider.calls.forEach { call ->
                 val payload = call.request.systemInstructions + call.request.turns.joinToString { it.text }
                 assertFalse(payload.contains("PRIVATE-"))
@@ -352,9 +358,9 @@ class ShellCourseHostWorkflowTest {
             val first = BlockingTransport()
             provider.block = first
             try {
-                click(R.string.course_tutor_send)
+                click(R.string.composer_send)
                 first.assertStarted()
-                click(R.string.course_tutor_cancel)
+                click(R.string.composer_stop)
                 first.assertDisconnected()
                 robot.waitFor(robot.text(R.string.course_tutor_canceled))
                 assertEquals(question, robot.field(robot.text(R.string.course_tutor_question)).text.toString())
@@ -363,7 +369,7 @@ class ShellCourseHostWorkflowTest {
             val second = BlockingTransport()
             provider.block = second
             try {
-                click(R.string.course_tutor_send)
+                click(R.string.composer_send)
                 second.assertStarted()
                 scenario.onActivity { model.clearKey() }
                 second.assertDisconnected()
@@ -384,7 +390,7 @@ class ShellCourseHostWorkflowTest {
                 click(R.string.course_open)
                 robot.waitFor(slideText)
                 openTutor("Explain the old outline")
-                click(R.string.course_tutor_send)
+                click(R.string.composer_send)
                 transport.assertStarted()
                 val current = checkNotNull(store.course(saved.id))
                 val lesson = current.outline.lessons.single()

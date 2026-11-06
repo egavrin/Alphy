@@ -34,7 +34,7 @@ class CourseTutorUiWorkflowTest {
         openSlide()
         openTutor()
         robot.waitFor(robot.text(R.string.course_tutor_unavailable))
-        assertFalse(robot.text(R.string.course_tutor_send) in robot.texts())
+        assertFalse(robot.text(R.string.composer_send) in robot.texts())
         robot.back()
         robot.waitFor("Saved explanation")
         robot.back()
@@ -54,11 +54,11 @@ class CourseTutorUiWorkflowTest {
             openTutor()
             val question = robot.text(R.string.course_tutor_question)
             robot.edit(question, "How does this work?")
-            click(R.string.course_tutor_send)
+            click(R.string.composer_send)
             robot.waitFor(robot.text(R.string.course_tutor_failed))
             assertFalse(robot.texts().any { it.contains("Private tutor exception") })
             assertEquals("How does this work?", robot.field(question).text.toString())
-            click(R.string.course_tutor_send)
+            click(R.string.composer_send)
             robot.waitFor("Tutor fixture answer")
 
             assertEquals(2, requests.size)
@@ -95,10 +95,10 @@ class CourseTutorUiWorkflowTest {
             openTutor()
             val question = robot.text(R.string.course_tutor_question)
             robot.edit(question, "Keep this question")
-            click(R.string.course_tutor_send)
+            click(R.string.composer_send)
             robot.waitFor(robot.text(R.string.course_tutor_waiting))
             robot.waitUntil { started.isCompleted }
-            click(R.string.course_tutor_cancel)
+            click(R.string.composer_stop)
             robot.waitFor(robot.text(R.string.course_tutor_canceled))
             robot.waitUntil { canceled.isCompleted }
             pending.complete("Late reply")
@@ -117,21 +117,36 @@ class CourseTutorUiWorkflowTest {
         withPlayer(tutor, startAtExercise = true) { _, store, saved ->
             robot.click("Fractions")
             click(R.string.course_open)
-            robot.edit(robot.text(R.string.course_answer_label), "earlier correct")
+            val answer = robot.text(R.string.course_answer_label)
+            val question = robot.text(R.string.course_tutor_question)
+            robot.edit(answer, "earlier correct")
+            openTutor()
+            robot.edit(question, "Why is this correct?")
+            click(R.string.course_tutor_close)
+            assertEquals("earlier correct", robot.field(answer).text.toString())
             click(R.string.course_check)
             robot.waitFor(robot.text(R.string.course_answer_correct))
             val committed = checkNotNull(store.course(saved.id))
             assertEquals("second", committed.progress.currentSlideId)
 
             openTutor()
-            robot.edit(robot.text(R.string.course_tutor_question), "Why is this correct?")
-            click(R.string.course_tutor_send)
+            assertEquals("Why is this correct?", robot.field(question).text.toString())
+            click(R.string.composer_send)
             robot.waitFor("Tutor fixture answer")
+            robot.diagnostics.capture("lesson-chat-open")
             val request = requests.single()
             assertEquals(saved.id, request.courseId)
             assertEquals(committed.revision, request.expectedRevision)
             assertEquals("first", request.slideId)
             assertEquals(listOf(true), request.earlierAnswers.map { it.correct })
+
+            click(R.string.course_tutor_close)
+            robot.waitFor(robot.text(R.string.course_answer_correct))
+            robot.diagnostics.capture("lesson-returned-to-exercise")
+            click(R.string.course_next)
+            robot.waitFor("Explain the result")
+            robot.waitFor(robot.text(R.string.course_generation_unavailable))
+            assertEquals("second", store.course(saved.id)?.progress?.currentSlideId)
         }
     }
 
@@ -197,7 +212,7 @@ class CourseTutorUiWorkflowTest {
                     scenario.onActivity { activity ->
                         activity.setContent {
                             MaterialTheme {
-                                CourseLibraryScreen(store, controller, onExit = {}, tutor = tutor)
+                                CourseLibraryScreen(store, controller, onExit = {}, tutor = tutor, composerModel = checkNotNull(fixture.model))
                             }
                         }
                     }

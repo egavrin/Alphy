@@ -1,6 +1,9 @@
 package com.alpha.assistant.courses
 
+import com.alpha.assistant.data.Attachment
+import com.alpha.assistant.data.Draft
 import com.alpha.assistant.sandbox.SandboxContract
+import com.alpha.assistant.surfaces.AssistContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -10,7 +13,11 @@ import org.json.JSONObject
 import java.util.UUID
 
 /** The host makes one bounded JSON request and propagates cancellation. */
-internal data class CourseOutlineModelRequest(val prompt: String, val maxResponseBytes: Int)
+internal data class CourseOutlineModelRequest(
+    val prompt: String,
+    val maxResponseBytes: Int,
+    val attachments: List<Attachment>,
+)
 
 internal data class CourseOutlineDraft(val setup: CourseSetup, val outline: CourseOutline)
 
@@ -34,17 +41,32 @@ internal class CourseOutlineService(
     private val store: CourseStore,
     private val invokeModel: suspend (CourseOutlineModelRequest) -> String,
 ) {
-    suspend fun propose(setup: CourseSetup): CourseOutlineDraft {
+    suspend fun propose(
+        setup: CourseSetup,
+        attachments: List<Attachment> = emptyList(),
+        previous: CourseOutline? = null,
+        change: String = "",
+    ): CourseOutlineDraft {
         outlineValue(CourseOutlineError.INVALID_INPUT) { setup.validate() }
-        val raw = request(
-            "Create an outline for the confirmed course setup. Every lesson and slide ID must be null.",
-            JSONObject().put("setup", setup.modelContext()),
-        )
+        val context = JSONObject().put("setup", setup.modelContext())
+        val task = if (previous == null && change.isBlank()) {
+            "Create an outline for the requested course. Every lesson and slide ID must be null."
+        } else {
+            if (previous != null) context.put("outline", previous.modelContext())
+            context.put("change", change)
+            "Use the requested change to propose the full course outline. Every lesson and slide ID must be null."
+        }
+        val raw = request(task, context, attachments)
         return CourseOutlineDraft(setup, decode(raw, previous = null))
     }
 
-    suspend fun proposeRefinement(courseId: String, expectedRevision: Long, instruction: String): CourseOutlineRefinement {
-        outlineValue(CourseOutlineError.INVALID_INPUT) { courseText(instruction, 4096, "Outline request") }
+    suspend fun proposeRefinement(courseId: String, expectedRevision: Long, instruction: String): CourseOutlineRefinement =
+        proposeRefinement(courseId, expectedRevision, Draft(instruction))
+
+    suspend fun proposeRefinement(courseId: String, expectedRevision: Long, input: Draft): CourseOutlineRefinement {
+        outlineValue(CourseOutlineError.INVALID_INPUT) {
+            if (input.text.isNotBlank() || input.attachments.isEmpty()) courseText(input.text, 4096, "Outline request")
+        }
         currentCoroutineContext().ensureActive()
         val course = requireCourse(courseId, expectedRevision)
         val steps = course.outline.steps()
@@ -61,7 +83,8 @@ internal class CourseOutlineService(
             JSONObject().put("setup", course.setup.modelContext())
                 .put("outline", course.outline.modelContext())
                 .put("protectedSlideCount", protectedCount)
-                .put("change", instruction),
+                .put("change", input.text),
+            input.attachments,
         )
         requireCourse(courseId, expectedRevision)
         val outline = decode(raw, course.outline)
@@ -81,14 +104,16 @@ internal class CourseOutlineService(
         return store.editOutline(refinement.courseId, refinement.expectedRevision, refinement.outline)
     }
 
-    private suspend fun request(task: String, context: JSONObject): String {
+    private suspend fun request(task: String, context: JSONObject, attachments: List<Attachment>): String {
         currentCoroutineContext().ensureActive()
-        val prompt = "$INSTRUCTIONS\n$task\n\nCourse context:\n$context"
+        val prompt = outlineValue(CourseOutlineError.INVALID_INPUT) {
+            AssistContext.requestText("$INSTRUCTIONS\n$task\n\nCourse context:\n$context", attachments)
+        }
         if (prompt.toByteArray(Charsets.UTF_8).size > MAX_PROMPT_BYTES) {
             throw CourseOutlineException(CourseOutlineError.CONTEXT_LIMIT)
         }
         val raw = try {
-            invokeModel(CourseOutlineModelRequest(prompt, SandboxContract.MAX_BYTES))
+            invokeModel(CourseOutlineModelRequest(prompt, SandboxContract.MAX_BYTES, attachments))
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (_: Exception) {

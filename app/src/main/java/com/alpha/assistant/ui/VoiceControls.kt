@@ -47,31 +47,41 @@ import com.alpha.assistant.voice.VoiceSession
     }
 }
 
-@Composable internal fun rememberVoiceStart(model: ShellViewModel, oneShot: Boolean): () -> Unit {
+@Composable internal fun rememberVoiceStart(
+    model: ShellViewModel,
+    oneShot: Boolean,
+    destination: CourseComposerState? = null,
+): () -> Unit {
     val context = LocalContext.current
-    val owner = context as? ComponentActivity
-    var pending by remember { mutableStateOf(false) }
+    val owner = androidx.activity.compose.LocalActivity.current as? ComponentActivity
+    var origin by remember(destination) { mutableStateOf<String?>(null) }
+    var pending by remember(destination) { mutableStateOf(false) }
     fun startIfVisible() {
         val power = context.getSystemService(PowerManager::class.java)
         val keyguard = context.getSystemService(KeyguardManager::class.java)
         if (pending && power.isInteractive && !keyguard.isDeviceLocked && owner?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true) {
             pending = false
-            model.startVoice(oneShot)
+            if (origin != null && origin == model.composerContextKey(destination)) model.startComposerVoice(oneShot, destination)
         }
     }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed ->
-        if (allowed) { pending = true; startIfVisible() } else { pending = false; model.voice.permissionDenied() }
+        if (allowed) { pending = true; startIfVisible() }
+        else {
+            pending = false
+            if (origin != null && origin == model.composerContextKey(destination)) model.denyVoicePermission(destination)
+        }
     }
-    DisposableEffect(owner, model, oneShot) {
+    DisposableEffect(owner, model, oneShot, destination) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) startIfVisible() }
         owner?.lifecycle?.addObserver(observer)
-        onDispose { pending = false; owner?.lifecycle?.removeObserver(observer) }
+        onDispose { pending = false; origin = null; owner?.lifecycle?.removeObserver(observer) }
     }
     return {
+        origin = model.composerContextKey(destination)
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             pending = true
             startIfVisible()
-        } else permission.launch(Manifest.permission.RECORD_AUDIO)
+        } else if (origin != null) permission.launch(Manifest.permission.RECORD_AUDIO)
     }
 }
 

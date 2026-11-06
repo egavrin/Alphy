@@ -63,6 +63,7 @@ internal data class ShellPaneLayout(
     systemInsets: WindowInsets,
     splitAutomations: Boolean = false,
     pairSettings: Boolean = false,
+    minimumPairWidth: Dp = 840.dp,
     content: @Composable (ShellPaneLayout) -> Unit,
 ) {
     val posture = currentWindowAdaptiveInfoV2().windowPosture
@@ -75,7 +76,9 @@ internal data class ShellPaneLayout(
         val safeWidth = if (hinges.isNotEmpty() || immersive) maxWidth else with(density) {
             maxWidth - (systemInsets.getLeft(density, layoutDirection) + systemInsets.getRight(density, layoutDirection)).toDp()
         }
-        val placement = density.shellPaneLayout(safeWidth, viewport, posture, pairApp, splitAutomations, pairSettings)
+        val placement = density.shellPaneLayout(
+            safeWidth, viewport, posture, pairApp, splitAutomations, pairSettings, minimumPairWidth,
+        )
         val padding = placement.singlePanePadding
         Box(Modifier.fillMaxSize().onGloballyPositioned { coordinates ->
             viewport = IntRect(coordinates.positionInWindow().round(), coordinates.size)
@@ -86,10 +89,16 @@ internal data class ShellPaneLayout(
 }
 
 private fun Density.shellPaneLayout(
-    width: Dp, viewport: IntRect?, posture: Posture, pairApp: Boolean, splitAutomations: Boolean, pairSettings: Boolean,
+    width: Dp,
+    viewport: IntRect?,
+    posture: Posture,
+    pairApp: Boolean,
+    splitAutomations: Boolean,
+    pairSettings: Boolean,
+    minimumPairWidth: Dp,
 ): ShellPaneLayout {
     val hinges = posture.hingeList.filter { it.isSeparating || it.isOccluding }
-    if (hinges.isEmpty() || viewport == null) return ShellPaneLayout(wide = pairApp && width >= 840.dp)
+    if (hinges.isEmpty() || viewport == null) return ShellPaneLayout(wide = pairApp && width >= minimumPairWidth)
 
     val (vertical, horizontal) = hinges.partition { it.isVertical }
     val columns = visibleSpans(viewport.left, viewport.right, vertical.map { it.bounds.left to it.bounds.right })
@@ -98,7 +107,7 @@ private fun Density.shellPaneLayout(
         columns.size == 2 && columns.first().length >= 240.dp.roundToPx() && columns.last().length >= 360.dp.roundToPx()
     ) return ShellPaneLayout(settingsHinge = (columns.first().end - viewport.left)..(columns.last().first - viewport.left))
     if (pairApp && horizontal.isEmpty() && vertical.size == 1 && columns.size == 2 &&
-        columns.all { it.length >= 360.dp.roundToPx() }
+        columns.all { it.length >= minOf(360.dp, minimumPairWidth / 2).roundToPx() }
     ) return ShellPaneLayout(wide = true, verticalHinge = vertical.single().bounds)
     if (pairApp && posture.isTabletop && vertical.isEmpty() && rows.size == 2 &&
         rows.all { it.length >= 260.dp.roundToPx() }

@@ -39,31 +39,43 @@ class ShellCourseCreationWorkflowTest {
         val provider = CourseProvider()
         withShell(provider) { scenario, model, store ->
             robot.edit(robot.text(R.string.composer_label), "Teach me Spanish")
+            scenario.onActivity {
+                assertTrue(model.addReviewedText("A reviewed Spanish greeting", "Fixture", model.contextDraftKey()))
+            }
             click(R.string.composer_send)
-            waitFor(R.string.shell_course_setup)
-            assertEquals(listOf(true), provider.calls.map { it.request.chatDecision })
-            assertTrue(provider.calls.single().request.allowCourseDecision)
-            assertTrue(store.courses().isEmpty())
-            scenario.onActivity { model.editDraft(kept) }
-            fillLevelAndGoal()
-            click(R.string.shell_course_plan)
             robot.waitFor(lesson)
+            assertEquals(listOf(true, false), provider.calls.map { it.request.chatDecision })
+            assertTrue(provider.calls.first().request.allowCourseDecision)
+            assertNull(robot.find(robot.text(R.string.shell_course_topic)))
+            scenario.onActivity { model.editDraft(kept) }
             assertEquals(2, provider.calls.size)
             assertTrue(store.courses().isEmpty())
             val outline = provider.calls.last().request
             assertTrue(outline.jsonObject)
             assertFalse(outline.search)
             val payload = outline.turns.single().text
-            assertTrue(payload.contains(topic) && payload.contains("Beginner") && payload.contains("Hold a conversation"))
+            assertTrue(payload.contains(topic) && payload.contains("Teach me Spanish"))
+            assertTrue(payload.contains("A reviewed Spanish greeting"))
             assertFalse(payload.contains("PRIVATE-"))
             assertTrue(outline.turns.single().images.isEmpty())
 
-            scenario.onActivity {
-                val setup = checkNotNull(model.courseSetup)
-                model.startPreparedCourse(setup.id)
-                model.startPreparedCourse(setup.id)
+            robot.edit(robot.text(R.string.composer_label), "Add conversation practice")
+            click(R.string.composer_send)
+            robot.waitFor("Practice a conversation")
+            assertEquals(3, provider.calls.size)
+            assertTrue(provider.calls.last().request.turns.single().text.contains("Add conversation practice"))
+            assertTrue(store.courses().isEmpty())
+            robot.diagnostics.capture("inline-plan")
+            click(R.string.shell_course_start)
+            try {
+                robot.waitFor(slide)
+            } catch (failure: AssertionError) {
+                val generation = store.courses().singleOrNull()?.generationFailure
+                val stages = provider.calls.map { it.request.generationStage }
+                throw AssertionError("First slide missing. Saved generation failure: $generation. Model stages: $stages.", failure)
             }
-            robot.waitFor(slide)
+            assertNull(robot.find(robot.text(R.string.course_tutor_close)))
+            robot.diagnostics.capture("lesson-first")
             val saved = store.courses().single()
             assertEquals(chatId, saved.setup.originatingConversationId)
             assertEquals(topic, saved.setup.topic)
@@ -83,25 +95,19 @@ class ShellCourseCreationWorkflowTest {
         }
     }
 
-    @Test fun composerAndLibraryWaitForSetupAndFailureOrCancelPreserveTheDraft() {
+    @Test fun failedPlanCanRetryAndCancelPreservesTheRegularDraft() {
         val provider = CourseProvider().apply { invalidOutline = true }
         withShell(provider) { scenario, model, store ->
             val existing = store.create(CourseSetup("Existing", "Beginner", "Keep this course"),
                 CourseOutline(listOf(CourseLessonPlan("keep", "Keep", listOf(
                     CourseSlidePlan("first", CourseSlideKind.EXPLANATION, "Keep this slide"),
                 )))))
-            scenario.onActivity {
-                model.editDraft(kept)
-                model.beginCourseSetup(kept.text, fromChat = true)
-            }
-            waitFor(R.string.shell_course_setup)
-            assertTrue(provider.calls.isEmpty())
-            assertEquals(kept.text, robot.field(robot.text(R.string.shell_course_topic)).text.toString())
-            fillLevelAndGoal()
-            click(R.string.shell_course_plan)
+            robot.edit(robot.text(R.string.composer_label), "Teach me Spanish")
+            click(R.string.composer_send)
             waitFor(R.string.shell_course_plan_failed)
+            scenario.onActivity { model.editDraft(kept) }
             assertEquals(listOf(existing), store.courses())
-            assertFalse(provider.calls.single().request.turns.single().text.contains("PRIVATE-"))
+            assertFalse(provider.calls.last().request.turns.single().text.contains("PRIVATE-"))
 
             provider.invalidOutline = false
             click(R.string.shell_course_plan)
@@ -116,7 +122,7 @@ class ShellCourseCreationWorkflowTest {
             robot.awaitDrawerClosed(scenario)
             robot.waitFor("Existing")
             assertNull(robot.find(robot.text(R.string.course_new)))
-            assertEquals(2, provider.calls.size)
+            assertEquals(3, provider.calls.size)
             assertEquals(listOf(existing), store.courses())
         }
     }
@@ -127,34 +133,25 @@ class ShellCourseCreationWorkflowTest {
         provider.outlineGate = release
         withShell(provider) { scenario, model, store ->
             try {
-                scenario.onActivity {
-                    model.editDraft(kept)
-                    model.beginCourseSetup(topic, fromChat = true)
-                }
-                waitFor(R.string.shell_course_setup)
-                fillLevelAndGoal()
-                click(R.string.shell_course_plan)
-                robot.waitUntil { provider.calls.isNotEmpty() }
-                val active = provider.calls.single().session
+                robot.edit(robot.text(R.string.composer_label), "Teach me Spanish")
+                click(R.string.composer_send)
+                robot.waitUntil { provider.calls.size == 2 }
+                scenario.onActivity { model.editDraft(kept) }
+                val active = provider.calls.last().session
                 scenario.onActivity { model.select("other") }
                 assertTrue(runCatching { active.check() }.isFailure)
                 release.complete(Unit)
-                robot.waitGone(robot.text(R.string.shell_course_setup))
+                robot.waitGone(robot.text(R.string.shell_course_review))
                 assertTrue(store.courses().isEmpty())
                 scenario.onActivity { assertEquals(kept, model.snapshot.conversations.single { it.id == chatId }.draft) }
 
                 robot.edit(robot.text(R.string.composer_label), "What time is it?")
                 click(R.string.composer_send)
                 robot.waitFor("Please confirm whether you want a course and name its topic.")
-                assertEquals(2, provider.calls.size)
+                assertEquals(3, provider.calls.size)
                 assertTrue(store.courses().isEmpty())
             } finally { release.complete(Unit) }
         }
-    }
-
-    private fun fillLevelAndGoal() {
-        robot.edit(robot.text(R.string.shell_course_level), "Beginner")
-        robot.edit(robot.text(R.string.shell_course_goal), "Hold a conversation")
     }
 
     private fun click(resource: Int) = robot.click(robot.text(resource))
@@ -200,7 +197,8 @@ class ShellCourseCreationWorkflowTest {
             when (request.generationStage) {
                 null -> {
                     outlineGate?.let { withContext(NonCancellable) { it.await() } }
-                    val outline = """{"lessons":[{"id":null,"title":"$lesson","slides":[{"id":null,"kind":"EXPLANATION","goal":"Practice a first greeting"}]}]}"""
+                    val goal = if (request.turns.single().text.contains("Add conversation practice")) "Practice a conversation" else "Practice a first greeting"
+                    val outline = """{"lessons":[{"id":null,"title":"$lesson","slides":[{"id":null,"kind":"EXPLANATION","goal":"$goal"}]}]}"""
                     emit(CloudEvent.RoundComplete(if (invalidOutline) "{}" else outline, false))
                 }
                 CloudGenerationStage.PLAN -> emit(CloudEvent.Text("""{"title":"Spanish","description":"","language":"en",

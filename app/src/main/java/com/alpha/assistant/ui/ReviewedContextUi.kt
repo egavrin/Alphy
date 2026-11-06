@@ -42,11 +42,12 @@ import java.io.InputStreamReader
     model: ShellViewModel,
     anchor: ContextMenuAnchor? = null,
     paneTop: Float = 0f,
+    destination: CourseComposerState? = null,
     dismiss: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val origin = rememberSaveable { model.contextDraftKey() }
+    val origin = rememberSaveable { model.composerContextKey(destination).orEmpty() }
     var page by rememberSaveable { mutableStateOf("sources") }
     var error by rememberSaveable { mutableStateOf<Int?>(null) }
     var pasted by rememberSaveable { mutableStateOf("") }
@@ -61,7 +62,7 @@ import java.io.InputStreamReader
     val imageName = stringResource(R.string.context_image_name)
     val textFileName = stringResource(R.string.context_text_file_name)
     fun checkOrigin(): Boolean {
-        if (origin == model.contextDraftKey()) return true
+        if (origin == model.composerContextKey(destination)) return true
         error = R.string.context_draft_changed
         return false
     }
@@ -70,7 +71,13 @@ import java.io.InputStreamReader
         cameraUri = null
         cameraReady = false
     }
-    fun close() { if (!cameraPending && !model.attachmentBusy) { discardCapture(); dismiss() } }
+    fun close() {
+        if (!cameraPending && !model.attachmentBusy) {
+            discardCapture()
+            destination?.contextError = null
+            dismiss()
+        }
+    }
     fun receivePick(uri: Uri?) {
         if (pickerSource == null) return
         if (uri == null || !checkOrigin()) pickerSource = null
@@ -100,7 +107,7 @@ import java.io.InputStreamReader
                             }
                         }.getOrNull() ?: imageName
                     }
-                    if (checkOrigin() && model.attachImage(Attachment(uri.toString(), name, mime), origin, persistReadAccess = true)) close()
+                    if (checkOrigin() && model.attachImage(Attachment(uri.toString(), name, mime), origin, persistReadAccess = true, destination = destination)) close()
                 }
                 "text/plain" -> if (pickerSource == "file") {
                     val text = withContext(Dispatchers.IO) { runCatching { readTextContext(resolver, uri) }.getOrNull() }
@@ -165,6 +172,7 @@ import java.io.InputStreamReader
     }
     @Composable fun Feedback() {
         error?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
+        destination?.contextError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (model.attachmentBusy || pickedUri != null) LinearProgressIndicator(Modifier.fillMaxWidth())
     }
     val density = LocalDensity.current
@@ -211,7 +219,7 @@ import java.io.InputStreamReader
                             Button(onClick = {
                                 val attachment = Attachment(cameraUri!!, cameraCaptureName, "image/jpeg")
                                 scope.launch {
-                                    if (checkOrigin() && model.attachImage(attachment, origin)) {
+                                    if (checkOrigin() && model.attachImage(attachment, origin, destination = destination)) {
                                         cameraUri = null
                                         cameraReady = false
                                         dismiss()
@@ -222,7 +230,7 @@ import java.io.InputStreamReader
                         TextButton(onClick = ::takePicture, enabled = !cameraPending && !model.attachmentBusy) { Text(if (cameraUri == null) stringResource(R.string.context_camera_open) else stringResource(R.string.context_camera_retake)) }
                         Text(stringResource(R.string.context_camera_cancel_info), style = MaterialTheme.typography.bodySmall)
                     }
-                    "calendar" -> CalendarContextReview(model, origin, ::close)
+                    "calendar" -> CalendarContextReview(model, origin, destination, ::close)
                     "paste", "file-text" -> {
                         val fromFile = page == "file-text"
                         val text = if (fromFile) pickedText else pasted
@@ -232,7 +240,7 @@ import java.io.InputStreamReader
                         }, label = { Text(stringResource(R.string.context_text_label)) }, modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp))
                         Text(stringResource(R.string.context_text_count_review, text.length))
                         Button(onClick = {
-                            if (checkOrigin() && model.addReviewedText(text, if (fromFile) textFileName else pastedTextName, origin)) close()
+                            if (checkOrigin() && model.addReviewedComposerText(text, if (fromFile) textFileName else pastedTextName, origin, destination)) close()
                         }, enabled = text.isNotBlank() && !model.loading && !model.loadFailed && !model.attachmentBusy) { Text(stringResource(R.string.context_text_attach)) }
                     }
                 }
@@ -260,7 +268,7 @@ private fun readTextContext(resolver: ContentResolver, uri: Uri): String {
     }
 }
 
-@Composable private fun CalendarContextReview(model: ShellViewModel, origin: String, attached: () -> Unit) {
+@Composable private fun CalendarContextReview(model: ShellViewModel, origin: String, destination: CourseComposerState?, attached: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var calendars by remember { mutableStateOf<List<Pair<Long, String>>>(emptyList()) }
@@ -330,7 +338,7 @@ private fun readTextContext(resolver: ContentResolver, uri: Uri): String {
         Text(stringResource(R.string.context_text_count, review.orEmpty().length))
         Button(onClick = {
             if (!permitted()) error = R.string.context_calendar_review_permission_lost
-            else if (model.addReviewedText(review.orEmpty(), calendarSelectionName, origin)) attached()
+            else if (model.addReviewedComposerText(review.orEmpty(), calendarSelectionName, origin, destination)) attached()
         }, enabled = review.orEmpty().isNotBlank() && review.orEmpty().length <= 8000) { Text(stringResource(R.string.context_calendar_attach)) }
         TextButton(onClick = { review = null }) { Text(stringResource(R.string.context_calendar_change_selection)) }
     }

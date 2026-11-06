@@ -69,8 +69,6 @@ import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import com.alpha.assistant.R
 import com.alpha.assistant.courses.CourseLibraryScreen
-import com.alpha.assistant.courses.CourseOutlineRefinementAction
-import com.alpha.assistant.courses.CourseOutlineRefinementHost
 import com.alpha.assistant.courses.CourseSnapshot
 import com.alpha.assistant.courses.CourseSourcedSlideGenerationHost
 import com.alpha.assistant.data.Attachment
@@ -422,7 +420,7 @@ import kotlinx.coroutines.launch
                                         tutor = model.courseTutor, generation = model.courseGeneration,
                                         refinement = model.courseRefinement, sourcedGeneration = sourcedCourseGeneration,
                                         entryRequest = model.courseEntry?.takeUnless { it.inChat }?.request,
-                                        onEntryHandled = model::courseEntryHandled,
+                                        onEntryHandled = model::courseEntryHandled, composerModel = model,
                                     )
                                     ShellDestination.Settings -> SecureWindow {
                                         SettingsPane(
@@ -437,7 +435,8 @@ import kotlinx.coroutines.launch
                     // One call place keeps the voice start state when the Chat route replaces the Desktop route.
                     if (destination == null) Composer(model, { contextSheet = true },
                         Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp).fillMaxWidth().testTag("composer"),
-                        compact = compact, onContextAnchorChanged = { contextAnchor = it })
+                        compact = compact, onContextAnchorChanged = { contextAnchor = it },
+                        destination = model.courseSetup?.composer)
                 }
             }
         }
@@ -448,9 +447,9 @@ import kotlinx.coroutines.launch
             modifier = Modifier.size(0.dp),
             tutor = model.courseTutor, generation = model.courseGeneration,
             refinement = model.courseRefinement, sourcedGeneration = sourcedCourseGeneration,
-            entryRequest = chatCourseEntry.request)
+            entryRequest = chatCourseEntry.request, composerModel = model,
+            onOutlineApplied = model::updateChatCourse)
     }
-    model.courseSetup?.let { CourseSetupDialog(model, it) }
     MiniAppActionDialogs(model.tools, miniAppActions)
     model.nativeRefinementTarget?.let { target ->
         key(model.tools, target) {
@@ -461,7 +460,7 @@ import kotlinx.coroutines.launch
         AlertDialog(onDismissRequest = model::clearRequestError, title = { Text(stringResource(R.string.send_failed)) }, text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(error) } }, confirmButton = { TextButton(onClick = model::clearRequestError) { Text(stringResource(R.string.understood)) } })
     }
     if (contextSheet && !model.loadFailed && !model.loading) {
-        ReviewedContextDialog(model, contextAnchor, contextPaneTop) {
+        ReviewedContextDialog(model, contextAnchor, contextPaneTop, destination = model.courseSetup?.composer) {
             contextSheet = false
         }
     }
@@ -492,59 +491,52 @@ import kotlinx.coroutines.launch
     }
 }
 
-@Composable private fun CourseSetupDialog(model: ShellViewModel, setup: ShellCourseSetup) {
-    val draft = setup.outline
-    val input = setup.input
+@Composable private fun CoursePlanCard(model: ShellViewModel, setup: ShellCourseSetup) {
+    val outline = setup.outline?.outline
     val working = setup.requesting || setup.saving
-    AlertDialog(
-        onDismissRequest = { model.cancelCourseSetup(setup.id) },
-        title = { Text(stringResource(if (draft == null) R.string.shell_course_setup else R.string.shell_course_review)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (draft == null) {
-                    Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(input.topic, { value -> model.editCourseSetup(setup.id) { it.copy(topic = value.take(256)) } },
-                            label = { Text(stringResource(R.string.shell_course_topic)) }, enabled = !working,
-                            singleLine = true, modifier = Modifier.fillMaxWidth())
-                        OutlinedTextField(input.level, { value -> model.editCourseSetup(setup.id) { it.copy(level = value.take(128)) } },
-                            label = { Text(stringResource(R.string.shell_course_level)) }, enabled = !working,
-                            singleLine = true, modifier = Modifier.fillMaxWidth())
-                        OutlinedTextField(input.goal, { value -> model.editCourseSetup(setup.id) { it.copy(goal = value.take(1024)) } },
-                            label = { Text(stringResource(R.string.shell_course_goal)) }, enabled = !working,
-                            maxLines = 3, modifier = Modifier.fillMaxWidth())
-                    }
-                } else {
-                    Text(draft.setup.topic, style = MaterialTheme.typography.titleMedium)
-                    LazyColumn(Modifier.heightIn(max = 320.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(draft.outline.lessons, key = { it.id }) { lesson ->
-                            Text(lesson.title, style = MaterialTheme.typography.titleSmall)
-                            lesson.slides.forEach { slide -> Text(slide.goal, style = MaterialTheme.typography.bodySmall) }
+    val colors = MaterialTheme.colorScheme
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (setup.lastChange.isNotEmpty()) {
+            Surface(Modifier.align(Alignment.End), shape = MaterialTheme.shapes.large, color = colors.secondaryContainer) {
+                Text(setup.lastChange, Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
+            }
+        }
+        Surface(shape = MaterialTheme.shapes.large, color = colors.surfaceContainerLow) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.shell_course_review), style = MaterialTheme.typography.labelLarge)
+                Text(setup.input.topic, style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.shell_course_level_value, setup.input.level),
+                    style = MaterialTheme.typography.bodySmall)
+                if (outline != null) {
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(outline.lessons, key = { it.id }) { lesson ->
+                            Surface(shape = MaterialTheme.shapes.medium, color = colors.surfaceContainer) {
+                                Column(Modifier.fillMaxWidth().padding(10.dp)) {
+                                    Text(lesson.title, style = MaterialTheme.typography.titleSmall)
+                                    lesson.slides.forEach { Text(it.goal, style = MaterialTheme.typography.bodySmall) }
+                                }
+                            }
                         }
                     }
                 }
                 if (working) LinearProgressIndicator(Modifier.fillMaxWidth())
-                setup.error?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
-            }
-        },
-        confirmButton = {
-            if (draft == null) Button(onClick = { model.requestCoursePlan(setup.id) }, enabled = !working) {
-                Text(stringResource(R.string.shell_course_plan))
-            } else Button(onClick = { model.startPreparedCourse(setup.id) }, enabled = !working) {
-                Text(stringResource(R.string.shell_course_start))
-            }
-        },
-        dismissButton = {
-            Row {
-                if (draft != null) TextButton(onClick = { model.changeCoursePlan(setup.id) }, enabled = !working) {
-                    Text(stringResource(R.string.shell_course_change_setup))
+                setup.error?.let { Text(stringResource(it), color = colors.error) }
+                if (outline != null) {
+                    Button(onClick = { model.startPreparedCourse(setup.id) }, enabled = !working && !model.attachmentBusy,
+                        modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.shell_course_start)) }
+                } else if (!working) {
+                    Button(onClick = { model.requestCoursePlan(setup.id) }, enabled = !model.attachmentBusy) {
+                        Text(stringResource(R.string.shell_course_plan))
+                    }
                 }
                 TextButton(onClick = { model.cancelCourseSetup(setup.id) }, enabled = !setup.saving) {
                     Text(stringResource(R.string.cancel))
                 }
             }
-        },
-    )
+        }
+        Text(stringResource(R.string.shell_course_refine_in_chat), style = MaterialTheme.typography.bodySmall)
+    }
 }
 
 @Composable private fun ToolLibraryUnavailablePane() {
@@ -579,6 +571,7 @@ import kotlinx.coroutines.launch
             }
             val legacyCards = model.tools.tools.filter { tool -> tool.conversationId == chat.id && tool.id !in chat.cardIds }
             val courses = if (resumeCourse == null) emptyList() else model.chatCourses.filter { it.setup.originatingConversationId == chat.id }
+            val plan = model.courseSetup?.takeIf { resumeCourse != null && it.input.originatingConversationId == chat.id }
             val openTool: (String) -> Unit = { id -> model.tools.select(id); tools() }
             val listState = key(chat.id) { rememberLazyListState() }
             val latestUserMessage = chat.messages.lastOrNull { it.role == "user" }?.id
@@ -590,6 +583,9 @@ import kotlinx.coroutines.launch
                     observedUserMessage = latestUserMessage
                     listState.requestScrollToItem(0)
                 }
+            }
+            LaunchedEffect(chat.id, plan?.id) {
+                if (plan != null) listState.requestScrollToItem(0)
             }
             LaunchedEffect(chat.id, openCourse, courses, chat.messages.size) {
                 if (openCourse != null) {
@@ -607,6 +603,7 @@ import kotlinx.coroutines.launch
                 LazyColumn(Modifier.fillMaxSize().semantics { contentDescription = chatMessages },
                     state = listState, reverseLayout = true, contentPadding = PaddingValues(24.dp),
                     verticalArrangement = Arrangement.spacedBy(15.dp)) {
+                    if (plan != null) item(key = "course-plan-${plan.id}") { CoursePlanCard(model, plan) }
                     items(chat.messages.asReversed(), key = { it.id }) { message ->
                         Column(Modifier.fillMaxWidth().padding(start = if (message.role == "user") 25.dp else 0.dp)) {
                             val assistant = message.role == "assistant"
@@ -644,8 +641,7 @@ import kotlinx.coroutines.launch
                         ChatCourseCard(
                             course, resume = { resumeCourse(course.id) },
                             openOutline = { model.openChatCourseOutline(course.id) },
-                            refinement = model.courseRefinement,
-                            onRefined = { scope.launch { model.refreshChatCourses(chat.id) } },
+                            refineOutline = { model.openChatCourseOutline(course.id, refine = true) },
                         )
                     }
                     items(legacyCards.asReversed(), key = { "tool-${it.id}" }) { artifact ->
@@ -670,8 +666,7 @@ import kotlinx.coroutines.launch
     course: CourseSnapshot,
     resume: () -> Unit,
     openOutline: () -> Unit,
-    refinement: CourseOutlineRefinementHost,
-    onRefined: (CourseSnapshot) -> Unit,
+    refineOutline: () -> Unit,
 ) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -681,7 +676,7 @@ import kotlinx.coroutines.launch
                 TextButton(onClick = resume) { Text(stringResource(R.string.shell_course_continue)) }
                 TextButton(onClick = openOutline) { Text(stringResource(R.string.shell_course_open_outline)) }
             }
-            CourseOutlineRefinementAction(course, refinement, onApplied = onRefined)
+            TextButton(onClick = refineOutline) { Text(stringResource(R.string.course_refinement_open)) }
         }
     }
 }

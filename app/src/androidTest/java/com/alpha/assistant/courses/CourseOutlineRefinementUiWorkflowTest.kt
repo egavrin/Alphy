@@ -55,7 +55,7 @@ class CourseOutlineRefinementUiWorkflowTest {
             assertEquals(instruction, robot.field(robot.text(R.string.course_refinement_instruction)).text.toString())
             assertFalse(robot.texts().any { it.contains("Private refinement failure") })
             assertEquals(original, store.course(original.id))
-            click(R.string.course_refinement_request)
+            click(R.string.composer_send)
             waitFor(R.string.course_refinement_review)
             assertEquals(2, calls.get())
             assertEquals(0, applies.get())
@@ -102,7 +102,7 @@ class CourseOutlineRefinementUiWorkflowTest {
     private fun requestRevision() {
         click(R.string.course_refinement_open)
         robot.edit(robot.text(R.string.course_refinement_instruction), instruction)
-        click(R.string.course_refinement_request)
+        click(R.string.composer_send)
     }
 
     private fun click(id: Int) = robot.click(robot.text(id))
@@ -139,7 +139,7 @@ class CourseOutlineRefinementUiWorkflowTest {
                     scenario.onActivity { activity ->
                         activity.setContent {
                             MaterialTheme {
-                                CourseLibraryScreen(store, controller, onExit = {}, refinement = host)
+                                CourseLibraryScreen(store, controller, onExit = {}, refinement = host, composerModel = checkNotNull(fixture.model))
                             }
                         }
                     }

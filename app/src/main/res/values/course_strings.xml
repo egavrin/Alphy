@@ -18,6 +18,11 @@
     <string name="course_view_completion">Посмотреть результат</string>
     <string name="course_complete">Курс завершён.</string>
     <string name="course_progress">Пройдено %1$d из %2$d</string>
+    <string name="course_lessons">Уроки</string>
+    <string name="course_lesson_position">Урок %1$d из %2$d</string>
+    <string name="course_lesson_current">Текущий</string>
+    <string name="course_lesson_completed">Пройден</string>
+    <string name="course_lesson_pending">Предстоит</string>
     <string name="course_slide_position">Слайд %1$d из %2$d</string>
     <string name="course_slide_missing">Этот слайд ещё не сохранён.</string>
     <string name="course_slide_generation_failed">Не удалось подготовить этот слайд. Прогресс сохранён.</string>
@@ -38,8 +43,10 @@
     <string name="course_order_reset">Очистить порядок</string>
     <string name="course_sources">Источники</string>
     <string name="course_adaptation">Адаптация</string>
-    <string name="course_tutor_open">Спросить учителя</string>
-    <string name="course_tutor_title">Учитель</string>
+    <string name="course_tutor_open">Чат</string>
+    <string name="course_tutor_title">Чат</string>
+    <string name="course_tutor_context">К уроку: %1$s</string>
+    <string name="course_tutor_attachment">Вложение</string>
     <string name="course_tutor_unavailable">Учитель сейчас недоступен.</string>
     <string name="course_tutor_close">Закрыть чат учителя</string>
     <string name="course_tutor_question">Вопрос учителю</string>

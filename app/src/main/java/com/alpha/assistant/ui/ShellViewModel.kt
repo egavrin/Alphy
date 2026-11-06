@@ -31,7 +31,7 @@ import com.alpha.assistant.courses.CourseTutorHost
 import com.alpha.assistant.courses.CourseTutorRequest
 import com.alpha.assistant.courses.encode
 import com.alpha.assistant.courses.kind
-import com.alpha.assistant.courses.validate
+import com.alpha.assistant.surfaces.AssistContext
 import com.alpha.assistant.memory.MemoryPageState
 import com.alpha.assistant.memory.MemoryStore
 import com.alpha.assistant.sandbox.SandboxClient
@@ -67,6 +67,9 @@ import org.json.JSONObject
 internal data class ShellCourseSetup(
     val id: String,
     val input: CourseSetup,
+    val initialAttachments: List<Attachment>,
+    val composer: CourseComposerState,
+    val lastChange: String = "",
     val outline: CourseOutlineDraft? = null,
     val requesting: Boolean = false,
     val saving: Boolean = false,
@@ -83,36 +86,86 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     private val weatherLocator: WeatherLocator = AndroidWeatherLocator(application),
 ) : AndroidViewModel(application) {
     internal val updates = AppUpdater.get(application)
-    private var voiceOrigin: Pair<String?, Draft>? = null
+    private data class VoiceOrigin(val destination: CourseComposerState?, val draft: Draft, val conversationId: String?)
+    private var voiceOrigin: VoiceOrigin? = null
+    private var voiceDestination by mutableStateOf<CourseComposerState?>(null)
     private var submitVoiceOnTranscript = false
     val voice = voiceFactory?.invoke(application, viewModelScope, ::receiveTranscript)
         ?: com.alpha.assistant.voice.VoiceSession(application, viewModelScope, ::receiveTranscript)
+
+    internal fun composerDraft(destination: CourseComposerState?): Draft = destination?.draft ?: snapshot.draft
+    internal fun voiceBelongsTo(destination: CourseComposerState?) = voiceDestination === destination
+
+    internal fun editComposerDraft(destination: CourseComposerState?, draft: Draft) {
+        if (destination == null) editDraft(draft)
+        else if (destination.active && !destination.busy) {
+            if (voice.active && voiceBelongsTo(destination) && draft != destination.draft) voiceDraftConflict()
+            destination.draft = draft.copy(text = draft.text.take(destination.maxText))
+        }
+    }
+
+    internal fun sendComposer(destination: CourseComposerState?) {
+        if (destination == null) send()
+        else if (destination.active && !destination.busy && !attachmentBusy) {
+            if (voiceBelongsTo(destination)) voice.submitted()
+            destination.send()
+        }
+    }
+
+    private fun currentVoiceOrigin(destination: CourseComposerState?) =
+        VoiceOrigin(destination, composerDraft(destination), snapshot.selectedId.takeIf { destination == null })
+
+    private fun validVoiceOrigin() = voiceDestination?.active != false &&
+        voiceOrigin == currentVoiceOrigin(voiceDestination)
+
     private fun receiveTranscript(text: String) {
         if (voice.oneShot) {
-            val draft = snapshot.draft
-            if (voiceOrigin != (snapshot.selectedId to draft)) {
+            if (!validVoiceOrigin()) {
                 voiceDraftConflict()
                 return
             }
+            val destination = voiceDestination
+            val draft = composerDraft(destination)
             val submit = submitVoiceOnTranscript
             submitVoiceOnTranscript = false
             voice.stop()
             val combined = listOf(draft.text, text.trim()).filter { it.isNotBlank() }.joinToString("\n")
-            editDraft(draft.copy(text = combined))
-            if (submit) send()
+            editComposerDraft(destination, draft.copy(text = combined))
+            if (submit) sendComposer(destination)
         } else if (snapshot.draft.text.isBlank() && snapshot.draft.attachments.isEmpty()) editDraft(snapshot.draft.copy(text = text))
         else voiceDraftConflict()
     }
+
     private fun voiceDraftConflict() { voice.stop(getApplication<Application>().getString(R.string.voice_draft_changed)) }
-    fun startVoice(oneShot: Boolean = true) {
-        if (loading || loadFailed || attachmentBusy || voice.active) return
+    fun startVoice(oneShot: Boolean = true) = startComposerVoice(oneShot, null)
+
+    internal fun startComposerVoice(oneShot: Boolean, destination: CourseComposerState?) {
+        if (loading || loadFailed || attachmentBusy || voice.active || destination?.active == false) return
         submitVoiceOnTranscript = false
-        voiceOrigin = snapshot.selectedId to snapshot.draft
-        voice.start(snapshot.draft.text.isBlank() && snapshot.draft.attachments.isEmpty(), activeConversationId != null, oneShot)
+        voiceDestination = destination
+        val origin = currentVoiceOrigin(destination)
+        voiceOrigin = origin
+        voice.start(origin.draft.text.isBlank() && origin.draft.attachments.isEmpty(),
+            destination?.busy ?: (activeConversationId != null), oneShot)
     }
+
+    internal fun denyVoicePermission(destination: CourseComposerState?) {
+        voiceDestination = destination
+        voice.permissionDenied()
+    }
+
+    internal fun closeCourseComposer(destination: CourseComposerState) {
+        destination.deactivate()
+        if (voiceBelongsTo(destination)) {
+            voice.stop()
+            voiceOrigin = null
+            voiceDestination = null
+        }
+    }
+
     fun sendVoice() {
         if (!voice.active || !voice.oneShot || voice.phase != "listening") return
-        if (voiceOrigin != (snapshot.selectedId to snapshot.draft)) { voiceDraftConflict(); return }
+        if (!validVoiceOrigin()) { voiceDraftConflict(); return }
         submitVoiceOnTranscript = true
         voice.finishRecording()
     }
@@ -160,7 +213,8 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     }
     private val courseOutlines = CourseOutlineService(courseStore) { request ->
         courseRequest { key, session ->
-            val call = CloudRequest(listOf(CloudTurn("user", request.prompt)), search = false, jsonObject = true)
+            val call = CloudRequest(listOf(CloudTurn("user", request.prompt, courseImages(request.attachments))),
+                search = false, jsonObject = true)
             completeCourseResponse(call, key, session, request.maxResponseBytes).also {
                 check(it.toByteArray(Charsets.UTF_8).size <= request.maxResponseBytes)
             }
@@ -191,21 +245,18 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         closeChatCourse()
     }
 
-    internal fun beginCourseSetup(topic: String, fromChat: Boolean) {
+    private fun beginCourseSetup(topic: String, user: Message, conversationId: String) {
         if (courseSetup != null || loading || loadFailed) return
-        val origin = snapshot.selectedId.takeIf { fromChat }
-        val input = CourseSetup(topic.trim().take(256), "", "", origin)
-        courseSetup = ShellCourseSetup(UUID.randomUUID().toString(), input)
-    }
-
-    internal fun editCourseSetup(id: String, change: (CourseSetup) -> CourseSetup) {
-        val setup = courseSetup ?: return
-        if (setup.id == id && !setup.requesting && !setup.saving && setup.outline == null) {
-            courseSetup = setup.copy(input = change(setup.input), error = null)
-        }
+        val id = UUID.randomUUID().toString()
+        val level = getApplication<Application>().getString(R.string.shell_course_adaptive_level)
+        val input = CourseSetup(topic.trim().take(256), level, user.text.take(1024), conversationId)
+        val composer = CourseComposerState(4096, { requestCoursePlan(id, revise = true) }, { stopCoursePlan(id) })
+        courseSetup = ShellCourseSetup(id, input, user.attachments, composer)
+        requestCoursePlan(id)
     }
 
     internal fun dismissCourseSetup() {
+        courseSetup?.let { closeCourseComposer(it.composer) }
         courseSetup = null
         courseSetupJob?.cancel()
         courseSetupJob = null
@@ -216,33 +267,39 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         if (setup.id == id && !setup.saving) dismissCourseSetup()
     }
 
-    internal fun changeCoursePlan(id: String) {
+    private fun stopCoursePlan(id: String) {
         val setup = courseSetup ?: return
-        if (setup.id == id && setup.outline != null && !setup.saving) {
-            courseSetup = setup.copy(outline = null, error = null)
+        if (setup.id == id && setup.requesting) {
+            courseSetup = setup.copy(requesting = false)
+            setup.composer.busy = false
+            courseSetupJob?.cancel()
         }
     }
 
-    internal fun requestCoursePlan(id: String) {
+    internal fun requestCoursePlan(id: String, revise: Boolean = false) {
         val setup = courseSetup ?: return
-        if (setup.id != id || setup.requesting || setup.saving || setup.outline != null) return
-        val input = setup.input.run { copy(topic = topic.trim(), level = level.trim(), goal = goal.trim()) }
-        if (runCatching { input.validate() }.isFailure) {
-            courseSetup = setup.copy(error = R.string.shell_course_input_required)
-            return
-        }
-        val pending = setup.copy(input = input, requesting = true, error = null)
+        if (setup.id != id || setup.requesting || setup.saving) return
+        val change = if (revise) setup.composer.draft else Draft(attachments = setup.initialAttachments)
+        if (revise && change.text.isBlank() && change.attachments.isEmpty()) return
+        val pending = setup.copy(requesting = true, error = null)
+        setup.composer.busy = true
         courseSetup = pending
         courseSetupJob = viewModelScope.launch {
             try {
-                val outline = courseOutlines.propose(input)
+                val outline = courseOutlines.propose(setup.input, change.attachments, setup.outline?.outline, change.text.trim())
                 ensureActive()
-                if (courseSetup === pending) courseSetup = pending.copy(requesting = false, outline = outline)
+                if (courseSetup === pending) {
+                    if (revise) setup.composer.draft = Draft()
+                    courseSetup = pending.copy(requesting = false, outline = outline,
+                        lastChange = if (revise) change.text.trim() else pending.lastChange)
+                }
             } catch (cancel: CancellationException) {
                 if (courseSetup === pending) courseSetup = pending.copy(requesting = false)
                 throw cancel
             } catch (_: Exception) {
                 if (courseSetup === pending) courseSetup = pending.copy(requesting = false, error = R.string.shell_course_plan_failed)
+            } finally {
+                if (courseSetup?.id == id && courseSetup?.requesting == false) setup.composer.busy = false
             }
         }
     }
@@ -251,13 +308,16 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         val setup = courseSetup ?: return
         val draft = setup.outline ?: return
         val origin = draft.setup.originatingConversationId
-        if (setup.id != id || setup.saving || (origin != null && snapshot.selectedId != origin)) return
+        if (setup.id != id || setup.saving || setup.requesting || attachmentBusy || snapshot.selectedId != origin) return
         val saving = setup.copy(saving = true, error = null)
+        setup.composer.busy = true
+        setup.composer.cancellable = false
         courseSetup = saving
         courseSetupJob = viewModelScope.launch {
             try {
                 val saved = withContext(Dispatchers.IO) { courseOutlines.create(draft) }
                 if (courseSetup === saving) {
+                    closeCourseComposer(setup.composer)
                     courseSetup = null
                     if (origin != null) chatCourses = listOf(saved) + chatCourses
                     openCourse(saved.id, inChat = origin != null)
@@ -265,7 +325,11 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (_: Exception) {
-                if (courseSetup === saving) courseSetup = saving.copy(saving = false, error = R.string.shell_course_save_failed)
+                if (courseSetup === saving) {
+                    setup.composer.busy = false
+                    setup.composer.cancellable = true
+                    courseSetup = saving.copy(saving = false, error = R.string.shell_course_save_failed)
+                }
             }
         }
     }
@@ -277,9 +341,16 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         if (snapshot.selectedId == chatId && courses != null) chatCourses = courses
     }
 
+    internal fun updateChatCourse(course: CourseSnapshot) {
+        if (course.setup.originatingConversationId == snapshot.selectedId) {
+            chatCourses = chatCourses.map { if (it.id == course.id) course else it }
+        }
+    }
+
     internal fun resumeChatCourse(id: String) = openChatCourse(id, CourseEntryDestination.REACHED_SLIDE)
 
-    internal fun openChatCourseOutline(courseId: String) = openChatCourse(courseId, CourseEntryDestination.OUTLINE)
+    internal fun openChatCourseOutline(courseId: String, refine: Boolean = false) =
+        openChatCourse(courseId, CourseEntryDestination.OUTLINE, refine)
 
     internal fun resumeDesktopCourse(courseId: String): Job? {
         val host = courseChatHost ?: return null
@@ -298,15 +369,17 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         }.also { desktopCourseLookup = it }
     }
 
-    private fun openChatCourse(id: String, destination: CourseEntryDestination) {
+    private fun openChatCourse(id: String, destination: CourseEntryDestination, refine: Boolean = false) {
         val selected = snapshot.selectedId ?: return
         if (chatCourses.any { it.id == id && it.setup.originatingConversationId == selected }) {
-            openCourse(id, inChat = true, destination = destination)
+            openCourse(id, inChat = true, destination = destination, refine = refine)
         }
     }
 
-    private fun openCourse(id: String, inChat: Boolean, destination: CourseEntryDestination = CourseEntryDestination.REACHED_SLIDE) {
-        val request = CourseEntryRequest(UUID.randomUUID().toString(), id, destination, exitToHostOnBack = inChat)
+    private fun openCourse(id: String, inChat: Boolean, destination: CourseEntryDestination = CourseEntryDestination.REACHED_SLIDE,
+        refine: Boolean = false,
+    ) {
+        val request = CourseEntryRequest(UUID.randomUUID().toString(), id, destination, exitToHostOnBack = inChat, refineOutline = refine)
         courseEntry = ShellCourseEntry(request, inChat)
         if (!inChat) queueSurface(ShellDestination.Courses)
     }
@@ -360,6 +433,12 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         }
     }
 
+    private fun courseImages(attachments: List<Attachment>): List<String> {
+        require(attachments.size <= ImageInput.MAX_IMAGES)
+        val resolver = getApplication<Application>().contentResolver
+        return attachments.filter { it.contextText == null }.map { ImageInput.dataUrl(resolver, it) }
+    }
+
     private suspend fun tutorAnswer(request: CourseTutorRequest, key: String, session: CloudSession): String {
         fun requireCurrent() {
             if (courseStore.slide(request.courseId, request.slideId) == null ||
@@ -369,9 +448,10 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         }
         requireCurrent()
         val input = tutorContext(request)
+        val images = courseImages(request.attachments)
         currentCoroutineContext().ensureActive()
         session.check()
-        val reply = completeCourseResponse(CloudRequest(listOf(CloudTurn("user", input)), search = false,
+        val reply = completeCourseResponse(CloudRequest(listOf(CloudTurn("user", input, images)), search = false,
             systemInstructions = COURSE_TUTOR_INSTRUCTIONS), key, session, COURSE_TUTOR_REPLY_LIMIT)
         requireCurrent()
         return reply
@@ -380,6 +460,8 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     private suspend fun completeCourseResponse(request: CloudRequest, key: String, session: CloudSession, limit: Int): String {
         var length = 0
         var completed: String? = null
+        currentCoroutineContext().ensureActive()
+        session.check()
         provider.respond(key, request, session) { event ->
             currentCoroutineContext().ensureActive()
             session.check()
@@ -411,7 +493,8 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 .put("options", JSONArray(exercise.options.map { JSONObject().put("id", it.id).put("label", it.label) })))
         }
         val input = JSONObject().put("question", request.question).put("slide", current)
-        fun fits() = input.toString().toByteArray(Charsets.UTF_8).size <= COURSE_TUTOR_CONTEXT_BYTES
+        fun context() = AssistContext.requestText(input.toString(), request.attachments)
+        fun fits() = context().toByteArray(Charsets.UTF_8).size <= COURSE_TUTOR_CONTEXT_BYTES
         check(fits()) { "The current slide exceeds the tutor context limit." }
         fun addRecent(name: String, items: List<JSONObject>) {
             val accepted = ArrayDeque<JSONObject>()
@@ -430,7 +513,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 .put("answer", it.answer.encode()).put("correct", it.correct)
         })
         addRecent("tutorHistory", request.history.map { JSONObject().put("question", it.question).put("answer", it.answer) })
-        return input.toString()
+        return context()
     }
 
     internal val memoryStore = MemoryStore(
@@ -652,7 +735,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     }
     fun editDraft(draft: Draft) {
         if(active?.weatherDraft != null && draft != snapshot.draft) cancelRequest()
-        if (voice.active && (voice.oneShot || voice.phase in listOf("preparing", "listening", "recognizing")) && draft != snapshot.draft) voiceDraftConflict()
+        if (voice.active && voiceBelongsTo(null) && (voice.oneShot || voice.phase in listOf("preparing", "listening", "recognizing")) && draft != snapshot.draft) voiceDraftConflict()
         val selected = snapshot.selected
         if (selected == null) {
             snapshot = snapshot.copy(newDraft = draft)
@@ -750,25 +833,41 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     }
     fun clearRequestError() { requestError = null }
     fun contextDraftKey(): String = snapshot.draft.id
-    fun acceptsContext(origin: String): Boolean {
-        if (!loading && !loadFailed && origin == contextDraftKey()) return true
-        requestError = getApplication<Application>().getString(R.string.context_draft_changed)
+    internal fun composerContextKey(destination: CourseComposerState?): String? =
+        composerDraft(destination).id.takeIf { destination?.active != false && destination?.busy != true }
+
+    fun acceptsContext(origin: String): Boolean = acceptsComposerContext(origin, null)
+
+    private fun contextFailure(message: String, destination: CourseComposerState?) {
+        if (destination == null) requestError = message else destination.contextError = message
+    }
+
+    private fun acceptsComposerContext(origin: String, destination: CourseComposerState?): Boolean {
+        if (!loading && !loadFailed && origin == composerContextKey(destination)) return true
+        contextFailure(getApplication<Application>().getString(R.string.context_draft_changed), destination)
         return false
     }
     fun addScreenText(text: String): Boolean = addReviewedText(text, "Текст экрана", contextDraftKey())
-    fun addReviewedText(text: String, source: String, origin: String): Boolean {
-        if (!acceptsContext(origin)) return false
-        if (attachmentBusy) { requestError = getApplication<Application>().getString(R.string.context_wait_for_image_check); return false }
-        val attachments = snapshot.draft.attachments
-        if (attachments.size >= ImageInput.MAX_IMAGES || attachments.any { it.contextText != null }) {
-            requestError = getApplication<Application>().getString(R.string.context_text_attachment_limit)
+    fun addReviewedText(text: String, source: String, origin: String): Boolean =
+        addReviewedComposerText(text, source, origin, null)
+
+    internal fun addReviewedComposerText(text: String, source: String, origin: String, destination: CourseComposerState?): Boolean {
+        if (!acceptsComposerContext(origin, destination)) return false
+        val application = getApplication<Application>()
+        if (attachmentBusy) {
+            contextFailure(application.getString(R.string.context_wait_for_image_check), destination)
+            return false
+        }
+        val draft = composerDraft(destination)
+        if (draft.attachments.size >= ImageInput.MAX_IMAGES || draft.attachments.any { it.contextText != null }) {
+            contextFailure(application.getString(R.string.context_text_attachment_limit), destination)
             return false
         }
         val attachment = runCatching { com.alpha.assistant.surfaces.AssistContext.textAttachment(text, source) }.getOrElse {
-            requestError = getApplication<Application>().getString(R.string.context_text_invalid)
+            contextFailure(application.getString(R.string.context_text_invalid), destination)
             return false
         }
-        editDraft(snapshot.draft.copy(attachments = attachments + attachment))
+        editComposerDraft(destination, draft.copy(attachments = draft.attachments + attachment))
         return true
     }
     fun addAttachment(attachment: Attachment, origin: String = contextDraftKey(), completed: (Boolean) -> Unit = {}) {
@@ -778,32 +877,35 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         attachment: Attachment,
         origin: String,
         persistReadAccess: Boolean = false,
+        destination: CourseComposerState? = null,
         canAttach: () -> Boolean = { true },
     ): Boolean {
-        if (attachmentBusy || !acceptsContext(origin)) return false
-        if (snapshot.draft.attachments.size >= ImageInput.MAX_IMAGES) {
-            requestError = getApplication<Application>().getString(R.string.context_attachment_count_limit)
+        if (attachmentBusy || !acceptsComposerContext(origin, destination)) return false
+        if (composerDraft(destination).attachments.size >= ImageInput.MAX_IMAGES) {
+            contextFailure(getApplication<Application>().getString(R.string.context_attachment_count_limit), destination)
             return false
         }
         val resolver = getApplication<Application>().contentResolver
         attachmentBusy = true
         try {
             val result = withContext(Dispatchers.IO) { runCatching { ImageInput.read(resolver, attachment) } }
-            if (!canAttach() || !acceptsContext(origin)) return false
+            if (!canAttach() || !acceptsComposerContext(origin, destination)) return false
             val failure = result.exceptionOrNull()
             if (failure != null) {
-                requestError = (failure as? CloudFailure)?.message ?: getApplication<Application>().getString(R.string.context_image_read_failed)
+                contextFailure((failure as? CloudFailure)?.message
+                    ?: getApplication<Application>().getString(R.string.context_image_read_failed), destination)
                 return false
             }
             if (persistReadAccess) {
                 try {
                     resolver.takePersistableUriPermission(Uri.parse(attachment.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 } catch (_: SecurityException) {
-                    requestError = getApplication<Application>().getString(R.string.context_image_access)
+                    contextFailure(getApplication<Application>().getString(R.string.context_image_access), destination)
                     return false
                 }
             }
-            editDraft(snapshot.draft.copy(attachments = snapshot.draft.attachments.filterNot { it.uri == attachment.uri } + attachment))
+            val draft = composerDraft(destination)
+            editComposerDraft(destination, draft.copy(attachments = draft.attachments.filterNot { it.uri == attachment.uri } + attachment))
             return true
         } finally {
             attachmentBusy = false
@@ -856,7 +958,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         if (draft.text.length > MAX_CHAT_INPUT) { requestError = "Сообщение превышает 16 000 символов. Сократите текст."; return }
         if (reviewMemoryCommand(draft)) return
         if (!queueHasRoom()) return
-        voice.submitted()
+        if (voiceBelongsTo(null)) voice.submitted()
         requestError = null
         val now = System.currentTimeMillis()
         val user = Message(UUID.randomUUID().toString(), "user", draft.text.trim(), now, "pending", draft.attachments,
@@ -1088,7 +1190,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 if (topic != null) {
                     val canOpen = courseHost != null && courseChatHost === courseHost && courseSetup == null &&
                         snapshot.selected?.takeIf { it.id == conversationId }?.messages?.lastOrNull { it.role == "user" }?.id == user.id
-                    if (canOpen) beginCourseSetup(topic, fromChat = true)
+                    if (canOpen) beginCourseSetup(topic, user, conversationId)
                     val notice = if (canOpen) R.string.shell_course_setup_in_chat else R.string.shell_course_open_learning
                     updateMessage(request, assistant.id) {
                         it.copy(text = getApplication<Application>().getString(notice), status = "complete", error = "", errorCode = "",
@@ -1117,7 +1219,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                                 provenance = replyProvenance)
                         } })
                 }
-                if(isActive(request)) snapshot.conversations.find { it.id == conversationId }?.messages?.find { it.id == assistant.id }?.let { voice.reply(it.text) }
+                if(isActive(request) && voiceBelongsTo(null)) snapshot.conversations.find { it.id == conversationId }?.messages?.find { it.id == assistant.id }?.let { voice.reply(it.text) }
             } catch (_: CancellationException) {
                 // cancelRequest saves the terminal status. Restart handles a closed model.
             } catch (choice: ChooseRefinement) {
@@ -1127,7 +1229,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 }
             } catch (failure: Exception) {
                 if(!isActive(request)) return@launch
-                voice.requestFailed()
+                if (voiceBelongsTo(null)) voice.requestFailed()
                 val known = failure as? CloudFailure
                 updateMessage(request, user.id) { if (it.status == "pending") it.copy(status = "not_sent") else it }
                 updateMessage(request, assistant.id) { it.copy(status = "error", errorCode = known?.code ?: "network", error = known?.message ?: if(it.toolOperationId != null) "The widget could not be created safely. Existing tools and data are unchanged. Retry the request." else "Нет соединения с DeepSeek. Проверьте сеть и повторите запрос.", searchStatus = if (it.searchStatus == "searching") "error" else it.searchStatus) }
@@ -1156,7 +1258,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         if(weatherPermissionId == request.assistantId) {
             weatherPermission?.cancel(); weatherPermission = null; weatherPermissionId = null
         }
-        voice.requestFailed()
+        if (voiceBelongsTo(null)) voice.requestFailed()
         cancelMessage(request.conversationId, request.assistantId, answerFragment)
         answerFragment = ""
         request.cancelled = true
