@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools.generation
 
+import com.alpha.assistant.tools.withUncheckedBehavior
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.automations.AutomationDefinition
@@ -237,7 +238,7 @@ class StandaloneClockedHostWorkflowTest {
                 val stage = checkNotNull(request.generationStage)
                 stages += stage
                 val answer = when(stage) {
-                    CloudGenerationStage.PLAN -> plan(needs)
+                    CloudGenerationStage.PLAN -> plan(needs).withUncheckedBehavior()
                     CloudGenerationStage.SELECTOR -> selectorAnswer(request.turns.single().text)
                     else -> error("A complete clocked app requested generated code.")
                 }

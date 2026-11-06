@@ -331,7 +331,7 @@ internal class NeedsPlan private constructor(
 
         val wholeScreenGuidance = """
             Choose one JSON response format.
-            If the request has enough information and connected controls and results require custom behavior that supported native parts cannot provide, return exactly {"wholeScreen":true}. This includes custom calculators, converters, and estimators with derived results. Return only the marker.
+            If the request has enough information and connected controls and results require custom behavior that supported native parts cannot provide, use {"wholeScreen":true} for the generation choice. This includes custom calculators, converters, and estimators with derived results. Supply the behavior field as directed below.
             Use a full plan for independent supported parts or a blocking clarification question. A native part can own its inputs and derived results when it covers the complete need. Its field rules apply only to the full plan.
         """.trimIndent()
 

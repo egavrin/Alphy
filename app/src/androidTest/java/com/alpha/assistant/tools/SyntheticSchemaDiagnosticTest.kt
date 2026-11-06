@@ -221,12 +221,12 @@ class SyntheticSchemaDiagnosticTest {
                 CloudGenerationStage.PLAN -> {
                     check(++plans <= 2)
                     val contract = com.alpha.assistant.tools.generation.NeedsPlan.prompt
-                    if (plans == 1) check(request.systemInstructions == contract)
+                    if (plans == 1) check(request.systemInstructions.startsWith(contract + "\n\n"))
                     else {
                         check(request.systemInstructions.startsWith(contract + "\n\n"))
                         check(request.turns.last() == CloudTurn("user","Return the corrected JSON plan."))
                     }
-                    check(request.turns.first().text == prompt)
+                    check(JSONObject(request.turns.first().text).getString("request") == prompt)
                     true
                 }
                 CloudGenerationStage.SELECTOR -> {
@@ -252,6 +252,7 @@ class SyntheticSchemaDiagnosticTest {
         override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
             check(request.jsonObject && !request.search && request.selectedText.isEmpty())
             check(request.turns.all {it.images.isEmpty()})
+            if (request.isFixtureRevisionPlan && request.replyWithFixturePlan(emit)) return
             if (routing.isRouteRequest(request,operation.prompt)) {
                 check(operation.base == null)
                 delegate.respond(key,request,session,emit)

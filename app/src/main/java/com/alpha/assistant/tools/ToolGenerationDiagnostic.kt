@@ -10,7 +10,7 @@ import java.util.UUID
 
 internal enum class ToolGenerationStage(val id: String) {
     AVAILABILITY("availability"), PLAN("plan"), SELECTOR("selector"), ASSEMBLY("assembly"), PROVIDER("provider"),
-    DEFINITION("definition"), STATE("state"), SMOKE("smoke")
+    DEFINITION("definition"), STATE("state"), SMOKE("smoke"), BEHAVIOR("behavior")
 }
 internal enum class ToolGenerationOutcome(val id: String) {
     COMPLETED("completed"), VALIDATED("validated"), REJECTED("rejected"), PROVIDER_FAILURE("providerFailure"),
@@ -50,6 +50,7 @@ internal sealed interface ToolGenerationTraceEvent {
         val selectorBatch: String?,
         val planPath: String?,
         val planShape: ResponseShape?,
+        val behavior: String?,
     ) : ToolGenerationTraceEvent
 
     /** VALIDATED marks the candidate boundary. The caller owns publication. */
@@ -90,7 +91,7 @@ internal class ToolGenerationTrace(
                 diagnostic.outcome, diagnostic.disposition, diagnostic.failureCode,
                 diagnostic.category, diagnostic.ui?.rule ?: diagnostic.safeSchemaRule,
                 safeSelectorBatch(diagnostic.selectorBatch), diagnostic.planPath?.takeIf(needsPlanPath::matches),
-                diagnostic.planShape?.takeIf { needsPlanPath.matches(it.path) }) }
+                diagnostic.planShape?.takeIf { needsPlanPath.matches(it.path) }, diagnostic.behavior) }
         }
 
         fun finish(failure: Throwable? = null) {
@@ -127,7 +128,7 @@ internal inline fun <T> ToolGenerationTrace.Run?.timed(
 
 private fun safeSelectorBatch(batch: String?) = batch?.takeIf { it == "sections" || it == "parts" }
 private val needsPlanPath = Regex(
-    """\$(?:\.(?:wholeScreen|title|description|language|inputs|constants|needs|questions|id|label|type|value|uses|sourceIds|stops|bands|items|ideas|name|minutes|min|date|offsetDays|repeatDays|effort|ask|options)(?:\[\d{1,2}])?)*"""
+    """\$(?:\.(?:wholeScreen|behavior|scenario|steps|title|description|language|inputs|constants|needs|questions|id|label|type|value|uses|sourceIds|stops|bands|items|ideas|name|minutes|min|date|offsetDays|repeatDays|effort|ask|options)(?:\[\d{1,2}])?)*"""
 )
 
 /** No candidate, exception message, private field name, or generated identifier enters this record.
@@ -148,7 +149,8 @@ internal data class ToolGenerationAttemptDiagnostic(
     val smokeCode: String?=null,
     val selectorBatch: String?=null,
     val planPath: String?=null,
-    val planShape: ResponseShape?=null
+    val planShape: ResponseShape?=null,
+    val behavior: String?=null
 ) {
     internal val safeSchemaRule get() = schemaRule?.takeIf { it in schemaRules }
 
@@ -160,7 +162,8 @@ internal data class ToolGenerationAttemptDiagnostic(
                 .put("category",diagnostic.category.id).put("rule",diagnostic.rule).put("path",diagnostic.path)
                 .put("expected",diagnostic.expected).put("observed",diagnostic.observed).put("count",diagnostic.count ?: JSONObject.NULL))}
             safeSchemaRule?.let {put("schema",JSONObject().put("rule",it).put("path","unknown"))}
-            if(smokeEvent!=null) put("smoke",JSONObject()
+            behavior?.let { put("behavior", it) }
+        if(smokeEvent!=null) put("smoke",JSONObject()
                 .put("event",smokeEvent.takeIf {it in smokeEvents} ?: "unknown")
                 .put("path",smokePath?.takeIf {it.matches(smokeLocation)} ?: "unknown")
                 .put("failureCode",safeCode(smokeCode ?: "unknown")))
@@ -169,7 +172,7 @@ internal data class ToolGenerationAttemptDiagnostic(
         private val codes=setOf("none","unknown","auth","cancelled","empty_response","incomplete","provider","quota","rate_limit",
             "response_length","response_size","stream_invalid","unavailable","tool_invalid","tool_limit","widget_generation","widget_response_size",
             "widget_request","widget_plan","widget_selector","widget_questions","widget_incomplete",
-            "widget_spec","widget_state","widget_preview","widget_preview_state","widget_preview_effects",
+            "widget_spec","widget_state","widget_behavior","widget_preview","widget_preview_state","widget_preview_effects",
             "javascript_unavailable","javascript_busy","javascript_sandbox_died","javascript_closed","javascript_memory_limit",
             "javascript_script_error","javascript_timeout","javascript_invalid_request","javascript_invalid_result")
         private val schemaRules=setOf("schema.name","schema.nodes","schema.structuredNodes","schema.depth","schema.scalar",

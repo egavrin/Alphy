@@ -2,6 +2,7 @@ package com.alpha.assistant.tools.generation
 
 import androidx.javascriptengine.IsolateStartupParameters
 import androidx.javascriptengine.JavaScriptIsolate
+import com.alpha.assistant.tools.withUncheckedBehavior
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.ChatProvider
@@ -40,7 +41,7 @@ class GenerationPolicyWorkflowTest {
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
             stages += request.generationStage
             emit(CloudEvent.Text(when (request.generationStage) {
-                CloudGenerationStage.PLAN -> plan
+                CloudGenerationStage.PLAN -> plan.withUncheckedBehavior()
                 CloudGenerationStage.COMPLETE -> definition.toString()
                 else -> error("Unexpected provider call.")
             }))

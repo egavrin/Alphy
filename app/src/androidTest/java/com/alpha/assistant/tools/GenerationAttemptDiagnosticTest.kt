@@ -89,10 +89,10 @@ class GenerationAttemptDiagnosticTest {
         }.exceptionOrNull()
         assertSame(terminal,failure)
         assertEquals(2,requests.size)
-        assertEquals(NeedsPlan.prompt,requests.first().systemInstructions)
+        assertTrue(requests.first().systemInstructions.startsWith(NeedsPlan.prompt + "\n\n"))
         requests.forEach { request ->
             assertTrue(request.systemInstructions.startsWith(NeedsPlan.prompt))
-            assertEquals(CloudTurn("user",original,images),request.turns.first())
+            assertEquals(CloudTurn("user",JSONObject().put("request", original).toString(),images),request.turns.first())
             assertTrue(request.jsonObject)
             assertFalse(request.search)
             assertFalse(request.systemInstructions.contains(original))
@@ -199,8 +199,8 @@ class GenerationAttemptDiagnosticTest {
         }.exceptionOrNull() as CloudFailure
         assertEquals("response_length",failure.code)
         assertEquals(2,requests.size)
-        assertEquals(NeedsPlan.prompt,requests.first().systemInstructions)
-        assertEquals(listOf(CloudTurn("user",original,images),CloudTurn("user","Return the corrected JSON plan.")),
+        assertTrue(requests.first().systemInstructions.startsWith(NeedsPlan.prompt + "\n\n"))
+        assertEquals(listOf(CloudTurn("user",JSONObject().put("request", original).toString(),images),CloudTurn("user","Return the corrected JSON plan.")),
             requests.last().turns)
         val hostCorrection = requests.last().systemInstructions.removePrefix(NeedsPlan.prompt)
         assertTrue(hostCorrection.contains("output limit"))

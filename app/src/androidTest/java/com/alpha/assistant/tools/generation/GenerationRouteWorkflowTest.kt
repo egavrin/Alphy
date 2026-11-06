@@ -1,5 +1,7 @@
 package com.alpha.assistant.tools.generation
 
+import com.alpha.assistant.tools.isFixtureRevisionPlan
+import com.alpha.assistant.tools.withUncheckedBehavior
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.CloudEvent
@@ -110,7 +112,9 @@ class GenerationRouteWorkflowTest {
             assertTrue(request.jsonObject)
             assertFalse(request.search)
             requests += request
-            emit(CloudEvent.Text(fixture(request, session)))
+            val output = if (request.isFixtureRevisionPlan) "{}" else fixture(request, session)
+            emit(CloudEvent.Text(if (request.generationStage == CloudGenerationStage.PLAN && output.startsWith("{"))
+                runCatching { output.withUncheckedBehavior() }.getOrDefault(output) else output))
         }
     }
 
@@ -144,6 +148,32 @@ class GenerationRouteWorkflowTest {
         val failure = runCatching { block() }.exceptionOrNull() as? CloudFailure ?: error("Expected $code.")
         assertEquals(code, failure.code)
         return failure
+    }
+
+    private fun planWithBehavior(needs: String, scenario: String): String = JSONObject(plan(needs))
+        .put("behavior", JSONObject().put("status", "checkable").put("scenario", JSONObject(scenario))).toString()
+
+    @Test fun selectedPartsRunBehaviorWithoutACodeWriter(): Unit = runBlocking {
+        val scenario = """{"slots":{
+            "add":{"kind":"action","part":"count"},
+            "count":{"kind":"value","part":"count","path":[0]}},
+            "steps":[{"op":"action","slot":"add"},{"op":"assert","slot":"count","test":"equals","value":1}]}"""
+        val provider = FixtureProvider { turn, _ ->
+            when (turn.generationStage) {
+                CloudGenerationStage.PLAN -> planWithBehavior(count, scenario)
+                CloudGenerationStage.SELECTOR -> answer(turn)
+                else -> error("Unexpected code writer for the complete part.")
+            }
+        }
+        val diagnostics = mutableListOf<JSONObject>()
+        withEngine(provider, { diagnostics += it }) { _, engine, _ ->
+            val draft = engine.createDraft("Make a counter that adds one.", null)
+            engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+            val saved = engine.accept(draft.id)
+            assertEquals(0, JSONObject(saved.state).getInt(counterState))
+            assertEquals("behavior", diagnostics.last().getString("stage"))
+            assertEquals("validated", diagnostics.last().getString("outcome"))
+        }
     }
 
     @Test fun completePartsSkipCodeAndPublishAfterSmoke(): Unit = runBlocking {
@@ -257,7 +287,7 @@ class GenerationRouteWorkflowTest {
                 provider.requests.clear()
                 refinement = invalid.toString()
                 failure("widget_spec") { engine.generate(draft.id, "fixture", emptyList(), CloudSession()) }
-                assertEquals(listOf(CloudGenerationStage.REFINE, CloudGenerationStage.REFINE), provider.stages)
+                assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE, CloudGenerationStage.REFINE), provider.stages)
                 assertEquals(good, store.draft(draft.id))
                 assertEquals(live, store.tool(live.id))
             }
@@ -361,16 +391,24 @@ class GenerationRouteWorkflowTest {
     }
 
     @Test fun mixedSceneSurvivesSaveReopenAndFillOnlyRefinement(): Unit = runBlocking {
+        val scenario = """{"slots":{
+            "add":{"kind":"action","part":"count"},
+            "count":{"kind":"value","part":"count","path":[0]},
+            "scene":{"kind":"surface"},
+            "dot":{"kind":"geometry"}},
+            "steps":[{"op":"action","slot":"add"},{"op":"assert","slot":"count","test":"equals","value":1},
+            {"op":"frames","slot":"scene","count":3,"observe":"dot","changes":2}]}"""
         var rejectRefinement = false
         val provider = FixtureProvider { turn, _ ->
             when (turn.generationStage) {
-                CloudGenerationStage.PLAN -> plan("$count,$scene")
+                CloudGenerationStage.PLAN -> planWithBehavior("$count,$scene", scenario)
                 CloudGenerationStage.SELECTOR -> answer(turn)
                 CloudGenerationStage.COMPLETE -> {
                     assertTrue(turn.turns.first().text.contains("Move a dot on each frame"))
                     assertTrue(turn.turns.first().text.contains("""["scene"]"""))
                     assertFalse(turn.turns.first().text.contains("\"nativePresentation\""))
-                    mixed(sceneFill())
+                    JSONObject(mixed(sceneFill())).put("behaviorBindings",
+                        JSONObject("""{"scene":"$surface","dot":{"surface":"$surface","path":[0]}}""")).toString()
                 }
                 CloudGenerationStage.REFINE -> {
                     val prompt = turn.turns.first().text
@@ -422,12 +460,12 @@ class GenerationRouteWorkflowTest {
             val refine = engine.createDraft("Rename the dot control.", live.id)
             provider.requests.clear()
             val refined = engine.generate(refine.id, "fixture", emptyList(), CloudSession())
-            assertEquals(listOf(CloudGenerationStage.REFINE), provider.stages)
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE), provider.stages)
             assertEquals(live.state, refined.previewState)
             rejectRefinement = true
             provider.requests.clear()
             failure("widget_incomplete") { engine.generate(refine.id, "fixture", emptyList(), CloudSession()) }
-            assertEquals(listOf(CloudGenerationStage.REFINE, CloudGenerationStage.REFINE), provider.stages)
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE, CloudGenerationStage.REFINE), provider.stages)
             assertEquals(live, store.tool(live.id))
             assertEquals(refined, store.draft(refine.id))
             val next = engine.accept(refine.id)
@@ -739,7 +777,7 @@ class GenerationRouteWorkflowTest {
         }
     }
 
-    @Test fun refinementBypassesPlanningAndKeepsLiveStateOnRepeatedFailure(): Unit = runBlocking {
+    @Test fun refinementPlansBehaviorAndKeepsLiveStateOnRepeatedFailure(): Unit = runBlocking {
         val definition = definition()
         var invalid = false
         val provider = FixtureProvider { turn, _ ->
@@ -762,12 +800,12 @@ class GenerationRouteWorkflowTest {
             val draft = engine.createDraft("Change the button label", live.id)
             provider.requests.clear()
             val good = engine.generate(draft.id, "fixture", emptyList(), CloudSession())
-            assertEquals(listOf(CloudGenerationStage.REFINE), provider.stages)
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE), provider.stages)
             assertEquals(live.state, good.previewState)
             invalid = true
             provider.requests.clear()
             failure("widget_spec") { engine.generate(draft.id, "fixture", emptyList(), CloudSession()) }
-            assertEquals(listOf(CloudGenerationStage.REFINE, CloudGenerationStage.REFINE), provider.stages)
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE, CloudGenerationStage.REFINE), provider.stages)
             assertEquals(good, store.draft(draft.id))
             assertEquals(live, store.tool(live.id))
         }

@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools.generation
 
+import com.alpha.assistant.tools.withUncheckedBehavior
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.ChatProvider
@@ -47,7 +48,7 @@ class StaticDraftPreviewWorkflowTest {
 
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
             val response = when (request.generationStage) {
-                CloudGenerationStage.PLAN -> plan(mixed)
+                CloudGenerationStage.PLAN -> plan(mixed).withUncheckedBehavior()
                 CloudGenerationStage.SELECTOR -> {
                     val questions = JSONObject(request.turns.single().text).getJSONArray("questions")
                     val answers = JSONArray()

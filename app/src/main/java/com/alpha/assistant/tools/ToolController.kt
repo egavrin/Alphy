@@ -324,7 +324,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                 engine.createDraft(prompt,target?.id,conversationId,operationId,target,originalRequest)
                 created = true
             }
-            withContext(Dispatchers.IO) { generateWithPreview(operationId,key,images,call) }
+            withContext(Dispatchers.IO) { generateWithPreview(operationId,key,images,call,originalRequest) }
             currentCoroutineContext().ensureActive(); call.check()
             previews.clear(operationId)
             val result = engine.accept(operationId,retainReceipt = true,canCommit = canCommit)
@@ -372,13 +372,13 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     }
     internal var generationTraceObserver: ((ToolGenerationTraceEvent) -> Unit)? = null
 
-    private suspend fun generateWithPreview(id: String,key: String,images: List<String>,call: CloudSession) {
+    private suspend fun generateWithPreview(id: String,key: String,images: List<String>,call: CloudSession,originalRequest: String? = null) {
         check(!closing) {"The tool controller is closed."}
         val requestId=UUID.randomUUID().toString()
         val observer=previews.begin(id,requestId)
         try {
             val trace = generationTraceObserver?.let { ToolGenerationTrace(UUID.fromString(id), it) }
-            val completed=engine.generate(id,key,images,call,previewObserver=observer,trace=trace)
+            val completed=engine.generate(id,key,images,call,previewObserver=observer,trace=trace,originalRequest=originalRequest)
             previews.complete(requestId,completed)
         } catch(failure: Throwable) {
             previews.clearRequest(requestId)

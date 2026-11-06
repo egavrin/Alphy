@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools.generation
 
+import com.alpha.assistant.tools.withUncheckedBehavior
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.ChatProvider
@@ -58,7 +59,9 @@ class LessonRouteWorkflowTest {
             assertTrue(request.turns.all { it.images.isEmpty() })
             requests += request
             val body = when (request.generationStage) {
-                CloudGenerationStage.PLAN -> plan.toString()
+                CloudGenerationStage.PLAN -> plan.toString().let {
+                    if (request.systemInstructions.contains("top-level \"behavior\"")) it.withUncheckedBehavior() else it
+                }
                 CloudGenerationStage.SELECTOR -> {
                     onSelection(session)
                     val input = JSONObject(request.turns.single().text)
@@ -138,7 +141,7 @@ class LessonRouteWorkflowTest {
         val policy = ToolExecutionPolicy(validateDefinition = {}, validateResult = {})
         val preview = generate(provider, policy = policy, request = "The host selected a CHOICE course slide.")
         val planning = provider.requests.first().systemInstructions
-        assertEquals(NeedsPlan.prompt, planning)
+        assertTrue(planning.startsWith(NeedsPlan.prompt + "\n\n"))
         assertFalse(JSONObject(preview.state).has(EXERCISE_FIELD))
         assertNotNull(preview.spec.nativePresentation)
         assertNotNull(preview.spec.action(JSONObject(preview.ui), "p4_main_select"))

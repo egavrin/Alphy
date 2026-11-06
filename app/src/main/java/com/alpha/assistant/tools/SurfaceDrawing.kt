@@ -10,6 +10,9 @@ import android.graphics.Path
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
+import android.util.Base64
+import androidx.compose.ui.graphics.toArgb
+import com.alpha.assistant.ui.AlphaLightColors
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -18,6 +21,8 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import org.json.JSONArray
 import org.json.JSONObject
+import java.nio.ByteBuffer
+import java.security.MessageDigest
 
 internal fun surfaceLabels(commands: JSONArray,availableImages: Set<String> = emptySet(),
     unavailableImage: (String)->String = {"$it · image unavailable"}): String=buildString {
@@ -47,6 +52,88 @@ internal fun drawSurfaceFrame(canvas: Canvas,surface: ToolSurface,commands: JSON
         drawSurface(canvas,commands,roleColors,images)
     } finally {canvas.restoreToCount(saved)}
 }
+/** Compare the selected shapes and their contribution to a bounded reference rendering. */
+internal data class SurfaceGeometry(val width: Int, val height: Int, val shape: List<String>, val visible: String, val hasInk: Boolean) {
+    fun movedFrom(previous: SurfaceGeometry) = width == previous.width && height == previous.height &&
+        hasInk && previous.hasInk && visible != previous.visible && shape != previous.shape
+}
+
+internal fun observeSurfaceGeometry(surface: ToolSurface, commands: JSONArray, selection: List<Int>): SurfaceGeometry? {
+    fun group(command: JSONObject, children: JSONArray) =
+        JSONObject().put("type", "group").put("children", children).apply {
+            command.optJSONArray("transform")?.let { put("transform", it) }
+        }
+    fun partition(array: JSONArray, depth: Int): Pair<JSONArray, JSONArray>? {
+        if (depth == selection.size) return array to JSONArray()
+        val index = selection[depth]
+        val command = array.optJSONObject(index) ?: return null
+        val remainder = JSONArray()
+        val selected = if (depth == selection.lastIndex) JSONArray().put(command) else {
+            val children = command.optJSONArray("children") ?: return null
+            val (inside, outside) = partition(children, depth + 1) ?: return null
+            repeat(array.length()) { n -> remainder.put(if (n == index) group(command, outside) else array.getJSONObject(n)) }
+            return JSONArray().put(group(command, inside)) to remainder
+        }
+        repeat(array.length()) { n -> if (n != index) remainder.put(array.getJSONObject(n)) }
+        return selected to remainder
+    }
+    fun shapes(array: JSONArray, transforms: List<String>, output: MutableList<String>) {
+        repeat(array.length()) { index ->
+            val command = array.getJSONObject(index)
+            when (command.getString("type")) {
+                "text" -> Unit
+                "group" -> shapes(command.getJSONArray("children"),
+                    transforms + listOfNotNull(command.optJSONArray("transform")?.toString()), output)
+                else -> output += transforms.toString() + command.keys().asSequence()
+                    .filterNot { it in setOf("color", "gradient", "label", "resourceId") }.sorted()
+                    .joinToString { key -> "$key=${command.get(key)}" }
+            }
+        }
+    }
+    fun withoutText(array: JSONArray): JSONArray = JSONArray().apply {
+        repeat(array.length()) { index ->
+            val command = array.getJSONObject(index)
+            when (command.getString("type")) {
+                "text" -> Unit
+                "group" -> put(group(command, withoutText(command.getJSONArray("children"))))
+                else -> put(command)
+            }
+        }
+    }
+    val (selected, remainder) = partition(commands, 0) ?: return null
+    val shape = mutableListOf<String>().apply { shapes(selected, emptyList(), this); sort() }
+    val width = minOf(surface.width, 512)
+    val height = minOf(surface.height, 512)
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val scheme = AlphaLightColors
+    val background = scheme.surface.toArgb()
+    val colors = ToolUiCatalog.tones.associateWith { scheme.toolInk(it, scheme.surface).toArgb() }
+    try {
+        val canvas = Canvas(bitmap)
+        fun render(array: JSONArray, pixels: IntArray) {
+            bitmap.eraseColor(background)
+            drawSurfaceFrame(canvas, surface, withoutText(array), width.toFloat(), height.toFloat(), colors)
+            bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+        }
+        val complete = IntArray(width * height)
+        val without = IntArray(complete.size)
+        render(commands, complete)
+        render(remainder, without)
+        val bytes = ByteBuffer.allocate(complete.size * Int.SIZE_BYTES)
+        val pixels = bytes.asIntBuffer()
+        var hasInk = false
+        for (index in complete.indices) {
+            val difference = complete[index] xor without[index]
+            if (difference != 0) hasInk = true
+            pixels.put(difference)
+        }
+        val digest = MessageDigest.getInstance("SHA-256").digest(bytes.array())
+        return SurfaceGeometry(width, height, shape, Base64.encodeToString(digest, Base64.NO_WRAP), hasInk)
+    } finally {
+        bitmap.recycle()
+    }
+}
+
 private fun drawSurface(canvas: Canvas,commands: JSONArray,roleColors: Map<String,Int>,images: Map<String,Bitmap>) {
     repeat(commands.length()) {index ->
         val c=commands.getJSONObject(index)
