@@ -73,6 +73,7 @@ class AppUpdateWorkflowTest {
         assumeFalse("Set REQUEST_INSTALL_PACKAGES to default before this test", app.packageManager.canRequestPackageInstalls())
         withReadyUpdate { tag ->
             val allow = robot.text(R.string.update_allow_install)
+            robot.reveal(allow, forward = null)
             robot.click(allow)
             robot.waitUntil { robot.diagnostics.freshRoot()?.packageName == "com.android.settings" }
             robot.back()
@@ -87,7 +88,9 @@ class AppUpdateWorkflowTest {
     @Test fun opensAndroidInstallerWithVerifiedUpdate() {
         assumeTrue("Set REQUEST_INSTALL_PACKAGES to allow before this test", app.packageManager.canRequestPackageInstalls())
         withReadyUpdate { tag ->
-            robot.click(robot.text(R.string.update_install))
+            val install = robot.text(R.string.update_install)
+            robot.reveal(install, forward = null)
+            robot.click(install)
             robot.waitUntil {
                 robot.diagnostics.freshRoot()?.packageName?.contains("packageinstaller") == true
             }
@@ -121,7 +124,9 @@ class AppUpdateWorkflowTest {
             val available = robot.text(R.string.update_available, tag)
             if (robot.find(available) == null) robot.click(robot.text(R.string.update_check))
             robot.waitFor(available)
-            robot.click(robot.text(R.string.update_download))
+            val download = robot.text(R.string.update_download)
+            robot.reveal(download, forward = null)
+            robot.click(download)
             robot.waitFor(robot.text(R.string.update_ready, tag))
             run(tag)
         }

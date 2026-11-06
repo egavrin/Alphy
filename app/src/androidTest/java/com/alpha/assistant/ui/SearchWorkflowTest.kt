@@ -31,8 +31,8 @@ class SearchWorkflowTest {
             robot.assertTarget(robot.text(R.string.conversation_actions, "Dated chat"))
             assertNull(robot.find("⋯"))
             assertFalse(robot.composedText(scenario, "⋯"))
-            // The top bar holds «Новый чат», so the page has none.
-            assertEquals(1, robot.texts().count { it == robot.text(R.string.new_chat) })
+            // New chat is available from the drawer. Search has no separate creation action.
+            assertNull(robot.find(robot.text(R.string.new_chat)))
             robot.edit(robot.text(R.string.search_field), "нет такого")
             robot.waitFor(robot.text(R.string.search_none))
         }

@@ -96,7 +96,8 @@ class ShellScreenshotTest {
             val colors = pixels.toSet().size
             assertTrue("settings-$page has $colors colors", colors >= 16)
             page++
-            end = !robot.scrollForward()
+            // A clipped child can keep the same outer bounds while the content scrolls.
+            end = !robot.scrollForward(requireBoundsChange = false)
         }
         assertTrue("The Settings page ends within 15 pages", end)
         val version = robot.text(R.string.app_version, "")

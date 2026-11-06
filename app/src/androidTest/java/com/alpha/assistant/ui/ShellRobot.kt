@@ -319,9 +319,10 @@ internal class ShellRobot(fixture: String) {
         automation.waitForIdle(100, 3000)
     }
     /** Scrolls a visible container that supports the requested direction. */
-    fun scrollForward(): Boolean = scroll(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+    fun scrollForward(requireBoundsChange: Boolean = true): Boolean =
+        scroll(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD, requireBoundsChange)
 
-    private fun scroll(action: Int): Boolean {
+    private fun scroll(action: Int, requireBoundsChange: Boolean = true): Boolean {
         fun containers(node: AccessibilityNodeInfo?, path: List<Int> = emptyList()): Sequence<List<Int>> = sequence {
             if (node == null || !node.isVisibleToUser) return@sequence
             if (node.isScrollable && node.actionList.any { it.id == action }) yield(path)
@@ -335,7 +336,7 @@ internal class ShellRobot(fixture: String) {
             val before = childBounds(node)
             if (node.performAction(action)) {
                 awaitScrollEnd { current(path)?.let(::childBounds).orEmpty() }
-                if (current(path)?.let(::childBounds) != before) return true
+                if (!requireBoundsChange || current(path)?.let(::childBounds) != before) return true
             }
         }
         return false

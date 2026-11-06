@@ -249,6 +249,7 @@ class SettingsConsentWorkflowTest {
         try {
             fixture.launch().use { scenario ->
                 openSettings(scenario)
+                robot.click(robot.text(R.string.access))
                 robot.reveal(robot.text(R.string.assistant_pick_hint))
                 robot.reveal(robot.text(R.string.assistant_open))
                 robot.click(robot.text(R.string.assistant_open))

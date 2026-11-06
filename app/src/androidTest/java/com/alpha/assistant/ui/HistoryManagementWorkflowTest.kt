@@ -67,7 +67,7 @@ class HistoryManagementWorkflowTest {
                 waitUntil { store.load().conversations.size == 1 }
                 assertNull(store.load().selectedId)
                 assertEquals(second, store.load().conversations.single())
-                click("Новый чат"); assertEquals(newDraft.text, field("Сообщение ассистенту").text.toString())
+                newChat(scenario); assertEquals(newDraft.text, field("Сообщение ассистенту").text.toString())
                 openSearch(scenario); click("Очистить историю"); click("Отмена")
                 assertEquals(second, store.load().conversations.single())
                 // Failure case: a query kept through the clear shows «Ничего не найдено» on an empty history.
@@ -75,7 +75,7 @@ class HistoryManagementWorkflowTest {
                 click("Очистить историю"); waitFor("Черновик нового чата, инструменты и их данные, автоматизации, API-ключи и исходные файлы сохранятся."); click("Очистить всё")
                 waitUntil { store.load().conversations.isEmpty() }
                 waitFor(robot.text(R.string.search_empty))
-                click("Новый чат"); assertEquals(newDraft.text, field("Сообщение ассистенту").text.toString())
+                newChat(scenario); assertEquals(newDraft.text, field("Сообщение ассистенту").text.toString())
                 assertEquals("history-test-only", keys.read().getOrThrow())
                 assertEquals(tool, tools.tool(tool.id))
                 val preservedRule = checkNotNull(rules.rule(rule.id))
@@ -125,7 +125,7 @@ class HistoryManagementWorkflowTest {
                 store.writableDatabase.execSQL("DROP TRIGGER fixture_reject_delete")
                 click("Повторить")
                 waitUntil { store.load().conversations.isEmpty() }
-                click("Новый чат")
+                newChat(scenario)
                 assertEquals("Keep independent draft", field("Сообщение ассистенту").text.toString())
                 assertTrue(store.load().conversations.isEmpty())
                 assertEquals("history-test-only", keys.read().getOrThrow())
@@ -136,6 +136,12 @@ class HistoryManagementWorkflowTest {
             store.close(); keys.clear(); context.deleteDatabase("$fixture.db"); context.deleteDatabase("$fixture.db-tools.db"); context.deleteSharedPreferences(fixture)
             java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(fixture) }
         }
+    }
+
+    private fun newChat(scenario: ActivityScenario<*>) {
+        robot.openDrawer(scenario)
+        robot.click(robot.text(R.string.new_chat))
+        robot.awaitDrawerClosed(scenario)
     }
 
     private fun openSearch(scenario: ActivityScenario<*>) {
