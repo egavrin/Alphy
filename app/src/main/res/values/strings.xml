@@ -297,7 +297,6 @@
     <string name="tool_library_content">Каталог мини-приложений</string>
     <string name="tool_catalog_options">Действия каталога мини-приложений</string>
     <string name="tool_catalog_empty">Мини-приложений пока нет. Попросите Alphy создать одно в чате.</string>
-    <string name="automation_empty_chat">Сценариев пока нет. Попросите Alphy создать сценарий в чате.</string>
     <string name="automation_power_start">Начать наблюдение питания</string>
     <string name="automation_power_stop">Остановить наблюдение питания</string>
     <string name="automation_power_failed">Android не запустил наблюдение питания. Проверьте доступ к уведомлениям.</string>

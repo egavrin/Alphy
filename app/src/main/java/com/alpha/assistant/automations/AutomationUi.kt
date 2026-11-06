@@ -1,20 +1,22 @@
 package com.alpha.assistant.automations
 
-import android.Manifest
 import android.content.*
-import android.net.Uri
-import android.os.Build
-import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -23,6 +25,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.alpha.assistant.R
 import com.alpha.assistant.tools.ToolController
 import com.alpha.assistant.tools.ToolSpec
+import com.alpha.assistant.ui.AlphaIcon
+import com.alpha.assistant.ui.AutomationPaneSplit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -36,15 +40,15 @@ import java.text.DateFormat
 import java.util.Date
 import java.util.UUID
 
-private fun date(at: Long?) = at?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(Date(it)) } ?: "Нет"
+internal fun date(at: Long?) = at?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(Date(it)) } ?: "Нет"
 private val testTimeFormat=DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss.SSS XXX")
 private fun testTime(at: Long)=testTimeFormat.withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(at))
-private fun status(status: String) = when(status) {
+internal fun status(status: String) = when(status) {
     "succeeded" -> "Выполнено"; "unknownOutcome" -> "Результат неизвестен"; "awaitingUser" -> "Нужно открыть Alphy и выполнить действие вручную"
     "cancelled" -> "Отменено"; "skipped" -> "Условия не выполнены"; "dryRun" -> "Проверка без действий"; "missed" -> "Пропущено"
     "launched" -> "Открыт интерфейс приложения"; "denied","revoked" -> "Нужен доступ"; "unavailable" -> "Недоступно"; "failed" -> "Ошибка"; else -> status
 }
-private fun triggerText(d: AutomationDefinition, appLabels: Map<String,String> = emptyMap()): String {
+internal fun triggerText(d: AutomationDefinition, appLabels: Map<String,String> = emptyMap()): String {
     val t = d.trigger
     return when(d.type) {
         "manual" -> "Только по кнопке «Запустить»"
@@ -93,38 +97,61 @@ private fun conditionText(d: AutomationDefinition): String = buildList {
         }))
         else -> step.target
     }
-    Column(verticalArrangement=Arrangement.spacedBy(4.dp)) {
-        Text(stringResource(R.string.automation_test_step,index+1,target),style=MaterialTheme.typography.titleSmall)
-        if(step.from!=null && step.to!=null) Text(stringResource(R.string.automation_test_range,testTime(step.from),testTime(step.to)))
-        val readAt=step.readAt
-        if(readAt!=null) {
-            Text(stringResource(R.string.automation_test_calendar_source,testTime(readAt)))
-            val events=JSONArray(checkNotNull(step.after))
-            if(events.length()==0) Text(stringResource(R.string.automation_test_calendar_empty))
-            if(events.length()==50) Text(stringResource(R.string.automation_test_calendar_limit))
-            repeat(events.length()) {eventIndex ->
-                val event=events.getJSONObject(eventIndex)
-                Text(stringResource(R.string.automation_test_event,event.getString("title"),testTime(event.getLong("start")),testTime(event.getLong("end"))))
-            }
-        } else {
-            when(step.capability) {
-                "tool.state.set","tool.records.calendar" -> {
-                    Text(stringResource(R.string.automation_test_tool_target,checkNotNull(step.toolId),checkNotNull(step.toolRevision)))
-                    Text(stringResource(R.string.automation_test_before,checkNotNull(step.before)))
-                    Text(stringResource(R.string.automation_test_after,checkNotNull(step.after)))
-                    if(step.uiChanged) Text(stringResource(R.string.automation_test_ui_changed))
+    OutlinedCard(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            AutomationNumber(index + 1)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(target, style = MaterialTheme.typography.titleSmall)
+                if(step.from!=null && step.to!=null) Text(stringResource(R.string.automation_test_range,testTime(step.from),testTime(step.to)))
+                val readAt=step.readAt
+                if(readAt!=null) {
+                    Text(stringResource(R.string.automation_test_calendar_source,testTime(readAt)))
+                    val events=JSONArray(checkNotNull(step.after))
+                    if(events.length()==0) Text(stringResource(R.string.automation_test_calendar_empty))
+                    if(events.length()==50) Text(stringResource(R.string.automation_test_calendar_limit))
+                    repeat(events.length()) {eventIndex ->
+                        val event=events.getJSONObject(eventIndex)
+                        Text(stringResource(R.string.automation_test_event,event.getString("title"),testTime(event.getLong("start")),testTime(event.getLong("end"))))
+                    }
+                } else {
+                    when(step.capability) {
+                        "tool.state.set","tool.records.calendar" -> {
+                            Text(stringResource(R.string.automation_test_tool_target,checkNotNull(step.toolId),checkNotNull(step.toolRevision)))
+                            Text(stringResource(R.string.automation_test_before,checkNotNull(step.before)))
+                            Text(stringResource(R.string.automation_test_after,checkNotNull(step.after)))
+                            if(step.uiChanged) Text(stringResource(R.string.automation_test_ui_changed))
+                        }
+                        "notification.post" -> step.after?.let {Text(it)}
+                        "calendar.create" -> step.after?.let {Text(stringResource(R.string.automation_test_calendar_location,it))}
+                    }
+                    if(step.capability in setOf("app.open","link.open","maps.open","calendar.create")) Text(stringResource(R.string.automation_test_external))
                 }
-                "notification.post" -> step.after?.let {Text(it)}
-                "calendar.create" -> step.after?.let {Text(stringResource(R.string.automation_test_calendar_location,it))}
             }
-            if(step.capability in setOf("app.open","link.open","maps.open","calendar.create")) Text(stringResource(R.string.automation_test_external))
         }
     }
 }
 
-@Composable fun AutomationsPane(tools: ToolController, chatRequest: String? = null,
-    openRuleId: String? = null, showAll: () -> Unit = {}, chatSetup: String? = null,
-    finishSetup: () -> Unit = {}, consumeRequest: () -> Unit = {}) {
+private val automationChatProposalSaver = listSaver<AutomationChatProposal?, String>(
+    save = { proposal -> proposal?.let { listOf(it.name, it.trigger.toString(), it.request) }.orEmpty() },
+    restore = { AutomationChatProposal(it[0], JSONObject(it[1]), it[2]) },
+)
+
+@Composable internal fun AutomationsPane(
+    tools: ToolController,
+    chatRequest: String? = null,
+    openRuleId: String? = null,
+    showAll: () -> Unit = {},
+    chatSetup: String? = null,
+    finishSetup: () -> Unit = {},
+    consumeRequest: () -> Unit = {},
+    split: AutomationPaneSplit? = null,
+    createInChat: () -> Unit = {},
+    exit: () -> Unit = {},
+) = AutomationTheme {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val appLabels=remember { context.packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0)
@@ -132,11 +159,19 @@ private fun conditionText(d: AutomationDefinition): String = buildList {
     var rules by remember { mutableStateOf(emptyList<AutomationRule>()) }
     var loadedRules by remember { mutableStateOf(false) }
     var histories by remember { mutableStateOf(emptyMap<String,List<AutomationRun>>()) }
-    var selected by remember { mutableStateOf<String?>(null) }
-    var editing by remember(chatSetup) { mutableStateOf(chatSetup != null) }
-    var editRule by remember { mutableStateOf<AutomationRule?>(null) }
-    var editSection by remember { mutableStateOf(AutomationEditorSection.WHEN) }
-    var proposal by remember(chatSetup) { mutableStateOf(chatSetup?.let { runCatching { AutomationDrafts.fromChat(it) }.getOrNull() }) }
+    var selected by rememberSaveable { mutableStateOf<String?>(null) }
+    var detailOpen by rememberSaveable { mutableStateOf(false) }
+    fun selectRule(id: String) {
+        selected = id
+        detailOpen = true
+    }
+    val listState = rememberLazyListState()
+    var editing by rememberSaveable(chatSetup) { mutableStateOf(chatSetup != null) }
+    var editRule by rememberSaveable(stateSaver = automationEditTargetSaver) { mutableStateOf<AutomationEditTarget?>(null) }
+    var editSection by rememberSaveable { mutableStateOf(AutomationEditorSection.WHEN) }
+    var proposal by rememberSaveable(chatSetup, stateSaver = automationChatProposalSaver) {
+        mutableStateOf(chatSetup?.let { runCatching { AutomationDrafts.fromChat(it) }.getOrNull() })
+    }
     var approval by remember { mutableStateOf<AutomationApproval?>(null) }
     var activating by remember { mutableStateOf<AutomationApproval?>(null) }
     var requestingAccess by remember { mutableStateOf(false) }
@@ -173,7 +208,9 @@ private fun conditionText(d: AutomationDefinition): String = buildList {
         }
     }
     fun edit(rule: AutomationRule?,section: AutomationEditorSection = AutomationEditorSection.WHEN) {
-        editRule=rule; editSection=section; proposal=null; error=null; errorRuleId=null; editing=true
+        if (rule != null) selectRule(rule.id)
+        editRule=rule?.let { AutomationEditTarget(it.id, it.revision, it.definition) }
+        editSection=section; proposal=null; error=null; errorRuleId=null; editing=true
     }
     LaunchedEffect(chatRequest) {
         if(chatRequest != null) {
@@ -181,7 +218,6 @@ private fun conditionText(d: AutomationDefinition): String = buildList {
             consumeRequest()
         }
     }
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { AutomationRuntime.refresh(context); reload() }
     val activationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { requestingAccess=false }
     val activationSettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { requestingAccess=false }
     val testPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {testAccessInProgress=false}
@@ -294,12 +330,17 @@ private fun conditionText(d: AutomationDefinition): String = buildList {
     testProposal?.let {proposal ->
         fun cancel() {proposal.cancel();testProposal=null}
         AlertDialog(onDismissRequest=::cancel,title={Text(stringResource(R.string.automation_test_title))},
+            containerColor = MaterialTheme.colorScheme.surface,
             text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(10.dp)) {
-                Text(stringResource(R.string.automation_test_rule,proposal.name,proposal.request.revision))
+                Column {
+                    Text(proposal.name, style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.automation_revision, proposal.request.revision),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Text(stringResource(R.string.automation_test_explanation))
                 proposal.steps.forEachIndexed {index,step -> OneTimeStep(index,step)}
                 if(testRunning) Text(stringResource(R.string.automation_test_running))
-            }},confirmButton={TextButton(enabled=!busy && !testRunning,onClick={
+            }},confirmButton={Button(enabled=!busy && !testRunning,shape=MaterialTheme.shapes.small,onClick={
                 testRunning=true
                 operation(proposal.request.ruleId) {store ->
                     try {
@@ -309,7 +350,7 @@ private fun conditionText(d: AutomationDefinition): String = buildList {
                                 !activity.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked
                         }) {intent -> checkNotNull(activity).startActivity(intent)}
                     } finally {
-                        withContext(Dispatchers.Main) {testProposal=null;testRunning=false;selected=proposal.request.ruleId}
+                        withContext(Dispatchers.Main) {testProposal=null;testRunning=false}
                     }
                 }
             }) {Text(stringResource(R.string.automation_test_run))}},dismissButton={TextButton(onClick=::cancel) {
@@ -318,130 +359,218 @@ private fun conditionText(d: AutomationDefinition): String = buildList {
     }
     approval?.let { pending ->
         val rule=pending.rule
-        AlertDialog(onDismissRequest={if(activating==null) approval=null},title={Text("Включить версию ${rule.revision}?")},
-            text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(10.dp)) {
-                Text(rule.definition.name); Text(triggerText(rule.definition,appLabels)); Text(conditionText(rule.definition)); Text(actionText(rule.definition,tools))
-                Text("Разрешение действует для этой версии, целей и параметров. Android запросит нужный доступ при включении.")
-                Text("При неизвестном результате повтора нет. Внешние приложения открываются по кнопке в журнале. Проверка без действий ничего не изменяет.")
-            }},
-            confirmButton={TextButton(enabled=!busy && activating==null,onClick={
-                requestedPermissions=emptySet()
-                visitedSettings=emptySet()
-                activating=pending
-            }) {Text("Включить")}},
-            dismissButton={TextButton(enabled=activating==null,onClick={approval=null}) {Text("Отмена")}})
+        AlertDialog(
+            onDismissRequest = { if (activating == null) approval = null },
+            title = { Text(stringResource(R.string.automation_enable_title, rule.revision)) },
+            containerColor = MaterialTheme.colorScheme.surface,
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(rule.definition.name, style = MaterialTheme.typography.titleMedium)
+                    val sections = listOf(
+                        AutomationEditorSection.WHEN to triggerText(rule.definition, appLabels),
+                        AutomationEditorSection.IF to conditionText(rule.definition),
+                        AutomationEditorSection.ACTIONS to actionText(rule.definition, tools),
+                    )
+                    sections.forEach { (section, value) ->
+                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                AlphaIcon(section.glyph, Modifier.size(18.dp))
+                                Text(stringResource(section.title), style = MaterialTheme.typography.titleSmall)
+                            }
+                            Text(value, style = MaterialTheme.typography.bodyMedium)
+                            HorizontalDivider(Modifier.padding(top = 4.dp))
+                        }
+                    }
+                    Text(stringResource(R.string.automation_enable_permission))
+                    Text(stringResource(R.string.automation_enable_safety))
+                }
+            },
+            confirmButton = {
+                Button(enabled = !busy && activating == null, shape = MaterialTheme.shapes.small, onClick = {
+                    requestedPermissions = emptySet()
+                    visitedSettings = emptySet()
+                    activating = pending
+                }) { Text(stringResource(R.string.automation_enable)) }
+            },
+            dismissButton = {
+                TextButton(enabled = activating == null, onClick = { approval = null }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
     }
     deleteConfirmation?.let { rule ->
-        AlertDialog(onDismissRequest={deleteConfirmation=null},title={Text("Удалить сценарий?")},text={Column {
-            Text(rule.definition.name)
-            Text("Запуски остановятся.")
-            Text("Журнал запусков хранится 30 дней.")
-        }},confirmButton={TextButton(enabled=!busy,onClick={
-            deleteConfirmation=null
-            operation(rule.id) { store -> AutomationRuntime.deleteRule(context,store,rule) }
-        }) {Text("Удалить")}},dismissButton={TextButton(onClick={deleteConfirmation=null}) {Text("Отмена")}})
+        AlertDialog(
+            onDismissRequest = { deleteConfirmation = null },
+            title = { Text(stringResource(R.string.automation_delete_title)) },
+            containerColor = MaterialTheme.colorScheme.surface,
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(rule.definition.name, style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.automation_delete_explanation))
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !busy,
+                    shape = MaterialTheme.shapes.small,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError),
+                    onClick = {
+                        deleteConfirmation = null
+                        operation(rule.id) { store ->
+                            AutomationRuntime.deleteRule(context, store, rule)
+                            withContext(Dispatchers.Main) {
+                                if (selected == rule.id) {
+                                    selected = null
+                                    detailOpen = false
+                                }
+                                if (openRuleId == rule.id) showAll()
+                            }
+                        }
+                    },
+                ) { Text(stringResource(R.string.delete)) }
+            },
+            dismissButton = { TextButton(onClick = { deleteConfirmation = null }) { Text(stringResource(R.string.cancel)) } },
+        )
     }
-    val scroll=key(editing) { rememberScrollState() }
-    Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(horizontal=20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-        if(editing) {
-            val captured=editRule
-            val notificationApps=appLabels.filterKeys {it!=context.packageName}
-            key(captured?.id,proposal?.request) {
-                AutomationEditor(captured,tools,proposal,editSection,notificationApps,busy,error,
-                    cancel={editing=false;proposal=null;error=null; if (chatSetup != null) finishSetup()}) { definition ->
-                    operation { store ->
-                        val saved=store.save(captured?.id,definition,captured?.revision)
-                        AutomationRuntime.reconcile(context,store)
-                        withContext(Dispatchers.Main) {selected=saved.id;editing=false;proposal=null; if (chatSetup != null) finishSetup()}
+
+    fun cancelEdit() {
+        editing = false
+        editRule = null
+        proposal = null
+        error = null
+        if (chatSetup != null) finishSetup()
+    }
+    fun clearFocus() {
+        selected = null
+        detailOpen = false
+        showAll()
+    }
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val wide = chatSetup == null && (split != null || maxWidth >= 840.dp)
+            val visibleRules = if (openRuleId == null) rules else rules.filter { it.id == openRuleId }
+            val selectedRule = visibleRules.find { it.id == (openRuleId ?: selected) }
+            val rule = when {
+                wide -> selectedRule ?: visibleRules.firstOrNull()
+                detailOpen || openRuleId != null -> selectedRule
+                else -> null
+            }
+            val showList = chatSetup == null && (wide || (!editing && openRuleId == null && rule == null))
+            val showDetail = editing || rule != null || openRuleId != null
+            val globalError = error.takeIf { errorRuleId == null || rules.none { it.id == errorRuleId } }
+            BackHandler(enabled = chatSetup == null && (editing || (!wide && openRuleId == null && rule != null))) {
+                if (editing) {
+                    if (!busy) cancelEdit()
+                } else detailOpen = false
+            }
+            val listWidth = if (wide) (maxWidth * 0.39f).coerceIn(320.dp, 360.dp) else maxWidth
+            Row(Modifier.fillMaxSize()) {
+                if (showList) {
+                    Box(
+                        Modifier.width(split?.listRegion ?: listWidth).fillMaxHeight(),
+                        contentAlignment = if (split == null) Alignment.TopStart else Alignment.TopEnd,
+                    ) {
+                        AutomationRuleList(
+                            visibleRules, loadedRules && openRuleId == null, (selectedRule ?: rule)?.id, listState,
+                            globalError.takeUnless { editing }, enabled = !editing, create = createInChat, select = ::selectRule,
+                            modifier = Modifier.width(listWidth),
+                        )
+                    }
+                    if (wide) {
+                        if (split != null) Spacer(Modifier.width(split.gap))
+                        else VerticalDivider()
+                    }
+                }
+                // Keep this slot in the same composition when the list opens beside it.
+                if (showDetail) {
+                    Box(Modifier.weight(1f).fillMaxHeight().testTag("automation-detail")) {
+                        if (editing) {
+                            val captured = editRule
+                            val notificationApps = appLabels.filterKeys { it != context.packageName }
+                            key(captured?.id, proposal?.request) {
+                                AutomationEditor(
+                                    captured, tools, proposal, editSection, notificationApps, busy, error,
+                                    back = !wide, cancel = ::cancelEdit,
+                                ) { definition ->
+                                    operation { store ->
+                                        val saved = store.save(captured?.id, definition, captured?.revision)
+                                        AutomationRuntime.reconcile(context, store)
+                                        withContext(Dispatchers.Main) {
+                                            selectRule(saved.id)
+                                            editing = false
+                                            editRule = null
+                                            proposal = null
+                                            if (chatSetup != null) finishSetup()
+                                        }
+                                    }
+                                }
+                            }
+                        } else if (rule != null) {
+                            key(rule.id) {
+                                val sections = listOf(
+                                    AutomationEditorSection.WHEN to automationTriggerSummary(rule.definition),
+                                    AutomationEditorSection.IF to conditionText(rule.definition),
+                                    AutomationEditorSection.ACTIONS to rule.definition.actions.map {
+                                        stringResource(automationActionLabels.getValue(it.capability))
+                                    }.joinToString("\n"),
+                                )
+                                AutomationRuleDetail(
+                                    rule, histories[rule.id].orEmpty(), sections, busy,
+                                    primaryEnabled = rule.id !in pausing && (rule.enabled || (!busy && activating == null)),
+                                    testEnabled = !busy && pendingTest == null && testProposal == null,
+                                    error = if (errorRuleId == rule.id) error else globalError.takeUnless { showList },
+                                    back = if (wide) null else if (openRuleId != null) exit else { { detailOpen = false } },
+                                    showAll = if (openRuleId != null) ::clearFocus else null,
+                                    toggle = { if (rule.enabled) pauseRule(rule) else resumeRule(rule) },
+                                    edit = { edit(rule, it) },
+                                    test = {
+                                        testPermissionAsked = false
+                                        testSettingsVisited = false
+                                        operation(rule.id) { store ->
+                                            val request = AutomationRuntime.requestOneTime(store, rule)
+                                            withContext(Dispatchers.Main) { pendingTest = request }
+                                        }
+                                    },
+                                    dryRun = {
+                                        operation(rule.id) { store ->
+                                            AutomationRuntime.execute(context, store, rule.id, rule.revision,
+                                                AutomationEvent("manual", "dry:${UUID.randomUUID()}"), true)
+                                        }
+                                    },
+                                    run = {
+                                        operation(rule.id) { store ->
+                                            AutomationRuntime.execute(context, store, rule.id, rule.revision,
+                                                AutomationEvent("manual", "manual:${UUID.randomUUID()}"))
+                                        }
+                                    },
+                                    delete = { deleteConfirmation = rule },
+                                    continueRun = { run ->
+                                        operation(rule.id) { store ->
+                                            AutomationRuntime.continueUserRun(context, store, run) { intent ->
+                                                withContext(Dispatchers.Main) {
+                                                    val activity = context as? ComponentActivity
+                                                    check(activity != null && activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
+                                                        !activity.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked)
+                                                    activity.startActivity(intent)
+                                                }
+                                            }
+                                        }
+                                    },
+                                )
+                            }
+                        } else {
+                            Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                                if (globalError != null && !showList) AutomationError(globalError)
+                                TextButton(onClick = ::clearFocus) { Text(stringResource(R.string.automation_all)) }
+                                if (loadedRules) Text(stringResource(R.string.automation_missing))
+                            }
+                        }
                     }
                 }
             }
-        } else {
-            if(errorRuleId==null || rules.none {it.id==errorRuleId}) {
-                error?.let { Text(it,color=MaterialTheme.colorScheme.error) }
-            }
-            if (openRuleId != null) {
-                TextButton(onClick = showAll, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.automation_all)) }
-                if (loadedRules && rules.none { it.id == openRuleId }) Text(stringResource(R.string.automation_missing))
-            } else {
-                if (loadedRules && rules.isEmpty()) Text(stringResource(R.string.automation_empty_chat))
-            }
-            rules.filter { openRuleId == null || it.id == openRuleId }.forEach { rule ->
-                ElevatedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                    Text(rule.definition.name,style=MaterialTheme.typography.titleMedium)
-                    Text("Версия ${rule.revision} · ${if(rule.enabled) "Включён" else "На паузе"}")
-                    val sections=mapOf(
-                        AutomationEditorSection.WHEN to triggerText(rule.definition,appLabels),
-                        AutomationEditorSection.IF to conditionText(rule.definition),
-                        AutomationEditorSection.ACTIONS to actionText(rule.definition,tools),
-                    )
-                    sections.forEach { (section,summary) ->
-                        TextButton(enabled=!busy,onClick={edit(rule,section)},modifier=Modifier.heightIn(min=48.dp)) {
-                            Text(stringResource(section.title),style=MaterialTheme.typography.titleSmall)
-                        }
-                        Text(summary)
-                    }
-                    if(rule.attention.isNotEmpty()) Text(rule.attention,color=MaterialTheme.colorScheme.error)
-                    if(errorRuleId==rule.id && error!=rule.attention) {
-                        error?.let {Text(it,color=MaterialTheme.colorScheme.error)}
-                    }
-                    Text("Следующий запуск: ${date(rule.nextAt)}")
-                    val last=histories[rule.id]?.firstOrNull()
-                    Text("Последний: ${last?.let { "${date(it.time)} · ${status(it.status)}" } ?: "Ещё не было"}")
-                    FlowRow(horizontalArrangement=Arrangement.spacedBy(4.dp)) {
-                        TextButton(enabled=if(rule.enabled) rule.id !in pausing else !busy && activating==null && rule.id !in pausing,
-                            onClick={if(rule.enabled) pauseRule(rule) else resumeRule(rule)}) {
-                            Text(when {
-                                rule.enabled -> "Пауза"
-                                rule.approvedRevision!=rule.revision || rule.attention.isNotEmpty() -> "Проверить и включить"
-                                else -> "Включить"
-                            })
-                        }
-                        TextButton(enabled=!busy,onClick={edit(rule)}) {Text("Изменить")}
-                        TextButton(enabled=!busy,onClick={deleteConfirmation=rule}) {Text("Удалить")}
-                    }
-                    Row(horizontalArrangement=Arrangement.spacedBy(4.dp)) {
-                        if(!rule.enabled) TextButton(enabled=!busy && pendingTest==null && testProposal==null,onClick={
-                            testPermissionAsked=false
-                            testSettingsVisited=false
-                            operation(rule.id) {store ->
-                                val request=AutomationRuntime.requestOneTime(store,rule)
-                                withContext(Dispatchers.Main) {pendingTest=request}
-                            }
-                        }) {Text(stringResource(R.string.automation_test_once))}
-                        TextButton(enabled=!busy,onClick={operation { store -> AutomationRuntime.execute(context,store,rule.id,rule.revision,AutomationEvent("manual","dry:${UUID.randomUUID()}"),true); selected=rule.id }}) {Text("Проверка без действий")}
-                        if(rule.enabled) TextButton(enabled=!busy,onClick={operation { store -> AutomationRuntime.execute(context,store,rule.id,rule.revision,AutomationEvent("manual","manual:${UUID.randomUUID()}")) }}) {Text("Запустить")}
-                    }
-                    TextButton(onClick={selected=if(selected == rule.id) null else rule.id}) {Text("Журнал за 30 дней")}
-                    if(selected == rule.id) {
-                        Text("Срок хранения — 30 дней.",style=MaterialTheme.typography.bodySmall)
-                        histories[rule.id].orEmpty().forEach { run ->
-                            HorizontalDivider(); Text("${date(run.time)} · версия ${run.revision} · ${status(run.status)}")
-                            Text(run.message,style=MaterialTheme.typography.bodySmall)
-                            val details=JSONArray(run.details)
-                            repeat(details.length()) { index ->
-                                val result=details.getJSONObject(index)
-                                result.optJSONObject("data")?.optString("preview")?.takeIf { it.isNotEmpty() }?.let { Text(it,style=MaterialTheme.typography.bodySmall) }
-                                result.optJSONObject("data")?.optJSONArray("events")?.let { events -> repeat(events.length()) { i ->
-                                    val event=events.getJSONObject(i); Text("${event.optString("title")} · ${date(event.optLong("start"))}",style=MaterialTheme.typography.bodySmall)
-                                } }
-                            }
-                            if(run.status == "awaitingUser") {
-                                Text("Alphy откроет только указанную цель. Действие внутри приложения выполняешь ты.",style=MaterialTheme.typography.bodySmall)
-                                TextButton(enabled=!busy && rule.enabled && rule.revision == run.revision,onClick={ operation { store ->
-                                    AutomationRuntime.continueUserRun(context,store,run) { intent -> withContext(Dispatchers.Main) {
-                                        val activity=context as? ComponentActivity
-                                        check(activity != null && activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && !activity.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked)
-                                        activity.startActivity(intent)
-                                    } }
-                                } }) {Text("Продолжить в приложении")}
-                            }
-                        }
-                    }
-                } }
-            }
         }
-        Spacer(Modifier.height(24.dp))
     }
 }
 

@@ -44,10 +44,13 @@ import androidx.navigationevent.NavigationEventDispatcherOwner
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import kotlin.math.roundToInt
 
+internal data class AutomationPaneSplit(val listRegion: Dp, val gap: Dp)
+
 internal data class ShellPaneLayout(
     val wide: Boolean = false,
     val verticalHinge: Rect? = null,
     val tabletopGap: IntRange? = null,
+    val automationSplit: AutomationPaneSplit? = null,
     val singlePanePadding: PaddingValues = PaddingValues(),
 ) {
     val paired: Boolean get() = wide || tabletopGap != null
@@ -57,6 +60,7 @@ internal data class ShellPaneLayout(
     immersive: Boolean,
     pairApp: Boolean,
     systemInsets: WindowInsets,
+    splitAutomations: Boolean = false,
     content: @Composable (ShellPaneLayout) -> Unit,
 ) {
     val posture = currentWindowAdaptiveInfoV2().windowPosture
@@ -69,7 +73,7 @@ internal data class ShellPaneLayout(
         val safeWidth = if (hinges.isNotEmpty() || immersive) maxWidth else with(density) {
             maxWidth - (systemInsets.getLeft(density, layoutDirection) + systemInsets.getRight(density, layoutDirection)).toDp()
         }
-        val placement = density.shellPaneLayout(safeWidth, viewport, posture, pairApp)
+        val placement = density.shellPaneLayout(safeWidth, viewport, posture, pairApp, splitAutomations)
         val padding = placement.singlePanePadding
         Box(Modifier.fillMaxSize().onGloballyPositioned { coordinates ->
             viewport = IntRect(coordinates.positionInWindow().round(), coordinates.size)
@@ -79,7 +83,9 @@ internal data class ShellPaneLayout(
     }
 }
 
-private fun Density.shellPaneLayout(width: Dp, viewport: IntRect?, posture: Posture, pairApp: Boolean): ShellPaneLayout {
+private fun Density.shellPaneLayout(
+    width: Dp, viewport: IntRect?, posture: Posture, pairApp: Boolean, splitAutomations: Boolean,
+): ShellPaneLayout {
     val hinges = posture.hingeList.filter { it.isSeparating || it.isOccluding }
     if (hinges.isEmpty() || viewport == null) return ShellPaneLayout(wide = pairApp && width >= 840.dp)
 
@@ -92,6 +98,16 @@ private fun Density.shellPaneLayout(width: Dp, viewport: IntRect?, posture: Post
     if (pairApp && posture.isTabletop && vertical.isEmpty() && rows.size == 2 &&
         rows.all { it.length >= 260.dp.roundToPx() }
     ) return ShellPaneLayout(tabletopGap = (rows.first().end - viewport.top)..(rows.last().first - viewport.top))
+
+    if (splitAutomations && horizontal.isEmpty() && vertical.size == 1 && columns.size == 2 &&
+        columns.first().length >= 320.dp.roundToPx() && columns.last().length >= 360.dp.roundToPx()
+    ) {
+        val listEnd = columns.first().end
+        return ShellPaneLayout(automationSplit = AutomationPaneSplit(
+            listRegion = (listEnd - viewport.left).toDp(),
+            gap = (columns.last().first - listEnd).toDp(),
+        ))
+    }
 
     val column = columns.maxByOrNull { it.length } ?: return ShellPaneLayout()
     val row = rows.maxByOrNull { it.length } ?: return ShellPaneLayout()

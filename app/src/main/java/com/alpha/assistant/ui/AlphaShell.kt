@@ -234,7 +234,8 @@ import kotlinx.coroutines.launch
                 Text(stringResource(R.string.load_failed_text))
                 Button(onClick = model::load) { Text(stringResource(R.string.retry)) }
             }
-        } else AdaptiveShellLayout(immersive, focusedMiniApp && !immersive, systemInsets) { paneLayout ->
+        } else AdaptiveShellLayout(immersive, focusedMiniApp && !immersive, systemInsets,
+            splitAutomations = destination == ShellDestination.Automations && !model.tools.storageUnavailable) { paneLayout ->
             val sceneStrategies = shellSceneStrategies(paneLayout)
             ModalNavigationDrawer({
                 ShellDrawerSheet(drawerState, snapshot.conversations, snapshot.selectedId, destination, snapshot.userName.ifBlank { stringResource(R.string.profile) },
@@ -397,7 +398,9 @@ import kotlinx.coroutines.launch
                                     )
                                     ShellDestination.Automations -> if (model.tools.storageUnavailable) ToolLibraryUnavailablePane()
                                         else com.alpha.assistant.automations.AutomationsPane(model.tools, automationRequest,
-                                            openRuleId = automationRuleId, showAll = { automationRuleId = null }) { automationRequest = null }
+                                            openRuleId = automationRuleId, showAll = { automationRuleId = null },
+                                            split = currentLayout.automationSplit, createInChat = ::newChat, exit = ::back,
+                                            consumeRequest = { automationRequest = null })
                                     ShellDestination.Courses -> CourseLibraryScreen(
                                         model.courseStore, model.courseController, onExit = { navigate(null) },
                                         tutor = model.courseTutor, generation = model.courseGeneration,

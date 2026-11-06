@@ -177,9 +177,14 @@ class AutomationActivationWorkflowTest {
                     robot.openDrawer(scenario)
                     robot.click(robot.text(R.string.automations))
                     robot.awaitDrawerClosed(scenario)
-                    robot.reveal("Удалить");robot.click("Удалить")
-                    robot.waitFor("Журнал запусков хранится 30 дней.")
-                    robot.click("Отмена")
+                    val options = robot.text(R.string.automation_rule_options)
+                    if (robot.find(options) == null) {
+                        robot.click(robot.text(R.string.tool_open_automation, rule.definition.name))
+                    }
+                    robot.click(options)
+                    robot.click(robot.text(R.string.delete))
+                    robot.waitFor(robot.text(R.string.automation_delete_explanation))
+                    robot.click(robot.text(R.string.cancel))
                     val current=checkNotNull(store.rule(rule.id))
                     assertEquals(rule.revision,current.revision)
                     assertEquals(rule.definition.json,current.definition.json)

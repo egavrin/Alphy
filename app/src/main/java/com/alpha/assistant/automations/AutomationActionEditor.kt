@@ -1,11 +1,19 @@
 package com.alpha.assistant.automations
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.alpha.assistant.R
 import com.alpha.assistant.capabilities.AndroidCapabilities
@@ -13,6 +21,8 @@ import com.alpha.assistant.capabilities.CapabilityRequest
 import com.alpha.assistant.tools.ToolController
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
+import com.alpha.assistant.ui.AlphaIcon
+import com.alpha.assistant.ui.Glyph
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -55,6 +65,25 @@ internal data class AutomationActionDraft(val request: CapabilityRequest, val st
     }
 }
 
+// Draft fields can be incomplete until Save validates the final definition.
+internal val automationActionDraftsSaver = listSaver<List<AutomationActionDraft>, String>(
+    save = { actions ->
+        actions.map { action ->
+            action.request.json().put("stateValue", action.stateValue).put("targetChanged", action.targetChanged).toString()
+        }
+    },
+    restore = { values ->
+        values.map { value ->
+            val action = JSONObject(value)
+            AutomationActionDraft(
+                CapabilityRequest(action.getString("id"), action.getString("capability"), action.getJSONObject("args")),
+                action.optString("stateValue").takeIf { action.has("stateValue") },
+                action.getBoolean("targetChanged"),
+            )
+        }
+    },
+)
+
 internal fun newAutomationAction(capability: String, notice: String,
     id: String = "a" + UUID.randomUUID().toString().replace("-","")): AutomationActionDraft {
     val now=System.currentTimeMillis()
@@ -74,7 +103,7 @@ internal fun newDayActions(notice: String): List<AutomationActionDraft> {
     return listOf(read,newAutomationAction("tool.records.calendar",notice).edit { put("source",read.id) })
 }
 
-private val actionLabels=linkedMapOf(
+internal val automationActionLabels=linkedMapOf(
     "notification.post" to R.string.automation_editor_action_notice,
     "calendar.read" to R.string.automation_editor_action_read,
     "calendar.read.rolling" to R.string.automation_editor_action_rolling,
@@ -90,46 +119,74 @@ private val actionLabels=linkedMapOf(
     actions: List<AutomationActionDraft>, tools: ToolController, notice: String,
     changed: (List<AutomationActionDraft>)->Unit
 ) {
-    val labels=actionLabels.mapValues { stringResource(it.value) }
-    var selectedId by remember { mutableStateOf<String?>(null) }
+    val labels=automationActionLabels.mapValues { stringResource(it.value) }
+    var selectedId by rememberSaveable { mutableStateOf(actions.singleOrNull()?.id) }
     fun move(index: Int,direction: Int) {
         changed(actions.toMutableList().apply { add(index+direction,removeAt(index)) })
     }
     actions.forEachIndexed { index, action ->
         key(action.id) {
-            OutlinedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(10.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
-                    Text(stringResource(R.string.automation_editor_action_number,index+1),style=MaterialTheme.typography.titleSmall)
-                    TextButton(onClick={selectedId=if(selectedId==action.id) null else action.id},modifier=Modifier.heightIn(min=48.dp)) {
-                        Text(labels.getValue(action.capability))
-                    }
-                    if(selectedId==action.id) {
-                        val update: (AutomationActionDraft)->Unit = { next ->
-                            changed(actions.map { if(it.id==next.id) next else it })
+            OutlinedCard(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small) {
+                val expanded = selectedId == action.id
+                val title = labels.getValue(action.capability)
+                val number = stringResource(R.string.automation_editor_action_number, index + 1)
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clickable(role = Role.Button) { selectedId = if (expanded) null else action.id }
+                        .semantics { contentDescription = number }
+                        .heightIn(min = 52.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AutomationNumber(index + 1)
+                    Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    AlphaIcon(Glyph.Down, Modifier.size(18.dp).rotate(if (expanded) 180f else 0f))
+                }
+                if (expanded) {
+                    Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val update: (AutomationActionDraft) -> Unit = { next ->
+                            changed(actions.map { if (it.id == next.id) next else it })
                         }
-                        AutomationChoice(action.capability,labels) { capability ->
-                            if(capability!=action.capability) update(newAutomationAction(capability,notice,action.id))
+                        AutomationChoice(action.capability, labels) { capability ->
+                            if (capability != action.capability) update(newAutomationAction(capability, notice, action.id))
                         }
-                        AutomationActionFields(action,actions.take(index),tools,update)
+                        AutomationActionFields(action, actions.take(index), tools, update)
                     }
-                    if(index>0) TextButton(onClick={move(index,-1)},modifier=Modifier.heightIn(min=48.dp)) {
-                        Text(stringResource(R.string.automation_editor_move_up,index+1))
-                    }
-                    if(index<actions.lastIndex) TextButton(onClick={move(index,1)},modifier=Modifier.heightIn(min=48.dp)) {
-                        Text(stringResource(R.string.automation_editor_move_down,index+1))
-                    }
-                    if(actions.size>1) TextButton(onClick={changed(actions.filter {it.id!=action.id})},modifier=Modifier.heightIn(min=48.dp)) {
-                        Text(stringResource(R.string.automation_editor_remove_action,index+1))
+                }
+                if (actions.size > 1) {
+                    FlowRow(Modifier.padding(horizontal = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (index > 0) TextButton(onClick = { move(index, -1) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text(stringResource(R.string.automation_editor_move_up, index + 1))
+                        }
+                        if (index < actions.lastIndex) TextButton(onClick = { move(index, 1) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text(stringResource(R.string.automation_editor_move_down, index + 1))
+                        }
+                        TextButton(onClick = { changed(actions.filter { it.id != action.id }) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text(stringResource(R.string.automation_editor_remove_action, index + 1))
+                        }
                     }
                 }
             }
         }
     }
-    OutlinedButton(enabled=actions.size<3,onClick={
-        val next=newAutomationAction("notification.post",notice)
-        selectedId=next.id
-        changed(actions+next)
-    },modifier=Modifier.heightIn(min=48.dp)) { Text(stringResource(R.string.automation_editor_add_action)) }
+    FilledTonalButton(
+        enabled = actions.size < 3,
+        onClick = {
+            val next = newAutomationAction("notification.post", notice)
+            selectedId = next.id
+            changed(actions + next)
+        },
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        shape = MaterialTheme.shapes.small,
+        colors = ButtonDefaults.filledTonalButtonColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+    ) {
+        AlphaIcon(Glyph.Plus, Modifier.size(18.dp), color = LocalContentColor.current)
+        Spacer(Modifier.width(8.dp))
+        Text(stringResource(R.string.automation_editor_add_action))
+    }
     if(actions.size==1) TextButton(onClick={changed(actions+newDayActions(notice))},modifier=Modifier.heightIn(min=48.dp)) {
         Text(stringResource(R.string.automation_editor_day_template))
     }

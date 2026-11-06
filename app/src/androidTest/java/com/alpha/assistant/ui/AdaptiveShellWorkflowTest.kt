@@ -19,6 +19,7 @@ import androidx.window.testing.layout.TestWindowLayoutInfo
 import androidx.window.testing.layout.WindowLayoutInfoPublisherRule
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
+import com.alpha.assistant.automations.AutomationStore
 import com.alpha.assistant.data.Conversation
 import com.alpha.assistant.data.Message
 import com.alpha.assistant.sandbox.SurfaceFrameMetrics
@@ -40,6 +41,69 @@ class AdaptiveShellWorkflowTest {
     private val robot = ShellRobot("adaptive-shell")
     private val composer get() = robot.text(R.string.composer_label)
     private val refinement get() = robot.text(R.string.tool_refine_request)
+
+    @Test fun automationEditorKeepsSelectionAndDraftAcrossWidthAndHingeChanges() {
+        val fixture = ShellFixture("automation-adaptive")
+        val definition = JSONObject("""{"trigger":{"type":"manual"},"conditions":{},"actions":[
+            {"id":"notice","capability":"notification.post","args":{"title":"Fixture","text":"Fixture"}}]}""")
+        val name = "Adaptive automation"
+        val row = robot.text(R.string.tool_open_automation, name)
+        val draft = "Unsaved automation name"
+        val editor = robot.text(R.string.automation_editor_edit)
+        val field = robot.text(R.string.automation_editor_name)
+        val list = "automation-list"
+        val detail = "automation-detail"
+        try {
+            AutomationStore(fixture.context, "${fixture.name}.db-tools.db-automations.db").use { store ->
+                store.save(null, definition.put("name", "Another automation"))
+                store.save(null, definition.put("name", name))
+            }
+            fixture.install(saveKey = false)
+            fixture.launch().use { scenario ->
+                val size = constrain(scenario, fixture, 420)
+                robot.openDrawer(scenario)
+                robot.click(robot.text(R.string.automations))
+                robot.awaitDrawerClosed(scenario)
+                robot.click(row)
+                robot.click(robot.text(R.string.automation_edit))
+                robot.edit(field, draft)
+                if (robot.keyboardTop(scenario) != null) {
+                    robot.back()
+                    robot.waitUntil { robot.keyboardTop(scenario) == null }
+                }
+                assertEquals(draft, robot.field(field).text.toString())
+
+                scenario.onActivity { size.value = 900 }
+                robot.waitUntil { robot.composed(scenario, list) }
+                assertEquals(draft, robot.field(field).text.toString())
+
+                val hinge = publishHinge(scenario, FoldingFeature.Orientation.VERTICAL, 450)
+                robot.waitUntil {
+                    val left = robot.composedBounds(scenario, list).first
+                    val right = robot.composedBounds(scenario, detail).first
+                    left.width() > 0 && right.width() > 0 && left.right <= hinge.left && right.left >= hinge.right
+                }
+                assertEquals(draft, robot.field(field).text.toString())
+                robot.diagnostics.capture("automation-editor-hinge")
+
+                folds.overrideWindowLayoutInfo(TestWindowLayoutInfo(emptyList()))
+                scenario.onActivity { size.value = 420 }
+                robot.waitUntil { !robot.composed(scenario, list) }
+                assertEquals(draft, robot.field(field).text.toString())
+                robot.back()
+                robot.waitGone(editor)
+                robot.waitFor(robot.text(R.string.automation_rule_options))
+                robot.back()
+                robot.waitFor(row)
+                robot.waitGone(robot.text(R.string.automation_rule_options))
+                robot.back()
+                robot.waitUntil { robot.composed(scenario, "desktop") }
+                assertEquals(0, fixture.provider.calls)
+            }
+        } finally {
+            fixture.remove()
+        }
+    }
 
     @Test fun narrowWideNarrowKeepsDraftsAndOneAppSession() = withTool { fixture, tools, scenario ->
         val size = constrain(scenario, fixture, 420)

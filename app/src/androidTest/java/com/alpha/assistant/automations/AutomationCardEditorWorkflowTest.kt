@@ -2,8 +2,10 @@ package com.alpha.assistant.automations
 
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.view.accessibility.AccessibilityNodeInfo
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
@@ -27,7 +29,10 @@ class AutomationCardEditorWorkflowTest {
         ]
     }""")
 
-    private fun withRule(input: JSONObject = chain(), block: (AutomationStore, AutomationRule) -> Unit) {
+    private fun withRule(
+        input: JSONObject = chain(),
+        block: (AutomationStore, AutomationRule, ActivityScenario<CloudTestActivity>) -> Unit,
+    ) {
         val fixture = ShellFixture("automation-card-editor")
         try {
             fixture.install(saveKey = false)
@@ -37,8 +42,9 @@ class AutomationCardEditorWorkflowTest {
                     robot.openDrawer(scenario)
                     robot.click(robot.text(R.string.automations))
                     robot.awaitDrawerClosed(scenario)
-                    robot.reveal("Editor fixture")
-                    block(store,rule)
+                    val options=robot.text(R.string.automation_rule_options)
+                    if(robot.find(options)==null) robot.click(robot.text(R.string.tool_open_automation,rule.definition.name))
+                    block(store,rule,scenario)
                 }
             }
         } finally {
@@ -58,7 +64,7 @@ class AutomationCardEditorWorkflowTest {
         robot.automation.waitForIdle(100, 3000)
     }
 
-    @Test fun nativeTimeEditKeepsThreeOrderedActionsAndExplicitZone() = withRule { store,rule ->
+    @Test fun nativeTimeEditKeepsThreeOrderedActionsAndExplicitZone() = withRule { store,rule,_ ->
         click("Когда")
         click("Время: 08:15")
         val automation=instrumentation.uiAutomation
@@ -93,7 +99,7 @@ class AutomationCardEditorWorkflowTest {
         assertEquals(0,saved.approvedRevision)
     }
 
-    @Test fun actionLimitAndInvalidCalendarOrderPreserveSavedRuleWhenCanceled() = withRule { store,rule ->
+    @Test fun actionLimitAndInvalidCalendarOrderPreserveSavedRuleWhenCanceled() = withRule { store,rule,_ ->
         click("Что сделать")
         var add: AccessibilityNodeInfo?=robot.reveal("Добавить действие")
         while(add!=null && add.isEnabled) add=add.parent
@@ -109,14 +115,20 @@ class AutomationCardEditorWorkflowTest {
 
     @Test fun addAndRemoveActionRespectBoundsAndStaleSaveKeepsNewerRevision() = withRule(
         chain().apply { getJSONArray("actions").remove(2) }
-    ) { store,rule ->
+    ) { store,rule,scenario ->
         click("Что сделать")
         click("Добавить действие")
         robot.reveal("Действие 3", forward = null)
         click("Удалить действие 3")
         click("Добавить действие")
         robot.reveal("Действие 3", forward = null)
+        val nameField = robot.text(R.string.automation_editor_name)
+        val draftName = "Unsaved editor name"
+        robot.reveal(nameField, forward = false)
+        robot.edit(nameField, draftName)
         val concurrent=store.save(rule.id,JSONObject(rule.definition.json).put("name","Newer editor revision"),rule.revision)
+        scenario.recreate()
+        assertEquals(draftName, robot.field(nameField).text.toString())
         click("Сохранить для проверки")
         robot.reveal("Сценарий изменился. Открой текущую версию.")
         assertEquals(concurrent.definition.json,store.rule(rule.id)?.definition?.json)

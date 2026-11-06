@@ -6,8 +6,6 @@
     <string name="automation_test_cancel_remaining">Отменить оставшиеся действия</string>
     <string name="automation_test_running">Выполняется разовая проверка…</string>
     <string name="automation_test_explanation">Сценарий останется выключенным. Разрешение действует только на указанные действия этой проверки.</string>
-    <string name="automation_test_rule">%1$s · версия %2$d</string>
-    <string name="automation_test_step">%1$d. %2$s</string>
     <string name="automation_test_tool_target">Мини-приложение %1$s · версия %2$d</string>
     <string name="automation_test_before">До: %1$s</string>
     <string name="automation_test_after">После: %1$s</string>

@@ -2,17 +2,25 @@ package com.alpha.assistant.automations
 
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.alpha.assistant.R
 import com.alpha.assistant.tools.ToolController
+import com.alpha.assistant.ui.AlphaIcon
+import com.alpha.assistant.ui.Glyph
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
@@ -69,45 +77,38 @@ private fun triggerForSave(draft: JSONObject,original: JSONObject?): JSONObject 
     }
 }
 
+internal data class AutomationEditTarget(val id: String, val revision: Int, val definition: AutomationDefinition)
+
+internal val automationEditTargetSaver = listSaver<AutomationEditTarget?, Any>(
+    save = { target -> target?.let { listOf(it.id, it.revision, it.definition.json) }.orEmpty() },
+    restore = { AutomationEditTarget(it[0] as String, it[1] as Int, AutomationDefinition.parse(JSONObject(it[2] as String))) },
+)
+
+private val automationJsonSaver = Saver<JSONObject, String>(save = { it.toString() }, restore = ::JSONObject)
+
 @Composable internal fun AutomationEditor(
-    rule: AutomationRule?, tools: ToolController, proposal: AutomationChatProposal?,
+    rule: AutomationEditTarget?, tools: ToolController, proposal: AutomationChatProposal?,
     initialSection: AutomationEditorSection, appLabels: Map<String,String>, busy: Boolean,
-    storeFailure: String?, cancel: () -> Unit, save: (JSONObject) -> Unit
+    storeFailure: String?, back: Boolean, cancel: () -> Unit, save: (JSONObject) -> Unit
 ) {
     val old=rule?.definition
     val defaultName=stringResource(R.string.automation_editor_default_name)
     val notice=stringResource(R.string.automation_editor_action_notice)
     val invalid=stringResource(R.string.automation_editor_invalid)
     val staleTarget=stringResource(R.string.automation_editor_pick_current_target)
-    var name by remember { mutableStateOf(old?.name ?: proposal?.name ?: defaultName) }
-    var trigger by remember { mutableStateOf(old?.trigger ?: proposal?.trigger ?: newTrigger("manual")) }
-    var conditions by remember { mutableStateOf(old?.conditions ?: JSONObject()) }
-    var actions by remember {
+    var name by rememberSaveable { mutableStateOf(old?.name ?: proposal?.name ?: defaultName) }
+    var trigger by rememberSaveable(stateSaver = automationJsonSaver) {
+        mutableStateOf(old?.trigger ?: proposal?.trigger ?: newTrigger("manual"))
+    }
+    var conditions by rememberSaveable(stateSaver = automationJsonSaver) { mutableStateOf(old?.conditions ?: JSONObject()) }
+    var actions by rememberSaveable(stateSaver = automationActionDraftsSaver) {
         mutableStateOf(old?.actions?.map { AutomationActionDraft(it) }
             ?: if(proposal!=null) newDayActions(notice) else listOf(newAutomationAction("notification.post",notice)))
     }
-    var section by remember { mutableStateOf(initialSection) }
+    var section by rememberSaveable { mutableStateOf(initialSection) }
     var failure by remember { mutableStateOf<String?>(null) }
 
-    Text(stringResource(if(rule==null) R.string.automation_editor_create else R.string.automation_editor_edit),
-        style=MaterialTheme.typography.titleLarge)
-    if(proposal!=null) {
-        Text(stringResource(R.string.automation_editor_prompt,proposal.request))
-        Text(stringResource(R.string.automation_editor_local_proposal),style=MaterialTheme.typography.bodySmall)
-    }
-    AutomationField(stringResource(R.string.automation_editor_name),name) {name=it}
-    AutomationEditorSection.entries.forEach { group ->
-        TextButton(onClick={section=group},modifier=Modifier.heightIn(min=48.dp)) {
-            Text(stringResource(group.title),style=MaterialTheme.typography.titleMedium)
-        }
-        if(section==group) when(group) {
-            AutomationEditorSection.WHEN -> AutomationTriggerFields(trigger,appLabels) {trigger=it}
-            AutomationEditorSection.IF -> AutomationConditionFields(conditions) {conditions=it}
-            AutomationEditorSection.ACTIONS -> AutomationActions(actions,tools,notice) {actions=it}
-        }
-    }
-    (failure ?: storeFailure)?.let {Text(it,color=MaterialTheme.colorScheme.error)}
-    Button(enabled=!busy,onClick={
+    fun saveDraft() {
         runCatching {
             val input=JSONObject().put("name",name).put("trigger",triggerForSave(trigger,old?.trigger))
                 .put("conditions",conditions).put("actions",JSONArray(actions.map { it.output(tools.tools,staleTarget) }))
@@ -119,14 +120,65 @@ private fun triggerForSave(draft: JSONObject,original: JSONObject?): JSONObject 
         }.onFailure {
             failure=it.message?.takeIf {message -> message.any { c -> c in 'А'..'я' || c=='ё' }} ?: invalid
         }
-    },modifier=Modifier.heightIn(min=48.dp)) {Text(stringResource(R.string.automation_editor_save))}
-    TextButton(enabled=!busy,onClick=cancel,modifier=Modifier.heightIn(min=48.dp)) {Text(stringResource(R.string.cancel))}
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            AutomationHeading(
+                stringResource(if (rule == null) R.string.automation_editor_create else R.string.automation_editor_edit),
+                cancel.takeIf { back && !busy },
+            )
+            if (proposal != null) {
+                Text(stringResource(R.string.automation_editor_prompt, proposal.request))
+                Text(stringResource(R.string.automation_editor_local_proposal), style = MaterialTheme.typography.bodySmall)
+            }
+            AutomationField(stringResource(R.string.automation_editor_name), name) { name = it }
+            SecondaryTabRow(selectedTabIndex = section.ordinal, containerColor = Color.Transparent) {
+                AutomationEditorSection.entries.forEach { group ->
+                    Tab(
+                        selected = section == group, onClick = { section = group },
+                        selectedContentColor = MaterialTheme.colorScheme.primary,
+                        unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = { Text(stringResource(group.title), style = MaterialTheme.typography.labelLarge) },
+                    )
+                }
+            }
+            when (section) {
+                AutomationEditorSection.WHEN -> AutomationTriggerFields(trigger, appLabels) { trigger = it }
+                AutomationEditorSection.IF -> AutomationConditionFields(conditions) { conditions = it }
+                AutomationEditorSection.ACTIONS -> AutomationActions(actions, tools, notice) { actions = it }
+            }
+        }
+        HorizontalDivider()
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+            (failure ?: storeFailure)?.let { message ->
+                AutomationError(message, Modifier.padding(bottom = 8.dp))
+            }
+            FlowRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                TextButton(enabled = !busy, onClick = cancel, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(stringResource(R.string.cancel))
+                }
+                Button(enabled = !busy, onClick = ::saveDraft, modifier = Modifier.heightIn(min = 48.dp),
+                    shape = MaterialTheme.shapes.small) {
+                    Text(stringResource(R.string.automation_editor_save))
+                }
+            }
+        }
+    }
 }
 
 @Composable private fun AutomationTriggerFields(trigger: JSONObject,appLabels: Map<String,String>,changed: (JSONObject)->Unit) {
     val type=trigger.getString("type")
     fun edit(block: JSONObject.()->Unit) {changed(JSONObject(trigger.toString()).apply(block))}
-    AutomationChoice(type,triggerLabels.mapValues { stringResource(it.value) }) {
+    AutomationChoice(type, triggerLabels.mapValues { stringResource(it.value) },
+        label = stringResource(R.string.automation_editor_trigger)) {
         if(it!=type) changed(newTrigger(it))
     }
     when(type) {
@@ -143,7 +195,7 @@ private fun triggerForSave(draft: JSONObject,original: JSONObject?): JSONObject 
                 "once" to stringResource(R.string.automation_editor_once),
                 "daily" to stringResource(R.string.automation_editor_daily),
                 "weekly" to stringResource(R.string.automation_editor_weekly)
-            )) { next -> edit {
+            ), label = stringResource(R.string.automation_editor_frequency)) { next -> edit {
                 put("repeat",next)
                 if(next=="once" && !has("date")) put("date",LocalDate.now().toString())
                 if(next=="weekly" && !has("days")) put("days",JSONArray(listOf(1,2,3,4,5)))
@@ -165,8 +217,10 @@ private fun triggerForSave(draft: JSONObject,original: JSONObject?): JSONObject 
                     }
                 }
             }
-            AutomationToggle(stringResource(R.string.automation_editor_exact),trigger.getBoolean("exact")) {edit {put("exact",it)}}
-            Text(stringResource(R.string.automation_editor_exact_help),style=MaterialTheme.typography.bodySmall)
+            AutomationSwitch(
+                Glyph.Clock, stringResource(R.string.automation_editor_exact), trigger.getBoolean("exact"),
+                supportingText = stringResource(R.string.automation_editor_exact_help),
+            ) { edit { put("exact", it) } }
         }
         "geofence" -> {
             mapOf("latitude" to R.string.automation_editor_latitude,"longitude" to R.string.automation_editor_longitude,
@@ -193,25 +247,41 @@ private fun triggerForSave(draft: JSONObject,original: JSONObject?): JSONObject 
 
 @Composable private fun AutomationConditionFields(conditions: JSONObject,changed: (JSONObject)->Unit) {
     fun edit(block: JSONObject.()->Unit) {changed(JSONObject(conditions.toString()).apply(block))}
-    val power=if(conditions.has("charging")) conditions.getBoolean("charging").toString() else "any"
-    AutomationChoice(power,mapOf(
-        "any" to stringResource(R.string.automation_editor_any_power),
-        "true" to stringResource(R.string.automation_editor_connected),
-        "false" to stringResource(R.string.automation_editor_disconnected)
-    )) { next -> edit {if(next=="any") remove("charging") else put("charging",next.toBoolean())} }
-    val hasWindow=conditions.has("fromMinute")
-    AutomationToggle(stringResource(R.string.automation_editor_time_window),hasWindow) { enabled -> edit {
-        if(enabled) put("fromMinute",8*60).put("toMinute",20*60)
-        else {remove("fromMinute");remove("toMinute")}
-    } }
-    if(hasWindow) {
-        val start=conditions.getInt("fromMinute")
-        val end=conditions.getInt("toMinute")
-        AutomationTime(stringResource(R.string.automation_editor_from_time),LocalTime.of(start/60,start%60)) {
-            edit {put("fromMinute",it.hour*60+it.minute)}
-        }
-        AutomationTime(stringResource(R.string.automation_editor_to_time),LocalTime.of(end/60,end%60)) {
-            edit {put("toMinute",it.hour*60+it.minute)}
+    val power = if (conditions.has("charging")) conditions.getBoolean("charging") else null
+    val hasWindow = conditions.has("fromMinute")
+    OutlinedCard(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small) {
+        Column {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                AutomationSwitch(Glyph.Bolt, stringResource(R.string.automation_editor_only_charging), power == true) { enabled ->
+                    edit { if (enabled) put("charging", true) else remove("charging") }
+                }
+                AutomationChoice(power?.toString() ?: "any", mapOf(
+                    "any" to stringResource(R.string.automation_editor_any_power),
+                    "false" to stringResource(R.string.automation_editor_disconnected),
+                    "true" to stringResource(R.string.automation_editor_connected),
+                ), label = stringResource(R.string.automation_editor_power)) { next ->
+                    edit { if (next == "any") remove("charging") else put("charging", next.toBoolean()) }
+                }
+            }
+            HorizontalDivider()
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                AutomationSwitch(Glyph.Clock, stringResource(R.string.automation_editor_time_window), hasWindow) { enabled ->
+                    edit {
+                        if (enabled) put("fromMinute", 8 * 60).put("toMinute", 20 * 60)
+                        else { remove("fromMinute"); remove("toMinute") }
+                    }
+                }
+                if (hasWindow) {
+                    val start = conditions.getInt("fromMinute")
+                    val end = conditions.getInt("toMinute")
+                    AutomationTime(stringResource(R.string.automation_editor_from_time), LocalTime.of(start / 60, start % 60)) {
+                        edit { put("fromMinute", it.hour * 60 + it.minute) }
+                    }
+                    AutomationTime(stringResource(R.string.automation_editor_to_time), LocalTime.of(end / 60, end % 60)) {
+                        edit { put("toMinute", it.hour * 60 + it.minute) }
+                    }
+                }
+            }
         }
     }
 }
@@ -221,5 +291,26 @@ private fun triggerForSave(draft: JSONObject,original: JSONObject?): JSONObject 
         verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
         Checkbox(checked=checked,onCheckedChange=null,enabled=enabled)
         Text(label)
+    }
+}
+
+
+@Composable private fun AutomationSwitch(
+    glyph: Glyph, label: String, checked: Boolean, supportingText: String? = null,
+    changed: (Boolean) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).toggleable(checked, role = Role.Switch, onValueChange = changed)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        AlphaIcon(glyph)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(label, style = MaterialTheme.typography.titleSmall)
+            if (supportingText != null) Text(supportingText, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked, onCheckedChange = null)
     }
 }
