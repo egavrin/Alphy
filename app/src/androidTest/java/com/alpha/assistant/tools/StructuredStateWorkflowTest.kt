@@ -392,7 +392,8 @@ class StructuredStateWorkflowTest {
         val requests=mutableListOf<CloudRequest>()
         val provider=object: ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent)->Unit) {
-                requests.add(request);emit(CloudEvent.Text(definition.json))
+                requests.add(request)
+                if (!request.replyWithFixturePlan(emit)) emit(CloudEvent.Text(definition.json))
             }
         }
         val engine=ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))

@@ -3,6 +3,7 @@ package com.alpha.assistant.ui
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -19,11 +20,14 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -34,10 +38,19 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.alpha.assistant.R
+import com.alpha.assistant.surfaces.WidgetProjection
+import com.alpha.assistant.surfaces.projectWidget
+import com.alpha.assistant.surfaces.widgetActionId
+import com.alpha.assistant.tools.ToolContent
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
+import com.alpha.assistant.tools.ToolUiCatalog
+import org.json.JSONArray
+import org.json.JSONObject
 import java.text.DateFormat
 import java.util.Date
+
+private val desktopTilePadding = 12.dp
 
 internal data class DesktopTileActions(
     val open: () -> Unit,
@@ -47,13 +60,54 @@ internal data class DesktopTileActions(
 )
 
 @Composable
-internal fun DesktopToolTile(tool: ToolRecord, editing: Boolean, actions: DesktopTileActions) {
+internal fun DesktopToolTile(tool: ToolRecord, editing: Boolean, actions: DesktopTileActions,
+    visible: Boolean = false, onAction: ((String, Any?, () -> Boolean) -> Unit)? = null) {
     val available = remember(tool.spec) { ToolSpec.availablePersisted(tool.spec) != null }
-    DesktopTile(ToolSpec.storedTitle(tool.spec), editing, actions, appIcon = true) {
-        if (!available) {
-            Text(stringResource(R.string.tool_closed_format), style = MaterialTheme.typography.bodySmall)
+    val title = remember(tool.spec) { ToolSpec.storedTitle(tool.spec) }
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val compact = !editing && LocalDensity.current.fontScale < 1.5f && maxWidth - desktopTilePadding * 2 >= 200.dp
+        val active = remember(tool.id, compact, visible) { mutableStateOf(compact && visible) }
+        DisposableEffect(active) { onDispose { active.value = false } }
+        val projection = if (available && compact) remember(tool) { runCatching { projectWidget(tool) }.getOrNull() } else null
+        val content = remember(projection) { projection?.desktopContent() }
+        DesktopTile(title, editing, actions, appIcon = true, openFromHeader = content != null) {
+            when {
+                !available -> Text(stringResource(R.string.tool_closed_format), style = MaterialTheme.typography.bodySmall)
+                content != null -> ToolContent(content, tool.state, enabled = active.value && onAction != null, heading = title,
+                    embedded = true, background = MaterialTheme.colorScheme.surfaceVariant) { action, value ->
+                    onAction?.invoke(action, value) { active.value }
+                }
+                projection != null -> Text(stringResource(R.string.widget_surface), style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
+}
+
+private fun WidgetProjection.desktopContent(): String? {
+    val action = nodes.firstOrNull { it.widgetActionId() != null }
+    val rows = nodes.filter { node ->
+        // The widget's synthetic summaries have no enabled flag. Use the localized tile fallback for them.
+        node.has("enabled") && when (node.getString("type")) {
+            "text" -> !node.has("spans")
+            "metric", "fact", "progress", "progressRing" -> true
+            "timer" -> !node.has("foreground")
+            else -> false
+        }
+    }.sortedByDescending { it.has("bind") }.take(if (action == null) 3 else 2) + listOfNotNull(action)
+    if (rows.isEmpty()) return null
+    val children = rows.map { node ->
+        when (node.getString("type")) {
+            "text", "metric", "fact" -> JSONObject().put("type", "text")
+                .put("text", ToolUiCatalog.widgetLabel(node, state)).put("maxLines", 2).put("overflow", "ellipsis")
+            else -> JSONObject(node.toString()).apply {
+                remove("layout")
+                remove("style")
+                remove("semantics")
+            }
+        }
+    }
+    return JSONObject().put("type", "column").put("style", JSONObject().put("gap", "small"))
+        .put("children", JSONArray(children)).toString()
 }
 
 @Composable
@@ -92,15 +146,16 @@ internal fun DesktopAutomationTile(item: DesktopAutomation, editing: Boolean, ac
 
 @Composable
 internal fun DesktopTile(title: String, editing: Boolean, actions: DesktopTileActions, appIcon: Boolean = false,
+    openFromHeader: Boolean = !appIcon,
     content: @Composable ColumnScope.() -> Unit) {
     val openLabel = stringResource(R.string.desktop_open_tile, title)
     val removeLabel = stringResource(R.string.desktop_remove_tile, title)
     val opener = if (editing) Modifier else Modifier.combinedClickable(role = Role.Button, onClick = actions.open,
         onLongClick = actions.remove, onLongClickLabel = removeLabel).semantics { contentDescription = openLabel }
-    Card(Modifier.fillMaxWidth().then(if (appIcon) opener else Modifier),
+    Card(Modifier.fillMaxWidth().then(if (openFromHeader) Modifier else opener),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).then(if (appIcon) Modifier else opener),
+        Column(Modifier.fillMaxWidth().padding(desktopTilePadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).then(if (openFromHeader) opener else Modifier),
                 horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (appIcon) MiniAppIcon(title)
                 Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleMedium.merge(RussianHyphenation))

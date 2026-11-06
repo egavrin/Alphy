@@ -1063,7 +1063,8 @@ private fun verticalArrangement(style: JSONObject?,gap: Dp): Arrangement.Vertica
                         }
                         DropdownMenu(expanded && enabled,onDismissRequest={expanded=false}) {
                             repeat(options.length()) {index -> val option=options.getJSONObject(index)
-                                DropdownMenuItem(text={Text(option.getString("text"))},onClick={expanded=false; event(action,option.get("value"))})
+                                DropdownMenuItem(text={Text(option.getString("text"))},onClick={expanded=false; event(action,option.get("value"))},
+                                    modifier=Modifier.heightIn(min=48.dp))
                             }
                         }
                     }
@@ -1695,7 +1696,12 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
                 var expanded by remember {mutableStateOf(false)}
                 Box {
                     OutlinedButton(onClick={expanded=true},enabled=enabled) {Text(values.first {selected(it.get("value"))}.getString("text"))}
-                    DropdownMenu(expanded && enabled,{expanded=false}) {values.forEach {option->DropdownMenuItem(text={Text(option.getString("text"))},onClick={expanded=false;choose(option.get("value"))})}}
+                    DropdownMenu(expanded && enabled,{expanded=false}) {
+                        values.forEach { option ->
+                            DropdownMenuItem(text={Text(option.getString("text"))},onClick={expanded=false;choose(option.get("value"))},
+                                modifier=Modifier.heightIn(min=48.dp))
+                        }
+                    }
                 }
             }
             "multiChoice" -> FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {

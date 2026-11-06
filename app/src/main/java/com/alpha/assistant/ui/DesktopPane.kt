@@ -50,6 +50,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.alpha.assistant.R
 import com.alpha.assistant.automations.AutomationResumeResult
 import com.alpha.assistant.courses.CourseSnapshot
@@ -81,6 +83,7 @@ import java.util.TimeZone
     val layout = remember(context, tools) { DesktopLayout(context, tools) }
     val scope = rememberCoroutineScope()
     var editing by rememberSaveable { mutableStateOf(false) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     var choosePlacement by remember { mutableStateOf<DesktopRef.Kind?>(null) }
     var pendingAutomations by remember { mutableStateOf(emptySet<String>()) }
     var automationError by remember { mutableStateOf<Int?>(null) }
@@ -97,7 +100,6 @@ import java.util.TimeZone
     }
     val courses = coursesResult?.getOrNull().orEmpty()
     val courseById = courses.associateBy { it.id }
-    val unfinishedCourse = courses.firstOrNull { !it.progress.isComplete }
     fun openCourse(courseId: String) {
         editing = false
         val lookup = model.resumeDesktopCourse(courseId) ?: return
@@ -167,7 +169,9 @@ import java.util.TimeZone
 
     val greeting = stringResource(greetingRes(LocalTime.now().hour))
     val name = model.snapshot.userName.trim()
-    val attention = automations.filter { it.needsAttention }.take(if (event == null) 2 else 1)
+    val slotsWithoutCalendar = if (event == null) 2 else 1
+    val attention = automations.filter { it.needsAttention }.take(slotsWithoutCalendar)
+    val unfinishedCourse = if (attention.size < slotsWithoutCalendar) courses.firstOrNull { !it.progress.isComplete } else null
     BoxWithConstraints(Modifier.widthIn(max = 620.dp).fillMaxWidth()) {
         val compactText = LocalDensity.current.fontScale < 1.5f
         val columns = if (maxWidth >= 480.dp && compactText) 2 else 1
@@ -294,7 +298,10 @@ import java.util.TimeZone
                     else if (item != null) model.openAutomationSurface(item.rule.id)
                     else if (course != null) openCourse(course.id)
                 }, remove = remove, moveEarlier = move(visible.getOrNull(index - 1)), moveLater = move(visible.getOrNull(index + 1)))
-                if (tool != null) DesktopToolTile(tool, editing, actions)
+                if (tool != null) DesktopToolTile(tool, editing, actions, visible = isDesktopVisible,
+                    onAction = if (!tools.busy && !tools.storageUnavailable) { action, value, active ->
+                        tools.interactFromDesktop(tool, action, value) { active() && lifecycle.currentState == Lifecycle.State.RESUMED }
+                    } else null)
                 else if (course != null) DesktopCourseTile(course, editing, actions)
                 else if (item != null) DesktopAutomationTile(item, editing, actions, switchEnabled = ref.id !in pendingAutomations) { enabled ->
                     if (ref.id !in pendingAutomations) {

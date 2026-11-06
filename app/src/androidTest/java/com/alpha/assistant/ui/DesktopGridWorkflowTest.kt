@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
@@ -17,9 +18,23 @@ import com.alpha.assistant.automations.AutomationReceiver
 import com.alpha.assistant.automations.AutomationRule
 import com.alpha.assistant.automations.AutomationRuntime
 import com.alpha.assistant.automations.AutomationStore
+import com.alpha.assistant.data.Conversation
+import com.alpha.assistant.data.Message
+import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.surfaces.ToolWidgets
+import com.alpha.assistant.surfaces.WidgetPreferences
+import com.alpha.assistant.tools.ArtifactCoordinator
+import com.alpha.assistant.tools.ToolEngine
+import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -42,6 +57,144 @@ class DesktopGridWorkflowTest {
     @After fun remove() {
         fixture.remove()
         fixture.context.deleteDatabase(desktopName)
+    }
+
+    @Test fun tileChatFullViewAndWidgetShareOneCounterAcrossReopen() {
+        val id = "shared-counter"
+        val title = "Shared counter"
+        seedTool(id, title, "Shared total", "Add one", placed = true)
+        fixture.store.saveConversation(Conversation("chat", "Counter discussion", 1, 1,
+            messages = listOf(Message("app", "assistant", "Your counter", 1, "complete", toolId = id, toolRevision = 1))))
+        fixture.install(saveKey = false)
+        fixture.launch().use { scenario ->
+            reveal("Shared total: 0")
+            click("Add one")
+            reveal("Shared total: 1")
+            click(R.string.desktop_edit)
+            reveal(robot.text(R.string.desktop_done))
+            assertNull(robot.find("Add one"))
+            click(R.string.desktop_done)
+
+            robot.openDrawer(scenario)
+            click("Counter discussion")
+            robot.awaitDrawerClosed(scenario)
+            reveal("Shared total: 1")
+            click(R.string.tool_open)
+            reveal(robot.text(R.string.tool_content))
+            reveal("Shared total: 1")
+
+            val context = object : ContextWrapper(fixture.context) {
+                override fun getSharedPreferences(name: String, mode: Int) =
+                    baseContext.getSharedPreferences("${fixture.name}-$name", mode)
+            }
+            val widgetId = 101
+            ToolStore(fixture.context, toolsName).use { store ->
+                val tool = checkNotNull(store.tool(id))
+                val engine = ToolEngine(store, ToolGenerationService(fixture.provider, SandboxClient(context)))
+                ToolWidgets.bind(context, widgetId, id, WidgetPreferences())
+                try {
+                    val action = ToolWidgets.actionIntent(context, widgetId, tool, "add", null)
+                    runBlocking {
+                        assertTrue(ToolWidgets.perform(context, action, store, engine, locked = false))
+                        assertFalse(ToolWidgets.perform(context, action, store, engine, locked = false))
+                    }
+                } finally {
+                    ToolWidgets.remove(context, widgetId)
+                }
+            }
+            reveal("Shared total: 2")
+            assertEquals(2, count(id))
+            robot.back()
+            reveal(robot.text(R.string.tool_library_content))
+            robot.back()
+            reveal(robot.text(R.string.tool_open))
+            reveal("Shared total: 2")
+            robot.back()
+            reveal(robot.text(R.string.desktop_open_tile, title))
+            reveal("Shared total: 2")
+            robot.diagnostics.capture("desktop-shared-counter")
+        }
+        fixture.launch().use {
+            reveal("Shared total: 2")
+            assertEquals(2, count(id))
+        }
+        assertEquals(0, fixture.provider.calls)
+    }
+
+    @Test fun tileActionThatRequestsAnEffectPreservesTheSavedState() {
+        val id = "effect-counter"
+        seedTool(id, "Effect counter", "Effect total", "Try alert", placed = true, alert = true)
+        fixture.install(saveKey = false)
+        fixture.launch().use {
+            val before = record(id)
+            reveal("Effect total: 0")
+            click("Try alert")
+            reveal("Откройте мини-приложение, чтобы выполнить это системное действие.")
+            assertEquals(before, record(id))
+            ToolStore(fixture.context, toolsName).use { assertTrue(it.effects(id).isEmpty()) }
+            click(R.string.desktop_open_tile, "Effect counter")
+            reveal(robot.text(R.string.tool_content))
+            reveal("Effect total: 0")
+        }
+        assertEquals(0, fixture.provider.calls)
+    }
+
+    @Test fun pendingTileActionsExpireAcrossVisibilityAndAvailabilityChanges() = runBlocking {
+        val id = "pending-counter"
+        val header = robot.text(R.string.desktop_open_tile, "Pending counter")
+        seedTool(id, "Pending counter", "Pending total", "Add pending", placed = true)
+        fixture.install(saveKey = false)
+        ToolStore(fixture.context, toolsName).use { store ->
+            fixture.launch().use { scenario ->
+                val controller = checkNotNull(fixture.model).tools
+                suspend fun queueAction(change: () -> Unit) = coroutineScope {
+                    val entered = CompletableDeferred<Unit>()
+                    val release = CompletableDeferred<Unit>()
+                    val barrier = launch(Dispatchers.IO) {
+                        ArtifactCoordinator.get(store, id).ordered {
+                            entered.complete(Unit)
+                            release.await()
+                        }
+                    }
+                    try {
+                        withTimeout(5_000) { entered.await() }
+                        click("Add pending")
+                        robot.waitUntil { controller.busy }
+                        change()
+                    } finally {
+                        release.complete(Unit)
+                        barrier.join()
+                    }
+                    robot.waitUntil { !controller.busy }
+                    assertEquals(0, count(id))
+                    assertTrue(store.effects(id).isEmpty())
+                }
+                queueAction {
+                    robot.openDrawer(scenario)
+                    robot.back()
+                    robot.awaitDrawerClosed(scenario)
+                }
+                queueAction {
+                    store.setDesktopPlacement(checkNotNull(store.tool(id)), false)
+                    robot.waitGone(header)
+                }
+                store.setDesktopPlacement(checkNotNull(store.tool(id)), true)
+                queueAction {
+                    store.setArchived(checkNotNull(store.tool(id)), true)
+                    robot.waitGone(header)
+                }
+                store.setArchived(checkNotNull(store.tool(id)), false)
+                val old = checkNotNull(store.tool(id))
+                click("Add pending")
+                reveal("Pending total: 1")
+                robot.waitUntil { !controller.busy }
+                robot.instrumentation.runOnMainSync { controller.interactFromDesktop(old, "add", null) { true } }
+                robot.waitUntil { !controller.busy }
+                assertEquals(1, count(id))
+                assertTrue(store.effects(id).isEmpty())
+            }
+        }
+        assertEquals(0, fixture.provider.calls)
     }
 
     @Test fun placementOrderAndNativeStateSurviveReopen() {
@@ -358,11 +511,17 @@ class DesktopGridWorkflowTest {
 
     private fun count(id: String) = JSONObject(checkNotNull(record(id)).state).getInt("count")
 
-    private fun seedTool(id: String, title: String, metric: String, button: String, placed: Boolean = false, createdAt: Long = 1) {
-        val spec = ToolSpec.parse("""{"formatVersion":3,"title":"$title","description":"Desktop workflow fixture","capabilities":[],
+    private fun seedTool(id: String, title: String, metric: String, button: String, placed: Boolean = false, createdAt: Long = 1,
+        alert: Boolean = false) {
+        val definition = JSONObject("""{"formatVersion":3,"title":"$title","description":"Desktop workflow fixture","capabilities":[],
             "stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"column","children":[
             {"type":"text","text":"$metric","bind":"count"},{"type":"button","text":"$button","action":"add"}]},
             "source":"if(input.event.type==='action') input.state.count++; return {state:input.state};"}""")
+        if (alert) {
+            definition.put("capabilities", JSONArray().put("vibration.play"))
+            definition.put("source", "input.state.count++; return {state:input.state,effects:[{id:'buzz',capability:'vibration.play',args:{milliseconds:1}}]};")
+        }
+        val spec = ToolSpec.parse(definition.toString())
         ToolStore(fixture.context, toolsName).use { tools ->
             tools.commitTool(ToolRecord(id, 1, 1, spec.json, spec.initialState.toString(), spec.ui.toString(), null, true,
                 createdAt = createdAt, onDesktop = placed), null, true)

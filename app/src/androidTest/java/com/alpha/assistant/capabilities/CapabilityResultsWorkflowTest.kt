@@ -197,16 +197,18 @@ class CapabilityResultsWorkflowTest {
     } }
     @Test fun refinementOmitsLiveStateAndInitialPrivateValues(): Unit = runBlocking { fixture { store, tool ->
         val marker="PRIVATE-RESULT-MARKER"
-        var prompt=""
+        val requests=mutableListOf<CloudRequest>()
         val privateSpec=spec().let { JSONObject(it.json).put("initialState",JSONObject(it.initialState).put("secret",marker)).toString() }
         val base=tool.copy(spec=privateSpec,state=JSONObject(tool.state).put("secret",marker).toString())
         val capture=object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                prompt=request.turns.joinToString { it.text }; emit(CloudEvent.Text(spec().json))
+                requests.add(request)
+                if (!request.replyWithFixturePlan(emit)) emit(CloudEvent.Text(spec().json))
             }
         }
         val result=ToolGenerationService(capture,SandboxClient(context)).generate("fixture","Change label",base,emptyList(),CloudSession(),tool.id)
-        assertFalse(prompt.contains(marker)); assertEquals(marker,JSONObject(result.state).getString("secret"))
+        assertFalse(requests.flatMap { it.turns }.any { marker in it.text })
+        assertEquals(marker,JSONObject(result.state).getString("secret"))
     } }
     // Review regressions: permission changes in the final guard, aggregate IPC limits, resource capacity after expiry,
     // and immutable picker identity across cancellation, rotation, duplicate callbacks, and different owners.

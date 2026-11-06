@@ -85,20 +85,8 @@ class NativeTimerWorkflowTest {
             ToolStore(fixture.context, "${fixture.name}.db-tools.db").use { store ->
                 store.commitTool(initial, null, revision = true)
                 fixture.install()
-                fixture.launch().use { scenario ->
-                    scenario.onActivity { activity ->
-                        val model = checkNotNull(fixture.model)
-                        activity.setContent {
-                            AlphaTheme {
-                                Column(Modifier.safeDrawingPadding()) {
-                                    model.tools.tools.firstOrNull { it.id == initial.id }?.let { record ->
-                                        MiniAppContent(model.tools, record, record, spec.title, enabled = !model.tools.busy, embedded = true)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    robot.waitFor("Разминка: ${robot.text(R.string.tool_timer_idle)}")
+                fixture.launch().use {
+                    robot.reveal("Разминка: ${robot.text(R.string.tool_timer_idle)}")
                     val now = System.currentTimeMillis()
                     val armed = initial.copy(stateVersion = 2, state = JSONObject(initial.state)
                         .put("time", now + 4_000).put("start", now).toString())

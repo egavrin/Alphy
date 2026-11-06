@@ -74,7 +74,7 @@ class DesktopWorkflowTest {
         }
     }
 
-    @Test fun desktopShortcutOpensTheAppAndTheCatalogOnlyBrowsesSavedApps() {
+    @Test fun desktopTileShowsTheSavedValueAndOpensTheApp() {
         val spec = com.alpha.assistant.tools.ToolSpec.parse("""{"formatVersion":3,"title":"Test calculator",
             "description":"","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":7},
             "ui":{"type":"text","text":"Result","bind":"count"},"source":"return {state:input.state};"}""")
@@ -87,7 +87,7 @@ class DesktopWorkflowTest {
         fixture.launch().use { scenario ->
             val shortcut = robot.text(R.string.desktop_open_tile, spec.title)
             robot.waitFor(shortcut)
-            assertNull(robot.find("Result: 7"))
+            robot.reveal("Result: 7")
             robot.click(shortcut)
             robot.waitFor("Result: 7")
             robot.click(robot.text(R.string.tool_library_back))

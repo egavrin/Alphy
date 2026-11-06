@@ -1,11 +1,14 @@
 package com.alpha.assistant.ui
 
 import android.Manifest
+import android.content.ContentValues
 import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
+import android.provider.CalendarContract.Events
 import android.view.accessibility.AccessibilityNodeInfo
 import com.alpha.assistant.R
 import com.alpha.assistant.automations.AutomationStore
+import com.alpha.assistant.capabilities.SyntheticOwnedCalendar
 import com.alpha.assistant.courses.CourseLessonPlan
 import com.alpha.assistant.courses.CourseOutline
 import com.alpha.assistant.courses.CourseSetup
@@ -47,14 +50,11 @@ class DesktopCourseWorkflowTest {
         val older = seedCourse("Older course", reachedLesson = 2)
         val chosen = seedCourse("Chosen course", reachedLesson = 2)
         seedCourse("Completed course", reachedLesson = 2, completed = true)
-        val attention = listOf("Review morning routine", "Review evening routine").map { name ->
-            val rule = seedAutomation(name)
-            robot.text(R.string.desktop_now_automation_detail, name, rule.attention)
-        }
+        val rule = seedAutomation("Review morning routine")
         fixture.install(saveKey = false)
 
         fixture.launch().use {
-            attention.forEach { reveal(it) }
+            reveal(robot.text(R.string.desktop_now_automation_detail, rule.definition.name, rule.attention))
             reveal(robot.text(R.string.desktop_now_course_detail, chosen.setup.topic, 2, 2))
             reveal(robot.text(R.string.desktop_add_course))
             assertNull(robot.find(robot.text(R.string.desktop_edit)))
@@ -77,6 +77,51 @@ class DesktopCourseWorkflowTest {
             assertEquals(listOf(chosen.id), layoutIds())
             assertTrue(checkNotNull(saved(chosen.id)).progress.isComplete)
             assertFalse(checkNotNull(saved(older.id)).progress.isComplete)
+        }
+        assertEquals(0, fixture.provider.calls)
+    }
+
+    @Test fun twoAttentionItemsLeaveTheCourseAvailableFromItsPlacedTile() {
+        assumeTrue(fixture.context.checkSelfPermission(Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED)
+        val course = seedCourse("Offline course", reachedLesson = 2)
+        val attention = listOf(seedAutomation("Morning routine"), seedAutomation("Evening routine"))
+        fixture.install(saveKey = false)
+        fixture.launch().use {
+            attention.forEach { rule -> reveal(robot.text(R.string.desktop_now_automation_detail, rule.definition.name, rule.attention)) }
+            assertNull(robot.find(robot.text(R.string.desktop_now_course_title)))
+            reveal(robot.text(R.string.desktop_add_course))
+            assertNull(robot.find(robot.text(R.string.desktop_now_course_title)))
+            click(R.string.desktop_add_course)
+            click(R.string.desktop_place_course, course.setup.topic)
+            click(R.string.desktop_open_tile, course.setup.topic)
+            robot.waitFor(slideText(course, 2))
+        }
+        assertEquals(0, fixture.provider.calls)
+    }
+
+    @Test fun nextCalendarEventReservesTheSecondSuggestion() {
+        assumeTrue(fixture.context.checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED)
+        seedCourse("Unfinished course", reachedLesson = 2)
+        seedAutomation("Morning routine")
+        seedAutomation("Evening routine")
+        fixture.install(saveKey = false)
+        SyntheticOwnedCalendar(fixture.context).use { calendar ->
+            val start = System.currentTimeMillis() + 30 * 60_000L
+            checkNotNull(fixture.context.contentResolver.insert(Events.CONTENT_URI, ContentValues().apply {
+                put(Events.CALENDAR_ID, calendar.id)
+                put(Events.TITLE, "Synthetic desktop event")
+                put(Events.DTSTART, start)
+                put(Events.DTEND, start + 30 * 60_000L)
+                put(Events.EVENT_TIMEZONE, "UTC")
+            }))
+            fixture.launch().use {
+                reveal(robot.text(R.string.desktop_now_automation_attention))
+                reveal(robot.text(R.string.desktop_now_calendar))
+                assertTrue(robot.texts().any { it.contains("Synthetic desktop event") })
+                assertNull(robot.find(robot.text(R.string.desktop_now_course_title)))
+                reveal(robot.text(R.string.desktop_grid_title))
+                assertNull(robot.find(robot.text(R.string.desktop_now_course_title)))
+            }
         }
         assertEquals(0, fixture.provider.calls)
     }

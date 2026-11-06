@@ -340,13 +340,18 @@ class MiniAppPresentationWorkflowTest {
             var heldDownTime=0L
             fun touch(action: Int?=null,fraction: Float=0.5f) {
                 if(find("Скрыть управление игрой")!=null)click("Скрыть управление игрой")
-                fun canvas(node: AccessibilityNodeInfo?=automation.rootInActiveWindow): AccessibilityNodeInfo? {
+                fun canvas(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
                     if(node==null)return null
-                    if(node.contentDescription?.startsWith("Playback probe.")==true)return node
+                    if(node.isVisibleToUser && node.contentDescription?.startsWith("Playback probe.")==true)return node
                     repeat(node.childCount) {canvas(node.getChild(it))?.let {found -> return found}}
                     return null
                 }
-                val bounds=Rect().also {checkNotNull(canvas()).getBoundsInScreen(it)}
+                val bounds=Rect()
+                waitUntil("The playback canvas did not return after closing the controls") {
+                    val visibleCanvas = canvas(diagnostics.freshRoot()) ?: return@waitUntil false
+                    visibleCanvas.getBoundsInScreen(bounds)
+                    !bounds.isEmpty
+                }
                 if(action==null || action==android.view.MotionEvent.ACTION_DOWN)heldDownTime=SystemClock.uptimeMillis()
                 for(phase in action?.let {listOf(it)} ?: listOf(android.view.MotionEvent.ACTION_DOWN,android.view.MotionEvent.ACTION_UP)) {
                     val event=android.view.MotionEvent.obtain(heldDownTime,SystemClock.uptimeMillis(),phase,bounds.left+bounds.width()*fraction,bounds.exactCenterY(),0)
@@ -985,7 +990,15 @@ class MiniAppPresentationWorkflowTest {
         fixture(specJson=definition.toString(),secondReference=true) {model,store,scenario ->
             val robot=ShellRobot("presentation")
             fun state()=JSONObject(checkNotNull(store.tool("lake")).state)
-            shown("Lake day"); shown("v1")
+            val app = instrumentation.targetContext
+            shown("Lake day")
+            val record = checkNotNull(store.tool("lake"))
+            val versions = app.getString(R.string.tool_details_versions, record.revision, record.stateVersion)
+            assertNull(find(versions))
+            click(app.getString(R.string.tool_card_actions, "Lake day"))
+            click(app.getString(R.string.tool_versions))
+            shown(versions)
+            click(app.getString(R.string.tool_dialog_close))
             click("Bag packed")
             waitUntil {state().getBoolean("packed")}
             click("Add a stop"); waitUntil {state().getInt("count")==1}

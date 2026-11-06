@@ -25,6 +25,8 @@ import com.alpha.assistant.scheduling.ScheduledTicket
 import com.alpha.assistant.scheduling.SourceRefresh
 import com.alpha.assistant.scheduling.SourceRefreshJobService
 import com.alpha.assistant.surfaces.ToolWidgets
+import com.alpha.assistant.surfaces.projectWidget
+import com.alpha.assistant.surfaces.widgetActionId
 import com.alpha.assistant.surfaces.widgetauthoring.WidgetAuthoring
 import com.alpha.assistant.surfaces.widgetauthoring.WidgetAuthoringResult
 import com.alpha.assistant.surfaces.widgetauthoring.WidgetDraftRequest
@@ -593,6 +595,20 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     }
     internal fun interact(t: ToolRecord, action: String, value: Any?, host: DeviceReadHost?, foreground: ()->Boolean, launch: (android.content.Intent)->Unit) {
         interactNative(t,action,value,foreground,launch,null,host)
+    }
+
+    internal fun interactFromDesktop(tool: ToolRecord, action: String, value: Any?, active: () -> Boolean) {
+        if (!active() || storageUnavailable) return
+        afterLiveFinal(tool.id) {
+            check(projectWidget(tool).nodes.firstNotNullOfOrNull { it.widgetActionId() } == action)
+            engine.interact(tool.id, tool.revision, tool.stateVersion, action, value, allowDeviceEffects = false,
+                onWidgetEvaluated = {
+                    if (!withContext(Dispatchers.Main.immediate) { active() }) throw CancellationException("The desktop closed.")
+                    check(store.tool(tool.id)?.let { it.createdAt == tool.createdAt && it.saved && it.onDesktop && !it.archived } == true) {
+                        app.getString(R.string.tool_missing)
+                    }
+                })
+        }
     }
 
     internal fun queueLocalButton(tool: ToolRecord, action: String, host: Any, active: () -> Boolean) {

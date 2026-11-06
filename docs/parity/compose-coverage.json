@@ -5,12 +5,12 @@
   "scope": "Bounded native mappings, not complete Compose or reference parity. Device status requires the evidence record.",
   "source_sha256": {
     "app/src/main/java/com/alpha/assistant/tools/ToolUiCatalog.kt": "2eb9676ea1f3b070c512864cb5610479b88eaf4761cf8e58b57253e1ae3c74e9",
-    "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt": "4e3488a6690c33fcaf0ab3baa874a20571ecf40f82bacaf274996656fe22a14c",
+    "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt": "3144d7ba11ab30d5bb12a3072ce1406ccf8a96ec98d78ed64adcc0ee3954f8b0",
     "app/src/main/java/com/alpha/assistant/tools/ArtifactProtocol.kt": "4086e0e19179654e53bcb090540fae2a6edbd188e5612f21bea2e0ce76140a4a",
     "app/src/main/java/com/alpha/assistant/tools/GraphicsContract.kt": "1627bd924d96cf010c77fde6d33d026d3621e04d75a7b70e663a884bd11cd270",
     "app/src/main/java/com/alpha/assistant/capabilities/CapabilityContract.kt": "fd227f77e467c285741a3d047f64959a55b9a609b3b9ea11ca1f08b726d4d5e8",
     "app/src/main/java/com/alpha/assistant/capabilities/MedicineCapabilities.kt": "ab62bd34ac48e2e7e7cc5560c969e577d8f4dfbc235a1f24559f6357048ae4b9",
-    "app/build.gradle.kts": "d664d12bb38b05fbafc9ce2133dacd7264e491b1daf00c05f8383f3559e0471b"
+    "app/build.gradle.kts": "0e9b91aca7e4bba2545cd51469739bd25773c81d9fc0c8f15528d3e5f161ce24"
   },
   "catalog_types": [
     "actionChip",

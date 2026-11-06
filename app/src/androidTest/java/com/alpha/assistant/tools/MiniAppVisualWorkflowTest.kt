@@ -434,6 +434,17 @@ class MiniAppVisualWorkflowTest {
                                                 step.click?.let(robot::click)
                                                 step.reveal?.let { label -> if (findVisible(label, textOnly = true) == null) robot.reveal(label) }
                                                 if (step.back) robot.back()
+                                                if (key == "choices/select" || key == "choices/menu") {
+                                                    val label = step.check.targets.single()
+                                                    val minimum = (48 * app.resources.displayMetrics.density).toInt()
+                                                    robot.diagnostics.target(label)
+                                                    robot.waitUntil {
+                                                        val item = generateSequence(robot.find(label)) { it.parent }
+                                                            .firstOrNull { it.isClickable && it.isEnabled }
+                                                        val bounds = item?.screenBounds()
+                                                        bounds != null && bounds.width() >= minimum && bounds.height() >= minimum
+                                                    }
+                                                }
                                                 val expansion = if (step.expandSheet) expandSheet(checkNotNull(step.dismiss), safe, requireSheetExpansion) else null
                                                 val editDateRange = key == "forms/date-range"
                                                 val fields = if (editDateRange) reachableDateRangeFields(safe) else emptyList()
