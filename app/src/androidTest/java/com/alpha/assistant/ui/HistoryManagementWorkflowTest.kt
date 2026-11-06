@@ -50,7 +50,7 @@ class HistoryManagementWorkflowTest {
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitFor("Сообщение ассистенту")
                 openSearch(scenario)
-                waitFor(robot.text(R.string.search_row_draft, DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, Locale.forLanguageTag("ru")).format(Date(first.updatedAt))))
+                waitFor(robot.text(R.string.search_row_draft, DateFormat.getDateInstance(DateFormat.SHORT, Locale.forLanguageTag("ru")).format(Date(first.updatedAt))))
                 click("Действия разговора First fixture"); click("Переименовать")
                 edit("Название разговора", " ")
                 waitFor("Введите название")
@@ -67,15 +67,15 @@ class HistoryManagementWorkflowTest {
                 waitUntil { store.load().conversations.size == 1 }
                 assertNull(store.load().selectedId)
                 assertEquals(second, store.load().conversations.single())
-                newChat(scenario); assertEquals(newDraft.text, field("Сообщение ассистенту").text.toString())
-                openSearch(scenario); click("Очистить историю"); click("Отмена")
+                openNewChatFromSearch(scenario); assertEquals(newDraft.text, field("Сообщение ассистенту").text.toString())
+                openSearch(scenario); openClearHistory(); click("Отмена")
                 assertEquals(second, store.load().conversations.single())
                 // Failure case: a query kept through the clear shows «Ничего не найдено» on an empty history.
                 edit("Поиск разговоров", "Second fixture")
-                click("Очистить историю"); waitFor("Черновик нового чата, инструменты и их данные, автоматизации, API-ключи и исходные файлы сохранятся."); click("Очистить всё")
+                openClearHistory(); waitFor("Черновик нового чата, инструменты и их данные, автоматизации, API-ключи и исходные файлы сохранятся."); click("Очистить всё")
                 waitUntil { store.load().conversations.isEmpty() }
                 waitFor(robot.text(R.string.search_empty))
-                newChat(scenario); assertEquals(newDraft.text, field("Сообщение ассистенту").text.toString())
+                openNewChatFromSearch(scenario); assertEquals(newDraft.text, field("Сообщение ассистенту").text.toString())
                 assertEquals("history-test-only", keys.read().getOrThrow())
                 assertEquals(tool, tools.tool(tool.id))
                 val preservedRule = checkNotNull(rules.rule(rule.id))
@@ -125,7 +125,7 @@ class HistoryManagementWorkflowTest {
                 store.writableDatabase.execSQL("DROP TRIGGER fixture_reject_delete")
                 click("Повторить")
                 waitUntil { store.load().conversations.isEmpty() }
-                newChat(scenario)
+                openNewChatFromSearch(scenario)
                 assertEquals("Keep independent draft", field("Сообщение ассистенту").text.toString())
                 assertTrue(store.load().conversations.isEmpty())
                 assertEquals("history-test-only", keys.read().getOrThrow())
@@ -144,6 +144,14 @@ class HistoryManagementWorkflowTest {
         robot.awaitDrawerClosed(scenario)
     }
 
+    private fun openNewChatFromSearch(scenario: ActivityScenario<*>) {
+        robot.click(robot.text(R.string.search_back))
+        newChat(scenario)
+    }
+    private fun openClearHistory() {
+        robot.click(robot.text(R.string.search_history_actions))
+        robot.click(robot.text(R.string.clear_history))
+    }
     private fun openSearch(scenario: ActivityScenario<*>) {
         robot.openDrawer(scenario)
         robot.click(robot.text(R.string.search))

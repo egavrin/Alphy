@@ -200,10 +200,14 @@
     <string name="voice_speech_failed">Не удалось озвучить ответ. Текст ответа сохранён в чате.</string>
     <string name="voice_request_failed">Голосовой сеанс остановлен: ответ не получен. Ваш текст сохранён в истории.</string>
     <string name="search_field">Поиск разговоров</string>
+    <string name="search_back">Назад из поиска</string>
+    <string name="search_recent">Недавние чаты</string>
+    <string name="search_results">Результаты поиска</string>
+    <string name="search_clear_query">Очистить запрос</string>
+    <string name="search_history_actions">Действия с историей</string>
     <string name="search_empty">Здесь появятся ваши разговоры.</string>
     <string name="search_none">Ничего не найдено. Попробуйте другой запрос.</string>
     <string name="search_row_draft">%1$s · черновик</string>
-    <string name="search_row_saved">%1$s · на устройстве</string>
     <string name="conversation_actions">Действия разговора %1$s</string>
     <string name="conversation_rename">Переименовать</string>
     <string name="conversation_delete">Удалить разговор</string>

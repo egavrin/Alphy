@@ -76,7 +76,12 @@ class ShellScreenshotTest {
         screen(directory, "chat")
         open(scenario, R.string.search)
         robot.waitFor(robot.text(R.string.search_field))
+        robot.waitUntil { robot.keyboardTop(scenario) != null }
         screen(directory, "search")
+        robot.edit(robot.text(R.string.search_field), "посмотреть")
+        robot.waitFor(robot.text(R.string.search_results))
+        screen(directory, "search-results")
+        robot.click(robot.text(R.string.search_back))
         open(scenario, R.string.settings)
         robot.click(robot.text(R.string.access))
         robot.waitFor(robot.text(R.string.access_intro))

@@ -1,88 +1,195 @@
 package com.alpha.assistant.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.alpha.assistant.R
 import com.alpha.assistant.data.Conversation
 import java.text.DateFormat
 import java.util.Date
 
-/** «Поиск». The top bar shows the title and «Новый чат», so the page has neither. */
-@Composable internal fun SearchPane(conversations: List<Conversation>, search: String, edit: (String) -> Unit,
-    select: (String) -> Unit, rename: (String, String) -> Unit, delete: (String) -> Unit, clear: () -> Unit) {
+@Composable internal fun SearchPane(
+    conversations: List<Conversation>,
+    search: String,
+    edit: (String) -> Unit,
+    select: (String) -> Unit,
+    rename: (String, String) -> Unit,
+    delete: (String) -> Unit,
+    clear: () -> Unit,
+    back: () -> Unit,
+    focusReady: Boolean,
+) {
     var menuId by rememberSaveable { mutableStateOf<String?>(null) }
     var renameId by rememberSaveable { mutableStateOf<String?>(null) }
     var renameText by rememberSaveable { mutableStateOf("") }
     var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
+    var historyMenu by remember { mutableStateOf(false) }
     var confirmClear by rememberSaveable { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(focusReady) {
+        if (focusReady && renameId == null && deleteId == null && !confirmClear) {
+            focusRequester.requestFocus()
+            keyboard?.show()
+        }
+    }
     // AlphyActivity keeps the default locale, so the Russian locale comes from the configuration.
-    val dates = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, LocalConfiguration.current.locales[0])
-    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
-        val searchLabel = stringResource(R.string.search_field)
-        OutlinedTextField(value = search, onValueChange = edit, placeholder = { Text(searchLabel) }, leadingIcon = { AlphaIcon(Glyph.Search) },
-            modifier = Modifier.fillMaxWidth().padding(vertical = 15.dp).semantics { contentDescription = searchLabel }, singleLine = true, shape = RoundedCornerShape(18.dp))
-        val results = conversations.filter { c -> search.isBlank() || c.title.contains(search, true) || c.messages.any { it.text.contains(search, true) } || c.draft.text.contains(search, true) }
-        LazyColumn(Modifier.weight(1f)) {
+    val locale = LocalConfiguration.current.locales[0]
+    val dates = remember(locale) { DateFormat.getDateInstance(DateFormat.SHORT, locale) }
+    val colors = MaterialTheme.colorScheme
+    val type = MaterialTheme.typography
+    val matchStyle = SpanStyle(color = colors.primary, fontWeight = FontWeight.SemiBold)
+    val hasQuery = search.isNotBlank()
+    val results = remember(conversations, search, matchStyle) {
+        conversations.mapNotNull { chat ->
+            val preview = if (hasQuery) {
+                matchPreview(chat.draft.text, search, matchStyle)
+                    ?: chat.messages.firstNotNullOfOrNull { matchPreview(it.text, search, matchStyle) }
+            } else null
+            SearchResult(chat, preview).takeIf { !hasQuery || preview != null || chat.title.contains(search, ignoreCase = true) }
+        }
+    }
+    // The shell consumes the IME inset except in tabletop mode.
+    Column(Modifier.fillMaxSize().imePadding()) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            GlyphButton(Glyph.Back, stringResource(R.string.search_back), back)
+            Text(stringResource(R.string.search), Modifier.weight(1f).padding(horizontal = 8.dp).semantics { heading() },
+                style = type.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Box {
+                GlyphButton(Glyph.MoreVertical, stringResource(R.string.search_history_actions)) { historyMenu = true }
+                DropdownMenu(expanded = historyMenu, onDismissRequest = { historyMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.clear_history)) },
+                        enabled = conversations.isNotEmpty(),
+                        onClick = { historyMenu = false; confirmClear = true },
+                    )
+                }
+            }
+        }
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 4.dp)) {
+            item {
+                Text(stringResource(if (hasQuery) R.string.search_results else R.string.search_recent),
+                    Modifier.padding(top = 4.dp, bottom = 8.dp).semantics { heading() },
+                    style = type.titleSmall, color = colors.onSurfaceVariant)
+            }
             // A query can stay after «Очистить всё», so an empty history shows search_empty for each query.
-            if (results.isEmpty()) item { Text(stringResource(if (conversations.isEmpty()) R.string.search_empty else R.string.search_none), Modifier.padding(vertical = 24.dp).semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            items(results, key = { it.id }) { c ->
+            if (results.isEmpty()) item {
+                Text(stringResource(if (conversations.isEmpty()) R.string.search_empty else R.string.search_none),
+                    Modifier.padding(vertical = 16.dp).semantics { liveRegion = LiveRegionMode.Polite }, color = colors.onSurfaceVariant)
+            }
+            items(results, key = { it.chat.id }) { (c, preview) ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f).clickable { select(c.id) }.padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text(c.title, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        val draft = c.draft.text.isNotEmpty() || c.draft.attachments.isNotEmpty()
-                        Text(stringResource(if (draft) R.string.search_row_draft else R.string.search_row_saved, dates.format(Date(c.updatedAt))),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.weight(1f).clickable { select(c.id) }.padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Box(Modifier.size(40.dp).background(colors.surfaceContainerHigh, MaterialTheme.shapes.small),
+                            contentAlignment = Alignment.Center) {
+                            AlphaIcon(Glyph.Chat, accent = true)
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(if (hasQuery) highlightedTitle(c.title, search, matchStyle) else AnnotatedString(c.title),
+                                style = type.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            if (preview != null) Text(preview, style = type.bodyMedium, color = colors.onSurfaceVariant,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            val date = dates.format(Date(c.updatedAt))
+                            val draft = c.draft.text.isNotEmpty() || c.draft.attachments.isNotEmpty()
+                            Text(if (draft) stringResource(R.string.search_row_draft, date) else date,
+                                style = type.bodySmall, color = colors.onSurfaceVariant)
+                        }
                     }
                     Box {
                         val actions = stringResource(R.string.conversation_actions, c.title)
-                        GlyphButton(Glyph.More, actions) { menuId = c.id }
+                        GlyphButton(Glyph.MoreVertical, actions) { menuId = c.id }
                         DropdownMenu(expanded = menuId == c.id, onDismissRequest = { menuId = null }) {
                             DropdownMenuItem(text = { Text(stringResource(R.string.conversation_rename)) }, onClick = { renameId = c.id; renameText = c.title; menuId = null })
                             DropdownMenuItem(text = { Text(stringResource(R.string.conversation_delete), color = MaterialTheme.colorScheme.error) }, onClick = { deleteId = c.id; menuId = null })
                         }
                     }
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
         }
-        TextButton(onClick = { confirmClear = true }, enabled = conversations.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.clear_history), color = if (conversations.isNotEmpty()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        val searchLabel = stringResource(R.string.search_field)
+        TextField(
+            value = search,
+            onValueChange = edit,
+            placeholder = { Text(searchLabel) },
+            leadingIcon = { AlphaIcon(Glyph.Search) },
+            trailingIcon = if (search.isEmpty()) null else {
+                {
+                    val label = stringResource(R.string.search_clear_query)
+                    IconButton(onClick = { edit(""); focusRequester.requestFocus(); keyboard?.show() },
+                        modifier = Modifier.size(48.dp).semantics { contentDescription = label }) {
+                        Box(Modifier.size(20.dp).background(colors.onSurfaceVariant, CircleShape), contentAlignment = Alignment.Center) {
+                            AlphaIcon(Glyph.Close, Modifier.size(13.dp), color = colors.surfaceContainerHigh)
+                        }
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 12.dp)
+                .focusRequester(focusRequester).semantics { contentDescription = searchLabel },
+            shape = CircleShape,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = colors.surfaceContainerHigh,
+                unfocusedContainerColor = colors.surfaceContainerHigh,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+            ),
+        )
     }
     if (renameId != null) AlertDialog(onDismissRequest = { renameId = null }, title = { Text(stringResource(R.string.rename_title)) }, text = {
         val renameLabel = stringResource(R.string.rename_label)
@@ -103,4 +210,36 @@ import java.util.Date
         }
     }, confirmButton = { TextButton(onClick = { clear(); confirmClear = false }) { Text(stringResource(R.string.clear_history_confirm)) } },
         dismissButton = { TextButton(onClick = { confirmClear = false }) { Text(stringResource(R.string.cancel)) } })
+}
+
+private data class SearchResult(val chat: Conversation, val preview: AnnotatedString?)
+
+private fun highlightedTitle(title: String, query: String, style: SpanStyle) = buildAnnotatedString {
+    append(title)
+    var start = title.indexOf(query, ignoreCase = true)
+    while (start >= 0) {
+        val end = start + query.length
+        addStyle(style, start, end)
+        start = title.indexOf(query, startIndex = end, ignoreCase = true)
+    }
+}
+
+private fun matchPreview(text: String, query: String, style: SpanStyle): AnnotatedString? {
+    val match = text.indexOf(query, ignoreCase = true)
+    if (match < 0) return null
+    // Keep the match visible when the preview is too narrow to show its context.
+    var start = match
+    if (start > 0 && text[start].isLowSurrogate()) start--
+    var end = (start + 112).coerceAtMost(text.length)
+    if (end < text.length && text[end].isLowSurrogate()) end++
+    return buildAnnotatedString {
+        if (start > 0) append('…')
+        val offset = length - start
+        for (index in start until end) {
+            val character = text[index]
+            append(if (character.isWhitespace()) ' ' else character)
+        }
+        addStyle(style, match + offset, minOf(match + query.length, end) + offset)
+        if (end < text.length) append('…')
+    }
 }

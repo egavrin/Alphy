@@ -236,7 +236,7 @@ import kotlinx.coroutines.launch
                 Column(Modifier.fillMaxSize().then(drawingInsets).onGloballyPositioned {
                     if (destination == null) contextPaneTop = it.boundsInWindow().top
                 }) {
-                    if (!focusedMiniApp && !compact) {
+                    if (!focusedMiniApp && !compact && destination != ShellDestination.Search) {
                         val title = if (destination == ShellDestination.Memory) null else stringResource(destination?.title ?: R.string.app_name)
                         ShellTopBar(title, onMenu = { focus.clearFocus(); scope.launch { drawerState.open() } },
                             onNewChat = if (destination == null && snapshot.selectedId != null) ::newChat else null)
@@ -358,7 +358,12 @@ import kotlinx.coroutines.launch
                                             immersive = currentImmersive, exitImmersive = { immersiveExited = true },
                                             settings = { navigate(ShellDestination.Settings) }) { navigate(null) }
                                     }
-                                    ShellDestination.Search -> SearchPane(currentSnapshot.conversations, search, { search = it }, { model.select(it); navigate(null) }, model::renameConversation, model::deleteConversation, model::clearHistory)
+                                    ShellDestination.Search -> SearchPane(
+                                        currentSnapshot.conversations, search, { search = it },
+                                        select = { model.select(it); navigate(null) },
+                                        rename = model::renameConversation, delete = model::deleteConversation, clear = model::clearHistory,
+                                        back = ::back, focusReady = destination == ShellDestination.Search && drawerState.isClosed && !drawerTargetsOpen,
+                                    )
                                     ShellDestination.Automations -> if (model.tools.storageUnavailable) ToolLibraryUnavailablePane()
                                         else com.alpha.assistant.automations.AutomationsPane(model.tools, automationRequest,
                                             openRuleId = automationRuleId, showAll = { automationRuleId = null }) { automationRequest = null }
