@@ -6,6 +6,7 @@ import android.provider.CalendarContract
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
+import com.alpha.assistant.R
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.data.SecureKeyStore
@@ -19,7 +20,7 @@ import org.junit.Test
 import java.io.File
 import java.util.UUID
 
-/** Actual native clicks, isolated JavaScript, native grants and ordinary Calendar Provider writes. */
+/** Actual native clicks, isolated JavaScript, native controls and ordinary Calendar Provider writes. */
 class OwnedCalendarAuthorizationWorkflowTest {
     private val diagnostics = UiFailureDiagnostics("calendar")
     private val instrumentation=InstrumentationRegistry.getInstrumentation()
@@ -46,7 +47,7 @@ class OwnedCalendarAuthorizationWorkflowTest {
             node=find(label)
             if(node?.isVisibleToUser==true)return@waitUntil true
             if(node!=null)node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
-            else find("Mini-app content")?.let { viewport ->
+            else find("Содержимое мини-приложения")?.let { viewport ->
                 if(viewport.actionList.none {it.id==direction})direction=if(direction==AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                     AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD else AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
                 // A refused scroll is not a failure: a running scroll animation can move the range after the read.
@@ -62,7 +63,7 @@ class OwnedCalendarAuthorizationWorkflowTest {
         while(node!=null && node?.isClickable!=true)node=node?.parent
         assertTrue(diagnostics.click(label,node))
     }
-    private fun workflow(semantic: Boolean,substitute: Boolean,grant: Boolean,bulk: Boolean=false,lateCreate: Boolean=false) {
+    private fun workflow(semantic: Boolean,substitute: Boolean,legacyDenied: Boolean = false,bulk: Boolean=false,lateCreate: Boolean=false) {
         val name="owned-calendar-ui-${UUID.randomUUID()}"
         val shell=ShellStore(context,"$name.db");val store=ToolStore(context,"$name.db-tools.db")
         val keys=SecureKeyStore(context,name,name)
@@ -81,16 +82,15 @@ class OwnedCalendarAuthorizationWorkflowTest {
                 .put("capabilities",JSONArray().put("calendar.createOwned").put("calendar.deleteAllOwned")).put("stateSchema",JSONObject("{\"ready\":\"boolean\"}")).put("initialState",JSONObject("{\"ready\":true}"))
                 .put("ui",node).put("source",source).toString())
             var tool=ToolRecord("calendar-ui",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)
-            store.saveTool(tool,true);if(grant)store.grant(tool.id,capability,true)
+            store.saveTool(tool,true);if(legacyDenied)store.seedLegacyDeviceGrant(tool.id,capability,false)
             if(bulk)kotlinx.coroutines.runBlocking {
-                store.grant(tool.id,"calendar.createOwned",true)
                 val native=OwnedCalendarCapabilities(context,store,unlocked={true})
                 repeat(if(lateCreate)1 else 5) {index ->
                     val old=store.tool(tool.id)!!
                     val createArgs=JSONObject(args.toString()).put("eventKey","bulk-$index").put("title","Synthetic bulk visit $index")
                     store.commitTool(old.copy(stateVersion=old.stateVersion+1),old,false,effects=listOf(CapabilityRequest("seed$index","calendar.createOwned",createArgs)))
                     if(!lateCreate) {
-                        val result=CapabilityBroker(context,store).executeOwned(store.effects(tool.id).last().key,true) {native.execute(it,{true}){}}
+                        val result=CapabilityBroker(context,store).executeOwned(store.effects(tool.id).last().key) {native.execute(it,{true}){}}
                         assertEquals(result.message,"succeeded",result.status)
                     }
                 }
@@ -111,37 +111,39 @@ class OwnedCalendarAuthorizationWorkflowTest {
                         "uiSnapshotException=unknown uiSnapshotPresence=unknown"
                 }
                 if(lateCreate) {
-                    diagnostics.target("Delete all 0 owned events")
-                    shown("Delete all 0 owned events")
-                    click("Просмотреть действие");click("Выполнить это действие")
+                    shown(context.getString(R.string.tool_calendar_delete_all, 0))
+                    kotlinx.coroutines.runBlocking {
+                        val key=store.effects(tool.id).last().key
+                        val native=OwnedCalendarCapabilities(context,store,unlocked={true})
+                        assertEquals("succeeded",CapabilityBroker(context,store).executeOwned(key) {native.execute(it,{true}){}}.status)
+                    }
                     waitUntil {!model.tools.busy && store.effects(tool.id).last().result.status=="succeeded"}
                     assertEquals(tool.stateVersion,store.tool(tool.id)!!.stateVersion)
-                    diagnostics.target("Delete all 1 owned events")
-                    shown("Delete all 1 owned events")
+                    shown(context.getString(R.string.tool_calendar_delete_all, 1))
                 }
-                val label=if(bulk)"Delete all ${if(lateCreate)1 else 5} owned events" else if(semantic)OwnedCalendarContract.label(OwnedCalendarContract.request(node)) else "Show details"
+                val label=if(bulk)context.getString(R.string.tool_calendar_delete_all, if(lateCreate) 1 else 5) else if(semantic)OwnedCalendarContract.label(OwnedCalendarContract.request(node)) else "Show details"
                 click(label)
                 waitUntil {!model.tools.busy && store.effects(tool.id).lastOrNull()?.request?.capability==capability}
                 val effect=store.effects(tool.id).last()
                 val count=context.contentResolver.query(CalendarContract.Events.CONTENT_URI,arrayOf(CalendarContract.Events._ID),
                     "${CalendarContract.Events.CALENDAR_ID}=? AND ${CalendarContract.Events.DELETED}=0",arrayOf(calendar.id.toString()),null)!!.use {cursor->cursor.count}
-                if(semantic && !substitute && grant) {
+                if(semantic && !substitute) {
                     assertEquals(effect.result.message,"succeeded",effect.result.status);assertEquals(if(bulk)0 else 1,count)
                     if(bulk)assertEquals(if(lateCreate)1 else 5,effect.result.data.getInt("deleted"))
                     assertNull(find("Подтвердить системное действие"))
-                } else {assertEquals("pending",effect.phase);assertEquals(0,count)}
+                } else {assertEquals("denied",effect.result.status);assertEquals(0,count)}
                 val dir=File(context.getExternalFilesDir(null),"owned-calendar-evidence").apply {mkdirs()}
-                val stem="ui-$semantic-$substitute-$grant-$bulk-$lateCreate"
+                val stem="ui-$semantic-$substitute-$legacyDenied-$bulk-$lateCreate"
                 automation.takeScreenshot()?.let {image->File(dir,"$stem.png").outputStream().use {out->image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out)};image.recycle()}
-                File(dir,"$stem.json").writeText(JSONObject().put("input",JSONObject().put("semantic",semantic).put("substitute",substitute).put("grant",grant).put("bulk",bulk).put("lateCreate",lateCreate))
-                    .put("expectedRows",if(semantic && !substitute && grant && !bulk)1 else 0).put("observedRows",count).put("effectStatus",effect.result.status).put("effectPhase",effect.phase).toString(2))
+                File(dir,"$stem.json").writeText(JSONObject().put("input",JSONObject().put("semantic",semantic).put("substitute",substitute).put("legacyDenied",legacyDenied).put("bulk",bulk).put("lateCreate",lateCreate))
+                    .put("expectedRows",if(semantic && !substitute && !bulk)1 else 0).put("observedRows",count).put("effectStatus",effect.result.status).put("effectPhase",effect.phase).toString(2))
             }
         }} finally {CloudTestActivity.factory=null;SystemClock.sleep(100);store.close();shell.close();context.deleteDatabase("$name.db");context.deleteDatabase("$name.db-tools.db");context.deleteSharedPreferences(name)}
     }
-    @Test fun approvedPendingCreateRefreshesTheDisplayedDeleteAllSnapshot()=workflow(semantic=true,substitute=false,grant=true,bulk=true,lateCreate=true)
-    @Test fun oneSemanticClickDeletesAllFiveOwnedEventsWithoutAnotherDialog()=workflow(semantic=true,substitute=false,grant=true,bulk=true)
-    @Test fun genericButtonCannotCreate()=workflow(semantic=false,substitute=false,grant=true)
-    @Test fun semanticSelectionCannotSubstituteAnotherEvent()=workflow(semantic=true,substitute=true,grant=true)
-    @Test fun semanticClickCreatesExactlyOneEventWithoutAnotherDialog()=workflow(semantic=true,substitute=false,grant=true)
-    @Test fun semanticClickNeedsExplicitScopedGrant()=workflow(semantic=true,substitute=false,grant=false)
+    @Test fun approvedPendingCreateRefreshesTheDisplayedDeleteAllSnapshot()=workflow(semantic=true,substitute=false,bulk=true,lateCreate=true)
+    @Test fun oneSemanticClickDeletesAllFiveOwnedEventsWithoutAnotherDialog()=workflow(semantic=true,substitute=false,bulk=true)
+    @Test fun genericButtonCannotCreate()=workflow(semantic=false,substitute=false)
+    @Test fun semanticSelectionCannotSubstituteAnotherEvent()=workflow(semantic=true,substitute=true)
+    @Test fun semanticClickCreatesExactlyOneEventWithoutAnotherDialog()=workflow(semantic=true,substitute=false)
+    @Test fun semanticClickIgnoresLegacyDeniedGrant()=workflow(semantic=true,substitute=false,legacyDenied=true)
 }

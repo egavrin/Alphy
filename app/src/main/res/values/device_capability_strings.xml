@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tool_device_actions">Системные функции</string>
+    <string name="tool_device_actions_details">Мини-приложение может запускать эти функции при вашем действии. Для некоторых функций Android запрашивает разрешение или открывает окно выбора.</string>
+    <string name="tool_device_history">История системных действий</string>
+    <string name="tool_device_android_permissions">Разрешения Android</string>
+    <string name="tool_device_open_android_settings">Открыть настройки Android</string>
+    <string name="tool_calendar_choose_writable">Выберите календарь</string>
+    <string name="tool_calendar_no_writable">Нет доступного календаря с напоминаниями. Настройте календарь в Android и повторите выбор.</string>
+    <string name="tool_calendar_unnamed">Календарь без названия</string>
+    <string name="tool_camera_review_title">Сохранить этот снимок?</string>
+    <string name="tool_camera_review_image">Предпросмотр снимка</string>
+    <string name="tool_camera_review_details">Это уменьшенный снимок камеры. Он остаётся на устройстве.</string>
+    <string name="tool_camera_keep">Сохранить снимок</string>
+    <string name="tool_medicine_reactivate">Сохранённые напоминания требуют повторного включения. Выберите то же действие напоминания в мини-приложении, чтобы включить его заново.</string>
+</resources>

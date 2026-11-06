@@ -13,6 +13,12 @@ harness = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(harness)
 
 
+def suite_status(current, total, method, code):
+    return (f"INSTRUMENTATION_STATUS: class=a.B\nINSTRUMENTATION_STATUS: current={current}\n"
+            f"INSTRUMENTATION_STATUS: numtests={total}\nINSTRUMENTATION_STATUS: test={method}\n"
+            f"INSTRUMENTATION_STATUS_CODE: {code}\n")
+
+
 class HarnessBoundaries(unittest.TestCase):
     def failed_fixture(self, directory):
         manifest, report = self.evidence_fixture(directory)
@@ -57,6 +63,62 @@ class HarnessBoundaries(unittest.TestCase):
                 (directory / "manifest.json").write_text(json.dumps(manifest))
                 with self.assertRaises(ValueError):
                     harness.verify_failed(directory)
+
+    def test_failed_evidence_checks_staged_generation_order(self):
+        def record(stage, outcome, code, disposition, attempt=1, **extra):
+            return dict(attempt=attempt, outcome=outcome, stage=stage, failureCode=code,
+                        category="unknown", disposition=disposition, **extra)
+
+        planned = record("plan", "completed", "none", "continue")
+        invalid_plan = record("plan", "rejected", "widget_plan", "correct")
+        sections = record("selector", "completed", "none", "continue", selectorBatch="sections")
+        parts = record("selector", "completed", "none", "continue", selectorBatch="parts")
+        unavailable_parts = record("selector", "providerFailure", "incomplete", "continue", selectorBatch="parts")
+        fallback = record("selector", "rejected", "widget_selector", "continue")
+        question = record("selector", "rejected", "widget_questions", "finish")
+        mixed = record("assembly", "rejected", "widget_incomplete", "finish")
+        auth = record("provider", "providerFailure", "auth", "finish")
+        too_long = record("provider", "providerFailure", "response_length", "correct")
+        validated = record("smoke", "validated", "none", "finish")
+        cases = [
+            (True, [record("plan", "providerFailure", "auth", "finish")], "CloudFailure"),
+            (True, [invalid_plan, {**invalid_plan, "attempt": 2, "disposition": "finish"}], "CloudFailure"),
+            (True, [invalid_plan, {**planned, "attempt": 2}, {**auth, "attempt": 2}], "CloudFailure"),
+            (True, [planned, sections, fallback, question], "CloudFailure"),
+            (True, [planned, sections, record("selector", "providerFailure", "unknown", "finish")], "IllegalArgumentException"),
+            (True, [planned, sections, parts, mixed], "CloudFailure"),
+            (True, [planned, sections, unavailable_parts, fallback, auth], "CloudFailure"),
+            (True, [planned, sections, fallback, too_long, {**auth, "attempt": 2}], "CloudFailure"),
+            (True, [planned, validated], "SQLiteException"),
+            (False, [planned, validated], ""),
+            (False, [planned], "CloudFailure"),
+            (False, [planned, parts, auth], "CloudFailure"),
+            (False, [planned, sections, fallback, parts, auth], "CloudFailure"),
+            (False, [planned, sections, mixed], "CloudFailure"),
+            (False, [planned, sections, unavailable_parts, auth], "CloudFailure"),
+            (False, [planned, sections, question, auth], "CloudFailure"),
+            (False, [invalid_plan, planned, auth], "CloudFailure"),
+            (False, [invalid_plan, {**planned, "attempt": 2}, {**too_long, "attempt": 2}], "CloudFailure"),
+            (False, [planned, {**auth, "disposition": "correct"}, {**auth, "attempt": 2}], "CloudFailure"),
+            (False, [planned, {key: value for key, value in auth.items() if key != "disposition"}], "CloudFailure"),
+            (False, [planned, {**auth, "attempt": 2}], "CloudFailure"),
+        ]
+        for valid, attempts, failure_type in cases:
+            with self.subTest(valid=valid, attempts=attempts), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                manifest, report = self.failed_fixture(directory)
+                report.update(generationAttempts=attempts, failureType=failure_type)
+                (directory / "report.json").write_text(json.dumps(report))
+                manifest["artifacts"]["report.json"] = harness.digest(directory / "report.json")
+                (directory / "manifest.json").write_text(json.dumps(manifest))
+                if valid:
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        self.assertEqual("FAILED", harness.verify_failed(directory))
+                    self.assertNotIn("PASS", output.getvalue())
+                else:
+                    with self.assertRaises(ValueError):
+                        harness.verify_failed(directory)
 
     def test_failed_evidence_requires_hashed_report_identity_and_capture_records(self):
         for name in ("report.json", "identity.json", "instrumentation.log", "capture.log"):
@@ -226,21 +288,25 @@ class HarnessBoundaries(unittest.TestCase):
         self.assertEqual(62, len(reference))
         self.assertEqual(reference, {row["reference"] for row in coverage["reference_ui"]})
         self.assertEqual(inventory["reference_commit"], coverage["reference_commit"])
-        self.assertEqual(49, len(set(coverage["catalog_types"])))
+        self.assertEqual(73, len(coverage["catalog_types"]))
+        self.assertEqual(73, len(set(coverage["catalog_types"])))
         for path, expected in coverage["source_sha256"].items():
             self.assertEqual(expected, harness.digest(harness.ROOT / path), path)
 
     def test_suite_outcome_reads_raw_instrumentation(self):
-        passed = "INSTRUMENTATION_RESULT: stream=\n\nTime: 1.2\n\nOK (2 tests)\n\n\nINSTRUMENTATION_CODE: -1\n"
+        x, y = (suite_status(i, 2, method, 1) for i, method in enumerate(("x", "y"), 1))
+        y_end = suite_status(2, 2, "y", 0)
+        passed = (x + suite_status(1, 2, "x", 0) + y + y_end +
+                  "INSTRUMENTATION_RESULT: stream=\n\nTime: 1.2\n\nOK (2 tests)\n\n\nINSTRUMENTATION_CODE: -1\n")
         self.assertEqual(harness.suite_outcome(passed, set()), {"observed": "passed", "tests": 2, "failures": [], "skipped": []})
-        failed = ("INSTRUMENTATION_STATUS: class=a.B\nINSTRUMENTATION_STATUS: test=x\nINSTRUMENTATION_STATUS_CODE: 1\n"
-                  "INSTRUMENTATION_STATUS: class=a.B\nINSTRUMENTATION_STATUS: stack=java.lang.AssertionError: no\n\tat a.B.x(B.kt:1)\n"
-                  "INSTRUMENTATION_STATUS: test=x\nINSTRUMENTATION_STATUS_CODE: -2\n"
+        failed = (x + "INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: no\n\tat a.B.x(B.kt:1)\n" +
+                  suite_status(1, 2, "x", -2) + y + y_end +
                   "INSTRUMENTATION_RESULT: stream=\n\nFAILURES!!!\nTests run: 2,  Failures: 1\n\n\nINSTRUMENTATION_CODE: -1\n")
         self.assertEqual(harness.suite_outcome(failed, set()), {"observed": "failed", "tests": 2, "failures": ["a.B#x"], "skipped": []})
         self.assertEqual(harness.suite_outcome(failed, {"a.B#x"})["observed"], "passed")
-        assumed = ("INSTRUMENTATION_STATUS: class=a.B\nINSTRUMENTATION_STATUS: test=y\nINSTRUMENTATION_STATUS_CODE: 1\n"
-                   "INSTRUMENTATION_STATUS: class=a.B\nINSTRUMENTATION_STATUS: test=y\nINSTRUMENTATION_STATUS_CODE: -4\n"
+        self.assertEqual("failed", harness.suite_outcome(failed.replace("Failures: 1", "Failures: 2"), {"a.B#x"})["observed"])
+        self.assertEqual("failed", harness.suite_outcome(passed.replace(y_end, "").replace("2 tests", "1 test"), set())["observed"])
+        assumed = (suite_status(1, 1, "y", 1) + suite_status(1, 1, "y", -4) +
                    "INSTRUMENTATION_RESULT: stream=\n\nOK (1 test)\n\n\nINSTRUMENTATION_CODE: -1\n")
         self.assertEqual(harness.suite_outcome(assumed, set()), {"observed": "failed", "tests": 1, "failures": [], "skipped": ["a.B#y"]})
         self.assertEqual(harness.suite_outcome(assumed, set(), {"a.B#y"})["observed"], "passed")
@@ -248,8 +314,8 @@ class HarnessBoundaries(unittest.TestCase):
         self.assertEqual(harness.suite_outcome(crashed, set())["observed"], "failed")
 
     def test_suite_command_uses_only_the_test_emulator(self):
-        command = harness.suite_instrument_command("adb", ["a.B#x", "c.D"], "abc123")
-        self.assertEqual(command[:3], ["adb", "-s", "emulator-5556"])
+        command = harness.suite_instrument_command("adb", ["a.B#x", "c.D"], "abc123", serial="emulator-5560")
+        self.assertEqual(command[:3], ["adb", "-s", "emulator-5560"])
         self.assertEqual(command[command.index("class") + 1], "a.B#x,c.D")
         self.assertEqual(command[-1], "com.alpha.assistant.test/androidx.test.runner.AndroidJUnitRunner")
         self.assertNotIn("class", harness.suite_instrument_command("adb", [], "abc123"))
@@ -257,9 +323,12 @@ class HarnessBoundaries(unittest.TestCase):
     def test_suite_build_failure_records_no_apk_hashes(self):
         with tempfile.TemporaryDirectory() as temporary:
             args = harness.argparse.Namespace(label="red", expect="build-failed", baseline=None, targets=[],
-                                              adb="adb", output=Path(temporary))
+                                              adb="adb", serial="emulator-5556", output=Path(temporary))
+            run = harness.subprocess.run
             def execute(command, **options):
-                return Mock(returncode=1 if command[0] == "./gradlew" else 0, stdout="")
+                if command[0] == "git":
+                    return run(command, **options)
+                return Mock(returncode=1 if command[0] == "./gradlew" else 0, stdout=self.emulator_reply(command))
             with patch.object(harness.subprocess, "run", side_effect=execute), contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(0, harness.suite(args))
             record = json.loads((Path(temporary) / "red/run.json").read_text())
@@ -280,28 +349,45 @@ class HarnessBoundaries(unittest.TestCase):
                                    (["a.B#x", "c.D"], "used")):
                 with self.subTest(targets=targets):
                     args = harness.argparse.Namespace(label="used", expect="passed", baseline=None, targets=targets,
-                                                      adb="/nonexistent/adb", output=Path(temporary))
+                                                      adb="/nonexistent/adb", serial="emulator-5556", output=Path(temporary))
                     with patch.object(harness.subprocess, "run") as execute, self.assertRaises(SystemExit) as refused:
                         harness.suite(args)
                     execute.assert_not_called()
                     self.assertIn(named, str(refused.exception))
 
-    SUITE_PASSED = "INSTRUMENTATION_RESULT: stream=\n\nOK (1 test)\n\n\nINSTRUMENTATION_CODE: -1\n"
-    SUITE_FAILED = ("INSTRUMENTATION_STATUS: class=a.B\nINSTRUMENTATION_STATUS: test=x\nINSTRUMENTATION_STATUS_CODE: -2\n"
+    SUITE_STARTED = suite_status(1, 1, "x", 1)
+    SUITE_PASSED = (SUITE_STARTED + suite_status(1, 1, "x", 0) +
+                    "INSTRUMENTATION_RESULT: stream=\n\nOK (1 test)\n\n\nINSTRUMENTATION_CODE: -1\n")
+    SUITE_FAILED = (SUITE_STARTED + suite_status(1, 1, "x", -2) +
                     "INSTRUMENTATION_RESULT: stream=\n\nFAILURES!!!\nTests run: 1,  Failures: 1\n\n\nINSTRUMENTATION_CODE: -1\n")
 
-    def fake_suite(self, output, label, instrumentation=SUITE_PASSED, installed="f" * 64, test_install=0, baseline=None):
+    @staticmethod
+    def emulator_reply(command):
+        return {"get-state": "device", "ro.kernel.qemu": "1", "ro.build.version.sdk": "29",
+                "ro.build.fingerprint": "fixture/sdk/29", "webviewupdate": "WebView 133 fixture"}.get(command[-1], "")
+
+    def fake_suite(self, output, label, instrumentation=SUITE_PASSED, installed="f" * 64, test_install=0, baseline=None,
+                   *, serial="emulator-5560", emulator=True, installed_test="f" * 64, failed_command=None):
         """Run suite() against a fake device whose built and installed APK hashes are "f" * 64 unless changed."""
         calls = []
+        run = harness.subprocess.run
         def execute(command, **options):
             calls.append((command, options))
+            if command[0] == "git":
+                return run(command, **options)
             if "instrument" in command:
                 options["stdout"].write(instrumentation)
-            replies = {"pm": "package:/data/app/base.apk\n", "sha256sum": installed + "  /data/app/base.apk\n"}
-            return Mock(returncode=test_install if command[-1] == harness.APKS[1] else 0,
-                        stdout=next((reply for word, reply in replies.items() if word in command), ""))
+            reply = self.emulator_reply(command)
+            if command[-1] == "ro.kernel.qemu" and not emulator:
+                reply = "0"
+            elif "pm" in command:
+                reply = "package:/data/app/" + command[-1] + "/base.apk\n"
+            elif "sha256sum" in command:
+                reply = (installed_test if ".test/" in command[-1] else installed) + "  " + command[-1]
+            returncode = test_install if command[-1] == harness.APKS[1] else int(failed_command in command)
+            return Mock(returncode=returncode, stdout=reply)
         args = harness.argparse.Namespace(label=label, expect="passed", baseline=baseline, targets=["a.B#x"],
-                                          adb="/nonexistent/adb", output=output)
+                                          adb="/nonexistent/adb", serial=serial, output=output)
         with patch.object(harness.subprocess, "run", side_effect=execute), patch.object(harness, "digest", return_value="f" * 64), \
                 contextlib.redirect_stdout(io.StringIO()):
             code = harness.suite(args)
@@ -313,6 +399,29 @@ class HarnessBoundaries(unittest.TestCase):
             self.assertEqual((0, "passed"), self.fake_suite(output, "same")[:2])
             self.assertEqual((1, "failed"), self.fake_suite(output, "other-installed-hash", installed="0" * 64)[:2])
             self.assertEqual((1, "failed"), self.fake_suite(output, "test-install-failed", test_install=1)[:2])
+            self.assertEqual((1, "failed"), self.fake_suite(output, "other-test-apk", installed_test="0" * 64)[:2])
+            self.assertEqual((1, "failed"), self.fake_suite(output, "failed-package-lookup", failed_command="pm")[:2])
+            self.assertEqual((1, "failed"), self.fake_suite(output, "failed-installed-hash", failed_command="sha256sum")[:2])
+
+    def test_suite_records_the_selected_emulator_and_rejects_other_devices(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            code, _, calls = self.fake_suite(output, "selected")
+            self.assertEqual(0, code)
+            self.assertTrue(all(c[1:3] == ["-s", "emulator-5560"] for c, _ in calls if c[0] == "/nonexistent/adb"))
+            record = json.loads((output / "selected/run.json").read_text())
+            self.assertEqual("emulator-5560", record["serial"])
+            self.assertEqual({"api": 29, "fingerprint": "fixture/sdk/29", "webView": "WebView 133 fixture"}, record["device"])
+            self.assertEqual("f" * 64, record["installedTestApkSha256"])
+            code, _, calls = self.fake_suite(output, "not-emulator", emulator=False)
+            self.assertEqual(1, code)
+            self.assertFalse(any(c[0] == "./gradlew" or "install" in c for c, _ in calls))
+            with self.assertRaisesRegex(SystemExit, "emulator serial"):
+                self.fake_suite(output, "physical-serial", serial="physical-device")
+
+    def test_suite_rejects_a_finished_empty_run(self):
+        empty = self.SUITE_PASSED.replace("1 test", "0 tests")
+        self.assertEqual("failed", harness.suite_outcome(empty, set())["observed"])
 
     def test_suite_passes_only_failures_that_the_baseline_knows(self):
         with tempfile.TemporaryDirectory() as temporary:

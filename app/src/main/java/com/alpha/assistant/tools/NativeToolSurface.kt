@@ -13,16 +13,20 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.flow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
@@ -32,6 +36,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.alpha.assistant.sandbox.SurfaceFrameMetrics
 import kotlinx.coroutines.*
+import com.alpha.assistant.R
+import com.alpha.assistant.ui.AlphaIcon
+import com.alpha.assistant.ui.StatusLine
+import com.alpha.assistant.ui.Glyph
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -48,15 +56,19 @@ internal class SurfaceEventQueue {
     fun clear()=events.clear()
 }
 
+private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable internal fun NativeToolSurface(tool: ToolRecord,spec: ToolSpec,enabled: Boolean,maxCanvasHeight: Dp,host: ArtifactUiHost,immersive: Boolean=false,covered: Boolean=false,onCoverReady: (Boolean)->Unit = {},topControls: @Composable () -> Unit = {},onSnapshot: (ArtifactSnapshot) -> Unit = {}) {
     val context=LocalContext.current
     val view=LocalView.current
     val lifecycle=LocalLifecycleOwner.current.lifecycle
     var attempt by remember(tool.id,tool.revision) {mutableIntStateOf(0)}
-    var error by remember(tool.id,tool.revision) {mutableStateOf<String?>(null)}
+    var error by remember(tool.id,tool.revision) {mutableStateOf<Int?>(null)}
     var controlsExpanded by remember(tool.id,tool.revision) {mutableStateOf(false)}
     var snapshot by remember(tool.id,tool.revision) {mutableStateOf<ArtifactSnapshot?>(null)}
+    var drawingHost by remember(tool.id,tool.revision,attempt) {mutableStateOf<DrawingHost?>(null)}
+    var requestedImages by remember(tool.id,tool.revision,attempt) {mutableStateOf<Set<String>>(emptySet())}
     var trace by remember(tool.id,tool.revision) {mutableStateOf<SurfaceFrameMetrics.Trace?>(null)}
     val density=LocalDensity.current.density
     val viewportSurface=spec.surfaces.values.singleOrNull()?.takeIf {it.sizing=="viewport"}
@@ -64,22 +76,23 @@ internal class SurfaceEventQueue {
     var acceptedViewport by remember(tool.id,tool.revision) {mutableStateOf<ToolSurface?>(null)}
     if(immersive) ImmersiveSystemBars(error==null)
     val queue=remember(tool.id,tool.revision,attempt) {SurfaceEventQueue()}
-    val effectiveSurfaces=acceptedViewport?.let {listOf(it)} ?: spec.surfaces.values.toList()
+    val effectiveSurfaces=snapshot?.viewport?.let {listOf(it)} ?: spec.surfaces.values.toList()
     val placements=remember(effectiveSurfaces) {surfacePlacements(effectiveSurfaces)}
     val router=remember(tool.id,tool.revision,attempt) {SurfacePointerRouter(spec.surfaces.values.toList())}
     val latestCovered=rememberUpdatedState(covered)
     val latestCoverReady=rememberUpdatedState(onCoverReady)
     val latestHost=rememberUpdatedState(host)
     val latestSnapshot=rememberUpdatedState(onSnapshot)
-    fun enqueue(event: JSONObject) {if(enabled && error==null)try {queue.add(event)}catch(e: Exception) {error=e.message}}
+    fun enqueue(event: JSONObject) {if(enabled && error==null)try {queue.add(event)}catch(_: Exception) {error=R.string.tool_session_input_limit}}
     LaunchedEffect(tool.id,tool.revision,enabled,attempt) {
         if(!enabled)return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             val active=latestHost.value
             val metrics=if(spec.surfaces.isNotEmpty())SurfaceFrameMetrics.start(java.util.UUID.randomUUID().toString(),0) else null
             trace=metrics
-            queue.clear();router.cancel();error=null
+            queue.clear();router.cancel();error=null;acceptedViewport=null
             fun publish(value: ArtifactSnapshot,touchAtNs: Long?=null) {
+                requestedImages=ArtifactProtocol.bitmapHandles(value.surfaces)
                 snapshot=value;latestSnapshot.value(value);metrics?.validated(value.sequence,touchAtNs)
             }
             suspend fun deliver(event: JSONObject,touchAtNs: Long?=null): ArtifactSnapshot {
@@ -93,8 +106,14 @@ internal class SurfaceEventQueue {
             val timers=mutableMapOf<String,Pair<Int,Long>>()
             val input=SurfaceInputState()
             var coverActive=false
+            var openedDrawingHost: DrawingHost?=null
             try {
-                publish(active.open())
+                val opened=active.open()
+                if(spec.surfaces.isNotEmpty()) {
+                    openedDrawingHost=DrawingHost(active,opened.sessionGeneration)
+                    drawingHost=openedDrawingHost
+                }
+                publish(opened)
                 if(viewportSurface!=null) {
                     val size=snapshotFlow {requestedViewport}.filterNotNull().first()
                     var ready=false
@@ -105,13 +124,21 @@ internal class SurfaceEventQueue {
                         }
                     }
                 }
-                for(id in spec.surfaces.keys)deliver(GraphicsContract.event("start",surfaceId=id))
+                publish(active.startSession())
                 while(isActive && error==null) {
                     // Only this coroutine evaluates. The next display tick follows completion, without catch-up.
                     val tick=withFrameNanos {it}
                     val now=SystemClock.elapsedRealtime()
-                    publish(active.snapshot())
-                    check(!context.getSystemService(KeyguardManager::class.java).isKeyguardLocked && context.getSystemService(PowerManager::class.java).isInteractive) {"Session stopped while device is locked. Reopen the mini-app."}
+                    val previous=snapshot
+                    val current=active.snapshot()
+                    publish(current)
+                    if(context.getSystemService(KeyguardManager::class.java).isKeyguardLocked || !context.getSystemService(PowerManager::class.java).isInteractive) {
+                        error=R.string.tool_session_locked
+                        break
+                    }
+                    if(current.frameOwner && !current.fenced && (previous?.frameOwner!=true || previous.fenced)) {
+                        publish(active.startSession())
+                    }
                     for(cancel in input.playback(checkNotNull(snapshot).playback))deliver(cancel)
                     if(checkNotNull(snapshot).playback in setOf("paused","ended"))router.cancel()
                     var entry=queue.next()
@@ -145,7 +172,7 @@ internal class SurfaceEventQueue {
                         }
                         clock.reset();timers.clear()
                     }
-                    if(snapshot?.playback=="playing" && !coverActive && snapshot?.fenced==false) {
+                    if(snapshot?.playback=="playing" && !coverActive && snapshot?.fenced==false && snapshot?.frameOwner==true) {
                         val dt=clock.tick(tick)
                         val subscribed=checkNotNull(snapshot).frames.toList()
                         for(id in subscribed) {
@@ -168,32 +195,62 @@ internal class SurfaceEventQueue {
                     metrics?.paused(coverActive || snapshot?.playback!="playing")
                 }
             } catch(cancel: CancellationException) {throw cancel}
-              catch(e: Exception) {error=e.message ?: "Session stopped. Reopen the mini-app."}
+              catch(_: Exception) {error=R.string.tool_session_stopped}
             finally {
+                if(drawingHost==openedDrawingHost) drawingHost=null
                 withContext(NonCancellable) {
                     for(cancel in input.cancel())runCatching {deliver(cancel)}
                     router.cancel()
-                    if(error==null)try {publish(active.flush())}catch(e: Exception) {error=e.message ?: "The local snapshot could not commit."}
-                    try {active.close()} catch(e: Exception) {error=e.message ?: "The local snapshot could not commit."}
+                    if(error==null)try {publish(active.flush())}catch(_: Exception) {error=R.string.tool_session_save_failed}
+                    try {active.close()} catch(_: Exception) {error=R.string.tool_session_save_failed}
                 }
                 metrics?.stop(if(error==null)"STOPPED" else "ERROR")
                 queue.clear()
             }
         }
     }
+    val imageHost=drawingHost.takeIf {enabled && error==null}
+    val drawingImages=remember(imageHost) {SurfaceBitmapCache()}
+    DisposableEffect(drawingImages) {onDispose {drawingImages.close()}}
+    LaunchedEffect(drawingImages,lifecycle) {
+        val source=imageHost ?: return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            try {
+                val checks=flow {while(currentCoroutineContext().isActive) {emit(Unit);delay(1000)}}
+                combine(snapshotFlow {requestedImages},checks) {handles,_ -> handles}.conflate().collect {handles ->
+                    drawingImages.refresh(handles,
+                        available={source.host.drawingImageAvailable(source.generation,it)},
+                        load={handle,budget -> source.host.loadDrawingImage(source.generation,handle,budget)},
+                        stillRequested={handle -> drawingHost==source && error==null && handle in requestedImages})
+                }
+            } finally {drawingImages.clear()}
+        }
+    }
+    val scheme = MaterialTheme.colorScheme
+    val canvasBackground = scheme.surface
+    val roleColors = remember(scheme) {
+        ToolUiCatalog.tones.associateWith { scheme.toolInk(it, canvasBackground).toArgb() }
+    }
     val stage: @Composable () -> Unit = {
         if(placements.isNotEmpty()) {
             val stageWidth=placements.maxOf {it.x+it.surface.width}
             val stageHeight=placements.maxOf {it.y+it.surface.height}
+            val inputWidth=acceptedViewport?.width ?: stageWidth
+            val inputHeight=acceptedViewport?.height ?: stageHeight
             val current=snapshot
-            val labels=placements.joinToString(" ") {surfaceLabels(current?.surfaces?.optJSONObject(it.surface.id)?.optJSONArray("commands") ?: JSONArray())}
+            val resources=LocalResources.current
+            val labels=placements.joinToString(" ") {
+                surfaceLabels(current?.surfaces?.optJSONObject(it.surface.id)?.optJSONArray("commands") ?: JSONArray(),drawingImages.images.keys) {label ->
+                    resources.getString(R.string.tool_image_unavailable,label)
+                }
+            }
             BoxWithConstraints(if(immersive)Modifier.fillMaxSize() else Modifier.fillMaxWidth(),contentAlignment=Alignment.Center) {
                 val ratio=stageWidth.toFloat()/stageHeight
                 val canvasModifier=if(viewportSurface!=null) {
                     val measured=if(immersive)Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(maxCanvasHeight)
                     measured.onSizeChanged {if(it.width>0 && it.height>0)requestedViewport=surfaceViewport(viewportSurface,it.width,it.height,density)}
                 } else Modifier.width(minOf(maxWidth,(if(immersive)maxHeight else minOf(maxCanvasHeight,maxHeight))*ratio)).aspectRatio(ratio)
-                Canvas(canvasModifier.background(Color(0xFF101827))
+                Canvas(canvasModifier.background(canvasBackground)
                     .semantics {contentDescription="${spec.title}. $labels"}
                     .pointerInput(tool.id,tool.revision,enabled,snapshot?.playback in setOf("ready","playing"),error==null,attempt,acceptedViewport,requestedViewport,covered) {
                         if(!enabled || covered || snapshot?.playback !in setOf("ready","playing") || error!=null || viewportSurface!=null && acceptedViewport!=requestedViewport)return@pointerInput
@@ -203,7 +260,7 @@ internal class SurfaceEventQueue {
                                 for(change in event.changes) {
                                     if(!change.pressed && !change.previousPressed)continue
                                     val phase=when {change.pressed && !change.previousPressed -> "down";!change.pressed -> "up";else -> "move"}
-                                    val routed=router.route(change.id.value,phase,change.position.x.toDouble()/size.width*stageWidth,change.position.y.toDouble()/size.height*stageHeight)
+                                    val routed=router.route(change.id.value,phase,change.position.x.toDouble()/size.width*inputWidth,change.position.y.toDouble()/size.height*inputHeight)
                                     if(routed!=null) {enqueue(routed);change.consume()}
                                 }
                             }
@@ -219,7 +276,7 @@ internal class SurfaceEventQueue {
                             val surfaceSaved=canvas.save()
                             try {
                                 canvas.translate(placement.x.toFloat(),placement.y.toFloat())
-                                drawSurfaceFrame(canvas,surface,commands,surface.width.toFloat(),surface.height.toFloat())
+                                drawSurfaceFrame(canvas,surface,commands,surface.width.toFloat(),surface.height.toFloat(),roleColors,drawingImages.images)
                             } finally {canvas.restoreToCount(surfaceSaved)}
                         }
                     } finally {canvas.restoreToCount(saved)}
@@ -239,35 +296,48 @@ internal class SurfaceEventQueue {
                 val event=when(playback) {"ready" -> "start"; "paused" -> "resume"; else -> "pause"}
                 for(id in spec.surfaces.keys)enqueue(GraphicsContract.event(event,surfaceId=id))
             },enabled=enabled && !covered && error==null && snapshot!=null,modifier=Modifier.heightIn(min=48.dp)) {
-                Text(when(playback) {"ready" -> "Start"; "paused" -> "Resume"; else -> "Pause"})
+                Text(stringResource(when(playback) {"ready" -> R.string.tool_game_start; "paused" -> R.string.tool_game_resume; else -> R.string.tool_game_pause}))
             }
-            TextButton(onClick={if(error!=null) {attempt++;error=null}else for(id in spec.surfaces.keys)enqueue(GraphicsContract.event("restart",surfaceId=id))},enabled=enabled && !covered,modifier=Modifier.heightIn(min=48.dp)) {Text("Restart")}
+            TextButton(onClick={if(error!=null) {attempt++;error=null}else for(id in spec.surfaces.keys)enqueue(GraphicsContract.event("restart",surfaceId=id))},enabled=enabled && !covered,modifier=Modifier.heightIn(min=48.dp)) {Text(stringResource(R.string.tool_game_restart))}
     }
     val movementControls: @Composable (Modifier,ToolSurface) -> Unit = {modifier,surface ->
-        for(direction in listOf("left","right"))Button(onClick={enqueue(GraphicsContract.event("control",direction=direction,surfaceId=surface.id))},enabled=enabled && !covered && error==null,modifier=modifier.heightIn(min=48.dp),contentPadding=PaddingValues(horizontal=8.dp)) {Text(direction.replaceFirstChar(Char::uppercase))}
+        for(direction in listOf("left","right"))Button(onClick={enqueue(GraphicsContract.event("control",direction=direction,surfaceId=surface.id))},enabled=enabled && !covered && error==null,modifier=modifier.heightIn(min=48.dp),contentPadding=PaddingValues(horizontal=8.dp)) {Text(stringResource(if(direction == "left") R.string.tool_game_left else R.string.tool_game_right))}
     }
+    val showControls = stringResource(R.string.tool_game_controls_open)
+    val gameControls = stringResource(R.string.tool_game_controls)
     if(immersive) Box(Modifier.fillMaxSize()) {
         stage()
-        if(!controlsExpanded && error==null)IconButton(onClick={controlsExpanded=true},modifier=Modifier.align(Alignment.TopEnd).windowInsetsPadding(WindowInsets.displayCutout.union(WindowInsets.systemGestures.only(WindowInsetsSides.Horizontal))).size(48.dp).semantics {contentDescription="Show game controls"}) {
-            Canvas(Modifier.size(21.dp)) {
-                for(y in listOf(0.25f,0.5f,0.75f))drawLine(Color.White,Offset(size.width*0.15f,size.height*y),Offset(size.width*0.85f,size.height*y),strokeWidth=2.dp.toPx())
+        if(!controlsExpanded && error==null)IconButton(onClick={controlsExpanded=true},modifier=Modifier.align(Alignment.TopEnd).windowInsetsPadding(WindowInsets.displayCutout.union(WindowInsets.systemGestures.only(WindowInsetsSides.Horizontal))).size(48.dp).semantics {contentDescription=showControls}) {
+            Surface(shape = MaterialTheme.shapes.small, color = scheme.surfaceContainerHigh, contentColor = scheme.onSurface) {
+                AlphaIcon(Glyph.Menu, Modifier.padding(6.dp), color = LocalContentColor.current)
             }
         }
         if(controlsExpanded || error!=null)Surface(Modifier.align(Alignment.TopCenter).safeDrawingPadding().windowInsetsPadding(WindowInsets.systemGestures),color=MaterialTheme.colorScheme.surface) {
-            Column(Modifier.verticalScroll(rememberScrollState()).semantics {contentDescription="Native game controls"}) {
-                TextButton(onClick={controlsExpanded=false},modifier=Modifier.align(Alignment.End).heightIn(min=48.dp)) {Text("Hide game controls")}
+            Column(Modifier.verticalScroll(rememberScrollState()).semantics {contentDescription=gameControls}) {
+                TextButton(onClick={controlsExpanded=false},modifier=Modifier.align(Alignment.End).heightIn(min=48.dp)) {Text(stringResource(R.string.tool_game_controls_close))}
                 topControls()
                 if(spec.surfaces.isNotEmpty())FlowRow(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(4.dp)) {
                     for(surface in spec.surfaces.values)movementControls(Modifier.widthIn(min=48.dp),surface)
                     playbackControls()
                 }
-                error?.let {Text(it,color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall)}
+                error?.let {StatusLine(Glyph.Close, scheme.error, stringResource(it))}
             }
         }
     } else Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
         stage()
         for(surface in spec.surfaces.values)Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {movementControls(Modifier.weight(1f),surface)}
-        if(error!=null || spec.surfaces.isNotEmpty())Text(error ?: snapshot?.playback?.replaceFirstChar(Char::uppercase) ?: "Starting",style=MaterialTheme.typography.bodySmall,color=if(error==null)MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error)
+        val failure = error
+        if(failure != null) StatusLine(Glyph.Close, scheme.error, stringResource(failure))
+        else if(spec.surfaces.isNotEmpty()) {
+            val (icon, label) = when(snapshot?.playback) {
+                "ready" -> Glyph.Check to R.string.tool_game_ready
+                "playing" -> Glyph.Arrow to R.string.tool_game_playing
+                "paused" -> Glyph.Stop to R.string.tool_game_paused
+                "ended" -> Glyph.Stop to R.string.tool_game_ended
+                else -> Glyph.History to R.string.tool_game_starting
+            }
+            StatusLine(icon, LocalContentColor.current, stringResource(label))
+        }
         if(spec.surfaces.isNotEmpty())Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {playbackControls()}
     }
 }

@@ -1,0 +1,33 @@
+<resources>
+    <string name="automation_test_once">Проверить</string>
+    <string name="automation_test_title">Проверить один раз?</string>
+    <string name="automation_test_run">Выполнить один раз</string>
+    <string name="automation_test_cancel">Отмена</string>
+    <string name="automation_test_cancel_remaining">Отменить оставшиеся действия</string>
+    <string name="automation_test_running">Выполняется разовая проверка…</string>
+    <string name="automation_test_explanation">Сценарий останется выключенным. Разрешение действует только на указанные действия этой проверки.</string>
+    <string name="automation_test_rule">%1$s · версия %2$d</string>
+    <string name="automation_test_step">%1$d. %2$s</string>
+    <string name="automation_test_tool_target">Мини-приложение %1$s · версия %2$d</string>
+    <string name="automation_test_before">До: %1$s</string>
+    <string name="automation_test_after">После: %1$s</string>
+    <string name="automation_test_ui_changed">Отображение мини-приложения также обновится.</string>
+    <string name="automation_test_range">Период: %1$s — %2$s</string>
+    <string name="automation_test_calendar_source">Данные прочитаны %1$s. Проверка использует этот снимок.</string>
+    <string name="automation_test_calendar">Календарь %1$s</string>
+    <string name="automation_test_calendar_empty">Событий в выбранном периоде нет.</string>
+    <string name="automation_test_calendar_limit">Показаны первые 50 событий выбранного периода.</string>
+    <string name="automation_test_event">%1$s · %2$s — %3$s</string>
+    <string name="automation_test_notification">Уведомление Alphy: %1$s</string>
+    <string name="automation_test_link">Открыть ссылку: %1$s</string>
+    <string name="automation_test_app">Открыть приложение: %1$s</string>
+    <string name="automation_test_maps">Открыть поиск на карте: %1$s</string>
+    <string name="automation_test_calendar_form">Открыть форму события: %1$s</string>
+    <string name="automation_test_calendar_location">Место: %1$s</string>
+    <string name="automation_test_external">Alphy откроет интерфейс. Действие в другом приложении выполняешь ты.</string>
+    <string name="automation_test_permission_denied">Для разовой проверки нужен доступ Android. Сценарий остался выключенным.</string>
+    <string name="automation_test_app_settings">Настройки Android</string>
+    <string name="automation_test_app_camera">Камера</string>
+    <string name="automation_test_app_browser">Браузер</string>
+    <string name="automation_test_app_calendar">Календарь</string>
+</resources>

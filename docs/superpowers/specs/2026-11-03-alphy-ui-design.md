@@ -696,9 +696,8 @@ Test it with `logprobs: true`, `top_logprobs: 20`, and `thinking: {type: "disabl
 - The renderer requires the current `theme` node (5.12). A change to the icon set can also change the accepted glyph names.
 - Store one network grant per mini-app and the current activation for each scheduled action. Keep grants and provider credentials separate from exported app data.
 - Save imports and manual edits only after validation. An import, edit, or cancellation cannot silently remove or replace existing user data.
-- (Builder) Data from earlier development versions:
-  - `AGENTS.md` forbids migrations only for earlier versions, and it forbids a silent delete.
-  - When a store cannot open earlier data, Alphy tells the user, and the user deletes it explicitly. The automation screen already does this («Не удалось открыть сценарии. Данные не удалены.», `automations/AutomationUi.kt`).
+- Alphy opens the existing mini-app library and creates any missing parts of the current storage structure in one transaction. Existing records, chats, and credentials stay available.
+- If the library cannot open, Alphy shows a plain error and preserves the original files. An existing library selection continues to isolate widgets and scheduled actions by library identity.
 
 ## 9. Quality and verification
 

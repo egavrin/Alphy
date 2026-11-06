@@ -6,6 +6,8 @@ import androidx.test.core.app.ActivityScenario
 import com.alpha.assistant.R
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Test
 import java.time.LocalTime
 
@@ -19,41 +21,102 @@ class DesktopWorkflowTest {
         .map { greetingRes((LocalTime.now().hour + it + 24) % 24) }
         .map { robot.text(R.string.greeting_named, robot.text(it), name) }
 
-    @Test fun desktopGreetsByNameAndSuggestsLocally() {
+    @Test fun desktopGreetsByNameWithoutSyntheticStatusCards() {
         fixture.install(saveKey = false)
         fixture.store.saveSetting("userName", "Евгений")
         fixture.launch().use { scenario ->
             robot.waitUntil { greetings("Евгений").any { robot.find(it) != null } }
             robot.waitFor(robot.text(R.string.desktop_prompt))
-            robot.waitFor(robot.text(R.string.now_title))
-            robot.click(robot.text(R.string.now_connect_title))
-            robot.waitUntil { robot.secure(scenario) }
-            robot.back()
-            robot.click(robot.text(R.string.now_day_title))
-            robot.waitFor(robot.text(R.string.automations))
-            robot.waitFor("Предложение из запроса: $MY_DAY_REQUEST")
+            assertNull(robot.find(robot.text(R.string.now_connect_title)))
+            assertNull(robot.find(robot.text(R.string.now_day_title)))
+            robot.assertTarget(robot.text(R.string.composer_label))
         }
     }
 
     @Test fun desktopSendOpensChatAndBackReturns() {
         fixture.install()
         fixture.launch().use {
-            robot.waitFor(robot.text(R.string.now_mini_app_title))
-            robot.assertTarget(robot.text(R.string.composer_label))
-            robot.instrumentation.waitForIdleSync()
-            assertEquals(0, fixture.provider.calls)
-            robot.click(robot.text(R.string.now_day_title))
-            robot.waitFor(robot.text(R.string.automations))
-            robot.back()
             robot.waitFor(robot.text(R.string.desktop_prompt))
+            robot.assertTarget(robot.text(R.string.composer_label))
+            robot.diagnostics.capture("desktop-home")
+            robot.instrumentation.waitForIdleSync()
             assertEquals(0, fixture.provider.calls)
             robot.edit(robot.text(R.string.composer_label), "Desktop question")
             robot.click(robot.text(R.string.composer_send))
             robot.waitFor("Fixture response")
             assertEquals(1, fixture.provider.calls)
+            assertEquals(1, robot.texts().count { it.trim() == "Desktop question" })
+            robot.diagnostics.capture("desktop-chat")
             robot.back()
             robot.waitGone("Fixture response")
             robot.waitFor(robot.text(R.string.desktop_prompt))
+        }
+    }
+
+    @Test fun explicitAutomationRequestOpensReviewFromTheComposerWithoutEnablingARule() {
+        fixture.install(saveKey = false)
+        fixture.launch().use {
+            val request = "Создай автоматизацию Мой день из календаря каждый день в 08:00"
+            robot.edit(robot.text(R.string.composer_label), request)
+            robot.click(robot.text(R.string.composer_send))
+            robot.waitFor(robot.text(R.string.automation_editor_local_proposal))
+            assertEquals(0, fixture.provider.calls)
+            robot.reveal(robot.text(R.string.cancel), null)
+            robot.click(robot.text(R.string.cancel))
+            robot.waitFor(robot.text(R.string.chat_automation_setup))
+            com.alpha.assistant.automations.AutomationStore(fixture.context, checkNotNull(fixture.model).tools.automationDatabase).use {
+                assertEquals(emptyList<com.alpha.assistant.automations.AutomationRule>(), it.rules())
+            }
+        }
+    }
+
+    @Test fun desktopShortcutOpensTheAppAndTheCatalogOnlyBrowsesSavedApps() {
+        val spec = com.alpha.assistant.tools.ToolSpec.parse("""{"formatVersion":3,"title":"Test calculator",
+            "description":"","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":7},
+            "ui":{"type":"text","text":"Result","bind":"count"},"source":"return {state:input.state};"}""")
+        val tool = com.alpha.assistant.tools.ToolRecord("catalog-calculator", 1, 1, spec.json,
+            spec.initialState, spec.ui.toString(), null, true, onDesktop = true)
+        com.alpha.assistant.tools.ToolStore(fixture.context, "${fixture.store.databaseName}-tools.db").use {
+            it.saveTool(tool, true)
+        }
+        fixture.install(saveKey = false)
+        fixture.launch().use { scenario ->
+            val shortcut = robot.text(R.string.desktop_open_tile, spec.title)
+            robot.waitFor(shortcut)
+            assertNull(robot.find("Result: 7"))
+            robot.click(shortcut)
+            robot.waitFor("Result: 7")
+            robot.click(robot.text(R.string.tool_library_back))
+            robot.waitFor(robot.text(R.string.tool_search))
+            assertNull(robot.find(robot.text(R.string.tool_request)))
+            robot.edit(robot.text(R.string.tool_search), "unmatched")
+            robot.waitFor(robot.text(R.string.tool_no_matches))
+            robot.edit(robot.text(R.string.tool_search), "calculator")
+            robot.click(spec.title)
+            robot.waitFor("Result: 7")
+            assertNotNull(fixture.model?.tools?.selectedId)
+            robot.diagnostics.capture("catalog-direct-open")
+        }
+    }
+
+    @Test fun newChatAndSettingsKeepTheirSeparatePurpose() {
+        fixture.install(saveKey = false)
+        fixture.store.saveSetting("userName", "Евгений")
+        fixture.launch().use { scenario ->
+            robot.openDrawer(scenario)
+            assertNull(robot.find(robot.text(R.string.access)))
+            robot.click(robot.text(R.string.new_chat))
+            robot.awaitDrawerClosed(scenario)
+            robot.waitUntil { greetings("Евгений").any { robot.find(it) != null } }
+            robot.waitGone(robot.text(R.string.desktop_grid_title))
+            robot.assertTarget(robot.text(R.string.composer_label))
+            robot.openDrawer(scenario)
+            robot.click(robot.text(R.string.settings))
+            robot.awaitDrawerClosed(scenario)
+            robot.reveal(robot.text(R.string.access))
+            robot.click(robot.text(R.string.access))
+            robot.reveal(robot.text(R.string.access_calendar))
+            robot.diagnostics.capture("permissions-in-settings")
         }
     }
 
@@ -69,8 +132,9 @@ class DesktopWorkflowTest {
             fixture.seedChat("long", title, "Long chat message")
             fixture.launch().use { scenario ->
                 scenario.onActivity { assertEquals(2f, it.resources.configuration.fontScale) }
-                for (id in listOf(R.string.menu, R.string.new_chat, R.string.composer_label, R.string.composer_send))
+                for (id in listOf(R.string.menu, R.string.composer_label, R.string.composer_send))
                     robot.assertTarget(robot.text(id))
+                assertNull(robot.find(robot.text(R.string.new_chat)))
                 robot.waitUntil { greetings(name).any { robot.find(it) != null } }
                 robot.openDrawer(scenario)
                 robot.assertTarget(robot.text(R.string.settings))
@@ -107,7 +171,7 @@ class DesktopWorkflowTest {
                 robot.click("Wide chat")
                 robot.awaitDrawerClosed(scenario)
                 robot.waitFor("Wide chat message")
-                assertCentered(scenario, "chat")
+                assertCentered(scenario, "chat-content")
             } finally { robot.rotate(scenario, landscape = false) }
         }
     }

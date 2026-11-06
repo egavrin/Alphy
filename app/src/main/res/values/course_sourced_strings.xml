@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="course_sourced_open">Подготовить слайд с источниками</string>
+    <string name="course_sourced_query">Запрос для поиска</string>
+    <string name="course_sourced_submit">Найти и подготовить</string>
+    <string name="course_sourced_continue">Продолжить без источников</string>
+    <string name="course_sourced_cancel">Отмена</string>
+    <string name="course_sourced_waiting">Ищем источники и готовим слайд…</string>
+    <string name="course_sourced_invalid_query">Введите запрос для поиска длиной до 128 символов.</string>
+    <string name="course_sourced_unavailable">Поиск сейчас недоступен. Попробуйте ещё раз.</string>
+    <string name="course_sourced_empty">Поиск не вернул источников. Уточните запрос.</string>
+    <string name="course_sourced_failed">Не удалось выполнить поиск. Попробуйте ещё раз.</string>
+    <string name="course_sourced_stale">Позиция курса изменилась. Закройте окно и проверьте план курса.</string>
+    <string name="course_sourced_missing_attribution">Слайд сохранился без источников. Закройте окно, чтобы проверить план курса.</string>
+</resources>

@@ -26,7 +26,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -35,17 +34,21 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.alpha.assistant.R
-import com.alpha.assistant.capabilities.AssistantSettingsRow
+import com.alpha.assistant.capabilities.AccessSettings
 
 /** «Настройки». The top bar shows the title, so the page has none. */
-@Composable internal fun SettingsPane(model: ShellViewModel) {
-    val context = LocalContext.current
+@Composable internal fun SettingsPane(
+    model: ShellViewModel,
+    openAtUpdates: Boolean,
+    openUpdateInstaller: () -> Unit,
+    openMemory: () -> Unit,
+) {
     val status = model.keyStatus
     // remember, not rememberSaveable, so a recreation clears the typed key.
     var key by remember { mutableStateOf("") }
+    var showAccess by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
-    val version = remember(context) { @Suppress("DEPRECATION") context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty() }
-    val scroll = rememberScrollState()
+    val scroll = rememberScrollState(initial = if (openAtUpdates) Int.MAX_VALUE else 0)
     // The key buttons are below the consent text, so a key action that changes the status scrolls the page up to the new status.
     var shownStatus by remember { mutableStateOf(status) }
     LaunchedEffect(status) {
@@ -54,6 +57,12 @@ import com.alpha.assistant.capabilities.AssistantSettingsRow
         if (previous != KeyStatus.Checking && previous != status) scroll.animateScrollTo(0)
     }
     Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(horizontal = 24.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { showAccess = !showAccess }) { Text(stringResource(R.string.access)) }
+            TextButton(onClick = openMemory) { Text(stringResource(R.string.memory_title)) }
+        }
+        if (showAccess) AccessSettings(model.tools.networkAccessHost)
+        HorizontalDivider()
         Heading(R.string.settings_deepseek)
         when (status) {
             KeyStatus.Ready -> StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(R.string.key_ready), PoliteLiveRegion)
@@ -95,9 +104,8 @@ import com.alpha.assistant.capabilities.AssistantSettingsRow
         Heading(R.string.settings_voice)
         VoiceControls(model)
         HorizontalDivider()
-        Heading(R.string.settings_assistant)
-        AssistantSettingsRow()
-        Text(stringResource(R.string.app_version, version), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Heading(R.string.update_title)
+        UpdateSettings(model.updates, openUpdateInstaller)
     }
     if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text(stringResource(R.string.key_delete_title)) },
         text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(stringResource(R.string.key_delete_text)) } },

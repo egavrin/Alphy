@@ -51,7 +51,7 @@ class NativeImageLifecycleTest {
                 .put("ui",JSONObject("""{"type":"image","text":"Photo","bind":"photo"}"""))
                 .put("source","return {state:input.state};").toString())
             val tool=ToolRecord(UUID.randomUUID().toString(),1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)
-            store.saveTool(tool,true); store.grant(tool.id,"photo.pick",true)
+            store.saveTool(tool,true)
             val resource=CapabilityResource("a".repeat(64),tool.id,"photo","content://native-image-fixture/photo","image/png",12,false,false,ToolStore.processSession,Long.MAX_VALUE)
             store.insertResource(resource)
             val manager=CapabilityResources(context,store,permissionCheck={true})

@@ -25,13 +25,20 @@ class AccessPageWorkflowTest {
         try {
             fixture.launch().use { scenario ->
                 robot.openDrawer(scenario)
-                robot.click(robot.text(R.string.access))
+                robot.click(robot.text(R.string.settings))
                 robot.awaitDrawerClosed(scenario)
-                assertTrue("The microphone row title is a heading", robot.waitFor(robot.text(R.string.access_microphone)).isHeading)
+                robot.click(robot.text(R.string.access))
+                robot.waitFor(robot.text(R.string.access_intro))
+                assertTrue("The microphone row title is a heading", robot.reveal(robot.text(R.string.access_microphone), forward = null).isHeading)
                 val shown = mutableSetOf<String>()
-                var end = false
-                repeat(15) { if (!end) { shown += robot.texts(); end = !robot.scrollForward() } }
-                assertTrue("The access page ends within 15 scrolls", end)
+                val systemSettings = robot.text(R.string.access_system_settings)
+                repeat(15) {
+                    if (systemSettings !in shown) {
+                        shown += robot.texts().takeWhile { it != robot.text(R.string.settings_deepseek) }
+                        if (systemSettings !in shown) robot.scrollForward()
+                    }
+                }
+                assertTrue("The access section ends within 15 scrolls", systemSettings in shown)
                 assertTrue(robot.text(R.string.access_note) in shown)
                 val titles = listOf(R.string.access_microphone, R.string.access_location, R.string.access_background_title, R.string.access_calendar,
                     R.string.access_owned_calendar, R.string.access_camera, R.string.access_notifications_title, R.string.access_exact_title,
@@ -39,7 +46,7 @@ class AccessPageWorkflowTest {
                 assertEquals(emptyList<String>(), titles.map { robot.text(it) }.filter { it !in shown })
                 val technical = Regex("""[a-z]+\.[a-z_.]+|Android API|API \d+|android\.permission|Реализовано|Запланировано|[A-Z]+_[A-Z_]+|сценари|\b(?!(?:Alphy|Android|DeepSeek)\b)[A-Za-z]{3,}\b""")
                 assertEquals(emptyList<String>(), shown.filter { technical.containsMatchIn(it) })
-                robot.click(robot.text(R.string.access_system_settings))
+                robot.click(systemSettings)
                 robot.waitUntil { monitor.hits == 1 }
             }
         } finally { robot.instrumentation.removeMonitor(monitor) }

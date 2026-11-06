@@ -6,6 +6,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
+import com.alpha.assistant.R
 import com.alpha.assistant.capabilities.CapabilityBroker
 import com.alpha.assistant.capabilities.CapabilityRequest
 import com.alpha.assistant.capabilities.CapabilityResult
@@ -48,9 +49,18 @@ class AutomaticToolWorkflowTest {
             .put("fields",JSONObject().put("id","string").put("text","string")))
         getJSONObject("initialState").put("observations",org.json.JSONArray())
     }.toString()
-    private fun decision(brief: String = "Create a counter", target: String? = null, text: String = "Ready.", kind: String = if(target == null) "create" else "refine", search: String = "none") =
+    private fun decision(brief: String = "Create a counter", text: String = "Ready.", kind: String = "create", search: String = "none") =
         JSONObject().put("kind",kind).put("text",text).put("brief",if(kind in listOf("create","refine")) brief else "")
-            .put("targetId",target ?: JSONObject.NULL).put("search",search).toString()
+            .put("search",search).toString()
+    private fun card(toolId: String) = Message("card-$toolId","assistant","",1,"complete",toolId = toolId,toolRevision = 1)
+    private fun seedTool(store: ToolStore, id: String, title: String, chat: String = "chat") {
+        val parsed = ToolSpec.parse(spec(title))
+        store.saveTool(ToolRecord(id,1,1,parsed.json,parsed.initialState,parsed.ui.toString(),chat,true),true)
+    }
+    private fun seedChat(store: ShellStore, vararg refs: String) {
+        store.saveConversation(Conversation("chat","Chat",1,1,messages = refs.map(::card)))
+        store.saveSetting("selected","chat")
+    }
     private abstract class SingleRoundProvider : ChatProvider {
         final override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
             val text = StringBuilder()
@@ -99,11 +109,13 @@ class AutomaticToolWorkflowTest {
     // terminal rounds must preserve useful progress without accepting an app request.
     @Test fun onlyTheTerminalToolFreeRoundCanCreateOneApp() {
         var generatedPrompt = ""
-        var generations = 0
+        val stages = CopyOnWriteArrayList<CloudGenerationStage?>()
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 if(request.jsonObject) {
-                    generations++; generatedPrompt = request.turns.first().text; emit(CloudEvent.Text(spec()))
+                    stages += request.generationStage
+                    if (request.replyWithFixturePlan(emit)) return
+                    generatedPrompt = request.turns.first().text; emit(CloudEvent.Text(spec()))
                 } else {
                     assertTrue(request.chatDecision)
                     emit(CloudEvent.Text(decision("WRONG INTERMEDIATE")))
@@ -115,12 +127,256 @@ class AutomaticToolWorkflowTest {
             }
         }
         Fixture(provider).use { f ->
+            val trace = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
+            main { f.model.tools.generationTraceObserver = { trace += it } }
             f.send("Create a day planner"); f.idle()
             assertEquals("complete",f.last.status); assertEquals("Ready.",f.last.text)
-            assertEquals(1,generations); assertEquals(1,f.toolStore.tools().size)
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE),stages)
+            assertEquals(1,f.toolStore.tools().size)
             assertFalse(generatedPrompt.contains("WRONG INTERMEDIATE"))
             assertTrue(generatedPrompt.contains("Use the verified stop for 30 minutes"))
             assertEquals("https://example.com/verified",f.last.sources.single().url)
+            assertTrue(trace.isNotEmpty())
+            assertEquals(setOf(f.last.toolOperationId), trace.map { it.operationId.toString() }.toSet())
+            assertEquals(stages, trace.filterIsInstance<ToolGenerationTraceEvent.Stage>()
+                .filter { it.started && it.providerStage != null }.map { it.providerStage })
+            assertEquals(ToolGenerationTraceOutcome.VALIDATED,
+                (trace.last() as ToolGenerationTraceEvent.Finished).outcome)
+        }
+    }
+
+    @Test fun generationCorrectsItalianLabelsFromAnItalianBriefAndPreview() {
+        val completions = CopyOnWriteArrayList<CloudRequest>()
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                val result = when (request.generationStage) {
+                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}"""
+                    CloudGenerationStage.COMPLETE -> {
+                        completions += request
+                        if (completions.size == 1) {
+                            val italian = JSONObject(spec()).getJSONObject("ui")
+                            val controls = italian.getJSONArray("children")
+                            controls.getJSONObject(0).put("text", "Conteggio totale delle operazioni eseguite")
+                            controls.getJSONObject(1).put("text", "Aggiungi una nuova operazione al conteggio")
+                            JSONObject(spec()).put("source",
+                                "const ui=$italian; return {state:input.state,ui:ui};").toString()
+                        } else spec()
+                    }
+                    else -> decision("Crea un contatore con un pulsante per aggiungere operazioni")
+                }
+                emit(CloudEvent.Text(result))
+            }
+        }
+        Fixture(provider).use { f ->
+            f.send("Create a counter with a button that adds one to the total every time I press it.")
+            f.idle()
+            assertEquals(2, completions.size)
+            assertTrue(completions.all { it.systemInstructions.contains("English (en)") })
+            assertEquals("complete", f.last.status)
+            assertEquals("Counter", ToolSpec.parsePersisted(f.toolStore.tools().single().spec).title)
+        }
+    }
+
+    @Test fun explicitAppLanguageOverridesRequestAndRejectsRepeatedMismatch() {
+        val completions = CopyOnWriteArrayList<CloudRequest>()
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                val result = when (request.generationStage) {
+                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}"""
+                    CloudGenerationStage.COMPLETE -> {
+                        completions += request
+                        JSONObject(spec("Trip expenses for Moscow")).apply {
+                            put("description", "Record your travel expenses and review the current total")
+                            val controls = getJSONObject("ui").getJSONArray("children")
+                            controls.getJSONObject(0).put("text", "Total expenses for this trip")
+                            controls.getJSONObject(1).put("text", "Add another expense to the trip")
+                        }.toString()
+                    }
+                    else -> decision("Make an expense counter for a trip to Moscow")
+                }
+                emit(CloudEvent.Text(result))
+            }
+        }
+        Fixture(provider).use { f ->
+            f.send("Make an expense counter for Moscow. Use Russian for the interface.")
+            f.idle()
+            assertEquals(2, completions.size)
+            assertTrue(completions.all { it.systemInstructions.contains("Russian (ru)") })
+            assertEquals("widget_language", f.last.errorCode)
+            assertTrue(f.toolStore.tools().isEmpty())
+            assertTrue(f.toolStore.drafts().isEmpty())
+        }
+    }
+
+    @Test fun currencyAndQuotedTextDoNotSetTheInterfaceLanguage() {
+        val requests = CopyOnWriteArrayList<CloudRequest>()
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                requests += request
+                val result = when (request.generationStage) {
+                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}"""
+                    CloudGenerationStage.COMPLETE -> spec("Moscow expenses")
+                    else -> decision("Счётчик расходов в Москве")
+                }
+                emit(CloudEvent.Text(result))
+            }
+        }
+        Fixture(provider).use { f ->
+            f.send("Create a counter for a trip to Moscow. Use Russian rubles. Label the note «Use French for the interface.»")
+            f.idle()
+            assertTrue(requests.single { it.generationStage == CloudGenerationStage.PLAN }.systemInstructions.contains("English (en)"))
+            assertTrue(requests.single { it.generationStage == CloudGenerationStage.COMPLETE }.systemInstructions.contains("English (en)"))
+            assertEquals("Moscow expenses", ToolSpec.parsePersisted(f.toolStore.tools().single().spec).title)
+        }
+    }
+
+    @Test fun languageTopicAndNegationDoNotOverrideInterfaceButExplicitInstructionDoes() {
+        val plans = CopyOnWriteArrayList<CloudRequest>()
+        var candidate = spec()
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                val result = when (request.generationStage) {
+                    CloudGenerationStage.PLAN -> {
+                        plans += request
+                        """{"wholeScreen":true}"""
+                    }
+                    CloudGenerationStage.COMPLETE -> candidate
+                    else -> decision()
+                }
+                emit(CloudEvent.Text(result))
+            }
+        }
+        Fixture(provider).use { f ->
+            f.send("Create an app to teach English speakers how to order coffee in Italian.")
+            f.idle()
+            assertTrue(plans.last().systemInstructions.contains("English (en)"))
+            assertEquals("complete", f.last.status)
+            f.send("Create a counter. Do not make the interface in Russian.")
+            f.idle()
+            assertTrue(plans.last().systemInstructions.contains("English (en)"))
+            assertEquals("complete", f.last.status)
+            candidate = JSONObject(spec("Conteggio delle ordinazioni")).apply {
+                put("description", "Conserva il conteggio delle ordinazioni in questo dispositivo")
+                val controls = getJSONObject("ui").getJSONArray("children")
+                controls.getJSONObject(0).put("text", "Conteggio totale delle ordinazioni")
+                controls.getJSONObject(1).put("text", "Aggiungi una nuova ordinazione")
+            }.toString()
+            f.send("Create a counter app in Italian.")
+            f.idle()
+            assertTrue(plans.last().systemInstructions.contains("Italian (it)"))
+            assertTrue(plans.last().systemInstructions.contains("Native parts supply English or Russian labels."))
+            assertEquals("complete", f.last.status)
+        }
+    }
+
+    @Test fun refinementPreservesSavedInterfaceLanguageUntilExplicitlyChanged() {
+        val refinements = CopyOnWriteArrayList<CloudRequest>()
+        val russian = JSONObject(spec("Счётчик выполненных задач")).apply {
+            put("description", "Сохраняйте выполненные задачи и проверяйте общий счёт")
+            val controls = getJSONObject("ui").getJSONArray("children")
+            controls.getJSONObject(0).put("text", "Общее число выполненных задач")
+            controls.getJSONObject(1).put("text", "Добавить ещё одну выполненную задачу")
+        }.toString()
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                val result = when (request.generationStage) {
+                    CloudGenerationStage.REFINE -> {
+                        refinements += request
+                        if (refinements.size == 1) russian else spec()
+                    }
+                    else -> decision("Refine the existing counter", kind = "refine")
+                }
+                emit(CloudEvent.Text(result))
+            }
+        }
+        Fixture(provider) { shell, tools ->
+            val parsed = ToolSpec.parse(russian)
+            tools.saveTool(ToolRecord("counter", 1, 1, parsed.json, """{"count":7}""", parsed.ui.toString(), "chat", true), true)
+            seedChat(shell, "counter")
+        }.use { f ->
+            f.send("Update the counter so the current total is more prominent.")
+            f.idle()
+            assertTrue(refinements.last().turns.first().text.contains("Russian (ru)"))
+            assertEquals("complete", f.last.status)
+            f.send("Do not change the layout and use English for the interface.")
+            f.idle()
+            assertTrue(refinements.last().turns.first().text.contains("English (en)"))
+            assertEquals("complete", f.last.status)
+            assertEquals(7, JSONObject(f.toolStore.tools().single().state).getInt("count"))
+        }
+    }
+
+    @Test fun generatedEditorsUseAppLanguageInTheRussianShellAndAfterReopen() {
+        val robot = ShellRobot("generated-editor-language")
+        val definition = """{"formatVersion":3,"title":"Bill calculator","description":"Calculate the bill locally","capabilities":[],
+            "stateSchema":{"bill":"number","people":"number"},"initialState":{"bill":0,"people":1},
+            "ui":{"type":"column","children":[
+                {"type":"numberInput","text":"Bill amount","bind":"bill","action":"bill","min":0,"max":1000},
+                {"type":"numberInput","text":"Number of people","bind":"people","action":"people","min":1,"max":20}]},
+            "source":"if(input.event.type==='action') input.state[input.event.actionId]=input.event.value;return {state:input.state};"}"""
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                emit(CloudEvent.Text(when (request.generationStage) {
+                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}"""
+                    CloudGenerationStage.COMPLETE -> definition
+                    else -> decision("Build a bill calculator with two fields")
+                }))
+            }
+        }
+        Fixture(provider).use { f ->
+            f.send("Make a bill calculator. Use English for the interface.")
+            f.idle()
+            val saved = f.toolStore.tools().single()
+            val stored = ToolSpec.parsePersisted(saved.spec)
+            assertEquals("en", stored.appLanguage)
+            assertFalse(JSONObject(stored.providerDefinition()).has("appLanguage"))
+            assertTrue(runCatching { ToolSpec.parse(saved.spec) }.isFailure)
+            fun open() {
+                main { f.model.openSurface(saved.id) }
+                robot.waitFor("Alphy · Мини-приложение")
+                robot.reveal("Apply: Bill amount", null)
+                robot.reveal("Apply: Number of people", null)
+                assertNull(robot.find("Применить: Bill amount"))
+            }
+            open()
+            robot.reveal("Bill amount", null)
+            robot.edit("Bill amount", "80")
+            robot.reveal("Apply: Bill amount", null)
+            robot.click("Apply: Bill amount")
+            waitUntil { JSONObject(f.toolStore.tool(saved.id)!!.state).getInt("bill") == 80 }
+            assertEquals(1, JSONObject(f.toolStore.tool(saved.id)!!.state).getInt("people"))
+            f.restart()
+            open()
+            robot.reveal("Bill amount", null)
+            assertEquals("80", robot.field("Bill amount").text.toString().removeSuffix(".0"))
+        }
+    }
+
+    @Test fun aDefinitionAtTheSizeLimitRepairsBeforeSavingItsLanguage() {
+        val large = JSONObject(spec()).put("source", "")
+        val prefix = "/*"
+        val suffix = "*/ return {state:input.state};"
+        large.put("source", prefix + suffix)
+        val count = (65_530 - large.toString().toByteArray().size) / 2
+        large.put("source", prefix + "\"".repeat(count) + suffix)
+        assertTrue(large.toString().toByteArray().size in 65_529..65_530)
+        assertNotNull(ToolSpec.parse(large.toString()))
+        var completions = 0
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                emit(CloudEvent.Text(when (request.generationStage) {
+                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}"""
+                    CloudGenerationStage.COMPLETE -> if (++completions == 1) large.toString() else spec()
+                    else -> decision()
+                }))
+            }
+        }
+        Fixture(provider).use { f ->
+            f.send("Make a counter. Use English for the interface.")
+            f.idle()
+            assertEquals(2, completions)
+            assertEquals("complete", f.last.status)
+            assertEquals("en", ToolSpec.parsePersisted(f.toolStore.tools().single().spec).appLanguage)
         }
     }
 
@@ -144,6 +400,7 @@ class AutomaticToolWorkflowTest {
         val reply = decision("Create a counter labelled \"count >> total\"",text = "Ready.\nChoose Add to increase the count.")
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (request.replyWithFixturePlan(emit)) return
                 if(request.systemInstructions.isNotEmpty()) {
                     assertFalse(request.jsonObject)
                     reply.forEach { emit(CloudEvent.Text(it.toString())) }
@@ -167,11 +424,11 @@ class AutomaticToolWorkflowTest {
         listOf(reply + " trailing",reply + reply,reply.dropLast(1),decision("x".repeat(17000)),
             decision().replace("\"kind\":", "\"kind\":\"answer\",\"kind\":"),
             decision().replace("\"brief\":\"Create a counter\"", "\"brief\":42"),
-            decision().replace("\"targetId\":null", "\"targetId\":false"),
+            JSONObject(decision()).put("targetId","forged").toString(),
             decision().replace("\"search\":\"none\"", "\"search\":\"invented\""),
             "[".repeat(25) + decision() + "]".repeat(25),
             decision(text = "x".repeat(ChatToolReply.MAX_REPLY))).forEach { invalid ->
-            assertTrue(invalid.take(100),runCatching { ChatToolReply.parse(invalid,emptyList(),"Create") }.isFailure)
+            assertTrue(invalid.take(100),runCatching { ChatToolReply.decode(invalid) }.isFailure)
         }
     }
 
@@ -185,6 +442,7 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
+                if (request.replyWithFixturePlan(emit)) return
                 if(request.systemInstructions.isEmpty()) {
                     releaseGeneration.await()
                     emit(CloudEvent.Text(generated))
@@ -205,9 +463,9 @@ class AutomaticToolWorkflowTest {
             main { f.model.tools.interact(first,"add",null) }; waitUntil { !f.model.tools.busy }
             assertEquals(1,JSONObject(f.model.tools.tools.single().state).getInt("count"))
             val oldMessageId = f.last.id
-            reply = decision("Rename the counter to Total",first.id); generated = spec("Total")
+            reply = decision("Rename the counter to Total",kind = "refine"); generated = spec("Total")
             releaseGeneration = CompletableDeferred()
-            f.send("Rename tool [${first.id}] to Total", search = false)
+            f.send("Rename the counter to Total", search = false)
             val updateStatus = "Обновляем мини-приложение…"
             if (robot.find(updateStatus) == null) robot.reveal(updateStatus)
             assertEquals(1, robot.texts().count { it == updateStatus })
@@ -230,13 +488,17 @@ class AutomaticToolWorkflowTest {
         var generatorCalls = 0
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if(request.systemInstructions.isEmpty()) { generatorCalls++; emit(CloudEvent.Text(spec())) }
+                if(request.generationStage != null) {
+                    generatorCalls++
+                    if (request.replyWithFixturePlan(emit)) return
+                    emit(CloudEvent.Text(spec()))
+                }
                 else emit(CloudEvent.Text(reply))
             }
         }
         Fixture(provider).use { f ->
             listOf("Ready. <<app: {}>>", "<｜｜DSML｜｜ invoke name=\"web_search\">", decision()+decision(),
-                decision("x".repeat(17000)), decision("Update","unknown"), decision().dropLast(1),
+                decision("x".repeat(17000)), JSONObject(decision("Update",kind = "refine")).put("targetId","unknown").toString(), decision().dropLast(1),
                 decision().replace("\"brief\":", "\"brief\":42,\"brief\":")).forEach { invalid ->
                 reply = invalid; f.send("Create an app"); f.idle()
                 assertEquals(invalid.take(80),"error",f.last.status)
@@ -245,8 +507,9 @@ class AutomaticToolWorkflowTest {
             assertEquals(0,generatorCalls)
             reply = decision(); f.send("Create counter"); f.idle()
             val first = f.model.tools.tools.single()
-            reply = decision("Update",first.id); f.send("Change that app"); f.idle()
-            assertEquals("complete",f.last.status); assertTrue(f.last.text.contains("Which")); assertEquals(first,f.model.tools.tools.single()); assertEquals(1,generatorCalls)
+            reply = JSONObject(decision("Update",kind = "refine")).put("targetId","foreign").toString()
+            f.send("Change that app"); f.idle()
+            assertEquals("widget_request",f.last.errorCode); assertEquals(first,f.model.tools.tools.single()); assertEquals(2,generatorCalls)
         }
     }
     @Test fun partialStreamCancelAndDeletedConversationCannotCommit() {
@@ -274,6 +537,7 @@ class AutomaticToolWorkflowTest {
         var generated = spec()
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (request.replyWithFixturePlan(emit)) return
                 if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
                 else if(block) {
                     started.countDown(); release.await(10,TimeUnit.SECONDS)
@@ -309,6 +573,7 @@ class AutomaticToolWorkflowTest {
         var attempts = 0
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (request.replyWithFixturePlan(emit)) return
                 assertEquals("isolated-auto-test",key)
                 if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
                 else {
@@ -352,6 +617,7 @@ class AutomaticToolWorkflowTest {
         var calls = 0
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (request.replyWithFixturePlan(emit)) return
                 if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
                 else { calls++; emit(CloudEvent.Text("REJECTED_OUTPUT_ONLY")) }
             }
@@ -371,6 +637,7 @@ class AutomaticToolWorkflowTest {
         var calls = 0
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (request.replyWithFixturePlan(emit)) return
                 if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
                 else {
                     requests += request
@@ -433,7 +700,8 @@ class AutomaticToolWorkflowTest {
         val requests=CopyOnWriteArrayList<CloudRequest>()
         val provider=object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision("Create a synthetic medication log with user-entered values",target)))
+                if (request.replyWithFixturePlan(emit)) return
+                if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision("Create a synthetic medication log with user-entered values",kind = if(target == null) "create" else "refine")))
                 else {
                     requests += request
                     val original=request.turns.first().text
@@ -459,12 +727,12 @@ class AutomaticToolWorkflowTest {
             f.send("Create a synthetic log"); f.idle()
             assertEquals(2,calls); assertEquals("complete",f.last.status)
             val created=f.toolStore.tool(f.last.toolId!!)!!
-            assertEquals(100,ToolSpec.parse(created.spec).schema.getJSONObject("observations").getInt("maxItems"))
+            assertEquals(100,ToolSpec.parsePersisted(created.spec).schema.getJSONObject("observations").getInt("maxItems"))
             main {f.model.tools.interact(created,"add",null)}; waitUntil {!f.model.tools.busy}
             val saved=f.toolStore.tool(created.id)!!
             assertEquals(1,JSONObject(saved.state).getInt("count"))
             target=saved.id; repair=false; calls=0; requests.clear()
-            f.send("Update tool [${saved.id}]"); f.idle()
+            f.send("Update the log"); f.idle()
             assertEquals(2,calls); assertEquals("error",f.last.status); assertEquals("widget_spec",f.last.errorCode)
             assertTrue(f.last.error,f.last.error.contains("Path: stateSchema.observations.maxItems."))
             assertTrue(f.last.error,f.last.error.contains("Observed: integer 200."))
@@ -480,6 +748,7 @@ class AutomaticToolWorkflowTest {
         var calls=0
         val provider=object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (request.replyWithFixturePlan(emit)) return
                 if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
                 else {
                     if(++calls == 2) {
@@ -520,6 +789,7 @@ class AutomaticToolWorkflowTest {
         var answer = spec()
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (request.replyWithFixturePlan(emit)) return
                 if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
                 else { calls++; failure?.let { throw it }; emit(CloudEvent.Text(answer)) }
             }
@@ -561,7 +831,8 @@ class AutomaticToolWorkflowTest {
         val requests = CopyOnWriteArrayList<CloudRequest>()
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision("Update the counter","existing")))
+                if (request.replyWithFixturePlan(emit)) return
+                if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision("Update the counter",kind = "refine")))
                 else {
                     requests += request
                     emit(CloudEvent.Text(if(++calls == 2 && repair) spec() else rejected))
@@ -572,12 +843,11 @@ class AutomaticToolWorkflowTest {
             val parsed = ToolSpec.parse(JSONObject(spec()).put("capabilities",org.json.JSONArray().put("vibration.play")).toString())
             tools.commitTool(ToolRecord("existing",1,1,parsed.json,"{\"count\":4}",parsed.ui.toString(),"recovery",true),null,true,
                 effects=listOf(CapabilityRequest("prior","vibration.play",JSONObject().put("milliseconds",1))))
-            tools.grant("existing","vibration.play",true)
             executedKey = tools.effects("existing").single().key
-            runBlocking { assertEquals("succeeded",CapabilityBroker(app,tools).execute(executedKey,true) {
+            runBlocking { assertEquals("succeeded",CapabilityBroker(app,tools).execute(executedKey) {
                 nativeExecutions++; CapabilityResult("succeeded","Fixture action completed")
             }.status) }
-            shell.saveConversation(Conversation("recovery","Recovery",1,1)); shell.saveSetting("selected","recovery")
+            shell.saveConversation(Conversation("recovery","Recovery",1,1,messages = listOf(card("existing")))); shell.saveSetting("selected","recovery")
         }.use { f ->
             for(source in listOf("while(true){}; // REJECTED_OUTPUT_ONLY", "throw new Error('REJECTED_OUTPUT_ONLY');")) {
                 for(succeeds in listOf(true,false)) {
@@ -585,7 +855,7 @@ class AutomaticToolWorkflowTest {
                     rejected = JSONObject(spec()).put("source",source).toString()
                     val before = f.toolStore.tool("existing")!!
                     val revisions = f.toolStore.revisions(before.id)
-                    f.send("Update tool [existing]"); f.idle()
+                    f.send("Update the counter"); f.idle()
                     assertEquals(2,calls)
                     assertEquals(requests.first().turns.first(),requests.last().turns.first())
                     assertEquals(rejected,requests.last().turns[1].text)
@@ -607,7 +877,7 @@ class AutomaticToolWorkflowTest {
                     val effect = f.toolStore.effects(before.id).single()
                     assertEquals(executedKey,effect.key); assertEquals("terminal",effect.phase)
                     assertEquals("succeeded",effect.result.status)
-                    runBlocking { assertEquals("succeeded",CapabilityBroker(app,f.toolStore).execute(executedKey,true) {
+                    runBlocking { assertEquals("succeeded",CapabilityBroker(app,f.toolStore).execute(executedKey) {
                         nativeExecutions++; error("A generation correction replayed a completed native action")
                     }.status) }
                     assertEquals(1,nativeExecutions)
@@ -621,6 +891,7 @@ class AutomaticToolWorkflowTest {
             var calls = 0
             val provider = object : SingleRoundProvider() {
                 override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                    if (request.replyWithFixturePlan(emit)) return
                     if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
                     else if(++calls == 1) emit(CloudEvent.Text(boundedListSpec(200)))
                     else {
@@ -648,7 +919,7 @@ class AutomaticToolWorkflowTest {
             var calls = 0
             val provider = object : SingleRoundProvider() {
                 override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                    if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision("Rename counter","existing")))
+                    if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision("Rename counter",kind = "refine")))
                     else if(++calls == 1) emit(CloudEvent.Text(JSONObject(spec()).put("stateSchema",JSONObject().put("count","string"))
                         .put("initialState",JSONObject().put("count","bad")).toString()))
                     else {
@@ -659,11 +930,11 @@ class AutomaticToolWorkflowTest {
             Fixture(provider) { shell, tools ->
                 val parsed = ToolSpec.parse(spec())
                 tools.saveTool(ToolRecord("existing",1,1,parsed.json,"{\"count\":4}",parsed.ui.toString(),"recovery",true),true)
-                shell.saveConversation(Conversation("recovery","Recovery",1,1)); shell.saveSetting("selected","recovery")
+                shell.saveConversation(Conversation("recovery","Recovery",1,1,messages = listOf(card("existing")))); shell.saveSetting("selected","recovery")
             }.use { f ->
                 try {
                     val before = f.toolStore.tool("existing")!!
-                    f.send("Rename tool [existing]"); assertTrue(entered.await(10,TimeUnit.SECONDS))
+                    f.send("Rename the counter"); assertTrue(entered.await(10,TimeUnit.SECONDS))
                     val expected = if(changeState) runBlocking {
                         ToolEngine(f.toolStore,ToolGenerationService(provider,com.alpha.assistant.sandbox.SandboxClient(app)))
                             .interact(before.id,before.revision,before.stateVersion,"add",null)
@@ -687,6 +958,7 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
+                if (request.replyWithFixturePlan(emit)) return
                 if(request.systemInstructions.isEmpty()) emit(CloudEvent.Text(if(++generationCalls == 1) "invalid" else spec()))
                 else {
                     if(request.search) emit(CloudEvent.Search("found",listOf(Source("Source","https://example.com/value","Verified value: 12"))))
@@ -706,47 +978,20 @@ class AutomaticToolWorkflowTest {
                 main { f.model.editDraft(Draft("Create an app from this image",listOf(Attachment(uri.toString(),"auto-reference.png","image/png")))); f.model.send() }
                 f.idle(); assertEquals("complete",f.last.status)
                 assertEquals("https://example.com/value",f.last.sources.single().url)
-                assertEquals(requests[0].turns.last().images,requests[1].turns.single().images)
-                assertEquals(1,requests[1].turns.single().images.size)
-                assertEquals(requests[1].turns.single(),requests[2].turns.first())
+                assertEquals(listOf(null, CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.COMPLETE),
+                    requests.map { it.generationStage })
+                assertEquals(requests[2].turns.single(),requests[3].turns.first())
                 val originalBytes = resolver.openInputStream(uri)!!.use { it.readBytes() }
-                requests.subList(1,3).forEach { request ->
-                    assertArrayEquals(originalBytes,android.util.Base64.decode(request.turns.first().images.single().substringAfter(','),android.util.Base64.DEFAULT))
+                requests.drop(1).forEach { request ->
+                    val input = request.turns.first()
+                    assertEquals(requests[0].turns.last().images,input.images)
+                    assertArrayEquals(originalBytes,android.util.Base64.decode(input.images.single().substringAfter(','),android.util.Base64.DEFAULT))
+                    assertTrue(input.text.contains("Verified value: 12"))
+                    assertTrue(input.text.contains("https://example.com/value")); assertFalse(request.search)
                 }
-                assertTrue(requests[1].turns.single().text.contains("Verified value: 12"))
-                assertTrue(requests[1].turns.single().text.contains("https://example.com/value")); assertFalse(requests[1].search)
                 f.send("Create another counter", search = false); f.idle()
-                assertTrue(requests.drop(3).all { !it.search && it.turns.all { turn -> turn.images.isEmpty() && !turn.text.contains(uri.toString()) } })
+                assertTrue(requests.drop(4).all { !it.search && it.turns.all { turn -> turn.images.isEmpty() && !turn.text.contains(uri.toString()) } })
             } finally { resolver.delete(uri,null,null) }
-        }
-    }
-    @Test fun olderExactIdentityWorksAndDuplicateTitlesOutsideModelContextStayAmbiguous() {
-        val requests = CopyOnWriteArrayList<CloudRequest>()
-        var reply = decision("Update the counter","tool-20")
-        var calls = 0
-        val provider = object : SingleRoundProvider() {
-            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                requests += request
-                if(request.systemInstructions.isEmpty()) { calls++; emit(CloudEvent.Text(spec("Updated"))) }
-                else emit(CloudEvent.Text(reply))
-            }
-        }
-        Fixture(provider) { shell, tools ->
-            repeat(21) { index ->
-                val parsed = ToolSpec.parse(spec(if(index == 0 || index == 20) "Duplicate counter" else "Counter $index"))
-                tools.saveTool(ToolRecord("tool-$index",1,1,parsed.json,parsed.initialState,parsed.ui.toString(),"many",true),true)
-            }
-            shell.saveConversation(Conversation("many","Many tools",1,1)); shell.saveSetting("selected","many")
-        }.use { f ->
-            // tool-0 is the 21st record. Its duplicate title must still prevent a title-only refinement.
-            reply = decision("Update counter","tool-20"); f.send("Update Duplicate counter"); f.idle()
-            assertEquals("complete",f.last.status); assertTrue(f.last.text.contains("Which")); assertEquals(0,calls)
-            assertFalse(requests.first().systemInstructions.contains("\"id\":\"tool-0\""))
-            assertEquals(1,f.toolStore.tool("tool-20")!!.revision)
-            reply = decision("Update the counter","tool-0"); f.send("Update tool [tool-0]"); f.idle()
-            assertEquals("complete",f.last.status); assertEquals("tool-0",f.last.toolId)
-            assertTrue(requests[1].systemInstructions.contains("\"id\":\"tool-0\""))
-            assertEquals(1,calls); assertEquals(2,f.toolStore.tool("tool-0")!!.revision)
         }
     }
     @Test fun longSearchSummariesKeepSourceUrlsWithoutExceedingGeneratorBudget() {
@@ -757,59 +1002,35 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
+                if (request.replyWithFixturePlan(emit)) return
                 if(request.systemInstructions.isEmpty()) emit(CloudEvent.Text(if(++generationCalls == 1) "invalid" else spec()))
                 else { emit(CloudEvent.Search("found",sources)); emit(CloudEvent.Text(decision(brief))) }
             }
         }
         Fixture(provider).use { f ->
             f.send("Create a counter with verified value 12"); f.idle()
-            assertEquals("complete",f.last.status); assertEquals(3,requests.size)
-            assertEquals(requests[1].turns.single(),requests[2].turns.first())
-            val turn = requests.last().turns.first().text
-            val prompt = turn.substringAfter("Request: ",missingDelimiterValue = "")
-            assertTrue("The generator must contain the bounded draft prompt",prompt.isNotEmpty())
-            assertTrue(prompt.length <= 16000)
-            assertEquals(ChatToolReply.generationPrompt("Create a counter with verified value 12",brief,"Ready.",sources),prompt)
-            assertTrue(prompt.contains("Create a counter with verified value 12"))
-            assertTrue(prompt.contains("Counter starts at verified value 12"))
-            sources.forEach { source -> assertTrue(prompt.contains(source.url)) }
+            assertEquals("complete",f.last.status)
+            assertEquals(listOf(null, CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.COMPLETE),
+                requests.map { it.generationStage })
+            assertEquals(requests[2].turns.single(),requests[3].turns.first())
+            val prompts = listOf(
+                requests[1].turns.single().text,
+                requests[2].turns.single().text.substringAfter("Request: ",missingDelimiterValue = "")
+            )
+            prompts.forEach { prompt ->
+                assertTrue("The generator must contain the bounded draft prompt",prompt.isNotEmpty())
+                assertTrue(prompt.length <= 16000)
+                assertEquals(ChatToolReply.generationPrompt("Create a counter with verified value 12",brief,"Ready.",sources),prompt)
+                assertTrue(prompt.contains("Create a counter with verified value 12"))
+                assertTrue(prompt.contains("Counter starts at verified value 12"))
+                sources.forEach { source -> assertTrue(prompt.contains(source.url)) }
+            }
             assertEquals(sources,f.last.sources)
             brief = "Counter " + "a".repeat(15000)
             f.send("Create a counter " + "b".repeat(2000)); f.idle()
             assertEquals("widget_size",f.last.errorCode)
-            assertEquals(4,requests.size)
+            assertEquals(5,requests.size)
         }
-    }
-    @Test fun overlappingCompleteTitlesRequireAnExplicitIdentity() {
-        val known = listOf("Water tracker","Water tracker Pro").mapIndexed { index,title ->
-            val parsed = ToolSpec.parse(spec(title))
-            ToolRecord("water-tool-$index",1,1,parsed.json,parsed.initialState,parsed.ui.toString(),"many",true)
-        }
-        val request = "Update Water tracker Pro"
-        known.forEach { tool ->
-            val clarification = ChatToolReply.parse(decision("Update",tool.id),known,request)
-            assertEquals("clarify",clarification.kind); assertNull(clarification.intent)
-            val context = ChatToolReply.instructions(known,request).substringAfter("Known tool identities: ").substringBefore("\n")
-            val identities = org.json.JSONArray(context)
-            assertTrue((0 until identities.length()).map(identities::getJSONObject).single { it.getString("id") == tool.id }.getBoolean("titleAmbiguous"))
-            val selected = ChatToolReply.parse(decision("Update",tool.id),known,"$request [${tool.id}]")
-            if(tool == known.last()) assertEquals(tool.id,selected.intent!!.target!!.id) else assertEquals("clarify",selected.kind)
-        }
-        assertEquals(known.first().id,ChatToolReply.parse(decision("Update",known.first().id),known,"Update Water tracker").intent!!.target!!.id)
-        val duplicates = known + known.first().copy(id = "duplicate-water-tool")
-        assertEquals("clarify",ChatToolReply.parse(decision("Update",known.first().id),duplicates,"Update Water tracker").kind)
-    }
-    @Test fun uniqueFullTitleOutsideRecentWindowIsAvailableWithoutPartialTitleMatches() {
-        val known = List(22) { index ->
-            val parsed = ToolSpec.parse(spec(if(index == 21) "Older water tracker" else "Counter $index"))
-            ToolRecord("tool-$index",1,1,parsed.json,parsed.initialState,parsed.ui.toString(),"many",true)
-        }
-        val instructions = ChatToolReply.instructions(known,"Update Older water tracker")
-        assertTrue(instructions.contains("\"id\":\"tool-21\""))
-        assertFalse(ChatToolReply.instructions(known,"Update Older water trackers").contains("\"id\":\"tool-21\""))
-        assertEquals("tool-21",ChatToolReply.parse(decision("Update","tool-21"),known,"Update Older water tracker").intent!!.target!!.id)
-        assertTrue(instructions.contains("home screen"))
-        assertTrue(runCatching { ChatToolReply.parse("Ready. <<app: {}>>",known,"Create") }.isFailure)
     }
     @Test fun unavailableToolDatabaseDisablesWidgetsWithoutBreakingOrdinaryChat() {
         val requests = CopyOnWriteArrayList<CloudRequest>()
@@ -820,7 +1041,12 @@ class AutomaticToolWorkflowTest {
             }
         }
         Fixture(provider) { shell, tools ->
-            tools.writableDatabase.version = 2; tools.close()
+            tools.close()
+            android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(app.getDatabasePath(tools.logicalDatabase), null).use {
+                it.execSQL("CREATE TABLE tools(id TEXT PRIMARY KEY,state TEXT)")
+                it.execSQL("INSERT INTO tools VALUES('keep','PRESERVE_UNAVAILABLE_STATE')")
+                it.version = 2
+            }
             shell.saveConversation(Conversation("unavailable","Storage unavailable",1,1,messages = listOf(
                 Message("pending-user","user","Create a counter",1,"sent"),
                 Message("pending-tool","assistant","Ready.",1,"generating",replyTo = "pending-user",toolOperationId = "pending-operation"))))
@@ -833,13 +1059,18 @@ class AutomaticToolWorkflowTest {
             main { f.model.clearRequestError() }
             f.send("Hello"); f.idle()
             assertEquals("complete",f.last.status); assertEquals("A normal answer.",f.last.text)
-            assertEquals("tool_storage",f.last.errorCode); assertTrue(f.last.error.contains("storage",ignoreCase = true))
+            assertEquals("tool_storage",f.last.errorCode)
+            assertEquals(app.getString(R.string.tool_storage_request_unavailable),f.last.error)
             assertTrue(requests.single().systemInstructions.contains("disabled",ignoreCase = true))
             reply = decision(); f.send("Create an app"); f.idle()
             assertEquals("error",f.last.status); assertEquals("",f.last.text)
             assertEquals("tool_storage",f.last.errorCode); assertEquals(2,requests.size)
             android.database.sqlite.SQLiteDatabase.openDatabase(app.getDatabasePath("${f.name}.db-tools.db").path,null,android.database.sqlite.SQLiteDatabase.OPEN_READONLY).use {
                 assertEquals(2,it.version)
+                it.rawQuery("SELECT state FROM tools WHERE id='keep'", null).use { row ->
+                    assertTrue(row.moveToFirst())
+                    assertEquals("PRESERVE_UNAVAILABLE_STATE", row.getString(0))
+                }
             }
         }
     }
@@ -871,6 +1102,7 @@ class AutomaticToolWorkflowTest {
                 if(request.jsonObject) {
                     assertTrue(request.turns.first().text.contains("untrusted_selected_text"))
                     assertTrue(request.turns.first().text.contains("user-entered amount 7"))
+                    if (request.replyWithFixturePlan(emit)) return
                     emit(CloudEvent.Text(spec()))
                 } else {
                     assertEquals(selected,request.selectedText)
@@ -886,33 +1118,294 @@ class AutomaticToolWorkflowTest {
             assertTrue(f.toolStore.tools().isEmpty())
             main { f.model.editDraft(Draft("Create a local app from the selected note",listOf(attachment))); f.model.send() }; f.idle()
             assertEquals("complete",f.last.status); assertNotNull(f.last.toolId)
-            assertEquals(1,f.toolStore.tools().size); assertEquals(3,requests.size)
+            assertEquals(1,f.toolStore.tools().size)
+            assertEquals(listOf(null, null, CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE),requests.map { it.generationStage })
         }
     }
-    @Test fun multipleExactIdsAndConflictingTitlesRequireClarification() {
-        val parsed = ToolSpec.parse(spec())
-        val a = ToolRecord("tool-A",1,1,parsed.json,parsed.initialState,parsed.ui.toString(),"chat",true)
-        val other = ToolSpec.parse(spec("Other counter"))
-        val b = a.copy(id = "tool-B",spec = other.json)
-        val known = listOf(a,b,a.copy(id = "foreign",conversationId = "elsewhere"),a.copy(id = "archived",archived = true))
-        listOf("Which should I change, [tool-A] or [tool-B]?","Change Counter or Other counter","Change [tool-A] or Other counter").forEach { user ->
-            assertEquals("clarify",ChatToolReply.parse(decision(target = a.id),known,user,"chat").kind)
+    @Test fun chatReferencesSelectByTitleAndKeepDuplicateChoicesDistinct() {
+        val requests = CopyOnWriteArrayList<CloudRequest>()
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                requests += request
+                if(request.jsonObject) emit(CloudEvent.Text(spec("Counter Plus")))
+                else emit(CloudEvent.Text(decision("Change the counter",kind = "refine")))
+            }
         }
-        assertEquals(a.id,ChatToolReply.parse(decision(target = a.id),known,"Change [tool-A]","chat").intent!!.target!!.id)
-        assertEquals(a.id,ChatToolReply.parse(decision(target = a.id),known,"Change its label","chat",hostTargetId = a.id).intent!!.target!!.id)
-        assertEquals("clarify",ChatToolReply.parse(decision(target = a.id),known,"Change [tool-B]","chat",hostTargetId = a.id).kind)
-        assertEquals("clarify",ChatToolReply.parse(decision(target = a.id),known,"Which [tool-A] or [tool-B]?","chat",hostTargetId = a.id).kind)
-        assertTrue(runCatching { ChatToolReply.parse(decision(target = "foreign"),known,"Change it","chat",hostTargetId = "foreign") }.isFailure)
-        assertTrue(runCatching { ChatToolReply.parse(decision(target = "archived"),known,"Change it","chat",hostTargetId = "archived") }.isFailure)
-    }
-    @Test fun foreignArchivedAndPartialIdsCannotBeRefined() {
-        val parsed = ToolSpec.parse(spec())
-        val active = ToolRecord("known-tool-12",1,1,parsed.json,parsed.initialState,parsed.ui.toString(),"chat",true)
-        listOf(active.copy(archived = true),active.copy(conversationId = "foreign")).forEach { target ->
-            assertTrue(runCatching { ChatToolReply.parse(decision(target = target.id),listOf(target),"Update [${target.id}]", "chat") }.isFailure)
+        Fixture(provider) { shell, tools ->
+            seedTool(tools,"a-host-id","Counter")
+            seedTool(tools,"b-host-id","Counter")
+            seedTool(tools,"c-host-id","Water tracker")
+            seedTool(tools,"outside-host-id","Secret outside title","outside")
+            seedTool(tools,"no-card-host-id","Secret unreferenced title")
+            seedChat(shell,"a-host-id","b-host-id","c-host-id")
+        }.use { f ->
+            f.send("Change the Water tracker"); f.idle()
+            assertEquals("c-host-id",f.last.toolId)
+            assertEquals(2,f.toolStore.tool("c-host-id")!!.revision)
+            assertFalse(requests.first().systemInstructions.contains("host-id"))
+            assertFalse(requests.first().systemInstructions.contains("Secret"))
+            assertTrue(requests.first().systemInstructions.contains("Water tracker"))
+
+            f.send("Change it"); f.idle()
+            assertEquals(listOf("Counter","Counter","Counter Plus"),f.last.refinementChoices.map { it.title })
+            val ambiguous = f.last.id
+            val calls = requests.size
+            main { f.model.chooseRefinementTarget(ambiguous,"outside-host-id") }
+            assertEquals(calls,requests.size)
+            assertEquals(1,f.toolStore.tool("outside-host-id")!!.revision)
+            main { f.model.chooseRefinementTarget(ambiguous,"b-host-id") }; f.idle()
+            assertEquals("b-host-id",f.last.toolId)
+            assertEquals(1,f.toolStore.tool("a-host-id")!!.revision)
+            assertEquals(2,f.toolStore.tool("b-host-id")!!.revision)
         }
-        assertEquals("clarify",ChatToolReply.parse(decision(target = active.id),listOf(active),"Update known-tool-123", "chat").kind)
     }
+
+    @Test fun fullViewRefineUsesLastChatAndCreatesANewCardAfterChatDeletion() {
+        val requests = CopyOnWriteArrayList<CloudRequest>()
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                requests += request
+                emit(CloudEvent.Text(if(request.jsonObject) spec("Updated") else decision("Change it",kind = "refine")))
+            }
+        }
+        Fixture(provider) { shell, tools ->
+            seedTool(tools,"full-view-id","Counter")
+            seedChat(shell,"full-view-id")
+            shell.saveConversation(Conversation("latest","Latest",1,1,messages = listOf(card("full-view-id"))))
+        }.use { f ->
+            main { f.model.editDraft(Draft("Keep this draft")); f.model.select(null); f.model.refineTool("full-view-id") }
+            waitUntil { f.model.snapshot.selectedId == "chat" }
+            assertEquals("",f.model.snapshot.draft.text)
+            f.send("Change its button"); f.idle()
+            assertEquals("full-view-id",f.last.toolId)
+            assertEquals("Keep this draft",f.model.snapshot.draft.text)
+            assertEquals("Change its button",requests.first().turns.last().text)
+            assertTrue(requests.first().systemInstructions.contains("Counter"))
+            assertFalse(requests.first().systemInstructions.contains("full-view-id"))
+
+            main { f.model.refineTool("full-view-id") }
+            waitUntil { f.model.snapshot.selected?.refinementTargetId == "full-view-id" }
+            main { f.model.editDraft(Draft("Keep this change draft")) }
+            runBlocking { f.model.tools.recordLastConversation(f.toolStore.tool("full-view-id")!!,"latest") }
+            main { f.model.refineTool("full-view-id") }
+            waitUntil { f.model.snapshot.selectedId == "latest" }
+            assertEquals("",f.model.snapshot.draft.text)
+            assertEquals("Keep this change draft",f.model.snapshot.conversations.single { it.id == "chat" }.composerDraft.text)
+
+            main { f.model.deleteConversation("latest"); f.model.refineTool("full-view-id"); f.model.refineTool("full-view-id") }
+            waitUntil { f.model.snapshot.selectedId != null }
+            assertNotEquals("chat",f.model.snapshot.selectedId)
+            assertEquals(2,f.model.snapshot.conversations.size)
+            assertEquals("",f.model.snapshot.draft.text)
+            assertEquals("full-view-id",f.last.toolId)
+            assertEquals(2,f.toolStore.tool("full-view-id")!!.revision)
+            waitUntil { f.toolStore.tool("full-view-id")!!.lastConversationId == f.model.snapshot.selectedId }
+        }
+    }
+
+    @Test fun queuedRefinementsUseSuccessiveCommittedRevisions() {
+        val entered = CountDownLatch(1)
+        val release = CompletableDeferred<Unit>()
+        val prompts = CopyOnWriteArrayList<String>()
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if(request.jsonObject) {
+                    prompts += request.turns.first().text
+                    if(prompts.size == 1) { entered.countDown(); release.await() }
+                    emit(CloudEvent.Text(spec("Version ${prompts.size + 1}")))
+                } else emit(CloudEvent.Text(decision(request.turns.last().text,kind = "refine")))
+            }
+        }
+        Fixture(provider) { shell, tools ->
+            seedTool(tools,"counter-id","Version 1")
+            seedChat(shell,"counter-id")
+        }.use { f ->
+            try {
+                f.send("Change Version 1 step one")
+                assertTrue(entered.await(10,TimeUnit.SECONDS))
+                f.send("Change Version 1 step two")
+                f.send("Change Version 1 step three")
+                assertEquals(listOf("generating","queued","queued"),f.model.snapshot.selected!!.messages.filter { it.replyTo != null }.map { it.status })
+                assertEquals(1,prompts.size)
+                release.complete(Unit); f.idle()
+                assertEquals(listOf(2,3,4),f.model.snapshot.selected!!.messages.filter { it.replyTo != null }.map { it.toolRevision })
+                assertEquals(4,f.toolStore.tool("counter-id")!!.revision)
+                assertTrue(prompts[1].contains("Version 2")); assertTrue(prompts[2].contains("Version 3"))
+            } finally { release.complete(Unit) }
+        }
+    }
+
+    @Test fun queueOverflowCancellationFailureAndRestartKeepRequestInput() {
+        val entered = CountDownLatch(1)
+        val blockRestart = CountDownLatch(1)
+        val gate = CompletableDeferred<Unit>()
+        val requests = CopyOnWriteArrayList<CloudRequest>()
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                requests += request
+                val text = request.turns.last().text
+                if(request.jsonObject) emit(CloudEvent.Text(spec("Updated")))
+                else {
+                    if(text == "Change 1") { entered.countDown(); gate.await() }
+                    if(text == "Change 2") throw CloudFailure("fixture","Fixture failure")
+                    if(text == "Change 3" && blockRestart.count != 0L) {
+                        blockRestart.countDown()
+                        CompletableDeferred<Unit>().await()
+                    }
+                    emit(CloudEvent.Text(decision("Change it",kind = "refine")))
+                }
+            }
+        }
+        Fixture(provider) { shell, tools ->
+            seedTool(tools,"counter-id","Counter")
+            seedChat(shell,"counter-id")
+        }.use { f ->
+            f.send("Change 1"); assertTrue(entered.await(10,TimeUnit.SECONDS))
+            for(index in 2..33) f.send("Change $index")
+            assertEquals("Change 33",f.model.snapshot.draft.text)
+            assertNotNull(f.model.requestError)
+            val chat = f.model.snapshot.selected!!
+            val active = chat.messages.first { it.replyTo != null }
+            val canceled = f.last
+            assertEquals(32,chat.messages.count { it.replyTo != null })
+            main { f.model.cancelRequest(canceled.id); f.model.cancelRequest(active.id) }
+            assertTrue(blockRestart.await(10,TimeUnit.SECONDS))
+            waitUntil { f.store.load().selected!!.messages.count { it.status == "queued" } == 28 }
+            val calls = requests.size
+            f.restart()
+            assertEquals(calls,requests.size)
+            assertEquals("Change 33",f.model.snapshot.draft.text)
+            val recovered = f.model.snapshot.selected!!
+            val replies = recovered.messages.filter { it.replyTo != null }
+            assertEquals(listOf("cancelled","error","interrupted"),replies.take(3).map { it.status })
+            assertEquals("cancelled",replies.last().status)
+            assertTrue(replies.drop(3).dropLast(1).all { it.status == "interrupted" })
+            assertEquals((1..32).map { "Change $it" },recovered.messages.filter { it.role == "user" }.map { it.text })
+            main { f.model.retry(replies[2].id) }; f.idle()
+            assertEquals(2,f.toolStore.tool("counter-id")!!.revision)
+            assertEquals("complete",f.model.snapshot.selected!!.messages.single { it.id == replies[2].id }.status)
+        }
+    }
+
+    @Test fun deletingTargetsAndChatsSkipsTheirQueuedWorkAndContinuesOtherRequests() {
+        val entered = CountDownLatch(1)
+        val gate = CompletableDeferred<Unit>()
+        val requests = CopyOnWriteArrayList<String>()
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if(request.jsonObject) emit(CloudEvent.Text(spec("Updated")))
+                else {
+                    val text = request.turns.last().text
+                    requests += text
+                    if(text == "Hold first") { entered.countDown(); gate.await() }
+                    emit(CloudEvent.Text(decision("Change it",kind = "refine")))
+                }
+            }
+        }
+        Fixture(provider) { shell, tools ->
+            seedTool(tools,"missing","Missing")
+            seedTool(tools,"keep","Keep","keep-chat")
+            seedTool(tools,"survivor","Survivor","removed-chat")
+            seedChat(shell,"missing")
+            shell.saveConversation(Conversation("removed-chat","Removed",1,1,messages = listOf(card("survivor"))))
+            shell.saveConversation(Conversation("keep-chat","Keep",1,1,messages = listOf(card("keep"))))
+        }.use { f ->
+            f.send("Hold first"); assertTrue(entered.await(10,TimeUnit.SECONDS))
+            val surface = f.model.surfaceSequence
+            main { f.model.refineTool("missing") }
+            waitUntil { f.model.surfaceSequence > surface }
+            f.send("Do not send missing")
+            main { f.model.select("removed-chat") }; f.send("Do not send removed")
+            main { f.model.select("keep-chat") }; f.send("Change keep")
+            val deletion = runBlocking { f.model.tools.prepareDeletion(f.toolStore.tool("missing")!!) }
+            main { f.model.tools.delete(deletion); f.model.deleteConversation("removed-chat") }
+            waitUntil { f.toolStore.tool("missing") == null && !f.model.tools.busy }
+            main { f.model.cancelRequest() }; f.idle()
+            assertEquals(listOf("Hold first","Change keep"),requests)
+            assertEquals("tool_unavailable",f.model.snapshot.conversations.single { it.id == "chat" }.messages.last().errorCode)
+            assertTrue(f.model.snapshot.conversations.none { it.id == "removed-chat" })
+            assertNotNull(f.toolStore.tool("survivor"))
+            assertEquals(2,f.toolStore.tool("keep")!!.revision)
+        }
+    }
+
+    @Test fun unavailableImplicitTargetAllowsAnswersAndCannotRetargetRefinements() {
+        for(archive in listOf(false,true)) {
+            val entered = CountDownLatch(1)
+            val gate = CompletableDeferred<Unit>()
+            val requests = CopyOnWriteArrayList<String>()
+            var generationCalls = 0
+            val provider = object : SingleRoundProvider() {
+                override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                    if(request.jsonObject) {
+                        generationCalls++
+                        emit(CloudEvent.Text(spec("Updated")))
+                        return
+                    }
+                    val text = request.turns.last().text
+                    requests += text
+                    val reply = when(text) {
+                        "Hold first" -> {
+                            entered.countDown()
+                            gate.await()
+                            decision(kind = "answer")
+                        }
+                        "What is a counter?" -> decision(kind = "answer", text = "A counter keeps a total.")
+                        "What is a timer?" -> {
+                            if(requests.count { it == text } == 1) throw CloudFailure("fixture","Retry the question.")
+                            decision(kind = "answer", text = "A timer measures time.")
+                        }
+                        "Change the counter" -> decision(kind = "refine")
+                        else -> error("Unexpected input: $text")
+                    }
+                    request.validateOperation?.invoke(ChatToolReply.decode(reply))
+                    emit(CloudEvent.Text(reply))
+                }
+            }
+            Fixture(provider) { shell, tools ->
+                seedTool(tools,"counter-id","Counter")
+                seedTool(tools,"other-id","Other app")
+                seedChat(shell,"counter-id")
+            }.use { f ->
+                try {
+                    f.send("Hold first")
+                    assertTrue(entered.await(10,TimeUnit.SECONDS))
+                    f.send("What is a counter?")
+                    f.send("What is a timer?")
+                    f.send("Change the counter")
+                    val surface = f.model.surfaceSequence
+                    main { f.model.refineTool("other-id") }
+                    waitUntil { f.model.surfaceSequence > surface }
+                    val counter = f.toolStore.tool("counter-id")!!
+                    if(archive) main { f.model.tools.archive(counter) }
+                    else {
+                        val deletion = runBlocking { f.model.tools.prepareDeletion(counter) }
+                        main { f.model.tools.delete(deletion) }
+                    }
+                    waitUntil { !f.model.tools.busy && f.toolStore.tool("counter-id")?.archived != false }
+                    gate.complete(Unit)
+                    f.idle()
+                    val replies = f.model.snapshot.selected!!.messages.filter { it.replyTo != null }
+                    assertEquals(listOf("Hold first","What is a counter?","What is a timer?","Change the counter"),requests)
+                    assertEquals("complete",replies[1].status)
+                    assertEquals("A counter keeps a total.",replies[1].text)
+                    assertEquals("fixture",replies[2].errorCode)
+                    assertEquals("tool_unavailable",replies[3].errorCode)
+                    main { f.model.retry(replies[2].id); f.model.retry(replies[3].id) }
+                    f.idle()
+                    val retried = f.model.snapshot.selected!!.messages.filter { it.replyTo != null }
+                    assertEquals("A timer measures time.",retried[2].text)
+                    assertEquals("tool_unavailable",retried[3].errorCode)
+                    assertEquals(listOf("What is a timer?","Change the counter"),requests.takeLast(2))
+                    assertEquals(0,generationCalls)
+                    assertEquals(1,f.toolStore.tool("other-id")!!.revision)
+                } finally {
+                    gate.complete(Unit)
+                }
+            }
+        }
+    }
+
     @Test fun interruptedAcceptedOperationRecoversWithoutCloudRequest() = runBlocking {
         var calls = 0
         val provider = object : SingleRoundProvider() {
@@ -920,7 +1413,10 @@ class AutomaticToolWorkflowTest {
         }
         Fixture(provider) { shell, tools ->
             val generation = object : SingleRoundProvider() {
-                override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) { emit(CloudEvent.Text(spec())) }
+                override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                    if (request.replyWithFixturePlan(emit)) return
+                    emit(CloudEvent.Text(spec()))
+                }
             }
             val engine = ToolEngine(tools,ToolGenerationService(generation,com.alpha.assistant.sandbox.SandboxClient(app)))
             runBlocking {

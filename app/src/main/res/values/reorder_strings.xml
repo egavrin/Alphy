@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tool_reorder_handle">Изменить порядок: %1$s</string>
+    <string name="tool_reorder_move_up">Переместить выше</string>
+    <string name="tool_reorder_move_down">Переместить ниже</string>
+</resources>

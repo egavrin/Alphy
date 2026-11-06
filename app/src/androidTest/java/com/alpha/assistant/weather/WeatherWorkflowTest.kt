@@ -53,7 +53,7 @@ class WeatherWorkflowTest {
                 override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                     request.weatherLocation!!.invoke()
                     continued++
-                    emit(CloudEvent.RoundComplete(ChatToolReply.encode(ChatToolReply.Decision("answer", "Weather fixture", "", null, "none")), false))
+                    emit(CloudEvent.RoundComplete(ChatToolReply.encode(ChatToolReply.Decision("answer", "Weather fixture", "", "none")), false))
                 }
             }, store, keys, weatherLocator = object : WeatherLocator {
                 override fun hasPermission() = true

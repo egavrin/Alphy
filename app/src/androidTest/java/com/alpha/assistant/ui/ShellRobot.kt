@@ -48,6 +48,7 @@ import com.alpha.assistant.data.Message
 import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.data.ShellStore
 import com.alpha.assistant.diagnostics.UiFailureDiagnostics
+import com.alpha.assistant.tools.replyWithFixturePlan
 import com.alpha.assistant.voice.VoiceSession
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -70,7 +71,12 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
         synchronized(this) { calls++ }
         failure?.let { throw it }
         gate?.await()
-        emit(CloudEvent.RoundComplete("""{"kind":"answer","text":${JSONObject.quote(reply)},"brief":"","targetId":null,"search":"none"}""", false))
+        if (request.replyWithFixturePlan(emit)) return
+        if (request.generationStage != null) {
+            emit(CloudEvent.Text("""{"formatVersion":3,"title":"Fixture","description":"","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"text","text":"Count","bind":"count"},"source":"return {state:input.state};"}"""))
+            return
+        }
+        emit(CloudEvent.RoundComplete("""{"kind":"answer","text":${JSONObject.quote(reply)},"brief":"","search":"none"}""", false))
     }
 }
 
@@ -134,14 +140,15 @@ internal class ShellRobot(fixture: String) {
             root?.packageName?.toString() == instrumentation.targetContext.packageName && find(root, label) == null
         }
     }
-    fun waitUntil(condition: () -> Boolean) {
-        val deadline = SystemClock.uptimeMillis() + 10000
+    fun waitUntil(condition: () -> Boolean) = waitUntil(10_000, condition)
+    fun waitUntil(timeoutMs: Long, condition: () -> Boolean) {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
         while (SystemClock.uptimeMillis() < deadline) {
             if (condition()) return
             SystemClock.sleep(50)
         }
         diagnostics.capture("wait-timeout")
-        fail("UI condition did not complete within 10 seconds")
+        fail("UI condition did not complete within ${timeoutMs / 1000} seconds")
     }
     // Compose UI 1.12.1 marks only an enabled field as editable, so a field that is disabled for a short time needs a wait.
     // The climb stops at the first ancestor that holds a field and takes the first field in it.
@@ -166,9 +173,12 @@ internal class ShellRobot(fixture: String) {
         return result!!
     }
     fun click(label: String) {
-        var node: AccessibilityNodeInfo? = waitFor(label)
-        while (node != null && !node.isClickable) node = node.parent
-        assertNotNull("No clickable node for $label", node)
+        diagnostics.target(label)
+        var node: AccessibilityNodeInfo? = null
+        waitUntil {
+            node = generateSequence(find(label)) { it.parent }.firstOrNull { it.isClickable }
+            node?.let { it.isVisibleToUser && it.isEnabled && AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK in it.actionList } == true
+        }
         assertTrue(diagnostics.click(label,node))
         automation.waitForIdle(100, 3000)
     }
@@ -252,11 +262,11 @@ internal class ShellRobot(fixture: String) {
         }
         assertTrue("$count frames did not pass within 10 seconds", frames.await(10, TimeUnit.SECONDS))
     }
-    /** Main thread only. A drawer row is on the screen. The top bar title has no click action, so it does not count. */
-    fun drawerRowShown(activity: Activity): Boolean = nodes(activity, merged = true).any { node ->
-        node.config.getOrNull(SemanticsProperties.Text)?.any { it.text == text(R.string.search) } == true &&
+    /** The visible right edge of the Search row. Read on the main thread. */
+    fun drawerRowRight(activity: Activity): Float = nodes(activity, merged = true).firstOrNull { node ->
+        node.config.getOrNull(SemanticsProperties.Text)?.any { it.text.trimEnd() == text(R.string.search) } == true &&
             SemanticsActions.OnClick in node.config && node.boundsInRoot.width > 0f
-    }
+    }?.boundsInRoot?.right ?: 0f
     /** Main thread only. The scrim has its label only while the drawer is settled open. */
     fun scrimLabeled(activity: Activity): Boolean = activity.getString(androidx.compose.ui.R.string.close_drawer).let { label ->
         nodes(activity).any { it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(label) == true }
@@ -265,6 +275,13 @@ internal class ShellRobot(fixture: String) {
     fun composed(scenario: ActivityScenario<*>, tag: String): Boolean = composedNode(scenario) { it.getOrNull(SemanticsProperties.TestTag) == tag }
     fun composedText(scenario: ActivityScenario<*>, text: String): Boolean =
         composedNode(scenario) { config -> config.getOrNull(SemanticsProperties.Text)?.any { it.text.trimEnd() == text } == true }
+    fun composedLink(scenario: ActivityScenario<*>, label: String, url: String): Boolean =
+        composedNode(scenario) { config -> config.getOrNull(SemanticsProperties.Text)?.any { text ->
+            text.getLinkAnnotations(0, text.length).any {
+                (it.item as? androidx.compose.ui.text.LinkAnnotation.Url)?.url == url &&
+                    text.text.substring(it.start, it.end) == label
+            }
+        } == true }
     /** The window bounds of the composed node with [tag] and the width of its Compose root, in pixels. */
     fun composedBounds(scenario: ActivityScenario<*>, tag: String): Pair<Rect, Int> {
         var result: Pair<Rect, Int>? = null
@@ -301,36 +318,71 @@ internal class ShellRobot(fixture: String) {
         }))
         automation.waitForIdle(100, 3000)
     }
-    /** Scrolls the first scrollable node of the window forward. A refused scroll returns false. */
-    fun scrollForward(): Boolean {
-        val scrolled = scrollable(diagnostics.freshRoot())?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) == true
-        if (scrolled) awaitScrollEnd()
-        return scrolled
+    /** Scrolls a visible container that supports the requested direction. */
+    fun scrollForward(): Boolean = scroll(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+
+    private fun scroll(action: Int): Boolean {
+        fun containers(node: AccessibilityNodeInfo?, path: List<Int> = emptyList()): Sequence<List<Int>> = sequence {
+            if (node == null || !node.isVisibleToUser) return@sequence
+            if (node.isScrollable && node.actionList.any { it.id == action }) yield(path)
+            repeat(node.childCount) { yieldAll(containers(childOrNull(node, it), path + it)) }
+        }
+        fun current(path: List<Int>): AccessibilityNodeInfo? =
+            path.fold(diagnostics.freshRoot()) { node, index -> node?.let { childOrNull(it, index) } }
+        val paths = containers(diagnostics.freshRoot()).toList()
+        for (path in paths) {
+            val node = current(path) ?: continue
+            val before = childBounds(node)
+            if (node.performAction(action)) {
+                awaitScrollEnd { current(path)?.let(::childBounds).orEmpty() }
+                if (current(path)?.let(::childBounds) != before) return true
+            }
+        }
+        return false
     }
-    /** A node outside the scroll viewport can be absent, so this helper scrolls forward until [label] shows. Then it shows the clickable node of [label], which [assertTarget] measures. */
-    fun reveal(label: String): AccessibilityNodeInfo {
+    /** Scroll to [label]. A null direction permits searching both ways after a layout change. */
+    fun reveal(label: String, forward: Boolean? = true): AccessibilityNodeInfo {
+        diagnostics.target(label)
         var node = find(label)
-        repeat(10) { if (node == null) { scrollForward(); node = find(label) } }
-        var target = node
-        while (target != null && !target.isClickable) target = target.parent
-        if ((target ?: node)?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id) == true) awaitScrollEnd()
+        val directions = if (forward == null) listOf(true, false) else listOf(forward)
+        for (down in directions) {
+            val action = if (down) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+            repeat(10) { if (node == null) { scroll(action); node = find(label) } }
+        }
+        val target = node?.let(::revealTarget)
+        if (target?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id) == true) {
+            // Android can accept this action in a stationary dialog. Sample the target even when it has no scroll container.
+            awaitScrollEnd {
+                val current = find(label)?.let(::revealTarget) ?: return@awaitScrollEnd null
+                val container = generateSequence(current) { it.parent }.firstOrNull { it.isScrollable }
+                listOf(Rect().also(current::getBoundsInScreen)) + container?.let(::childBounds).orEmpty()
+            }
+        }
         return waitFor(label)
     }
+
+    private fun revealTarget(node: AccessibilityNodeInfo): AccessibilityNodeInfo =
+        generateSequence(node) { it.parent }.firstOrNull { it.isClickable } ?: node
+
     fun shell(command: String): String =
         automation.executeShellCommand(command).use { ParcelFileDescriptor.AutoCloseInputStream(it).bufferedReader().readText().trim() }
 
-    private fun scrollable(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-        if (node == null || node.isScrollable) return node
-        repeat(node.childCount) { scrollable(node.getChild(it))?.let { return it } }
-        return null
+    private fun childOrNull(node: AccessibilityNodeInfo, index: Int): AccessibilityNodeInfo? = try {
+        if (index < node.childCount) node.getChild(index) else null
+    } catch (_: IndexOutOfBoundsException) {
+        null
     }
+
+    private fun childBounds(node: AccessibilityNodeInfo): List<Rect> =
+        List(node.childCount) { index -> Rect().also { childOrNull(node, index)?.getBoundsInScreen(it) } }
+
     // A scroll action returns before its animation starts, and waitForIdle can return before the content moves.
-    // After two frames the animation runs, so the scroll is at its end when two reads of the content bounds agree.
-    private fun awaitScrollEnd() {
+    // After two frames the animation runs. Wait for two reads of the relevant bounds to agree.
+    private fun awaitScrollEnd(readBounds: () -> List<Rect>?) {
         awaitFrames(2)
         var last: List<Rect>? = null
         waitUntil {
-            val content = scrollable(diagnostics.freshRoot())?.let { node -> List(node.childCount) { index -> Rect().also { node.getChild(index)?.getBoundsInScreen(it) } } }
+            val content = readBounds()
             (content != null && content == last).also { last = content }
         }
     }
@@ -353,7 +405,7 @@ internal class ShellRobot(fixture: String) {
     private fun find(node: AccessibilityNodeInfo?, label: String): AccessibilityNodeInfo? {
         if (node == null) return null
         if (node.text?.toString()?.trimEnd() == label || node.contentDescription?.toString() == label) return node
-        repeat(node.childCount) { find(node.getChild(it), label)?.let { match -> return match } }
+        repeat(node.childCount) { find(childOrNull(node, it), label)?.let { match -> return match } }
         return null
     }
     private fun texts(node: AccessibilityNodeInfo?): List<String> = if (node == null) emptyList() else

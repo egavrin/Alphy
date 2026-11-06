@@ -23,7 +23,12 @@ import org.json.JSONObject
 /** Public Android APIs only. The sandbox has no reference to this executor. */
 class AndroidCapabilities internal constructor(private val context: Context,private val medicineAccess: ()->MedicineReminderAccess={MedicineRuntime.access(context)}) {
     fun permission(id: String) = CapabilityCatalog.definition(id).permission
-    fun permissionGranted(id: String) = if(id in MedicineContract.reminderIds) medicineAccess().permissionGranted else if(id in OwnedCalendarContract.ids) OwnedCalendarCapabilities.hasPermissions(context) else permission(id)?.let { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED } ?: true
+    fun permissionGranted(id: String) = when(id) {
+        DeviceReadContract.LOCATION -> DeviceReadContract.locationPermission(context)
+        in MedicineContract.reminderIds -> medicineAccess().permissionGranted
+        in OwnedCalendarContract.ids -> OwnedCalendarCapabilities.hasPermissions(context)
+        else -> permission(id)?.let { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED } ?: true
+    }
     /** Reads only platform availability metadata. It never requests permission or launches an action. */
     fun availability(id: String): JSONObject {
         val definition = CapabilityCatalog.definition(id)
@@ -76,6 +81,11 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
             } catch(_: android.content.ActivityNotFoundException) { CapabilityResult("unavailable","На устройстве нет приложения, которое поддерживает это системное действие.") }
         }
         return when(definition.action) {
+            CapabilityAction.DEVICE_READ -> CapabilityResult("unavailable","Чтение доступно только из открытого мини-приложения.")
+            CapabilityAction.NETWORK_REQUEST -> CapabilityResult("unavailable","Сетевой запрос требует текущего сеанса мини-приложения.")
+            CapabilityAction.AI_ASK -> CapabilityResult("unavailable","Для запроса к DeepSeek откройте мини-приложение.")
+            CapabilityAction.AUDIO_PLAYBACK -> CapabilityResult("unavailable","Воспроизведение доступно только из открытого мини-приложения.")
+            CapabilityAction.VIDEO_PLAYBACK -> CapabilityResult("unavailable","Видео требует видимого элемента воспроизведения.")
             CapabilityAction.NOTIFICATION_POST -> {
                 val manager = context.getSystemService(NotificationManager::class.java)
                 manager.createNotificationChannel(NotificationChannel("alpha-tools","Инструменты Alphy",NotificationManager.IMPORTANCE_DEFAULT))
@@ -93,15 +103,7 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
             }
             CapabilityAction.MEDICINE -> CapabilityResult("denied","Medicine actions require a claimed native owner context.")
             CapabilityAction.CALENDAR_OWNED -> CapabilityResult("denied","Owned calendar actions require a claimed native owner context.")
-            CapabilityAction.CALENDAR_READ -> {
-                val events = JSONArray()
-                val uri = CalendarContract.Instances.CONTENT_URI.buildUpon().appendPath(args.getLong("from").toString()).appendPath(args.getLong("to").toString()).build()
-                val cursor = context.contentResolver.query(uri,arrayOf(CalendarContract.Instances.EVENT_ID,CalendarContract.Instances.TITLE,CalendarContract.Instances.BEGIN,CalendarContract.Instances.END),
-                    "${CalendarContract.Instances.CALENDAR_ID}=?",arrayOf(args.getLong("calendarId").toString()),"${CalendarContract.Instances.BEGIN} ASC")
-                    ?: return CapabilityResult("unavailable","Системный календарь недоступен.")
-                cursor.use { c -> while(c.moveToNext() && events.length() < 50) events.put(JSONObject().put("title",c.getString(1).orEmpty().take(500)).put("start",c.getLong(2)).put("end",c.getLong(3))) }
-                CapabilityResult("succeeded","События выбранного календаря за указанный период прочитаны на устройстве. Данные не отправлялись в DeepSeek.",JSONObject().put("events",events).put("limit",50))
-            }
+            CapabilityAction.CALENDAR_READ -> readCalendar(args,includeIds=false)
             CapabilityAction.CALENDAR_CREATE -> open(Intent(Intent.ACTION_INSERT,CalendarContract.Events.CONTENT_URI)
                 .putExtra(CalendarContract.Events.TITLE,args.getString("title"))
                 .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME,args.getLong("start"))
@@ -132,9 +134,39 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
                 else Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION),true)
             CapabilityAction.FILE_PICK -> open(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(args.getString("mime"))
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION),true)
+            CapabilityAction.AUDIO_PICK -> open(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("audio/*")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION),true)
+            CapabilityAction.VIDEO_PICK -> open(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION),true)
             CapabilityAction.CAMERA_CAPTURE -> open(Intent(MediaStore.ACTION_IMAGE_CAPTURE),true)
         }
     }
+    /** Stable provider IDs are for the local automation import only. */
+    internal fun readAutomationCalendar(request: CapabilityRequest): CapabilityResult {
+        val valid=CapabilityCatalog.request(request.json())
+        require(valid.capability=="calendar.read")
+        if(permissionGranted(valid.capability)) {
+            try {return readCalendar(valid.args,includeIds=true)} catch(_: SecurityException) { /* Android can revoke access during the query. */ }
+        }
+        return CapabilityResult("denied",context.getString(com.alpha.assistant.R.string.capability_permission_required))
+    }
+
+    private fun readCalendar(args: JSONObject,includeIds: Boolean): CapabilityResult {
+        val events=JSONArray()
+        val uri=CalendarContract.Instances.CONTENT_URI.buildUpon().appendPath(args.getLong("from").toString()).appendPath(args.getLong("to").toString()).build()
+        val cursor=context.contentResolver.query(uri,arrayOf(CalendarContract.Instances.EVENT_ID,CalendarContract.Instances.TITLE,CalendarContract.Instances.BEGIN,CalendarContract.Instances.END),
+            "${CalendarContract.Instances.CALENDAR_ID}=?",arrayOf(args.getLong("calendarId").toString()),"${CalendarContract.Instances.BEGIN} ASC")
+            ?: return CapabilityResult("unavailable","Системный календарь недоступен.")
+        cursor.use { c ->
+            while(events.length()<50 && c.moveToNext()) {
+                events.put(JSONObject().put("title",c.getString(1).orEmpty().take(500)).put("start",c.getLong(2)).put("end",c.getLong(3)).apply {
+                    if(includeIds) put("id",c.getLong(0))
+                })
+            }
+        }
+        return CapabilityResult("succeeded","События выбранного календаря за указанный период прочитаны на устройстве. Данные не отправлялись в DeepSeek.",JSONObject().put("events",events).put("limit",50))
+    }
+
     companion object {
         fun selectionResult(resultCode: Int, intent: Intent?): CapabilityResult {
             if(resultCode == Activity.RESULT_CANCELED) return CapabilityResult("cancelled","Выбор в системном окне отменён.")

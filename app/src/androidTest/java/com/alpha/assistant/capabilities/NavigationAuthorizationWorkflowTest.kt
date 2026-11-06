@@ -62,7 +62,7 @@ class NavigationAuthorizationWorkflowTest {
             .put("stateSchema",JSONObject("{\"name\":\"string\"}")).put("initialState",JSONObject("{\"name\":\"\"}"))
             .put("ui",node).put("source",source).toString())
         val tool=ToolRecord("navigation",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)
-        store.saveTool(tool,true); store.grant(tool.id,"maps.markReached",true);store.grant(tool.id,"maps.route",true)
+        store.saveTool(tool,true)
         lateinit var model: ShellViewModel
         val offline=object: ChatProvider {override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend(CloudEvent)->Unit)=error("Offline UI fixture")}
         CloudTestActivity.factory={ShellViewModel(it,offline,shell,keys).also {created -> model=created}}
@@ -79,7 +79,7 @@ class NavigationAuthorizationWorkflowTest {
     }
     @Test fun genericDetailsCannotMarkB() = fixture(JSONObject("{\"type\":\"button\",\"text\":\"Show details\",\"action\":\"run\"}"),stop("B")) { model,store,tool ->
         click("Show details");waitUntil {!model.tools.busy && store.effects(tool.id).isNotEmpty()}
-        assertEquals("pending",store.effects(tool.id).single().phase)
+        assertEquals("denied",store.effects(tool.id).single().result.status)
         assertEquals(0,store.readableDatabase.rawQuery("SELECT COUNT(*) FROM maps_reached",null).use {it.moveToFirst();it.getInt(0)})
     }
     @Test fun inputCannotMarkB() = fixture(JSONObject("{\"type\":\"input\",\"text\":\"Name\",\"bind\":\"name\",\"action\":\"run\"}"),stop("B")) { model,store,tool ->
@@ -94,7 +94,7 @@ class NavigationAuthorizationWorkflowTest {
         diagnostics.capture("before-set-text")
         var field: AccessibilityNodeInfo?=null
         // The covered Desktop composer stays in the window during the push fade, so search only the mini-app content.
-        waitUntil {field=editable(find("Mini-app content"));field!=null}
+        waitUntil {field=editable(find("Содержимое мини-приложения"));field!=null}
         try {
             assertTrue(field!!.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,android.os.Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,"Changed")
@@ -102,14 +102,14 @@ class NavigationAuthorizationWorkflowTest {
         } finally {
             diagnostics.capture("after-set-text",field)
         }
-        click("Apply: Name");waitUntil {!model.tools.busy && store.effects(tool.id).isNotEmpty()}
-        assertEquals("pending",store.effects(tool.id).single().phase)
+        click("Применить: Name");waitUntil {!model.tools.busy && store.effects(tool.id).isNotEmpty()}
+        assertEquals("denied",store.effects(tool.id).single().result.status)
         assertEquals(0,store.readableDatabase.rawQuery("SELECT COUNT(*) FROM maps_reached",null).use {it.moveToFirst();it.getInt(0)})
     }
     @Test fun semanticMarkACannotSubstituteB() = fixture(navigation(),stop("B")) { model,store,tool ->
         click("Mark reached: Stop A [A] · 31.230000,121.473000 wgs84")
         waitUntil {!model.tools.busy && store.effects(tool.id).isNotEmpty()}
-        assertEquals("pending",store.effects(tool.id).single().phase)
+        assertEquals("denied",store.effects(tool.id).single().result.status)
         assertEquals(0,store.readableDatabase.rawQuery("SELECT COUNT(*) FROM maps_reached",null).use {it.moveToFirst();it.getInt(0)})
     }
     @Test fun legitimateSemanticClickMarksAWithoutAnotherDialog() = fixture(navigation(),null) { model,store,tool ->
@@ -121,7 +121,7 @@ class NavigationAuthorizationWorkflowTest {
     @Test fun semanticRouteCCannotSubstituteB() = fixture(navigation("maps.route",stop("C").put("mode","walking").put("reachedRef","a".repeat(64))),stop("B").put("mode","walking").put("reachedRef","a".repeat(64))) { model,store,tool ->
         click("Route to: Stop C [C] · 31.250000,121.513000 wgs84 · walking")
         waitUntil {!model.tools.busy && store.effects(tool.id).isNotEmpty()}
-        assertEquals("pending",store.effects(tool.id).single().phase)
+        assertEquals("denied",store.effects(tool.id).single().result.status)
     }
     @Test fun selectedDataAndCapabilityMustMatchExactly() {
         val mark=navigation()

@@ -4,6 +4,8 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.content.SharedPreferences
+import java.io.Closeable
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -26,6 +28,15 @@ class SecureKeyStore(context: Context, name: String = "alpha_credentials", priva
         check(preferences.edit().putString("consent", "1").commit()) { "Consent write failed" }
     }
     @Synchronized fun consented(): Boolean = preferences.getString("consent", null) == "1"
+    // The IV changes with each credential write and contains no key material.
+    internal fun consentIdentity(): String? = preferences.getString("iv", null)?.takeIf { consented() }
+    internal fun observeConsent(changed: () -> Unit): Closeable {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || key == "iv" || key == "consent") changed()
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        return Closeable { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
     @Synchronized fun read(): Result<String?> = runCatching {
         val ciphertext = preferences.getString("ciphertext", null)
         val iv = preferences.getString("iv", null)

@@ -39,7 +39,7 @@ class CapabilityOutcomeWorkflowTest {
                 .put("stateSchema",JSONObject("{\"ready\":\"boolean\"}")).put("initialState",JSONObject("{\"ready\":true}"))
                 .put("ui",JSONObject("{\"type\":\"text\",\"text\":\"Fixture\"}")).put("source","return {state:input.state};").toString())
             val tool=ToolRecord("owner",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)
-            store.commitTool(tool,null,true,effects=listOf(request)); store.grant(tool.id,request.capability,true)
+            store.commitTool(tool,null,true,effects=listOf(request))
             block(permissions,store,tool,store.effects(tool.id).single().key)
         } } finally { context.deleteDatabase(name) }
     }
@@ -49,17 +49,17 @@ class CapabilityOutcomeWorkflowTest {
         assertEquals(immediate.json().toString(),store.effect(key)!!.result.json().toString())
         ToolStore(context,store.databaseName).use { reopened ->
             assertEquals(immediate.json().toString(),reopened.effect(key)!!.result.json().toString())
-            val duplicate=CapabilityBroker(context,reopened).execute(key,true) { error("Duplicate adapter execution") }
+            val duplicate=CapabilityBroker(context,reopened).execute(key) { error("Duplicate adapter execution") }
             assertEquals(immediate.json().toString(),duplicate.json().toString())
         }
     }
     @Test fun postClaimChangesReturnTheDurableDecisionWithoutReplay(): Unit = runBlocking {
-        for(mode in listOf("grant","state","revision","archive","permission","invalidData","terminal")) fixture { permissions,store,tool,key ->
+        for(mode in listOf("legacyRow","state","revision","archive","permission","invalidData","terminal")) fixture { permissions,store,tool,key ->
             var calls=0
-            val result=CapabilityBroker(permissions,store).execute(key,true) {
+            val result=CapabilityBroker(permissions,store).execute(key) {
                 calls++; assertEquals("running",store.effect(key)!!.phase)
                 when(mode) {
-                    "grant" -> store.grant(tool.id,it.capability,false)
+                    "legacyRow" -> store.seedLegacyDeviceGrant(tool.id,it.capability,false)
                     "state" -> store.commitTool(tool.copy(stateVersion=2),tool,false)
                     "revision" -> store.commitTool(tool.copy(revision=2),tool,true)
                     "archive" -> store.setArchived(tool,true)
@@ -69,7 +69,7 @@ class CapabilityOutcomeWorkflowTest {
                 CapabilityResult("succeeded","Adapter reply",if(mode=="invalidData") JSONObject().put("unexpected",true) else JSONObject())
             }
             consistent(store,key,result,when(mode) {
-                "grant" -> "revoked"
+                "legacyRow" -> "succeeded"
                 "permission" -> "denied"
                 "invalidData" -> "failed"
                 else -> "cancelled"
@@ -80,12 +80,12 @@ class CapabilityOutcomeWorkflowTest {
     @Test fun terminalStatusesAndAdapterErrorsRemainDurable(): Unit = runBlocking {
         for(status in CapabilityResult.statuses - "awaitingUser") fixture { permissions,store,_,key ->
             var calls=0
-            val result=CapabilityBroker(permissions,store).execute(key,true) { calls++; CapabilityResult(status,"Adapter $status") }
+            val result=CapabilityBroker(permissions,store).execute(key) { calls++; CapabilityResult(status,"Adapter $status") }
             consistent(store,key,result,status); assertEquals(1,calls)
         }
         for(security in listOf(true,false)) fixture { permissions,store,_,key ->
             var calls=0
-            val result=CapabilityBroker(permissions,store).execute(key,true) {
+            val result=CapabilityBroker(permissions,store).execute(key) {
                 calls++; if(security) throw SecurityException("Fixture") else error("Fixture")
             }
             consistent(store,key,result,if(security) "denied" else "unknownOutcome"); assertEquals(1,calls)
@@ -93,16 +93,16 @@ class CapabilityOutcomeWorkflowTest {
     }
     @Test fun pendingForegroundWorkCanResumeAndThenCannotReplay(): Unit = runBlocking { fixture { permissions,store,_,key ->
         val broker=CapabilityBroker(permissions,store); var calls=0
-        val pending=broker.execute(key,true) { calls++; CapabilityResult("awaitingUser","Open the app") }
+        val pending=broker.execute(key) { calls++; CapabilityResult("awaitingUser","Open the app") }
         assertEquals("pending",store.effect(key)!!.phase)
         assertEquals(pending.json().toString(),store.effect(key)!!.result.json().toString())
-        val result=broker.execute(key,true) { calls++; CapabilityResult("succeeded","Resumed") }
+        val result=broker.execute(key) { calls++; CapabilityResult("succeeded","Resumed") }
         consistent(store,key,result,"succeeded"); assertEquals(2,calls)
     } }
     @Test fun pickerWaitsForOneResourceCallbackAndRejectsLateResults(): Unit = runBlocking {
         fixture(CapabilityRequest("pick","photo.pick",JSONObject())) { permissions,store,tool,key ->
             var calls=0
-            val waiting=CapabilityBroker(permissions,store).execute(key,true) {
+            val waiting=CapabilityBroker(permissions,store).execute(key) {
                 calls++; CapabilityResult("awaitingUser","Picker",JSONObject().put("launched",true))
             }
             consistent(store,key,waiting,"awaitingUser","waiting"); assertEquals(1,calls)
@@ -117,11 +117,11 @@ class CapabilityOutcomeWorkflowTest {
     @Test fun rejectedPickerLaunchCannotAcceptAResource(): Unit = runBlocking {
         fixture(CapabilityRequest("pick","photo.pick",JSONObject())) { permissions,store,tool,key ->
             var calls=0
-            val result=CapabilityBroker(permissions,store).execute(key,true) {
-                calls++; store.grant(tool.id,it.capability,false)
+            val result=CapabilityBroker(permissions,store).execute(key) {
+                calls++; store.setArchived(tool,true)
                 CapabilityResult("awaitingUser","Picker",JSONObject().put("launched",true))
             }
-            consistent(store,key,result,"revoked")
+            consistent(store,key,result,"cancelled")
             val resource=CapabilityResource("b".repeat(64),tool.id,"photo","content://fixture/late","image/jpeg",3,false,false,ToolStore.processSession,Long.MAX_VALUE)
             assertFalse(store.finishUserEffect(key,CapabilityResult("succeeded","Late selection",resource.metadata()),resource))
             assertTrue(store.resources(tool.id).isEmpty()); assertEquals(1,calls)
@@ -129,7 +129,7 @@ class CapabilityOutcomeWorkflowTest {
     }
     @Test fun cancellationPersistsUnknownOutcomeAndNeverReplays(): Unit = runBlocking { fixture { permissions,store,_,key ->
         var calls=0
-        val interrupted=runCatching { CapabilityBroker(permissions,store).execute(key,true) { calls++; throw CancellationException("Fixture") } }
+        val interrupted=runCatching { CapabilityBroker(permissions,store).execute(key) { calls++; throw CancellationException("Fixture") } }
         assertTrue(interrupted.exceptionOrNull() is CancellationException)
         consistent(store,key,store.effect(key)!!.result,"unknownOutcome"); assertEquals(1,calls)
     } }
@@ -142,13 +142,13 @@ class CapabilityOutcomeWorkflowTest {
                 if(capability=="calendar.createOwned") args.put("calendarRef","c".repeat(64)).put("eventKey","fixture")
                 else args.put("eventRef","d".repeat(64))
             }
-            for(mode in listOf("grant","state","archive","permission")) fixture(
+            for(mode in listOf("revision","state","archive","permission")) fixture(
                 CapabilityRequest("write",capability,args)) { permissions,store,tool,key ->
                 var calls=0
-                val result=CapabilityBroker(permissions,store).executeOwned(key,true) { effect ->
+                val result=CapabilityBroker(permissions,store).executeOwned(key) { effect ->
                     calls++
                     when(mode) {
-                        "grant" -> store.grant(tool.id,effect.request.capability,false)
+                        "revision" -> store.commitTool(tool.copy(revision=2),tool,true)
                         "state" -> store.commitTool(tool.copy(stateVersion=2),tool,false)
                         "archive" -> store.setArchived(tool,true)
                         "permission" -> permissions.allowed=false

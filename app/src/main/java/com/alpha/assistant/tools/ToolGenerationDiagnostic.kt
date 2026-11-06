@@ -1,14 +1,134 @@
 package com.alpha.assistant.tools
 
+import android.os.SystemClock
+import com.alpha.assistant.cloud.CloudFailure
+import com.alpha.assistant.cloud.CloudGenerationStage
+import com.alpha.assistant.cloud.ResponseShape
+import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
+import java.util.UUID
 
 internal enum class ToolGenerationStage(val id: String) {
-    AVAILABILITY("availability"), PROVIDER("provider"), DEFINITION("definition"), STATE("state"), SMOKE("smoke")
+    AVAILABILITY("availability"), PLAN("plan"), SELECTOR("selector"), ASSEMBLY("assembly"), PROVIDER("provider"),
+    DEFINITION("definition"), STATE("state"), SMOKE("smoke")
 }
 internal enum class ToolGenerationOutcome(val id: String) {
-    ACCEPTED("accepted"), REJECTED("rejected"), PROVIDER_FAILURE("providerFailure"),
+    COMPLETED("completed"), VALIDATED("validated"), REJECTED("rejected"), PROVIDER_FAILURE("providerFailure"),
     RUNTIME_UNAVAILABLE("runtimeUnavailable"), CANCELED("canceled")
 }
+internal enum class ToolGenerationDisposition(val id: String) {
+    CONTINUE("continue"), CORRECT("correct"), FINISH("finish")
+}
+internal enum class ToolGenerationTraceOutcome { VALIDATED, FAILED, CANCELED }
+
+/** Operation evidence contains no candidate data or diagnostic details from generated content. */
+internal sealed interface ToolGenerationTraceEvent {
+    val operationId: UUID
+    val attempt: Int
+    val atNanos: Long
+
+    data class Stage(
+        override val operationId: UUID,
+        override val attempt: Int,
+        override val atNanos: Long,
+        val stage: ToolGenerationStage,
+        val started: Boolean,
+        val selectorBatch: String?,
+        val providerStage: CloudGenerationStage?,
+    ) : ToolGenerationTraceEvent
+
+    data class Attempt(
+        override val operationId: UUID,
+        override val attempt: Int,
+        override val atNanos: Long,
+        val stage: ToolGenerationStage,
+        val outcome: ToolGenerationOutcome,
+        val disposition: ToolGenerationDisposition,
+        val failureCode: String,
+        val validationCategory: ToolValidationCategory?,
+        val validationRule: String?,
+        val selectorBatch: String?,
+        val planPath: String?,
+        val planShape: ResponseShape?,
+    ) : ToolGenerationTraceEvent
+
+    /** VALIDATED marks the candidate boundary. The caller owns publication. */
+    data class Finished(
+        override val operationId: UUID,
+        override val attempt: Int,
+        override val atNanos: Long,
+        val outcome: ToolGenerationTraceOutcome,
+        val failureCode: String,
+        val partsOnly: Boolean?,
+    ) : ToolGenerationTraceEvent
+}
+
+/** The opt-in host owns collection and retention. The generation path retains no events. */
+internal class ToolGenerationTrace(
+    val operationId: UUID,
+    private val onEvent: (ToolGenerationTraceEvent) -> Unit,
+    private val clockNanos: () -> Long = SystemClock::elapsedRealtimeNanos,
+) {
+    private inline fun emit(event: (Long) -> ToolGenerationTraceEvent) {
+        try { onEvent(event(clockNanos())) } catch (_: Throwable) {}
+    }
+
+    inner class Run {
+        private var lastAttempt = 1
+        var partsOnly: Boolean? = null
+
+        fun stage(attempt: Int, stage: ToolGenerationStage, started: Boolean, selectorBatch: String?,
+            providerStage: CloudGenerationStage?) {
+            lastAttempt = maxOf(lastAttempt, attempt)
+            emit { ToolGenerationTraceEvent.Stage(operationId, attempt, it, stage, started,
+                safeSelectorBatch(selectorBatch), providerStage) }
+        }
+
+        fun diagnostic(diagnostic: ToolGenerationAttemptDiagnostic) {
+            lastAttempt = maxOf(lastAttempt, diagnostic.attempt)
+            emit { ToolGenerationTraceEvent.Attempt(operationId, diagnostic.attempt, it, diagnostic.stage,
+                diagnostic.outcome, diagnostic.disposition, diagnostic.failureCode,
+                diagnostic.category, diagnostic.ui?.rule ?: diagnostic.safeSchemaRule,
+                safeSelectorBatch(diagnostic.selectorBatch), diagnostic.planPath?.takeIf(needsPlanPath::matches),
+                diagnostic.planShape?.takeIf { needsPlanPath.matches(it.path) }) }
+        }
+
+        fun finish(failure: Throwable? = null) {
+            val cloudCode = (failure as? CloudFailure)?.code
+            val outcome = when {
+                failure == null -> ToolGenerationTraceOutcome.VALIDATED
+                failure is CancellationException || cloudCode == "cancelled" -> ToolGenerationTraceOutcome.CANCELED
+                else -> ToolGenerationTraceOutcome.FAILED
+            }
+            val code = when (outcome) {
+                ToolGenerationTraceOutcome.VALIDATED -> "none"
+                ToolGenerationTraceOutcome.CANCELED -> "cancelled"
+                ToolGenerationTraceOutcome.FAILED -> ToolGenerationAttemptDiagnostic.safeCode(cloudCode ?: "unknown")
+            }
+            emit { ToolGenerationTraceEvent.Finished(operationId, lastAttempt, it, outcome, code, partsOnly) }
+        }
+    }
+}
+
+internal inline fun <T> ToolGenerationTrace.Run?.timed(
+    attempt: Int,
+    stage: ToolGenerationStage,
+    selectorBatch: String? = null,
+    providerStage: CloudGenerationStage? = null,
+    block: () -> T,
+): T {
+    this?.stage(attempt, stage, true, selectorBatch, providerStage)
+    try {
+        return block()
+    } finally {
+        this?.stage(attempt, stage, false, selectorBatch, providerStage)
+    }
+}
+
+private fun safeSelectorBatch(batch: String?) = batch?.takeIf { it == "sections" || it == "parts" }
+private val needsPlanPath = Regex(
+    """\$(?:\.(?:wholeScreen|title|description|language|inputs|constants|needs|questions|id|label|type|value|uses|sourceIds|stops|bands|items|ideas|name|minutes|min|date|offsetDays|repeatDays|effort|ask|options)(?:\[\d{1,2}])?)*"""
+)
 
 /** No candidate, exception message, private field name, or generated identifier enters this record.
  * Binding subrules come from validator checks, not candidate text or exception messages.
@@ -19,19 +139,27 @@ internal data class ToolGenerationAttemptDiagnostic(
     val outcome: ToolGenerationOutcome,
     val stage: ToolGenerationStage,
     val failureCode: String,
+    val disposition: ToolGenerationDisposition,
     val category: ToolValidationCategory?=null,
     val ui: ToolUiDiagnostic?=null,
     val schemaRule: String?=null,
     val smokeEvent: String?=null,
     val smokePath: String?=null,
-    val smokeCode: String?=null
+    val smokeCode: String?=null,
+    val selectorBatch: String?=null,
+    val planPath: String?=null,
+    val planShape: ResponseShape?=null
 ) {
+    internal val safeSchemaRule get() = schemaRule?.takeIf { it in schemaRules }
+
     fun report()=JSONObject().put("attempt",attempt).put("outcome",outcome.id).put("stage",stage.id)
-        .put("failureCode",safeCode(failureCode)).put("category",category?.id ?: "unknown").apply {
+        .put("failureCode",safeCode(failureCode)).put("category",category?.id ?: "unknown")
+        .put("disposition",disposition.id).apply {
+            safeSelectorBatch(selectorBatch)?.let {put("selectorBatch",it)}
             ui?.let {diagnostic -> put("ui",JSONObject().put("stage",diagnostic.stage.name.lowercase(java.util.Locale.ROOT))
                 .put("category",diagnostic.category.id).put("rule",diagnostic.rule).put("path",diagnostic.path)
                 .put("expected",diagnostic.expected).put("observed",diagnostic.observed).put("count",diagnostic.count ?: JSONObject.NULL))}
-            schemaRule?.takeIf {it in schemaRules}?.let {put("schema",JSONObject().put("rule",it).put("path","unknown"))}
+            safeSchemaRule?.let {put("schema",JSONObject().put("rule",it).put("path","unknown"))}
             if(smokeEvent!=null) put("smoke",JSONObject()
                 .put("event",smokeEvent.takeIf {it in smokeEvents} ?: "unknown")
                 .put("path",smokePath?.takeIf {it.matches(smokeLocation)} ?: "unknown")
@@ -39,14 +167,15 @@ internal data class ToolGenerationAttemptDiagnostic(
         }
     companion object {
         private val codes=setOf("none","unknown","auth","cancelled","empty_response","incomplete","provider","quota","rate_limit",
-            "response_size","stream_invalid","unavailable","tool_invalid","tool_limit","widget_generation","widget_response_size",
+            "response_length","response_size","stream_invalid","unavailable","tool_invalid","tool_limit","widget_generation","widget_response_size",
+            "widget_request","widget_plan","widget_selector","widget_questions","widget_incomplete",
             "widget_spec","widget_state","widget_preview","widget_preview_state","widget_preview_effects",
             "javascript_unavailable","javascript_busy","javascript_sandbox_died","javascript_closed","javascript_memory_limit",
             "javascript_script_error","javascript_timeout","javascript_invalid_request","javascript_invalid_result")
         private val schemaRules=setOf("schema.name","schema.nodes","schema.structuredNodes","schema.depth","schema.scalar",
             "schema.constructor","schema.type","object.keys","object.fields","list.keys","list.fields","list.maxItems","list.id",
             "list.field","array.keys","array.maxItems","state.fields","collections.count")
-        private val smokeEvents=setOf("preview","render","open","action","viewport","frame","timer","start","pointer","control","pause","resume","restart","stop")
+        private val smokeEvents=setOf("preview","render","open","action","liveInput","viewport","frame","timer","start","pointer","control","pause","resume","restart","stop")
         private val smokeLocation=Regex("\\$\\.(?:ui(?:\\.(?:children|rowActions)\\[[0-9]{1,3}\\]|\\.rowTemplate)*|(?:surfaces|timers)\\[[0-9]{1,3}\\])")
         internal fun safeCode(code: String)=code.takeIf {it in codes || it.matches(Regex("http_[0-9]{3}"))} ?: "unknown"
     }

@@ -8,6 +8,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.data.*
+import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
 import com.offlineassistant.app.voice.AudioTranscription
 import kotlinx.coroutines.CompletableDeferred
@@ -17,6 +18,8 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /** Failure cases: Stop discards recognition, Cancel loses a draft, a late result
  * replaces edited text or another conversation, or Send submits more than once. */
@@ -97,9 +100,12 @@ class InlineVoiceWorkflowTest {
                 click("Завершить запись")
                 assertEquals("recognizing", model.voice.phase)
                 result.complete(AudioTranscription("Распознанный текст", null, 0))
-                waitUntil { model.voice.phase == "review" }
-                assertEquals(original, model.snapshot.draft)
-                scenario.onActivity { model.voice.editTranscript("Проверенный текст"); model.sendVoice(); model.sendVoice() }
+                waitUntil { !model.voice.active && model.snapshot.draft.text == "Keep my question\nРаспознанный текст" }
+                assertTrue(model.snapshot.conversations.isEmpty())
+                assertEquals(original.attachments, model.snapshot.draft.attachments)
+                val composer = ShellRobot("voice-draft")
+                composer.edit("Сообщение ассистенту", "Keep my question\nПроверенный текст")
+                click(composer.text(com.alpha.assistant.R.string.composer_send))
                 waitUntil { model.snapshot.selected?.messages?.count { it.role == "user" } == 1 }
                 val user = model.snapshot.selected!!.messages.single { it.role == "user" }
                 assertEquals("Keep my question\nПроверенный текст", user.text)
@@ -129,7 +135,17 @@ class InlineVoiceWorkflowTest {
                 waitUntil { !model.voice.active }
                 assertEquals(selectedDraft, model.snapshot.draft)
                 assertEquals(changed, model.snapshot.newDraft)
-                assertEquals(4, preparations)
+
+                result = CompletableDeferred()
+                click("Голосовой запрос")
+                waitUntil { model.voice.phase == "listening" }
+                click("Отправить голосовой текст")
+                scenario.onActivity { model.sendVoice() }
+                assertEquals("recognizing", model.voice.phase)
+                result.complete(AudioTranscription("Отправь сразу", null, 0))
+                waitUntil { model.snapshot.selected?.messages?.count { it.role == "user" } == 2 }
+                assertEquals("Отправь сразу", model.snapshot.selected!!.messages.last { it.role == "user" }.text)
+                assertEquals(5, preparations)
                 File(context.getExternalFilesDir(null), "inline-voice-actions.txt").writeText(actions.toString() + voiceState())
                 scenario.onActivity { model.voice.permissionDenied(); model.voice.stop() }
                 assertTrue("Permission recovery must remain available", model.voice.permissionRequired)
@@ -144,6 +160,65 @@ class InlineVoiceWorkflowTest {
             result.complete(AudioTranscription(null, "Fixture closed", 0))
             CloudTestActivity.factory = null
             store.close(); context.deleteDatabase("$fixture.db"); context.deleteDatabase("$fixture.db-tools.db")
+        }
+    }
+
+    @Test fun stopKeepsSpeechCapturedBeforeModelPreparation() {
+        val context = instrumentation.targetContext
+        val id = "cold-voice-${UUID.randomUUID()}"
+        val store = ShellStore(context, "$id.db")
+        val keys = SecureKeyStore(context, id, id)
+        val wav = File(context.cacheDir, "$id.wav")
+        instrumentation.context.assets.open("voice/russian.wav").use { input -> wav.outputStream().use(input::copyTo) }
+        val wave = com.k2fsa.sherpa.onnx.WaveReader.readWave(wav.absolutePath)
+        assertEquals(16000, wave.sampleRate)
+        val allowPreparation = CountDownLatch(1)
+        val buffered = CountDownLatch(1)
+        val captureEnded = CompletableDeferred<Unit>()
+        lateinit var model: ShellViewModel
+        CloudTestActivity.factory = { app ->
+            ShellViewModel(app, store = store, keys = keys, voiceFactory = { application, scope, transcript ->
+                VoiceSession(application, scope, transcript,
+                    prepareModels = { assertTrue(allowPreparation.await(15, TimeUnit.SECONDS)) },
+                    capturePcmForTest = { offer ->
+                        for (start in wave.samples.indices step 1600) {
+                            offer(ShortArray(minOf(1600, wave.samples.size - start)) { offset ->
+                                (wave.samples[start + offset] * 32767f).toInt().toShort()
+                            })
+                        }
+                        buffered.countDown()
+                        captureEnded.await()
+                        true
+                    })
+            }).also { model = it }
+        }
+        try {
+            ActivityScenario.launch(CloudTestActivity::class.java).use {
+                waitUntil { !model.loading }
+                click("Голосовой запрос")
+                allowMicrophone()
+                assertTrue("Capture must continue while preparation is blocked", buffered.await(5, TimeUnit.SECONDS))
+                assertTrue(allowPreparation.count > 0)
+                assertNull(find(diagnostics.freshRoot(), "Подготовка T-one · распознавание на устройстве"))
+                diagnostics.capture("recording-while-model-loads")
+                click("Завершить запись")
+                captureEnded.complete(Unit)
+                assertEquals("recognizing", model.voice.phase)
+                assertTrue(model.snapshot.draft.text.isEmpty())
+                allowPreparation.countDown()
+                val robot = ShellRobot("cold-voice")
+                robot.waitUntil(20_000) { !model.voice.active && "таймер" in model.snapshot.draft.text.lowercase() }
+                assertTrue(model.snapshot.conversations.isEmpty())
+                assertTrue(robot.field("Сообщение ассистенту").isEditable)
+                robot.diagnostics.capture("cold-voice-draft")
+            }
+        } finally {
+            allowPreparation.countDown()
+            captureEnded.complete(Unit)
+            CloudTestActivity.factory = null
+            store.close()
+            wav.delete()
+            context.deleteDatabase("$id.db")
         }
     }
 

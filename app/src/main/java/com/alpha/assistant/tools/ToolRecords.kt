@@ -76,15 +76,15 @@ class ToolRecords(private val store: ToolStore) {
             }
         }
         internal fun createTables(db: android.database.sqlite.SQLiteDatabase) {
-            db.execSQL("CREATE TABLE artifact_collections(owner TEXT NOT NULL,name TEXT NOT NULL,generation INTEGER NOT NULL,PRIMARY KEY(owner,name))")
-            db.execSQL("CREATE TABLE artifact_records(owner TEXT NOT NULL,collection TEXT NOT NULL,record_key TEXT NOT NULL,token TEXT NOT NULL,value TEXT NOT NULL,size_bytes INTEGER NOT NULL,PRIMARY KEY(owner,collection,record_key))")
-            db.execSQL("CREATE TABLE artifact_cursors(cursor TEXT PRIMARY KEY,owner TEXT NOT NULL,collection TEXT NOT NULL,ordering TEXT NOT NULL,position TEXT NOT NULL,generation INTEGER NOT NULL)")
-            db.execSQL("CREATE TABLE artifact_record_deliveries(delivery_id TEXT PRIMARY KEY,owner TEXT NOT NULL,revision INTEGER NOT NULL,state_version INTEGER NOT NULL,event TEXT NOT NULL,phase TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,UNIQUE(owner,revision,state_version))")
+            db.execSQL("CREATE TABLE IF NOT EXISTS artifact_collections(owner TEXT NOT NULL,name TEXT NOT NULL,generation INTEGER NOT NULL,PRIMARY KEY(owner,name))")
+            db.execSQL("CREATE TABLE IF NOT EXISTS artifact_records(owner TEXT NOT NULL,collection TEXT NOT NULL,record_key TEXT NOT NULL,token TEXT NOT NULL,value TEXT NOT NULL,size_bytes INTEGER NOT NULL,PRIMARY KEY(owner,collection,record_key))")
+            db.execSQL("CREATE TABLE IF NOT EXISTS artifact_cursors(cursor TEXT PRIMARY KEY,owner TEXT NOT NULL,collection TEXT NOT NULL,ordering TEXT NOT NULL,position TEXT NOT NULL,generation INTEGER NOT NULL)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS artifact_record_deliveries(delivery_id TEXT PRIMARY KEY,owner TEXT NOT NULL,revision INTEGER NOT NULL,state_version INTEGER NOT NULL,event TEXT NOT NULL,phase TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,UNIQUE(owner,revision,state_version))")
         }
     }
     private val db get() = store.writableDatabase
     internal fun ensureCollections(tool: ToolRecord) {
-        val spec=ToolSpec.parse(tool.spec)
+        val spec=ToolSpec.parsePersisted(tool.spec)
         spec.collections.keys().forEach { name ->
             db.insertWithOnConflict("artifact_collections",null,ContentValues().apply { put("owner",tool.id); put("name",name); put("generation",0) },android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE)
         }
@@ -97,7 +97,7 @@ class ToolRecords(private val store: ToolStore) {
         val pending=pending(next.id)
         check(pending == null || pending.id == deliveryId) { "A local record result must finish before another change." }
         if(old != null) {
-            val previous=ToolSpec.parse(old.spec); val candidate=ToolSpec.parse(next.spec)
+            val previous=ToolSpec.parsePersisted(old.spec); val candidate=ToolSpec.parsePersisted(next.spec)
             previous.collections.keys().forEach {
                 require(candidate.collections.has(it) && ToolValueSchema.same(previous.collections.get(it),candidate.collections.get(it))) { "Existing collections cannot be removed or retyped." }
             }
@@ -112,7 +112,7 @@ class ToolRecords(private val store: ToolStore) {
     fun commitAction(old: ToolRecord, next: ToolRecord, operations: JSONArray, canCommit: ()->Boolean = { true }): RecordDelivery {
         validateOperations(operations); require(operations.length() in 1..8)
         require(next == old.copy(stateVersion=old.stateVersion+1,state=next.state,ui=next.ui))
-        val spec=ToolSpec.parse(old.spec); spec.validateState(next.state); spec.validateUi(JSONObject(next.ui),JSONObject(next.state))
+        val spec=ToolSpec.parsePersisted(old.spec); spec.validateState(next.state); spec.validateUi(JSONObject(next.ui),JSONObject(next.state))
         var receipt: RecordDelivery?=null
         store.transaction {
             check(canCommit()) { "The action was canceled." }
@@ -232,7 +232,7 @@ class ToolRecords(private val store: ToolStore) {
             val old=store.tool(delivery.owner) ?: return@transaction
             if(old.archived || old.revision != delivery.revision || old.stateVersion != delivery.stateVersion) { reject(delivery); return@transaction }
             require(next == old.copy(stateVersion=old.stateVersion+1,state=next.state,ui=next.ui))
-            val spec=ToolSpec.parse(old.spec); spec.validateState(next.state); spec.validateUi(JSONObject(next.ui),JSONObject(next.state))
+            val spec=ToolSpec.parsePersisted(old.spec); spec.validateState(next.state); spec.validateUi(JSONObject(next.ui),JSONObject(next.state))
             if(!canCommit()) return@transaction
             store.commitTool(next,old,false,recordDeliveryId=delivery.id)
             check(db.update("artifact_record_deliveries",ContentValues().apply { put("phase","committed"); put("event","") },"delivery_id=? AND phase='pending' AND attempts=?",arrayOf(delivery.id,delivery.attempts.toString())) == 1)

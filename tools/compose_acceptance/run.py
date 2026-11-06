@@ -33,8 +33,10 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def adb_command(adb, *args):
-    return [adb, "-s", "emulator-5556", *args]
+def adb_command(adb, *args, serial="emulator-5556"):
+    if not re.fullmatch(r"emulator-[0-9]{4,5}", serial):
+        raise SystemExit("Use an explicit emulator serial, such as emulator-5556.")
+    return [adb, "-s", serial, *args]
 
 
 def child_environment():
@@ -121,8 +123,14 @@ def validate_matrix(rows):
 
 
 def identity(apks=True):
-    paths = sorted(path for parent in ("app/src", "tools/compose_acceptance") for path in (ROOT / parent).rglob("*")
-                   if path.is_file() and "__pycache__" not in path.parts)
+    listed = subprocess.check_output(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "tools/compose_acceptance"],
+        cwd=ROOT, env=child_environment(),
+    )
+    paths = {ROOT / os.fsdecode(name) for name in listed.split(b"\0") if name}
+    # Android packages assets from app/src even when Git ignores them.
+    paths.update((ROOT / "app/src").rglob("*"))
+    paths = sorted(path for path in paths if path.is_file() and "__pycache__" not in path.parts)
     paths += [ROOT / "app/build.gradle.kts", ROOT / "docs/parity/compose-coverage.json", SCENARIOS]
     files = {str(path.relative_to(ROOT)): digest(path) for path in paths}
     aggregate = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
@@ -241,6 +249,99 @@ def verify(directory):
     return passed and manifest["mode"] == "real"
 
 
+def validate_failed_generation(attempts, failure_type):
+    failure_outcomes = {"rejected", "providerFailure", "runtimeUnavailable", "canceled"}
+    candidate_stages = {"provider", "definition", "state", "smoke"}
+    if not isinstance(attempts, list) or not attempts or any(
+        not isinstance(row, dict) or type(row.get("attempt")) is not int or any(
+            not isinstance(row.get(key), str) or not row[key]
+            for key in ("outcome", "stage", "failureCode", "category")
+        ) for row in attempts
+    ):
+        raise ValueError("Failed attempt identity or terminal diagnostic is incomplete.")
+
+    # Historical reports recorded only terminal candidate attempts.
+    if all("disposition" not in row and "selectorBatch" not in row for row in attempts):
+        if len(attempts) > 2 or any(
+            row["attempt"] != number or row["outcome"] not in failure_outcomes
+            or row["stage"] not in candidate_stages | {"availability"}
+            for number, row in enumerate(attempts, 1)
+        ):
+            raise ValueError("Failed attempt identity or terminal diagnostic is incomplete.")
+        if len(attempts) == 2 and attempts[0]["outcome"] != "rejected":
+            raise ValueError("Only rejected model output permits a correction.")
+        return
+
+    number = 1
+    phase = "plan"
+    next_batch = "sections"
+    parts_completed = False
+    transport_failed = False
+    fallback = False
+    for index, row in enumerate(attempts):
+        stage, outcome, code = row["stage"], row["outcome"], row["failureCode"]
+        disposition = row.get("disposition")
+        batch = row.get("selectorBatch")
+        valid = (row["attempt"] == number
+                 and disposition in ("continue", "correct", "finish")
+                 and (disposition == "finish") == (index == len(attempts) - 1)
+                 and (code == "none") == (outcome in ("completed", "validated"))
+                 and ("selectorBatch" not in row or (stage == "selector" and batch in ("sections", "parts"))))
+        if stage == "availability":
+            valid = valid and index == 0 and disposition == "finish" and outcome in ("runtimeUnavailable", "canceled")
+        elif stage == "plan":
+            correctable = (outcome, code) in (("rejected", "widget_plan"), ("providerFailure", "response_length"))
+            valid = valid and phase == "plan" and (
+                (outcome == "completed" and disposition == "continue")
+                or (correctable and number == 1 and disposition == "correct")
+                or (disposition == "finish" and (outcome in ("providerFailure", "canceled") or correctable)
+                    and (not correctable or number == 2))
+            )
+            if disposition == "continue":
+                phase = "selector"
+        elif stage == "selector":
+            valid = valid and phase == "selector"
+            if batch is not None:
+                valid = valid and batch == next_batch and not fallback and (
+                    (disposition == "continue" and outcome in ("completed", "providerFailure"))
+                    or (disposition == "finish" and outcome == "canceled" and code == "cancelled")
+                )
+                next_batch = "parts" if batch == "sections" and outcome == "completed" else None
+                parts_completed = batch == "parts" and outcome == "completed"
+                transport_failed = outcome == "providerFailure"
+            elif disposition == "continue":
+                valid = valid and next_batch != "sections" and not fallback and (outcome, code) == ("rejected", "widget_selector")
+                fallback = True
+            else:
+                valid = valid and disposition == "finish" and (
+                    (outcome, code) in (("canceled", "cancelled"), ("providerFailure", "unknown"))
+                    or (next_batch != "sections" and (not transport_failed or fallback)
+                        and (outcome, code) == ("rejected", "widget_questions"))
+                )
+        elif stage == "assembly":
+            valid = (valid and phase == "selector" and parts_completed and disposition == "finish"
+                     and (outcome, code) == ("rejected", "widget_incomplete"))
+        elif stage in candidate_stages:
+            valid = valid and phase in ("selector", "candidate") and (not transport_failed or fallback)
+            phase = "candidate"
+            if disposition == "correct":
+                valid = valid and number == 1 and (
+                    (stage != "provider" and outcome == "rejected")
+                    or (stage == "provider" and (outcome, code) == ("providerFailure", "response_length"))
+                )
+            elif outcome == "validated":
+                # Candidate validation can finish before preview or artifact publication fails.
+                valid = valid and disposition == "finish" and stage == "smoke" and isinstance(failure_type, str) and bool(failure_type)
+            else:
+                valid = valid and disposition == "finish" and outcome in failure_outcomes
+        else:
+            valid = False
+        if not valid:
+            raise ValueError("Failed generation diagnostic stage, outcome, or correction order is invalid.")
+        if disposition == "correct":
+            number += 1
+
+
 def verify_failed(directory):
     """Validate a complete failed generation record. This never verifies workflow success."""
     manifest = json.loads((directory / "manifest.json").read_text())
@@ -262,18 +363,7 @@ def verify_failed(directory):
     tested = json.loads((directory / "identity.json").read_text())
     if any(report.get(key) != tested.get(key) or not tested.get(key) for key in ("revision", "sourceSha256")):
         raise ValueError("Tested source identity differs.")
-    attempts = report.get("generationAttempts", [])
-    if not isinstance(attempts, list) or not 1 <= len(attempts) <= 2:
-        raise ValueError("Failed evidence needs one or two terminal attempt records.")
-    outcomes = {"rejected", "providerFailure", "runtimeUnavailable", "canceled"}
-    stages = {"availability", "provider", "definition", "state", "smoke"}
-    for index, attempt in enumerate(attempts, 1):
-        if (type(attempt.get("attempt")) is not int or attempt["attempt"] != index
-                or attempt.get("outcome") not in outcomes or attempt.get("stage") not in stages
-                or not attempt.get("failureCode") or not attempt.get("category")):
-            raise ValueError("Failed attempt identity or terminal diagnostic is incomplete.")
-    if len(attempts) == 2 and attempts[0]["outcome"] != "rejected":
-        raise ValueError("Only rejected model output permits a correction.")
+    validate_failed_generation(report.get("generationAttempts"), report.get("failureType"))
     rows = manifest["checks"]
     validate_results(case, rows)
     if any(row["status"] == "PASS" for row in rows):
@@ -287,31 +377,52 @@ def verify_failed(directory):
 
 
 def suite_outcome(stdout, known, known_skipped=frozenset()):
-    """Classify raw `am instrument -r` output. Only a finished JUnit run without an unknown failure or skip passes."""
-    status, failures, skipped = {}, set(), set()
+    """Check AndroidJUnitRunner status records against the final JUnit summary."""
+    status, started, finished = {}, {}, {}
+    failures, skipped, totals = set(), set(), set()
+    invalid_status = False
     for line in stdout.splitlines():
         kind, _, value = line.strip().partition(": ")
         if kind == "INSTRUMENTATION_STATUS":
             key, _, value = value.partition("=")
             status[key] = value
         elif kind == "INSTRUMENTATION_STATUS_CODE":
-            test = status.get("class", "") + "#" + status.get("test", "")
-            if value in ("-1", "-2"):
-                failures.add(test)
-            elif value in ("-3", "-4"):
-                skipped.add(test)
-            status = {}
-    counts = re.findall(r"^(?:OK \((\d+) tests?\)|Tests run: (\d+))", stdout, re.M)
-    finished = bool(re.search(r"^INSTRUMENTATION_CODE: -1\s*$", stdout, re.M) and re.search(r"^(?:OK \(|FAILURES!!!)", stdout, re.M))
-    # A class-level failure, such as one in @AfterClass, reaches the JUnit summary without a test block.
-    unattributed = bool(re.search(r"^FAILURES!!!", stdout, re.M)) and not failures
-    passed = finished and not unattributed and failures <= set(known) and skipped <= set(known_skipped)
-    return {"observed": "passed" if passed else "failed", "tests": int("".join(counts[-1])) if counts else 0,
+            event, status = status, {}
+            if "current" not in event and value == "0":
+                continue
+            if not (event.get("class") and event.get("test") and event.get("current", "").isdigit()
+                    and event.get("numtests", "").isdigit()):
+                invalid_status = True
+                continue
+            index = int(event["current"])
+            test = event["class"] + "#" + event["test"]
+            totals.add(int(event["numtests"]))
+            if value == "1" and index not in started:
+                started[index] = test
+            elif value in {"0", "-1", "-2", "-3", "-4"} and started.get(index) == test and index not in finished:
+                finished[index] = value
+                if value in ("-1", "-2"):
+                    failures.add(test)
+                if value in ("-3", "-4"):
+                    skipped.add(test)
+            else:
+                invalid_status = True
+    summaries = re.findall(r"^(?:OK \((\d+) tests?\)|Tests run: (\d+),\s+Failures: (\d+))\s*$", stdout, re.M)
+    success_count, test_count, failure_count = summaries[-1] if summaries else ("", "", "")
+    tests = int(success_count or test_count or 0)
+    terminal = re.findall(r"^INSTRUMENTATION_CODE: (-?\d+)\s*$", stdout, re.M)
+    expected_indices = set(range(1, len(finished) + 1))
+    passed = (not invalid_status and len(summaries) == 1 and terminal == ["-1"] and tests > 0
+              and started.keys() == finished.keys() == expected_indices and totals == {len(finished)}
+              and tests == len(finished) - sum(code == "-3" for code in finished.values())
+              and int(failure_count or 0) == sum(code in ("-1", "-2") for code in finished.values())
+              and failures <= set(known) and skipped <= set(known_skipped))
+    return {"observed": "passed" if passed else "failed", "tests": tests,
             "failures": sorted(failures), "skipped": sorted(skipped)}
 
 
-def suite_instrument_command(adb, targets, revision):
-    command = adb_command(adb, "shell", "am", "instrument", "-w", "-r")
+def suite_instrument_command(adb, targets, revision, *, serial="emulator-5556"):
+    command = adb_command(adb, "shell", "am", "instrument", "-w", "-r", serial=serial)
     if targets:
         command += ["-e", "class", ",".join(targets)]
     return command + ["-e", "testedRevision", revision, RUNNER]
@@ -337,19 +448,22 @@ def write_run(directory, record):
     return 0 if record["observed"] == record["expected"] else 1
 
 
-def installed_apk_hash(adb, commands, log):
-    commands.append(adb_command(adb, "shell", "pm", "path", "com.alpha.assistant"))
-    listed = subprocess.run(commands[-1], stdout=subprocess.PIPE, stderr=log, text=True, env=child_environment()).stdout.split()
-    paths = [entry.removeprefix("package:") for entry in listed if entry.startswith("package:")]
-    if not paths:
+def installed_apk_hash(adb, serial, package, commands, log):
+    commands.append(adb_command(adb, "shell", "pm", "path", package, serial=serial))
+    listed = subprocess.run(commands[-1], stdout=subprocess.PIPE, stderr=log, text=True, env=child_environment())
+    if listed.returncode != 0:
         return None
-    commands.append(adb_command(adb, "shell", "sha256sum", paths[0]))
-    hashed = subprocess.run(commands[-1], stdout=subprocess.PIPE, stderr=log, text=True, env=child_environment()).stdout.split()
-    return hashed[0] if hashed else None
+    paths = [entry.removeprefix("package:") for entry in listed.stdout.split() if entry.startswith("package:")]
+    if len(paths) != 1 or not re.fullmatch(r"/[A-Za-z0-9_./=~+-]+\.apk", paths[0]):
+        return None
+    commands.append(adb_command(adb, "shell", "sha256sum", paths[0], serial=serial))
+    hashed = subprocess.run(commands[-1], stdout=subprocess.PIPE, stderr=log, text=True, env=child_environment())
+    fields = hashed.stdout.split()
+    return fields[0] if hashed.returncode == 0 and fields else None
 
 
 def suite(args):
-    """Build both APKs, replace-install them on emulator-5556, and run device tests. The app keeps its data and key."""
+    """Build both APKs and run device tests on the selected emulator without clearing app data."""
     for target in args.targets:
         # adb joins its arguments into one device shell line, so a space or a $ would change the am command.
         if not re.fullmatch(r"[A-Za-z0-9_.]+(#[A-Za-z0-9_]+)?", target):
@@ -358,11 +472,31 @@ def suite(args):
     baseline = json.loads(args.baseline.read_text()) if args.baseline else {"failures": [], "skipped": []}
     known, known_skipped = set(baseline["failures"]), set(baseline["skipped"])
     directory = evidence_directory(args)
-    subprocess.run(adb_command(args.adb, "get-state"), check=True, capture_output=True, env=child_environment())
-    record = {**tested_source(), "apks": None, "installedApkSha256": None, "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-              "serial": "emulator-5556", "commands": [], "targets": args.targets, "expected": args.expect,
+    state_command = adb_command(args.adb, "get-state", serial=args.serial)
+    record = {**tested_source(), "apks": None, "installedApkSha256": None, "installedTestApkSha256": None,
+              "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "serial": args.serial, "commands": [], "targets": args.targets, "expected": args.expect,
               "baseline": None if args.baseline is None else str(args.baseline)}
     directory.mkdir(parents=True)
+
+    def device_command(*parts):
+        return adb_command(args.adb, *parts, serial=args.serial)
+
+    def read_device(command, log):
+        record["commands"].append(command)
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=log, text=True, env=child_environment())
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    with (directory / "device.log").open("w") as log:
+        online = read_device(state_command, log) == "device" and read_device(device_command("shell", "getprop", "ro.kernel.qemu"), log) == "1"
+        api = read_device(device_command("shell", "getprop", "ro.build.version.sdk"), log) if online else ""
+        fingerprint = read_device(device_command("shell", "getprop", "ro.build.fingerprint"), log) if online else ""
+        webview = read_device(device_command("shell", "dumpsys", "webviewupdate"), log) if online else ""
+    if not (online and re.fullmatch(r"[0-9]{2}", api) and int(api) >= 29 and fingerprint and webview):
+        record.update(observed="failed", tests=0, failures=[], skipped=[], deviceError="Emulator identity unavailable.",
+                      elapsedSeconds=round(time.monotonic() - started, 1))
+        return write_run(directory, record)
+    record["device"] = {"api": int(api), "fingerprint": fingerprint, "webView": webview}
 
     def execute(command, log, environment=None):
         record["commands"].append(command)
@@ -375,16 +509,22 @@ def suite(args):
     if built:
         record["apks"] = {path: digest(ROOT / path) for path in APKS}
         with (directory / "install.log").open("w") as log:
-            prepared = [execute(adb_command(args.adb, "install", "-r", path), log) for path in APKS]
-            record["installedApkSha256"] = installed_apk_hash(args.adb, record["commands"], log)
+            prepared = [execute(device_command("install", "-r", path), log) for path in APKS]
+            record["installedApkSha256"] = installed_apk_hash(args.adb, args.serial, "com.alpha.assistant", record["commands"], log)
+            record["installedTestApkSha256"] = installed_apk_hash(args.adb, args.serial, "com.alpha.assistant.test", record["commands"], log)
             # A crashed earlier test can leave a large font or night mode.
-            prepared += [execute(adb_command(args.adb, "shell", "settings", "put", "system", "font_scale", "1.0"), log),
-                         execute(adb_command(args.adb, "shell", "cmd", "uimode", "night", "no"), log)]
-        with (directory / "stdout.log").open("w") as log:
-            execute(suite_instrument_command(args.adb, args.targets, record["revision"]), log)
-        outcome = suite_outcome((directory / "stdout.log").read_text(errors="replace"), known, known_skipped)
-        if not all(prepared) or record["installedApkSha256"] != record["apks"][APKS[0]]:
-            outcome["observed"] = "failed"
+            prepared += [execute(device_command("shell", "settings", "put", "system", "font_scale", "1.0"), log),
+                         execute(device_command("shell", "cmd", "uimode", "night", "no"), log)]
+        installed = [record["installedApkSha256"], record["installedTestApkSha256"]]
+        if all(prepared) and installed == [record["apks"][path] for path in APKS]:
+            with (directory / "stdout.log").open("w") as log:
+                completed = execute(suite_instrument_command(args.adb, args.targets, record["revision"], serial=args.serial), log)
+            outcome = suite_outcome((directory / "stdout.log").read_text(errors="replace"), known, known_skipped)
+            if not completed:
+                outcome["observed"] = "failed"
+        else:
+            outcome = {"observed": "failed", "tests": 0, "failures": [], "skipped": [],
+                       "deviceError": "The selected emulator did not install both tested APKs."}
     record.update(outcome, elapsedSeconds=round(time.monotonic() - started, 1))
     return write_run(directory, record)
 
@@ -413,8 +553,9 @@ def main():
     execute.add_argument("--seconds", type=int, choices=range(1, 181), default=30)
     execute.add_argument("--adb", default=ADB)
     execute.add_argument("--output", type=Path, default=ROOT / "evidence/compose-execution/scenarios")
-    device = commands.add_parser("suite", help="Build, replace-install, and run device tests on emulator-5556 only.")
+    device = commands.add_parser("suite", help="Build, replace-install, and run device tests on the selected emulator.")
     device.add_argument("--label", required=True)
+    device.add_argument("--serial", required=True, help="Exact emulator serial, such as emulator-5556.")
     device.add_argument("--expect", choices=("passed", "failed", "build-failed"), default="passed")
     device.add_argument("--baseline", type=Path, help="A run.json whose failures and skipped tests are known.")
     device.add_argument("--adb", default=ADB)

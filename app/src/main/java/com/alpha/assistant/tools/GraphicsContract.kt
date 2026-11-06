@@ -17,6 +17,7 @@ object GraphicsContract {
         internal var segments=0
         internal var stops=0
         internal var bytes=0
+        internal val bitmapHandles=mutableSetOf<String>()
     }
     private fun keys(o: JSONObject)=o.keys().asSequence().toSet()
     private fun number(o: JSONObject,key: String,min: Double = -8192.0,max: Double = 8192.0): Double = scalar(o.get(key),min,max)
@@ -69,7 +70,11 @@ object GraphicsContract {
         require(keys(o)==expected)
         if(o.has("surfaceId"))require(o.get("surfaceId") is String && o.getString("surfaceId").matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")))
     }
-    private fun color(value: Any) {require(value is String && value.matches(Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?")))}
+    private val hexColor=Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?")
+    private val bitmapHandle=Regex("[0-9a-f]{64}")
+    private fun color(value: Any) {
+        require(value is String && (value in ToolUiCatalog.tones || value.matches(hexColor))) {"Unsupported drawing color."}
+    }
     private val identity=doubleArrayOf(1.0,0.0,0.0,1.0,0.0,0.0)
     private fun transform(parent: DoubleArray,raw: JSONArray): DoubleArray {
         require(raw.length()==6)
@@ -122,6 +127,20 @@ object GraphicsContract {
                     val next=if(c.has("transform"))transform(m,c.getJSONArray("transform")) else m
                     point(0.0,0.0,next,false)
                     visit(c.getJSONArray("children"),depth+1,next)
+                    return@repeat
+                }
+                if(type=="bitmap") {
+                    require(keys(c)==setOf("type","resourceId","label","x","y","width","height"))
+                    val handle=c.get("resourceId")
+                    require(handle is String && handle.matches(bitmapHandle)) {"Bitmap drawing needs an opaque image handle."}
+                    budget.bitmapHandles.add(handle)
+                    require(budget.bitmapHandles.size<=ToolUiCatalog.MAX_IMAGES) {"Drawing exceeds its image limit."}
+                    val label=c.get("label")
+                    require(label is String && label.isNotBlank()) {"Bitmap drawing needs an accessibility label."}
+                    budget.chars+=label.length;require(budget.chars<=2048)
+                    val width=number(c,"width",0.0);val height=number(c,"height",0.0)
+                    require(width.toFloat()>0 && height.toFloat()>0)
+                    bounds(number(c,"x"),number(c,"y"),width,height,m)
                     return@repeat
                 }
                 val fields=when(type) {

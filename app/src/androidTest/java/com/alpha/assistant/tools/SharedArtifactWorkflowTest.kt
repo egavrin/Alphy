@@ -1,4 +1,5 @@
 package com.alpha.assistant.tools
+import com.alpha.assistant.capabilities.legacyDeviceGrant
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -37,6 +38,108 @@ class SharedArtifactWorkflowTest {
         val engine=ToolEngine(store,ToolGenerationService(offline,SandboxClient(context)))
         try {block(store,engine,initial)} finally {runCatching {engine.closeArtifact(initial.id,initial.revision)};store.close();context.deleteDatabase(name)}
     }
+
+    @Test fun retainedHostHandoffWaitsForReleaseAndKeepsTheQueuedAction(): Unit=runBlocking {
+        fixture {store,engine,first ->
+            val nextSpec=definition("""
+                const state = input.state;
+                if (input.event.type === 'open') globalThis.opened = true;
+                if (input.event.type === 'action') {
+                    if (globalThis.opened !== true) throw Error('Open must precede the action');
+                    state.count++;
+                }
+                return {state};
+            """.trimIndent())
+            val next=first.copy(id="next",spec=nextSpec.json)
+            store.saveTool(next,true)
+            val firstHost=engine.openArtifact(first)
+            try {
+                val cancelled=async(start=CoroutineStart.UNDISPATCHED) {engine.openArtifactHost(next.id,next.revision)}
+                assertFalse("An occupied lease must suspend host admission",cancelled.isCompleted)
+                cancelled.cancelAndJoin()
+                val preserved=engine.interact(first.id,first.revision,first.stateVersion,"add",null)
+                assertEquals(10,JSONObject(preserved.state).getInt("count"))
+
+                val opening=async(start=CoroutineStart.UNDISPATCHED) {engine.openArtifactHost(next.id,next.revision)}
+                val action=async(start=CoroutineStart.UNDISPATCHED) {engine.interact(next.id,next.revision,next.stateVersion,"add",null)}
+                assertFalse(opening.isCompleted)
+                assertFalse(action.isCompleted)
+                assertEquals(next,store.tool(next.id))
+                engine.closeArtifact(first.id,first.revision,firstHost.sessionGeneration)
+
+                val opened=withTimeout(5000) {opening.await()}
+                val changed=withTimeout(5000) {action.await()}
+                assertEquals(1,JSONObject(changed.state).getInt("count"))
+                assertEquals(changed,store.tool(next.id))
+                assertEquals(preserved,store.tool(first.id))
+                engine.closeArtifact(next.id,next.revision,opened.sessionGeneration)
+            } finally {
+                engine.closeArtifact(first.id,first.revision,firstHost.sessionGeneration)
+                engine.closeArtifact(next.id,next.revision)
+            }
+        }
+    }
+
+    @Test fun widgetEvaluationCannotOverwriteNewerSavedStateWhileARetainedFrameIsPending(): Unit=runBlocking {
+        fixture {store,engine,initial ->
+            val evaluated=CompletableDeferred<ToolPreview>()
+            val release=CompletableDeferred<Unit>()
+            val foreground=ToolGenerationService(offline,SandboxClient(context))
+            val widget=ToolEngine(store,foreground)
+            engine.openArtifact(initial)
+            var pending: Deferred<Result<ToolRecord>>?=null
+            try {
+                ArtifactCoordinator.get(store,initial.id).ordered {
+                    val live=event(store,foreground,initial.id,initial.revision,GraphicsContract.event("frame",dt=16,surfaceId="left"))
+                    assertEquals(1,JSONObject(live.tool.state).getInt("count"))
+                    assertEquals(initial,store.tool(initial.id))
+                    pending=async(start=CoroutineStart.UNDISPATCHED) {
+                        runCatching {
+                            widget.interact(initial.id,initial.revision,initial.stateVersion,"add",null,
+                                allowDeviceEffects=false,onWidgetEvaluated={ preview ->
+                                    evaluated.complete(preview)
+                                    release.await()
+                                })
+                        }
+                    }
+                }
+                val preview=withTimeout(5000) {evaluated.await()}
+                assertEquals(11,JSONObject(preview.state).getInt("count"))
+                assertTrue(preview.effects.isEmpty())
+                val external=initial.copy(stateVersion=initial.stateVersion+1,state="{\"count\":100}")
+                store.commitTool(external,initial,false)
+                release.complete(Unit)
+                val failure=withTimeout(5000) {checkNotNull(pending).await()}.exceptionOrNull()
+                assertEquals("Saved data changed during widget evaluation. Reopen the mini-app.",failure?.message)
+                assertEquals(external,store.tool(initial.id))
+                assertTrue(store.effects(initial.id).isEmpty())
+            } finally {
+                release.complete(Unit)
+                pending?.cancelAndJoin()
+            }
+        }
+    }
+
+    @Test fun widgetCommitsAfterExactlyOneFlushOfItsCapturedRetainedState(): Unit=runBlocking {
+        fixture {store,engine,initial ->
+            val generation=ToolGenerationService(offline,SandboxClient(context))
+            engine.openArtifact(initial)
+            val widget=ArtifactCoordinator.get(store,initial.id).ordered {
+                val live=event(store,generation,initial.id,initial.revision,GraphicsContract.event("frame",dt=16,surfaceId="left"))
+                assertEquals(1,JSONObject(live.tool.state).getInt("count"))
+                assertEquals(initial,store.tool(initial.id))
+                async(start=CoroutineStart.UNDISPATCHED) {
+                    engine.interact(initial.id,initial.revision,initial.stateVersion,"add",null,allowDeviceEffects=false)
+                }
+            }
+            val committed=withTimeout(5000) {widget.await()}
+            assertEquals(initial.stateVersion+2,committed.stateVersion)
+            assertEquals(11,JSONObject(committed.state).getInt("count"))
+            assertEquals(committed,store.tool(initial.id))
+            assertTrue(store.effects(initial.id).isEmpty())
+        }
+    }
+
     /** Failure cases: omitted playback loses native controls, explicit playback loses authority,
      * omitted values reset an opted-in session, or reopen loses the saved pause.
      */
@@ -77,6 +180,25 @@ class SharedArtifactWorkflowTest {
             assertEquals(2,JSONObject(reopened.tool.state).getInt("count"))
         }
     }
+    @Test fun explicitPlaybackFromFirstSurfaceStopsAutomaticStarts(): Unit=runBlocking {
+        fixture {store,engine,initial ->
+            val source="""
+                const s=input.state,e=input.event;
+                if(e.type==='start')s.count++;
+                if(e.type==='resume')return {state:s,playback:'playing'};
+                return s.count===0 ? {state:s} : {state:s,playback:'paused'};
+            """.trimIndent()
+            val tool=initial.copy(spec=definition(source).json);store.saveTool(tool,true)
+            val open=engine.openArtifactHost(tool.id,tool.revision)
+            val started=engine.startArtifactHostSession(tool.id,tool.revision,open.sessionGeneration)
+            assertEquals("paused",started.playback)
+            assertEquals(1,JSONObject(started.tool.state).getInt("count"))
+            engine.artifactEvent(tool.id,tool.revision,GraphicsContract.event("resume",surfaceId="left"))
+            val resumed=engine.startArtifactHostSession(tool.id,tool.revision,open.sessionGeneration)
+            assertEquals("playing",resumed.playback)
+            assertEquals(1,JSONObject(resumed.tool.state).getInt("count"))
+        }
+    }
     @Test fun surfacesAndActionsShareStateAndCloseFlushes():Unit=runBlocking {
         fixture {store,engine,initial ->
             val start=engine.openArtifact(initial)
@@ -109,12 +231,12 @@ class SharedArtifactWorkflowTest {
         fixture {store,engine,initial ->
             val json=JSONObject(initial.spec).put("capabilities",JSONArray("[\"vibration.play\"]")).put("capabilityResults",true)
                 .put("source","const s=input.state; if(input.event.type==='action') return {state:s,effects:[{id:'buzz',capability:'vibration.play',args:{milliseconds:1}}]}; if(input.event.type==='capabilityResults') s.count+=100; if(input.event.type==='frame')s.count++; return {state:s,frames:['left']};")
-            val spec=ToolSpec.parse(json.toString());val tool=initial.copy(spec=spec.json);store.saveTool(tool,true);store.grant(tool.id,"vibration.play",true)
+            val spec=ToolSpec.parse(json.toString());val tool=initial.copy(spec=spec.json);store.saveTool(tool,true)
             engine.openArtifact(tool)
             val action=engine.interact(tool.id,1,1,"add",null)
             val fenced=engine.artifactEvent(tool.id,1,GraphicsContract.event("frame",16,surfaceId="left"))
             assertEquals(action.stateVersion,fenced.tool.stateVersion);assertEquals(0,JSONObject(fenced.tool.state).getInt("count"))
-            val effect=store.effects(tool.id).single();assertNotNull(store.claimEffect(effect.key,true));store.finishEffect(effect.key,CapabilityResult("succeeded","Done"))
+            val effect=store.effects(tool.id).single();assertNotNull(store.claimEffect(effect.key));store.finishEffect(effect.key,CapabilityResult("succeeded","Done"))
             engine.deliverCapabilityResults(tool.id);engine.deliverCapabilityResults(tool.id)
             assertEquals(100,JSONObject(store.tool(tool.id)!!.state).getInt("count"))
             assertEquals("committed",store.deliveries(tool.id).single().phase)
@@ -144,7 +266,7 @@ class SharedArtifactWorkflowTest {
                 return result;
             """.trimIndent()
             val spec=ToolSpec.parse(JSONObject(definition(source).json).put("capabilities",JSONArray("[\"vibration.play\"]")).toString())
-            val tool=initial.copy(spec=spec.json);store.saveTool(tool,true);store.grant(tool.id,"vibration.play",true)
+            val tool=initial.copy(spec=spec.json);store.saveTool(tool,true)
             val before=engine.openArtifact(tool)
             assertEquals(count,before.surfaces.getJSONObject("left").getJSONArray("commands").length())
             val rejected=runCatching {
@@ -156,7 +278,7 @@ class SharedArtifactWorkflowTest {
             assertEquals(before.surfaces.toString(),retained.surfaces.toString())
             assertEquals(before.tool,retained.tool)
             assertEquals(tool,store.tool(tool.id));assertTrue(store.effects(tool.id).isEmpty())
-            assertTrue(store.granted(tool.id,"vibration.play"))
+            assertNull(store.legacyDeviceGrant(tool.id,"vibration.play"))
         }
     }
     /** Old engine cleanup and stale hosts must not close or drive a successor's retained session. */
@@ -287,7 +409,7 @@ class SharedArtifactWorkflowTest {
             val before=preferences.all
             for(widget in listOf(false,true)) {
                 val result=com.alpha.assistant.surfaces.SurfaceEntry.pin(context,old,widget,com.alpha.assistant.surfaces.WidgetPreferences())
-                assertTrue(result.second.contains("unavailable",ignoreCase=true))
+                assertEquals(context.getString(com.alpha.assistant.R.string.widget_pin_unavailable),result.second)
                 assertEquals(old,store.tool(old.id));assertEquals(before,preferences.all)
             }
         }

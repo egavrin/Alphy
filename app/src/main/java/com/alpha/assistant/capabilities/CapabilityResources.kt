@@ -2,10 +2,14 @@ package com.alpha.assistant.capabilities
 
 import android.content.Context
 import android.content.Intent
+import android.content.res.AssetFileDescriptor
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.CancellationSignal
 import android.provider.OpenableColumns
+import com.alpha.assistant.media.MAX_MEDIA_BYTES
 import com.alpha.assistant.tools.ToolStore
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.File
 import java.security.SecureRandom
 
@@ -17,6 +21,9 @@ class CapabilityResources(private val context: Context, private val store: ToolS
         const val MAX_RESOURCES = 32
         private val lock = Any()
         private val random = SecureRandom()
+        private val selectionCapabilities = mapOf("photo" to "photo.pick", "document" to "file.pick",
+            "cameraPhoto" to "camera.capture", AudioContract.RESOURCE_KIND to AudioContract.PICK, VideoContract.RESOURCE_KIND to VideoContract.PICK)
+        internal fun resourceKind(capability: String) = selectionCapabilities.entries.firstOrNull { it.value == capability }?.key
     }
     data class Acquired(val result: CapabilityResult, val resource: CapabilityResource?)
     private fun token() = ByteArray(32).also(random::nextBytes).joinToString("") { "%02x".format(it.toInt() and 255) }
@@ -48,7 +55,7 @@ class CapabilityResources(private val context: Context, private val store: ToolS
     fun acquire(owner: String, capability: String, result: CapabilityResult): Acquired {
         if(result.status != "succeeded") return Acquired(result,null)
         reclaimUnavailable(owner)
-        val kind=when(capability) { "photo.pick" -> "photo"; "file.pick" -> "document"; "camera.capture" -> "cameraPhoto"; else -> error("Not a selected resource") }
+        val kind=checkNotNull(resourceKind(capability)) { "Not a selected resource" }
         var journal: CapabilityResource?=null
         try {
             val mime: String
@@ -79,7 +86,11 @@ class CapabilityResources(private val context: Context, private val store: ToolS
                 if(kind == "photo") require(mime.startsWith("image/"))
             }
             require(mime.length <= 100 && mime.matches(Regex("[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+")))
-            require(size in 0..MAX_FILE_BYTES)
+            when(kind) {
+                AudioContract.RESOURCE_KIND -> require(AudioContract.isAudioMime(mime) && size in 1..MAX_MEDIA_BYTES)
+                VideoContract.RESOURCE_KIND -> require(VideoContract.isVideoMime(mime) && size in 1..MAX_MEDIA_BYTES)
+                else -> require(size in 0..MAX_FILE_BYTES)
+            }
             val selected=checkNotNull(journal).copy(mimeType=mime,sizeBytes=size,persistent=persistent,ownsGrant=ownsGrant)
             val safe=CapabilityResult("succeeded",if(persistent) "Selected content is available on this device." else "Selected content is available only in this app session. Select it again after restart.",selected.metadata())
             CapabilityResultEvent.data(capability,safe)
@@ -90,7 +101,8 @@ class CapabilityResources(private val context: Context, private val store: ToolS
             throw failure
         }
     }
-    fun finishSelection(key: String, result: CapabilityResult): Boolean = synchronized(lock) {
+    fun finishSelection(key: String, result: CapabilityResult, canCommit: () -> Boolean = { true }): Boolean = synchronized(lock) {
+        if(!canCommit()) {discardCamera(result);return@synchronized false}
         val effect=store.effect(key) ?: run { discardCamera(result); return@synchronized false }
         if(effect.phase != "waiting") { discardCamera(result); return@synchronized false }
         if(!store.effectTargetValid(effect) || !permissionCheck(effect.request.capability)) {
@@ -102,6 +114,7 @@ class CapabilityResources(private val context: Context, private val store: ToolS
         catch(_: Exception) { Acquired(CapabilityResult("unavailable","Selected content access or bounded metadata is unavailable."),null) }
         var accepted=false
         try {
+            if(!canCommit()) return@synchronized false
             accepted=store.finishUserEffect(key,acquired.result,acquired.resource)
             return@synchronized accepted
         } finally { if(!accepted && acquired.resource != null) release(acquired.resource) }
@@ -117,16 +130,36 @@ class CapabilityResources(private val context: Context, private val store: ToolS
         val selected=checkNotNull(store.resource(id)) { "Resource unavailable" }
         val tool=checkNotNull(store.tool(owner)) { "Resource unavailable" }
         check(selected.owner == owner && !tool.archived && selected.expiresAt > System.currentTimeMillis()) { "Resource unavailable" }
-        val capability=when(selected.kind) { "photo" -> "photo.pick"; "document" -> "file.pick"; "cameraPhoto" -> "camera.capture"; else -> error("Resource unavailable") }
-        check(capability in com.alpha.assistant.tools.ToolSpec.parse(tool.spec).capabilities && store.granted(owner,capability) && permissionCheck(capability)) { "Resource unavailable" }
+        val capability=checkNotNull(selectionCapabilities[selected.kind]) { "Resource unavailable" }
+        check(capability in com.alpha.assistant.tools.ToolSpec.parsePersisted(tool.spec).capabilities && permissionCheck(capability)) { "Resource unavailable" }
         check(permissionAvailable(selected)) { "Resource access unavailable" }
         if(selected.kind == "cameraPhoto") check(cameraFile(File(selected.locator).name).path == selected.locator && File(selected.locator).isFile && File(selected.locator).length() == selected.sizeBytes)
         return selected
     }
+    internal fun resolveAudio(owner: String, id: String): CapabilityResource = resolve(owner,id).also { selected ->
+        check((selected.kind == AudioContract.RESOURCE_KIND || selected.kind == "document") &&
+            AudioContract.isAudioMime(selected.mimeType) && selected.sizeBytes in 1..MAX_MEDIA_BYTES) { "Audio resource unavailable" }
+    }
+
+    internal fun resolveVideo(owner: String, id: String): CapabilityResource = resolve(owner,id).also { selected ->
+        check((selected.kind == VideoContract.RESOURCE_KIND || selected.kind == "document") &&
+            VideoContract.isVideoMime(selected.mimeType) && selected.sizeBytes in 1..MAX_MEDIA_BYTES) { "Video resource unavailable" }
+    }
+
+    /** Called on IO with a resolved resource. Cancellation reaches Android before it can return a late descriptor. */
+    internal suspend fun openMedia(selected: CapabilityResource): AssetFileDescriptor? = suspendCancellableCoroutine { continuation ->
+        val signal = CancellationSignal()
+        continuation.invokeOnCancellation { signal.cancel() }
+        try {
+            val descriptor = context.contentResolver.openAssetFileDescriptor(Uri.parse(selected.locator), "r", signal)
+            continuation.resume(descriptor) { _, returned, _ -> runCatching { returned?.close() } }
+        } catch (failure: Exception) { continuation.resumeWith(Result.failure(failure)) }
+    }
+
     /** This reads Android grant metadata only. It does not query a content provider or read a file. */
     fun permissionAvailable(selected: CapabilityResource): Boolean = runCatching {
         if(selected.expiresAt <= System.currentTimeMillis() || (!selected.persistent && selected.session != ToolStore.processSession)) return@runCatching false
-        val capability=when(selected.kind) { "photo" -> "photo.pick"; "document" -> "file.pick"; "cameraPhoto" -> "camera.capture"; else -> return@runCatching false }
+        val capability=selectionCapabilities[selected.kind] ?: return@runCatching false
         if(!permissionCheck(capability)) return@runCatching false
         if(selected.kind == "cameraPhoto") true else {
             val uri=Uri.parse(selected.locator)
@@ -134,23 +167,36 @@ class CapabilityResources(private val context: Context, private val store: ToolS
                 (!selected.persistent || context.contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission })
         }
     }.getOrDefault(false)
-    /** Expiry and prior-process temporary access cannot recover. Revoked tool or runtime grants can recover, so retain them. */
+    /** Expiry and prior-process temporary access cannot recover. Revoked Android access can recover, so retain them. */
     fun reclaimUnavailable(owner: String) = synchronized(lock) {
         val now=System.currentTimeMillis()
         store.resources(owner).filter { it.expiresAt <= now || (!it.persistent && it.session != ToolStore.processSession) }.forEach(::release)
     }
+    internal fun <T> ordered(block: ()->T): T = synchronized(lock,block)
     fun release(selected: CapabilityResource) = synchronized(lock) {
+        val current=store.resource(selected.id) ?: run {
+            store.acquisitions().firstOrNull { it.id==selected.id }?.let(::cleanupAcquisition)
+            return@synchronized
+        }
         var cleanup=false
         store.transaction {
-            val siblings=store.resourcesForLocator(selected.locator).filter { it.id != selected.id }
-            if(siblings.isEmpty()) { store.deleteResource(selected.id); store.journalResource(selected); cleanup=true }
-            else {
-                if(selected.ownsGrant) store.transferResourceGrant(siblings.first().id)
-                store.deleteAcquisition(selected.id)
+            val siblings=store.resourcesForLocator(current.locator).filter { it.id != current.id }
+            if(siblings.isEmpty()) {
+                store.deleteResource(current.id)
+                store.journalResource(current)
+                cleanup=true
+            } else {
+                if(current.ownsGrant) store.transferResourceGrant(siblings.first().id)
+                store.deleteAcquisition(current.id)
+                store.deleteResource(current.id)
             }
-            store.deleteResource(selected.id)
         }
-        if(cleanup) cleanupAcquisition(selected)
+        if(cleanup) cleanupAcquisition(current)
+    }
+    internal fun releaseOwner(owner: String): Boolean = synchronized(lock) {
+        store.resources(owner).forEach(::release)
+        store.acquisitions().filter { it.owner==owner }.forEach(::cleanupAcquisition)
+        store.resources(owner).isEmpty() && store.acquisitions().none { it.owner==owner }
     }
     fun recoverAcquisitions(force: Boolean = false) = synchronized(lock) {
         store.acquisitions().filter { force || it.session != ToolStore.processSession }.forEach(::cleanupAcquisition)

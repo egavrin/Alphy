@@ -1,4 +1,6 @@
 package com.alpha.assistant.tools
+import com.alpha.assistant.capabilities.legacyDeviceGrant
+import com.alpha.assistant.capabilities.seedLegacyDeviceGrant
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -25,6 +27,7 @@ class GenerationSmokeWorkflowTest {
         val requests=mutableListOf<CloudRequest>()
         var afterResponse: (()->Unit)?=null
         override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend(CloudEvent)->Unit) {
+            if (request.replyWithFixturePlan(emit)) return
             requests+=request;emit(CloudEvent.Text(outputs[(requests.size-1).coerceAtMost(outputs.lastIndex)]));afterResponse?.invoke()
         }
     }
@@ -123,21 +126,21 @@ class GenerationSmokeWorkflowTest {
         try {
             val first=engine.createDraft("Effect fixture",null);val preview=engine.generate(first.id,"offline",emptyList(),CloudSession());val saved=engine.accept(first.id)
             assertEquals(0,JSONObject(preview.previewState!!).getInt("count"));assertTrue(store.effects(saved.id).isEmpty())
-            store.grant(saved.id,"vibration.play",true)
+            store.seedLegacyDeviceGrant(saved.id,"vibration.play",true)
             val revisions=store.revisions(saved.id)
             val recordSource="if(e.type==='capabilityResults'||e.type==='recordResults')throw Error('invented result'); if(e.type==='action')return {state:s,records:[{id:'write',collection:'history',op:'put',key:'entry',expectedToken:null,value:{note:'private'}}]};"
             provider.outputs=listOf(JSONObject(definition.toString()).put("source",JSONObject(spec(recordSource)).getString("source")).toString());provider.requests.clear()
             val draft=engine.createDraft("Private records",saved.id);engine.generate(draft.id,"offline",emptyList(),CloudSession())
             assertNull(ToolRecords(store).pending(saved.id));assertEquals(0,store.readableDatabase.rawQuery("SELECT COUNT(*) FROM artifact_records WHERE owner=?",arrayOf(saved.id)).use {it.moveToFirst();it.getInt(0)})
-            assertEquals(saved,store.tool(saved.id));assertEquals(revisions,store.revisions(saved.id));assertTrue(store.granted(saved.id,"vibration.play"));engine.reject(draft.id)
+            assertEquals(saved,store.tool(saved.id));assertEquals(revisions,store.revisions(saved.id));assertEquals(true,store.legacyDeviceGrant(saved.id,"vibration.play"));engine.reject(draft.id)
             provider.outputs=listOf(JSONObject(definition.toString()).put("source",JSONObject(spec(recordSource.replace("note:'private'","note:42"))).getString("source")).toString());provider.requests.clear()
             val bad=engine.createDraft("Bad record value",saved.id)
             assertTrue(runCatching {engine.generate(bad.id,"offline",emptyList(),CloudSession())}.exceptionOrNull() is CloudFailure)
-            assertEquals(2,provider.requests.size);assertEquals(saved,store.tool(saved.id));assertTrue(store.granted(saved.id,"vibration.play"));assertEquals(revisions,store.revisions(saved.id));engine.reject(bad.id)
+            assertEquals(2,provider.requests.size);assertEquals(saved,store.tool(saved.id));assertEquals(true,store.legacyDeviceGrant(saved.id,"vibration.play"));assertEquals(revisions,store.revisions(saved.id));engine.reject(bad.id)
             provider.requests.clear();provider.outputs=listOf(definition.toString());provider.afterResponse={throw CancellationException("fixture cancellation")}
             val canceled=engine.createDraft("Canceled refinement",saved.id)
             assertTrue(runCatching {engine.generate(canceled.id,"offline",emptyList(),CloudSession())}.exceptionOrNull() is CancellationException)
-            assertEquals(1,provider.requests.size);assertNull(store.draft(canceled.id)!!.candidate);assertEquals(saved,store.tool(saved.id));assertTrue(store.granted(saved.id,"vibration.play"));assertEquals(revisions,store.revisions(saved.id))
+            assertEquals(1,provider.requests.size);assertNull(store.draft(canceled.id)!!.candidate);assertEquals(saved,store.tool(saved.id));assertEquals(true,store.legacyDeviceGrant(saved.id,"vibration.play"));assertEquals(revisions,store.revisions(saved.id))
         } finally {engine.closeArtifacts();store.close();context.deleteDatabase(name)}
     }
     @Test fun retainedSessionSurvivesSmokeAndBusyTransientSlotDoesNotRepair(): Unit=runBlocking {

@@ -11,6 +11,7 @@ import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.MainActivity
 import com.alpha.assistant.R
 import com.alpha.assistant.surfaces.AssistantChat
+import com.alpha.assistant.surfaces.AssistantActivity
 import org.junit.After
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -114,5 +115,33 @@ class ShellNavigationWorkflowTest {
             }
             assertFalse(robot.secure(scenario))
         }
+    }
+
+    @Test fun compactAssistantShowsAutomationAndMemoryReview() {
+        val app = fixture.context.applicationContext as Application
+        val shared = ViewModelProvider(AssistantChat, object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = checkNotNull(CloudTestActivity.factory)(app) as T
+        })[ShellViewModel::class.java]
+        try {
+            assertSame(fixture.model, shared)
+            ActivityScenario.launch<AssistantActivity>(Intent(app, AssistantActivity::class.java)).use {
+                val composer = robot.text(R.string.composer_label)
+                val send = robot.text(R.string.composer_send)
+                robot.edit(composer, "Создай сценарий")
+                robot.click(send)
+                robot.waitFor(robot.text(R.string.automation_editor_create))
+                robot.reveal(robot.text(R.string.cancel), null)
+                robot.click(robot.text(R.string.cancel))
+                robot.waitGone(robot.text(R.string.automation_editor_create))
+                robot.edit(composer, "Запомни: я предпочитаю краткие ответы")
+                robot.click(send)
+                robot.waitFor(robot.text(R.string.memory_text))
+                robot.click(robot.text(R.string.memory_cancel))
+                robot.click(robot.text(R.string.memory_discard))
+                robot.waitGone(robot.text(R.string.memory_text))
+                assertTrue(fixture.provider.calls == 0)
+            }
+        } finally { if (shared === fixture.model) AssistantChat.viewModelStore.clear() }
     }
 }

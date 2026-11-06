@@ -3,10 +3,12 @@ package com.alpha.assistant.tools
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.sandbox.*
+import com.alpha.assistant.tools.generation.NeedsPlan
 import kotlinx.coroutines.*
 import org.json.*
 import org.junit.Assert.*
 import org.junit.Test
+import java.util.UUID
 
 /** Cases recorded before implementation: definition/schema/UI, saved-state incompatibility,
  * preview mutation/effects/UI, smoke script, provider/size/unknown errors, cancellation,
@@ -24,22 +26,189 @@ class GenerationAttemptDiagnosticTest {
         .put("source",source).toString()
     private class Provider(val outputs: List<String>,val failure: Exception?=null,val failAt: Int=1): ChatProvider {
         var calls=0
+        var planningCalls=0
         val requests=mutableListOf<CloudRequest>()
         override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend(CloudEvent)->Unit) {
+            if (request.replyWithFixturePlan(emit)) {
+                planningCalls++
+                return
+            }
             calls++;requests+=request
             if(calls==failAt)failure?.let {throw it}
             emit(CloudEvent.Text(outputs[(calls-1).coerceAtMost(outputs.lastIndex)]))
         }
     }
     private suspend fun generate(provider: Provider,events: MutableList<ToolGenerationAttemptDiagnostic>,base: ToolRecord?=null,
-        sandbox: SandboxClient=SandboxClient(context),throwObserver: Boolean=false): ToolPreview =
-        ToolGenerationService(provider,sandbox,null,{event -> events+=event; if(throwObserver)throw CancellationException(secret)})
-            .generate(secret,"Local fixture",base,emptyList(),CloudSession(),"SECRET_GENERATED_ID")
+        sandbox: SandboxClient=SandboxClient(context),throwObserver: Boolean=false,
+        trace: ToolGenerationTrace? = null): ToolPreview {
+        val planningEvents=mutableListOf<ToolGenerationAttemptDiagnostic>()
+        val priorPlanningCalls=provider.planningCalls
+        return try {
+            ToolGenerationService(provider,sandbox,null,{event ->
+                if (event.stage == ToolGenerationStage.PLAN) planningEvents+=event else events+=event
+                if (throwObserver) throw CancellationException(secret)
+            }).generate(secret,"Local fixture",base,emptyList(),CloudSession(),"SECRET_GENERATED_ID",
+                privateState = false, draftPreview = null, trace = trace)
+        } finally {
+            assertEquals(provider.planningCalls-priorPlanningCalls,planningEvents.size)
+            planningEvents.forEach { event ->
+                assertEquals("completed",event.report().getString("outcome"))
+                assertEquals("continue",event.report().getString("disposition"))
+            }
+            safe(planningEvents)
+        }
+    }
     private fun safe(events: List<ToolGenerationAttemptDiagnostic>) {
         val encoded=JSONArray(events.map {it.report()}).toString()
         assertFalse(encoded,encoded.contains("SECRET"));assertFalse(encoded,encoded.contains("content://"))
         assertFalse(encoded,encoded.contains("credential"));assertFalse(encoded,encoded.contains("private"))
     }
+    @Test fun needsPlanCorrectionIncludesTheRejectedShapeAndKeepsTraceStructural(): Unit = runBlocking {
+        // Failure cases: host rules share the user role, images change, or rejected data enters host instructions.
+        val original = "Build a calculator.\nThe host selected a CHOICE course slide."
+        val images = listOf("data:image/png;base64,FIXTURE")
+        val rejected = JSONObject("""{"title":"Calculator","description":"","language":"en",
+            "inputs":[{"id":"bill","label":"Bill","type":"number","value":""}],"constants":[],
+            "needs":[{"id":"result","type":"other","label":"Total","description":"Calculate total","uses":{"bill":"bill"}}],
+            "questions":[]}""").apply { getJSONArray("inputs").getJSONObject(0).put("value",JSONArray().put(secret)) }.toString()
+        val requests = mutableListOf<CloudRequest>()
+        val events = mutableListOf<ToolGenerationTraceEvent>()
+        val terminal = CloudFailure("auth","Stop after the correction request.")
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                assertEquals(CloudGenerationStage.PLAN,request.generationStage)
+                requests += request
+                if (requests.size == 2) throw terminal
+                emit(CloudEvent.Text(rejected))
+            }
+        }
+        val trace = ToolGenerationTrace(UUID.randomUUID(), { events += it })
+        val failure = runCatching {
+            ToolGenerationService(provider,SandboxClient(context)).generate("fixture",original,null,images,
+                CloudSession(),"fixture",privateState=false,draftPreview=null,trace=trace)
+        }.exceptionOrNull()
+        assertSame(terminal,failure)
+        assertEquals(2,requests.size)
+        assertEquals(NeedsPlan.prompt,requests.first().systemInstructions)
+        requests.forEach { request ->
+            assertTrue(request.systemInstructions.startsWith(NeedsPlan.prompt))
+            assertEquals(CloudTurn("user",original,images),request.turns.first())
+            assertTrue(request.jsonObject)
+            assertFalse(request.search)
+            assertFalse(request.systemInstructions.contains(original))
+            assertFalse(request.systemInstructions.contains(secret))
+        }
+        val turns = requests.last().turns
+        assertEquals(requests.first().turns.single(),turns.first())
+        assertEquals(listOf("user","assistant","user"),turns.map { it.role })
+        assertEquals(rejected,turns[1].text)
+        assertEquals(CloudTurn("user","Return the corrected JSON plan."),turns.last())
+        val hostCorrection = requests.last().systemInstructions.removePrefix(NeedsPlan.prompt)
+        assertTrue(hostCorrection.contains("$.inputs[0].value"))
+        assertTrue(hostCorrection.contains(NeedsPlan.structureChecklist))
+        assertFalse(hostCorrection.contains(secret))
+        val correction = events.filterIsInstance<ToolGenerationTraceEvent.Attempt>()
+            .single { it.disposition == ToolGenerationDisposition.CORRECT }
+        assertEquals("$.inputs[0].value",correction.planPath)
+        assertEquals("plan.value.type",correction.planShape?.rule)
+        assertEquals("array",correction.planShape?.observedType)
+        assertFalse(events.toString().contains(secret))
+    }
+
+    @Test fun planReferenceAndDescriptionFailuresKeepOneSharedCorrection(): Unit = runBlocking {
+        // Failure cases: array references, excess references, undeclared IDs, and invalid descriptions.
+        val valid = """{"title":"Local","description":"","language":"en","inputs":[],
+            "constants":[],"needs":[{"id":"custom","type":"other","label":"Local","description":"Show a total"}],"questions":[]}"""
+        val mutations: List<Pair<ResponseShape, (JSONObject) -> Unit>> = listOf(
+            ResponseShape("plan.uses.object","$.needs[0].uses","array") to { row -> row.put("uses",JSONArray().put(secret)) },
+            ResponseShape("plan.uses.count","$.needs[0].uses","object") to { row -> row.put("uses",JSONObject().apply { repeat(9) { put("r$it",secret) } }) },
+            ResponseShape("plan.uses.reference","$.needs[0].uses","string") to { row -> row.put("uses",JSONObject().put("amount",secret)) },
+            ResponseShape("plan.description.missing","$.needs[0]","missing") to { row -> row.remove("description") },
+            ResponseShape("plan.description.blank","$.needs[0].description","string") to { row -> row.put("description","") },
+            ResponseShape("plan.description.blank","$.needs[0].description","string") to { row -> row.put("description"," \n\t") },
+            ResponseShape("plan.description.length","$.needs[0].description","string") to { row -> row.put("description","x".repeat(501)) },
+            ResponseShape("plan.description.type","$.needs[0].description","object") to { row -> row.put("description",JSONObject().put("text",secret)) },
+            ResponseShape("plan.description.type","$.needs[0].description","null") to { row -> row.put("description",JSONObject.NULL) },
+        )
+        val boundary = JSONObject(valid).apply { getJSONArray("needs").getJSONObject(0).put("description","x".repeat(500)) }
+        assertEquals(500,NeedsPlan.parse(boundary.toString()).needs.single().description.length)
+        val invalidConstants = listOf(
+            ResponseShape("plan.constants.array", "$.constants", "object") to JSONObject(),
+            ResponseShape("plan.constants.count", "$.constants", "array") to JSONArray().apply { repeat(25) { put(it) } },
+            ResponseShape("plan.constants.unused", "$.constants", "array") to JSONArray().put(JSONObject().put("id", "extra").put("value", secret)),
+        )
+        val invalidPlans = mutations.map { (shape, mutate) ->
+            shape to JSONObject(valid).apply { mutate(getJSONArray("needs").getJSONObject(0)) }
+        } + invalidConstants.map { (shape, value) -> shape to JSONObject(valid).put("constants", value) }
+        for ((shape, plan) in invalidPlans) {
+            val path = shape.path
+            val rejected = plan.toString()
+            for (alreadyCorrected in listOf(false,true)) {
+                val requests = mutableListOf<CloudRequest>()
+                val events = mutableListOf<ToolGenerationTraceEvent>()
+                val session = CloudSession().apply { if (alreadyCorrected) assertTrue(claimCorrection()) }
+                val provider = object : ChatProvider {
+                    override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent) -> Unit) {
+                        assertEquals(CloudGenerationStage.PLAN,request.generationStage)
+                        requests += request
+                        emit(CloudEvent.Text(rejected))
+                    }
+                }
+                val failure = runCatching {
+                    ToolGenerationService(provider,SandboxClient(context)).generate("fixture","Build a local calculator",null,
+                        emptyList(),session,"fixture",privateState=false,draftPreview=null,
+                        trace=ToolGenerationTrace(UUID.randomUUID(), { events += it }))
+                }.exceptionOrNull() as CloudFailure
+                assertEquals("widget_plan",failure.code)
+                assertEquals(if (alreadyCorrected) 1 else 2,requests.size)
+                val attempts = events.filterIsInstance<ToolGenerationTraceEvent.Attempt>()
+                assertTrue(attempts.all { it.planPath == path })
+                assertTrue(attempts.all { it.planShape == shape })
+                assertEquals(ToolGenerationDisposition.FINISH,attempts.last().disposition)
+                assertFalse(events.toString().contains(secret))
+                if (!alreadyCorrected) {
+                    assertEquals(ToolGenerationDisposition.CORRECT,attempts.first().disposition)
+                    assertEquals(rejected,requests.last().turns[1].text)
+                    assertEquals(CloudTurn("user","Return the corrected JSON plan."),requests.last().turns.last())
+                    val hostCorrection = requests.last().systemInstructions.removePrefix(NeedsPlan.prompt)
+                    assertTrue(hostCorrection.contains(path))
+                    assertTrue(hostCorrection.contains(NeedsPlan.structureChecklist))
+                    assertFalse(hostCorrection.contains(secret))
+                }
+            }
+        }
+    }
+
+    @Test fun truncatedPlanCorrectionKeepsPartialOutputOutOfEveryInstruction(): Unit = runBlocking {
+        // Failure cases: partial output enters a retry, or output-limit guidance enters the user role.
+        val original = "Build a local calculator"
+        val images = listOf("data:image/png;base64,FIXTURE")
+        val requests = mutableListOf<CloudRequest>()
+        val session = CloudSession()
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent) -> Unit) {
+                assertEquals(CloudGenerationStage.PLAN,request.generationStage)
+                requests += request
+                emit(CloudEvent.Text(secret))
+                throw CloudFailure("response_length","Output limit")
+            }
+        }
+        val failure = runCatching {
+            ToolGenerationService(provider,SandboxClient(context)).generate("fixture",original,null,images,
+                session,"fixture",privateState=false,draftPreview=null)
+        }.exceptionOrNull() as CloudFailure
+        assertEquals("response_length",failure.code)
+        assertEquals(2,requests.size)
+        assertEquals(NeedsPlan.prompt,requests.first().systemInstructions)
+        assertEquals(listOf(CloudTurn("user",original,images),CloudTurn("user","Return the corrected JSON plan.")),
+            requests.last().turns)
+        val hostCorrection = requests.last().systemInstructions.removePrefix(NeedsPlan.prompt)
+        assertTrue(hostCorrection.contains("output limit"))
+        assertTrue(hostCorrection.contains("shorter complete JSON object"))
+        assertFalse(requests.toString().contains(secret))
+        assertFalse(session.claimCorrection())
+    }
+
     @Test fun typedFailuresAreAssociatedWithFirstAndCorrectionAttempts(): Unit=runBlocking {
         val good=spec()
         val fixtures=listOf(
@@ -57,7 +226,7 @@ class GenerationAttemptDiagnosticTest {
             assertEquals(2,provider.calls);assertEquals(listOf(1,2),events.map {it.attempt})
             val first=events.first().report()
             assertEquals("rejected",first.getString("outcome"));assertEquals(category,first.getString("category"));assertEquals(stage,first.getString("stage"))
-            assertEquals("accepted",events.last().report().getString("outcome"))
+            assertEquals("validated",events.last().report().getString("outcome"))
             assertEquals("{\"count\":7}",result.state);assertTrue(result.effects.isEmpty());safe(events)
             if(stage=="smoke")assertTrue(first.has("smoke"))
         }
@@ -69,7 +238,12 @@ class GenerationAttemptDiagnosticTest {
         val good=spec()
         val bad=JSONObject(good).put("ui",JSONObject().put("type","numberInput").put("text","Local").put("bind","SECRET_MISSING").put("action","edit")).toString()
         val events=mutableListOf<ToolGenerationAttemptDiagnostic>();val provider=Provider(listOf(bad,good))
-        generate(provider,events,throwObserver=true)
+        val traceEvents = mutableListOf<ToolGenerationTraceEvent>()
+        generate(provider,events,throwObserver=true,trace=ToolGenerationTrace(UUID.randomUUID(), { traceEvents += it }))
+        val rejection = traceEvents.filterIsInstance<ToolGenerationTraceEvent.Attempt>()
+            .single { it.disposition == ToolGenerationDisposition.CORRECT }
+        assertEquals("component_binding_missing_path", rejection.validationRule)
+        assertFalse(traceEvents.toString().contains("SECRET"))
         assertEquals(2,provider.requests.size)
         assertEquals(provider.requests[0].turns.single(),provider.requests[1].turns.first())
         assertEquals(bad,provider.requests[1].turns[1].text)
@@ -132,6 +306,50 @@ class GenerationAttemptDiagnosticTest {
             assertEquals("rejected",events.first().report().getString("outcome"))
             assertEquals(if(failure is CancellationException) "canceled" else "providerFailure",events.last().report().getString("outcome"))
             safe(events)
+        }
+    }
+
+    @Test fun timedCorrectionAndTerminalFailureStayOnOneOperationWithoutPrivateData(): Unit = runBlocking {
+        val operation = UUID.randomUUID()
+        for (failure in listOf(CloudFailure(secret, secret), CancellationException(secret))) {
+            val events = mutableListOf<ToolGenerationTraceEvent>()
+            var now = 100L
+            val trace = ToolGenerationTrace(operation, { events += it }, { now++ })
+            val result = runCatching {
+                generate(Provider(listOf("not JSON $secret"), failure, 2), mutableListOf(), trace = trace)
+            }
+            assertSame(failure, result.exceptionOrNull())
+            assertTrue(events.all { it.operationId == operation })
+            assertEquals(events.map { it.atNanos }.sorted(), events.map { it.atNanos })
+            assertFalse(events.toString().contains(secret))
+            val stages = events.filterIsInstance<ToolGenerationTraceEvent.Stage>()
+            val active = ArrayDeque<ToolGenerationTraceEvent.Stage>()
+            for (event in stages) {
+                if (event.started) active.addLast(event) else {
+                    val start = active.removeLast()
+                    assertEquals(start.copy(atNanos = event.atNanos, started = false), event)
+                }
+            }
+            assertTrue(active.isEmpty())
+            val correction = events.filterIsInstance<ToolGenerationTraceEvent.Attempt>()
+                .single { it.disposition == ToolGenerationDisposition.CORRECT }
+            assertEquals(1, correction.attempt)
+            assertEquals(ToolGenerationStage.DEFINITION, correction.stage)
+            assertEquals(ToolValidationCategory.JSON, correction.validationCategory)
+            val second = stages.first { it.attempt == 2 }
+            assertTrue(second.started && second.atNanos > correction.atNanos)
+            assertEquals(ToolGenerationStage.PROVIDER, second.stage)
+            val terminal = events.filterIsInstance<ToolGenerationTraceEvent.Finished>().single()
+            assertEquals(events.last(), terminal)
+            assertEquals(2, terminal.attempt)
+            assertEquals(false, terminal.partsOnly)
+            if (failure is CancellationException) {
+                assertEquals(ToolGenerationTraceOutcome.CANCELED, terminal.outcome)
+                assertEquals("cancelled", terminal.failureCode)
+            } else {
+                assertEquals(ToolGenerationTraceOutcome.FAILED, terminal.outcome)
+                assertEquals("unknown", terminal.failureCode)
+            }
         }
     }
 }

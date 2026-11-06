@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+    <uses-permission android:name="android.permission.READ_ASSIST_STRUCTURE_SCREEN_CONTENT" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -52,15 +56,25 @@
             android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/chat_camera_paths" />
         </provider>
+        <provider android:name=".updates.AppUpdateProvider" android:authorities="${applicationId}.app-update"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/app_update_paths" />
+        </provider>
         <provider android:name=".surfaces.AssistMediaProvider" android:authorities="${applicationId}.assist-media" android:exported="false" />
+        <provider android:name=".portability.MiniAppExportProvider" android:authorities="${applicationId}.mini-app-export"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/mini_app_export_paths" />
+        </provider>
         <activity android:name=".surfaces.WidgetConfigurationActivity" android:exported="true">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" /></intent-filter>
         </activity>
-        <receiver android:name=".surfaces.ToolWidgetProvider" android:exported="false" android:label="Alphy tool">
+        <receiver android:name=".surfaces.ToolWidgetProvider" android:exported="false" android:label="@string/widget_configure_title">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/tool_widget_info" />
         </receiver>
         <receiver android:name=".surfaces.PinResultReceiver" android:exported="false" />
+        <service android:name=".scheduling.SourceRefreshJobService" android:exported="true"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
         <service android:name=".surfaces.AlphaTileService" android:label="Alphy" android:icon="@drawable/ic_alpha"
             android:exported="true" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>

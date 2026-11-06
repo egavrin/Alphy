@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tool_preview_provisional">Предварительный просмотр · проверка продолжается</string>
+    <string name="tool_preview_drawing">Рисунок предпросмотра</string>
+    <string name="tool_preview_drawing_unavailable">Рисунок предпросмотра недоступен.</string>
+</resources>

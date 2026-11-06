@@ -4,20 +4,32 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.alpha.assistant.chat.RefinementChoice
 import org.json.JSONArray
 import org.json.JSONObject
 
 data class Attachment(val uri: String, val name: String, val mime: String, val contextText: String? = null)
 data class Draft(val text: String = "", val attachments: List<Attachment> = emptyList(), val id: String = java.util.UUID.randomUUID().toString())
 data class Source(val title: String, val url: String, val summary: String = "", val siteName: String? = null, val siteIcon: String? = null)
+
+/** The host assigns provenance independently of message text. */
+enum class MessageProvenance { CLEAN, MEMORY_DERIVED, UNKNOWN }
+
 data class Message(val id: String, val role: String, val text: String, val createdAt: Long, val status: String,
     val attachments: List<Attachment> = emptyList(), val replyTo: String? = null, val search: Boolean = false,
     val searchStatus: String = "", val sources: List<Source> = emptyList(), val error: String = "", val errorCode: String = "",
-    val toolId: String? = null, val toolRevision: Int? = null, val toolOperationId: String? = null)
-data class Conversation(val id: String, val title: String, val createdAt: Long, val updatedAt: Long, val draft: Draft = Draft(), val messages: List<Message> = emptyList())
+    val toolId: String? = null, val toolRevision: Int? = null, val toolOperationId: String? = null,
+    val queueOrder: Long? = null, val hostTargetId: String? = null, val requiresRefinement: Boolean = false,
+    val refinementChoices: List<RefinementChoice> = emptyList(),
+    val provenance: MessageProvenance = MessageProvenance.UNKNOWN)
+data class Conversation(val id: String, val title: String, val createdAt: Long, val updatedAt: Long, val draft: Draft = Draft(), val messages: List<Message> = emptyList(),
+    val refinementTargetId: String? = null, val refinementDraft: Draft? = null) {
+    val cardIds: List<String> get() = messages.mapNotNull { it.toolId }.distinct()
+    val composerDraft: Draft get() = refinementDraft ?: draft
+}
 data class ShellSnapshot(val conversations: List<Conversation> = emptyList(), val selectedId: String? = null, val newDraft: Draft = Draft(), val userName: String = "") {
     val selected: Conversation? get() = conversations.find { it.id == selectedId }
-    val draft: Draft get() = selected?.draft ?: newDraft
+    val draft: Draft get() = selected?.composerDraft ?: newDraft
 }
 
 /** Version 1 stores each conversation atomically. Credentials never enter this database. */
@@ -113,8 +125,14 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
         return Draft(json.getString("text"), decodeAttachments(json.getJSONArray("attachments")), json.getString("id"))
     }
     private fun encodeConversation(c: Conversation) = JSONObject().put("id", c.id).put("title", c.title).put("createdAt", c.createdAt).put("updatedAt", c.updatedAt)
-        .put("draft", encodeDraft(c.draft)).put("messages", JSONArray().apply { c.messages.forEach { m -> put(JSONObject().put("id", m.id).put("role", m.role).put("text", m.text).put("createdAt", m.createdAt).put("status", m.status).put("attachments", encodeAttachments(m.attachments)).put("replyTo", m.replyTo).put("search", m.search)
-            .put("toolId",m.toolId).put("toolRevision",m.toolRevision).put("toolOperationId",m.toolOperationId).put("searchStatus", m.searchStatus).put("error", m.error).put("errorCode", m.errorCode).put("sources", JSONArray().apply { m.sources.forEach { source ->
+        .put("draft", encodeDraft(c.draft)).put("refinementTargetId",c.refinementTargetId)
+        .put("refinementDraft",c.refinementDraft?.let(::encodeDraft)).put("messages", JSONArray().apply { c.messages.forEach { m -> put(JSONObject().put("id", m.id).put("role", m.role).put("text", m.text).put("createdAt", m.createdAt).put("status", m.status).put("attachments", encodeAttachments(m.attachments)).put("replyTo", m.replyTo).put("search", m.search)
+            .put("provenance", m.provenance.name)
+            .put("toolId",m.toolId).put("toolRevision",m.toolRevision).put("toolOperationId",m.toolOperationId)
+            .put("queueOrder",m.queueOrder).put("hostTargetId",m.hostTargetId).put("requiresRefinement",m.requiresRefinement)
+            .put("refinementChoices",JSONArray().apply { m.refinementChoices.forEach { choice ->
+                put(JSONObject().put("toolId",choice.toolId).put("title",choice.title))
+            } }).put("searchStatus", m.searchStatus).put("error", m.error).put("errorCode", m.errorCode).put("sources", JSONArray().apply { m.sources.forEach { source ->
                 put(JSONObject().put("title", source.title).put("url", source.url).put("summary", source.summary)
                     .put("siteName", source.siteName).put("siteIcon", source.siteIcon))
             } })) } })
@@ -124,5 +142,14 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
             it.optJSONArray("sources")?.let { sources -> List(sources.length()) { index -> sources.getJSONObject(index).let { source ->
                 Source(source.getString("title"), source.getString("url"), source.optString("summary"), source.opt("siteName") as? String, source.opt("siteIcon") as? String)
             } } } ?: emptyList(), it.optString("error"), it.optString("errorCode"), it.optString("toolId").takeIf { value -> value.isNotEmpty() && value != "null" },
-            if(it.isNull("toolRevision")) null else it.getInt("toolRevision"), it.optString("toolOperationId").takeIf { value -> value.isNotEmpty() && value != "null" }) } } })
+            if(it.isNull("toolRevision")) null else it.getInt("toolRevision"), it.opt("toolOperationId") as? String,
+            if(it.isNull("queueOrder")) null else it.getLong("queueOrder"), it.opt("hostTargetId") as? String, it.optBoolean("requiresRefinement"),
+            it.optJSONArray("refinementChoices")?.let { choices ->
+                List(choices.length()) { index -> choices.getJSONObject(index).let { choice ->
+                    RefinementChoice(choice.getString("toolId"),choice.getString("title"))
+                } }
+            }.orEmpty(),
+            provenance = (it.opt("provenance") as? String)?.let { name ->
+                MessageProvenance.entries.firstOrNull { value -> value.name == name }
+            } ?: MessageProvenance.UNKNOWN) } } }, j.opt("refinementTargetId") as? String, j.optJSONObject("refinementDraft")?.let(::decodeDraft))
 }

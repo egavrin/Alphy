@@ -1,6 +1,11 @@
 package com.alpha.assistant.ui
 
+import android.view.Choreographer
+import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
+import androidx.compose.runtime.Recomposer
+import androidx.compose.ui.MotionDurationScale
+import androidx.compose.ui.platform.compositionContext
 import androidx.lifecycle.Lifecycle
 import androidx.navigationevent.NavigationEvent
 import androidx.test.core.app.ActivityScenario
@@ -11,6 +16,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
 class DrawerWorkflowTest {
@@ -26,7 +33,7 @@ class DrawerWorkflowTest {
             robot.waitFor("Alpha message")
             robot.openDrawer(scenario)
             val rows = listOf(R.string.search, R.string.new_chat, R.string.mini_apps, R.string.automations, R.string.recent)
-                .map { robot.text(it) } + "Beta chat" + robot.text(R.string.access) + robot.text(R.string.profile)
+                .map { robot.text(it) } + "Beta chat" + robot.text(R.string.profile)
             for ((upper, lower) in rows.zipWithNext()) assertTrue("$upper ends above $lower", robot.bounds(upper).bottom <= robot.bounds(lower).top)
             robot.assertTarget(robot.text(R.string.settings))
             robot.back()
@@ -71,7 +78,7 @@ class DrawerWorkflowTest {
             try {
                 robot.openDrawer(scenario)
                 robot.rotate(scenario, landscape = true)
-                for (id in listOf(R.string.search, R.string.access, R.string.settings)) {
+                for (id in listOf(R.string.search, R.string.mini_apps, R.string.settings)) {
                     robot.waitFor(robot.text(id))
                     robot.assertTarget(robot.text(id))
                 }
@@ -117,31 +124,69 @@ class DrawerWorkflowTest {
     }
 
     @Test fun backDuringOpenAnimationClosesDrawer() {
+        val previousScale = robot.shell("settings get global animator_duration_scale")
         fixture.seedChat("alpha", "Alpha chat", "Alpha message", selected = true)
         fixture.launch().use { scenario ->
             robot.waitFor("Alpha message")
-            robot.withBackInput(scenario) { input ->
-                var menu: AccessibilityNodeInfo? = robot.waitFor(robot.text(R.string.menu))
-                while (menu != null && !menu.isClickable) menu = menu.parent
-                // ShellRobot.click waits for an idle UI, and the drawer can finish its open animation in that wait.
-                assertTrue(menu!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-                var sent = false
-                try {
-                    // The check and the Back share one main-thread block, so the drawer cannot settle between them.
-                    robot.waitUntil {
-                        scenario.onActivity { if (!sent && robot.drawerRowShown(it) && !robot.scrimLabeled(it)) { input.complete(); sent = true } }
-                        sent
-                    }
-                } catch (timeout: AssertionError) { throw AssertionError("The test did not see the drawer move within the wait timeout", timeout) }
-                var open = false
+            robot.openDrawer(scenario)
+            var settledRight = 0f
+            scenario.onActivity { settledRight = robot.drawerRowRight(it) }
+            assertTrue("Open drawer has a visible row", settledRight > 0)
+            robot.back()
+            robot.awaitDrawerClosed(scenario)
+
+            fun awaitComposeScale(scale: Float) {
                 robot.waitUntil {
-                    var settled = false
-                    scenario.onActivity { open = robot.scrimLabeled(it); settled = open || !robot.drawerRowShown(it) }
-                    settled
+                    var current: Float? = null
+                    scenario.onActivity { activity ->
+                        val root = activity.findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
+                        current = (root.compositionContext as? Recomposer)?.effectCoroutineContext
+                            ?.get(MotionDurationScale)?.scaleFactor
+                    }
+                    current == scale
                 }
-                assertFalse("Back during the open animation closes the drawer", open)
-                assertTrue(robot.composed(scenario, "chat"))
-                assertEquals("alpha", selectedId(scenario))
+            }
+            try {
+                // The Compose observer can retain the old scale while no window is subscribed.
+                robot.shell("settings put global animator_duration_scale 0")
+                awaitComposeScale(0f)
+                robot.shell("settings put global animator_duration_scale 1")
+                awaitComposeScale(1f)
+                robot.withBackInput(scenario) { input ->
+                    var menu: AccessibilityNodeInfo? = robot.waitFor(robot.text(R.string.menu))
+                    while (menu != null && !menu.isClickable) menu = menu.parent
+                    val backSent = CountDownLatch(1)
+                    lateinit var frame: Choreographer.FrameCallback
+                    scenario.onActivity { activity ->
+                        frame = Choreographer.FrameCallback {
+                            val right = robot.drawerRowRight(activity)
+                            if (right > 0 && right < settledRight) {
+                                input.complete()
+                                backSent.countDown()
+                            } else Choreographer.getInstance().postFrameCallback(frame)
+                        }
+                        Choreographer.getInstance().postFrameCallback(frame)
+                    }
+                    try {
+                        assertTrue(menu!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+                        assertTrue("The drawer moved before Back", backSent.await(10, TimeUnit.SECONDS))
+                    } finally {
+                        scenario.onActivity { Choreographer.getInstance().removeFrameCallback(frame) }
+                    }
+                    var open = false
+                    robot.waitUntil {
+                        var settled = false
+                        scenario.onActivity { open = robot.scrimLabeled(it); settled = open || robot.drawerRowRight(it) == 0f }
+                        settled
+                    }
+                    assertFalse("Back during the open animation closes the drawer", open)
+                    assertTrue(robot.composed(scenario, "chat"))
+                    assertEquals("alpha", selectedId(scenario))
+                }
+            } finally {
+                if (previousScale == "null") robot.shell("settings delete global animator_duration_scale")
+                else robot.shell("settings put global animator_duration_scale $previousScale")
+                awaitComposeScale(previousScale.toFloatOrNull() ?: 1f)
             }
         }
     }

@@ -1,0 +1,7 @@
+<resources>
+    <string name="tool_live_input_pending">Ввод сохраняется</string>
+    <string name="tool_live_input_unsaved">Ввод не сохранён</string>
+    <string name="tool_live_input_unavailable">Откройте мини-приложение для ввода</string>
+    <string name="tool_live_input_finish_first">Сначала завершите ввод и дождитесь сохранения</string>
+    <string name="tool_live_input_finish">Завершить ввод: %1$s</string>
+</resources>

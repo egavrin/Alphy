@@ -10,6 +10,8 @@ Package 3A connects the native shell to DeepSeek. It keeps the native sandbox un
 
 The user gives consent one time, at key entry. `cloudKey()` refuses a request without that consent. The chat and the mini-app page then show «Открыть настройки». The app sends at most 20 completed question-and-answer pairs, within a 48,000-character history budget. It sends the current message separately. Previous image bytes and document URIs never enter later requests automatically. Current messages have a 16,000-character limit.
 
+A saved mini-app can call `ai.ask` from an explicit action in a visible, focused window. DeepSeek receives the text supplied by that action. The host uses the existing key consent, independently of the mini-app network grant. The host cancels the request when the last eligible window loses focus. A widget layout request sends the user's instruction and allowed binding and action names. The host reads saved values locally to show the preview.
+
 Reference contracts checked for this package:
 
 - [Vision guide](https://api-docs.deepseek.com/guides/vision/)

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="desktop_add_course">Добавить курс</string>
+    <string name="desktop_choose_course">Какой курс добавить?</string>
+    <string name="desktop_place_course">Добавить «%1$s»</string>
+    <string name="desktop_now_course_title">Пора повторить</string>
+    <string name="desktop_now_course_detail">%1$s · урок %2$d из %3$d</string>
+    <string name="desktop_course_lesson_progress">%1$d/%2$d</string>
+    <string name="desktop_courses_load_failed">Не удалось загрузить курсы для рабочего стола.</string>
+</resources>

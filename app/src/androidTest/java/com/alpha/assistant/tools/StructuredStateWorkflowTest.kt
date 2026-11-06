@@ -30,7 +30,7 @@ class StructuredStateWorkflowTest {
     private fun withStore(block: (ToolStore,String)->Unit) {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val name="structured-${UUID.randomUUID()}.db"; val store=ToolStore(context,name)
-        try { block(store,name) } finally { store.close(); context.deleteDatabase(name) }
+        try { block(store,name) } finally { store.close(); context.deleteDatabase(name); context.deleteDatabase("$name-automations.db") }
     }
     // Failure cases: list/array bounds, numeric token types, constructor extras, required IDs,
     // malformed names, nested/collection paths, field/depth/node budgets, and payload disclosure.
@@ -287,42 +287,127 @@ class StructuredStateWorkflowTest {
         assertEquals("staleCursor",stale.getString("status"))
         assertTrue(runCatching { act(operations("""{"id":"page","collection":"history","op":"page","order":"asc","limit":51,"cursor":null}""")) }.isFailure)
     }
-    @Test fun additiveV4UpgradePreservesAllExistingRowsAndUnknownVersionDoesNotReset() = withStore { store,name ->
-        val source="if(input.event.type==='capabilityResults') input.state.count+=input.event.entries.length; return {state:input.state};"
-        val definition=ToolSpec.parse(JSONObject(spec(source).json).put("capabilityResults",true).put("capabilities",JSONArray().put("vibration.play")).toString())
-        val old=tool(definition); store.saveTool(old,true)
-        val db=store.writableDatabase
-        db.execSQL("INSERT INTO drafts VALUES('receipt',?,-7,9,'keep','candidate','state','ui','conversation')",arrayOf(old.id))
-        db.execSQL("INSERT INTO capability_grants VALUES(?,'photo.pick',1)",arrayOf(old.id))
-        db.execSQL("INSERT INTO capability_grants VALUES(?,'vibration.play',1)",arrayOf(old.id))
-        val request=com.alpha.assistant.capabilities.CapabilityRequest("kept","vibration.play",JSONObject().put("milliseconds",1))
-        val result=com.alpha.assistant.capabilities.CapabilityResult("succeeded","Preserved result")
-        db.execSQL("INSERT INTO capability_effects VALUES('kept',?,1,1,?,?,1,'terminal','session')",arrayOf(old.id,request.json().toString(),result.json().toString()))
-        db.execSQL("INSERT INTO capability_deliveries VALUES(?,?,1,1,'pending',1,NULL,'session')",arrayOf(UUID.randomUUID().toString(),old.id))
-        for(table in listOf("capability_resources","capability_acquisitions")) db.execSQL("INSERT INTO $table VALUES(?,?,'document','private-locator','text/plain',5,1,1,'session',9999999999999)",arrayOf(table,old.id))
-        db.execSQL("CREATE TABLE credentials(value TEXT)"); db.execSQL("INSERT INTO credentials VALUES('fixture-secret')")
-        val tables=listOf("tools","revisions","drafts","capability_grants","capability_effects","capability_deliveries","capability_private_owners","capability_resources","capability_acquisitions","credentials")
-        fun snapshot(database: android.database.sqlite.SQLiteDatabase) = tables.associateWith { table ->
-            database.rawQuery("SELECT * FROM $table ORDER BY rowid",null).use { c -> buildList { while(c.moveToNext()) add((0 until c.columnCount).map { if(c.isNull(it)) null else c.getString(it) }) } }
-        }
-        val before=snapshot(db)
-        for(table in listOf("artifact_collections","artifact_records","artifact_cursors","artifact_record_deliveries","maps_stops","maps_reached","owned_calendar_selection","owned_calendar_events","owned_calendar_delete_batches","owned_calendar_delete_items")) db.execSQL("DROP TABLE $table")
-        db.version=4; store.close()
+    @Test fun unsupportedV7DatabasePreservesDataAndVersion() = withStore { store,name ->
         val context=InstrumentationRegistry.getInstrumentation().targetContext
-        var retained=before
-        ToolStore(context,name).use { upgraded ->
-            assertEquals(7,upgraded.readableDatabase.version); assertEquals(before,snapshot(upgraded.readableDatabase))
-            val offline=object: ChatProvider {override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent)->Unit) = error("Upgrade result stays local")}
-            val engine=ToolEngine(upgraded,ToolGenerationService(offline,SandboxClient(context)),permissionCheck={true})
-            runBlocking {engine.deliverCapabilityResults(old.id)}
-            assertEquals(1,JSONObject(upgraded.tool(old.id)!!.state).getInt("count")); assertEquals("committed",upgraded.deliveries(old.id).single().phase)
-            val delivered=upgraded.tool(old.id); runBlocking {engine.deliverCapabilityResults(old.id)}; assertEquals(delivered,upgraded.tool(old.id))
-            retained=snapshot(upgraded.readableDatabase)
+        val path=context.getDatabasePath(name).path
+        store.close()
+        android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(path,null).use {
+            it.execSQL("CREATE TABLE tools(id TEXT PRIMARY KEY,state TEXT)")
+            it.execSQL("INSERT INTO tools VALUES('keep','PRESERVE_V7_STATE')")
+            it.version=7
         }
-        android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path,null,0).use { it.version=8 }
-        ToolStore(context,name).use { unsupported -> assertTrue(runCatching { unsupported.readableDatabase }.isFailure) }
-        android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path,null,android.database.sqlite.SQLiteDatabase.OPEN_READONLY).use { assertEquals(retained,snapshot(it)); assertEquals(8,it.version) }
+        val failure=runCatching {ToolStore(context,name).use {it.readableDatabase}}.exceptionOrNull()
+        assertTrue(failure.toString(),failure is ToolLibraryUnavailable)
+        android.database.sqlite.SQLiteDatabase.openDatabase(path,null,android.database.sqlite.SQLiteDatabase.OPEN_READONLY).use { database ->
+            assertEquals(7,database.version)
+            database.rawQuery("SELECT state FROM tools WHERE id='keep'",null).use {
+                assertTrue(it.moveToFirst());assertEquals("PRESERVE_V7_STATE",it.getString(0))
+            }
+        }
     }
+
+    @Test fun restoreKeepsNewSchemaDefaultsStateAndCollectionTokens() = withStore { store,name -> runBlocking {
+            val context=InstrumentationRegistry.getInstrumentation().targetContext
+            val v1=spec()
+            val v2=ToolSpec.parse(JSONObject(v1.json).apply {
+                getJSONObject("stateSchema").put("extra","string")
+                getJSONObject("initialState").put("extra","CURRENT_DEFAULT")
+                put("ui",JSONObject("""{"type":"button","text":"Current button","action":"save"}"""))
+            }.toString())
+            val first=tool(v1)
+            store.commitTool(first,null,true)
+            val records=ToolRecords(store)
+            val action=records.commitAction(first,first.copy(stateVersion=2),operations(put("a")))
+            val token=JSONObject(action.event).getJSONArray("entries").getJSONObject(0).getJSONObject("record").getString("token")
+            assertTrue(records.commitDelivery(action,first.copy(stateVersion=3)))
+            val data=JSONObject(v2.initialState).put("extra","LIVE_VALUE").put("count",12).toString()
+            val current=first.copy(revision=2,stateVersion=4,spec=v2.json,state=data,ui=v2.ui.toString())
+            store.commitTool(current,store.tool(first.id),true)
+            val offline=object: ChatProvider {
+                override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent)->Unit) = error("Restore stays local")
+            }
+            val engine=ToolEngine(store,ToolGenerationService(offline,SandboxClient(context)))
+            val rule=JSONObject("""{"name":"Dependent writer","trigger":{"type":"manual"},"conditions":{},"actions":[{"id":"set","capability":"tool.state.set","args":{"toolId":"${current.id}","revision":2,"field":"count","value":9}}]}""")
+            val stopped=com.alpha.assistant.automations.AutomationStore(context,"$name-automations.db").use { rules ->
+                rules.save(null,rule).also { rules.approve(it.id,it.revision) }
+            }
+            val restored=engine.rollback(first.id,2,4,1)
+            val metadata=store.revisions(first.id).first()
+            assertEquals(listOf(StoppedAutomation(stopped.id,"Dependent writer")),metadata.stoppedAutomations)
+            com.alpha.assistant.automations.AutomationStore(context,"$name-automations.db").use { rules ->
+                val paused=rules.rule(stopped.id)!!
+                assertFalse(paused.enabled)
+                assertEquals(paused.attention,rules.history(stopped.id).single().message)
+            }
+            val definition=ToolSpec.parsePersisted(restored.spec)
+            assertEquals(v1.source,definition.source);assertEquals(v1.ui.toString(),definition.ui.toString())
+            assertEquals(v2.initialState,definition.initialState);assertEquals(v2.collections.toString(),definition.collections.toString())
+            assertEquals(data,restored.state);assertEquals(3,restored.revision)
+            val after=records.commitAction(restored,restored.copy(stateVersion=6),operations(put("a",token)))
+            assertEquals("succeeded",JSONObject(after.event).getJSONArray("entries").getJSONObject(0).getString("status"))
+    } }
+
+    @Test fun restoreRejectsRenderEffectsStateChangesAndStaleSnapshots() = withStore { store,_ -> runBlocking {
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        val offline=object: ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent)->Unit) = error("Restore stays local")
+        }
+        val engine=ToolEngine(store,ToolGenerationService(offline,SandboxClient(context)))
+        val candidates=listOf(
+            "return {state:input.state,effects:[{id:'buzz',capability:'vibration.play',args:{milliseconds:10}}]};",
+            "return {state:input.state,records:[{id:'get',collection:'history',op:'get',key:'a'}]};",
+            "input.state.count++; return {state:input.state};",
+            "return {state:input.state,ui:{type:'invalid'}};"
+        )
+        for(source in candidates) {
+            val previous=tool(ToolSpec.parse(JSONObject(spec(source).json).put("capabilities",JSONArray().put("vibration.play")).toString()))
+            store.commitTool(previous,null,true)
+            val good=spec()
+            val current=previous.copy(revision=2,stateVersion=2,spec=good.json,ui=good.ui.toString())
+            store.commitTool(current,previous,true)
+            assertFalse(engine.restoreAvailability(current,1).available)
+            assertTrue(runCatching {engine.rollback(current.id,2,2,1)}.isFailure)
+            assertEquals(current,store.tool(current.id));assertEquals(2,store.revisions(current.id).size)
+            assertTrue(store.effects(current.id).isEmpty());assertNull(ToolRecords(store).pending(current.id))
+            val changed=current.copy(stateVersion=3)
+            store.commitTool(changed,current,false)
+            assertTrue(runCatching {engine.rollback(current.id,2,2,1)}.isFailure)
+            assertEquals(changed,store.tool(current.id))
+        }
+    } }
+
+    @Test fun publicRefinementUsesDeclaredUiAndKeepsLiveStateLocal() = withStore { store,_ -> runBlocking {
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        val definition=ToolSpec.parse(JSONObject(spec().json).apply {
+            remove("collections")
+            getJSONObject("initialState").put("trip",JSONObject("""{"stops":["PUBLIC_DEFAULT"],"at":1}"""))
+            getJSONObject("ui").put("text","DECLARED_BUTTON")
+        }.toString())
+        val first=tool(definition).copy(
+            state=JSONObject(definition.initialState).put("trip",JSONObject("""{"stops":["LIVE_SENTINEL"],"at":1}""")).toString(),
+            ui=JSONObject(definition.ui.toString()).put("text","RENDERED_SENTINEL").toString(),
+            conversationId="original",lastConversationId="original"
+        )
+        store.commitTool(first,null,true)
+        val requests=mutableListOf<CloudRequest>()
+        val provider=object: ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent)->Unit) {
+                requests.add(request);emit(CloudEvent.Text(definition.json))
+            }
+        }
+        val engine=ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))
+        val draft=engine.createDraft("Change the button",first.id,"next")
+        engine.generate(draft.id,"fixture",emptyList(),CloudSession())
+        val current=engine.accept(draft.id)
+        assertEquals("original",current.conversationId);assertEquals("next",current.lastConversationId)
+        assertEquals(first.state,current.state)
+        val turns=requests.flatMap {it.turns}.joinToString("\n") {it.text}
+        assertTrue(turns.contains("DECLARED_BUTTON"));assertTrue(turns.contains("PUBLIC_DEFAULT"))
+        assertFalse(turns.contains("RENDERED_SENTINEL"));assertFalse(turns.contains("LIVE_SENTINEL"))
+        val saved=store.revisions(current.id).first()
+        assertTrue(saved.label.isNotBlank());assertTrue(saved.createdAt>=first.createdAt)
+    } }
+
     @Test fun artifactRecordCountAndByteQuotasRollbackTheWholeAction() = withStore { store,_ ->
         fun configured(bytes: Boolean): ToolSpec {
             val json=JSONObject(spec().json)
@@ -421,7 +506,12 @@ class StructuredStateWorkflowTest {
         val name="structured-engine-${UUID.randomUUID()}.db"; val store=ToolStore(context,name)
         var capturedRequest: CloudRequest?=null
         var answer=spec("""if(input.event.type==='action')return {state:input.state,records:[{id:'save',collection:'history',op:'put',key:'a',expectedToken:null,value:{at:1793577600000,dose:'PRIVATE_MEDICATION'}}]}; if(input.event.type==='recordResults'){input.state.count=input.event.entries.length;} return {state:input.state};""").json
-        val provider=object: ChatProvider { override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent)->Unit) {capturedRequest=request; emit(CloudEvent.Text(answer))} }
+        val provider=object: ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent)->Unit) {
+                if (request.replyWithFixturePlan(emit)) return
+                capturedRequest=request; emit(CloudEvent.Text(answer))
+            }
+        }
         val service=ToolGenerationService(provider,SandboxClient(context)); val engine=ToolEngine(store,service)
         try {
             val draft=engine.createDraft("local tracker",null); engine.generate(draft.id,"fixture",emptyList(),CloudSession()); val old=engine.accept(draft.id)

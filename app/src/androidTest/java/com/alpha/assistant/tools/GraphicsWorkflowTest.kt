@@ -19,6 +19,17 @@ import java.util.UUID
 class GraphicsWorkflowTest {
     private val context get()=InstrumentationRegistry.getInstrumentation().targetContext
     private fun rejects(block: () -> Unit) {assertTrue(runCatching(block).isFailure)}
+    @Test fun drawingRolesAndHexUseTheSameStrictPaintBoundary() {
+        fun frame(color: String) = """{"commands":[{"type":"rect","x":0,"y":0,"width":10,"height":10,"color":"$color"}]}"""
+        for (color in listOf("default","muted","accent","success","warning","error","#112233","#AABBCCDD"))
+            GraphicsContract.frame(frame(color),"frame")
+        for (color in listOf("primary","red","Accent","#123","#ZZZZZZ","javascript:red"))
+            rejects { GraphicsContract.frame(frame(color),"frame") }
+        val gradient = """{"commands":[{"type":"rect","x":0,"y":0,"width":10,"height":10,"gradient":{"type":"linear","x":0,"y":0,"x2":10,"y2":0,"stops":[{"offset":0,"color":"accent"},{"offset":1,"color":"#123456"}]}}]}"""
+        GraphicsContract.frame(gradient,"frame")
+        rejects { GraphicsContract.frame(gradient.replace("accent","primary"),"frame") }
+    }
+
     @Test fun strictDrawingAndCheckpointBoundaries() {
         val spec=ToolSpec.parse(ArkanoidFixture.spec())
         assertTrue(spec.surfaces.isNotEmpty())
@@ -96,10 +107,10 @@ internal object ArkanoidFixture {
                 if(y>406){lives--;x=160;y=320;vy=-180;}
             }
             const commands=[{type:'roundRect',x:paddle,y:380,width:64,height:10,radius:4,color:'#66DDFF'},
-                {type:'circle',x,y,radius:6,color:'#FFFFFF'},
+                {type:'circle',x,y,radius:6,color:'default'},
                 ...bricks.filter(b=>b.on).map(b=>({type:'rect',x:b.x,y:b.y,width:44,height:16,color:'#FFAA66'})),
-                {type:'text',x:10,y:25,text:'Score '+score+'  Lives '+lives,size:16,color:'#FFFFFF'},
-                {type:'text',x:10,y:410,text:'Tick '+frames+' Paddle '+paddle+' Ball '+Math.round(x)+','+Math.round(y),size:12,color:'#FFFFFF'}];
+                {type:'text',x:10,y:25,text:'Score '+score+'  Lives '+lives,size:16,color:'default'},
+                {type:'text',x:10,y:410,text:'Tick '+frames+' Paddle '+paddle+' Ball '+Math.round(x)+','+Math.round(y),size:12,color:'muted'}];
             return event.type==='checkpoint'?{commands,checkpoint:{score,lives}}:{commands};
         };
     """.trimIndent()

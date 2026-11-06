@@ -45,7 +45,7 @@ class OwnedCalendarWorkflowTest {
             .put("capabilities",JSONArray(OwnedCalendarContract.ids.toList())).put("initialState",JSONObject("{\"ready\":true}")).put("stateSchema",JSONObject("{\"ready\":\"boolean\"}"))
             .put("ui",JSONObject("{\"type\":\"text\",\"text\":\"Fixture\"}")).put("source","return {state:input.state};").toString())
         val tool=ToolRecord("owner",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)
-        store.saveTool(tool,true);OwnedCalendarContract.ids.forEach {store.grant(tool.id,it,true)}
+        store.saveTool(tool,true)
         val native=OwnedCalendarCapabilities(context,store,provider,permissions={true},unlocked={true})
         var next=1
         fun execute(capability: String,args: JSONObject): CapabilityResult = runBlocking {
@@ -53,7 +53,7 @@ class OwnedCalendarWorkflowTest {
             val request=CapabilityRequest("op${next++}",capability,args)
             store.commitTool(updated,old,false,effects=listOf(request))
             val key=store.effects(tool.id).last().key
-            CapabilityBroker(context,store).executeOwned(key,true) {effect ->
+            CapabilityBroker(context,store).executeOwned(key) {effect ->
                 if(capability=="calendar.select")native.select(effect,provider.calendar,{true}) else native.execute(effect,{true}) {}
             }
         }
@@ -107,11 +107,11 @@ class OwnedCalendarWorkflowTest {
         store.commitTool(old.copy(stateVersion=old.stateVersion+1),old,false,effects=listOf(CapabilityRequest("late","calendar.createOwned",create(ref))))
         val createKey=store.effects("owner").last().key
         val stale=OwnedCalendarLedger(store).snapshot(store.tool("owner")!!);assertTrue(stale.entries.isEmpty())
-        runBlocking {assertEquals("succeeded",CapabilityBroker(context,store).executeOwned(createKey,true) {native.execute(it,{true}){}}.status)}
+        runBlocking {assertEquals("succeeded",CapabilityBroker(context,store).executeOwned(createKey) {native.execute(it,{true}){}}.status)}
         val fresh=OwnedCalendarLedger(store).snapshot(store.tool("owner")!!);assertEquals(1,fresh.entries.size)
         val current=store.tool("owner")!!
         store.commitTool(current.copy(stateVersion=current.stateVersion+1),current,false,effects=listOf(CapabilityRequest("all","calendar.deleteAllOwned",JSONObject().put("version",1))))
-        val key=store.effects("owner").last().key;store.claimEffect(key,true);val effect=store.effect(key)!!
+        val key=store.effects("owner").last().key;store.claimEffect(key);val effect=store.effect(key)!!
         runBlocking {
             assertEquals("denied",native.deleteAll(effect,stale,{true}).status);assertEquals(0,provider.deletes)
             assertEquals("succeeded",native.deleteAll(effect,fresh,{true}).status);assertEquals(1,provider.deletes)
@@ -131,7 +131,7 @@ class OwnedCalendarWorkflowTest {
                 ledger.deleteProgress(effect,snapshot.entries[1],"running")
             }
             if(mode in setOf("cancel","exception"))runBlocking {
-                val result=runCatching {CapabilityBroker(context,store).executeOwned(key,true) {effect ->
+                val result=runCatching {CapabilityBroker(context,store).executeOwned(key) {effect ->
                     journal(effect)
                     if(mode=="cancel")throw kotlinx.coroutines.CancellationException("Synthetic interrupted bulk operation")
                     else error("Synthetic provider interruption")
@@ -139,10 +139,10 @@ class OwnedCalendarWorkflowTest {
                 if(mode=="cancel")assertTrue(result.exceptionOrNull() is kotlinx.coroutines.CancellationException)
                 else assertEquals(3,result.getOrThrow().data.getInt("total"))
             } else {
-                store.claimEffect(key,true);val effect=store.effect(key)!!;journal(effect)
+                store.claimEffect(key);val effect=store.effect(key)!!;journal(effect)
                 when(mode) {
                     "recover" -> store.recoverCapabilityWork(force=true)
-                    "revoke" -> store.grant("owner","calendar.deleteAllOwned",false)
+                    "revoke" -> {val old=store.tool("owner")!!;store.commitTool(old.copy(revision=old.revision+1),old,true);store.finishEffect(key,CapabilityResult("unknownOutcome","Revision changed"))}
                     "archive" -> store.setArchived(store.tool("owner")!!,true)
                     "access" -> {
                         val changed=store.tool("owner")!!;store.saveTool(changed.copy(stateVersion=changed.stateVersion+1),false)
@@ -174,11 +174,11 @@ class OwnedCalendarWorkflowTest {
         provider.available=true
         val old=store.tool("owner")!!;val request=CapabilityRequest("guard","calendar.createOwned",create(ref))
         store.commitTool(old.copy(stateVersion=old.stateVersion+1),old,false,effects=listOf(request))
-        val key=store.effects("owner").last().key;store.claimEffect(key,true)
+        val key=store.effects("owner").last().key;store.claimEffect(key)
         val effect=store.effect(key)!!
         assertEquals("denied",OwnedCalendarCapabilities(context,store,provider,permissions={false},unlocked={true}).execute(effect,{true}){}.status)
         assertEquals("awaitingUser",OwnedCalendarCapabilities(context,store,provider,permissions={true},unlocked={true}).execute(effect,{false}){}.status)
-        store.grant("owner","calendar.createOwned",false)
+        val changed=store.tool("owner")!!;store.commitTool(changed.copy(stateVersion=changed.stateVersion+1),changed,false)
         assertEquals("denied",OwnedCalendarCapabilities(context,store,provider,permissions={true},unlocked={true}).execute(effect,{true}){}.status)
         assertEquals(0,provider.inserts)
     }

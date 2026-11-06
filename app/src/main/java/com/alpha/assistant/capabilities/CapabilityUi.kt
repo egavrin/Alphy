@@ -1,8 +1,11 @@
 package com.alpha.assistant.capabilities
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
-import android.graphics.Bitmap
+import android.content.ContextWrapper
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,171 +17,170 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.app.ActivityCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.alpha.assistant.R
 import com.alpha.assistant.tools.ToolController
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.surfaces.ToolWidgets
-import kotlinx.coroutines.launch
-import org.json.JSONObject
-
-@Composable fun ToolCapabilityGrants(controller: ToolController, tool: ToolRecord) {
-    val spec = remember(tool.spec) { ToolSpec.available(tool.spec) } ?: return
-    if(spec.capabilities.isNotEmpty()) {
-        Text("Доступы инструмента",style = MaterialTheme.typography.titleMedium)
-        Text("Каждый доступ действует только для этого инструмента. Внешние действия требуют подтверждения. Scoped calendar grants permit explicit native calendar buttons without repeated confirmation. Доступы maps.markReached и maps.route разрешают прямые кнопки навигации в открытом Alphy без повторного подтверждения. Результаты остаются на устройстве.")
-        spec.capabilities.forEach { id ->
-            Row(Modifier.fillMaxWidth()) {
-                Checkbox(tool.id + ":" + id in controller.grants,{ controller.grant(tool,id,it) },enabled = !controller.busy)
-                Column(Modifier.weight(1f)) { Text(CapabilityCatalog.definition(id).title); Text(id,style = MaterialTheme.typography.bodySmall)
-                    if(id in MedicineContract.ids) Text("Allow this app to execute explicitly selected native medicine actions without another confirmation. Meals and intake require separate user records. Exact alarm and notification permissions remain separate. Reports require native review before Share.",style=MaterialTheme.typography.bodySmall)
-                    if(id in OwnedCalendarContract.ids) Text("Allow explicit native calendar buttons in this app without another confirmation. Creation and deletion show exact event details. Android permissions and calendar selection remain required. Reminder delivery is not verified.",style=MaterialTheme.typography.bodySmall)
-                    if(id in NavigationContract.ids) Text(if(id == "maps.markReached") "Разрешить кнопкам этого приложения отмечать достигнутые точки. Отмечай только места, куда ты уже пришёл." else "Разрешить кнопкам этого приложения открывать маршрут от последней отмеченной точки. Координаты передаются установленному приложению карт.",style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-    }
-}
+import kotlinx.coroutines.CancellationException
 
 @Composable fun ToolCapabilityPanel(controller: ToolController, tool: ToolRecord, showDetails: Boolean = true) {
-    if(showDetails && !tool.archived) ToolCapabilityGrants(controller,tool)
-    val context = LocalContext.current
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val scope = rememberCoroutineScope()
-    val selections=rememberSaveable(saver=CapabilitySelectionState.Saver) { CapabilitySelectionState() }
-    var selectionIntent by rememberSaveable { mutableStateOf<Intent?>(null) }
-    var cameraPreview by remember { mutableStateOf<CapabilityCameraPreview?>(null) }
-    var confirmKey by remember { mutableStateOf<String?>(null) }
-    var calendarKey by remember { mutableStateOf<String?>(null) }
-    var calendarChoices by remember { mutableStateOf<List<NativeOwnedCalendar>>(emptyList()) }
-    var calendarStatus by remember { mutableStateOf("") }
-    fun loadCalendarChoices() {
-        scope.launch {
-            calendarChoices=runCatching {controller.writableCalendars()}.getOrDefault(emptyList())
-            calendarStatus=if(calendarChoices.isEmpty()) "No writable calendar supports one alert reminder. Configure a calendar in Android first." else "Select one calendar for this app. Account details stay native."
+    if (!showDetails) return
+    val spec = remember(tool.spec) { ToolSpec.availablePersisted(tool.spec) } ?: return
+    if (!tool.archived && spec.capabilities.isNotEmpty()) {
+        Text(stringResource(R.string.tool_device_actions), style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.tool_device_actions_details))
+        spec.capabilities.forEach { Text(CapabilityCatalog.definition(it).title) }
+        if (spec.capabilities.any { it in MedicineContract.reminderIds }) {
+            val reactivation by produceState(false, controller, tool.id, tool.revision, controller.effects) {
+                value = try { controller.remindersNeedReactivation(tool.id) }
+                    catch (cancel: CancellationException) { throw cancel }
+                    catch (_: Exception) { false }
+            }
+            if (reactivation) Text(stringResource(R.string.tool_medicine_reactivate))
         }
     }
-    val calendarPermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        if(OwnedCalendarCapabilities.hasPermissions(context)) loadCalendarChoices()
-        else calendarStatus="Both Android calendar permissions are required. No event was changed."
-    }
-    if(calendarKey!=null) AlertDialog(onDismissRequest={calendarKey=null;calendarChoices=emptyList()},title={Text("Select writable calendar")},text={
-        Column {Text(calendarStatus);calendarChoices.forEach {calendar ->
-            TextButton(onClick={
-                val key=calendarKey ?: return@TextButton
-                calendarKey=null;calendarChoices=emptyList()
-                controller.selectCalendar(key,calendar,{lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && !ToolWidgets.isLocked(context)})
-            },enabled=!controller.busy) {Text(calendar.name.ifBlank {"Unnamed calendar"})}
-        }}
-    },confirmButton={},dismissButton={TextButton(onClick={calendarKey=null;calendarChoices=emptyList()}) {Text("Cancel")}})
-
-    DisposableEffect(cameraPreview) {
-        val bitmap = cameraPreview?.bitmap
-        onDispose { if(bitmap != null && !bitmap.isRecycled) bitmap.recycle() }
-    }
-    selections.active?.let { selected -> selectionIntent?.let { intent ->
-        key(selected.token) {
-            CapabilitySelectionActivity(selected,intent,
-                canLaunch={ lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && !ToolWidgets.isLocked(context) },
-                onResult={ launch,returned ->
-                    val completed=selections.consume(launch.token)
-                    if(completed != null) {
-                        selectionIntent=null
-                        if(completed.capability == "camera.capture" && returned.resultCode == Activity.RESULT_OK) {
-                            @Suppress("DEPRECATION")
-                            val bitmap=returned.data?.extras?.get("data") as? Bitmap
-                            if(bitmap != null && bitmap.width in 1..2048 && bitmap.height in 1..2048) cameraPreview=CapabilityCameraPreview(completed,bitmap)
-                            else controller.finishSelection(completed.effectKey,CapabilityResult("unknownOutcome","Камера не вернула подходящее изображение для предпросмотра."))
-                        } else controller.finishSelection(completed.effectKey,AndroidCapabilities.selectionResult(returned.resultCode,returned.data))
-                    }
-                },
-                onFailure={ launch ->
-                    selections.consume(launch.token)?.let { completed ->
-                        selectionIntent=null
-                        controller.finishSelection(completed.effectKey,CapabilityResult("unavailable","The system selection could not start."))
-                    }
-                })
-        }
-    } }
-    if(showDetails && controller.effects.isNotEmpty()) Text("История системных действий",style = MaterialTheme.typography.titleMedium)
-    controller.effects.filter {showDetails || it.phase == "pending" || it.result.status == "awaitingUser"}.takeLast(30).reversed().forEach { effect ->
+    val effects = controller.effects.filter { it.owner == tool.id }.takeLast(30)
+    if (effects.isNotEmpty()) Text(stringResource(R.string.tool_device_history), style = MaterialTheme.typography.titleMedium)
+    effects.asReversed().forEach { effect ->
         OutlinedCard(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp),verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(CapabilityCatalog.definition(effect.request.capability).title)
-                Text("${resultLabel(effect.result.status)}: ${effect.result.message}",style = MaterialTheme.typography.bodySmall)
-                if(effect.phase == "pending") {
-                    Text(actionDetails(effect.request),style = MaterialTheme.typography.bodySmall)
-                    Row {
-                        TextButton(onClick = {
-                            if(effect.request.capability=="calendar.select") {
-                                calendarKey=effect.key;calendarChoices=emptyList();calendarStatus="Calendar permission and selection are required."
-                                if(OwnedCalendarCapabilities.hasPermissions(context)) loadCalendarChoices()
-                                else calendarPermission.launch(arrayOf(android.Manifest.permission.READ_CALENDAR,android.Manifest.permission.WRITE_CALENDAR))
-                            } else if(effect.request.capability in NavigationContract.ids) {
-                                controller.executeEffect(effect.key,true,{ lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && !ToolWidgets.isLocked(context) }) { intent ->
-                                    check(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && !ToolWidgets.isLocked(context)); context.startActivity(intent)
-                                }
-                            } else confirmKey = effect.key
-                        },enabled = !controller.busy && (!CapabilityCatalog.definition(effect.request.capability).selection || (selections.active == null && cameraPreview == null))) { Text(when(effect.request.capability) { "calendar.select" -> "Select writable calendar"; "maps.markReached" -> "Я уже здесь: ${effect.request.args.getString("label")}"; "maps.route" -> "Маршрут к ${effect.request.args.getString("label")}"; else -> "Просмотреть действие" }) }
-                        TextButton(onClick = { controller.executeEffect(effect.key,false,{ false }) {} },enabled = !controller.busy) { Text("Отмена action") }
-                    }
-                }
-                if(effect.result.status == "awaitingUser" && effect.result.data.optBoolean("launched")) {
-                    TextButton(onClick = {
-                        selections.active?.takeIf { it.effectKey == effect.key }?.let { selections.consume(it.token); selectionIntent=null }
-                        controller.finishSelection(effect.key,CapabilityResult("unknownOutcome","Окно выбора не вернуло подтверждённый результат."))
-                    },enabled = !controller.busy && cameraPreview == null) { Text("Закрыть без подтверждённого результата") }
-                }
-                if(effect.result.data.has("uri")) Text("Выбрано на устройстве: ${effect.result.data.getString("uri")}",style = MaterialTheme.typography.bodySmall)
-                if(effect.result.data.has("localPhoto")) Text("Фото на устройстве: ${effect.result.data.getString("localPhoto")}",style = MaterialTheme.typography.bodySmall)
-                if(effect.result.data.has("events")) {
-                    val events = effect.result.data.getJSONArray("events")
-                    if(events.length() == 0) Text("За этот период событий нет",style = MaterialTheme.typography.bodySmall)
+                Text(actionDetails(effect.request), style = MaterialTheme.typography.bodySmall)
+                Text("${resultLabel(effect.result.status)}: ${effect.result.message}", style = MaterialTheme.typography.bodySmall)
+                effect.result.data.optJSONArray("events")?.let { events ->
+                    if (events.length() == 0) Text("За этот период событий нет", style = MaterialTheme.typography.bodySmall)
                     repeat(events.length()) { index ->
                         val event = events.getJSONObject(index)
-                        Text("${event.getString("title").ifBlank { "Без названия" }} · ${eventTime(event.getLong("start"))} — ${eventTime(event.getLong("end"))}",style = MaterialTheme.typography.bodySmall)
+                        Text("${event.getString("title").ifBlank { "Без названия" }} · ${eventTime(event.getLong("start"))} — ${eventTime(event.getLong("end"))}",
+                            style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
         }
-    }
-    val effect = controller.effects.find { it.key == confirmKey }
-    if(effect != null) AlertDialog(onDismissRequest = { confirmKey = null },title = { Text("Подтвердить системное действие") },text = {
-        Column { Text(CapabilityCatalog.definition(effect.request.capability).title); Text(actionDetails(effect.request)); Text("Alphy проверит доступ инструмента и разрешения Android. Открытие другого приложения не подтверждает выполнение действия в нём.") }
-    },confirmButton = { TextButton(onClick = {
-        confirmKey = null
-        val foreground = { lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && !ToolWidgets.isLocked(context) }
-        controller.executeEffect(effect.key,true,foreground) { intent ->
-            check(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && !ToolWidgets.isLocked(context)) { "Открой Alphy, чтобы продолжить это действие" }
-            if(CapabilityCatalog.definition(effect.request.capability).selection) {
-                check(cameraPreview == null && selections.begin(effect.key,effect.request.capability) != null) { "Another system selection is active." }
-                selectionIntent=intent
-            } else context.startActivity(intent)
-        }
-    },enabled = !controller.busy && (!CapabilityCatalog.definition(effect.request.capability).selection || (selections.active == null && cameraPreview == null))) { Text("Выполнить это действие") } },dismissButton = { TextButton(onClick = { confirmKey = null }) { Text("Назад") } })
-    cameraPreview?.let { preview ->
-        val bitmap=preview.bitmap
-        AlertDialog(onDismissRequest = {
-            controller.finishSelection(preview.launch.effectKey,CapabilityResult("cancelled","Снимок предпросмотра удалён."))
-            cameraPreview = null
-        },title = { Text("Сохранить снимок на устройстве?") },text = {
-            Column { Image(bitmap.asImageBitmap(),"Предпросмотр снимка",Modifier.fillMaxWidth().heightIn(max = 240.dp)); Text("Это уменьшенный снимок камеры. Он не отправляется в DeepSeek.") }
-        },confirmButton = { TextButton(onClick = {
-            scope.launch {
-                val result = controller.saveCameraPreview(preview.launch.effectKey,bitmap)
-                controller.finishSelection(preview.launch.effectKey,result)
-                if(cameraPreview?.launch?.token == preview.launch.token) cameraPreview=null
-            }
-        },enabled = !controller.busy) { Text("Сохранить на устройстве") } },dismissButton = { TextButton(onClick = {
-            controller.finishSelection(preview.launch.effectKey,CapabilityResult("cancelled","Снимок предпросмотра удалён."))
-            cameraPreview = null
-        }) { Text("Удалить") } })
     }
 }
 
-private data class CapabilityCameraPreview(val launch: CapabilitySelectionLaunch, val bitmap: Bitmap)
+/** Only the owning controller receives a platform callback. All foreground mini-app surfaces share this host. */
+@Composable internal fun CapabilityPromptHost(controller: ToolController) {
+    val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val foreground = { lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && !ToolWidgets.isLocked(context) }
+    when (val prompt = controller.capabilityPrompt) {
+        is CapabilityPrompt.Picker -> key(prompt.launch.token) {
+            CapabilitySelectionActivity(prompt.launch, prompt.intent, { foreground() && controller.canLaunchPicker(prompt) },
+                onResult = controller::receivePickerResult,
+                onFailure = { controller.receivePickerResult(it, null) })
+        }
+        is CapabilityPrompt.Calendar -> key(controller, prompt.effectKey) {
+            CalendarSelection(controller, prompt.effectKey, foreground)
+        }
+        is CapabilityPrompt.LocationPermission -> key(controller, prompt.token) {
+            RequestLocationPermission(controller, prompt, foreground)
+        }
+        is CapabilityPrompt.Camera -> AlertDialog(
+            onDismissRequest = { controller.finishCameraPreview(prompt, keep = false) },
+            title = { Text(stringResource(R.string.tool_camera_review_title)) },
+            text = {
+                Column {
+                    Image(prompt.bitmap.asImageBitmap(), stringResource(R.string.tool_camera_review_image),
+                        Modifier.fillMaxWidth().heightIn(max = 240.dp))
+                    Text(stringResource(R.string.tool_camera_review_details))
+                }
+            },
+            confirmButton = { TextButton(onClick = { controller.finishCameraPreview(prompt, keep = true) },
+                enabled = !controller.busy) { Text(stringResource(R.string.tool_camera_keep)) } },
+            dismissButton = { TextButton(onClick = { controller.finishCameraPreview(prompt, keep = false) },
+                enabled = !controller.busy) { Text(stringResource(R.string.delete)) } },
+        )
+        is CapabilityPrompt.Reading, null -> Unit
+    }
+    controller.devicePermissionIssue?.takeIf { controller.capabilityPrompt==null }?.let { message ->
+        AlertDialog(onDismissRequest = controller::dismissDevicePermissionIssue,
+            title = { Text(stringResource(R.string.tool_device_android_permissions)) },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = {
+                if (foreground()) {
+                    val settings = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+                    if (runCatching { context.startActivity(settings) }.isSuccess) controller.dismissDevicePermissionIssue()
+                }
+            }) { Text(stringResource(R.string.tool_device_open_android_settings)) } },
+            dismissButton = { TextButton(onClick = controller::dismissDevicePermissionIssue) {
+                Text(stringResource(R.string.tool_dialog_close))
+            } })
+    }
+}
+
+@Composable private fun RequestLocationPermission(controller: ToolController, request: CapabilityPrompt.LocationPermission,
+    foreground: () -> Boolean) {
+    val context = LocalContext.current
+    val activity = remember(context) { generateSequence(context) { (it as? ContextWrapper)?.baseContext }.filterIsInstance<Activity>().firstOrNull() }
+    val permission = Manifest.permission.ACCESS_COARSE_LOCATION
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val settingsRequired = !granted && (activity == null || !ActivityCompat.shouldShowRequestPermissionRationale(activity, permission))
+        controller.receiveLocationPermission(request, LocationPermissionAnswer(granted, settingsRequired))
+    }
+    var launched by rememberSaveable(request.token) { mutableStateOf(false) }
+    LaunchedEffect(request.token) {
+        if (!launched) {
+            launched = true
+            if (!foreground() || !controller.canLaunchLocationPermission(request)) controller.cancelLocationPermission(request)
+            else if (runCatching { launcher.launch(permission) }.isFailure)
+                controller.receiveLocationPermission(request, LocationPermissionAnswer(granted = false, settingsRequired = true))
+        }
+    }
+}
+
+@Composable private fun CalendarSelection(controller: ToolController, effectKey: String, foreground: () -> Boolean) {
+    val context = LocalContext.current
+    var choices by remember { mutableStateOf<List<NativeOwnedCalendar>?>(null) }
+    var requested by rememberSaveable { mutableStateOf(false) }
+    var permitted by remember { mutableStateOf(OwnedCalendarCapabilities.hasPermissions(context)) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        permitted = OwnedCalendarCapabilities.hasPermissions(context)
+        if (!permitted) controller.cancelCalendar(effectKey, denied = true)
+    }
+    LaunchedEffect(permitted) {
+        if (permitted) {
+            choices = try { controller.writableCalendars() }
+                catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) { emptyList() }
+        }
+        else if (!requested) {
+            requested = true
+            if (foreground()) {
+                if (runCatching { launcher.launch(arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)) }.isFailure) {
+                    controller.cancelCalendar(effectKey, denied = true)
+                }
+            } else controller.cancelCalendar(effectKey)
+        }
+    }
+    AlertDialog(
+        onDismissRequest = { controller.cancelCalendar(effectKey) },
+        title = { Text(stringResource(R.string.tool_calendar_choose_writable)) },
+        text = {
+            Column {
+                when {
+                    choices == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
+                    choices.orEmpty().isEmpty() -> Text(stringResource(R.string.tool_calendar_no_writable))
+                    else -> choices.orEmpty().forEach { calendar ->
+                        TextButton(onClick = { controller.selectCalendar(effectKey, calendar, foreground) },
+                            enabled = !controller.busy) {
+                            Text(calendar.name.ifBlank { stringResource(R.string.tool_calendar_unnamed) })
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = { controller.cancelCalendar(effectKey) }) { Text(stringResource(R.string.cancel)) } },
+    )
+}
 
 /** A new token creates a separate registry entry. Saved launch state prevents rotation from relaunching Android. */
 @Composable private fun CapabilitySelectionActivity(launch: CapabilitySelectionLaunch, intent: Intent, canLaunch: ()->Boolean,
@@ -223,6 +225,9 @@ private fun actionDetails(request: CapabilityRequest): String {
         "vibration.play" -> "Длительность: ${args.getLong("milliseconds")} мс"
         "flashlight.set" -> if(args.getBoolean("enabled")) "Включить фонарик" else "Выключить фонарик"
         "file.pick" -> "Тип файла: ${args.getString("mime")}"
+        VideoContract.PICK -> "Выбрать видео в Android"
+        VideoContract.PLAY -> "Воспроизвести выбранное видео"
+        NetworkEffectContract.ID -> "Метод запроса: ${args.getString("method")}"
         "photo.pick" -> "Выбрать одну фотографию в системном окне"
         "camera.capture" -> "Открыть камеру и просмотреть уменьшенный снимок"
         else -> "Функция недоступна"

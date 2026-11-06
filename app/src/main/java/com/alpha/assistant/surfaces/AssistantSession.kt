@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Bundle
+import android.os.PowerManager
 import android.service.voice.VoiceInteractionService
 import android.service.voice.VoiceInteractionSession
 import android.service.voice.VoiceInteractionSessionService
@@ -24,54 +25,133 @@ import java.util.UUID
 
 /** One process owns each in-flight request across compact and full activities. */
 object AssistantChat : ViewModelStoreOwner {
+    interface ModelSource {
+        fun assistantModel(application: Application): ShellViewModel?
+    }
+
     override val viewModelStore = ViewModelStore()
-    fun model(application: Application) = ViewModelProvider(this,ViewModelProvider.AndroidViewModelFactory.getInstance(application))[ShellViewModel::class.java]
+
+    fun model(application: Application): ShellViewModel =
+        (application as? ModelSource)?.assistantModel(application)
+            ?: ViewModelProvider(this, ViewModelProvider.AndroidViewModelFactory.getInstance(application))[ShellViewModel::class.java]
 }
 
-data class AssistCapture(val id: String, val text: String? = null, val screenshot: Bitmap? = null,
-    val status: String = "Screen context unavailable. Android can omit protected or disabled screen data.")
+internal const val ASSIST_INVOCATION = "assist_invocation"
+
+internal fun Context.assistantUnavailable(): Boolean =
+    ToolWidgets.isLocked(this) || !getSystemService(PowerManager::class.java).isInteractive
+
+data class AssistCapture(val id: String, val text: String? = null, val screenshot: Bitmap? = null) {
+    val hasContent: Boolean get() = text != null || screenshot != null
+}
+
 object AssistantCapture {
-    var current by mutableStateOf<AssistCapture?>(null); private set
-    fun begin(): String = UUID.randomUUID().toString().also { current = AssistCapture(it) }
+    var current by mutableStateOf<AssistCapture?>(null)
+        private set
+    private var owner: Pair<String, () -> Unit>? = null
+
+    fun begin(onClose: () -> Unit = {}): String = UUID.randomUUID().toString().also { id ->
+        owner = id to onClose
+        current = AssistCapture(id)
+    }
+
     fun update(id: String, text: String? = current?.text, screenshot: Bitmap? = current?.screenshot) {
         val capture = current?.takeIf { it.id == id } ?: return
-        current = capture.copy(text = text,screenshot = screenshot)
+        current = capture.copy(text = text, screenshot = screenshot)
     }
-    fun clear(id: String) { if(current?.id == id) current = null }
+
+    fun clear(id: String) {
+        if (current?.id == id) current = null
+    }
+
+    fun close(id: String) {
+        val closing = owner?.takeIf { it.first == id } ?: return
+        owner = null
+        clear(id)
+        closing.second()
+    }
+
+    internal fun release(id: String) {
+        if (owner?.first == id) owner = null
+        clear(id)
+    }
 }
 
 class AlphaVoiceInteractionService : VoiceInteractionService()
+
 class AlphaVoiceSessionService : VoiceInteractionSessionService() {
     override fun onNewSession(args: Bundle?): VoiceInteractionSession = AlphaVoiceSession(this)
 }
 
 class AlphaVoiceSession(private val appContext: Context) : VoiceInteractionSession(appContext) {
     private var invocation: String? = null
+    private var shown = false
+    private var receiveText = false
+    private var receiveScreenshot = false
+
     override fun onPrepareShow(args: Bundle?, showFlags: Int) {
-        super.onPrepareShow(args,showFlags)
+        super.onPrepareShow(args, showFlags)
         setUiEnabled(false)
-        invocation?.let(AssistantCapture::clear)
-        invocation = AssistantCapture.begin()
+        invocation?.let(AssistantCapture::release)
+        // The platform callbacks carry no show ID. A reused session cannot safely attribute late data.
+        receiveText = !shown && showFlags and SHOW_WITH_ASSIST != 0
+        receiveScreenshot = !shown && showFlags and SHOW_WITH_SCREENSHOT != 0
+        shown = true
+        invocation = if (appContext.assistantUnavailable()) null else AssistantCapture.begin { finish() }
     }
+
     override fun onShow(args: Bundle?, showFlags: Int) {
-        super.onShow(args,showFlags)
-        if(ToolWidgets.isLocked(appContext)) { invocation?.let(AssistantCapture::clear) }
-        startAssistantActivity(Intent(appContext,AssistantActivity::class.java).putExtra("assist_invocation",invocation))
+        super.onShow(args, showFlags)
+        val id = invocation
+        if (id == null || appContext.assistantUnavailable()) {
+            endSession()
+            return
+        }
+        try {
+            startAssistantActivity(Intent(appContext, AssistantActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(ASSIST_INVOCATION, id))
+        } catch (_: android.content.ActivityNotFoundException) {
+            endSession()
+        }
     }
+
     override fun onHandleAssist(state: AssistState) {
         val id = invocation ?: return
-        if(ToolWidgets.isLocked(appContext) || !state.isFocused) return
-        val structure = state.assistStructure ?: return
-        val text = runCatching { visibleText(structure) }.getOrNull()
-        AssistantCapture.update(id,text = text)
+        if (!receiveText || !state.isFocused || appContext.assistantUnavailable() || AssistantCapture.current?.id != id) return
+        receiveText = false
+        val text = state.assistStructure?.let { runCatching { visibleText(it) }.getOrNull() }
+        AssistantCapture.update(id, text = text)
     }
+
     override fun onHandleScreenshot(screenshot: Bitmap?) {
         val id = invocation ?: return
-        if(ToolWidgets.isLocked(appContext)) return
-        AssistantCapture.update(id,screenshot = screenshot)
+        if (!receiveScreenshot || appContext.assistantUnavailable() || AssistantCapture.current?.id != id) return
+        receiveScreenshot = false
+        AssistantCapture.update(id, screenshot = screenshot)
     }
-    override fun onLockscreenShown() { invocation?.let(AssistantCapture::clear); hide(); super.onLockscreenShown() }
-    override fun onDestroy() { invocation?.let(AssistantCapture::clear); super.onDestroy() }
+
+    override fun onHide() {
+        super.onHide()
+        if (invocation != null) endSession()
+    }
+
+    override fun onLockscreenShown() {
+        endSession()
+    }
+
+    override fun onDestroy() {
+        invocation?.let(AssistantCapture::release)
+        invocation = null
+        super.onDestroy()
+    }
+
+    private fun endSession() {
+        invocation?.let(AssistantCapture::release)
+        invocation = null
+        finish()
+    }
+
     private fun visibleText(structure: AssistStructure): String? {
         val text = StringBuilder()
         var count = 0
@@ -81,9 +161,11 @@ class AlphaVoiceSession(private val appContext: Context) : VoiceInteractionSessi
             val variation = node.inputType and InputType.TYPE_MASK_VARIATION
             val password = (kind == InputType.TYPE_CLASS_TEXT && variation in setOf(InputType.TYPE_TEXT_VARIATION_PASSWORD,InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)) ||
                 (kind == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD)
-            if(!password) node.text?.toString()?.takeIf { it.isNotBlank() }?.let {
-                if(text.isNotEmpty()) text.append('\n')
-                text.append(it.take(8000-text.length))
+            if (password) return
+            node.text?.toString()?.takeIf { it.isNotBlank() }?.let {
+                if (text.isNotEmpty()) text.append('\n')
+                val part = it.take(8000 - text.length)
+                text.append(if (part.lastOrNull()?.isHighSurrogate() == true) part.dropLast(1) else part)
             }
             repeat(minOf(node.childCount,2000-count)) { visit(node.getChildAt(it),depth+1) }
         }

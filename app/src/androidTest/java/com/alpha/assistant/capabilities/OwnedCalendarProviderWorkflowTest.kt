@@ -54,13 +54,12 @@ class OwnedCalendarProviderWorkflowTest {
                 .put("capabilities",JSONArray(OwnedCalendarContract.ids.toList())).put("stateSchema",JSONObject("{\"ready\":\"boolean\"}")).put("initialState",JSONObject("{\"ready\":true}"))
                 .put("ui",JSONObject("{\"type\":\"text\",\"text\":\"Fixture\"}")).put("source","return {state:input.state};").toString())
             store.saveTool(ToolRecord("provider",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true),true)
-            OwnedCalendarContract.ids.forEach {store.grant("provider",it,true)}
             val native=OwnedCalendarCapabilities(context,store,unlocked={true});val broker=CapabilityBroker(context,store)
             var sequence=0
             suspend fun execute(capability: String,args: JSONObject): CapabilityResult {
                 val old=store.tool("provider")!!;val request=CapabilityRequest("op${sequence++}",capability,args)
                 store.commitTool(old.copy(stateVersion=old.stateVersion+1),old,false,effects=listOf(request))
-                return broker.executeOwned(store.effects("provider").last().key,true) {effect ->
+                return broker.executeOwned(store.effects("provider").last().key) {effect ->
                     if(capability=="calendar.select")native.select(effect,fixture.native(),{true}) else native.execute(effect,{true}) {}
                 }
             }

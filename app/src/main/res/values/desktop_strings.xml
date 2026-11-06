@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="desktop_grid_title">Мой стол</string>
+    <string name="desktop_edit">Изменить</string>
+    <string name="desktop_done">Готово</string>
+    <string name="desktop_empty">Добавьте на стол мини-приложения, которыми часто пользуетесь.</string>
+    <string name="desktop_open_library">Открыть библиотеку</string>
+    <string name="desktop_open_tile">Открыть «%1$s»</string>
+    <string name="desktop_remove_tile">Убрать «%1$s» со стола</string>
+    <string name="desktop_move_earlier">Переместить «%1$s» ближе к началу</string>
+    <string name="desktop_move_later">Переместить «%1$s» ближе к концу</string>
+    <string name="desktop_layout_failed">Не удалось сохранить или прочитать порядок плиток. Сохранённые данные доступны.</string>
+    <string name="desktop_open_graphics">Откройте мини-приложение для управления графикой.</string>
+    <string name="desktop_add_automation">Добавить сценарий</string>
+    <string name="desktop_choose_automation">Какой сценарий добавить?</string>
+    <string name="desktop_place_automation">Добавить «%1$s»</string>
+    <string name="desktop_automation_active">Включён</string>
+    <string name="desktop_automation_paused">На паузе</string>
+    <string name="desktop_automation_switch">Состояние сценария «%1$s»</string>
+    <string name="desktop_automation_no_run">Запусков ещё не было</string>
+    <string name="desktop_automation_last_run">Последний запуск %1$s · %2$s</string>
+    <string name="desktop_automation_read_failed">Не удалось открыть сохранённые сценарии.</string>
+    <string name="desktop_automation_pause_failed">Не удалось поставить сценарий на паузу. Проверьте его состояние в списке сценариев.</string>
+    <string name="desktop_automation_resume_failed">Не удалось включить сценарий. Проверьте его состояние в списке сценариев.</string>
+    <string name="desktop_now_automation_attention">Сценарий требует внимания</string>
+    <string name="desktop_now_automation_detail">%1$s · %2$s</string>
+    <string name="desktop_now_calendar">Следующее событие</string>
+    <string name="desktop_now_calendar_untitled">Событие без названия</string>
+    <string name="desktop_now_calendar_detail">%1$s · %2$s</string>
+    <string name="desktop_calendar_open_failed">Не удалось открыть приложение календаря.</string>
+</resources>

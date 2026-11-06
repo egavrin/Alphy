@@ -3,9 +3,19 @@ package com.alpha.assistant.surfaces
 import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
+import android.content.ContentValues
 import android.content.Context
 import android.content.ContextWrapper
 import android.os.Bundle
+import android.view.View
+import android.view.ViewGroup
+import android.widget.ProgressBar
+import android.widget.TextView
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
+import androidx.glance.appwidget.GlanceAppWidgetManager
+import androidx.glance.appwidget.compose
+import com.alpha.assistant.R
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.*
@@ -22,55 +32,140 @@ import java.util.UUID
  * invalid action, locked action, persisted reopen, compact/wide layout and host binding. */
 @RunWith(AndroidJUnit4::class)
 class SurfaceWorkflowTest {
-    /** Render in the Android host, then measure actual child bounds at supported launcher sizes. */
-    @Test fun hostProjectionKeepsBoundStateAndPrimaryActionInsideContent() {
+    @Test fun hostProjectionFitsAndResizes() = runBlocking {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
-        val raw = """{"formatVersion":3,"title":"Water test","description":"Local water tracker","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":4},"ui":{"type":"column","children":[{"type":"text","text":"Water test"},{"type":"text","text":"Count","bind":"count"},{"type":"button","text":"Add","action":"add"},{"type":"button","text":"Reset","action":"reset"}]},"source":"return {state:input.state};"}"""
-        val definition = JSONObject(raw)
-        listOf("Less","Half","Double").forEachIndexed { index,label ->
-            definition.getJSONObject("ui").getJSONArray("children").put(JSONObject().put("type","button").put("text",label).put("action","extra$index"))
-        }
-        val spec = ToolSpec.parse(definition.toString())
+        val spec = ToolSpec.parse("""{"formatVersion":3,"title":"Water test","description":"Local water tracker","capabilities":[],"stateSchema":{"count":"number","note":"string"},"initialState":{"count":4,"note":""},"ui":{"type":"column","children":[{"type":"text","text":"Water test"},{"type":"text","text":"Count","bind":"count"},{"type":"button","text":"Add","action":"add"},{"type":"progress","text":"Goal","bind":"count","max":8},{"type":"input","text":"Note","bind":"note","action":"note"}]},"source":"return {state:input.state};"}""")
         val tool = ToolRecord("host-projection-fixture",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)
-        instrumentation.runOnMainSync {
-            val sizes = listOf(140 to 140,180 to 180,276 to 319,420 to 360) +
-                listOf(168,172,192,196,240,244,288,292,336,340,384,388).map { 276 to it }
-            sizes.forEach { (width,height) ->
-              listOf(false,true).filter { !it || android.os.Build.VERSION.SDK_INT >= 31 }.forEach { responsive ->
+        listOf(140 to 140, 180 to 180, 276 to 319, 420 to 360).forEach { (width,height) ->
+            val views = ToolGlanceWidget.preview(context,tool,WidgetPreferences(),DpSize(width.dp,height.dp))
+            instrumentation.runOnMainSync {
                 val host = android.appwidget.AppWidgetHostView(context)
                 host.setPadding(0,0,0,0)
-                val density = context.resources.displayMetrics.density
-                fun measureHost() {
-                    host.measure(android.view.View.MeasureSpec.makeMeasureSpec((width*density).toInt(),android.view.View.MeasureSpec.EXACTLY),
-                        android.view.View.MeasureSpec.makeMeasureSpec((height*density).toInt(),android.view.View.MeasureSpec.EXACTLY))
-                    host.layout(0,0,host.measuredWidth,host.measuredHeight)
-                }
-                measureHost()
-                val views = if(responsive) ToolWidgets.renderForHost(context,98765,tool,WidgetPreferences(),false,Bundle())
-                    else ToolWidgets.render(context,98765,tool,WidgetPreferences(),width >= 250,false,height,width)
                 host.updateAppWidget(views)
-                measureHost()
-                val content = host.findViewById<android.widget.LinearLayout>(com.alpha.assistant.R.id.widget_content)
-                assertNotNull("Host must inflate the widget",content)
-                val children = (0 until content.childCount).map { content.getChildAt(it) }
-                val labels = children.map { (it as android.widget.TextView).text.toString() }
+                val density = context.resources.displayMetrics.density
+                fun exact(dp: Int) = View.MeasureSpec.makeMeasureSpec((dp * density).toInt(), View.MeasureSpec.EXACTLY)
+                host.measure(exact(width),exact(height))
+                host.layout(0,0,host.measuredWidth,host.measuredHeight)
+                val rendered = host.descendants().toList()
+                val labels = rendered.filterIsInstance<TextView>().map { it.text.toString() }
                 assertTrue("$width x $height: $labels",labels.contains("Count: 4"))
-                assertFalse(labels.contains("Water test"))
-                if(height >= 172) assertTrue("Primary action must remain visible: $labels",labels.contains("Add"))
-                children.forEach { child ->
-                    val touch = android.graphics.Rect().also(child::getHitRect)
-                    assertTrue("Control must fit the content: $width x $height, responsive=$responsive",touch.top >= 0 && touch.bottom <= content.height)
-                    assertTrue("Rows must preserve their 48dp touch height: $width x $height, responsive=$responsive",touch.width() > 0 && touch.height() >= (48*density).toInt())
-                    assertTrue((child as android.widget.TextView).text.isNotBlank())
+                if(height >= 180) assertTrue("Primary action must remain visible: $labels",labels.contains("Add"))
+                if(height >= 319) {
+                    assertTrue(labels.contains("Goal: 4"))
+                    assertTrue(rendered.filterIsInstance<ProgressBar>().any { it.progress * 2 == it.max })
+                    assertTrue(labels.contains(context.getString(R.string.widget_open_content, "Note")))
                 }
-                val open = host.findViewById<android.widget.Button>(com.alpha.assistant.R.id.widget_open)
-                assertTrue(open.isClickable)
-                if(height == 140) assertEquals("Open 5 more",open.text.toString())
-              }
+                assertFalse("Preview must be inert",rendered.any { it.isClickable && it.isEnabled })
             }
         }
     }
+
+    @Test fun focalRecipeLimitsWidgetRenderingAndActionDelivery(): Unit = runBlocking {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val base = instrumentation.targetContext
+        val fixture = "focal-widget-${UUID.randomUUID()}"
+        val database = "$fixture.db"
+        val context = object : ContextWrapper(base) {
+            override fun getSharedPreferences(name: String, mode: Int) = base.getSharedPreferences("$fixture-$name",mode)
+        }
+        val raw = JSONObject("""{
+            "formatVersion":3,"title":"Focal widget","description":"Local widget fixture","capabilities":[],
+            "stateSchema":{"count":"number","privateCount":"number","note":"string","show":"boolean","active":"boolean"},
+            "initialState":{"count":4,"privateCount":99,"note":"","show":true,"active":true},
+            "ui":{"type":"column","visibleBind":"show","enabledBind":"active","children":[
+                {"type":"column","children":[
+                    {"type":"text","text":"Private count","bind":"privateCount"},
+                    {"type":"button","text":"Private action","action":"outside"}]},
+                {"type":"column","children":[
+                    {"type":"text","text":"Focal count","bind":"count"},
+                    {"type":"button","text":"Add","action":"add"},
+                    {"type":"button","text":"Hidden action","action":"hidden","visible":false},
+                    {"type":"button","text":"Disabled action","action":"disabled","enabled":false},
+                    {"type":"input","text":"Note","bind":"note","action":"note"}]}]},
+            "source":"if(input.event.type==='action') input.state.count++; return {state:input.state};"
+        }""")
+        val plain = ToolSpec.parse(raw.toString())
+        val recipe = raw.put("nativePresentation",JSONObject()
+            .put("profile","focus").put("preset","clean").put("focalPosition",1)
+            .put("compactSummary","focal").put("primaryActionId","add"))
+        val spec = ToolSpec.parsePersisted(recipe.toString())
+        val tool = ToolRecord(fixture,1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)
+        val prefs = WidgetPreferences("wide",true)
+        suspend fun labels(record: ToolRecord): List<String> {
+            val views = ToolGlanceWidget.preview(context,record,prefs,DpSize(360.dp,400.dp))
+            var result = emptyList<String>()
+            instrumentation.runOnMainSync {
+                result = views.apply(base,null).descendants().filterIsInstance<TextView>().map { it.text.toString() }.toList()
+            }
+            return result
+        }
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                error("Widget actions are local")
+            }
+        }
+        val widgetId = 1700000001
+        try {
+            ToolStore(context,database).use { store ->
+                store.saveTool(tool,true)
+                ToolWidgets.bind(context,widgetId,tool.id,prefs,store)
+                val engine = ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))
+                suspend fun deliver(action: String, record: ToolRecord = tool, locked: Boolean = false): Boolean =
+                    ToolWidgets.perform(context,ToolWidgets.actionIntent(context,widgetId,record,action,null),store,engine,locked)
+                val visible = labels(tool)
+                assertTrue(visible.containsAll(listOf("Focal count: 4","Add","Disabled action",
+                    context.getString(R.string.widget_open_content,"Note"))))
+                assertFalse(visible.any { it.startsWith("Private") || it == "Hidden action" })
+                val open = ToolWidgets.openIntent(context,tool.id)
+                assertEquals(tool.id,open.getStringExtra("tool_id"))
+                assertEquals(tool.id,open.data?.lastPathSegment)
+                listOf("outside","hidden","disabled","note").forEach { assertFalse(it,deliver(it)) }
+                assertFalse(deliver("add",tool.copy(id = "another-app")))
+                assertFalse(deliver("add",tool.copy(revision = 0)))
+                assertFalse(deliver("add",locked = true))
+                assertTrue(deliver("add"))
+                assertFalse(deliver("add"))
+                val current = checkNotNull(store.tool(tool.id))
+                assertTrue(labels(current).contains("Focal count: 5"))
+                val noRecipe = current.copy(spec = plain.json)
+                assertTrue(labels(noRecipe).contains("Private count: 99"))
+                val disabled = current.copy(stateVersion = current.stateVersion + 1,
+                    state = JSONObject(current.state).put("active",false).toString())
+                store.saveTool(disabled,false)
+                assertFalse(deliver("add",disabled))
+                val hidden = disabled.copy(stateVersion = disabled.stateVersion + 1,
+                    state = JSONObject(disabled.state).put("show",false).toString())
+                store.saveTool(hidden,false)
+                assertFalse(deliver("add",hidden))
+                assertFalse(labels(hidden).any { it.startsWith("Focal count") || it == "Add" })
+                val staleUi = JSONObject(current.ui)
+                val slots = staleUi.getJSONArray("children")
+                val wrongFocal = slots.getJSONObject(0)
+                slots.put(0,slots.getJSONObject(1)).put(1,wrongFocal)
+                val stale = current.copy(stateVersion = hidden.stateVersion + 1,ui = staleUi.toString())
+                assertEquals(1,store.writableDatabase.update("tools",ContentValues().apply {
+                    put("ui",stale.ui)
+                    put("state",stale.state)
+                    put("state_version",stale.stateVersion)
+                },"id=?",arrayOf(stale.id)))
+                assertFalse(deliver("add",stale))
+                assertTrue(labels(stale).contains(context.getString(R.string.widget_unavailable)))
+            }
+        } finally {
+            base.deleteDatabase(database)
+            base.deleteSharedPreferences("$fixture-alpha-widgets")
+        }
+    }
+
+    @Test fun quickSettingsTileOpensAssistantWithoutCapture() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val intent = AlphaTileService.entryIntent(context)
+        assertEquals(ComponentName(context,AssistantActivity::class.java),intent.component)
+        assertFalse(intent.hasExtra("assist_invocation"))
+        assertNull(intent.action)
+    }
+
     @Test fun widgetBindingActionConcurrencyAndReopen() = runBlocking {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val base = instrumentation.targetContext
@@ -108,6 +203,8 @@ class SurfaceWorkflowTest {
             assertTrue(JSONObject(store.tool(initial.id)!!.state).getBoolean("done"))
             val locked = ToolWidgets.actionIntent(context,101,store.tool(initial.id)!!,"add",null)
             assertFalse(ToolWidgets.perform(context,locked,store,engine(store),locked = true))
+            val staleRevision = ToolWidgets.actionIntent(context,101,store.tool(initial.id)!!.copy(revision = 0),"add",null)
+            assertFalse(ToolWidgets.perform(context,staleRevision,store,engine(store),locked = false))
             val before = store.tool(initial.id)!!
             val results = withContext(Dispatchers.Default) {
                 listOf(async { runCatching { engine(store).interact(before.id,before.revision,before.stateVersion,"add",null) } },
@@ -118,44 +215,84 @@ class SurfaceWorkflowTest {
             ToolStore(context,database).use { reopened -> assertEquals(store.tool(initial.id),reopened.tool(initial.id)) }
             val invalid = ToolWidgets.actionIntent(context,101,store.tool(initial.id)!!,"missing",null)
             assertFalse(ToolWidgets.perform(context,invalid,store,engine(store),locked = false))
+            val effectSpec = ToolSpec.parse(JSONObject(raw)
+                .put("capabilities", org.json.JSONArray().put("vibration.play"))
+                .put("source", "input.state.count++;return {state:input.state,effects:[{id:'buzz',capability:'vibration.play',args:{milliseconds:1}}]};")
+                .toString())
+            val effectTool = initial.copy(id = "$suffix-effect", spec = effectSpec.json, ui = effectSpec.ui.toString())
+            store.saveTool(effectTool, true)
+            ToolWidgets.bind(context,104,effectTool.id,WidgetPreferences())
+            val widgetEffect = ToolWidgets.actionIntent(context,104,effectTool,"add",null)
+            assertFalse(ToolWidgets.perform(context,widgetEffect,store,engine(store),locked = false))
+            assertEquals(effectTool,store.tool(effectTool.id))
+            assertTrue(store.effects(effectTool.id).isEmpty())
             ToolWidgets.bind(context,103,"deleted",WidgetPreferences())
             assertFalse(ToolWidgets.perform(context,ToolWidgets.actionIntent(context,103,initial,"add",null),store,engine(store),locked = false))
-            instrumentation.runOnMainSync {
-                listOf(false,true).forEach { wide ->
-                    val views = ToolWidgets.render(context,101,store.tool(initial.id),WidgetPreferences(),wide,false)
-                    val view = views.apply(base,null)
-                    assertNotNull(view.findViewById<android.view.View>(com.alpha.assistant.R.id.widget_title))
-                }
-                ToolWidgets.render(context,103,null,WidgetPreferences(),false,false).apply(base,null)
-                ToolWidgets.render(context,101,store.tool(initial.id),WidgetPreferences(),true,true).apply(base,null)
-            }
+            val deletedAction = ToolWidgets.actionIntent(context,102,store.tool(initial.id)!!,"add",null)
+            ToolWidgets.removeDeletedBindings(context,initial.id,setOf(102),store)
+            assertTrue(ToolWidgets.deleted(context,102))
+            assertFalse(ToolWidgets.perform(context,deletedAction,store,engine(store),locked = false))
+            assertEquals(setOf(101),ToolWidgets.bindings(context,initial.id))
             instrumentation.uiAutomation.adoptShellPermissionIdentity("android.permission.BIND_APPWIDGET")
             try {
                 hostId = host.allocateAppWidgetId()
                 val manager = AppWidgetManager.getInstance(base)
                 val bound = manager.bindAppWidgetIdIfAllowed(hostId,ComponentName(base,ToolWidgetProvider::class.java),Bundle())
                 assertTrue("Shell BIND_APPWIDGET permission must permit test host",bound)
-                manager.updateAppWidget(hostId,ToolWidgets.render(context,101,store.tool(initial.id),WidgetPreferences(),true,false))
                 assertEquals(ComponentName(base,ToolWidgetProvider::class.java),manager.getAppWidgetInfo(hostId).provider)
-                val requestToken = UUID.randomUUID().toString()
                 val requests = context.getSharedPreferences("alpha-pin-requests",Context.MODE_PRIVATE)
-                requests.edit().putBoolean("$requestToken-pending",true).putString("$requestToken-proposal",
-                    JSONObject().put("tool",initial.id).put("format","wide").put("details",false).put("before",org.json.JSONArray()).toString()).commit()
+                fun queuePin(previous: List<Int> = emptyList()): String {
+                    val token = UUID.randomUUID().toString()
+                    requests.edit().putBoolean("$token-pending",true).putString("$token-proposal",
+                        JSONObject().put("tool",initial.id).put("format","wide").put("details",false)
+                            .put("before",org.json.JSONArray(previous)).toString()).commit()
+                    SurfaceEntry.setStatus(context,token,context.getString(R.string.widget_pin_pending))
+                    return token
+                }
+                val cancelledToken = queuePin()
+                val requestToken = queuePin()
+                assertNull(ToolWidgets.toolId(context,hostId))
                 val callback = android.content.Intent(context,PinResultReceiver::class.java).setAction("alpha.PIN_WIDGET")
                     .setData(android.net.Uri.parse("alpha-pin://result/$requestToken")).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID,hostId)
                 instrumentation.runOnMainSync { PinResultReceiver().onReceive(context,callback) }
                 assertEquals(initial.id,ToolWidgets.toolId(context,hostId))
                 assertEquals(WidgetPreferences("wide",false),ToolWidgets.preferences(context,hostId))
-                assertEquals("Android confirmed addition to the home screen.",SurfaceEntry.status(context,requestToken))
+                assertEquals(context.getString(R.string.widget_pin_confirmed),SurfaceEntry.status(context,requestToken))
+                assertEquals("A request without a callback remains unconfirmed",
+                    context.getString(R.string.widget_pin_pending),SurfaceEntry.status(context,cancelledToken))
                 instrumentation.runOnMainSync { PinResultReceiver().onReceive(context,callback) }
                 assertFalse(requests.getBoolean("$requestToken-pending",false))
-                val wrongToken = UUID.randomUUID().toString()
-                requests.edit().putBoolean("$wrongToken-pending",true).putString("$wrongToken-proposal",
-                    JSONObject().put("tool",initial.id).put("format","wide").put("details",false).put("before",org.json.JSONArray()).toString()).commit()
+                val wrongToken = queuePin(listOf(hostId))
                 val invalidCallback = android.content.Intent(callback).setData(android.net.Uri.parse("alpha-pin://result/$wrongToken"))
-                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID,-1)
                 instrumentation.runOnMainSync { PinResultReceiver().onReceive(context,invalidCallback) }
-                assertTrue(SurfaceEntry.status(context,wrongToken).startsWith("Android callback did not match"))
+                assertEquals(context.getString(R.string.widget_pin_mismatch),SurfaceEntry.status(context,wrongToken))
+                val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(hostId)
+                val widget = ToolGlanceWidget()
+                val secondHostId = host.allocateAppWidgetId()
+                try {
+                    assertTrue(manager.bindAppWidgetIdIfAllowed(secondHostId,ComponentName(base,ToolWidgetProvider::class.java),Bundle()))
+                    ToolWidgets.bind(context,secondHostId,initial.id,WidgetPreferences("compact",true),store)
+                    val secondGlanceId = GlanceAppWidgetManager(context).getGlanceIdBy(secondHostId)
+                    val compact = DpSize(180.dp,180.dp)
+                    val wide = DpSize(320.dp,320.dp)
+                    suspend fun assertBothCounts(expected: Int) {
+                        val compactViews = widget.compose(context,secondGlanceId,size = compact)
+                        val wideViews = widget.compose(context,glanceId,size = wide)
+                        instrumentation.runOnMainSync {
+                            listOf(compactViews,wideViews).forEach { remote ->
+                                val labels = remote.apply(base,null).descendants().filterIsInstance<TextView>().map { it.text.toString() }.toList()
+                                assertTrue("Expected count $expected: $labels",labels.contains("Count: $expected"))
+                            }
+                        }
+                    }
+                    assertBothCounts(1)
+                    val latest = store.tool(initial.id)!!
+                    assertTrue(ToolWidgets.perform(context,ToolWidgets.actionIntent(context,secondHostId,latest,"add",null),store,engine(store),locked = false))
+                    assertBothCounts(2)
+                } finally {
+                    ToolWidgets.remove(context,secondHostId)
+                    host.deleteAppWidgetId(secondHostId)
+                }
             } finally { instrumentation.uiAutomation.dropShellPermissionIdentity() }
         } finally {
             if(hostId != AppWidgetManager.INVALID_APPWIDGET_ID) host.deleteAppWidgetId(hostId)
@@ -163,5 +300,12 @@ class SurfaceWorkflowTest {
             base.deleteSharedPreferences("$suffix-alpha-widgets")
             base.deleteSharedPreferences("$suffix-alpha-pin-requests")
         }
+    }
+}
+
+internal fun View.descendants(): Sequence<View> = sequence {
+    yield(this@descendants)
+    if (this@descendants is ViewGroup) {
+        repeat(childCount) { yieldAll(getChildAt(it).descendants()) }
     }
 }

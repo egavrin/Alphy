@@ -61,10 +61,12 @@ class ComposeScenarioAcceptanceTest {
         check(!directory.exists()) {"Evidence directory already exists."}
         check(directory.mkdirs())
         val responses=JSONArray()
+        val routingStages=JSONArray()
         val attempts=JSONArray()
+        var repaired=false
         val report=JSONObject().put("runId",runId).put("mode",mode).put("scenario",scenario).put("repetition",repetition)
             .put("revision",revision).put("sourceSha256",sourceHash).put("request",case.getString("request"))
-            .put("generation","pending").put("responses",responses).put("generationAttempts",attempts).put("phase","generation")
+            .put("generation","pending").put("responses",responses).put("routingStages",routingStages).put("generationAttempts",attempts).put("phase","generation")
             .put("interactions","UNREVIEWED").put("externalResults","UNVERIFIED")
         fun save() {File(directory,"report.json").writeText(report.toString(2))}
         fun screenshot(name: String) {
@@ -101,15 +103,30 @@ class ComposeScenarioAcceptanceTest {
                 error("The review activity cannot call a provider.")
             }
         }
+        val liveProvider=if (live) DeepSeekProvider() else null
         val provider=object: ChatProvider {
             override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
+                check(request.jsonObject && !request.search && request.turns.all {it.images.isEmpty()})
+                val stage=checkNotNull(request.generationStage)
+                if (stage != CloudGenerationStage.SELECTOR && request.turns.size > 1) {
+                    check(!repaired) {"Normal correction bound changed."}
+                    repaired=true
+                }
+                if (stage == CloudGenerationStage.PLAN || stage == CloudGenerationStage.SELECTOR) {
+                    check(routingStages.length() < 4) {"Normal routing bound changed."}
+                    routingStages.put(stage.name)
+                    save()
+                    if (liveProvider != null) liveProvider.respond(key,request,session,emit)
+                    else check(request.replyWithFixturePlan(emit))
+                    return
+                }
+                check(stage == CloudGenerationStage.COMPLETE)
                 check(responses.length()<2) {"Normal correction bound changed."}
-                check(request.jsonObject && request.turns.all {it.images.isEmpty()})
                 if(responses.length()>0) responses.getJSONObject(0).put("outcome","correctionRequested")
                 val response=JSONObject().put("attempt",responses.length()+1).put("outcome","started").put("characters",0)
                 responses.put(response);save()
                 var characters=0
-                val delegate=if(live) DeepSeekProvider() else object: ChatProvider {
+                val delegate=liveProvider ?: object: ChatProvider {
                     override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
                         emit(CloudEvent.Text(ArkanoidFixture.spec()))
                     }
@@ -133,7 +150,7 @@ class ComposeScenarioAcceptanceTest {
             val draft=engine.createDraft(case.getString("request"),null)
             engine.generate(draft.id,key,emptyList(),CloudSession())
             val tool=engine.accept(draft.id)
-            report.put("generation","accepted").put("firstAttempt",responses.length()==1).put("repaired",responses.length()==2)
+            report.put("generation","accepted").put("firstAttempt",!repaired).put("repaired",repaired)
                 .put("artifactId",tool.id).put("artifactRevision",tool.revision).put("specSha256",hash(tool.spec))
                 .put("initialStateSha256",hash(tool.state)).put("database","$name.db-tools.db")
             File(directory,"artifact.json").writeText(tool.spec)
@@ -170,8 +187,12 @@ class ComposeScenarioAcceptanceTest {
             engine.closeArtifacts();store.close();shell.close()
             uiKeys.clear();app.deleteSharedPreferences(name)
             java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null);deleteEntry(name)}
-            report.put("firstAttemptOutcome",attempts.optJSONObject(0)?.getString("outcome") ?: "unknown")
-                .put("repairOutcome",attempts.optJSONObject(1)?.getString("outcome") ?: "notRequested")
+            fun outcome(number: Int): String? = (0 until attempts.length()).asSequence()
+                .map(attempts::getJSONObject)
+                .lastOrNull { it.getInt("attempt") == number && it.getString("disposition") != "continue" }
+                ?.getString("outcome")
+            report.put("firstAttemptOutcome",outcome(1) ?: "unknown")
+                .put("repairOutcome",outcome(2) ?: "notRequested")
             save()
         }
     }

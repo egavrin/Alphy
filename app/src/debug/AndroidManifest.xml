@@ -1,6 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Debug-only loopback HTTP supports deterministic provider tests. -->
-    <application android:usesCleartextTraffic="true">
+    <application android:name=".AssistantFixtureApplication" android:usesCleartextTraffic="true">
+        <activity android:name=".MiniAppGalleryActivity" android:exported="false" />
         <activity android:name=".VoiceTestActivity" android:exported="false" />
         <activity android:name=".CloudTestActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
     </application>

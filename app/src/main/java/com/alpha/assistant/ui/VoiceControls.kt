@@ -12,13 +12,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -92,40 +90,33 @@ import com.alpha.assistant.voice.VoiceSession
 @Composable internal fun InlineVoiceRecorder(model: ShellViewModel) {
     val voice = model.voice
     val color = MaterialTheme.colorScheme.onSurfaceVariant
+    val recording = voice.phase == "listening"
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        ProvideTextStyle(MaterialTheme.typography.labelSmall) { StatusLine(Glyph.Mic, color, voice.status) }
-        if (voice.phase == "preparing" || voice.phase == "recognizing") LinearProgressIndicator(Modifier.fillMaxWidth())
-        if (voice.phase == "review") {
-            val reviewLabel = stringResource(R.string.voice_review_label)
-            BasicTextField(voice.partial, voice::editTranscript,
-                // The vertical space is inside the decoration, so the field node keeps the 48 dp minimum height, as in Composer.
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 150.dp).padding(horizontal = 7.dp).semantics { contentDescription = reviewLabel },
-                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), decorationBox = { inner -> Box(Modifier.padding(vertical = 5.dp)) { inner() } })
-            Text(stringResource(R.string.voice_send_hint), style = MaterialTheme.typography.labelSmall)
-        } else if (voice.partial.isNotBlank()) Text(voice.partial, maxLines = 2, style = MaterialTheme.typography.bodySmall)
-        val cancelLabel = stringResource(R.string.voice_cancel)
+        if (voice.partial.isNotBlank()) Text(voice.partial, Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            maxLines = 3, style = MaterialTheme.typography.bodyLarge)
         val levelLabel = stringResource(R.string.voice_level)
-        val finishLabel = stringResource(R.string.voice_finish)
-        val sendLabel = stringResource(R.string.voice_send)
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { voice.stop() }, modifier = Modifier.size(48.dp).semantics { contentDescription = cancelLabel }) { AlphaIcon(Glyph.Close) }
-            Canvas(Modifier.weight(1f).height(40.dp).semantics {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+            RoundAction(Glyph.Close, stringResource(R.string.voice_cancel), { voice.stop() })
+            if (!recording) {
+                Text(stringResource(R.string.voice_transcribing), Modifier.weight(1f).then(PoliteLiveRegion),
+                    color = color, style = MaterialTheme.typography.bodySmall)
+                CircularProgressIndicator(Modifier.padding(end = 12.dp).size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Canvas(Modifier.weight(1f).height(40.dp).semantics {
                 contentDescription = levelLabel
                 progressBarRangeInfo = ProgressBarRangeInfo(voice.levels.lastOrNull() ?: 0f, 0f..1f)
-            }) {
-                val spacing = size.width / 48
-                repeat(48) { index ->
-                    val level = voice.levels.getOrNull(index - (48 - voice.levels.size)) ?: 0f
-                    val height = 2.dp.toPx() + level * (size.height - 2.dp.toPx())
-                    val x = spacing * (index + 0.5f)
-                    drawLine(color, Offset(x, (size.height - height) / 2), Offset(x, (size.height + height) / 2), minOf(3.dp.toPx(), spacing * 0.6f), StrokeCap.Round)
+                }) {
+                    val spacing = size.width / 48
+                    repeat(48) { index ->
+                        val level = voice.levels.getOrNull(index - (48 - voice.levels.size)) ?: 0f
+                        val height = 2.dp.toPx() + level * (size.height - 2.dp.toPx())
+                        val x = spacing * (index + 0.5f)
+                        drawLine(color, Offset(x, (size.height - height) / 2), Offset(x, (size.height + height) / 2), minOf(3.dp.toPx(), spacing * 0.6f), StrokeCap.Round)
+                    }
                 }
+                RoundAction(Glyph.Stop, stringResource(R.string.voice_finish), voice::finishRecording)
+                RoundAction(Glyph.Arrow, stringResource(R.string.voice_send), model::sendVoice, primary = true)
             }
-            // The button content color dims a disabled glyph and keeps the contrast on the primary container.
-            IconButton(onClick = voice::finishRecording, enabled = voice.phase == "listening", modifier = Modifier.size(48.dp).semantics { contentDescription = finishLabel }) { AlphaIcon(Glyph.Stop, color = LocalContentColor.current) }
-            FilledIconButton(onClick = model::sendVoice, enabled = voice.phase == "review" && voice.partial.isNotBlank() && !model.attachmentBusy,
-                modifier = Modifier.size(48.dp).semantics { contentDescription = sendLabel }) { AlphaIcon(Glyph.Arrow, color = LocalContentColor.current) }
         }
     }
 }

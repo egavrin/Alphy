@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -36,11 +37,12 @@ import androidx.compose.ui.unit.dp
 import com.alpha.assistant.R
 import com.alpha.assistant.data.Conversation
 
-@Composable internal fun ShellTopBar(title: String, onMenu: () -> Unit, onNewChat: () -> Unit) {
+@Composable internal fun ShellTopBar(title: String?, onMenu: () -> Unit, onNewChat: (() -> Unit)?) {
     Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         GlyphButton(Glyph.Menu, stringResource(R.string.menu), onMenu)
-        Text(title, Modifier.weight(1f).padding(horizontal = 8.dp).semantics { heading() }, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        GlyphButton(Glyph.Compose, stringResource(R.string.new_chat), onNewChat)
+        if (title == null) Spacer(Modifier.weight(1f))
+        else Text(title, Modifier.weight(1f).padding(horizontal = 8.dp).semantics { heading() }, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (onNewChat != null) GlyphButton(Glyph.Compose, stringResource(R.string.new_chat), onNewChat)
     }
 }
 
@@ -57,6 +59,7 @@ import com.alpha.assistant.data.Conversation
             item { Item(stringResource(R.string.new_chat), Glyph.Compose, false, newChat) }
             item { Destination(ShellDestination.MiniApps, Glyph.Grid) }
             item { Destination(ShellDestination.Automations, Glyph.Repeat) }
+            item { Destination(ShellDestination.Courses, Glyph.File) }
             item {
                 Text(stringResource(R.string.recent), Modifier.padding(start = 28.dp, top = 16.dp, bottom = 8.dp).semantics { heading() },
                     style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -67,7 +70,6 @@ import com.alpha.assistant.data.Conversation
             }
         }
         HorizontalDivider()
-        Destination(ShellDestination.Access, Glyph.Shield)
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             // The name follows, so the initial is decorative for TalkBack.
             Box(Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape).clearAndSetSemantics { hideFromAccessibility() }, contentAlignment = Alignment.Center) {

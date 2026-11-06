@@ -1,0 +1,30 @@
+<resources>
+    <string name="assistant_open_app">Открыть</string>
+    <string name="assistant_close">Закрыть ассистента</string>
+    <string name="assistant_ask">Спросите Alphy</string>
+    <string name="assistant_unlock_title">Разблокируйте устройство</string>
+    <string name="assistant_unlock">Разблокировать</string>
+    <string name="assistant_locked_dismiss">Отмена</string>
+    <string name="assistant_screen_suggestion">+ Экран</string>
+    <string name="assistant_screen_suggestion_text">+ Экран: «%1$s»</string>
+    <string name="assistant_screen_unavailable">Контекст экрана недоступен</string>
+    <string name="assistant_review_title">Проверить текущий экран</string>
+    <string name="assistant_review_detail">Текст и снимок экрана — внешние данные. Выберите, что прикрепить. Данные отправятся только после нажатия «Отправить».</string>
+    <string name="assistant_screen_text">Текст экрана</string>
+    <string name="assistant_screen_image">Снимок экрана</string>
+    <string name="assistant_attach_text">Прикрепить текст</string>
+    <string name="assistant_attach_image">Прикрепить снимок</string>
+    <string name="assistant_review_done">Готово</string>
+    <string name="assistant_discard_capture">Убрать контекст экрана</string>
+    <string name="assistant_image_error">Не удалось прикрепить снимок. Данные экрана не отправлены.</string>
+    <string name="assistant_load_error">Не удалось открыть чат. Сохранённые данные не удалены.</string>
+    <string name="assistant_retry">Повторить</string>
+    <string name="assistant_request_error">Вложение или запрос недоступны</string>
+    <string name="assistant_save_error">Не удалось сохранить</string>
+    <string name="assistant_save_detail">Текущий сеанс открыт. Повторите сохранение перед закрытием приложения.</string>
+    <string name="assistant_save_retry">Повторить сохранение</string>
+    <string name="assistant_history">История</string>
+    <string name="assistant_history_search">Поиск в истории</string>
+    <string name="assistant_continuous_voice">Непрерывный голосовой сеанс</string>
+    <string name="assistant_provider_settings">Настройки DeepSeek</string>
+</resources>

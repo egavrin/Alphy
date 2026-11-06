@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tool_refinement_current_version">Мини-приложение изменилось. Откройте текущую версию и повторите попытку.</string>
+    <string name="tool_native_edit_title">Изменение мини-приложения</string>
+    <string name="tool_native_edit_instruction">Опишите изменения</string>
+    <string name="tool_native_edit_prepare">Подготовить изменения</string>
+    <string name="tool_native_edit_before">До изменения</string>
+    <string name="tool_native_edit_after">После изменения</string>
+    <string name="tool_native_edit_stopped">Эти сценарии будут приостановлены</string>
+    <string name="tool_native_edit_review_rules">Эти сценарии потребуют повторной проверки</string>
+    <string name="tool_native_edit_confirm">Сохранить изменения</string>
+    <string name="tool_native_edit_failed">Не удалось изменить мини-приложение. Проверьте текущую версию.</string>
+</resources>

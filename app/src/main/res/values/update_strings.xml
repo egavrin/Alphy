@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="update_title">Обновления Alphy</string>
+    <string name="update_check">Проверить обновления</string>
+    <string name="update_checking">Проверяем обновления…</string>
+    <string name="update_current">Установлена актуальная версия Alphy.</string>
+    <string name="update_available">Доступно обновление %1$s</string>
+    <string name="update_download">Скачать обновление</string>
+    <string name="update_downloading">Скачано %1$d%%</string>
+    <string name="update_cancel_download">Отменить скачивание</string>
+    <string name="update_ready">Обновление %1$s готово к установке.</string>
+    <string name="update_allow_install">Разрешить установку</string>
+    <string name="update_install">Установить обновление</string>
+    <string name="update_discard">Удалить скачанный APK</string>
+    <string name="update_details">Что нового</string>
+    <string name="update_size">Размер APK — %1$s</string>
+    <string name="update_no_notes">Описание выпуска отсутствует.</string>
+    <string name="update_close_details">Закрыть</string>
+    <string name="update_dismiss_notice">Скрыть</string>
+    <string name="update_check_failed">Не удалось проверить обновления. Повторите попытку.</string>
+    <string name="update_download_failed">Не удалось скачать обновление. Повторите попытку.</string>
+    <string name="update_invalid_apk">Не удалось подтвердить подлинность или совместимость APK.</string>
+    <string name="update_download_missing">Скачанный APK недоступен. Скачайте обновление снова.</string>
+    <string name="update_installer_failed">Не удалось открыть установщик или настройки Android.</string>
+</resources>

@@ -1,4 +1,4 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#FFFFFF" android:pathData="M32,77L49,31L59,31L76,77L65,77L61,65L47,65L43,77ZM50,55L58,55L54,43Z" />
-    <path android:fillColor="#BDE9D4" android:pathData="M76,26L79,34L87,37L79,40L76,48L73,40L65,37L73,34Z" />
-</vector>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:width="72dp" android:height="72dp" android:gravity="center"
+        android:drawable="@drawable/alphy_launcher_art" />
+</layer-list>

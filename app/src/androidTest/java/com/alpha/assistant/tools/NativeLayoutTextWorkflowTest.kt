@@ -3,6 +3,8 @@ package com.alpha.assistant.tools
 import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
@@ -77,11 +79,12 @@ class NativeLayoutTextWorkflowTest {
         assertEquals(ToolUiCatalog.Projection.SUMMARY,ToolUiCatalog.component(projection.getString("type")).projection)
         assertFalse(ToolUiCatalog.widgetLabel(projection,JSONObject(selected.initialState)).contains("Row 0"))
     }
-    @Test fun themeRejectsUnsafePaletteAndUnboundedTypeScale() {
-        val ui=JSONObject("""{"type":"theme","preset":"clean","mode":"dark","typeScale":1.1,"cornerRadius":16,"palette":{"primary":"#FFFFFF","onPrimary":"#000000"},"children":[{"type":"text","text":"Theme"}]}""")
+    @Test fun themeRejectsPaletteModeAndUnboundedTypeScale() {
+        val ui=JSONObject("""{"type":"theme","preset":"clean","typeScale":1.1,"cornerRadius":16,"children":[{"type":"text","text":"Theme"}]}""")
         spec(ui)
-        for(palette in listOf("{\"primary\":\"#FFFFFF\"}","{\"primary\":\"#FFFFFF\",\"onPrimary\":\"#EEEEEE\"}","{\"surface\":\"javascript:red\",\"onSurface\":\"#000000\"}"))
-            rejects {spec(JSONObject(ui.toString()).put("palette",JSONObject(palette)))}
+        rejects {spec(JSONObject(ui.toString()).put("palette",JSONObject("""{"primary":"#FFFFFF","onPrimary":"#000000"}""")))}
+        for(mode in listOf("system","light","dark",JSONObject.NULL))
+            rejects {spec(JSONObject(ui.toString()).put("mode",mode))}
         rejects {spec(JSONObject(ui.toString()).put("typeScale",3))}
         rejects {spec(JSONObject(ui.toString()).put("cornerRadius",100))}
     }
@@ -98,6 +101,7 @@ class NativeLayoutTextWorkflowTest {
             var requests=0
             val provider=object: ChatProvider {
                 override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
+                    if (request.replyWithFixturePlan(emit)) return
                     requests++;emit(CloudEvent.Text(if(requests == 1) bad else good))
                 }
             }
@@ -131,8 +135,8 @@ class NativeLayoutTextWorkflowTest {
             await("Missing visible $label") {
                 node=find(label)
                 if(node?.isVisibleToUser==true)return@await true
-                if(node!=null)node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
-                else find("Mini-app content")?.let {viewport ->
+                if(node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id) != true)
+                    (find("Содержимое мини-приложения") ?: find("Сообщения разговора"))?.let {viewport ->
                     if(viewport.actionList.none {it.id==direction})direction=if(direction==AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD else AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
                     // A refused scroll is not a failure: a running scroll animation can move the range after the read.
                     if(viewport.actionList.any {it.id==direction} && !viewport.performAction(direction) && !refused) {refused=true;diagnostics.capture("scroll-refused",viewport)}
@@ -146,9 +150,9 @@ class NativeLayoutTextWorkflowTest {
         fun capture(label: String) {val directory=File(app.getExternalFilesDir(null),"native-layout-text-evidence").apply {mkdirs()};instrumentation.uiAutomation.takeScreenshot()?.let {bitmap -> File(directory,"$label.png").outputStream().use {bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)};bitmap.recycle()}}
         try {
             ActivityScenario.launch(CloudTestActivity::class.java).use {scenario ->
-                await("Fixture did not load") {!model.loading && !model.tools.busy};click("Open")
+                await("Fixture did not load") {!model.loading && !model.tools.busy};click("Открыть")
                 await("Readable instructions missing") {find("Read guide")?.isVisibleToUser==true};capture("compact")
-                var disabled=find("Disabled action")
+                var disabled: AccessibilityNodeInfo? = shown("Disabled action")
                 while(disabled?.isEnabled==true && disabled?.isClickable==false) disabled=disabled?.parent
                 assertFalse("Disabled controls must expose their disabled state",disabled?.isEnabled ?: true)
                 click("Show final row");shown("Row 23")
@@ -162,7 +166,10 @@ class NativeLayoutTextWorkflowTest {
                     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(1f,1.5f)) {
                         androidx.compose.material3.MaterialTheme {
                         val scroll=androidx.compose.foundation.rememberScrollState()
-                        androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize().verticalScroll(scroll)) {ToolContent(selected.ui.toString(),tools.tool("layout")!!.state,true) {_,_ -> }}
+                        androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize().verticalScroll(scroll)
+                            .semantics { contentDescription = app.getString(com.alpha.assistant.R.string.tool_content) }) {
+                            ToolContent(selected.ui.toString(),tools.tool("layout")!!.state,true) {_,_ -> }
+                        }
                     }
                     }
                 }})}

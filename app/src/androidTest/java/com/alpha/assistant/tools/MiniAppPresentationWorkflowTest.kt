@@ -1,17 +1,34 @@
 package com.alpha.assistant.tools
 
+import android.app.Activity
+import android.app.Instrumentation
+import android.content.Intent
 import android.os.Bundle
+import android.provider.CalendarContract
 import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import android.os.SystemClock
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.data.*
+import com.alpha.assistant.ui.AlphaTheme
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
 import org.junit.Assert.*
@@ -19,12 +36,14 @@ import org.junit.Test
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-/** Black-box failure cases: executable chat cards, lost app context/draft, scrolling composer,
+/** Black-box failure cases: stale or inactive chat cards, lost app context/draft, scrolling composer,
  * active candidate controls, accidental apply, and lost apply/discard controls with long content.
  * The root runs this fixture and retains screenshots with its tested revision and command.
  */
@@ -92,21 +111,16 @@ class MiniAppPresentationWorkflowTest {
         waitUntil("Missing visible label: $label") {
             node=find(label)
             if(node?.isVisibleToUser == true)return@waitUntil true
-            if(node != null)node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
-            else {
-                if(label in setOf("Exit full screen","App controls","Start","Pause","Resume","Restart","Left","Right") && find("Show game controls")?.isVisibleToUser==true) {
-                    var handle=find("Show game controls")
-                    while(handle?.isClickable==false)handle=handle.parent
-                    assertTrue("Expand native game controls",checkNotNull(handle).performAction(AccessibilityNodeInfo.ACTION_CLICK))
-                    return@waitUntil false
+            if(node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id) != true) {
+                if(label in setOf("Выйти из полноэкранного режима","Управление мини-приложением","Начать","Пауза","Продолжить","Начать заново","Влево","Вправо")) {
+                    var handle=find("Показать управление игрой")
+                    if (handle?.isVisibleToUser == true) {
+                        while (handle?.isClickable == false) handle = handle.parent
+                        if (handle?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) return@waitUntil false
+                    }
                 }
-                fun scrollable(current: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-                    if(current==null)return null
-                    if(current.isScrollable)return current
-                    repeat(current.childCount) {scrollable(current.getChild(it))?.let {return it}}
-                    return null
-                }
-                val viewport=find("Native game controls") ?: find("Mini-app content") ?: find("Mini-app library content") ?: if(label=="Open")scrollable(diagnostics.freshRoot()) else null
+                val viewport=find("Управление игрой") ?: find("Содержимое мини-приложения") ?: find("Содержимое библиотеки мини-приложений")
+                    ?: find("Сообщения разговора")
                 if(viewport != null) {
                     if(viewport.actionList.none {it.id == direction}) direction=if(direction == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                         AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD else AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
@@ -155,21 +169,30 @@ class MiniAppPresentationWorkflowTest {
         val directory=File(instrumentation.targetContext.getExternalFilesDir(null),"mini-app-evidence").apply {mkdirs()}
         automation.takeScreenshot()?.let {bitmap -> File(directory,"$name.png").outputStream().use {bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}; bitmap.recycle()}
     }
-    private fun fixture(candidate: Boolean=false, provider: ChatProvider?=null, specJson: String=ItineraryFixture.spec(), block: (ShellViewModel,ToolStore,ActivityScenario<CloudTestActivity>) -> Unit) {
+    private fun fixture(candidate: Boolean=false, provider: ChatProvider?=null, specJson: String=ItineraryFixture.spec(), secondReference: Boolean=false, candidateJson: String=ItineraryFixture.spec("Revised lake day"),
+        repeatInChat: Boolean=false, previousJson: String?=null, showChat: Boolean=true, pendingPrompt: String?=null,
+        block: (ShellViewModel,ToolStore,ActivityScenario<CloudTestActivity>) -> Unit) {
         val app=instrumentation.targetContext
         val name="presentation-${UUID.randomUUID()}"
         val shell=ShellStore(app,"$name.db"); val tools=ToolStore(app,"$name.db-tools.db")
         val keys=SecureKeyStore(app,name,name)
         val spec=ToolSpec.parse(specJson)
-        val tool=ToolRecord("lake",1,1,spec.json,spec.initialState,spec.ui.toString(),"chat",true)
+        val seed=ToolRecord("lake",1,1,spec.json,spec.initialState,spec.ui.toString(),"chat",true)
+        val previous=previousJson?.let(ToolSpec::parse)
+        val tool=if(previous==null) seed else seed.copy(revision=2,stateVersion=2)
+        if(previous!=null) tools.saveTool(seed.copy(spec=previous.json,state=previous.initialState,ui=previous.ui.toString()),true)
         tools.saveTool(tool,true)
-        spec.capabilities.forEach {tools.grant(tool.id,it,true)}
-        if(candidate) {
-            val next=ToolSpec.parse(ItineraryFixture.spec("Revised lake day"))
-            tools.saveDraft(ToolDraft("candidate",tool.id,1,1,"Make the day shorter",next.json,next.initialState,next.ui.toString(),"chat"))
+        if(candidate || pendingPrompt != null) {
+            val next=if(candidate) ToolSpec.parsePersisted(candidateJson) else null
+            tools.saveDraft(ToolDraft("candidate",tool.id,1,1,pendingPrompt ?: "Make the day shorter",
+                next?.json,next?.initialState,next?.ui?.toString(),"chat"))
         }
-        shell.saveConversation(Conversation("chat","Plan discussion",1,1,messages=listOf(Message("artifact","assistant","Your day plan is ready.",1,"complete",toolId=tool.id,toolRevision=1))))
-        shell.saveSetting("selected","chat")
+        val artifact=Message("artifact","assistant","Your day plan is ready.",1,"complete",toolId=tool.id,toolRevision=1)
+        val cards=if(repeatInChat) listOf(artifact,artifact.copy(id="duplicate-artifact")) else listOf(artifact)
+        shell.saveConversation(Conversation("chat","Plan discussion",1,1,messages=cards))
+        if(secondReference) shell.saveConversation(Conversation("other","Second discussion",2,2,
+            messages=listOf(Message("second-artifact","assistant","Second card.",2,"complete",toolId=tool.id,toolRevision=1))))
+        if(showChat) shell.saveSetting("selected","chat")
         keys.save("presentation-fixture-only").getOrThrow()
         lateinit var model: ShellViewModel
         val responder=provider ?: object: ChatProvider {
@@ -209,8 +232,8 @@ class MiniAppPresentationWorkflowTest {
             """.trimIndent())
         definition.getJSONArray("surfaces").getJSONObject(0).put("sizing","viewport")
         fixture(specJson=definition.toString()) {_,store,scenario ->
-            click("Open");shown("Exit full screen")
-            assertNull(find("Mini-app refinement"));assertNull(find("Mini-app content"))
+            click("Открыть");shown("Выйти из полноэкранного режима")
+            assertNull(find("Изменение мини-приложения"));assertNull(find("Содержимое мини-приложения"))
             fun state()=JSONObject(store.tool("lake")!!.state)
             fun canvas(node: AccessibilityNodeInfo?=automation.rootInActiveWindow): AccessibilityNodeInfo? {
                 if(node==null)return null
@@ -231,7 +254,7 @@ class MiniAppPresentationWorkflowTest {
             fullWindow()
             val down=SystemClock.uptimeMillis()
             fun touch(action: Int,fraction: Float) {
-                if(find("Hide game controls")!=null)click("Hide game controls")
+                if(find("Скрыть управление игрой")!=null)click("Скрыть управление игрой")
                 val event=android.view.MotionEvent.obtain(down,SystemClock.uptimeMillis(),action,bounds.left+bounds.width()*fraction,bounds.exactCenterY(),0)
                 event.source=android.view.InputDevice.SOURCE_TOUCHSCREEN
                 try {assertTrue(injectTouch(event))}finally {event.recycle()}
@@ -242,22 +265,22 @@ class MiniAppPresentationWorkflowTest {
             waitUntil {state().getString("phase")=="up"}
             assertEquals(state().getInt("width")*0.75,state().getDouble("x"),3.0)
             touch(android.view.MotionEvent.ACTION_DOWN,0.5f)
-            click("Pause");waitUntil {state().getInt("cancels")>0};touch(android.view.MotionEvent.ACTION_UP,0.5f)
-            click("Resume")
+            click("Пауза");waitUntil {state().getInt("cancels")>0};touch(android.view.MotionEvent.ACTION_UP,0.5f)
+            click("Продолжить")
             val previousWidth=state().getInt("width")
             scenario.onActivity {it.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE}
             waitUntil {state().getInt("width")!=previousWidth}
             waitUntil {canvas()?.let {it.getBoundsInScreen(bounds);bounds.width()>bounds.height()}==true}
             fullWindow()
-            assertNull("Wide view must suppress shell split",find("Mini-app refinement"))
-            click("App controls");shown("Probe state")
+            assertNull("Wide view must suppress the embedded app",find("Содержимое мини-приложения"))
+            click("Управление мини-приложением");shown("Probe state")
             settled("Probe state")
             automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
-            shown("Exit full screen")
+            shown("Выйти из полноэкранного режима")
             scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
             scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
-            shown("Exit full screen");screenshot("immersive-viewport")
-            click("Exit full screen");shown("Mini-app refinement")
+            shown("Выйти из полноэкранного режима");screenshot("immersive-viewport")
+            click("Выйти из полноэкранного режима");shown("Содержимое мини-приложения")
             assertTrue(store.effects("lake").isEmpty())
             scenario.onActivity {activity ->
                 val insets=androidx.core.view.ViewCompat.getRootWindowInsets(activity.window.decorView)
@@ -277,7 +300,8 @@ class MiniAppPresentationWorkflowTest {
             .put("ui",JSONObject("""{"type":"column","children":[{"type":"text","text":"Playback controls"},{"type":"button","text":"Generated pause","action":"pause"},{"type":"button","text":"Generated resume","action":"resume"}]}"""))
             .put("source","""
                 const s=input.state,e=input.event,a=e.type==='action'?e.actionId:e.type;
-                if(a==='start'&&s.mode==='ready'&&s.starts++>0||a==='resume'||a==='restart')s.mode='playing';
+                if(a==='start')s.starts++;
+                if(a==='start'||a==='resume'||a==='restart')s.mode='playing';
                 if(a==='pause')s.mode='paused';
                 if(e.type==='frame')s.ticks++;
                 if(e.type==='pointer'){s.pointerX=e.x;if(e.phase==='down')s.downs++;}
@@ -291,9 +315,22 @@ class MiniAppPresentationWorkflowTest {
             fun mode(value: String)=waitUntil {state().getString("mode")==value}
             fun still() {val ticks=state().getInt("ticks");SystemClock.sleep(350);assertEquals(ticks,state().getInt("ticks"))}
             fun advances() {val ticks=state().getInt("ticks");waitUntil {state().getInt("ticks")>ticks}}
-            fun dismiss() {settled("Playback controls");automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK);shown("Exit full screen")}
+            val gameMenu = instrumentation.targetContext.getString(R.string.tool_game_controls_open)
+            fun openGameMenu() = click(gameMenu)
+            fun dismiss() {
+                settled("Playback controls")
+                assertTrue(automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
+                try {
+                    shown(instrumentation.targetContext.getString(R.string.tool_full_screen_exit))
+                } catch (failure: AssertionError) {
+                    val sheet = find("Playback controls")?.isVisibleToUser == true
+                    val gameMenu = find(instrumentation.targetContext.getString(R.string.tool_game_controls_open))?.isVisibleToUser == true
+                    val panel = find(instrumentation.targetContext.getString(R.string.tool_game_controls))?.isVisibleToUser == true
+                    throw AssertionError("Back left sheet=$sheet gameMenu=$gameMenu panel=$panel animatorEnabled=${android.animation.ValueAnimator.areAnimatorsEnabled()}", failure)
+                }
+            }
             fun controls() {
-                click("App controls");shown("Playback controls")
+                click("Управление мини-приложением");shown("Playback controls")
                 waitUntil {
                     var node=find("Generated pause")
                     while(node?.isClickable==false)node=node.parent
@@ -302,7 +339,7 @@ class MiniAppPresentationWorkflowTest {
             }
             var heldDownTime=0L
             fun touch(action: Int?=null,fraction: Float=0.5f) {
-                if(find("Hide game controls")!=null)click("Hide game controls")
+                if(find("Скрыть управление игрой")!=null)click("Скрыть управление игрой")
                 fun canvas(node: AccessibilityNodeInfo?=automation.rootInActiveWindow): AccessibilityNodeInfo? {
                     if(node==null)return null
                     if(node.contentDescription?.startsWith("Playback probe.")==true)return node
@@ -317,33 +354,241 @@ class MiniAppPresentationWorkflowTest {
                     try {assertTrue(injectTouch(event))}finally {event.recycle()}
                 }
             }
-            click("Open");shown("Start");mode("ready");still()
+            waitUntil("The chat canvas did not initialize in ready mode") {
+                state().getString("mode")=="ready" && state().getInt("starts")==0
+            }
+            click("Открыть");shown(gameMenu);mode("ready");still()
+            assertEquals("Opening the full view must preserve the initialized ready state",0,state().getInt("starts"))
             touch(android.view.MotionEvent.ACTION_DOWN,0.25f)
             waitUntil {state().getInt("downs")==1}
-            click("Start");mode("playing");advances()
+            openGameMenu()
+            click("Начать");mode("playing");advances()
+            assertEquals("Only the user's Start advances ready playback",1,state().getInt("starts"))
             touch(android.view.MotionEvent.ACTION_MOVE,0.75f)
             waitUntil("Ready-to-playing transition lost pointer ownership") {kotlin.math.abs(state().getDouble("pointerX")-240.0)<3.0}
             touch(android.view.MotionEvent.ACTION_UP,0.75f)
-            click("Pause");shown("Resume");mode("paused");still()
-            click("Restart");mode("playing");shown("Pause");advances()
+            click("Пауза");shown("Продолжить");mode("paused");still()
+            click("Начать заново");mode("playing");shown("Пауза");advances()
             touch();waitUntil {state().getInt("downs")==2}
+            openGameMenu()
             controls();mode("playing");still()
-            click("Generated pause");mode("paused");dismiss();shown("Resume");still()
+            click("Generated pause");mode("paused");dismiss();shown("Продолжить");still()
             controls();click("Generated resume");mode("playing")
-            dismiss();shown("Pause");advances()
+            dismiss();shown("Пауза");advances()
             scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
             mode("playing");still()
             scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
-            shown("Pause");mode("playing");advances()
-            click("Pause");mode("paused");shown("Resume")
-            click("Exit full screen");shown("Mini-app refinement");shown("Resume");mode("paused");still()
+            shown("Пауза");mode("playing");advances()
+            assertEquals("Resuming the activity must not send Start",1,state().getInt("starts"))
+            click("Пауза");mode("paused");shown("Продолжить")
+            click("Выйти из полноэкранного режима");shown("Содержимое мини-приложения");shown("Продолжить");mode("paused");still()
             scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
             scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
-            shown("Resume");mode("paused");still()
+            shown("Продолжить");mode("paused");still()
+            assertEquals("Reopening paused playback must not send Start",1,state().getInt("starts"))
             screenshot("playback-saved-pause")
             println("PLAYBACK_NATIVE ready=PASS restart=PASS sheetActions=PASS suspension=PASS savedPause=PASS")
         }
     }
+    private fun activeCardSpec(title: String, advance: Boolean, note: String) = JSONObject(ArkanoidFixture.spec())
+        .put("title",title)
+        .put("stateSchema",JSONObject("""{"ticks":"number","touches":"number","note":"string"}"""))
+        .put("initialState",JSONObject().put("ticks",0).put("touches",0).put("note",note))
+        .put("ui",JSONObject("""{"type":"text","text":"Saved note","bind":"note"}"""))
+        .put("source","""
+            const s=input.state,e=input.event;
+            if($advance && e.type==='frame')s.ticks++;
+            if(e.type==='pointer' && (e.phase==='down'||e.phase==='cancel'))s.touches++;
+            return {state:s,playback:'playing',frames:['main'],surfaces:{main:{commands:[
+                {type:'rect',x:0,y:0,width:320,height:420,color:'#123456'},
+                {type:'text',x:12,y:24,size:16,text:'Ticks '+s.ticks,color:'#FFFFFF'}]}}};
+        """.trimIndent()).toString()
+
+    @Test fun liveCanvasResumesOnTheSameActivityWithTheLatestState() = fixture(
+        specJson=activeCardSpec("Live canvas",true,"Resume data")
+    ) {_,store,scenario ->
+        val metrics=com.alpha.assistant.sandbox.SurfaceFrameMetrics
+        fun state()=JSONObject(checkNotNull(store.tool("lake")).state)
+        diagnostics.state={"state="+store.tool("lake")?.state+" metrics="+metrics.snapshot()?.status}
+        waitUntil("The live chat canvas did not commit a frame") {state().getInt("ticks")>0}
+        lateinit var activity: CloudTestActivity
+        scenario.onActivity {activity=it}
+        scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+        waitUntil("The original canvas session did not close") {metrics.snapshot()?.status=="STOPPED"}
+        val savedTicks=state().getInt("ticks")
+        scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
+        scenario.onActivity {assertSame("Resume must use the same activity",activity,it)}
+        waitUntil("The resumed chat canvas did not advance its saved state") {state().getInt("ticks")>savedTicks}
+        assertEquals("Resume data",state().getString("note"))
+        screenshot("live-canvas-same-activity-resume")
+    }
+
+    @Test fun inlineRestoreQuiescesActiveCanvasAndKeepsCurrentData() = fixture(
+        specJson=activeCardSpec("Current live canvas",true,"Current data"),
+        previousJson=activeCardSpec("Earlier live canvas",false,"Earlier data")
+    ) {_,store,_ ->
+        fun state()=JSONObject(checkNotNull(store.tool("lake")).state)
+        diagnostics.state={"state="+store.tool("lake")?.state+" revision="+store.tool("lake")?.revision}
+        shown("v2")
+        waitUntil("The current canvas did not commit a frame") {state().getInt("ticks")>0}
+        val ticks=state().getInt("ticks")
+        click("Вернуть v1")
+        waitUntil("Inline restore did not commit a new revision") {store.tool("lake")?.revision==3}
+        assertTrue("Restore must keep canvas progress",state().getInt("ticks")>=ticks)
+        assertEquals("Current data",state().getString("note"))
+        assertEquals("Восстановление v1",store.revisions("lake").first().label)
+        shown("v3");shown("Earlier live canvas")
+        screenshot("inline-restore-live-canvas")
+    }
+
+    @Test fun restoreUsesTheFinalPauseFromEitherVisibleHost() {
+        restoreAcrossVisibleHosts(conflict = false)
+    }
+
+    @Test fun restoreRejectsStateChangedAfterBothVisibleHostsPause() {
+        restoreAcrossVisibleHosts(conflict = true)
+    }
+
+    // A display tick does not guarantee host order. Gate the real cancel until the newer host
+    // acknowledges its pause, then let the same controller and store process the restore.
+    private fun restoreAcrossVisibleHosts(conflict: Boolean) = fixture(
+        specJson = activeCardSpec("Shared pause canvas", false, "Current data"),
+        previousJson = activeCardSpec("Earlier canvas", false, "Earlier data"),
+        showChat = false,
+    ) { model, store, scenario ->
+        val tool = checkNotNull(store.tool("lake"))
+        val spec = ToolSpec.parsePersisted(tool.spec)
+        val actions = MiniAppActions()
+        val olderHost = model.tools.artifactHost(tool)
+        val newerHost = model.tools.artifactHost(tool)
+        val olderOpened = CompletableDeferred<Unit>()
+        val newerOpened = AtomicReference<ArtifactSnapshot>()
+        val ownerPaused = CompletableDeferred<Unit>()
+        val ownerPauseSnapshot = AtomicReference<ArtifactSnapshot>()
+        val ownerOnlyBoundary = AtomicReference<ToolRecord?>()
+        val finalCancel = AtomicReference<ArtifactSnapshot>()
+        val olderPauseSnapshot = AtomicReference<ArtifactSnapshot>()
+        val boundaryAtConflict = AtomicReference<ToolRecord>()
+        val externalWrite = AtomicReference<ToolRecord>()
+        diagnostics.state = {
+            val first = ownerPauseSnapshot.get()
+            val last = olderPauseSnapshot.get()
+            "ownerPause=${first?.sequence}/${first?.tool?.stateVersion} " +
+                "olderPause=${last?.sequence}/${last?.tool?.stateVersion} " +
+                "revision=${store.tool(tool.id)?.revision} error=${model.tools.error}"
+        }
+        val restoreLabel = instrumentation.targetContext.getString(R.string.tool_restore_version, 1)
+        val older = object : ArtifactUiHost by olderHost {
+            override suspend fun open() = olderHost.open().also { olderOpened.complete(Unit) }
+
+            override suspend fun event(event: JSONObject): ArtifactSnapshot {
+                if (event.optString("type") == "pointer" && event.optString("phase") == "cancel") {
+                    ownerPaused.await()
+                    return olderHost.event(event).also(finalCancel::set)
+                }
+                return olderHost.event(event)
+            }
+        }
+        val newer = object : ArtifactUiHost by newerHost {
+            override suspend fun open(): ArtifactSnapshot {
+                olderOpened.await()
+                return newerHost.open().also(newerOpened::set)
+            }
+        }
+        scenario.onActivity { activity ->
+            activity.setContentView(ComposeView(activity).apply {
+                setContent {
+                    AlphaTheme {
+                        Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+                            val current = model.tools.tools.single()
+                            Text("v${current.revision}")
+                            if (current.revision == tool.revision) {
+                                Row(Modifier.fillMaxWidth()) {
+                                    var olderLatest: ArtifactSnapshot? = null
+                                    var newerLatest: ArtifactSnapshot? = null
+                                    Column(Modifier.weight(1f).semantics { contentDescription = "Older canvas host" }) {
+                                        CoveredToolSurface(tool, spec, true, 120.dp, older, actions,
+                                            onSnapshot = { olderLatest = it }, onCoverReady = { ready ->
+                                                if (ready) {
+                                                    val paused = checkNotNull(olderLatest)
+                                                    olderPauseSnapshot.set(paused)
+                                                    if (conflict) {
+                                                        boundaryAtConflict.set(checkNotNull(actions.restoreSnapshot(tool)))
+                                                        val next = paused.tool.copy(stateVersion = paused.tool.stateVersion + 1,
+                                                            state = JSONObject(paused.tool.state).put("note", "Post-boundary data").toString())
+                                                        store.commitTool(next, paused.tool, false)
+                                                        externalWrite.set(next)
+                                                    }
+                                                }
+                                            })
+                                    }
+                                    Column(Modifier.weight(1f).semantics { contentDescription = "Newer canvas host" }) {
+                                        CoveredToolSurface(tool, spec, true, 120.dp, newer, actions,
+                                            onSnapshot = { newerLatest = it }, onCoverReady = { ready ->
+                                                if (ready) {
+                                                    ownerPauseSnapshot.set(checkNotNull(newerLatest))
+                                                    ownerOnlyBoundary.set(actions.restoreSnapshot(tool))
+                                                    ownerPaused.complete(Unit)
+                                                }
+                                            })
+                                    }
+                                }
+                                TextButton(onClick = { actions.requestRestore(tool, 1) }) { Text(restoreLabel) }
+                            }
+                            model.tools.error?.let { Text(it) }
+                            MiniAppActionDialogs(model.tools, actions)
+                        }
+                    }
+                }
+            })
+        }
+        waitUntil("The second canvas did not acquire frame ownership") { newerOpened.get()?.frameOwner == true }
+        shown("Newer canvas host")
+        fun canvas(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+            if (node.contentDescription?.startsWith("Shared pause canvas.") == true) return node
+            repeat(node.childCount) { index -> node.getChild(index)?.let(::canvas)?.let { return it } }
+            return null
+        }
+        val bounds = Rect().also { checkNotNull(canvas(shown("Older canvas host"))).getBoundsInScreen(it) }
+        val now = SystemClock.uptimeMillis()
+        val down = android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_DOWN,
+            bounds.exactCenterX(), bounds.exactCenterY(), 0)
+        down.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+        try { assertTrue(injectTouch(down)) } finally { down.recycle() }
+        waitUntil("The older host did not save the initial pointer input") {
+            JSONObject(checkNotNull(store.tool(tool.id)).state).getInt("touches") == 1
+        }
+        click(restoreLabel)
+        waitUntil("Both visible hosts did not acknowledge their pauses") { olderPauseSnapshot.get() != null }
+        val first = checkNotNull(ownerPauseSnapshot.get())
+        val last = checkNotNull(olderPauseSnapshot.get())
+        val cancel = checkNotNull(finalCancel.get())
+        assertTrue(first.frameOwner)
+        assertFalse(last.frameOwner)
+        assertNull("Restore must wait for the older host to pause", ownerOnlyBoundary.get())
+        assertTrue(last.sessionGeneration < first.sessionGeneration)
+        assertTrue(last.sequence > first.sequence)
+        assertTrue(last.tool.stateVersion > first.tool.stateVersion)
+        assertEquals(cancel.tool, last.tool)
+        assertEquals(1, JSONObject(first.tool.state).getInt("touches"))
+        assertEquals(2, JSONObject(last.tool.state).getInt("touches"))
+        if (conflict) {
+            shown("Инструмент изменился. Открой текущую версию.")
+            waitUntil { !model.tools.busy }
+            assertEquals(last.tool, boundaryAtConflict.get())
+            assertEquals(checkNotNull(externalWrite.get()), store.tool(tool.id))
+            assertEquals(listOf(2, 1), store.revisions(tool.id).map { it.revision })
+        } else {
+            waitUntil("Restore did not finish") { !model.tools.busy && (store.tool(tool.id)?.revision == 3 || model.tools.error != null) }
+            assertNull("Restore rejected the latest acknowledged state", model.tools.error)
+            shown("v3")
+            val restored = checkNotNull(store.tool(tool.id))
+            assertEquals(last.tool.state, restored.state)
+            assertEquals("Earlier canvas", ToolSpec.storedTitle(restored.spec))
+            assertEquals("Восстановление v1", store.revisions(tool.id).first().label)
+        }
+    }
+
     /** Saved provider regressions: down/move must change state and visible paddle pixels.
      * The original JSON stays unchanged. The probe above covers observable up/cancel delivery.
      */
@@ -361,7 +606,9 @@ class MiniAppPresentationWorkflowTest {
                     repeat(node.childCount) {canvas(node.getChild(it))?.let {return it}}
                     return null
                 }
-                click("Open");shown("Pause")
+                click("Открыть");shown("Начать")
+                assertEquals("$file waits for the user to start", "ready", state().getString("status"))
+                click("Начать");shown("Пауза")
                 val bounds=Rect()
                 waitUntil {canvas()?.let {it.getBoundsInScreen(bounds);bounds.width()>0 && bounds.height()>0}==true}
                 val window=Rect().also {checkNotNull(diagnostics.freshRoot()).getBoundsInScreen(it)}
@@ -371,18 +618,18 @@ class MiniAppPresentationWorkflowTest {
                 waitUntil {canvas()?.let {it.getBoundsInScreen(bounds);(bounds.width()>bounds.height())==(orientation==android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)}==true}
                 val window=Rect().also {checkNotNull(diagnostics.freshRoot()).getBoundsInScreen(it)}
                 assertEquals("$file orientation=$orientation full-window canvas",window,bounds)
-                click("Restart");shown("Pause")
-                click("Pause");shown("Resume")
-                click("Left");waitUntil {state().getDouble("paddle")<0.49}
-                click("Right");waitUntil {kotlin.math.abs(state().getDouble("paddle")-0.5)<0.03}
-                click("App controls")
+                click("Начать заново");shown("Пауза")
+                click("Пауза");shown("Продолжить")
+                click("Влево");waitUntil {state().getDouble("paddle")<0.49}
+                click("Вправо");waitUntil {kotlin.math.abs(state().getDouble("paddle")-0.5)<0.03}
+                click("Управление мини-приложением")
                 shown(definition.getJSONObject("ui").getJSONArray("children").getJSONObject(0).getString("text")+": "+state().getString("message"))
                 waitUntil("App controls sheet did not settle") {offersExpand()}
                 screenshot(file.removeSuffix(".json")+"-$orientation-app-controls")
                 automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
-                shown("Resume")
-                click("Hide game controls")
-                shown("Show game controls")
+                shown("Продолжить")
+                click("Скрыть управление игрой")
+                shown("Показать управление игрой")
                 waitUntil("$file orientation=$orientation first-row bricks must remain unobstructed") {
                     val board=automation.takeScreenshot() ?: return@waitUntil false
                     try {
@@ -397,9 +644,9 @@ class MiniAppPresentationWorkflowTest {
                     }finally {board.recycle()}
                 }
                 screenshot(file.removeSuffix(".json")+"-$orientation-unobstructed-board")
-                click("Resume");shown("Pause");click("Hide game controls")
-                shown("Show game controls")
-                assertNull("Playback panel must retract during play",find("Hide game controls"))
+                click("Продолжить");shown("Пауза");click("Скрыть управление игрой")
+                shown("Показать управление игрой")
+                assertNull("Playback panel must retract during play",find("Скрыть управление игрой"))
                 val stem=file.removeSuffix(".json")+"-"+if(orientation==android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)"landscape" else "portrait"
                 fun visiblePaddle(label: String,expected: Double?=null): Double {
                     var center=Double.NaN
@@ -447,13 +694,13 @@ class MiniAppPresentationWorkflowTest {
                 touch(android.view.MotionEvent.ACTION_DOWN,0.6f)
                 waitUntil("CANCEL must release the consumed pointer") {kotlin.math.abs(state().getDouble("paddle")-0.6)<0.03}
                 touch(android.view.MotionEvent.ACTION_UP,0.6f)
-                click("Pause");shown("Resume")
-                click("Restart");shown("Pause")
+                click("Пауза");shown("Продолжить")
+                click("Начать заново");shown("Пауза")
                 waitUntil {state().getInt("score")==0 && state().getInt("lives")==3}
                 screenshot("$stem-controls-expanded")
                 println("SAVED_GAME_TOUCH file=$file orientation=$orientation density=${instrumentation.targetContext.resources.displayMetrics.density} fontScale=${instrumentation.targetContext.resources.configuration.fontScale} beforePx=$before downPx=$down movePx=$moved fullWindow=PASS down=PASS move=PASS upRelease=PASS cancelRelease=PASS nativeControls=PASS restart=PASS")
                 }
-                click("Exit full screen");shown("Mini-app refinement")
+                click("Выйти из полноэкранного режима");shown("Содержимое мини-приложения")
             }
         }
     }
@@ -466,16 +713,16 @@ class MiniAppPresentationWorkflowTest {
             return null
         }
         fun paddle(value: Int) {waitUntil {surface()?.contentDescription?.contains("Paddle $value ")==true}}
-        click("Open")
-        shown("Playing")
-        click("Pause")
-        shown("Paused")
-        click("Right");paddle(156)
+        click("Открыть")
+        shown("Игра идёт")
+        click("Пауза")
+        shown("Игра на паузе")
+        click("Вправо");paddle(156)
         val before=store.tool("lake")!!;assertTrue(before.stateVersion>=1)
-        ToolSpec.parse(before.spec).validateState(before.state)
+        ToolSpec.parsePersisted(before.spec).validateState(before.state)
         assertNull("Protocol 3 saves validated state without a checkpoint button",find("Save score"))
-        click("Left");paddle(128)
-        click("Resume");shown("Playing")
+        click("Влево");paddle(128)
+        click("Продолжить");shown("Игра идёт")
         val node=checkNotNull(surface());node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
         automation.waitForIdle(100,3000)
         val bounds=Rect().also {checkNotNull(surface()).getBoundsInScreen(it)}
@@ -485,7 +732,7 @@ class MiniAppPresentationWorkflowTest {
             val event=android.view.MotionEvent.obtain(now,SystemClock.uptimeMillis(),action,x,y,0)
             try {assertTrue(injectTouch(event))}finally {event.recycle()}
         }
-        paddle(48);click("Pause");shown("Paused");screenshot("graphics-touch-saved")
+        paddle(48);click("Пауза");shown("Игра на паузе");screenshot("graphics-touch-saved")
         val saved=store.tool("lake")!!
         scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
         Thread.sleep(150)
@@ -495,22 +742,22 @@ class MiniAppPresentationWorkflowTest {
         }
         assertEquals(saved.state,store.tool("lake")!!.state)
         scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
-        shown("Playing")
+        shown("Игра идёт")
         paddle(128)
-        click("Restart")
+        click("Начать заново")
         paddle(128)
         assertEquals(0,JSONObject(store.tool("lake")!!.state).getInt("score"))
         assertEquals(3,JSONObject(store.tool("lake")!!.state).getInt("lives"))
         screenshot("graphics-resumed")
         automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
         waitUntil {surface()==null}
-        shown("Mini-app library content")
+        shown("Содержимое библиотеки мини-приложений")
         assertTrue(store.effects("lake").isEmpty())
         println("GRAPHICS_NATIVE touch=PASS durableState=PASS backgroundRelease=PASS back=PASS stateVersion=${saved.stateVersion}")
     }
     @Test fun graphicsLockReleasesSessionWithoutSavingFrames() = fixture(specJson=ArkanoidFixture.spec()) {model,store,scenario ->
-        click("Open");shown("Playing")
-        click("Pause");shown("Paused")
+        click("Открыть");shown("Игра идёт")
+        click("Пауза");shown("Игра на паузе")
         val saved=store.tool("lake")!!
         val power=instrumentation.targetContext.getSystemService(android.os.PowerManager::class.java)
         try {
@@ -532,7 +779,7 @@ class MiniAppPresentationWorkflowTest {
     @Test fun graphicsForegroundSixtySecondEvidence() = fixture(specJson=ArkanoidFixture.spec()) {model,store,scenario ->
         val metrics=com.alpha.assistant.sandbox.SurfaceFrameMetrics
         val previous=metrics.snapshot()?.generation
-        click("Open")
+        click("Открыть")
         waitUntil("Missing active native frame session") {
             metrics.snapshot()?.let {it.generation!=previous && it.status=="RUNNING" && it.acceptedFrames>0}==true
         }
@@ -592,7 +839,7 @@ class MiniAppPresentationWorkflowTest {
                 }};
             """.trimIndent())
         fixture(specJson=definition.toString()) {_,store,_ ->
-            click("Open");shown("Playing")
+            click("Открыть");shown("Игра идёт")
             fun state()=JSONObject(store.tool("lake")!!.state)
             fun canvas(node: AccessibilityNodeInfo?=automation.rootInActiveWindow): AccessibilityNodeInfo? {
                 if(node==null)return null
@@ -620,11 +867,11 @@ class MiniAppPresentationWorkflowTest {
             touch(android.view.MotionEvent.ACTION_DOWN,10f,10f)
             waitUntil {state().getInt("downs")==2}
             assertEquals("back",state().getString("last"))
-            click("Pause")
+            click("Пауза")
             waitUntil {state().getInt("cancels")==1}
             touch(android.view.MotionEvent.ACTION_UP,10f,10f)
-            shown("Paused");screenshot("positioned-surfaces-paused")
-            click("Resume");shown("Playing")
+            shown("Игра на паузе");screenshot("positioned-surfaces-paused")
+            click("Продолжить");shown("Игра идёт")
             waitUntil {state().getInt("firstDt")==0 && !state().getBoolean("resumed")}
             waitUntil {com.alpha.assistant.sandbox.SurfaceFrameMetrics.snapshot()?.frameCommits?.let {it>0}==true}
             val measured=checkNotNull(com.alpha.assistant.sandbox.SurfaceFrameMetrics.snapshot())
@@ -675,7 +922,7 @@ class MiniAppPresentationWorkflowTest {
                 return {state:input.state};
             """.trimIndent())
         fixture(specJson=definition.toString()) {model,store,scenario ->
-            click("Open"); shown("Turns"); shown("0"); screenshot("compose-families-initial")
+            click("Открыть"); shown("Turns"); shown("0"); screenshot("compose-families-initial")
             click("Turn layer")
             waitUntil {JSONObject(store.tool("lake")!!.state).getInt("tick")==1 && !model.tools.busy}
             shown("Turns"); shown("1"); screenshot("compose-families-turned")
@@ -693,7 +940,7 @@ class MiniAppPresentationWorkflowTest {
             shown("Details selected"); screenshot("compose-families-details")
             click("Select row")
             waitUntil {JSONObject(store.tool("lake")!!.state).getJSONArray("rows").getJSONObject(0).getBoolean("selected") && !model.tools.busy}
-            edit("Row amount","4"); click("Apply: Row amount")
+            edit("Row amount","4"); click("Применить: Row amount")
             waitUntil {JSONObject(store.tool("lake")!!.state).getJSONArray("rows").getJSONObject(0).getInt("amount")==4 && !model.tools.busy}
             shown("Native timeline"); shown("10:00"); screenshot("compose-families-timeline")
             scenario.onActivity {it.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE}
@@ -716,47 +963,114 @@ class MiniAppPresentationWorkflowTest {
         }
     }
 
-    @Test fun chatSummaryOpensFocusedAppWithPersistentComposer() = fixture {model,store,scenario ->
-        shown("Lake day"); shown("Open"); shown("Refine")
-        assertNull("Chat must not render rows or image nodes",find("Day plan"))
-        assertEquals(1,store.tool("lake")!!.stateVersion)
-        screenshot("chat-summary")
-        click("Refine")
-        shown("Day plan"); shown("Refine this mini-app")
-        assertNull("Focused app owns its top bar", find("Меню"))
-        assertNull("Focused app has no shell new-chat action", find(instrumentation.targetContext.getString(R.string.new_chat)))
-        assertNull(find("История версий"))
-        edit("Refine this mini-app","Keep my request")
-        val before=Rect().also {shown("Preview changes").getBoundsInScreen(it)}
-        screenshot("composer-keyboard")
-        scenario.recreate()
-        shown("Refine this mini-app")
-        val composer=find("Keep my request")
-        assertNotNull("Composer text survives recreation",composer)
-        // The long itinerary scrolls independently. The composer stays outside that viewport.
-        fun scroll(node: AccessibilityNodeInfo?): Boolean {
-            if(node == null) return false
-            if(node.isScrollable && node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) return true
-            repeat(node.childCount) {if(scroll(node.getChild(it))) return true}
-            return false
+    @Test fun liveChatCardSharesStateWithFullViewAndAnotherChat() {
+        val definition=JSONObject(ItineraryFixture.spec())
+            .put("stateSchema",JSONObject("""{"packed":"boolean","count":"number"}"""))
+            .put("initialState",JSONObject("""{"packed":false,"count":0}"""))
+            .put("ui",JSONObject("""{"type":"column","children":[
+                {"type":"checkbox","text":"Bag packed","bind":"packed","action":"pack"},
+                {"type":"button","text":"Add a stop","action":"add"},
+                {"type":"text","text":"Stops","bind":"count"}
+            ]}"""))
+            .put("source","""
+                if(input.event.actionId==='pack') input.state.packed=input.event.value;
+                if(input.event.actionId==='add') input.state.count++;
+                return {state:input.state};
+            """.trimIndent())
+        fixture(specJson=definition.toString(),secondReference=true) {model,store,scenario ->
+            val robot=ShellRobot("presentation")
+            fun state()=JSONObject(checkNotNull(store.tool("lake")).state)
+            shown("Lake day"); shown("v1")
+            click("Bag packed")
+            waitUntil {state().getBoolean("packed")}
+            click("Add a stop"); waitUntil {state().getInt("count")==1}
+            shown("Stops: 1"); screenshot("live-chat-card")
+            val composer=instrumentation.targetContext.getString(R.string.composer_label)
+            edit(composer,"Keep my ordinary draft")
+            click("Открыть")
+            shown("Содержимое мини-приложения"); shown("Stops: 1")
+            click("Add a stop"); waitUntil {state().getInt("count")==2}
+            click("Изменить")
+            waitUntil {model.snapshot.selected?.refinementTargetId == "lake" && model.snapshot.draft.text.isEmpty()}
+            shown(composer)
+            assertEquals("Keep my ordinary draft",model.snapshot.selected?.draft?.text)
+            shown("Stops: 2")
+            robot.openDrawer(scenario); click("Second discussion"); robot.awaitDrawerClosed(scenario)
+            waitUntil {model.snapshot.selectedId == "other"}; shown("Stops: 2")
+            click("Add a stop"); waitUntil {state().getInt("count")==3}
+            scenario.recreate()
+            waitUntil {model.snapshot.selectedId == "other"}; shown("Stops: 3")
+            click("Открыть"); shown("Содержимое мини-приложения"); shown("Stops: 3")
+            assertTrue(state().getBoolean("packed"))
+            screenshot("shared-live-card-reopened")
         }
-        repeat(5) {scroll(automation.rootInActiveWindow); automation.waitForIdle(100,3000)}
-        shown("Preview changes")
-        screenshot("long-itinerary")
-        assertEquals("lake",model.tools.selectedId)
+    }
+    @Test fun embeddedDialogsKeepChatLibraryAndDraftControlsAvailable() {
+        val definition=JSONObject(ItineraryFixture.spec())
+            .put("stateSchema",JSONObject("""{"dialog":"boolean"}"""))
+            .put("initialState",JSONObject("""{"dialog":true}"""))
+            .put("ui",JSONObject("""{"type":"column","children":[
+                {"type":"dialog","text":"Review embedded choice","visibleBind":"dialog","dismissAction":"dismiss",
+                 "children":[{"type":"text","text":"The preview keeps the host controls available."}]}
+            ]}"""))
+            .put("source","if(input.event.actionId==='dismiss') input.state.dialog=false; return {state:input.state};")
+            .toString()
+        fixture(candidate=true,specJson=definition,candidateJson=definition,repeatInChat=true) {model,store,scenario ->
+            val robot=ShellRobot("presentation")
+            val app=instrumentation.targetContext
+            shown("Review embedded choice")
+            shown("Закрыть: Review embedded choice")
+            shown(app.getString(R.string.composer_label))
+            robot.openDrawer(scenario);click(app.getString(R.string.mini_apps));robot.awaitDrawerClosed(scenario)
+            shown("Lake day")
+            assertNull("Thumbnail contents are absent from accessibility",find("Review embedded choice"))
+            click("Make the day shorter")
+            shown("Предпросмотр · управление станет доступно после сохранения")
+            shown("Применить изменения");screenshot("embedded-dialog-preview")
+            click("Удалить предпросмотр")
+            click("Закрыть: Review embedded choice")
+            waitUntil { !JSONObject(checkNotNull(store.tool("lake")).state).getBoolean("dialog") && !model.tools.busy }
+        }
+    }
+    @Test fun composerQueuesWhileBusyAndCancelsTheSelectedRequest() {
+        val calls=AtomicInteger()
+        val provider=object : ChatProvider {
+            override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
+                calls.incrementAndGet()
+                awaitCancellation()
+            }
+        }
+        fixture(provider=provider) { model,_,_ ->
+            val app=instrumentation.targetContext
+            val composer=app.getString(R.string.composer_label)
+            val send=app.getString(R.string.composer_send)
+            fun status()=model.snapshot.selected!!.messages.filter { it.replyTo != null }.map { it.status }
+            edit(composer,"Hold first request");click(send)
+            waitUntil {calls.get()==1 && status()==listOf("streaming")}
+            edit(composer,"Queue second request");click(send)
+            waitUntil {status()==listOf("streaming","queued")}
+            shown(app.getString(R.string.chat_request_queued))
+            click(app.getString(R.string.chat_cancel_queued))
+            waitUntil {status()==listOf("streaming","cancelled")}
+            assertEquals(1,calls.get())
+            click(app.getString(R.string.composer_stop))
+            waitUntil {status()==listOf("cancelled","cancelled") && model.activeConversationId==null}
+            assertEquals(1,calls.get())
+        }
     }
     @Test fun quickBackAfterChatMenuLeavesTheChat() = fixture {model,_,scenario ->
         val robot=ShellRobot("presentation")
         instrumentation.runOnMainSync {model.openSurface("lake")}
         waitUntil {!model.tools.busy}
-        shown("Mini-app content")
+        shown("Содержимое мини-приложения")
         // Only the Chat entry shows this message. The push fade to MiniApps ends first.
         robot.waitUntil {!robot.composedText(scenario,"Your day plan is ready.")}
-        click("Mini-app options")
-        var chat: AccessibilityNodeInfo?=shown("Chat")
+        click("Действия мини-приложения")
+        val chatLabel = robot.text(R.string.tool_chat)
+        var chat: AccessibilityNodeInfo?=shown(chatLabel)
         while(chat?.isClickable == false) chat=chat.parent
         // No idle wait, so the pop fade still runs at the Back.
-        assertTrue("Click Chat",diagnostics.click("Chat",chat))
+        assertTrue("Click Chat",diagnostics.click(chatLabel,chat))
         robot.waitUntil {robot.composedText(scenario,"Your day plan is ready.")}
         // The closing menu window gets a Back while it has the window focus.
         waitUntil { var focus = false; scenario.onActivity { focus = it.window.decorView.hasWindowFocus() }; focus }
@@ -767,11 +1081,12 @@ class MiniAppPresentationWorkflowTest {
         instrumentation.runOnMainSync {model.tools.selectDraft("candidate"); model.openSurface("lake")}
         waitUntil {!model.tools.busy}
         instrumentation.runOnMainSync {model.tools.selectDraft("candidate")}
-        shown("Preview · controls are disabled"); shown("Apply changes"); shown("Discard preview")
+        shown("Предпросмотр · управление станет доступно после сохранения"); shown("Применить изменения"); shown("Удалить предпросмотр")
         screenshot("candidate-preview")
         assertEquals(1,store.tool("lake")!!.revision)
-        click("Discard preview")
-        shown("Lake day"); shown("Refine this mini-app")
+        click("Удалить предпросмотр")
+        shown("Lake day"); shown("Изменить")
+        assertNull(find("Опишите изменения"))
         assertEquals("lake",model.tools.selectedId); assertNull(store.draft("candidate"))
         assertEquals(1,store.tool("lake")!!.revision)
     }
@@ -779,17 +1094,19 @@ class MiniAppPresentationWorkflowTest {
         instrumentation.runOnMainSync {model.openSurface("lake")}
         waitUntil {!model.tools.busy}
         instrumentation.runOnMainSync {model.tools.selectDraft("candidate")}
-        click("Apply changes")
+        click("Применить изменения")
         waitUntil {!model.tools.busy && store.tool("lake")!!.revision == 2}
-        shown("Revised lake day"); shown("Refine this mini-app")
+        shown("Revised lake day"); shown("Изменить")
+        assertNull(find("Опишите изменения"))
         assertNull(store.draft("candidate"))
         screenshot("accepted-refinement")
     }
-    @Test fun cancelThenErrorThenRetryPreservesAppAndComposer() {
+    @Test fun cancelThenErrorThenRetryPreservesAppAndPendingDraft() {
         val calls=AtomicInteger()
         val provider=object: ChatProvider {
             override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
                 check(request.jsonObject)
+                if (request.replyWithFixturePlan(emit)) return
                 when(calls.incrementAndGet()) {
                     1 -> awaitCancellation()
                     2 -> throw CloudFailure("fixture_failure","Offline refinement fixture")
@@ -797,27 +1114,33 @@ class MiniAppPresentationWorkflowTest {
                 }
             }
         }
-        fixture(provider=provider) {model,store,_ ->
-            click("Open")
+        val prompt = "Keep the lake walk"
+        fixture(provider=provider, pendingPrompt=prompt) {model,store,_ ->
+            click("Открыть")
             val original=store.tool("lake")!!
-            edit("Refine this mini-app","Keep the lake walk")
-            click("Preview changes")
+            click(instrumentation.targetContext.getString(R.string.tool_library_back))
+            click(prompt)
+            shown(prompt)
+            assertNull(find("Опишите изменения"))
+            click("Повторить предпросмотр")
             waitUntil {calls.get() == 1}
-            shown("Lake day"); click("Cancel")
+            shown("Lake day"); click(instrumentation.targetContext.getString(R.string.cancel))
             waitUntil {!model.tools.busy}
             assertEquals(original,store.tool("lake")); assertEquals("lake",model.tools.selectedId)
-            shown("Keep the lake walk"); shown("Retry preview")
+            shown(prompt); shown("Повторить предпросмотр")
+            assertEquals(prompt,store.draft("candidate")?.prompt)
             screenshot("cancel-preserves-app")
-            click("Retry preview")
+            click("Повторить предпросмотр")
             waitUntil {!model.tools.busy && model.tools.error != null}
-            shown("Offline refinement fixture"); shown("Keep the lake walk")
+            shown("Offline refinement fixture"); shown(prompt)
             assertEquals(original,store.tool("lake"))
             screenshot("refinement-error")
-            click("Retry preview")
-            shown("Preview · controls are disabled"); shown("Recovered lake day")
+            click("Повторить предпросмотр")
+            shown("Предпросмотр · управление станет доступно после сохранения"); shown("Recovered lake day")
             assertEquals(original,store.tool("lake")); assertEquals(3,calls.get())
-            click("Discard preview")
-            shown("Lake day"); shown("Keep the lake walk")
+            click("Удалить предпросмотр")
+            shown("Lake day")
+            assertNull(store.draft("candidate"))
             assertEquals(original,store.tool("lake"))
         }
     }
@@ -825,18 +1148,18 @@ class MiniAppPresentationWorkflowTest {
         instrumentation.runOnMainSync {model.openSurface("lake")}
         waitUntil {!model.tools.busy}
         instrumentation.runOnMainSync {model.tools.selectDraft("candidate")}
-        shown("Apply changes")
+        shown("Применить изменения")
         val old=store.tool("lake")!!
         val nextState=JSONObject(old.state).apply {getJSONArray("stops").getJSONObject(0).put("detail","Concurrent saved edit")}
         val changed=old.copy(stateVersion=old.stateVersion+1,state=nextState.toString())
         store.commitTool(changed,old,false)
-        click("Apply changes")
+        click("Применить изменения")
         waitUntil {!model.tools.busy && model.tools.error != null}
         shown("Инструмент изменился. Открой текущую версию.")
         assertEquals(changed,store.tool("lake")); assertNotNull(store.draft("candidate"))
-        shown("Apply changes"); shown("Discard preview")
+        shown("Применить изменения"); shown("Удалить предпросмотр")
         screenshot("stale-apply-rejected")
-        click("Discard preview")
+        click("Удалить предпросмотр")
         shown("Lake day"); assertEquals(changed,store.tool("lake"))
     }
     @Test fun twoButtonsOnOneStopCreateDistinctCorrectNativeRequests() {
@@ -852,23 +1175,45 @@ class MiniAppPresentationWorkflowTest {
                 }
                 return {state:input.state};
             """.trimIndent())
-        fixture(specJson=definition.toString()) {model,store,_ ->
-            click("Open")
-            click("Search maps")
-            waitUntil {store.effects("lake").size == 1 && !model.tools.busy}
-            val map=store.effects("lake").single()
-            assertEquals("maps.open",map.request.capability)
-            assertEquals("Stop 1",map.request.args.getString("query")); assertEquals("pending",map.phase)
-            click("Open calendar form")
-            waitUntil {store.effects("lake").size == 2 && !model.tools.busy}
-            val calendar=store.effects("lake").last()
-            assertEquals("calendar.create",calendar.request.capability)
-            assertEquals("Stop 1",calendar.request.args.getString("title"))
-            assertEquals("Walk by the lake for 20 minutes",calendar.request.args.getString("location"))
-            assertEquals(1800000000000,calendar.request.args.getLong("start"))
-            assertNotEquals(map.key,calendar.key); assertEquals("pending",calendar.phase)
-            assertEquals(1,store.tool("lake")!!.revision)
-            screenshot("distinct-stop-requests")
+        val launches = java.util.concurrent.CopyOnWriteArrayList<Intent>()
+        val monitor = object : Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? {
+                val map = intent.action == Intent.ACTION_VIEW && intent.scheme == "geo"
+                val calendar = intent.action == Intent.ACTION_INSERT && intent.data == CalendarContract.Events.CONTENT_URI
+                if (!map && !calendar) return null
+                launches.add(Intent(intent))
+                return Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null)
+            }
+        }
+        instrumentation.addMonitor(monitor)
+        try {
+            fixture(specJson=definition.toString()) {model,store,_ ->
+                click("Открыть")
+                click("Search maps")
+                waitUntil {store.effects("lake").size == 1 && !model.tools.busy}
+                val map=store.effects("lake").single()
+                assertEquals("maps.open",map.request.capability)
+                assertEquals("Stop 1",map.request.args.getString("query"))
+                assertEquals("launched",map.result.status)
+                assertEquals("geo:0,0?q=Stop%201", launches.single().dataString)
+                click("Open calendar form")
+                waitUntil {store.effects("lake").size == 2 && !model.tools.busy}
+                val calendar=store.effects("lake").last()
+                assertEquals("calendar.create",calendar.request.capability)
+                assertEquals("Stop 1",calendar.request.args.getString("title"))
+                assertEquals("Walk by the lake for 20 minutes",calendar.request.args.getString("location"))
+                assertEquals(1800000000000,calendar.request.args.getLong("start"))
+                assertNotEquals(map.key,calendar.key)
+                assertEquals("launched",calendar.result.status)
+                assertEquals(2, launches.size)
+                val calendarIntent = launches.last()
+                assertEquals("Stop 1", calendarIntent.getStringExtra(CalendarContract.Events.TITLE))
+                assertEquals(1800000000000L, calendarIntent.getLongExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, -1))
+                assertEquals(1,store.tool("lake")!!.revision)
+                screenshot("distinct-stop-requests")
+            }
+        } finally {
+            instrumentation.removeMonitor(monitor)
         }
     }
 

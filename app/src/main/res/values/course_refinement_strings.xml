@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="course_refinement_open">Изменить план</string>
+    <string name="course_refinement_unavailable">Изменение плана сейчас недоступно.</string>
+    <string name="course_refinement_instruction">Что изменить в плане?</string>
+    <string name="course_refinement_request">Запросить новый план</string>
+    <string name="course_refinement_waiting">Готовим новый план…</string>
+    <string name="course_refinement_review">Проверьте новый план</string>
+    <string name="course_refinement_apply">Применить изменения</string>
+    <string name="course_refinement_saving">Сохраняем изменения…</string>
+    <string name="course_refinement_cancel">Отмена</string>
+    <string name="course_refinement_request_failed">Не удалось подготовить новый план. Можно повторить запрос.</string>
+    <string name="course_refinement_apply_failed">Не удалось сохранить изменения.</string>
+    <string name="course_refinement_stale">План изменился. Откройте актуальный план курса и повторите запрос.</string>
+    <string name="course_refinement_protected">Изменения затрагивают пройденную часть курса.</string>
+</resources>

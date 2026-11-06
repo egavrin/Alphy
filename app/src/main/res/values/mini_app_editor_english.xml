@@ -1,0 +1,12 @@
+<resources>
+    <string name="tool_generated_apply_en">Apply: %1$s</string>
+    <string name="tool_generated_search_en">Search: %1$s</string>
+    <string name="tool_generated_remove_en">Remove: %1$s</string>
+    <string name="tool_number_increase_en">Increase: %1$s</string>
+    <string name="tool_number_decrease_en">Decrease: %1$s</string>
+    <string name="tool_live_input_finish_en">Finish editing: %1$s</string>
+    <string name="tool_live_input_pending_en">Saving changes</string>
+    <string name="tool_live_input_unsaved_en">Changes are unsaved</string>
+    <string name="tool_live_input_unavailable_en">Open the mini-app to edit</string>
+    <string name="tool_live_input_finish_first_en">Finish editing and wait for your changes to save</string>
+</resources>

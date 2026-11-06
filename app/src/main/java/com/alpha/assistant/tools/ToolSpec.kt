@@ -1,6 +1,9 @@
 package com.alpha.assistant.tools
 
 import com.alpha.assistant.sandbox.SandboxContract
+import com.alpha.assistant.tools.generation.NativePresentation
+import com.alpha.assistant.tools.generation.PartsContractFailure
+import com.alpha.assistant.tools.generation.ToolComposition
 import org.json.JSONObject
 
 internal enum class ToolValidationCategory(val id: String, val guidance: String) {
@@ -15,7 +18,9 @@ internal enum class ToolValidationCategory(val id: String, val guidance: String)
     UI_STRUCTURE("tool_ui_structure", "Use the native UI catalog. Keep UI within 256 nodes, depth 8, 50 children per container, and 32768 bytes."),
     UI_PROPERTIES("tool_ui_properties", "Remove unsupported properties. Use only the documented catalog properties and finite style values. visible and enabled must be booleans."),
     UI_BINDINGS("tool_ui_bindings", "Use declared dotted object paths with the documented type. Paths must exist in both schema and state. Never use array indices or prototype access."),
-    UI_ACTIONS("tool_ui_actions", "Use a unique action ID for each actionable control. IDs must start with an ASCII letter and contain at most 48 letters, digits, or underscores.");
+    UI_ACTIONS("tool_ui_actions", "Use a unique action ID for each actionable control. IDs must start with an ASCII letter and contain at most 48 letters, digits, or underscores."),
+    COMPOSITION("tool_composition", "Keep the host-owned parts in their fixed positions. Use only fill-owned state, actions, and surfaces in generated fill."),
+    NATIVE_PRESENTATION("tool_native_presentation", "Keep the existing focal slot structure, its position, and its action.");
 
     val feedback get() = "Validation category: $id. $guidance"
 }
@@ -31,9 +36,30 @@ internal fun <T> validateTool(category: ToolValidationCategory, details: ToolVal
         throw ToolValidationFailure(category,details)
     }
 
+private fun <T> validateHostMetadata(category: ToolValidationCategory, rule: String, block: () -> T): T = validateTool(category) {
+    try {
+        block()
+    } catch (failure: PartsContractFailure) {
+        throw ToolValidationFailure(category, ToolValidationDetails(rule,failure.path,failure.expected,"invalid host metadata"))
+    }
+}
+
+private fun <T> validateComposition(block: () -> T): T =
+    validateHostMetadata(ToolValidationCategory.COMPOSITION,"composition",block)
+
+private fun <T> validateNativePresentation(block: () -> T): T =
+    validateHostMetadata(ToolValidationCategory.NATIVE_PRESENTATION,"nativePresentation",block)
+
 /** Generated data describes native controls. Generated code never runs in the host process. */
-data class ToolSpec(val json: String, val title: String, val description: String, val source: String,
-    val schema: JSONObject, val initialState: String, val ui: JSONObject, val capabilities: Set<String>, val capabilityResults: Boolean = false, val collections: JSONObject = JSONObject(), val surfaces: Map<String,ToolSurface> = emptyMap(), val presentation: String = "app") {
+@ConsistentCopyVisibility
+data class ToolSpec private constructor(val json: String, val title: String, val description: String, val source: String,
+    val schema: JSONObject, val initialState: String, val ui: JSONObject, val capabilities: Set<String>, val capabilityResults: Boolean,
+    val collections: JSONObject, val surfaces: Map<String,ToolSurface>, val presentation: String,
+    internal val composition: ToolComposition?, internal val nativePresentation: NativePresentation?,
+    internal val appLanguage: String?) {
+    internal val isSealedStandalone: Boolean get() = composition?.isSealedStandalone == true
+    internal val canQueueLocalButtons: Boolean get() = capabilities.isEmpty() && collections.length() == 0 && surfaces.isEmpty()
+
     fun validateState(value: String): JSONObject {
         require(value.toByteArray().size <= 49152) { "Данные инструмента превышают 48 КиБ" }
         val state = SandboxContract.objectFrom(value)
@@ -45,17 +71,54 @@ data class ToolSpec(val json: String, val title: String, val description: String
     internal fun validateUi(root: JSONObject,state: JSONObject,stage: ToolUiValidationStage,observer: ((ToolUiDiagnostic)->Unit)?): JSONObject {
         val trace=ToolUiValidationTrace(stage,observer)
         return try {
-            validateTool(ToolValidationCategory.UI_STRUCTURE) {ToolUiCatalog.validate(root,schema,state,trace)}
+            val catalogRoot = composition?.let { validateComposition { it.catalogUi(root,state) } } ?: root
+            validateTool(ToolValidationCategory.UI_STRUCTURE) {ToolUiCatalog.validate(catalogRoot,schema,state,trace,capabilities)}
+            nativePresentation?.let { validateNativePresentation { it.focalNode(root) } }
+            root
         } catch(failure: ToolValidationFailure) {
             throw ToolValidationFailure(failure.category,failure.details,trace.failure(failure.category))
         }
     }
     fun action(ui: JSONObject, id: String): JSONObject? = ToolUiCatalog.action(ui,id)
+
+    internal fun providerDefinition(): String {
+        if (composition == null && nativePresentation == null && appLanguage == null) return json
+        val definition = composition?.fillDefinition(this) ?: JSONObject(json).apply { remove(NativePresentation.FIELD) }
+        definition.remove(APP_LANGUAGE_FIELD)
+        return definition.toString()
+    }
+
+    internal fun withAppLanguage(tag: String?): ToolSpec {
+        if (tag == null || tag == appLanguage) return this
+        require(appLanguageTag.matches(tag))
+        val encoded = JSONObject(json).put(APP_LANGUAGE_FIELD, tag).toString()
+        validateTool(ToolValidationCategory.JSON, ToolValidationDetails("definition_size", "$",
+            "at most 65536 bytes including native presentation metadata", "oversized definition")) {
+            require(encoded.toByteArray(Charsets.UTF_8).size <= SandboxContract.MAX_BYTES)
+        }
+        return copy(json = encoded, appLanguage = tag)
+    }
+
+    internal fun preserveNativePresentation(candidate: ToolSpec, observer: ((ToolUiDiagnostic) -> Unit)? = null): ToolSpec {
+        require(candidate.nativePresentation == null)
+        val recipe = nativePresentation ?: return candidate
+        validateNativePresentation { recipe.focalNode(candidate.ui) }
+        val definition = JSONObject(candidate.json).put(NativePresentation.FIELD, recipe.json())
+        return parsePersisted(definition.toString(),observer)
+    }
+
     companion object {
+        private const val APP_LANGUAGE_FIELD = "appLanguage"
+        private val appLanguageTag = Regex("[a-z]{2,3}")
+
         fun available(raw: String): ToolSpec? = try {parse(raw)} catch(_: IllegalArgumentException) {null} catch(_: IllegalStateException) {null} catch(_: org.json.JSONException) {null}
+        /** Only app-owned records may contain a host composition manifest. */
+        internal fun availablePersisted(raw: String): ToolSpec? = try {parsePersisted(raw)} catch(_: IllegalArgumentException) {null} catch(_: IllegalStateException) {null} catch(_: org.json.JSONException) {null}
         fun storedTitle(raw: String): String = runCatching {JSONObject(raw).optString("title").take(100).ifBlank {"Unavailable mini-app"}}.getOrDefault("Unavailable mini-app")
         /** Refinements may add fields, but cannot remove, retype, or reset stored values. */
         fun stateForRevision(previous: ToolSpec, next: ToolSpec, raw: String): String {
+            requireSameComposition(previous,next)
+            requireSameNativePresentation(previous,next)
             val state = previous.validateState(raw)
             previous.schema.keys().forEach { key ->
                 require(next.schema.has(key) && ToolValueSchema.same(previous.schema.get(key),next.schema.get(key))) { "Несовместимая схема данных: $key. Сохранённые данные не изменены." }
@@ -67,13 +130,46 @@ data class ToolSpec(val json: String, val title: String, val description: String
             next.schema.keys().forEach { key -> if(!state.has(key)) state.put(key,initial.get(key)) }
             return next.validateState(state.toString()).toString()
         }
+        fun forRestore(current: ToolSpec,previous: ToolSpec): ToolSpec {
+            requireSameComposition(current,previous)
+            requireSameNativePresentation(current,previous)
+            val definition=JSONObject(previous.json)
+                .put("stateSchema",current.schema)
+                .put("initialState",JSONObject(current.initialState))
+            if(current.collections.length()>0) definition.put("collections",current.collections)
+            else definition.remove("collections")
+            return parsePersisted(definition.toString())
+        }
+        private fun requireSameComposition(previous: ToolSpec,next: ToolSpec) = validateComposition {
+            val composition = previous.composition
+            if (composition == null) require(next.composition == null)
+            else composition.requireSameOwnership(next.composition)
+        }
+
+        private fun requireSameNativePresentation(previous: ToolSpec,next: ToolSpec) = validateNativePresentation {
+            val recipe = previous.nativePresentation
+            if (recipe == null) require(next.nativePresentation == null)
+            else {
+                require(recipe.sameSelection(next.nativePresentation))
+                recipe.focalNode(next.ui)
+            }
+        }
+
+        /** Parse provider, import, or manual edit input. This boundary rejects host metadata. */
         fun parse(raw: String): ToolSpec = parse(raw,null)
-        internal fun parse(raw: String,observer: ((ToolUiDiagnostic)->Unit)?): ToolSpec {
+        internal fun parse(raw: String,observer: ((ToolUiDiagnostic)->Unit)?): ToolSpec = parse(raw,observer,false)
+
+        /** Parse host-created artifacts from app-owned storage or a host builder. */
+        internal fun parsePersisted(raw: String,observer: ((ToolUiDiagnostic)->Unit)? = null): ToolSpec = parse(raw,observer,true)
+
+        private fun parse(raw: String,observer: ((ToolUiDiagnostic)->Unit)?,persisted: Boolean): ToolSpec {
             val j = validateTool(ToolValidationCategory.JSON) { SandboxContract.objectFrom(raw) }
             validateTool(ToolValidationCategory.FIELDS) {
                 val required = setOf("formatVersion", "title", "description", "capabilities", "stateSchema", "initialState", "ui", "source")
                 val fields = j.keys().asSequence().toSet()
-                require(fields.containsAll(required) && fields.all { it in required || it in setOf("capabilityResults","collections","surfaces","presentation") })
+                val optional = setOf("capabilityResults","collections","surfaces","presentation") +
+                    (if (persisted) setOf("composition",NativePresentation.FIELD,APP_LANGUAGE_FIELD) else emptySet())
+                require(fields.containsAll(required) && fields.all { it in required || it in optional })
                 require(!j.has("capabilityResults") || j.get("capabilityResults") is Boolean) { "Неверные поля инструмента" }
             }
             validateTool(ToolValidationCategory.VERSION) { require(j.get("formatVersion") is Int && j.getInt("formatVersion") == 3) }
@@ -109,6 +205,11 @@ data class ToolSpec(val json: String, val title: String, val description: String
                     it.getString("mode")
                 } else "app"
             }
+            val appLanguage = validateTool(ToolValidationCategory.METADATA) {
+                if (j.has(APP_LANGUAGE_FIELD)) (j.get(APP_LANGUAGE_FIELD) as String).also {
+                    require(appLanguageTag.matches(it))
+                } else null
+            }
             val initialState = validateTool(ToolValidationCategory.INITIAL_STATE) { j.getJSONObject("initialState").toString() }
             val ui = try {validateTool(ToolValidationCategory.UI_STRUCTURE) { j.getJSONObject("ui") }}
                 catch(failure: ToolValidationFailure) {
@@ -116,8 +217,16 @@ data class ToolSpec(val json: String, val title: String, val description: String
                     trace.at("ui_object","$.ui","object",j.opt("ui"))
                     throw ToolValidationFailure(failure.category,failure.details,trace.failure(failure.category))
                 }
+            val composition = if (j.has("composition")) validateComposition {
+                ToolComposition.read(j,schema,JSONObject(initialState),surfaces.keys)
+            } else null
+            val nativePresentation = if (j.has(NativePresentation.FIELD)) validateNativePresentation {
+                NativePresentation.parse(j.getJSONObject(NativePresentation.FIELD),ui).also {
+                    composition?.requireNativePresentation(it)
+                }
+            } else null
             return ToolSpec(j.toString(), j.getString("title"), j.getString("description"), source, schema,
-                initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surfaces,presentation).also {
+                initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surfaces,presentation,composition,nativePresentation,appLanguage).also {
                 validateTool(ToolValidationCategory.INITIAL_STATE) { it.validateState(it.initialState) }
                 it.validateUi(it.ui,JSONObject(it.initialState),ToolUiValidationStage.DEFINITION,observer)
             }

@@ -34,6 +34,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.alpha.assistant.R
+import com.alpha.assistant.network.ui.MiniAppNetworkAccessHost
+import com.alpha.assistant.network.ui.MiniAppNetworkAccessSection
 import com.alpha.assistant.ui.Glyph
 import com.alpha.assistant.ui.PoliteLiveRegion
 import com.alpha.assistant.ui.StatusLine
@@ -91,20 +93,22 @@ private fun Context.activity(): Activity? = when (this) {
 }
 
 /** «Доступ и функции». The top bar shows the title, so the page has none. */
-@Composable fun AccessPane() {
+@Composable internal fun AccessSettings(network: MiniAppNetworkAccessHost?) {
     val context = LocalContext.current
     var openFailed by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        AndroidAccessOverview()
-        Text(stringResource(R.string.access_note))
-        OutlinedButton(onClick = {
-            openFailed = try {
-                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))); false
-            } catch (_: ActivityNotFoundException) { true }
-        }) { Text(stringResource(R.string.access_system_settings), textAlign = TextAlign.Center) }
-        if (openFailed) StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.access_app_settings_failed), PoliteLiveRegion)
-    }
+    AndroidAccessOverview()
+    com.alpha.assistant.automations.AutomationDeviceSettings()
+    MiniAppNetworkAccessSection(network)
+    HorizontalDivider()
+    Text(stringResource(R.string.access_note))
+    OutlinedButton(onClick = {
+        openFailed = try {
+            context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))); false
+        } catch (_: ActivityNotFoundException) { true }
+    }) { Text(stringResource(R.string.access_system_settings), textAlign = TextAlign.Center) }
+    if (openFailed) StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.access_app_settings_failed), PoliteLiveRegion)
 }
+
 
 /** The access rows, emitted into the column of the caller. */
 @Composable fun AndroidAccessOverview() {
@@ -129,6 +133,9 @@ private fun Context.activity(): Activity? = when (this) {
     val locationHardware = context.packageManager.hasSystemFeature(PackageManager.FEATURE_LOCATION)
     Text(stringResource(R.string.access_intro))
     AndroidPermissionControl(stringResource(R.string.access_microphone), listOf(Manifest.permission.RECORD_AUDIO), PackageManager.FEATURE_MICROPHONE)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.CINNAMON_BUN) {
+        AndroidPermissionControl(stringResource(R.string.access_local_network), listOf(Manifest.permission.ACCESS_LOCAL_NETWORK))
+    }
     AndroidPermissionControl(stringResource(R.string.access_location), listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION), PackageManager.FEATURE_LOCATION, onChanged = { refresh++ })
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(stringResource(R.string.access_background_title), Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)

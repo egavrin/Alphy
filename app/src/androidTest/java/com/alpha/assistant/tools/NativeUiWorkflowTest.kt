@@ -312,8 +312,9 @@ class NativeUiWorkflowTest {
             val provider=object: ChatProvider {
                 override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
                     requests.add(request)
+                    if (request.replyWithFixturePlan(emit)) return
                     if(cancel) throw CancellationException("SECRET_CANCEL")
-                    emit(CloudEvent.Text(outputs[requests.lastIndex]))
+                    emit(CloudEvent.Text(outputs[requests.size - 2]))
                 }
             }
             val service=if(observer == null) ToolGenerationService(provider,SandboxClient(context)) else ToolGenerationService(provider,SandboxClient(context),observer)
@@ -328,13 +329,13 @@ class NativeUiWorkflowTest {
             val ordinary=run(outputs,null)
             assertEquals(ordinary,run(outputs,diagnostics::add))
             assertEquals(ordinary,run(outputs,observer={throw IllegalStateException("SECRET_OBSERVER")}))
-            assertEquals(if(outputs.first() == valid) 1 else 2,ordinary.first.size)
+            assertEquals(if(outputs.first() == valid) 2 else 3,ordinary.first.size)
             assertFalse(diagnostics.toString().contains("SECRET_"))
             if(outputs.first() == previewInvalid) assertEquals(ToolUiValidationStage.PREVIEW,diagnostics.first().stage)
-            if(ordinary.first.size == 2) {
-                val correction=ordinary.first[1].turns.last().text
+            if(ordinary.first.size == 3) {
+                val correction=ordinary.first.last().turns.last().text
                 val diagnostic=diagnostics.first()
-                assertEquals(outputs.first(),ordinary.first[1].turns[1].text)
+                assertEquals(outputs.first(),ordinary.first.last().turns[1].text)
                 assertTrue(correction.contains("UI rule: ${diagnostic.rule}."))
                 assertTrue(correction.contains("Path: ${diagnostic.path}."))
                 assertTrue(correction.contains("Expected: ${diagnostic.expected}."))

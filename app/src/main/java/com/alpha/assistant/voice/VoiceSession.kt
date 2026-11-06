@@ -7,8 +7,10 @@ import android.media.*
 import androidx.compose.runtime.*
 import com.alpha.assistant.R
 import com.offlineassistant.app.voice.AudioTranscriber
+import com.offlineassistant.app.voice.AudioTranscription
 import com.offlineassistant.app.speech.SileroSpeechSynthesizer
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import java.util.concurrent.Executors
 import kotlin.math.sqrt
 
@@ -18,7 +20,8 @@ class VoiceSession internal constructor(
     private val scope: CoroutineScope,
     private val transcript: (String) -> Unit,
     private val prepareModels: ((Boolean) -> Unit)? = null,
-    private val captureAudio: (suspend () -> com.offlineassistant.app.voice.AudioTranscription)? = null
+    private val captureAudio: (suspend () -> AudioTranscription)? = null,
+    private val capturePcmForTest: (suspend (suspend (ShortArray) -> Unit) -> Boolean)? = null,
 ) {
     var oneShot by mutableStateOf(true); private set
     var levels by mutableStateOf<List<Float>>(emptyList()); private set
@@ -63,7 +66,7 @@ class VoiceSession internal constructor(
         val token = ++generation
         job = scope.launch {
             try {
-                withContext(worker) {
+                if (!oneShot || captureAudio != null) withContext(worker) {
                     if (prepareModels != null) prepareModels.invoke(!oneShot)
                     else {
                         models.prepare(includeSpeech = !oneShot)
@@ -81,7 +84,11 @@ class VoiceSession internal constructor(
         if (!active || token != generation) return
         finishRequested = false
         phase = "listening"; status = context.getString(if (oneShot) R.string.voice_listening else R.string.voice_listening_session); partial = ""
-        val result = if (captureAudio != null) captureAudio.invoke() else withContext(worker) { record(token) }
+        val result = when {
+            captureAudio != null -> captureAudio.invoke()
+            oneShot -> recordWhilePreparing(token)
+            else -> withContext(worker) { recordContinuous(token) }
+        }
         if (!active || token != generation) return
         val text = result.text
         if (text.isNullOrBlank()) { stop(context.getString(R.string.voice_not_recognized)); return }
@@ -90,7 +97,6 @@ class VoiceSession internal constructor(
         phase = "review"; status = context.getString(R.string.voice_review)
         transcript(text)
     }
-    fun editTranscript(text: String) { if (active && oneShot && phase == "review") partial = text }
     fun finishRecording() {
         if (!active || !oneShot || phase != "listening") return
         finishRequested = true
@@ -131,49 +137,103 @@ class VoiceSession internal constructor(
     private fun releaseFocus() { focus?.let { audioManager.abandonAudioFocusRequest(it) }; focus = null }
     fun close() { stop(); releaseScope.launch { worker.close(); releaseScope.cancel() } }
 
-    @Suppress("MissingPermission")
-    private fun record(token: Int): com.offlineassistant.app.voice.AudioTranscription {
-        val sampleRate = 16000
-        val minimum = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        check(minimum > 0) { "PCM16 microphone is unsupported" }
-        val input = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minimum, 6400))
-        var endpoint = false
-        var streaming: com.offlineassistant.app.voice.StreamingTranscriptionSession? = null
-        var completed = false
+    private suspend fun recordWhilePreparing(token: Int): AudioTranscription = coroutineScope {
+        // At most 25 seconds of 16 kHz mono PCM wait in memory while the model loads.
+        val blocks = Channel<ShortArray>(MAX_SAMPLES / BLOCK_SAMPLES)
+        val capture = async(Dispatchers.IO) {
+            try {
+                val offer: suspend (ShortArray) -> Unit = { samples -> blocks.send(samples) }
+                capturePcmForTest?.invoke(offer) ?: recordPcm(token, onSamples = offer)
+            } finally { blocks.close() }
+        }
         try {
-            streaming = checkNotNull(recognizer!!.startStreaming({ text -> scope.launch { if (active && token == generation) partial = text } }, { endpoint = true })) { "T-one streaming is unavailable" }
+            withContext(worker) {
+                prepareModels?.invoke(false)
+                models.prepare(includeSpeech = false)
+                ensureActive()
+                val local = models.recognizer()
+                try {
+                    val stream = streaming(local, token)
+                    try {
+                        for (samples in blocks) {
+                            ensureActive()
+                            stream.acceptPcm16(samples, SAMPLE_RATE)
+                        }
+                        val speech = capture.await()
+                        ensureActive()
+                        if (speech) stream.finish() else noSpeech()
+                    } finally { stream.cancel() }
+                } finally { local.release() }
+            }
+        } finally {
+            if (capture.isActive) {
+                capture.cancel()
+                synchronized(captureLock) {
+                    if (token == generation) runCatching { recorder?.stop() }
+                }
+            }
+        }
+    }
+
+    private fun streaming(recognizer: AudioTranscriber, token: Int, endpoint: () -> Unit = {}) =
+        checkNotNull(recognizer.startStreaming({ text ->
+            scope.launch { if (active && token == generation) partial = text }
+        }, endpoint)) { "T-one streaming is unavailable" }
+
+    private suspend fun recordContinuous(token: Int): AudioTranscription {
+        var endpoint = false
+        val stream = streaming(checkNotNull(recognizer), token) { endpoint = true }
+        try {
+            val speech = recordPcm(token, untilEndpoint = { endpoint }) { stream.acceptPcm16(it, SAMPLE_RATE) }
+            return if (speech) stream.finish() else noSpeech()
+        } finally { stream.cancel() }
+    }
+
+    @Suppress("MissingPermission")
+    private suspend fun recordPcm(token: Int, untilEndpoint: (() -> Boolean)? = null, onSamples: suspend (ShortArray) -> Unit): Boolean {
+        val minimum = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        check(minimum > 0) { "PCM16 microphone is unsupported" }
+        val input = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minimum, 6400))
+        try {
             synchronized(captureLock) {
                 check(input.state == AudioRecord.STATE_INITIALIZED) { "Microphone initialization failed" }
                 check(active && token == generation) { "Voice stopped" }
-                if (finishRequested) return com.offlineassistant.app.voice.AudioTranscription(null, "No speech detected", 0)
+                if (finishRequested) return false
                 recorder = input
                 input.startRecording()
                 check(input.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Microphone recording failed" }
             }
-            val block = ShortArray(1600)
+            val block = ShortArray(BLOCK_SAMPLES)
             var total = 0; var speech = false
-            while (active && token == generation && total < sampleRate * 25 && !finishRequested && (oneShot || !endpoint)) {
-                val count = input.read(block, 0, block.size, AudioRecord.READ_BLOCKING)
+            while (token == generation && total < MAX_SAMPLES && !finishRequested && untilEndpoint?.invoke() != true) {
+                val count = input.read(block, 0, minOf(block.size, MAX_SAMPLES - total), AudioRecord.READ_BLOCKING)
                 if (count <= 0 && finishRequested) break
                 check(count > 0) { "Microphone read failed: $count" }
+                currentCoroutineContext().ensureActive()
                 val samples = block.copyOf(count)
                 val rms = sqrt(samples.sumOf { val v = it / 32768.0; v * v } / count)
                 scope.launch { if (active && token == generation) levels = (levels.takeLast(47) + (rms.toFloat() * 12f).coerceIn(0f, 1f)) }
                 if (rms > 0.004) speech = true
                 total += count
-                streaming.acceptPcm16(samples, sampleRate)
-                if (!oneShot && !speech && total >= sampleRate * 8) break
+                onSamples(samples)
+                if (untilEndpoint != null && !speech && total >= SAMPLE_RATE * 8) break
             }
-            runCatching { input.stop() }; recorder = null
-            check(active && token == generation) { "Voice stopped" }
             scope.launch { if (active && token == generation) { phase = "recognizing"; status = context.getString(R.string.voice_recognizing) } }
-            if (!speech) return com.offlineassistant.app.voice.AudioTranscription(null, "No speech detected", 0)
-            val result = streaming.finish()
-            completed = true
-            return result
+            return speech
         } finally {
-            recorder = null; runCatching { input.stop() }; input.release()
-            if (!completed) streaming?.cancel()
+            synchronized(captureLock) {
+                if (recorder === input) recorder = null
+                runCatching { input.stop() }
+            }
+            input.release()
         }
+    }
+
+    private fun noSpeech() = AudioTranscription(null, "No speech detected", 0)
+
+    private companion object {
+        const val SAMPLE_RATE = 16000
+        const val BLOCK_SAMPLES = 1600
+        const val MAX_SAMPLES = SAMPLE_RATE * 25
     }
 }

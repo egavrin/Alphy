@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -17,10 +18,13 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
+import androidx.navigationevent.findViewTreeNavigationEventDispatcherOwner
 import com.alpha.assistant.R
 import com.alpha.assistant.capabilities.AndroidPermissionControl
 import com.alpha.assistant.data.Attachment
@@ -34,8 +38,6 @@ import java.io.InputStreamReader
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable internal fun ReviewedContextDialog(
     model: ShellViewModel,
-    createMiniApp: (String) -> Unit,
-    automate: (String) -> Unit,
     dismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -138,16 +140,28 @@ import java.io.InputStreamReader
             camera.launch(uri)
         }.onFailure { cameraPending = false; discardCapture(); error = R.string.context_camera_open_failed }
     }
-    ModalBottomSheet(onDismissRequest = ::close, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = ::close, sheetState = sheet,
+        properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false)) {
+        // System Back goes to the sheet window, which has its own dispatcher.
+        val dialogOwner = checkNotNull(LocalView.current.findViewTreeNavigationEventDispatcherOwner())
+        CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides dialogOwner) {
+            BackHandler {
+                if (!cameraPending && !model.attachmentBusy) scope.launch {
+                    sheet.hide()
+                    if (!sheet.isVisible) close()
+                }
+            }
+        }
         Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(stringResource(R.string.context_title), style = MaterialTheme.typography.titleLarge)
-                Text(stringResource(R.string.context_privacy))
+                if (page != "sources") Text(stringResource(R.string.context_privacy))
                 if (page != "sources") TextButton(onClick = { page = "sources"; error = null }, enabled = !cameraPending && !model.attachmentBusy) { Text(stringResource(R.string.context_back_to_sources)) }
                 when (page) {
                     "sources" -> {
-                        val enabled = pickerSource == null && !model.attachmentBusy
-                        Text(stringResource(R.string.context_sources), style = MaterialTheme.typography.titleSmall)
+                        fun canChooseSource() = pickerSource == null && !model.attachmentBusy
+                        val enabled = canChooseSource()
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             AssistChip(onClick = { if (checkOrigin()) page = "camera" }, label = { Text(stringResource(R.string.context_camera)) }, enabled = enabled)
                             AssistChip(onClick = { launchPicker("photo") { photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) } },
@@ -156,14 +170,6 @@ import java.io.InputStreamReader
                             AssistChip(onClick = { if (checkOrigin()) page = "calendar" }, label = { Text(stringResource(R.string.context_calendar)) }, enabled = enabled)
                         }
                         TextButton(onClick = { if (checkOrigin()) page = "paste" }, enabled = enabled) { Text(stringResource(R.string.context_paste)) }
-                        Text(stringResource(R.string.context_creation), style = MaterialTheme.typography.titleSmall)
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            AssistChip(onClick = { if (checkOrigin()) { close(); createMiniApp(model.snapshot.draft.text) } },
-                                label = { Text(stringResource(R.string.context_mini_app)) }, enabled = enabled)
-                            AssistChip(onClick = { if (checkOrigin()) { close(); automate(model.snapshot.draft.text) } },
-                                label = { Text(stringResource(R.string.context_automation)) }, enabled = enabled)
-                        }
-                        Text(stringResource(R.string.context_screen_context_info), style = MaterialTheme.typography.bodySmall)
                     }
                     "camera" -> {
                         AndroidPermissionControl(stringResource(R.string.context_camera), listOf(Manifest.permission.CAMERA), PackageManager.FEATURE_CAMERA_ANY)

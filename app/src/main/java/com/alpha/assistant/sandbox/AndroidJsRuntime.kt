@@ -34,7 +34,11 @@ internal class AndroidJsRuntime internal constructor(context: Context,private va
     private var connecting: CompletableDeferred<Connection>?=null
     private var current: Connection?=null
     private var retiring: CompletableDeferred<Unit>?=null
-    private val slots=mutableMapOf<Boolean,Any>()
+    private class Slot {
+        val released=CompletableDeferred<Unit>()
+        var isolate: Isolate?=null
+    }
+    private val slots=mutableMapOf<Boolean,Slot>()
 
     suspend fun availability(): SandboxResult = try {
         if(withTimeoutOrNull(4000) {connection()} == null)SandboxResult("UNAVAILABLE") else SandboxResult("OK")
@@ -74,26 +78,45 @@ internal class AndroidJsRuntime internal constructor(context: Context,private va
         }
     }
 
-    suspend fun acquire(retained: Boolean,maxReturnBytes: Int): Isolate {
-        val connection=withTimeoutOrNull(4000) {connection()} ?: throw RuntimeFailure("UNAVAILABLE")
-        val reservation=Any()
-        synchronized(lock) {
-            if(current !== connection || retiring!=null)throw RuntimeFailure("SANDBOX_DIED")
-            if(slots.containsKey(retained))throw RuntimeFailure("BUSY")
-            slots[retained]=reservation
+    private suspend fun reserve(connection: Connection,retained: Boolean,slot: Slot,waitForRelease: Boolean) {
+        while(true) {
+            currentCoroutineContext().ensureActive()
+            val occupied=synchronized(lock) {
+                if(current !== connection || retiring!=null)throw RuntimeFailure("SANDBOX_DIED")
+                val previous=slots[retained]
+                if(previous==null) slots[retained]=slot
+                previous
+            } ?: return
+            if(!waitForRelease) throw RuntimeFailure("BUSY")
+            occupied.released.await()
         }
+    }
+
+    private fun release(retained: Boolean,slot: Slot) {
+        synchronized(lock) {if(slots[retained]===slot) slots.remove(retained)}
+        slot.released.complete(Unit)
+    }
+
+    suspend fun acquire(retained: Boolean,maxReturnBytes: Int,waitForRetainedRelease: Boolean=false): Isolate {
+        val connection=withTimeoutOrNull(4000) {connection()} ?: throw RuntimeFailure("UNAVAILABLE")
+        val slot=Slot()
         var native: JavaScriptIsolate?=null
         var owned: Isolate?=null
         try {
+            if(retained && waitForRetainedRelease) {
+                if(withTimeoutOrNull(RETAINED_HANDOFF_MS) {reserve(connection,true,slot,waitForRelease=true)}==null)
+                    throw RuntimeFailure("BUSY")
+            } else reserve(connection,retained,slot,waitForRelease=false)
+            currentCoroutineContext().ensureActive()
             native=connection.sandbox.createIsolate(IsolateStartupParameters().apply {
                 setMaxHeapSizeBytes(SandboxContract.HEAP_BYTES)
                 setMaxEvaluationReturnSizeBytes(maxReturnBytes)
             })
-            val isolate=Isolate(connection.generation,retained,native)
+            val isolate=Isolate(connection.generation,native) {release(retained,slot)}
             owned=isolate
             synchronized(lock) {
-                if(current !== connection || slots[retained] !== reservation)throw RuntimeFailure("SANDBOX_DIED")
-                slots[retained]=isolate
+                if(current !== connection || slots[retained] !== slot)throw RuntimeFailure("SANDBOX_DIED")
+                slot.isolate=isolate
             }
             native.addOnTerminatedCallback(direct) {info ->
                 if(info.status in setOf(TerminationInfo.STATUS_MEMORY_LIMIT_EXCEEDED,TerminationInfo.STATUS_SANDBOX_DEAD))invalidate(connection.generation)
@@ -105,8 +128,7 @@ internal class AndroidJsRuntime internal constructor(context: Context,private va
             if(ready.status!="OK") {isolate.close();throw RuntimeFailure(ready.status)}
             return isolate
         } catch(failure: Exception) {
-            if(owned!=null)owned.close() else native?.close()
-            synchronized(lock) {if(slots[retained] === reservation)slots.remove(retained)}
+            if(owned!=null) owned.close() else try {native?.close()} finally {release(retained,slot)}
             if(failure is CancellationException)throw failure
             if(failure is RuntimeFailure)throw failure
             invalidate(connection.generation)
@@ -117,23 +139,24 @@ internal class AndroidJsRuntime internal constructor(context: Context,private va
     /** No action is retried. All users of a dead sandbox lose their lease before another sandbox can connect. */
     private fun invalidate(epoch: Long) {
         val retirement=CompletableDeferred<Unit>()
-        val (sandbox,users)=synchronized(lock) {
+        val (sandbox,occupied)=synchronized(lock) {
             val active=current
             if(active==null || active.generation!=epoch || retiring!=null)return
             retiring=retirement;current=null;connecting=null
-            val users=slots.values.filterIsInstance<Isolate>();slots.clear()
-            active.sandbox to users
+            val occupied=slots.values.toList();slots.clear()
+            active.sandbox to occupied
         }
         try {
-            users.forEach {it.close("SANDBOX_DIED")}
+            occupied.forEach {it.isolate?.close("SANDBOX_DIED")}
             sandbox.close()
         } finally {
             synchronized(lock) {if(retiring === retirement)retiring=null}
+            occupied.forEach {it.released.complete(Unit)}
             retirement.complete(Unit)
         }
     }
 
-    inner class Isolate internal constructor(private val epoch: Long,private val retained: Boolean,private val native: JavaScriptIsolate) {
+    inner class Isolate internal constructor(private val epoch: Long,private val native: JavaScriptIsolate,private val releaseSlot: ()->Unit) {
         private val stateLock=Any()
         private val busy=AtomicBoolean(false)
         private var sequence=0L
@@ -199,12 +222,12 @@ internal class AndroidJsRuntime internal constructor(context: Context,private va
                 if(terminal!=null)false else {terminal=reason;++sequence;true}
             }
             if(!changed)return
-            synchronized(lock) {if(slots[retained] === this)slots.remove(retained)}
-            native.close()
+            try {native.close()} finally {releaseSlot()}
         }
     }
 
     companion object {
+        private const val RETAINED_HANDOFF_MS=4_000L
         private val direct=Executor {it.run()}
         @Volatile private var instance: AndroidJsRuntime?=null
         fun get(context: Context): AndroidJsRuntime=instance ?: synchronized(this) {instance ?: AndroidJsRuntime(context).also {instance=it}}

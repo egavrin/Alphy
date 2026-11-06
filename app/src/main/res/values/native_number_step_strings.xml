@@ -1,0 +1,4 @@
+<resources>
+    <string name="tool_number_decrease">Уменьшить: %1$s</string>
+    <string name="tool_number_increase">Увеличить: %1$s</string>
+</resources>

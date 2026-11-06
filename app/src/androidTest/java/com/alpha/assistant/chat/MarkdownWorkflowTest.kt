@@ -2,12 +2,17 @@ package com.alpha.assistant.chat
 
 import android.app.Application
 import android.os.SystemClock
+import android.text.Spanned
+import android.text.style.ClickableSpan
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.data.*
+import com.alpha.assistant.ui.ShellFixture
+import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
 import org.junit.Assert.*
 import org.junit.Test
@@ -56,5 +61,60 @@ class MarkdownWorkflowTest {
             keys.clear(); app.deleteSharedPreferences(name)
             java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(name) }
         }
+    }
+
+    @Test fun chatMarkdownTablesExposeCellsAndScrollToLaterColumns() {
+        val fixture = ShellFixture("markdown-table")
+        val robot = ShellRobot("markdown-table")
+        val malformed = "| Malformed A | Malformed B |\n| --- |"
+        val markdown = """
+            Table introduction.
+
+            | **City** | Time | Forecast | Alert | Zone | Details |
+            | --- | ---: | :---: | --- | --- | --- |
+            | [Moscow](https://example.com/facts) | [Unsafe](javascript:alert(1)) | Cloudy | Off | Local | Evening |
+
+        """.trimIndent() + "\n\n" + malformed
+        fixture.store.saveConversation(Conversation("chat", "Markdown table", 1, 1,
+            messages = listOf(Message("m", "assistant", markdown, 1, "complete"))))
+        fixture.store.saveSetting("selected", "chat")
+        fixture.install(saveKey = false)
+        try {
+            fixture.launch().use {
+                robot.waitFor("Table introduction.")
+                val city = robot.waitFor("City")
+                assertTrue(city.isHeading)
+                assertEquals(0, city.collectionItemInfo?.rowIndex)
+                assertEquals(0, city.collectionItemInfo?.columnIndex)
+                val moscow = robot.waitFor("Moscow")
+                assertEquals(1, moscow.collectionItemInfo?.rowIndex)
+                assertEquals(1, clickableSpans(moscow))
+                assertEquals(0, clickableSpans(robot.waitFor("Unsafe")))
+                assertTrue(robot.texts().any { text -> text.contains(malformed) })
+
+                val table = generateSequence(city) { node -> node.parent }.first { node ->
+                    node.collectionInfo?.columnCount == 6
+                }
+                assertEquals(2, table.collectionInfo.rowCount)
+                assertTrue(table.isScrollable)
+                assertFalse(robot.find("Details")?.isVisibleToUser == true)
+                repeat(5) {
+                    if (robot.find("Details")?.isVisibleToUser != true) {
+                        assertTrue(table.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT.id))
+                        robot.automation.waitForIdle(100, 3000)
+                    }
+                }
+                assertTrue(robot.waitFor("Details").isVisibleToUser)
+                assertTrue(robot.waitFor("Evening").isVisibleToUser)
+                assertEquals(markdown, fixture.model!!.snapshot.selected!!.messages.single().text)
+            }
+        } finally {
+            fixture.remove()
+        }
+    }
+
+    private fun clickableSpans(node: AccessibilityNodeInfo): Int {
+        val text = node.text as? Spanned ?: return 0
+        return text.getSpans(0, text.length, ClickableSpan::class.java).size
     }
 }

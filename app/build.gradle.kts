@@ -7,11 +7,11 @@ android {
     compileSdk = 37
     defaultConfig {
         applicationId = "com.alpha.assistant"
-        minSdk = 29
+        minSdk = 36
         targetSdk = 37
         ndk { abiFilters += "arm64-v8a" }
-        versionCode = 2
-        versionName = "0.1.0-alpha.2"
+        versionCode = 4
+        versionName = "0.1.0-alpha.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
@@ -39,12 +39,17 @@ dependencies {
     implementation("androidx.compose.material3:material3:1.5.0-beta02")
     implementation("androidx.navigation3:navigation3-runtime:1.2.0")
     implementation("androidx.navigation3:navigation3-ui:1.2.0")
+    implementation("androidx.compose.material3.adaptive:adaptive-navigation3:1.3.0")
+    implementation("androidx.window:window:1.5.1")
     implementation("androidx.navigationevent:navigationevent-compose:1.1.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.compose.ui:ui")
+    implementation("androidx.glance:glance-appwidget:1.2.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("androidx.javascriptengine:javascriptengine:1.1.1")
     implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation("com.google.mlkit:language-id:17.0.6")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.window:window-testing:1.5.1")
 }

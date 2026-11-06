@@ -149,7 +149,7 @@ class SyntheticSchemaDiagnosticTest {
             memoryStore(context,name).use {store ->
                 uiBoundary(true,store.writableDatabase.path,operation.prompt)
                 operation.base?.let {base ->
-                    val spec=ToolSpec.parse(base.spec)
+                    val spec=ToolSpec.parsePersisted(base.spec)
                     spec.validateState(base.state); spec.validateUi(JSONObject(base.ui),JSONObject(base.state))
                     check(spec.capabilities.isEmpty() && spec.surfaces.isEmpty() && spec.collections.length() == 0)
                     store.saveTool(base,true)
@@ -206,34 +206,88 @@ class SyntheticSchemaDiagnosticTest {
             .put("category",diagnostic.category.id).put("rule",diagnostic.rule).put("path",diagnostic.path)
             .put("expected",diagnostic.expected).put("observed",diagnostic.observed).put("count",diagnostic.count ?: JSONObject.NULL)
     }
+    private class DiagnosticRouting {
+        private var plans=0
+        private var batches=0
+        private var corrected=false
+
+        fun isRouteRequest(request: CloudRequest,prompt: String): Boolean {
+            val stage=request.generationStage ?: return false
+            if (stage != CloudGenerationStage.SELECTOR && request.turns.size > 1) {
+                check(!corrected) {"The normal generation retry bound changed."}
+                corrected=true
+            }
+            return when (stage) {
+                CloudGenerationStage.PLAN -> {
+                    check(++plans <= 2)
+                    val contract = com.alpha.assistant.tools.generation.NeedsPlan.prompt
+                    if (plans == 1) check(request.systemInstructions == contract)
+                    else {
+                        check(request.systemInstructions.startsWith(contract + "\n\n"))
+                        check(request.turns.last() == CloudTurn("user","Return the corrected JSON plan."))
+                    }
+                    check(request.turns.first().text == prompt)
+                    true
+                }
+                CloudGenerationStage.SELECTOR -> {
+                    check(++batches <= 2 && request.turns.size == 1 && request.systemInstructions.isNotEmpty())
+                    true
+                }
+                else -> false
+            }
+        }
+
+        fun clear() { plans=0; batches=0; corrected=false }
+    }
+
     private inner class UiRecordingProvider(private val delegate: ChatProvider,private val operation: UiOperation): ChatProvider {
         private inner class Response {
             val text=StringBuilder(); var characters=0L; var outcome="providerFailed"; var category: String?=null
             val diagnostics=JSONArray()
+            var reachedOutputLimit=false
         }
         private val responses=mutableListOf<Response>()
+        private val routing=DiagnosticRouting()
         private var original: CloudTurn?=null
         override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
-            check(responses.size < 2) {"The normal generation retry bound changed."}
-            check(request.jsonObject && !request.search && request.systemInstructions.isEmpty() && request.selectedText.isEmpty())
+            check(request.jsonObject && !request.search && request.selectedText.isEmpty())
             check(request.turns.all {it.images.isEmpty()})
+            if (routing.isRouteRequest(request,operation.prompt)) {
+                check(operation.base == null)
+                delegate.respond(key,request,session,emit)
+                return
+            }
+            check(responses.size < 2) {"The normal generation retry bound changed."}
+            check(request.systemInstructions.isEmpty())
             check(request.turns.first().role == "user" && request.turns.first().text.endsWith("Request: ${operation.prompt}${operation.context}"))
             if(responses.isEmpty()) {check(request.turns.size == 1); original=request.turns.first()}
             else {
-                check(request.turns.size == 3 && request.turns.first() == original)
-                check(request.turns[1].role == "assistant" && request.turns[1].text == responses.last().text.toString() && request.turns.last().role == "user")
-                responses.last().outcome="normalValidatorRequestedCorrection"; responses.last().category=category(request.turns.last().text)
+                val previous=responses.last()
+                check(request.turns.first() == original && request.turns.last().role == "user")
+                if (previous.reachedOutputLimit) {
+                    check(request.turns.size == 2)
+                    previous.outcome="outputLimitRequestedCorrection"
+                } else {
+                    check(request.turns.size == 3 && request.turns[1].role == "assistant" && request.turns[1].text == previous.text.toString())
+                    previous.outcome="normalValidatorRequestedCorrection"
+                }
+                previous.category=category(request.turns.last().text)
             }
             val response=Response().also(responses::add)
-            delegate.respond(key,request,session) {event ->
-                if(event is CloudEvent.Text) {
-                    response.characters+=event.value.length
-                    val remaining=65536-response.text.length
-                    if(remaining > 0) response.text.append(event.value.take(remaining))
+            try {
+                delegate.respond(key,request,session) {event ->
+                    if(event is CloudEvent.Text) {
+                        response.characters+=event.value.length
+                        val remaining=65536-response.text.length
+                        if(remaining > 0) response.text.append(event.value.take(remaining))
+                    }
+                    emit(event)
                 }
-                emit(event)
+                response.outcome="providerCompleted"
+            } catch (failure: CloudFailure) {
+                response.reachedOutputLimit=failure.code == "response_length"
+                throw failure
             }
-            response.outcome="providerCompleted"
         }
         fun diagnostic(value: ToolUiDiagnostic) {responses.lastOrNull()?.diagnostics?.put(uiDiagnosticReport(value))}
         fun finish(outcome: String,category: String?) {responses.lastOrNull()?.let {it.outcome=outcome; it.category=category}}
@@ -242,7 +296,7 @@ class SyntheticSchemaDiagnosticTest {
                 .put("characters",response.characters).put("captureTruncated",response.characters > response.text.length)
                 .put("validatorFailures",response.diagnostics))
         }}
-        fun clear() {responses.forEach {it.text.clear()}; responses.clear(); original=null}
+        fun clear() {responses.forEach {it.text.clear()}; responses.clear(); routing.clear(); original=null}
     }
 
     private fun memoryStore(context: android.content.Context, databaseName: String): ToolStore {
@@ -324,7 +378,7 @@ class SyntheticSchemaDiagnosticTest {
 
     private fun failureCode(failure: Exception): String {
         val code = (failure as? CloudFailure)?.code ?: return "localFailure"
-        val allowed = setOf("auth", "cancelled", "empty_response", "incomplete", "provider", "quota", "rate_limit", "response_size", "stream_invalid", "unavailable", "tool_invalid", "tool_limit", "widget_generation", "widget_response_size", "widget_spec", "widget_state", "widget_preview", "widget_preview_state", "widget_preview_effects")
+        val allowed = setOf("auth", "cancelled", "empty_response", "incomplete", "provider", "quota", "rate_limit", "response_length", "response_size", "stream_invalid", "unavailable", "tool_invalid", "tool_limit", "widget_generation", "widget_response_size", "widget_plan", "widget_selector", "widget_questions", "widget_incomplete", "widget_spec", "widget_state", "widget_preview", "widget_preview_state", "widget_preview_effects")
         return code.takeIf { it in allowed || it.matches(Regex("http_[0-9]{3}")) } ?: "providerFailure"
     }
 
@@ -337,14 +391,25 @@ class SyntheticSchemaDiagnosticTest {
             var code: String? = null
         }
         private val responses = mutableListOf<Response>()
+        private val routing=DiagnosticRouting()
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-            check(responses.size < 2) { "The normal generation retry bound changed." }
             check(request.jsonObject && !request.search && request.turns.all { it.images.isEmpty() })
+            if (routing.isRouteRequest(request,REQUEST)) {
+                delegate.respond(key,request,session,emit)
+                return
+            }
+            check(responses.size < 2) { "The normal generation retry bound changed." }
             check(request.turns.first().text.endsWith("Request: $REQUEST"))
             if (responses.isNotEmpty()) {
-                check(request.turns.size == 3 && request.turns[1].text == responses.last().text.toString())
-                responses.last().outcome = "normalValidatorRequestedCorrection"
-                responses.last().category = category(request.turns.last().text)
+                val previous=responses.last()
+                if (previous.code == "response_length") {
+                    check(request.turns.size == 2)
+                    previous.outcome = "outputLimitRequestedCorrection"
+                } else {
+                    check(request.turns.size == 3 && request.turns[1].text == previous.text.toString())
+                    previous.outcome = "normalValidatorRequestedCorrection"
+                }
+                previous.category = category(request.turns.last().text)
             } else check(request.turns.size == 1)
             val response = Response().also(responses::add)
             try {
@@ -373,7 +438,7 @@ class SyntheticSchemaDiagnosticTest {
                     .put("schema", describe(response.text.toString())))
             }
         }
-        fun clear() { responses.forEach { it.text.clear() }; responses.clear() }
+        fun clear() { responses.forEach { it.text.clear() }; responses.clear(); routing.clear() }
     }
 
     private fun probe(schema: JSONObject, collections: JSONObject): JSONObject = try {

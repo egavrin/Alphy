@@ -3,6 +3,7 @@ package com.alpha.assistant.sandbox
 import org.json.JSONObject
 
 internal object SandboxContract {
+    const val LIVE_INPUT_EVENT = "liveInput"
     const val MAX_BYTES = 65536
     const val HEAP_BYTES = 16L * 1024 * 1024
     const val EVALUATION_MS = 500L
@@ -86,10 +87,20 @@ internal object SandboxContract {
         when(type) {
             "preview","render","open" -> require(event.keys().asSequence().toSet()==setOf("type"))
             "action" -> {
-                require(event.keys().asSequence().toSet().containsAll(setOf("type","actionId","value")))
-                require(event.keys().asSequence().toSet().all {it in setOf("type","actionId","value","calendar","medicine","navigation")})
+                val fields=event.keys().asSequence().toSet()
+                val action=setOf("type","actionId","value")
+                require(fields.containsAll(action))
+                require(fields.all {it in setOf("type","actionId","value","calendar","medicine","navigation","video")})
                 require(event.get("actionId") is String && event.getString("actionId").matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")))
+                if(event.has("video")) {
+                    require(fields==action+"video")
+                    val video=event.getJSONObject("video")
+                    require(video.keys().asSequence().toSet()==setOf("resourceId"))
+                    val handle=video.get("resourceId")
+                    require(handle is String && handle.matches(Regex("[0-9a-f]{64}")) && event.get("value")==handle)
+                }
             }
+            LIVE_INPUT_EVENT -> validateLiveInputEvent(event)
             "capabilityResults","recordResults" -> Unit
             else -> com.alpha.assistant.tools.GraphicsContract.validateEvent(event)
         }
@@ -112,9 +123,25 @@ internal object SandboxContract {
         require(json.keys().asSequence().toSet() == setOf("artifactId", "revision", "event", "state"))
     }
 
-    fun validateResult(result: String) {
+    fun validateLiveInputEvent(event: JSONObject) {
+        require(event.keys().asSequence().toSet() == setOf("type", "actionId", "value") && event.get("type") == LIVE_INPUT_EVENT)
+        val id=event.get("actionId")
+        require(id is String && id.matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")))
+        val value=event.get("value")
+        val scalar=if(value is JSONObject) {
+            require(value.keys().asSequence().toSet() == setOf("key", "value"))
+            val key=value.get("key")
+            require(key is String && key.isNotBlank() && key.length<=128)
+            value.get("value")
+        } else value
+        require((scalar is String && scalar.length<=2048) || (scalar is Number && scalar.toDouble().isFinite()))
+    }
+
+    fun validateResult(result: String, liveInput: Boolean = false) {
         val json = objectFrom(result)
-        require(json.keys().asSequence().toSet().all { it in setOf("state", "ui", "effects", "records", "surfaces", "frames", "timers", "playback") })
+        val fields=if(liveInput) setOf("state", "ui", "surfaces")
+            else setOf("state", "ui", "effects", "records", "surfaces", "frames", "timers", "playback")
+        require(json.keys().asSequence().all { it in fields })
         json.getJSONObject("state")
         if (json.has("ui")) json.getJSONObject("ui")
         if(json.has("surfaces")) json.getJSONObject("surfaces")

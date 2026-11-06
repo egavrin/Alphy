@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="memory_title">Память</string>
+    <string name="memory_exit">Выйти из памяти</string>
+    <string name="memory_empty">Сохранённых фактов пока нет.</string>
+    <string name="memory_add">Добавить факт</string>
+    <string name="memory_edit">Изменить</string>
+    <string name="memory_edit_title">Изменить факт</string>
+    <string name="memory_edit_fact">Изменить факт %1$d</string>
+    <string name="memory_delete">Удалить</string>
+    <string name="memory_delete_fact">Удалить факт %1$d</string>
+    <string name="memory_delete_title">Удалить этот факт?</string>
+    <string name="memory_text">Текст факта</string>
+    <string name="memory_save">Сохранить</string>
+    <string name="memory_cancel">Отмена</string>
+    <string name="memory_discard_title">Удалить черновик?</string>
+    <string name="memory_keep_editing">Продолжить редактирование</string>
+    <string name="memory_discard">Удалить черновик</string>
+    <string name="memory_retry">Повторить</string>
+    <string name="memory_load_failed">Не удалось загрузить факты из памяти.</string>
+    <string name="memory_save_failed">Не удалось сохранить факт. Повторите попытку.</string>
+    <string name="memory_delete_failed">Не удалось удалить факт. Повторите попытку.</string>
+    <string name="memory_stale_edit">Факт уже изменили. Проверьте сохранённую версию. Ваш черновик на месте.</string>
+    <string name="memory_current_text">Сохранённая версия</string>
+    <string name="memory_use_latest">Редактировать эту версию</string>
+    <string name="memory_missing_edit">Факт уже удалили. Вы можете сохранить черновик как новый факт.</string>
+    <string name="memory_convert_draft">Создать новый факт из черновика</string>
+    <string name="memory_stale_delete">Факт уже изменили. Проверьте сохранённую версию перед удалением.</string>
+    <string name="memory_missing_delete">Факт уже удалили.</string>
+</resources>

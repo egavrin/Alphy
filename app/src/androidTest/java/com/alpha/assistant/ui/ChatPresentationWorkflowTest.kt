@@ -12,6 +12,12 @@ import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
+import com.alpha.assistant.courses.CourseLessonPlan
+import com.alpha.assistant.courses.CourseOutline
+import com.alpha.assistant.courses.CourseSetup
+import com.alpha.assistant.courses.CourseSlideKind
+import com.alpha.assistant.courses.CourseSlidePlan
+import com.alpha.assistant.courses.CourseStore
 import com.alpha.assistant.data.Attachment
 import com.alpha.assistant.data.Conversation
 import com.alpha.assistant.data.Message
@@ -28,6 +34,87 @@ import java.util.concurrent.atomic.AtomicReference
 class ChatPresentationWorkflowTest {
     private val robot = ShellRobot("chat-presentation")
 
+    @Test fun sendingAndJumpToLatestRevealNewMessagesAfterReadingHistory() {
+        val fixture = ShellFixture("chat-jump-ui")
+        val history = (1..24).map { index ->
+            Message("history-$index", "assistant", "Earlier answer $index", index.toLong(), "complete")
+        }
+        fixture.store.saveConversation(Conversation("history", "History", 1, 24, messages = history))
+        fixture.store.saveSetting("selected", "history")
+        val courses = "${fixture.store.databaseName}-courses.db"
+        CourseStore(fixture.context, courses).use { store ->
+            repeat(4) { index ->
+                store.create(CourseSetup("Course ${index + 1}", "Beginner", "Study examples", "history"),
+                    CourseOutline(listOf(CourseLessonPlan("lesson", "Examples", listOf(
+                        CourseSlidePlan("intro", CourseSlideKind.EXPLANATION, "Read the example"),
+                    )))))
+            }
+        }
+        fixture.install()
+        val jump = robot.text(R.string.chat_jump_latest)
+        val latest = history.last().text
+        try {
+            fixture.launch().use { scenario ->
+                robot.waitUntil { fixture.model?.chatCourses?.size == 4 }
+                robot.waitFor(latest)
+                fun readHistory() {
+                    val list = robot.bounds(robot.text(R.string.chat_messages))
+                    robot.shell("input swipe ${list.centerX()} ${list.top + list.height() / 4} " +
+                        "${list.centerX()} ${list.bottom - list.height() / 4} 350")
+                    robot.waitFor(jump)
+                    robot.waitGone(latest)
+                }
+                readHistory()
+                val visibleOlder = history.first { robot.find(it.text)?.isVisibleToUser == true }.text
+                scenario.recreate()
+                robot.waitFor(jump)
+                assertTrue(robot.waitFor(visibleOlder).isVisibleToUser)
+                robot.waitGone(latest)
+                robot.click(jump)
+                robot.waitFor(latest)
+                robot.waitGone(jump)
+                readHistory()
+                robot.edit(robot.text(R.string.composer_label), "New question after reading history")
+                robot.click(robot.text(R.string.composer_send))
+                robot.waitFor("Fixture response")
+                robot.waitGone(jump)
+                assertEquals(1, fixture.provider.calls)
+            }
+        } finally {
+            fixture.remove()
+            fixture.context.deleteDatabase(courses)
+        }
+    }
+
+    @Test fun replyUsesOneStopControlEvenWithANewDraft() {
+        val fixture = ShellFixture("chat-stop-ui")
+        fixture.provider.gate = CompletableDeferred()
+        fixture.seedChat("chat", "Earlier chat", "Earlier question", selected = true)
+        fixture.install()
+        try {
+            fixture.launch().use {
+                val composer = robot.text(R.string.composer_label)
+                val stop = robot.text(R.string.composer_stop)
+                robot.edit(composer, "Start an answer")
+                robot.click(robot.text(R.string.composer_send))
+                robot.waitFor("Отвечаю…")
+                assertEquals(1, robot.texts().count { it == stop })
+                assertNull(robot.find("Остановить запрос"))
+                robot.diagnostics.capture("single-reply-stop")
+                robot.edit(composer, "Keep this draft")
+                robot.assertTarget(stop)
+                robot.assertTarget(robot.text(R.string.composer_send))
+                robot.click(stop)
+                robot.waitFor("Запрос остановлен.")
+                assertEquals("Keep this draft", robot.field(composer).text.toString())
+                assertEquals(1, fixture.provider.calls)
+            }
+        } finally {
+            fixture.provider.gate?.complete(Unit)
+            fixture.remove()
+        }
+    }
+
     // Failure cases: a fragment enables links or actions, TalkBack reads it, or the accepted answer has no live region.
     @Test fun provisionalTextIsInertUntilTheAcceptedAnswerCompletes() {
         val fixture = ShellFixture("chat-stream-ui")
@@ -39,7 +126,7 @@ class ChatPresentationWorkflowTest {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 emit(CloudEvent.AnswerFragment(fragment))
                 complete.await()
-                emit(CloudEvent.RoundComplete("""{"kind":"answer","text":${JSONObject.quote("**$answer**")},"brief":"","targetId":null,"search":"none"}""", false))
+                emit(CloudEvent.RoundComplete("""{"kind":"answer","text":${JSONObject.quote("**$answer**")},"brief":"","search":"none"}""", false))
             }
         }, fixture.store, fixture.keys) }
         try {
@@ -47,7 +134,7 @@ class ChatPresentationWorkflowTest {
                 robot.edit(robot.text(R.string.composer_label), "Проверка ответа")
                 robot.click(robot.text(R.string.composer_send))
                 val incomplete = robot.waitFor("Ответ не завершён")
-                robot.waitFor("DeepSeek отвечает…")
+                robot.waitFor(robot.text(R.string.composer_stop))
                 assertTrue(robot.composedText(scenario, fragment))
                 robot.find(fragment)?.let { node ->
                     assertFalse(node.isImportantForAccessibility)
@@ -85,7 +172,8 @@ class ChatPresentationWorkflowTest {
         fixture.store.saveConversation(Conversation("chat", "Источники", 1, 1, messages = listOf(
             Message("request", "user", "Найдите источник", 1, "sent",
                 attachments = listOf(Attachment("content://fixture/image", "карта.png", "image/png"))),
-            Message("answer", "assistant", "Ответ по источнику [1].", 1, "complete", searchStatus = "found", sources = sources))))
+            Message("answer", "assistant", "Ответ по источнику [1]. Код `[1]`, неизвестный [3], недопустимый [2].",
+                1, "complete", searchStatus = "found", sources = sources))))
         fixture.store.saveSetting("selected", "chat")
         fixture.install()
         val launchedIntent = AtomicReference<Intent>()
@@ -98,9 +186,12 @@ class ChatPresentationWorkflowTest {
         try {
             fixture.launch().use { scenario ->
                 robot.waitFor("Вложение · карта.png · только в исходном запросе")
-                robot.waitFor("Веб-поиск завершён")
                 val valid = "Источник 1. Example. Public article"
                 assertTrue(robot.waitFor(valid).isVisibleToUser)
+                assertTrue(robot.composedLink(scenario, "[1]", publicUrl))
+                assertFalse(robot.composedLink(scenario, "[2]", "javascript:alert(1)"))
+                assertFalse(robot.composedLink(scenario, "[3]", publicUrl))
+                assertNull(robot.find("Веб-поиск завершён"))
                 assertTrue(robot.composed(scenario, "source-fallback-1"))
                 robot.instrumentation.addMonitor(monitor)
                 try {
@@ -122,6 +213,30 @@ class ChatPresentationWorkflowTest {
         } finally {
             fixture.remove()
         }
+    }
+
+    @Test fun rejectedWeatherSourcesShowReadableRetryWithoutRepeatingTheQuestion() {
+        val fixture = ShellFixture("weather-fallback-ui")
+        val question = "Какая погода в Москве?"
+        val rawError = "Search returned sources, but Alphy cannot independently verify the stated facts."
+        fixture.store.saveConversation(Conversation("weather", question, 1, 1, messages = listOf(
+            Message("question", "user", question, 1, "sent"),
+            Message("answer", "assistant", "", 1, "error", replyTo = "question", errorCode = "source_support",
+                error = rawError, sources = listOf(Source("Прогноз", "https://example.com/moscow"))),
+        )))
+        fixture.store.saveSetting("selected", "weather")
+        fixture.install()
+        try {
+            fixture.launch().use {
+                robot.waitFor(robot.text(R.string.chat_source_support))
+                assertEquals(1, robot.texts().count { it.trim() == question })
+                assertNull(robot.find(rawError))
+                robot.click(robot.text(R.string.chat_message_retry))
+                robot.waitFor("Fixture response")
+                assertEquals(1, fixture.provider.calls)
+                assertEquals(1, checkNotNull(fixture.model?.snapshot?.selected).messages.count { it.role == "user" })
+            }
+        } finally { fixture.remove() }
     }
 
     // Failure cases: a previous failure offers retry, or key recovery and retry become unreachable at large font scale.

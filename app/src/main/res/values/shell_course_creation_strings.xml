@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shell_course_setup">Настройка курса</string>
+    <string name="shell_course_topic">Тема</string>
+    <string name="shell_course_level">Уровень</string>
+    <string name="shell_course_goal">Цель</string>
+    <string name="shell_course_plan">Составить план</string>
+    <string name="shell_course_review">План курса</string>
+    <string name="shell_course_start">Начать курс</string>
+    <string name="shell_course_change_setup">Изменить настройки</string>
+    <string name="shell_course_input_required">Укажите тему, уровень и цель курса.</string>
+    <string name="shell_course_plan_failed">Не удалось составить план. Проверьте настройки DeepSeek и попробуйте ещё раз.</string>
+    <string name="shell_course_save_failed">Не удалось сохранить курс. План можно проверить и попробовать ещё раз.</string>
+    <string name="shell_course_setup_in_chat">Укажите уровень и цель, чтобы составить план курса.</string>
+    <string name="shell_course_open_learning">Откройте «Обучение», чтобы настроить курс.</string>
+    <string name="shell_course_continue">Продолжить</string>
+    <string name="shell_course_progress">%1$d из %2$d слайдов</string>
+</resources>

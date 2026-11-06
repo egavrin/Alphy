@@ -86,8 +86,8 @@ internal class NavigationLedger(private val store: ToolStore) {
     companion object {
         const val MAX_STOPS_PER_OWNER = 128
         fun createTables(db: SQLiteDatabase) {
-            db.execSQL("CREATE TABLE maps_stops(owner TEXT NOT NULL,revision INTEGER NOT NULL,stop_id TEXT NOT NULL,stop TEXT NOT NULL,PRIMARY KEY(owner,revision,stop_id))")
-            db.execSQL("CREATE TABLE maps_reached(owner TEXT PRIMARY KEY,revision INTEGER NOT NULL,reached_ref TEXT NOT NULL,stop_id TEXT NOT NULL,effect_key TEXT NOT NULL,marked_at INTEGER NOT NULL)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS maps_stops(owner TEXT NOT NULL,revision INTEGER NOT NULL,stop_id TEXT NOT NULL,stop TEXT NOT NULL,PRIMARY KEY(owner,revision,stop_id))")
+            db.execSQL("CREATE TABLE IF NOT EXISTS maps_reached(owner TEXT PRIMARY KEY,revision INTEGER NOT NULL,reached_ref TEXT NOT NULL,stop_id TEXT NOT NULL,effect_key TEXT NOT NULL,marked_at INTEGER NOT NULL)")
         }
     }
     fun revoke(owner: String) { store.writableDatabase.delete("maps_reached","owner=?",arrayOf(owner)) }
@@ -132,7 +132,7 @@ internal class NavigationLedger(private val store: ToolStore) {
         return result
     }
     fun resolve(effect: CapabilityEffect, ref: String): JSONObject? {
-        if(!valid(effect) || !store.granted(effect.owner,"maps.markReached")) return null
+        if(!valid(effect)) return null
         return store.readableDatabase.rawQuery("SELECT s.stop FROM maps_reached r JOIN maps_stops s ON s.owner=r.owner AND s.revision=r.revision AND s.stop_id=r.stop_id WHERE r.owner=? AND r.revision=? AND r.reached_ref=?",
             arrayOf(effect.owner,effect.revision.toString(),ref)).use { if(it.moveToFirst()) JSONObject(it.getString(0)).also(NavigationContract::validateStop) else null }
     }
@@ -151,7 +151,7 @@ internal class NavigationCapabilities(private val context: Context, private val 
         val stop=NavigationContract.stop(request.args)
         if(request.capability == "maps.markReached") return ledger.mark(effect,stop,active)
         val ref=request.args.getString("reachedRef")
-        val origin=ledger.resolve(effect,ref) ?: return CapabilityResult("denied","Mark the current reached stop again. This reference is missing, stale, revoked, or belongs to another app.")
+        val origin=ledger.resolve(effect,ref) ?: return CapabilityResult("denied","Mark the current reached stop again. This reference is missing, stale, or belongs to another app.")
         if(!ledger.consistent(effect,stop)) return CapabilityResult("denied","This destination ID already identifies another stop.")
         if(origin.getString("coordinateSystem") != stop.getString("coordinateSystem")) return CapabilityResult("unavailable","Origin and destination use different coordinate systems. No conversion is assumed.")
         val mode=request.args.getString("mode")

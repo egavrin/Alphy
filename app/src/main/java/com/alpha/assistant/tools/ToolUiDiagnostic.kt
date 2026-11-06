@@ -15,7 +15,13 @@ internal data class ToolUiDiagnostic(
     val observed: String,
     val count: Int?
 ) {
-    val correction get() = "UI rule: $rule. Path: $path. Expected: $expected. Observed type: $observed. Stage: ${stage.name}."
+    val correction get() = buildString {
+        append("UI rule: $rule. Path: $path. Expected: $expected. Observed type: $observed. Stage: ${stage.name}.")
+        if (count != null) append(" Observed count: $count.")
+        if (rule == "component_text") {
+            append(" Give this node a short label in the requested language. Omit text only if the catalog allows the node without text.")
+        }
+    }
 }
 
 internal class ToolUiValidationTrace(

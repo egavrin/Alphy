@@ -13,7 +13,8 @@ It does not add a medical diagnosis, medicine, dose, date, or claimed source ret
 
 ## Device and data boundaries
 
-The runner fixes every ADB command to `emulator-5556`.
+The single-scenario runner fixes every ADB command to `emulator-5556`.
+For the instrumentation suite, use `run.py suite --serial SERIAL --label LABEL` to select an owned emulator explicitly.
 The runner has no clear, uninstall, unqualified ADB, or connected-device Gradle command.
 The pre-existing emulator `emulator-5554` must remain untouched.
 Build and explicitly replace-install the APKs before a run:

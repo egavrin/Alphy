@@ -71,11 +71,9 @@ internal object GameGenerationExample {
               s.message=messages[s.status]+' Score '+s.score+'. Lives '+s.lives+'.';
             }
             const colors=['#FF6489','#B48AFF','#648EFF','#42D9CF','#FFC66D'];
-            const commands=[{type:'rect',x:0,y:0,width:W,height:H,
-              gradient:{type:'linear',x:0,y:0,x2:W,y2:H,stops:[{offset:0,color:'#111B36'},{offset:1,color:'#050A18'}]}},
-              {type:'text',x:W*0.055,y:H*0.068,size:Math.min(128,u*0.065),text:'ARKANOID',color:'#E6F3FF'},
-              {type:'text',x:W*0.055,y:H*0.112,size:u*0.033,text:'SCORE '+String(s.score).padStart(3,'0')+'     LIVES '+s.lives+'     '+s.bricks.filter(Boolean).length+'/30',color:'#90ABC9'},
-              {type:'line',x:W*0.055,y:H*0.13,x2:W*0.945,y2:H*0.13,stroke:Math.max(0.1,u*0.002),color:'#293A58'}];
+            const commands=[{type:'text',x:W*0.055,y:H*0.068,size:Math.min(128,u*0.065),text:'ARKANOID',color:'accent'},
+              {type:'text',x:W*0.055,y:H*0.112,size:u*0.033,text:'SCORE '+String(s.score).padStart(3,'0')+'     LIVES '+s.lives+'     '+s.bricks.filter(Boolean).length+'/30',color:'muted'},
+              {type:'line',x:W*0.055,y:H*0.13,x2:W*0.945,y2:H*0.13,stroke:Math.max(0.1,u*0.002),color:'muted'}];
             for(let i=0;i<s.bricks.length;i++)if(s.bricks[i]){
               const b=brick(i);
               commands.push({type:'roundRect',x:b.x,y:b.y+u*0.009,width:b.width,height:b.height,radius:u*0.009,color:'#020713'},
@@ -87,8 +85,8 @@ internal object GameGenerationExample {
                 gradient:{type:'linear',x:0,y:py,x2:W,y2:py,stops:[{offset:0,color:'#3BD9DB'},{offset:1,color:'#B6F4FF'}]}},
               {type:'line',x:s.paddle*W-u*0.025,y:py+ph/2,x2:s.paddle*W+u*0.025,y2:py+ph/2,stroke:Math.max(0.1,u*0.005),color:'#15738C'},
               {type:'circle',x:s.x*W,y:s.y*H,radius:r*2,color:'#2276DFFF'},
-              {type:'circle',x:s.x*W,y:s.y*H,radius:r,color:'#FFFFFF'},
-              {type:'text',x:W*0.055,y:H*0.975,size:u*0.027,text:'DRAG ANYWHERE  /  LEFT + RIGHT CONTROLS',color:'#90ABC9'});
+              {type:'circle',x:s.x*W,y:s.y*H,radius:r,color:'default'},
+              {type:'text',x:W*0.055,y:H*0.975,size:u*0.027,text:'DRAG ANYWHERE  /  LEFT + RIGHT CONTROLS',color:'muted'});
             if(s.status!=='playing'){
               const titles={ready:'READY TO PLAY',paused:'PAUSED',won:'BOARD CLEARED',gameOver:'GAME OVER'};
               const details={ready:'Drag to move. Break every brick.',paused:'Your board is saved. Use Resume.',won:'Perfect clear! Use Restart to play.',gameOver:'Three lives used. Try Restart.'};

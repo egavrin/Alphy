@@ -4,6 +4,7 @@ import com.alpha.assistant.capabilities.MedicineContract
 import com.alpha.assistant.capabilities.NavigationContract
 import com.alpha.assistant.capabilities.OwnedCalendarContract
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.sandbox.SandboxContract
 import com.alpha.assistant.sandbox.SandboxResult
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
@@ -22,7 +23,10 @@ internal class ToolGenerationSmoke(
     private val revision: Int,
     private val initialState: String,
     private val checkActive: suspend ()->Unit,
-    private val validate: (String,JSONObject,String,String)->ToolPreview
+    private val generation: ToolGenerationService,
+    private val policy: ToolExecutionPolicy? = null,
+    private val onInitialPreview: (suspend (ToolPreview) -> Unit)? = null,
+    private val checkUi: (suspend (String) -> Unit)? = null,
 ) {
     private data class Control(val event: JSONObject,val path: String)
     private inner class Branch(private val execute: suspend (String,String)->SandboxResult,initialUi: String) {
@@ -38,16 +42,14 @@ internal class ToolGenerationSmoke(
             checkActive()
             try {
                 val type=event.getString("type")
-                if(type=="action") ToolUiCatalog.validateAction(JSONObject(ui),event.getString("actionId"),event.opt("value").takeUnless {it==JSONObject.NULL},JSONObject(state))
-                if(type !in setOf("preview","render","open","action")) {
+                if(type !in setOf("preview","render","open","action",SandboxContract.LIVE_INPUT_EVENT)) {
                     GraphicsContract.validateSurfaceEvent(event,effectiveSurfaces)
                     if(type=="frame") require(event.getString("surfaceId") in frames)
                     if(type=="timer") require(event.getString("timerId") in timers)
                 }
-                val input=JSONObject().put("artifactId",id).put("revision",revision).put("state",JSONObject(state)).put("event",event)
-                val raw=execute(spec.source,input.toString())
-                if(raw.status!="OK") throw com.alpha.assistant.cloud.CloudFailure("javascript_${raw.status.lowercase(java.util.Locale.ROOT)}",raw.message)
-                val result=validate(state,event,ui,checkNotNull(raw.json))
+                val result=generation.executeEvent(spec,id,revision,state,event,ui,policy) { source,input ->
+                    execute(source,input.toString())
+                }
                 val merged=JSONObject(surfaces.toString())
                 result.surfaces?.let {output -> output.keys().forEach {merged.put(it,output.getJSONObject(it))}}
                 ArtifactProtocol.validateSurfaces(merged)
@@ -55,6 +57,7 @@ internal class ToolGenerationSmoke(
                     val surface=effectiveSurfaces.getValue(event.getString("surfaceId"))
                     effectiveSurfaces=effectiveSurfaces+(surface.id to surface.copy(width=event.getInt("width"),height=event.getInt("height")))
                 }
+                checkUi?.invoke(result.ui)
                 state=result.state;ui=result.ui;surfaces=merged
                 frames=result.frames ?: frames;timers=result.timers ?: timers
                 playback.update(result.playback,type)
@@ -95,12 +98,19 @@ internal class ToolGenerationSmoke(
             }
         }
     }
-    private suspend fun <T> branch(initialUi: String=spec.ui.toString(),block: suspend Branch.()->T): T = sandbox.disposable {execute -> Branch(execute,initialUi).block()}
+    private suspend fun <T> branch(initialUi: String=spec.ui.toString(),block: suspend Branch.()->T): T =
+        if(spec.isSealedStandalone) Branch({ _, _ -> error("A sealed standalone app has no executor.") },initialUi).block()
+        else sandbox.disposable {execute -> Branch(execute,initialUi).block()}
     suspend fun run(): ToolPreview {
         val preview=branch {
             val result=event(JSONObject().put("type","preview"),"$.ui")
             event(JSONObject().put("type","render"),"$.ui")
             result
+        }
+        onInitialPreview?.let {
+            checkActive()
+            it(preview)
+            checkActive()
         }
         val initialControls=branch(preview.ui) {
             event(JSONObject().put("type","open"),"$.ui")
@@ -108,7 +118,8 @@ internal class ToolGenerationSmoke(
             surfaces();subscriptions()
             controls
         }
-        val initialIds=initialControls.map {it.event.getString("actionId")}.toSet()
+        fun identity(control: Control) = control.event.getString("type") to control.event.getString("actionId")
+        val initialIds=initialControls.map(::identity).toSet()
         for(control in initialControls) {
             val revealed=branch(preview.ui) {
                 event(JSONObject().put("type","open"),"$.ui")
@@ -117,7 +128,7 @@ internal class ToolGenerationSmoke(
                 if(!fenced) {
                     event(JSONObject().put("type","render"),control.path)
                     surfaces();subscriptions()
-                    controls(JSONObject(ui),JSONObject(state)).filter {it.event.getString("actionId") !in initialIds}
+                    controls(JSONObject(ui),JSONObject(state)).filter {identity(it) !in initialIds}
                 } else emptyList()
             }
             // One bounded reveal step covers a newly opened modal or page without an unbounded action graph.
@@ -134,10 +145,13 @@ internal class ToolGenerationSmoke(
     }
     private fun controls(root: JSONObject,state: JSONObject): List<Control> {
         val result=mutableListOf<Control>()
-        fun add(id: String,value: Any?,path: String,key: String?) {
+        fun add(id: String,value: Any?,path: String,key: String?,liveInput: Boolean=false) {
             val payload=if(key==null)value else JSONObject().put("key",key).put("value",value ?: JSONObject.NULL)
-            val selected=try {ToolUiCatalog.validateAction(root,id,payload,state)}catch(_: IllegalStateException) {return}
-            val event=JSONObject().put("type","action").put("actionId",id).put("value",payload ?: JSONObject.NULL)
+            val selected=try {
+                if(liveInput) ToolUiCatalog.validateLiveInput(root,id,payload,state) else ToolUiCatalog.validateAction(root,id,payload,state)
+            }catch(_: IllegalStateException) {return}
+            val event=if(liveInput) liveInputEvent(id,payload)
+                else JSONObject().put("type","action").put("actionId",id).put("value",payload ?: JSONObject.NULL)
             val request=when(selected.getString("type")) {
                 "calendar" -> OwnedCalendarContract.request(selected)
                 "medicine" -> MedicineContract.request(selected)
@@ -151,8 +165,9 @@ internal class ToolGenerationSmoke(
             if(!ToolUiCatalog.visible(node,values) || !ToolUiCatalog.enabled(node,values))return
             if(node.optString("type")=="transition" && ToolUiCatalog.value(values,node.getString("bind"))!=true)return
             val type=node.getString("type")
+            val stack=if(type=="routeStack") ToolUiCatalog.routeStack(node,values) else emptyList()
             val id=node.optString("action")
-            if(id.isNotEmpty()) {
+            if(id.isNotEmpty() && !(type == "timer" && node.has("foreground"))) {
                 val current=if(node.has("bind"))ToolUiCatalog.value(values,node.getString("bind")) else null
                 val samples: List<Any?> = when(type) {
                     "input","search" -> node.optInt("maxLength",2048).let {limit -> listOf((current as String).take(limit),"","Preview".take(limit))}
@@ -164,11 +179,12 @@ internal class ToolGenerationSmoke(
                     "dateRangeInput" -> listOf(current,JSONArray().put("2000-02-28").put("2000-02-29"))
                     "multiChoice" -> node.getJSONArray("options").let {options->listOf(current,JSONArray(),JSONArray().apply {repeat(options.length()){put(options.getJSONObject(it).get("value"))}})}
                     "pager" -> listOf(current,0,node.getJSONArray("children").length()-1)
+                    "routeStack" -> if(stack.size>1) listOf(JSONArray(stack)) else emptyList()
                     in ToolUiCatalog.choiceTypes -> node.getJSONArray("options").let {listOf(it.getJSONObject(0).get("value"),it.getJSONObject(it.length()-1).get("value"),current)}
                     "list","table","groupedList","lazyList","lazyGrid" -> ToolUiCatalog.records(node,values).let {rows -> (0 until rows.length()).take(1).plus(if(rows.length()>1)listOf(rows.length()-1) else emptyList()).map {ToolUiCatalog.stableKey(rows.getJSONObject(it))}}
                     else -> listOf(null)
                 }
-                for(sample in samples)add(id,sample,path,key)
+                for(sample in samples)add(id,sample,path,key,ToolUiCatalog.isLiveInput(node))
             }
             node.optString("dismissAction").takeIf {it.isNotEmpty()}?.let {add(it,null,path,key)}
             ToolUiCatalog.interactionActions(node).forEach {(kind,id)->
@@ -190,8 +206,18 @@ internal class ToolGenerationSmoke(
                 }
             }
             node.optJSONArray("children")?.let {children ->
-                if(type=="pager") {val page=(ToolUiCatalog.value(values,node.getString("bind")) as Number).toInt();visit(children.getJSONObject(page),values,"$path.children[$page]",key)}
-                else repeat(children.length()) {visit(children.getJSONObject(it),values,"$path.children[$it]",key)}
+                when(type) {
+                    "pager" -> {
+                        val page=(ToolUiCatalog.value(values,node.getString("bind")) as Number).toInt()
+                        visit(children.getJSONObject(page),values,"$path.children[$page]",key)
+                    }
+                    "routeStack" -> {
+                        val routes=node.getJSONArray("routes")
+                        val page=(0 until routes.length()).first {routes.getString(it)==stack.last()}
+                        visit(children.getJSONObject(page),values,"$path.children[$page]",key)
+                    }
+                    else -> repeat(children.length()) {visit(children.getJSONObject(it),values,"$path.children[$it]",key)}
+                }
             }
         }
         visit(root,state,"$.ui")

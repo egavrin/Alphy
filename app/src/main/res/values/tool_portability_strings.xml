@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tool_import">Импортировать мини-приложение</string>
+    <string name="tool_export">Экспорт мини-приложения</string>
+    <string name="tool_export_contents">В файл войдёт описание мини-приложения. Доступы, файлы устройства и ключи не передаются.</string>
+    <string name="tool_export_state">Добавить сохранённое состояние</string>
+    <string name="tool_export_collections">Для приложения с отдельными коллекциями доступен экспорт без сохранённого состояния.</string>
+    <string name="tool_export_share">Поделиться файлом</string>
+    <string name="tool_export_failed">Не удалось подготовить файл мини-приложения.</string>
+    <string name="tool_manual_edit">Редактировать вручную</string>
+    <string name="tool_manual_edit_notice">Измените описание JSON. При сохранении Alphy проверит данные и приостановит связанные сценарии.</string>
+    <string name="tool_manual_edit_definition">Описание мини-приложения (JSON)</string>
+    <string name="tool_manual_edit_save">Проверить и сохранить</string>
+    <string name="tool_manual_edit_failed">Не удалось сохранить изменения. Проверьте JSON и текущую версию мини-приложения.</string>
+</resources>

@@ -4,6 +4,12 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
+    <style name="Theme.Alpha.CompactTimePicker" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:timePickerStyle">@style/Widget.Alpha.CompactTimePicker</item>
+    </style>
+    <style name="Widget.Alpha.CompactTimePicker" parent="android:style/Widget.Material.Light.TimePicker">
+        <item name="android:timePickerMode">spinner</item>
+    </style>
     <style name="Theme.Alpha.Assistant" parent="Theme.Alpha">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>

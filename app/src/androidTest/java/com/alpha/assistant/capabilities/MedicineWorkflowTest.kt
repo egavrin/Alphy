@@ -58,9 +58,9 @@ class MedicineWorkflowTest {
      */
     private class Platform: MedicinePlatform {
         val armed=mutableListOf<JSONObject>()
+        val access=MedicineReminderAccess(true,true,true,true)
         var posts=0
-        var failure: String?=null
-        override fun accessFailure()=failure
+        override fun accessFailure()=access.failure()
         override fun arm(reminder: JSONObject) {armed.add(JSONObject(reminder.toString()))}
         override fun cancel(reminder: JSONObject) {}
         override fun post(reminder: JSONObject,at: Long,now: Long): String {posts++;return "activeNotification"}
@@ -68,22 +68,23 @@ class MedicineWorkflowTest {
     private fun reminderFixture(block: (ToolStore,MedicineStore,Platform,(String,JSONObject,Long)->CapabilityResult)->Unit) {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val name="medicine-repair-${UUID.randomUUID()}.db"
-        val tools=ToolStore(context,name)
+        val platform=Platform()
+        val permissions=AndroidCapabilities(context,medicineAccess={platform.access})
+        val tools=ToolStore(context,name,permissionCheck=permissions::permissionGranted)
         val medicineName=MedicineRuntime.database(tools)
         val medicine=MedicineStore(context,medicineName)
-        val platform=Platform()
         val spec=ToolSpec.parse(JSONObject().put("formatVersion",3).put("title","Medicine fixture").put("description","")
             .put("capabilities",JSONArray(MedicineContract.ids.toList())).put("initialState",JSONObject("{\"ready\":true}"))
             .put("stateSchema",JSONObject("{\"ready\":\"boolean\"}"))
             .put("ui",JSONObject("{\"type\":\"text\",\"text\":\"Fixture\"}")).put("source","return {state:input.state};").toString())
         val tool=ToolRecord("owner",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)
-        tools.saveTool(tool,true);MedicineContract.ids.forEach {tools.grant(tool.id,it,true)}
+        tools.saveTool(tool,true)
         var sequence=0
         fun execute(id: String,args: JSONObject,now: Long): CapabilityResult=runBlocking {
             val old=tools.tool(tool.id)!!
             tools.commitTool(old.copy(stateVersion=old.stateVersion+1),old,false,effects=listOf(CapabilityRequest("op${sequence++}",id,args)))
             val key=tools.effects(tool.id).last().key
-            CapabilityBroker(context,tools).executeOwned(key,true) {effect ->
+            CapabilityBroker(context,tools).executeOwned(key) {effect ->
                 MedicineCapabilities(context,tools,clock={now},platform=platform,unlocked={true}).execute(effect,{true}) {}
             }
         }
@@ -93,6 +94,35 @@ class MedicineWorkflowTest {
     private fun mealReminder(key: String,offset: Int)=JSONObject().put("version",1).put("reminderKey",key).put("medicine","Explicit medicine")
         .put("timeZone","UTC").put("mealKey","lunch").put("offsetMinutes",offset)
     private fun alarm(reminder: JSONObject)=Intent().putExtra("owner",reminder.getString("owner")).putExtra("key",reminder.getString("reminderKey")).putExtra("at",reminder.getLong("nextAt"))
+    @Test fun legacyScheduleNeedsFreshExplicitActivationOfTheSameDefinition() {
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        val now=Instant.parse("2026-11-02T12:00:00Z").toEpochMilli()
+        reminderFixture {tools,medicine,platform,execute ->
+            val args=JSONObject().put("version",1).put("reminderKey","daily").put("medicine","Explicit medicine")
+                .put("timeZone","UTC").put("minuteOfDay",12*60+1)
+            val oldAt=now+60000
+            medicine.writableDatabase.execSQL(
+                "INSERT INTO reminders(owner,key,revision,capability,args,mode,status,next_at) VALUES(?,?,?,?,?,?,?,?)",
+                arrayOf<Any>("owner","daily",1,"medicine.remindDaily",args.toString(),"daily","scheduled",oldAt))
+            val legacy=medicine.reminders().single()
+            tools.seedLegacyDeviceGrant("owner","medicine.remindDaily",false)
+            MedicineRuntime.deliver(context,tools,medicine,alarm(legacy),oldAt,platform)
+            assertEquals(0,platform.posts)
+            assertTrue(platform.armed.isEmpty())
+            val preserved=medicine.reminders().single()
+            assertEquals("reactivationRequired",preserved.getString("status"))
+            assertEquals(args.toString(),preserved.getJSONObject("args").toString())
+            assertEquals("denied",execute("medicine.remindDaily",JSONObject(args.toString()).put("minuteOfDay",1),now).status)
+            assertTrue(platform.armed.isEmpty())
+            assertEquals("succeeded",execute("medicine.remindDaily",args,now).status)
+            val active=medicine.reminders().single()
+            assertEquals("scheduled",active.getString("status"))
+            assertEquals(oldAt,active.getLong("nextAt"))
+            MedicineRuntime.deliver(context,tools,medicine,alarm(active),oldAt,platform)
+            MedicineRuntime.deliver(context,tools,medicine,alarm(active),oldAt,platform)
+            assertEquals(1,platform.posts)
+        }
+    }
     @Test fun restoreAndDirectDeliveryShareTheSameWindowAndClaim() {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val at=Instant.parse("2026-11-02T12:00:00Z").toEpochMilli()

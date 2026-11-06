@@ -1,0 +1,156 @@
+{
+  "status": "Proposed frozen inputs. Root acceptance is pending.",
+  "request_origin": "Synthetic requests written in the user's voice. The requests and test data are fictional.",
+  "reference": {
+    "product": "deal-studio-ohos",
+    "revision": "26eaacccc8ec4ce5376fecedb0a6f821ccefd561",
+    "evidence": "Pinned source and host checks. These sources do not establish native behavior or a comparison result."
+  },
+  "scope": [
+    "Use the same request and interaction checks for both products.",
+    "Use test-owned state and an isolated local clock where a check needs a date.",
+    "Merge accepted cases with the final workflow criteria and capability inventory before the comparison."
+  ],
+  "approved_capabilities": ["vibration.play"],
+  "interactions": {},
+  "cases": [
+    {
+      "id": "reference-itinerary",
+      "category": "itinerary",
+      "language": "ru",
+      "capabilities": [],
+      "expected_outcome": "generated",
+      "request": "Сделай план прогулки. Начинаю в 09:10: выставочный зал на 25 минут, сквер на 35 минут и книжный павильон на 20 минут. Между остановками по 10 минут. Покажи время каждой остановки и конец прогулки. Дай менять время старта и отмечать, где я уже побывал.",
+      "interactions": {
+        "schedule": "Verify the three stops in order at 09:10–09:35, 09:45–10:20, and 10:30–10:50.",
+        "start": "Set the start to 09:30. Verify the same order and an end time of 11:10.",
+        "progress": "Mark the first two stops reached. Clear the first mark. Verify that only the second stop remains marked."
+      },
+      "reference_files": ["tools/vera-harness/itinerary-check.js"]
+    },
+    {
+      "id": "reference-quick-log",
+      "category": "quick-log",
+      "language": "ru",
+      "capabilities": [],
+      "expected_outcome": "generated",
+      "request": "Сделай быстрый журнал нарезанных листов бумаги. Две кнопки: добавить 3 листа или 5 листов. Моя цель — 20 листов за день. Покажи сумму за сегодня, время каждой записи и вчерашнюю сумму. Нужны отмена последнего добавления и удаление отдельной записи.",
+      "interactions": {
+        "count": "At 09:00, 09:01, and 09:02, add 3, 3, and 5 sheets. Verify 11 of 20 and three entries with their respective times.",
+        "undo_remove": "Undo the last entry, then remove the 09:00 entry. Verify 3 of 20 and only the 09:01 entry.",
+        "day_boundary": "Advance the test clock one local day. Verify today's total is zero and yesterday's total is 3."
+      },
+      "reference_files": ["tools/vera-harness/quick-log-check.js"]
+    },
+    {
+      "id": "reference-dose-schedule",
+      "category": "dose-schedule",
+      "language": "ru",
+      "capabilities": [],
+      "expected_outcome": "generated",
+      "request": "Сделай учебный журнал для двух вымышленных приёмов: «Образец А» в 08:15 и «Образец Б» в 19:40 каждый день. Покажи, что ещё не отмечено или просрочено. Нужны отметка, отмена отметки и число дней подряд, когда отмечены оба приёма. Это макет журнала; не добавляй лекарства, дозировки или советы.",
+      "interactions": {
+        "provided_schedule": "At 09:00, verify exactly the two requested entries. Only the 08:15 entry is late.",
+        "take_undo": "Mark both entries. Verify 2 of 2 and a one-day streak. Undo the second mark. Verify 1 of 2 and a zero-day streak.",
+        "day_boundary": "Mark the second entry again. Advance one local day and verify zero entries marked today and a one-day streak.",
+        "data_boundary": "Verify the app gives no medication recommendation, invents no doses, and creates no calendar events."
+      },
+      "reference_files": ["tools/vera-harness/dose-schedule-check.js"]
+    },
+    {
+      "id": "reference-due-items",
+      "category": "due-items",
+      "language": "ru",
+      "capabilities": [],
+      "expected_outcome": "generated",
+      "request": "Сделай список сроков для мастерской. Срок талона истёк позавчера, бумагу нужно заказать завтра, а фильтр заменить через 10 дней. Фильтр меняют каждые 14 дней. Отсортируй по сроку и отдельно посчитай просроченные записи и записи со сроком в ближайшие три дня. Когда я отмечу замену фильтра, отсчитай его следующий срок от сегодняшнего дня.",
+      "interactions": {
+        "initial_order": "Verify the order is ticket, paper, filter. Verify one expired item and one due within three days.",
+        "repeat": "Mark the filter replaced. Verify its new date is 14 local days from today and the other dates are unchanged.",
+        "retention": "Close and reopen the saved app. Verify the new filter date and both original items remain."
+      },
+      "reference_files": ["tools/vera-harness/due-items-check.js"]
+    },
+    {
+      "id": "reference-points-ledger",
+      "category": "points-ledger",
+      "language": "ru",
+      "capabilities": [],
+      "expected_outcome": "generated",
+      "request": "Сделай счёт очков для команд «Янтарь» и «Мел». За викторину начисляй 3 очка, за пазл — 2. Подсказка стоит 5 очков, в долг её брать нельзя. Покажи отдельный баланс каждой команды и историю начислений и списаний. Дай отменить последнее действие.",
+      "interactions": {
+        "balance_guard": "Both balances start at zero. Attempt to redeem a hint for Янтарь. Verify the balance stays at zero.",
+        "earn_spend": "For Янтарь, record two quizzes and redeem a hint. Verify 6 before redemption and 1 afterward.",
+        "independent_undo": "Add one puzzle for Мел and undo it. Verify Мел returns to zero and Янтарь stays at 1.",
+        "history": "Verify the two quiz credits and one hint debit remain associated with Янтарь."
+      },
+      "reference_files": ["tools/vera-harness/points-ledger-check.js"]
+    },
+    {
+      "id": "reference-idea-deck",
+      "category": "idea-deck",
+      "language": "ru",
+      "capabilities": [],
+      "expected_outcome": "generated",
+      "request": "Сделай подборку занятий на перерыв. Идеи: «Разобрать карандаши» — 2 минуты и мало сил, «Набросать эскиз» — 5 минут и мало сил, «Разложить инструменты» — 5 минут и средне, «Разобрать полку» — 12 минут и много сил. Показывай одну идею с кнопкой «Другая». Нужны фильтры по времени и силам и отметка «Сделано сегодня».",
+      "interactions": {
+        "filters": "Set the time limit to five minutes and select low effort. Verify that only Разобрать карандаши and Набросать эскиз remain available.",
+        "cycle": "Use Другая twice. Verify it alternates between the two matching ideas.",
+        "done": "Mark one idea done. Verify the other becomes featured and the completed idea cannot increase today's count again.",
+        "empty": "Set a one-minute limit. Verify that no idea is offered and the completed count stays unchanged."
+      },
+      "reference_files": ["tools/vera-harness/idea-deck-check.js"]
+    },
+    {
+      "id": "reference-interval-timer",
+      "category": "interval-timer",
+      "language": "en",
+      "capabilities": ["vibration.play"],
+      "expected_outcome": "generated",
+      "request": "Make a timer for two drawing rounds. Each round has 12 seconds of drawing. Rest for 5 seconds between the rounds, with no rest after the last round. Show the current phase and round. Let me pause, reset, and start again. Vibrate once when the last round ends while the timer is open.",
+      "interactions": {
+        "pause_reset": "Start and pause mid-round. Verify the displayed time stays fixed. Reset to round one with 12 seconds and no vibration request.",
+        "phase_order": "Start and keep the timer open. Verify 12 seconds of drawing, 5 seconds of rest, and 12 seconds of drawing in round two.",
+        "terminal": "Verify the timer finishes with no further countdown. Verify one terminal vibration request and none at the earlier transitions.",
+        "vibration_unavailable": "Repeat on a test device without a vibrator. Verify the timer finishes and shows that vibration was unavailable.",
+        "restart": "Start again from completion. Verify round one and a fresh 12-second drawing phase."
+      },
+      "reference_files": ["tools/vera-harness/interval-timer-check.js"],
+      "reference_limit": "The host check signals at phase changes when enabled. The terminal-only behavior is a proposed check for both products."
+    },
+    {
+      "id": "reference-reading-status",
+      "category": "reading-status",
+      "language": "ru",
+      "capabilities": [],
+      "expected_outcome": "generated",
+      "request": "Сделай журнал оборотов тестового вентилятора. Первая запись — 1200 об/мин. Мои метки: ниже 1000 — «Медленно», от 1000 до 1499 — «Рабочий режим», от 1500 — «Быстро». Покажи последнее значение и метку, историю от новых к старым и график, если записей две или больше. Дай удалять записи.",
+      "interactions": {
+        "seed": "Verify the initial entry is 1200 об/мин with the Рабочий режим label and no graph.",
+        "boundaries": "Add 999, 1000, and 1500 in that order. Verify the respective labels are Медленно, Рабочий режим, and Быстро.",
+        "history": "Verify newest-first history and a graph. Delete 1500 and verify 1000 with Рабочий режим is now the latest reading.",
+        "invalid": "Attempt to add the text abc. Verify the saved readings and latest status stay unchanged."
+      },
+      "reference_files": ["tools/vera-harness/reading-status-check.js", "tools/vera-harness/request-seed-check.js"]
+    },
+    {
+      "id": "reference-city-only-itinerary",
+      "category": "itinerary-source-selection",
+      "language": "ru",
+      "capabilities": [],
+      "expected_outcome": "generated",
+      "request": "Сделай план пятичасовой пересадки в Казани. Время начала, названия остановок и минуты на каждой я введу сам. Покажи время остановок по порядку без промежутков, время окончания пересадки и сколько минут осталось после последней остановки.",
+      "interactions": {
+        "local_plan": "Enter 10:00, then two stops of 20 and 35 minutes. Verify their times are 10:00–10:20 and 10:20–10:55.",
+        "remaining": "Verify a 15:00 layover end and 245 minutes left. Verify the app uses only the entered stops.",
+        "no_live_discovery": "Verify a generation trace and a runtime trace show zero live-source discoveries or searches. Mark unavailable if either trace is missing.",
+        "no_invented_weather": "Verify the app shows no weather or other current information and asks for no source grant."
+      },
+      "reference_files": [
+        "entry/src/main/ets/vera/LiveFigures.ets",
+        "tools/vera-harness/live-figures-check.js",
+        "tools/vera-harness/verify-check.js"
+      ]
+    }
+  ]
+}

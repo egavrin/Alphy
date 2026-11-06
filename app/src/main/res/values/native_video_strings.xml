@@ -1,0 +1,10 @@
+<resources>
+    <string name="tool_video_ready">Видео готово к воспроизведению</string>
+    <string name="tool_video_play">Воспроизвести: %1$s</string>
+    <string name="tool_video_no_selection">Видео не выбрано</string>
+    <string name="tool_video_open_app">Откройте мини-приложение для просмотра видео</string>
+    <string name="tool_video_preparing">Подготовка видео</string>
+    <string name="tool_video_playing">Видео воспроизводится</string>
+    <string name="tool_video_unavailable">Видео недоступно</string>
+    <string name="tool_video_failed">Не удалось воспроизвести видео</string>
+</resources>

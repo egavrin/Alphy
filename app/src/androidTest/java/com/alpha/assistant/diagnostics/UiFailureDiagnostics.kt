@@ -11,7 +11,7 @@ import java.io.File
 class UiFailureDiagnostics(private val fixture: String) {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val automation get() = instrumentation.uiAutomation
-    private val labels = mutableSetOf("Mini-app content", "Mini-app library content", "Mini-app refinement", "Refine this mini-app", "Name", "Changed", "Apply: Name",
+    private val labels = mutableSetOf("Содержимое мини-приложения", "Содержимое библиотеки мини-приложений", "Изменение мини-приложения", "Опишите изменения", "Name", "Changed", "Применить: Name",
         "Сообщение ассистенту", "Отправить сообщение", "Голосовой запрос").apply {
         for (count in listOf(0, 1, 5)) add("$count owned events in this snapshot. Events added after this click remain separate. Uncertain events keep their saved ownership records.")
     }
@@ -32,10 +32,11 @@ class UiFailureDiagnostics(private val fixture: String) {
     private fun node(node: AccessibilityNodeInfo?): String {
         if (node == null) return "<absent>"
         val bounds = Rect().also { node.getBoundsInScreen(it) }
+        val state = if (android.os.Build.VERSION.SDK_INT >= 30) node.stateDescription else null
         return "class=${node.className} text=${safe(node.text)} description=${safe(node.contentDescription)} " +
             "visible=${node.isVisibleToUser} enabled=${node.isEnabled} selected=${node.isSelected} " +
             "editable=${node.isEditable} focused=${node.isFocused} clickable=${node.isClickable} " +
-            "bounds=$bounds actions=${node.actionList.map { it.id }} state=${safe(node.stateDescription)}"
+            "bounds=$bounds actions=${node.actionList.map { it.id }} state=${safe(state)}"
     }
 
     private fun snapshot(selected: AccessibilityNodeInfo?): String = buildString {

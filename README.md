@@ -37,21 +37,65 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 The app uses the application ID `com.alpha.assistant` and the device label `Alphy`.
 
+## GitHub updates
+
+Alphy checks public GitHub releases, including prereleases, once per day when the app enters the foreground. [Alphy releases](https://github.com/egavrin/Alphy/releases)
+Open «Настройки» → «Обновления Alphy» to check at any time, read release notes, and download an update.
+After the download, select «Установить обновление» to open the Android installer.
+If Android requires permission for Alphy to install apps, grant it and return to Alphy to select «Установить обновление».
+If you use Alpha 2, install the first updater build (Alpha 3) over your current app through Android.
+
+For each release, publish one APK named `Alphy-v<version>.apk` under the public tag `v<version>`.
+Use a semantic version that matches the APK's `versionName` and a `versionCode` greater than the previous release.
+Use the application ID `com.alpha.assistant` and the same signing certificate as the previous release.
+GitHub provides the asset size and SHA-256 digest that Alphy uses to verify the download.
+
 ## Voice models
 
 The repository excludes the Silero model bundle because its license restricts commercial use. A fresh clone can build, but the complete local voice workflow does not work without that bundle. The historical ONNX export is not provided here. Local voice requires the exact files listed in [`app/src/main/assets/voice/manifest.json`](app/src/main/assets/voice/manifest.json), including Silero. The app verifies each file's size and SHA-256 before use. See [`docs/voice-integration.md`](docs/voice-integration.md) for source and license details.
 
 ## Tests
 
-Run the Android instrumentation tests on the ARM64 emulator `emulator-5556`:
+Run the Android instrumentation tests on an owned ARM64 emulator. The following example selects `emulator-5556`.
 
 ```sh
-python3 tools/compose_acceptance/run.py suite --label LABEL
+python3 tools/compose_acceptance/run.py suite --serial emulator-5556 --label LABEL
 ```
 
-The command builds the app APK and the test APK. It installs both with `adb install -r` on `emulator-5556` only, so the app keeps its data. The build uses `JAVA_HOME=/opt/homebrew/opt/openjdk@17` and `ANDROID_HOME=/opt/homebrew/share/android-commandlinetools`. Use the `--adb` option for a different adb path. `LABEL` names a new evidence directory in `evidence/alphy-ui/`. Add test classes or methods after the label to run only those tests. The project does not use `connectedDebugAndroidTest`, because that task uninstalls the app with its data and its key.
+The command builds both APKs, installs them with `adb install -r` on the selected emulator, and verifies the installed SHA-256 hashes. It records the emulator API level, build fingerprint, and WebView version. The build uses `JAVA_HOME=/opt/homebrew/opt/openjdk@17` and `ANDROID_HOME=/opt/homebrew/share/android-commandlinetools`. Use the `--adb` option for a different adb path. `LABEL` names a new evidence directory in `evidence/alphy-ui/`. Add test classes or methods after the label to run only those tests. Use the suite runner to retain app data and credentials between runs.
 
 Some workflows require device permissions, Google Play services, or the local voice models. See the documents in [`docs/`](docs/) for feature details and test limits.
+
+### Update installer workflow
+
+Use a disposable ARM64 emulator with the Alpha 3 debug APK and its instrumentation APK.
+Use a compatible Alpha 4 fixture with application ID `com.alpha.assistant`, version name `0.1.0-alpha.4`, and version code `4`.
+Sign the fixture with the same key as the installed Alpha 3 APK.
+Replace the example emulator serial and fixture path with your values.
+
+```sh
+serial=emulator-5570
+fixture=/path/to/Alphy-v0.1.0-alpha.4.apk
+test=com.alpha.assistant.ui.AppUpdateWorkflowTest
+runner=com.alpha.assistant.test/androidx.test.runner.AndroidJUnitRunner
+
+adb -s "$serial" shell run-as com.alpha.assistant mkdir -p files/update-test
+adb -s "$serial" exec-in 'run-as com.alpha.assistant sh -c "cat > files/update-test/Alphy-v0.1.0-alpha.4.apk"' < "$fixture"
+
+adb -s "$serial" shell appops set com.alpha.assistant REQUEST_INSTALL_PACKAGES default
+adb -s "$serial" shell am instrument -w -r -e class "$test#returnsFromInstallPermissionWithVerifiedUpdate" "$runner"
+
+adb -s "$serial" shell appops set com.alpha.assistant REQUEST_INSTALL_PACKAGES allow
+adb -s "$serial" shell am instrument -w -r -e class "$test#opensAndroidInstallerWithVerifiedUpdate" "$runner"
+
+adb -s "$serial" shell appops set com.alpha.assistant REQUEST_INSTALL_PACKAGES default
+adb -s "$serial" shell run-as com.alpha.assistant rm files/update-test/Alphy-v0.1.0-alpha.4.apk
+```
+
+For an actual replacement, add `-e holdInstaller true` before `"$runner"` in the installer test command.
+Confirm installation within 90 seconds after the test reports that the installer is open.
+Android ends the test process when it replaces the app.
+Verify the installed version and retained data after replacement.
 
 ## License
 

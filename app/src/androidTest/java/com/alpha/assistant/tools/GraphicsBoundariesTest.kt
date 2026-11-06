@@ -96,7 +96,7 @@ class GraphicsBoundariesTest {
         val bitmap=Bitmap.createBitmap(32,32,Bitmap.Config.ARGB_8888)
         val canvas=Canvas(bitmap)
         val commands=frame("[{\"type\":\"group\",\"transform\":[1,0,0,1,20,0],\"children\":[$rect]},$rect]").getJSONArray("commands")
-        drawSurfaceFrame(canvas,ToolSurface("main",16,16),commands,16f,16f)
+        drawSurfaceFrame(canvas,ToolSurface("main",16,16),commands,16f,16f,emptyMap())
         assertEquals(android.graphics.Color.RED,bitmap.getPixel(5,5))
         assertEquals(0,bitmap.getPixel(25,5))
         bitmap.recycle()

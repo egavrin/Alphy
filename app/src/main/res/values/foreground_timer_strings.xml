@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="foreground_timer_start">Запустить таймер</string>
+    <string name="foreground_timer_resume">Продолжить таймер</string>
+    <string name="foreground_timer_reset">Сбросить таймер</string>
+    <string name="foreground_timer_ready">Готов: %1$s</string>
+    <string name="foreground_timer_paused">На паузе: %1$s</string>
+    <string name="foreground_timer_vibration">По окончании — вибрация %1$d мс</string>
+    <string name="foreground_timer_notification">По окончании — уведомление «%1$s». %2$s</string>
+    <string name="foreground_timer_denied">Время вышло. Android не разрешил оповещение.</string>
+    <string name="foreground_timer_unavailable">Время вышло. Оповещение недоступно.</string>
+    <string name="foreground_timer_uncertain">Время вышло. Результат оповещения не подтверждён.</string>
+    <string name="foreground_timer_suppressed">Время вышло. Достигнут лимит оповещений.</string>
+    <string name="foreground_timer_failed">Не удалось сохранить состояние таймера.</string>
+</resources>

@@ -18,7 +18,7 @@ import java.util.UUID
  * Cases: opt-out, ordered three-effect batch, duplicate execution/callback/delivery, handler effects, state/revision/archive
  * changes, grants/permissions at receipt and commit, interrupted native claims, bounded delivery recovery, cancellation,
  * atomic state/receipt rollback, private refinement, oversized/forged data, resource owner/expiry, shared URI cleanup,
- * additive v3 retention, and unsupported schemas without deletion. Device permission/UI flows remain acceptance work.
+ * unsupported schemas without deletion. Device permission/UI flows remain acceptance work.
  */
 @RunWith(AndroidJUnit4::class)
 class CapabilityResultsWorkflowTest {
@@ -39,22 +39,23 @@ class CapabilityResultsWorkflowTest {
     private fun engine(store: ToolStore) = ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)), permissionCheck = { true })
     private suspend fun fixture(block: suspend (ToolStore,ToolRecord) -> Unit) {
         val name = "results-${UUID.randomUUID()}.db"
-        try { ToolStore(context,name).use { store -> val tool = record(); store.commitTool(tool,null,true); store.grant(tool.id,"vibration.play",true); block(store,tool) } }
+        try { ToolStore(context,name).use { store -> val tool = record(); store.commitTool(tool,null,true); block(store,tool) } }
         finally { context.deleteDatabase(name) }
     }
     @Test fun batchWaitsForAllSiblingsAndCommitsOnce(): Unit = runBlocking { fixture { store, tool ->
+        store.seedLegacyDeviceGrant(tool.id,"vibration.play",false)
         store.commitTool(tool.copy(stateVersion=2),tool,false,effects=listOf(request("a"),request("b"),request("c")))
         val broker = CapabilityBroker(context,store)
         var calls = 0
         store.effects(tool.id).forEachIndexed { index, effect ->
-            broker.execute(effect.key,true) { calls++; CapabilityResult("succeeded","Native") }
+            broker.execute(effect.key) { calls++; CapabilityResult("succeeded","Native") }
             if(index < 2) { engine(store).deliverCapabilityResults(tool.id); assertEquals(0,JSONObject(store.tool(tool.id)!!.state).getInt("count")) }
         }
         engine(store).deliverCapabilityResults(tool.id)
         assertEquals(3,calls)
         assertEquals("a,b,c",JSONObject(store.tool(tool.id)!!.state).getString("secret"))
         assertEquals(3,JSONObject(store.tool(tool.id)!!.state).getInt("count"))
-        store.effects(tool.id).forEach { broker.execute(it.key,true) { error("Repeated external action") } }
+        store.effects(tool.id).forEach { broker.execute(it.key) { error("Repeated external action") } }
         engine(store).deliverCapabilityResults(tool.id)
         assertEquals(3,store.tool(tool.id)!!.stateVersion)
         assertEquals("committed",store.deliveries(tool.id).single().phase)
@@ -64,28 +65,27 @@ class CapabilityResultsWorkflowTest {
             val bad = spec(handler="return {state:input.state,effects:[{id:'bad',capability:'notification.post',args:{title:'x',text:'y'}}]};")
             val changed = tool.copy(spec=bad.json,stateVersion=2)
             store.commitTool(changed,tool,false,effects=listOf(request()))
-            CapabilityBroker(context,store).execute(store.effects(tool.id).single().key,true) { CapabilityResult("succeeded","Native") }
+            CapabilityBroker(context,store).execute(store.effects(tool.id).single().key) { CapabilityResult("succeeded","Native") }
             engine(store).deliverCapabilityResults(tool.id)
             assertEquals(changed,store.tool(tool.id)); assertEquals("rejected",store.deliveries(tool.id).single().phase)
         }
         fixture { store, tool ->
             val legacy = tool.copy(spec=spec(false).json,stateVersion=2)
             store.commitTool(legacy,tool,false,effects=listOf(request()))
-            CapabilityBroker(context,store).execute(store.effects(tool.id).single().key,true) { CapabilityResult("succeeded","Native") }
+            CapabilityBroker(context,store).execute(store.effects(tool.id).single().key) { CapabilityResult("succeeded","Native") }
             engine(store).deliverCapabilityResults(tool.id)
             assertEquals(legacy,store.tool(tool.id)); assertTrue(store.deliveries(tool.id).isEmpty())
         }
     }
-    @Test fun staleArchivedRevokedAndPermissionChangesRejectWithoutStateLoss(): Unit = runBlocking {
-        for(mode in listOf("state","revision","archive","grant","permission")) fixture { store, tool ->
+    @Test fun staleArchivedAndPermissionChangesRejectWithoutStateLoss(): Unit = runBlocking {
+        for(mode in listOf("state","revision","archive","permission")) fixture { store, tool ->
             val changed = tool.copy(stateVersion=2)
             store.commitTool(changed,tool,false,effects=listOf(request()))
-            CapabilityBroker(context,store).execute(store.effects(tool.id).single().key,true) { CapabilityResult("succeeded","Native") }
+            CapabilityBroker(context,store).execute(store.effects(tool.id).single().key) { CapabilityResult("succeeded","Native") }
             when(mode) {
                 "state" -> store.commitTool(changed.copy(stateVersion=3),changed,false)
                 "revision" -> store.commitTool(changed.copy(revision=2,stateVersion=3),changed,true)
                 "archive" -> store.setArchived(changed,true)
-                "grant" -> store.grant(tool.id,"vibration.play",false)
             }
             val before = store.tool(tool.id)
             ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)),permissionCheck={ mode != "permission" }).deliverCapabilityResults(tool.id)
@@ -96,8 +96,8 @@ class CapabilityResultsWorkflowTest {
         val changed = tool.copy(stateVersion=2)
         store.commitTool(changed,tool,false,effects=listOf(request()))
         val key = store.effects(tool.id).single().key
-        assertNotNull(store.claimEffect(key,true)); assertEquals("running",store.effect(key)!!.phase)
-        assertNull(store.claimEffect(key,true))
+        assertNotNull(store.claimEffect(key)); assertEquals("running",store.effect(key)!!.phase)
+        assertNull(store.claimEffect(key))
         store.recoverCapabilityWork(force = true)
         assertEquals("terminal",store.effect(key)!!.phase)
         assertEquals("unknownOutcome",store.effect(key)!!.result.status)
@@ -112,7 +112,7 @@ class CapabilityResultsWorkflowTest {
     } }
     @Test fun commitRechecksPermissionsAndCancellation(): Unit = runBlocking { fixture { store, tool ->
         val changed=tool.copy(stateVersion=2); store.commitTool(changed,tool,false,effects=listOf(request()))
-        CapabilityBroker(context,store).execute(store.effects(tool.id).single().key,true) { CapabilityResult("succeeded","Native") }
+        CapabilityBroker(context,store).execute(store.effects(tool.id).single().key) { CapabilityResult("succeeded","Native") }
         val claimed=store.claimDelivery(tool.id) { true }!!
         assertFalse(store.commitDelivery(claimed,changed.copy(stateVersion=3),canCommit={false}) { true })
         assertEquals(changed,store.tool(tool.id))
@@ -121,16 +121,15 @@ class CapabilityResultsWorkflowTest {
     @Test fun permissionRevokeAfterClaimAndDuplicateCallbacksCannotCommit(): Unit = runBlocking {
         fixture { store, tool ->
             val changed=tool.copy(stateVersion=2); store.commitTool(changed,tool,false,effects=listOf(request()))
-            CapabilityBroker(context,store).execute(store.effects(tool.id).single().key,true) { CapabilityResult("succeeded","Native") }
+            CapabilityBroker(context,store).execute(store.effects(tool.id).single().key) { CapabilityResult("succeeded","Native") }
             val claimed=store.claimDelivery(tool.id) { true }!!
             assertFalse(store.commitDelivery(claimed,changed.copy(stateVersion=3)) { false })
             assertEquals(changed,store.tool(tool.id))
         }
         fixture { store, tool ->
-            store.grant(tool.id,"photo.pick",true)
             val changed=tool.copy(stateVersion=2); store.commitTool(changed,tool,false,effects=listOf(request(capability="photo.pick")))
             val key=store.effects(tool.id).single().key
-            CapabilityBroker(context,store).execute(key,true) { CapabilityResult("awaitingUser","Picker",JSONObject().put("launched",true)) }
+            CapabilityBroker(context,store).execute(key) { CapabilityResult("awaitingUser","Picker",JSONObject().put("launched",true)) }
             assertEquals("waiting",store.effect(key)!!.phase)
             assertFalse(store.finishUserEffect(key,CapabilityResult("cancelled","Canceled")))
             assertFalse(store.finishUserEffect(key,CapabilityResult("succeeded","Late",JSONObject().put("uri","content://private"))))
@@ -141,10 +140,10 @@ class CapabilityResultsWorkflowTest {
         fixture { store, tool ->
             store.commitTool(tool.copy(stateVersion=2),tool,false,effects=listOf(request()))
             val key=store.effects(tool.id).single().key
-            assertTrue(runCatching { CapabilityBroker(context,store).execute(key,true) { throw kotlinx.coroutines.CancellationException("fixture") } }.isFailure)
+            assertTrue(runCatching { CapabilityBroker(context,store).execute(key) { throw kotlinx.coroutines.CancellationException("fixture") } }.isFailure)
             assertEquals("terminal",store.effect(key)!!.phase)
             assertEquals("unknownOutcome",store.effect(key)!!.result.status)
-            CapabilityBroker(context,store).execute(key,true) { error("Repeated interrupted effect") }
+            CapabilityBroker(context,store).execute(key) { error("Repeated interrupted effect") }
         }
     }
     @Test fun interruptedResourceAcquisitionIsRecoverableWithoutDeletingProviderOriginals(): Unit = runBlocking { fixture { store, tool ->
@@ -172,7 +171,6 @@ class CapabilityResultsWorkflowTest {
         assertEquals(1,store.resourcesForLocator(first.locator).size)
         val temporary=first.copy(id="c".repeat(64),persistent=false,ownsGrant=false,session="previous-process")
         store.insertResource(temporary)
-        store.grant(tool.id,"file.pick",true)
         assertTrue(runCatching { manager.resolve(tool.id,temporary.id) }.isFailure)
     } }
     @Test fun typedDataRejectsOversizeLocatorsProviderIdsAndForgedResources() {
@@ -182,7 +180,6 @@ class CapabilityResultsWorkflowTest {
         assertTrue(runCatching { CapabilityResultEvent.data("notification.post",CapabilityResult("succeeded","ignored",JSONObject().put("text","x".repeat(20000)))) }.isFailure)
     }
     @Test fun resourceHandlesRejectOtherOwnerExpiryAndOriginalFileDeletion(): Unit = runBlocking { fixture { store, tool ->
-        store.grant(tool.id,"camera.capture",true)
         val manager=CapabilityResources(context,store,permissionCheck={true})
         val original=java.io.File(context.filesDir,"capture-${UUID.randomUUID()}.jpg").apply { writeBytes(byteArrayOf(1,2,3)) }
         try {
@@ -216,7 +213,7 @@ class CapabilityResultsWorkflowTest {
     @Test fun permissionChangeInEitherCommitGuardRejectsPrivateState(): Unit = runBlocking {
         for(revokeGuard in listOf(1,2)) fixture { store, tool ->
             val changed=tool.copy(stateVersion=2); store.commitTool(changed,tool,false,effects=listOf(request()))
-            CapabilityBroker(context,store).execute(store.effects(tool.id).single().key,true) { CapabilityResult("succeeded","Native") }
+            CapabilityBroker(context,store).execute(store.effects(tool.id).single().key) { CapabilityResult("succeeded","Native") }
             val claimed=store.claimDelivery(tool.id) { true }!!
             var allowed=true; var guards=0
             val committed=store.commitDelivery(claimed,changed.copy(stateVersion=3,state=JSONObject(changed.state).put("secret","PRIVATE").toString()),
@@ -250,7 +247,6 @@ class CapabilityResultsWorkflowTest {
         assertEquals(3,JSONObject(preview.state).getInt("count")); assertTrue(preview.effects.isEmpty())
     }
     @Test fun acquisitionReclaimsThirtyTwoExpiredOrPriorSessionResources(): Unit = runBlocking { fixture { store, tool ->
-        store.grant(tool.id,"camera.capture",true)
         val manager=CapabilityResources(context,store,permissionCheck={true})
         val shared="content://fixture/shared-expired"
         val sibling=CapabilityResource("f".repeat(64),"another-owner","document",shared,"text/plain",1,true,false,ToolStore.processSession,Long.MAX_VALUE)
@@ -272,10 +268,10 @@ class CapabilityResultsWorkflowTest {
         } finally { original.delete() }
     } }
     @Test fun pickerIdentityRejectsOutOfOrderDuplicateAndDifferentOwnerCallbacks() {
-        val state=CapabilitySelectionState(processSession="session")
+        val state=CapabilitySelectionState("library-A",processSession="session")
         val a=state.begin("owner-A:1:2:photo","photo.pick")!!
         assertNull(state.begin("owner-B:1:2:file","file.pick"))
-        val rotated=CapabilitySelectionState.restore(state.snapshot(),"session")
+        val rotated=state // The Activity retains the owning controller across rotation.
         assertEquals(a,rotated.active)
         assertEquals(a,rotated.consume(a.token))
         val b=rotated.begin("owner-B:1:2:file","file.pick")!!
@@ -287,11 +283,11 @@ class CapabilityResultsWorkflowTest {
         assertEquals(canceled,rotated.consume(canceled.token))
         val later=rotated.begin("owner-B:1:3:photo","photo.pick")!!
         assertNull(rotated.consume(canceled.token)); assertEquals(later,rotated.active)
-        val restarted=CapabilitySelectionState.restore(rotated.snapshot(),"new-process")
-        assertNull(restarted.active); assertNull(restarted.consume(later.token))
+        val restarted=CapabilitySelectionState("library-A",processSession="new-process")
+        assertFalse(restarted.owns(later)); assertNull(restarted.consume(later.token))
     }
-    @Test fun additiveUpgradeRetainsEveryExistingTableAndRejectsUnsupportedVersions() {
-        for(version in listOf(2,3,8)) {
+    @Test fun unsupportedVersionsPreserveReceiptsCredentialsAndVersion() {
+        for(version in listOf(2,3,7,9)) {
             val name="upgrade-${UUID.randomUUID()}.db"
             val path=context.getDatabasePath(name); path.parentFile!!.mkdirs()
             SQLiteDatabase.openOrCreateDatabase(path,null).use { db ->
@@ -311,10 +307,10 @@ class CapabilityResultsWorkflowTest {
             }
             try {
                 ToolStore(context,name).use { store ->
-                    if(version == 3) { assertEquals(7,store.draft("receipt")!!.acceptedRevision); assertTrue(store.granted("owner","photo.pick")); assertEquals(7,store.readableDatabase.version); assertEquals(1,store.tools().size); assertEquals(1,store.revisions(store.tools().single().id).size); assertEquals("unknownOutcome",store.effect("kept-effect")!!.result.status); assertEquals("terminal",store.effect("kept-effect")!!.phase) }
-                    else assertTrue(runCatching { store.readableDatabase }.isFailure)
+                    assertTrue(runCatching { store.readableDatabase }.exceptionOrNull() is ToolLibraryUnavailable)
                 }
                 SQLiteDatabase.openDatabase(path.path,null,SQLiteDatabase.OPEN_READONLY).use { db ->
+                    assertEquals(version,db.version)
                     db.rawQuery("SELECT value FROM credentials",null).use { assertTrue(it.moveToFirst()); assertEquals("fixture-secret",it.getString(0)) }
                     db.rawQuery("SELECT count(*) FROM drafts",null).use { assertTrue(it.moveToFirst()); assertEquals(1,it.getInt(0)) }
                 }

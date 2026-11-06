@@ -1,5 +1,6 @@
 package com.alpha.assistant
 
+import com.alpha.assistant.tools.ToolLibraryStorage
 import android.os.Bundle
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -25,7 +26,18 @@ class MainActivity : AlphyActivity() {
     private fun receiveEntry(intent: Intent) {
         // A launch from Recents repeats the extras of the old entry.
         if(intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
-        if(intent.action in listOf(Intent.ACTION_MAIN,Intent.ACTION_ASSIST,Intent.ACTION_VIEW)) model.openSurface(intent.getStringExtra("tool_id"),intent.getBooleanExtra("settings",false))
+        if(intent.action in listOf(Intent.ACTION_MAIN,Intent.ACTION_ASSIST,Intent.ACTION_VIEW)) {
+            val tool=intent.getStringExtra("tool_id")
+            if(tool!=null && intent.data?.scheme=="alpha" && intent.data?.authority=="tool") {
+                val library=runCatching {ToolLibraryStorage.current(this)}.getOrNull()
+                val expected=intent.getStringExtra(ToolLibraryStorage.GENERATION_EXTRA) ?: ToolLibraryStorage.ORIGINAL
+                if(library?.generation!=expected) {
+                    model.openCreationSurface(com.alpha.assistant.ui.ShellDestination.MiniApps,"")
+                    return
+                }
+            }
+            model.openSurface(tool,intent.getBooleanExtra("settings",false))
+        }
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); receiveEntry(intent) }
     override fun onResume() { super.onResume(); model.tools.reload(); com.alpha.assistant.automations.AutomationRuntime.refresh(this) }

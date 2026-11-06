@@ -1,0 +1,26 @@
+<resources>
+    <string name="live_source_title">Источник данных</string>
+    <string name="live_source_review">Проверить источник</string>
+    <string name="live_source_approve">Разрешить источник</string>
+    <string name="live_source_field">Поле ответа: %1$s · %2$s</string>
+    <string name="live_source_type_text">текст</string>
+    <string name="live_source_type_number">число</string>
+    <string name="live_source_type_boolean">да или нет</string>
+    <string name="live_source_consent">Мини-приложение и его виджет показывают значение из этого поля. Для запроса также нужен доступ к сети в настройках Alphy.</string>
+    <string name="live_source_schedule_consent">Alphy будет запрашивать это поле примерно раз в час, в том числе в фоне. Android выбирает время обновления. Расписание можно отключить здесь.</string>
+    <string name="live_source_refresh">Обновить сейчас</string>
+    <string name="live_source_start">Обновлять в фоне</string>
+    <string name="live_source_stop">Остановить обновления</string>
+    <string name="live_source_hourly">Фоновое обновление каждый час</string>
+    <string name="live_source_fresh">Данные на %1$s</string>
+    <string name="live_source_stale">Последнее значение на %1$s · не обновилось</string>
+    <string name="live_source_unavailable">Источник недоступен</string>
+    <string name="live_source_error">Действие не выполнено. Проверьте доступ к сети для этого мини-приложения.</string>
+    <string name="live_source_widget_fresh">%1$s · %2$s</string>
+    <string name="live_source_widget_stale">%1$s · %2$s · не обновилось</string>
+    <string name="recurring_search_title">Регулярный поиск</string>
+    <string name="recurring_search_query">Поисковый запрос</string>
+    <string name="recurring_search_consent">Alphy отправляет этот запрос в DeepSeek примерно раз в шесть часов и показывает заголовки и ссылки здесь. Android выбирает время запуска. Поиск можно остановить в этом окне.</string>
+    <string name="recurring_search_start">Разрешить регулярный поиск</string>
+    <string name="recurring_search_error">Расписание не сохранено. Проверьте ключ DeepSeek и количество активных расписаний.</string>
+</resources>

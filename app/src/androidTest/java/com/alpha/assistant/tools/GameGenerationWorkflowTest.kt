@@ -25,7 +25,9 @@ class GameGenerationWorkflowTest {
     private class Provider(private val output: String): ChatProvider {
         val requests=mutableListOf<CloudRequest>()
         override suspend fun respond(key:String,request:CloudRequest,session:CloudSession,emit:suspend(CloudEvent)->Unit) {
-            requests+=request;emit(CloudEvent.Text(output))
+            requests+=request
+            if (request.replyWithFixturePlan(emit)) return
+            emit(CloudEvent.Text(output))
         }
     }
     private suspend fun fixture(raw:String,block:suspend(ToolStore,ToolEngine,ToolRecord)->Unit) {
@@ -40,8 +42,8 @@ class GameGenerationWorkflowTest {
     @Test fun exactPromptExamplePassesProductionGenerationAndKeepsNongameWidgetsValid():Unit=runBlocking {
         val raw=GameGenerationExample.spec();val provider=Provider(raw)
         val result=ToolGenerationService(provider,SandboxClient(context)).generate("offline","A local game",null,emptyList(),CloudSession(),"fixture")
-        assertEquals(1,provider.requests.size)
-        assertTrue(provider.requests.single().turns.first().text.contains(raw))
+        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE),provider.requests.map { it.generationStage })
+        assertTrue(provider.requests.last().turns.first().text.contains(raw))
         assertEquals(ToolSpec.parse(raw).initialState,result.state)
         assertTrue(result.effects.isEmpty());assertEquals(0,result.records.length())
         assertTrue(result.surfaces!!.getJSONObject("main").getJSONArray("commands").length()>0)
@@ -70,7 +72,7 @@ class GameGenerationWorkflowTest {
                 engine.interact(tool.id,1,current.tool.stateVersion,id,null)
                 current=engine.artifactSnapshot(tool.id,1)
             }
-            val spec=ToolSpec.parse(tool.spec)
+            val spec=ToolSpec.parsePersisted(tool.spec)
             assertEquals("immersive",spec.presentation)
             assertEquals("viewport",spec.surfaces.getValue("main").sizing)
             assertNull(spec.surfaces.getValue("main").x)
@@ -83,7 +85,7 @@ class GameGenerationWorkflowTest {
             event(GraphicsContract.event("frame",50));assertTrue(state().getDouble("y")<initialY)
             val commands=current.surfaces.getJSONObject("main").getJSONArray("commands")
             val ball=(0 until commands.length()).map(commands::getJSONObject)
-                .single {it.optString("type")=="circle" && it.optString("color")=="#FFFFFF"}
+                .single {it.optString("type")=="circle" && it.optString("color")=="default"}
             assertEquals(state().getDouble("y")*640,ball.getDouble("y"),0.000001)
             event(GraphicsContract.event("pointer",x=80.0,y=580.0,phase="down"))
             assertEquals(80.0/360,state().getDouble("paddle"),0.000001)

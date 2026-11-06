@@ -34,7 +34,9 @@ class ToolWorkflowTest {
         val objectSchema = answer
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                requests += request; assertTrue(request.jsonObject); assertFalse(request.search); emit(CloudEvent.Text(answer))
+                requests += request; assertTrue(request.jsonObject); assertFalse(request.search)
+                if (request.replyWithFixturePlan(emit)) return
+                emit(CloudEvent.Text(answer))
             }
         }
         val engine = ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))
@@ -44,7 +46,7 @@ class ToolWorkflowTest {
             val preview = engine.generate(draft.id,"fixture",emptyList(),CloudSession())
             assertTrue(store.tools().isEmpty()); assertEquals(0,JSONObject(preview.previewState!!).getInt("count"))
             val first = engine.accept(draft.id)
-            val parsed = ToolSpec.parse(first.spec)
+            val parsed = ToolSpec.parsePersisted(first.spec)
             assertEquals("number",parsed.schema.get("count"))
             assertEquals("string",parsed.schema.getJSONObject("items").getJSONObject("fields").get("id"))
             val changed = engine.interact(first.id,first.revision,first.stateVersion,"add",null)
@@ -87,6 +89,7 @@ class ToolWorkflowTest {
         var answers=emptyList<String>()
         val provider=object: ChatProvider {
             override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
+                if (request.replyWithFixturePlan(emit)) return
                 requests.add(request); emit(CloudEvent.Text(answers[requests.lastIndex]))
             }
         }
@@ -141,7 +144,9 @@ class ToolWorkflowTest {
         var answer = spec()
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                assertEquals("tool-test-only", key); requests += request; emit(CloudEvent.Text(answer))
+                assertEquals("tool-test-only", key); requests += request
+                if (request.replyWithFixturePlan(emit)) return
+                emit(CloudEvent.Text(answer))
             }
         }
         val store = ToolStore(context, name)
@@ -174,14 +179,17 @@ class ToolWorkflowTest {
                 assertEquals(second, reopened.tool(second.id))
                 assertEquals(2, reopened.revisions(second.id).size)
                 val rolled = engine.rollback(second.id, second.revision, second.stateVersion, 1)
-                assertEquals(3, rolled.revision); assertEquals("Count", ToolSpec.parse(rolled.spec).title)
+                assertEquals(3, rolled.revision); assertEquals("Count", ToolSpec.parsePersisted(rolled.spec).title)
                 assertEquals(1, JSONObject(rolled.state).getInt("count"))
                 assertTrue(runCatching { engine.rollback(second.id, second.revision, second.stateVersion, 1) }.isFailure)
             } finally { reopened.close() }
-            assertEquals(3, requests.size)
-            assertArrayEquals(imageBytes,android.util.Base64.decode(requests.first().turns.single().images.single().substringAfter(','),android.util.Base64.DEFAULT))
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.REFINE, CloudGenerationStage.REFINE),
+                requests.map { it.generationStage })
+            requests.take(2).forEach { request ->
+                assertArrayEquals(imageBytes,android.util.Base64.decode(request.turns.single().images.single().substringAfter(','),android.util.Base64.DEFAULT))
+            }
             assertTrue(requests.all { !it.search })
-            assertTrue(requests.drop(1).all { it.turns.none { turn -> turn.images.isNotEmpty() } })
+            assertTrue(requests.drop(2).all { it.turns.none { turn -> turn.images.isNotEmpty() } })
         } finally { store.close(); context.deleteDatabase(name) }
     }
 
@@ -190,7 +198,10 @@ class ToolWorkflowTest {
         val name = "tool-test-${UUID.randomUUID()}.db"
         var answer = spec()
         val provider = object : ChatProvider {
-            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) { emit(CloudEvent.Text(answer)) }
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (request.replyWithFixturePlan(emit)) return
+                emit(CloudEvent.Text(answer))
+            }
         }
         val store = ToolStore(context, name)
         val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context)))
@@ -233,7 +244,9 @@ class ToolWorkflowTest {
         var calls = 0
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                assertEquals("tool-test-only",key); calls++; emit(CloudEvent.Text(spec()))
+                assertEquals("tool-test-only",key); calls++
+                if (request.replyWithFixturePlan(emit)) return
+                emit(CloudEvent.Text(spec()))
             }
         }
         lateinit var model: com.alpha.assistant.ui.ShellViewModel
@@ -266,7 +279,7 @@ class ToolWorkflowTest {
                 found=find(root,text)
                 if(found?.isVisibleToUser != true) found?.performAction(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
                 if(found?.isVisibleToUser != true) {
-                    val viewport=find(root,"Mini-app content") ?: find(root,"Mini-app library content")
+                    val viewport=find(root,"Содержимое мини-приложения") ?: find(root,"Содержимое библиотеки мини-приложений")
                     if(viewport != null && !viewport.performAction(direction)) direction=if(direction == android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                         android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD else android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
                 }
@@ -298,18 +311,16 @@ class ToolWorkflowTest {
             robot.openDrawer(scenario)
             click(app.getString(R.string.mini_apps))
             robot.awaitDrawerClosed(scenario)
-            instrumentation.runOnMainSync { model.tools.preparePrompt("Create a counter") }
-            waitFor("Create a counter")
-            click("Create preview")
-            waitFor("Preview · controls are disabled")
+            instrumentation.runOnMainSync { model.tools.generate("Create a counter", null, null, emptyList()) }
+            waitFor("Предпросмотр · управление станет доступно после сохранения")
             assertTrue(model.tools.tools.isEmpty())
-            click("Apply changes")
+            click("Применить изменения")
             waitFor("Count: 0")
             click("Add")
             waitFor("Count: 1")
-            assertEquals(1,calls)
+            assertEquals(2,calls)
             waitUntil { model.tools.tools.single().saved }
-            click("Mini-app library")
+            click(app.getString(R.string.tool_library_back))
             waitFor("Count")
             assertEquals(1,JSONObject(model.tools.tools.single().state).getInt("count"))
             scenario.recreate()
@@ -317,13 +328,13 @@ class ToolWorkflowTest {
             assertTrue(waitFor("Count").isVisibleToUser)
             assertNull("Recreation keeps the requested library page",model.tools.selectedId)
             assertEquals(1,JSONObject(model.tools.tools.single().state).getInt("count"))
-            assertEquals(1,calls)
+            assertEquals(2,calls)
             val evidence=java.io.File(app.getExternalFilesDir(null),"mini-app-evidence").apply {mkdirs()}
             instrumentation.uiAutomation.takeScreenshot()?.let {image ->
                 java.io.File(evidence,"compose-library-recreated.png").outputStream().use {image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)}
                 image.recycle()
             }
-            println("NATIVE_LIBRARY recreation=PASS visibleSavedCount=PASS stateCount=1 providerCalls=1")
+            println("NATIVE_LIBRARY recreation=PASS visibleSavedCount=PASS stateCount=1 providerCalls=2")
         } catch (failure: Throwable) {
             fun dump(node: android.view.accessibility.AccessibilityNodeInfo?): String {
                 if(node == null) return ""

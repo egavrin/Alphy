@@ -214,10 +214,10 @@ internal interface OwnedCalendarUiHost {
 internal class OwnedCalendarLedger(private val store: ToolStore) {
     companion object {
         fun createTables(db: SQLiteDatabase) {
-            db.execSQL("CREATE TABLE owned_calendar_delete_batches(effect_key TEXT PRIMARY KEY,owner TEXT NOT NULL)")
-            db.execSQL("CREATE TABLE owned_calendar_delete_items(effect_key TEXT NOT NULL,event_ref TEXT NOT NULL,phase TEXT NOT NULL,PRIMARY KEY(effect_key,event_ref))")
-            db.execSQL("CREATE TABLE owned_calendar_selection(owner TEXT PRIMARY KEY,calendar_ref TEXT NOT NULL,calendar_id INTEGER NOT NULL,identity TEXT NOT NULL,name TEXT NOT NULL)")
-            db.execSQL("CREATE TABLE owned_calendar_events(owner TEXT NOT NULL,event_ref TEXT NOT NULL,event_key TEXT NOT NULL,calendar_ref TEXT NOT NULL,calendar_id INTEGER NOT NULL,calendar_identity TEXT NOT NULL,effect_key TEXT NOT NULL,marker TEXT NOT NULL,fingerprint TEXT NOT NULL,details TEXT NOT NULL,provider_id INTEGER,phase TEXT NOT NULL,PRIMARY KEY(owner,event_key),UNIQUE(owner,event_ref),UNIQUE(effect_key))")
+            db.execSQL("CREATE TABLE IF NOT EXISTS owned_calendar_delete_batches(effect_key TEXT PRIMARY KEY,owner TEXT NOT NULL)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS owned_calendar_delete_items(effect_key TEXT NOT NULL,event_ref TEXT NOT NULL,phase TEXT NOT NULL,PRIMARY KEY(effect_key,event_ref))")
+            db.execSQL("CREATE TABLE IF NOT EXISTS owned_calendar_selection(owner TEXT PRIMARY KEY,calendar_ref TEXT NOT NULL,calendar_id INTEGER NOT NULL,identity TEXT NOT NULL,name TEXT NOT NULL)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS owned_calendar_events(owner TEXT NOT NULL,event_ref TEXT NOT NULL,event_key TEXT NOT NULL,calendar_ref TEXT NOT NULL,calendar_id INTEGER NOT NULL,calendar_identity TEXT NOT NULL,effect_key TEXT NOT NULL,marker TEXT NOT NULL,fingerprint TEXT NOT NULL,details TEXT NOT NULL,provider_id INTEGER,phase TEXT NOT NULL,PRIMARY KEY(owner,event_key),UNIQUE(owner,event_ref),UNIQUE(effect_key))")
         }
     }
     fun valid(effect: CapabilityEffect): Boolean {

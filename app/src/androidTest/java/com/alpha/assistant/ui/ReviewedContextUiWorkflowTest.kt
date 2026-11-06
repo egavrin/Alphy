@@ -112,13 +112,11 @@ class ReviewedContextUiWorkflowTest {
                 assertEquals(original, reviewed.copy(attachments = emptyList()))
                 assertEquals(excerpt, reviewed.attachments.single().contextText)
 
-                click("Добавить контекст")
-                click("Мини-приложение")
-                assertEquals(original.text, field("Request for a mini-app").text.toString())
-                scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
-                click("Добавить контекст")
-                click("Автоматизация")
-                waitFor("Локальный шаблон «Мой день». Выбери календарь, период, инструмент и список. Проверь все параметры. Запрос не передавался в облако.")
+                click(robot.text(R.string.composer_add_context))
+                waitFor(robot.text(R.string.context_title))
+                assertNull(find(diagnostics.freshRoot(), robot.text(R.string.context_mini_app)))
+                assertNull(find(diagnostics.freshRoot(), robot.text(R.string.context_automation)))
+                click(robot.text(R.string.cancel))
                 assertEquals(reviewed, fixture.store.load().draft)
                 assertEquals(0, fixture.provider.calls)
             }
@@ -172,7 +170,7 @@ class ReviewedContextUiWorkflowTest {
                 val identity = Rect().also { waitFor("Alphy").getBoundsInScreen(it) }
                 assertTrue("Menu is on the first row at the left", menu.left < identity.left && menu.top < identity.bottom)
                 click("Добавить контекст")
-                click("Вставить текст из заметок или другого приложения")
+                click("Вставить текст")
                 edit("Выбранный текст · до 8000 символов", "Explicitly selected note content")
                 scenario.recreate()
                 assertEquals("Explicitly selected note content", field("Выбранный текст · до 8000 символов").text.toString())
@@ -191,8 +189,9 @@ class ReviewedContextUiWorkflowTest {
                 assertTrue(actions.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK))
                 click("Выбрать текст для заметки"); waitFor("Передать выбранный текст в заметки"); click("Закрыть")
                 assertEquals(reviewed, store.load().draft)
-                robot.openDrawer(scenario); robot.click(robot.text(R.string.access)); robot.awaitDrawerClosed(scenario)
-                waitFor(robot.text(R.string.access))
+                robot.openDrawer(scenario); robot.click(robot.text(R.string.settings)); robot.awaitDrawerClosed(scenario)
+                robot.reveal(robot.text(R.string.access)); robot.click(robot.text(R.string.access))
+                robot.reveal(robot.text(R.string.access_calendar))
                 assertEquals(reviewed, store.load().draft)
                 assertEquals(0, sends)
                 val evidence = File(context.getExternalFilesDir(null), "reviewed-context-evidence").apply { mkdirs() }

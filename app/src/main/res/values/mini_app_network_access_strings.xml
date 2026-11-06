@@ -1,0 +1,17 @@
+<resources>
+    <string name="mini_app_network_title">Сеть для мини-приложений</string>
+    <string name="mini_app_network_explain_grant">Каждому мини-приложению можно отдельно разрешить доступ к сети и отозвать его в любое время.</string>
+    <string name="mini_app_network_explain_scope">Доступ охватывает любые адреса в интернете и локальной сети. Он действует и при перенаправлениях, и при загрузке содержимого веб-страниц, например изображений и шрифтов.</string>
+    <string name="mini_app_network_explain_data">Мини-приложение с доступом к сети может отправлять любые данные, которые Android позволяет ему получить. Alphy не запрашивает подтверждение для каждой отправки.</string>
+    <string name="mini_app_network_explain_android">Разрешения Android, в том числе для локальной сети, действуют отдельно. Доступ к сети в Alphy не заменяет их.</string>
+    <string name="mini_app_network_explain_ai">Мини-приложение может передавать доступные ему данные в ИИ Alphy. Для этого действует согласие, данное при добавлении ключа поставщика ИИ. Доступ мини-приложения к сети для этого не нужен.</string>
+    <string name="mini_app_network_unavailable">Настройки доступа к сети недоступны.</string>
+    <string name="mini_app_network_empty">Нет мини-приложений.</string>
+    <string name="mini_app_network_granted">Сохранённая настройка: доступ разрешён</string>
+    <string name="mini_app_network_not_granted">Сохранённая настройка: доступ не разрешён</string>
+    <string name="mini_app_network_allow">Разрешить доступ: %1$s</string>
+    <string name="mini_app_network_revoke">Отозвать доступ: %1$s</string>
+    <string name="mini_app_network_pending">Сохраняем настройку…</string>
+    <string name="mini_app_network_allow_failed">Не удалось сохранить разрешение на доступ к сети. Повторите попытку.</string>
+    <string name="mini_app_network_revoke_failed">Не удалось сохранить отзыв доступа. После перезапуска Alphy доступ может остаться разрешённым. Повторите попытку.</string>
+</resources>

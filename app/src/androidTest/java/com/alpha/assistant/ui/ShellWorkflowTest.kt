@@ -40,7 +40,7 @@ class ShellWorkflowTest {
         keys = SecureKeyStore(context, fixtureName, fixtureName)
         check(keys.save("alpha-test-only").isSuccess)
         CloudTestActivity.factory = { app -> ShellViewModel(app, object : ChatProvider {
-            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) { emit(CloudEvent.RoundComplete("""{"kind":"answer","text":"Navigation fixture response","brief":"","targetId":null,"search":"none"}""",false)) }
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) { emit(CloudEvent.RoundComplete("""{"kind":"answer","text":"Navigation fixture response","brief":"","search":"none"}""",false)) }
         }, store, keys) }
     }
     @After fun removeFixture() {
@@ -51,9 +51,11 @@ class ShellWorkflowTest {
     }
     // Failure cases: duplicate or bottom navigation, clipped touch targets, obsolete composer controls,
     // keyboard-blocked navigation, or a lost draft after the top bar or the drawer changes the route.
-    private fun assertHeaderAndComposer(statusBarBottom: Int = 0, keyboardTop: Int? = null) {
+    private fun assertHeaderAndComposer(statusBarBottom: Int = 0, keyboardTop: Int? = null, home: Boolean = false) {
         val input = Rect().also { waitFor("Сообщение ассистенту").getBoundsInScreen(it) }
-        for (label in listOf(context.getString(R.string.menu), context.getString(R.string.new_chat))) {
+        val newChat = context.getString(R.string.new_chat)
+        if (home) assertNull(find(diagnostics.freshRoot(), newChat))
+        for (label in if (home) listOf(context.getString(R.string.menu)) else listOf(context.getString(R.string.menu), newChat)) {
             var node: AccessibilityNodeInfo? = waitFor(label)
             while (node != null && !node.isClickable) node = node.parent
             assertNotNull("Accessible header action $label", node)
@@ -100,7 +102,7 @@ class ShellWorkflowTest {
     @Test fun draftsHistoryAndNavigation() {
         val robot = ShellRobot("shell")
         ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
-            assertHeaderAndComposer()
+            assertHeaderAndComposer(home = true)
             screenshot("header-and-composer")
             edit("Сообщение ассистенту", "Shell workflow message")
             click("Отправить сообщение")

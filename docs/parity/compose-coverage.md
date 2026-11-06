@@ -4,7 +4,7 @@ This record describes protocol 3 above baseline `62179af217478075a1d7a10960c9494
 The pinned reference is `deal-studio-ohos@7ee06af1941729b00a110493ad9d1d9b5b127d17`.
 The reference working tree is not an input. [Extracted source provenance](inventory.json)
 
-The machine record contains all 62 reference UI entries and all 49 current native catalog types.
+The machine record contains all 62 pinned reference UI entries and all 73 current native catalog types.
 It also records current source hashes. [Coverage data](compose-coverage.json)
 A mapping identifies a native composition approach. It does not certify identical reference properties, behavior, style, or performance.
 The historical inventory and baseline keep their earlier status. This record supplies the current mapping.
@@ -153,3 +153,14 @@ The canonical manifest preserves the six exact requests and names all observable
 [Scenario fixtures](../../app/src/androidTest/assets/compose-scenarios.json)
 The safe runner produces separate real and synthetic directories. [Harness procedure](compose-acceptance.md)
 The infant-care workflow has source-linked safety criteria. [Medical guidance](compose-medical-safety.md)
+
+
+## Mini-app visual gallery
+
+The debug-only `MiniAppGalleryActivity` uses the production Compose and canvas renderers. Its fixtures have no storage or provider access. The fixtures cover the current native catalog with trip, shopping, habit, and budget examples. They also include media, motion, canvas, and disabled system actions.
+
+`MiniAppVisualWorkflowTest` captures 50 sections and 12 additional rendered states per configuration. It opens dialog, sheet, picker, and choice states, advances the pager, and checks the Back action. It edits and applies a date range in compact portrait and short landscape. Each configuration records light or dark, font scale, width, and color scheme. The gallery uses the device and fixed API 29 schemes, and two Tonal Spot schemes with seeds `#4285F4` and `#3D845F`. [Material Color Utilities 0.3.0](https://github.com/material-foundation/material-color-utilities/blob/main/dev_guide/creating_color_scheme.md)
+
+The test checks 4.5:1 contrast for sampled rendered body text, including text in disabled containers. It records actual contrast for inactive Material control labels and platform picker buttons. It checks selected 48 dp targets, disabled state, editable fields, slider actions, and visible chart, loading, and canvas pixels. The test checks the visible characters in the lazy-grid record and the rendered extent of both date-range labels and values. The compact date-range workflow verifies that an out-of-order range disables Apply until the dates are corrected.
+
+The test sets the Android font scale to 100% and 200%, verifies the effective scale in each captured window, and disables transitions for settled captures. It restores the previous settings after the test. The app saves `matrix.json` and screenshots in `plan3-gallery-sections` in app external files. The canvas pixel check and the reduced-motion workflow save evidence in `plan3-gallery`. The accessibility checks use the Android node tree. A separate 200% workflow checks the Android date and time picker actions in normal and short windows. Short windows use the Android time spinner with its text fade disabled.

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tool_standalone_refinement_unavailable">Изменение этого мини-приложения через чат пока недоступно. Сохранённые данные не изменились.</string>
+</resources>

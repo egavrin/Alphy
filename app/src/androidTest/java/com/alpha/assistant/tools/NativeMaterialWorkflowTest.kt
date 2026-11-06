@@ -110,7 +110,12 @@ class NativeMaterialWorkflowTest {
             val good=NativeMaterialFixture.definition(JSONObject(NativeMaterialFixture.ui))
             val bad=JSONObject(good).put("source","if(input.event.type==='action' && ($predicate))throw Error('Representative event reached');"+JSONObject(good).getString("source")).toString()
             var requests=0
-            val provider=object:ChatProvider {override suspend fun respond(key:String,request:CloudRequest,session:CloudSession,emit:suspend(CloudEvent)->Unit) {requests++;emit(CloudEvent.Text(if(requests==1)bad else good))}}
+            val provider=object: ChatProvider {
+                override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
+                    if (request.replyWithFixturePlan(emit)) return
+                    requests++;emit(CloudEvent.Text(if(requests==1)bad else good))
+                }
+            }
             ToolGenerationService(provider,SandboxClient(context)).generate("offline","Local Material fixture",null,emptyList(),CloudSession(),"material")
             assertEquals("Smoke omitted $predicate",2,requests)
         }
@@ -137,8 +142,8 @@ class NativeMaterialWorkflowTest {
             await("Missing visible $label") {
                 node=find(label)
                 if(node?.isVisibleToUser==true)return@await true
-                if(node!=null)node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
-                else find("Mini-app content")?.let {viewport ->
+                if(node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id) != true)
+                    (find("Содержимое мини-приложения") ?: find("Сообщения разговора"))?.let {viewport ->
                     if(viewport.actionList.none {it.id==direction})direction=if(direction==AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD else AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
                     // A refused scroll is not a failure: a running scroll animation can move the range after the read.
                     if(viewport.actionList.any {it.id==direction} && !viewport.performAction(direction) && !refused) {refused=true;diagnostics.capture("scroll-refused",viewport)}
@@ -151,11 +156,11 @@ class NativeMaterialWorkflowTest {
         fun click(label:String) {shown(label);var node:AccessibilityNodeInfo?=null;await("Missing $label"){node=find(label);while(node?.isClickable==false)node=node?.parent;node?.isVisibleToUser==true&&node?.isEnabled==true};assertTrue(node!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))}
         fun capture(label:String) {val directory=File(app.getExternalFilesDir(null),"native-material-evidence").apply{mkdirs()};instrumentation.uiAutomation.takeScreenshot()?.let{bitmap->File(directory,"$label.png").outputStream().use{bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)};bitmap.recycle()}}
         try {ActivityScenario.launch(CloudTestActivity::class.java).use {scenario->
-            await("Fixture did not load"){!model.loading&&!model.tools.busy};click("Open");click("Mode B")
+            await("Fixture did not load"){!model.loading&&!model.tools.busy};click("Открыть");shown("Содержимое мини-приложения");click("Mode B")
             await("Choice did not persist"){JSONObject(tools.tool("material")!!.state).getString("mode")=="b"&&!model.tools.busy}
             click("Show dialog");await("Dialog missing"){find("Confirm choice")?.isVisibleToUser==true};capture("dialog");click("Confirm choice")
             await("Dialog did not close"){!JSONObject(tools.tool("material")!!.state).getBoolean("dialog")&&!model.tools.busy}
-            click("Next: Pages");await("Pager did not change"){JSONObject(tools.tool("material")!!.state).getInt("page")==1&&!model.tools.busy};capture("page-2")
+            click("Далее: Pages");await("Pager did not change"){JSONObject(tools.tool("material")!!.state).getInt("page")==1&&!model.tools.busy};capture("page-2")
             scenario.recreate();shown("Second page");assertEquals("b",JSONObject(tools.tool("material")!!.state).getString("mode"));capture("reopened")
         };assertTrue(tools.effects("material").isEmpty());println("NATIVE_MATERIAL choice=PASS dialog=PASS pager=PASS reopen=PASS effects=0")}
         finally {CloudTestActivity.factory=null;tools.close();shell.close();keys.clear();app.deleteDatabase("$name.db");app.deleteDatabase(toolDatabase);app.deleteSharedPreferences(name);java.security.KeyStore.getInstance("AndroidKeyStore").apply{load(null);deleteEntry(name)}}

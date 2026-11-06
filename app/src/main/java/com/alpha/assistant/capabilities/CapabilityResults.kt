@@ -1,5 +1,6 @@
 package com.alpha.assistant.capabilities
 
+import com.alpha.assistant.media.MAX_MEDIA_BYTES
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -12,8 +13,15 @@ object CapabilityResultEvent {
     private fun keys(json: JSONObject) = json.keys().asSequence().toSet()
     fun data(capability: String, result: CapabilityResult): JSONObject {
         require(capability in CapabilityCatalog.ids && result.status != "awaitingUser")
+        if(capability in DeviceReadContract.ids) require(result.status in DeviceReadContract.statuses)
+        if(capability in AudioContract.playbackIds) require(result.status in AudioContract.playbackStatuses)
+        if(capability==VideoContract.PLAY) require(result.status in VideoContract.statuses)
         val data = JSONObject(result.data.toString())
         require(data.toString().toByteArray().size <= MAX_DATA_BYTES)
+        if(capability==NetworkEffectContract.ID) {
+            NetworkEffectContract.validateResult(result.status,data)
+            return data
+        }
         if(capability in MedicineContract.ids && !(result.status=="failed" && data.has("code"))) {
             MedicineContract.validateResult(capability,result)
             return data
@@ -35,6 +43,12 @@ object CapabilityResultEvent {
             return data
         }
         when(capability) {
+            in DeviceReadContract.ids -> DeviceReadContract.validate(capability,data)
+            MiniAppAi.ID -> {
+                require(keys(data) == setOf("text"))
+                val answer = data.get("text")
+                require(answer is String && answer.isNotBlank() && answer.length <= MiniAppAi.MAX_ANSWER && '\u0000' !in answer)
+            }
             "calendar.read" -> {
                 require(keys(data) == setOf("events","limit") && data.get("limit") == 50)
                 val events = data.getJSONArray("events")
@@ -50,14 +64,19 @@ object CapabilityResultEvent {
                     require(event.getLong("end") >= event.getLong("start"))
                 }
             }
-            "photo.pick", "file.pick", "camera.capture" -> {
+            "photo.pick", "file.pick", "camera.capture", AudioContract.PICK, VideoContract.PICK -> {
                 require(keys(data) == setOf("resourceId","kind","mimeType","sizeBytes"))
                 require(data.getString("resourceId").matches(Regex("[0-9a-f]{64}")))
-                val kind=when(capability) { "photo.pick" -> "photo"; "file.pick" -> "document"; else -> "cameraPhoto" }
+                val kind=checkNotNull(CapabilityResources.resourceKind(capability))
                 require(data.getString("kind") == kind)
                 require(data.get("mimeType") is String && data.getString("mimeType").matches(Regex("[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+")) && data.getString("mimeType").length <= 100)
                 val size=data.get("sizeBytes")
-                require(size is Number && size.toDouble() == size.toLong().toDouble() && size.toLong() in 0..CapabilityResources.MAX_FILE_BYTES)
+                val sizes = when(capability) {
+                    AudioContract.PICK -> {require(AudioContract.isAudioMime(data.getString("mimeType"))); 1..MAX_MEDIA_BYTES}
+                    VideoContract.PICK -> {require(VideoContract.isVideoMime(data.getString("mimeType"))); 1..MAX_MEDIA_BYTES}
+                    else -> 0..CapabilityResources.MAX_FILE_BYTES
+                }
+                require(size is Number && size.toDouble() == size.toLong().toDouble() && size.toLong() in sizes)
             }
             else -> { require(capability in CapabilityCatalog.ids); require(data.length() == 0) }
         }

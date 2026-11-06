@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import com.alpha.assistant.automations.AutomationDefinition
 import com.alpha.assistant.automations.AutomationRuntime
 import com.alpha.assistant.tools.ToolStore
+import com.alpha.assistant.tools.ToolLibraryStorage
 import com.alpha.assistant.ui.AlphaTheme
 import com.alpha.assistant.ui.AlphyActivity
 import org.json.JSONArray
@@ -37,10 +38,10 @@ internal object MedicineContract {
     private const val recordSchema="""{"type":"object","additionalProperties":false,"required":["kind","key","at","timeZone","medicine","mealKey","mealWindow","status"],"properties":{"kind":{"type":"string","enum":["meal","intake","reminder"]},"key":{"type":"string","maxLength":160},"at":{"type":"integer"},"timeZone":{"type":"string","maxLength":80},"medicine":{"type":"string","maxLength":80},"mealKey":{"type":"string","maxLength":80},"mealWindow":{"type":"string","enum":["notApplicable","noMealAnchor","within30Minutes","outside30Minutes"]},"status":{"type":"string","maxLength":80}}}"""
     val resultSchema="""{"version":{"type":"integer","const":1},"record":$recordSchema,"records":{"type":"array","maxItems":5,"items":$recordSchema},"nextCursor":{"type":"integer","minimum":0},"reminder":{"type":"object","additionalProperties":false,"required":["reminderKey","mode","status","nextAt"],"properties":{"reminderKey":{"type":"string","maxLength":80},"mode":{"type":"string","enum":["daily","meal"]},"status":{"type":"string","maxLength":80},"nextAt":{"type":["integer","null"]},"selectedAt":{"type":"integer"},"requestedAt":{"type":"integer"}}}}"""
     private fun definition(id: String,title: String,args: Map<String,CapabilityArgument>,description: String)=CapabilityDefinition(id,title,CapabilityAction.MEDICINE,args,
-        "Version 1. $description Never invent a dose, meal, intake, time, offset, or medical schedule. Explicit native medicine controls and a scoped grant are required.",
+        "Version 1. $description Never invent a dose, meal, intake, time, offset, or medical schedule. Use the dedicated native medicine controls. Android permissions apply.",
         if(id=="medicine.report") "launched" else "succeeded","Only explicit local records and native request states are confirmed. Reminder delivery and medicine intake are separate.",
         permission=if(id in reminderIds && android.os.Build.VERSION.SDK_INT>=33) android.Manifest.permission.POST_NOTIFICATIONS else null,
-        foreground=true,resultData=resultSchema,scopedActionGrant=true)
+        foreground=true,resultData=resultSchema)
     val definitions=listOf(
         definition("medicine.recordMeal","Record meal",record,"Save the user's explicit past meal time and IANA timeZone with a stable recordKey. Same-key retries preserve the original record."),
         definition("medicine.recordIntake","Record actual intake",record+mapOf("medicine" to text(),"mealKey" to text(optional=true)),"Save actual intake only after the user explicitly records it. Optional mealKey must reference this app's explicit meal. Native history calculates the inclusive 0–30-minute window."),
@@ -127,13 +128,44 @@ internal object MedicineSchedule {
 }
 
 /** New private storage preserves all existing tool and automation databases. Stable keys prevent repeated writes. */
-internal class MedicineStore(context: Context,name: String="alpha-medicine.db"): SQLiteOpenHelper(context,name,null,1) {
+internal class MedicineStore(private val context: Context,name: String=ToolLibraryStorage.current(context).medicine):
+    SQLiteOpenHelper(context,name,null,1,ToolLibraryStorage.preserveOnCorruption) {
+    override fun getReadableDatabase(): SQLiteDatabase {
+        ToolLibraryStorage.requireRelated(context,databaseName,"medicine")
+        return super.getReadableDatabase()
+    }
+    override fun getWritableDatabase(): SQLiteDatabase {
+        ToolLibraryStorage.requireRelated(context,databaseName,"medicine")
+        return super.getWritableDatabase()
+    }
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE entries(seq INTEGER PRIMARY KEY AUTOINCREMENT,owner TEXT NOT NULL,kind TEXT NOT NULL,key TEXT NOT NULL,at INTEGER NOT NULL,data TEXT NOT NULL,UNIQUE(owner,kind,key))")
         db.execSQL("CREATE TABLE reminders(owner TEXT NOT NULL,key TEXT NOT NULL,revision INTEGER NOT NULL,capability TEXT NOT NULL,args TEXT NOT NULL,mode TEXT NOT NULL,status TEXT NOT NULL,next_at INTEGER,PRIMARY KEY(owner,key))")
         db.execSQL("CREATE TABLE reports(token TEXT PRIMARY KEY,owner TEXT NOT NULL,body TEXT NOT NULL,expires INTEGER NOT NULL)")
     }
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        if(!db.isReadOnly) db.execSQL("CREATE TABLE IF NOT EXISTS reminder_activation(owner TEXT NOT NULL,key TEXT NOT NULL,revision INTEGER NOT NULL,capability TEXT NOT NULL,args TEXT NOT NULL,PRIMARY KEY(owner,key))")
+    }
     override fun onUpgrade(db: SQLiteDatabase,oldVersion: Int,newVersion: Int)=error("Unknown medicine schema. Records remain saved.")
+    private val ownedTables=listOf("entries","reminders","reports","reminder_activation").map { it to "owner=?" }
+    fun deletionFingerprint(owner: String) = com.alpha.assistant.tools.ownerFingerprint(readableDatabase,owner,ownedTables)
+    fun deleteOwner(owner: String,context: Context) {
+        val generation=ToolLibraryStorage.relatedSelection(context,databaseName,"medicine")?.generation ?: ToolLibraryStorage.ORIGINAL
+        val platform=MedicineRuntime.android(context,generation)
+        val manager=context.getSystemService(NotificationManager::class.java)
+        reminders().filter { it.getString("owner")==owner }.forEach { reminder ->
+            platform.cancel(reminder)
+            val prefix=MedicineRuntime.tagPrefix(owner,reminder.getString("reminderKey"))
+            manager.activeNotifications.filter { it.tag?.startsWith(prefix)==true }.forEach { manager.cancel(it.tag,it.id) }
+        }
+        val db=writableDatabase
+        db.beginTransaction()
+        try {
+            ownedTables.forEach { (table,where) -> db.delete(table,where,arrayOf(owner)) }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
     fun entry(owner: String,kind: String,key: String): JSONObject?=readableDatabase.rawQuery("SELECT data FROM entries WHERE owner=? AND kind=? AND key=?",arrayOf(owner,kind,key)).use {if(it.moveToFirst()) JSONObject(it.getString(0)) else null}
     fun append(owner: String,data: JSONObject) {writableDatabase.insertOrThrow("entries",null,ContentValues().apply {put("owner",owner);put("kind",data.getString("kind"));put("key",data.getString("key"));put("at",data.getLong("at"));put("data",data.toString())})}
     fun record(owner: String,id: String,args: JSONObject,now: Long): CapabilityResult {
@@ -159,6 +191,27 @@ internal class MedicineStore(context: Context,name: String="alpha-medicine.db"):
     }
     fun reminders(): List<JSONObject> = readableDatabase.rawQuery("SELECT owner,key,revision,capability,args,mode,status,next_at FROM reminders",null).use {c -> buildList {while(c.moveToNext())add(JSONObject().put("owner",c.getString(0)).put("reminderKey",c.getString(1)).put("revision",c.getInt(2)).put("capability",c.getString(3)).put("args",JSONObject(c.getString(4))).put("mode",c.getString(5)).put("status",c.getString(6)).put("nextAt",if(c.isNull(7)) JSONObject.NULL else c.getLong(7)))}}
     fun state(owner: String,key: String,status: String,next: Long?) {writableDatabase.update("reminders",ContentValues().apply {put("status",status);if(next==null)putNull("next_at") else put("next_at",next)},"owner=? AND key=?",arrayOf(owner,key))}
+    fun activated(reminder: JSONObject): Boolean = readableDatabase.rawQuery(
+        "SELECT 1 FROM reminder_activation WHERE owner=? AND key=? AND revision=? AND capability=? AND args=?",
+        arrayOf(reminder.getString("owner"),reminder.getString("reminderKey"),reminder.getInt("revision").toString(),
+            reminder.getString("capability"),reminder.getJSONObject("args").toString()),
+    ).use { it.moveToFirst() }
+
+    fun activate(effect: CapabilityEffect, mode: String, at: Long) {
+        val db=writableDatabase
+        val key=effect.request.args.getString("reminderKey")
+        db.beginTransaction()
+        try {
+            val definition=ContentValues().apply {
+                put("owner",effect.owner); put("key",key); put("revision",effect.revision)
+                put("capability",effect.request.capability); put("args",effect.request.args.toString())
+            }
+            val reminder=ContentValues(definition).apply {put("mode",mode);put("status","scheduled");put("next_at",at)}
+            check(db.insertWithOnConflict("reminders",null,reminder,SQLiteDatabase.CONFLICT_REPLACE)!=-1L)
+            check(db.insertWithOnConflict("reminder_activation",null,definition,SQLiteDatabase.CONFLICT_REPLACE)!=-1L)
+            db.setTransactionSuccessful()
+        } finally {db.endTransaction()}
+    }
     fun report(owner: String,from: Long,to: Long,now: Long): String? {
         val lines=mutableListOf("Medicine history. User records and reminder attempts only.","Range: ${Instant.ofEpochMilli(from)} inclusive to ${Instant.ofEpochMilli(to)} exclusive.","Missing records do not prove missed intake. Notifications do not prove intake or reading.")
         readableDatabase.rawQuery("SELECT data FROM entries WHERE owner=? AND at>=? AND at<? ORDER BY at,seq LIMIT 1001",arrayOf(owner,from.toString(),to.toString())).use {c ->
@@ -175,7 +228,7 @@ internal class MedicineStore(context: Context,name: String="alpha-medicine.db"):
 }
 
 internal class MedicineCapabilities(private val context: Context,private val tools: ToolStore,
-    private val clock: ()->Long={System.currentTimeMillis()},private val platform: MedicinePlatform=MedicineRuntime.android(context),
+    private val clock: ()->Long={System.currentTimeMillis()},private val platform: MedicinePlatform=MedicineRuntime.android(context,tools.library.generation),
     private val unlocked: ()->Boolean={!com.alpha.assistant.surfaces.ToolWidgets.isLocked(context)}) {
     fun execute(effect: CapabilityEffect,foreground: ()->Boolean,launch: (Intent)->Unit): CapabilityResult {
         val native=tools.effect(effect.key)
@@ -187,7 +240,9 @@ internal class MedicineCapabilities(private val context: Context,private val too
             if(id=="medicine.history") return CapabilityResult("succeeded","Explicit local history. No intake is inferred.",store.history(effect.owner,args.getLong("from"),args.getLong("to"),args.getLong("cursor")))
             if(id=="medicine.report") {
                 val token=store.report(effect.owner,args.getLong("from"),args.getLong("to"),now) ?: return CapabilityResult("unavailable","The complete report exceeds 1000 records or 200000 UTF-8 bytes. Select a shorter range.")
-                launch(Intent(context,MedicineReportActivity::class.java).putExtra("token",token).putExtra("toolsDatabase",tools.databaseName))
+                launch(Intent(context,MedicineReportActivity::class.java).putExtra("token",token).putExtra("toolsDatabase",tools.databaseName)
+                    .putExtra("ownerRevision",effect.revision)
+                    .putExtra(ToolLibraryStorage.GENERATION_EXTRA,tools.library.generation))
                 return CapabilityResult("launched","The native report preview opened. Nothing was shared.")
             }
             val key=args.getString("reminderKey")
@@ -201,8 +256,13 @@ internal class MedicineCapabilities(private val context: Context,private val too
             }
             if(old!=null) {
                 if(old.getString("args")!=args.toString() || old.getString("capability")!=id) return CapabilityResult("denied","This key already identifies another reminder. Cancel it and use a new key.")
-                MedicineRuntime.reconcile(context,tools,store,now,platform)
-                return reminderResult(store.reminders().first {it.getString("owner")==effect.owner && it.getString("reminderKey")==key})
+                val status=old.getString("status")
+                val needsActivation=status in setOf("reactivationRequired","grantRevoked","ownerChanged") ||
+                    (status=="scheduled" && (old.getInt("revision")!=effect.revision || !store.activated(old)))
+                if(!needsActivation) {
+                    MedicineRuntime.reconcile(context,tools,store,now,platform)
+                    return reminderResult(store.reminders().first {it.getString("owner")==effect.owner && it.getString("reminderKey")==key})
+                }
             }
             platform.accessFailure()?.let {return CapabilityResult("unavailable",it)}
             val daily=id=="medicine.remindDaily"
@@ -213,8 +273,10 @@ internal class MedicineCapabilities(private val context: Context,private val too
             if(!daily && now>meal!!.getLong("at")+1800000) return CapabilityResult("unavailable","The meal's 30-minute window has passed. No notification was requested.")
             if(selectedAt<now && !immediate) return CapabilityResult("unavailable","The selected nonzero offset time already passed. No delayed reminder was scheduled.")
             val at=if(immediate) now else selectedAt
-            store.writableDatabase.insertOrThrow("reminders",null,ContentValues().apply {put("owner",effect.owner);put("key",key);put("revision",effect.revision);put("capability",id);put("args",args.toString());put("mode",if(daily) "daily" else "meal");put("status","scheduled");put("next_at",at)})
-            if(immediate) MedicineRuntime.deliver(context,tools,store,Intent().putExtra("owner",effect.owner).putExtra("key",key).putExtra("at",at),clock(),platform)
+            if(!tools.effectTargetValid(native) || !foreground() || !unlocked()) return CapabilityResult("denied","The selected reminder action changed. Open the current control and try again.")
+            store.activate(effect,if(daily) "daily" else "meal",at)
+            if(immediate) MedicineRuntime.deliver(context,tools,store,Intent().putExtra("owner",effect.owner).putExtra("key",key).putExtra("at",at)
+                .putExtra(ToolLibraryStorage.GENERATION_EXTRA,tools.library.generation),clock(),platform)
             else MedicineRuntime.reconcile(context,tools,store,now,platform)
             return reminderResult(store.reminders().first {it.getString("owner")==effect.owner && it.getString("reminderKey")==key},if(immediate) selectedAt else null,if(immediate) now else null)
         }
@@ -254,20 +316,20 @@ internal interface MedicinePlatform {
 internal object MedicineRuntime {
     const val ALARM="com.alpha.assistant.MEDICINE_ALARM"
     fun tagPrefix(owner: String,key: String)="medicine:"+java.security.MessageDigest.getInstance("SHA-256").digest(JSONArray().put(owner).put(key).toString().toByteArray()).joinToString("") {"%02x".format(it.toInt() and 255)}+":"
-    fun database(tools: ToolStore)=if(tools.databaseName=="alpha-tools.db") "alpha-medicine.db" else "${tools.databaseName}-medicine.db"
+    fun database(tools: ToolStore)=tools.library.medicine
     fun access(context: Context): MedicineReminderAccess {
         val manager=context.getSystemService(NotificationManager::class.java)
         return MedicineReminderAccess(AutomationRuntime.exactAllowed(context),AndroidCapabilities(context).permissionGranted("notification.post"),
             manager.areNotificationsEnabled(),manager.getNotificationChannel("alpha-medicine")?.importance!=NotificationManager.IMPORTANCE_NONE)
     }
-    fun android(context: Context): MedicinePlatform=AndroidPlatform(context)
-    private class AndroidPlatform(private val context: Context): MedicinePlatform {
+    fun android(context: Context,generation: String=ToolLibraryStorage.ORIGINAL): MedicinePlatform=AndroidPlatform(context,generation)
+    private class AndroidPlatform(private val context: Context,private val generation: String): MedicinePlatform {
         override fun accessFailure(): String? {
             context.getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("alpha-medicine","Medicine reminders",NotificationManager.IMPORTANCE_HIGH))
             return access(context).failure()
         }
-        override fun arm(reminder: JSONObject) {context.getSystemService(AlarmManager::class.java).setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,reminder.getLong("nextAt"),pending(context,reminder))}
-        override fun cancel(reminder: JSONObject) {context.getSystemService(AlarmManager::class.java).cancel(pending(context,reminder))}
+        override fun arm(reminder: JSONObject) {context.getSystemService(AlarmManager::class.java).setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,reminder.getLong("nextAt"),pending(context,reminder,generation))}
+        override fun cancel(reminder: JSONObject) {context.getSystemService(AlarmManager::class.java).cancel(pending(context,reminder,generation))}
         override fun post(reminder: JSONObject,at: Long,now: Long): String {
             val manager=context.getSystemService(NotificationManager::class.java)
             val tag=tagPrefix(reminder.getString("owner"),reminder.getString("reminderKey"))+at
@@ -281,16 +343,28 @@ internal object MedicineRuntime {
             return if(manager.activeNotifications.any {it.tag==tag}) "activeNotification" else "unknownOutcome"
         }
     }
-    private fun pending(context: Context,r: JSONObject): PendingIntent = PendingIntent.getBroadcast(context,0,Intent(context,MedicineReceiver::class.java).setAction(ALARM)
-        .setData(Uri.Builder().scheme("alpha-medicine").authority("alarm").appendPath(r.getString("owner")).appendPath(r.getString("reminderKey")).build())
-        .putExtra("owner",r.getString("owner")).putExtra("key",r.getString("reminderKey")).putExtra("at",r.optLong("nextAt")),PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    private fun pending(context: Context,r: JSONObject,generation: String): PendingIntent = PendingIntent.getBroadcast(context,0,Intent(context,MedicineReceiver::class.java).setAction(ALARM)
+        .setData(Uri.Builder().scheme("alpha-medicine").authority("alarm").apply {
+            if(generation!=ToolLibraryStorage.ORIGINAL) appendPath(generation)
+        }.appendPath(r.getString("owner")).appendPath(r.getString("reminderKey")).build())
+        .putExtra(ToolLibraryStorage.GENERATION_EXTRA,generation).putExtra("owner",r.getString("owner"))
+        .putExtra("key",r.getString("reminderKey")).putExtra("at",r.optLong("nextAt")),PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     private fun deadline(store: MedicineStore,r: JSONObject): Long = if(r.getString("mode")=="meal")
         (store.entry(r.getString("owner"),"meal",r.getJSONObject("args").getString("mealKey"))?.getLong("at") ?: 0)+1800000 else r.getLong("nextAt")+60000
-    fun reconcile(context: Context,tools: ToolStore,store: MedicineStore,now: Long=System.currentTimeMillis(),platform: MedicinePlatform=android(context)) {
+    private fun ownerCurrent(tool: com.alpha.assistant.tools.ToolRecord?,reminder: JSONObject): Boolean =
+        tool!=null && !tool.archived && tool.revision==reminder.getInt("revision") &&
+            reminder.getString("capability") in com.alpha.assistant.tools.ToolSpec.availablePersisted(tool.spec)?.capabilities.orEmpty()
+
+    fun reconcile(context: Context,tools: ToolStore,store: MedicineStore,now: Long=System.currentTimeMillis(),platform: MedicinePlatform=android(context,tools.library.generation)) {
         for(r in store.reminders()) {
             if(r.getString("status")!="scheduled") {platform.cancel(r);continue}
             val owner=r.getString("owner");val key=r.getString("reminderKey");val tool=tools.tool(owner)
-            val failure=when {tool==null || tool.archived || tool.revision!=r.getInt("revision") -> "ownerChanged";!tools.granted(owner,r.getString("capability")) -> "grantRevoked";platform.accessFailure()!=null -> "permissionUnavailable";else -> null}
+            val failure=when {
+                !ownerCurrent(tool,r) -> "ownerChanged"
+                !store.activated(r) -> "reactivationRequired"
+                platform.accessFailure()!=null -> "permissionUnavailable"
+                else -> null
+            }
             if(failure!=null) {store.state(owner,key,failure,null);platform.cancel(r);continue}
             if(now>deadline(store,r)) {complete(store,r,"missed",now,platform);continue}
             // Keep the original occurrence and claim key. A past valid target requests prompt Android delivery.
@@ -308,12 +382,13 @@ internal object MedicineRuntime {
         if(next!=null)try {platform.arm(r.put("nextAt",next))}
         catch(_: SecurityException) {store.state(owner,key,"permissionUnavailable",null);platform.cancel(r)}
     }
-    fun deliver(context: Context,tools: ToolStore,store: MedicineStore,intent: Intent,now: Long=System.currentTimeMillis(),platform: MedicinePlatform=android(context)) {
+    fun deliver(context: Context,tools: ToolStore,store: MedicineStore,intent: Intent,now: Long=System.currentTimeMillis(),platform: MedicinePlatform=android(context,tools.library.generation)) {
+        if((intent.getStringExtra(ToolLibraryStorage.GENERATION_EXTRA) ?: ToolLibraryStorage.ORIGINAL)!=tools.library.generation) return
         val r=store.reminders().find {it.getString("owner")==intent.getStringExtra("owner") && it.getString("reminderKey")==intent.getStringExtra("key")} ?: return
         if(r.getString("status")!="scheduled" || r.isNull("nextAt") || r.getLong("nextAt")!=intent.getLongExtra("at",-1)) return
         val at=r.getLong("nextAt");if(now<at)return
         val tool=tools.tool(r.getString("owner"))
-        if(tool==null || tool.archived || tool.revision!=r.getInt("revision") || !tools.granted(tool.id,r.getString("capability")) || platform.accessFailure()!=null) {reconcile(context,tools,store,now,platform);return}
+        if(tool==null || !ownerCurrent(tool,r) || !store.activated(r) || platform.accessFailure()!=null) {reconcile(context,tools,store,now,platform);return}
         val args=r.getJSONObject("args")
         if(now>deadline(store,r)) {complete(store,r,"missed",now,platform);return}
         val eventKey="${r.getString("reminderKey")}:$at"
@@ -336,7 +411,7 @@ class MedicineReceiver: BroadcastReceiver() {
         val pending=goAsync()
         AutomationRuntime.launch(context,pending::finish) {
             ToolStore.effectMutex.withLock {
-                ToolStore(context).use {tools ->MedicineStore(context).use {store ->MedicineRuntime.deliver(context,tools,store,intent)}}
+                ToolStore(context).use {tools ->MedicineStore(context,MedicineRuntime.database(tools)).use {store ->MedicineRuntime.deliver(context,tools,store,intent)}}
             }
         }
     }
@@ -349,11 +424,16 @@ class MedicineReportActivity: AlphyActivity() {
         enableEdgeToEdge()
         val token=intent.getStringExtra("token") ?: return finish()
         val database=intent.getStringExtra("toolsDatabase") ?: return finish()
-        fun snapshot(): String?=ToolStore(this,database).use {tools ->MedicineStore(this,MedicineRuntime.database(tools)).use {store ->
+        fun snapshot(): String?=runCatching {ToolStore(this,database).use {tools ->
+            if((intent.getStringExtra(ToolLibraryStorage.GENERATION_EXTRA) ?: ToolLibraryStorage.ORIGINAL)!=tools.library.generation) return null
+            MedicineStore(this,MedicineRuntime.database(tools)).use {store ->
             store.readableDatabase.rawQuery("SELECT owner,body,expires FROM reports WHERE token=?",arrayOf(token)).use {c ->
-                if(!c.moveToFirst() || c.getLong(2)<System.currentTimeMillis() || tools.tool(c.getString(0))?.archived!=false || !tools.granted(c.getString(0),"medicine.report")) null else c.getString(1)
+                if(!c.moveToFirst() || c.getLong(2)<System.currentTimeMillis()) return@use null
+                val owner=tools.tool(c.getString(0))
+                if(owner==null || owner.archived || owner.revision!=intent.getIntExtra("ownerRevision",-1) ||
+                    "medicine.report" !in com.alpha.assistant.tools.ToolSpec.availablePersisted(owner.spec)?.capabilities.orEmpty()) null else c.getString(1)
             }
-        }}
+        }}}.getOrNull()
         val body=snapshot() ?: return finish()
         setContent {AlphaTheme {Surface(Modifier.fillMaxSize()) {Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             Text("Review medicine report",style=MaterialTheme.typography.titleLarge)
