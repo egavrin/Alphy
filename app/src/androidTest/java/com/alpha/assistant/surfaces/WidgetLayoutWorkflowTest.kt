@@ -86,6 +86,7 @@ class WidgetLayoutWorkflowTest {
                 fixture.launch().use {
                     robot.click(robot.text(R.string.tool_open))
                     robot.click(robot.text(R.string.tool_options))
+                    robot.click("Закрепить")
                     robot.click(robot.text(R.string.tool_widget_add))
                     draft("Custom total: 4")
                     val save = robot.text(R.string.widget_save)

@@ -56,11 +56,11 @@ class DesktopCourseWorkflowTest {
         fixture.launch().use {
             attention.forEach { reveal(it) }
             reveal(robot.text(R.string.desktop_now_course_detail, chosen.setup.topic, 2, 2))
-            click(R.string.desktop_edit)
-            reveal(robot.text(R.string.desktop_done))
+            reveal(robot.text(R.string.desktop_add_course))
+            assertNull(robot.find(robot.text(R.string.desktop_edit)))
             click(R.string.desktop_add_course)
             click(R.string.desktop_place_course, chosen.setup.topic)
-            click(R.string.desktop_done)
+            reveal(robot.text(R.string.desktop_edit))
             assertEquals(0, fixture.provider.calls)
             click(R.string.desktop_now_course_title)
             robot.waitFor(slideText(chosen, 2))

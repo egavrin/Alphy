@@ -59,20 +59,14 @@ import kotlinx.coroutines.launch
     )
 }
 
-@Composable fun PinToolButton(tool: ToolRecord) {
-    var show by remember { mutableStateOf(false) }
-    TextButton(onClick = { show = true }) { Text(stringResource(R.string.widget_add_to_home)) }
-    if (show) PinToolDialog(tool) { show = false }
-}
-
 internal enum class PinToolKind { Widget, Shortcut }
 
-@Composable internal fun PinToolDialog(tool: ToolRecord, only: PinToolKind? = null, controller: ToolController? = null, dismiss: () -> Unit) {
+@Composable internal fun PinToolDialog(tool: ToolRecord, kind: PinToolKind, controller: ToolController? = null, dismiss: () -> Unit) {
     val context = LocalContext.current
     val layoutSaved = stringResource(R.string.widget_layout_saved)
     val scope = rememberCoroutineScope()
     var requesting by remember { mutableStateOf(false) }
-    var widget by remember(only) { mutableStateOf(only != PinToolKind.Shortcut) }
+    val widget = kind == PinToolKind.Widget
     var prefs by remember { mutableStateOf(WidgetPreferences("compact",true)) }
     var token by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -88,11 +82,7 @@ internal enum class PinToolKind { Widget, Shortcut }
     AlertDialog(onDismissRequest = dismiss,
         title = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(stringResource(when (only) {
-                    PinToolKind.Widget -> R.string.tool_widget_add
-                    PinToolKind.Shortcut -> R.string.tool_shortcut_add
-                    null -> R.string.widget_home_title
-                }))
+                Text(stringResource(if (widget) R.string.tool_widget_add else R.string.tool_shortcut_add))
                 if (!editingLayout) status?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
             }
         },
@@ -105,10 +95,6 @@ internal enum class PinToolKind { Widget, Shortcut }
                         status = layoutSaved
                     }
                     return@Column
-                }
-                if(only == null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(widget,{ widget = true },{ Text(stringResource(R.string.widget_kind)) })
-                    FilterChip(!widget,{ widget = false },{ Text(stringResource(R.string.widget_shortcut)) })
                 }
                 if(widget) {
                     WidgetOptions(prefs) { prefs = it }

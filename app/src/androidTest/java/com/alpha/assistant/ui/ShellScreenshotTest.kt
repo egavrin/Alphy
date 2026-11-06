@@ -207,10 +207,10 @@ class ShellScreenshotTest {
             assertTrue("Settings rail and detail must not overlap", rail.right <= detail.left)
         }
         assertEquals("Settings center pixel", Color.BLACK, center(screen(directory, "settings-secure")))
+        robot.reveal(robot.text(R.string.settings_name_label), forward = null)
         captureSettingsPage(scenario, directory, "settings")
         for ((section, target, name) in listOf(
             Triple(R.string.settings_deepseek, R.string.key_ready, "deepseek"),
-            Triple(R.string.settings_name_label, R.string.settings_name_hint, "name"),
             Triple(R.string.settings_voice, R.string.voice_start, "voice"),
             Triple(R.string.access, R.string.access_intro, "access"),
             Triple(R.string.memory_title, R.string.memory_empty, "memory"),

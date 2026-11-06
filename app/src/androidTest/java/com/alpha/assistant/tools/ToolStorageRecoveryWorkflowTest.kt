@@ -45,6 +45,7 @@ class ToolStorageRecoveryWorkflowTest {
                         }
                     }
                     robot.click(robot.text(R.string.tool_options))
+                    robot.click("Закрепить")
                     robot.click(robot.text(R.string.tool_desktop_add))
                     robot.waitUntil { fixture.model?.tools?.tools?.single()?.onDesktop == true }
                     robot.click(robot.text(R.string.tool_options))

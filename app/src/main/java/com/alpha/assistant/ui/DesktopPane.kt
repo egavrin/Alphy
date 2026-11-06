@@ -127,12 +127,18 @@ import java.util.TimeZone
     val automationChoices = automations.filter { DesktopRef(DesktopRef.Kind.Automation, it.rule.id) !in order }
     val courseChoices = courses.filter { DesktopRef(DesktopRef.Kind.Course, it.id) !in order }
     val canEditLayout = layout.order != null && !layout.saving
+    val empty = visible.isEmpty()
+    val desktopLoaded = canEditLayout && !layout.failed && !tools.busy && !tools.storageUnavailable &&
+        automationsResult?.isSuccess == true && coursesResult?.isSuccess == true
+    LaunchedEffect(empty, desktopLoaded) {
+        if (empty && desktopLoaded) editing = false
+    }
     val openLibrary = {
         editing = false
         tools.select(null)
         open(ShellDestination.MiniApps)
     }
-    BackHandler(editing) { editing = false }
+    BackHandler(editing && !empty) { editing = false }
 
     val placementKind = choosePlacement
     if (placementKind != null) {
@@ -221,17 +227,17 @@ import java.util.TimeZone
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(stringResource(R.string.desktop_grid_title), Modifier.weight(1f).semantics { heading() },
                             style = MaterialTheme.typography.titleLarge)
-                        TextButton(onClick = { editing = !editing }, modifier = Modifier.heightIn(min = 48.dp)) {
+                        if (!empty) TextButton(onClick = { editing = !editing }, modifier = Modifier.heightIn(min = 48.dp)) {
                             Text(stringResource(if (editing) R.string.desktop_done else R.string.desktop_edit))
                         }
                     }
-                    if (editing && automationChoices.isNotEmpty()) {
+                    if ((editing || empty) && automationChoices.isNotEmpty()) {
                         TextButton(onClick = { choosePlacement = DesktopRef.Kind.Automation }, enabled = canEditLayout,
                             modifier = Modifier.heightIn(min = 48.dp)) {
                             Text(stringResource(R.string.desktop_add_automation))
                         }
                     }
-                    if (editing && courseChoices.isNotEmpty()) {
+                    if ((editing || empty) && courseChoices.isNotEmpty()) {
                         TextButton(onClick = { choosePlacement = DesktopRef.Kind.Course }, enabled = canEditLayout,
                             modifier = Modifier.heightIn(min = 48.dp)) {
                             Text(stringResource(R.string.desktop_add_course))
@@ -257,8 +263,13 @@ import java.util.TimeZone
                             Text(stringResource(R.string.tool_dismiss))
                         }
                     }
-                    if (visible.isEmpty() && !tools.busy) {
+                    if (empty && desktopLoaded && tools.error == null) {
                         Text(stringResource(R.string.desktop_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.desktop_example_list), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.desktop_example_habits), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.desktop_example_timer), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (empty && tools.tools.any { it.saved && !it.archived }) {
                         TextButton(onClick = openLibrary, modifier = Modifier.heightIn(min = 48.dp)) {
                             Text(stringResource(R.string.desktop_open_library))
                         }

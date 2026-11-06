@@ -220,8 +220,11 @@ import kotlinx.coroutines.launch
         }
     }
     val selectedTool = model.tools.tools.find { it.id == model.tools.selectedId }
-    LaunchedEffect(libraryOrigin, selectedTool?.id, selectedTool?.archived) {
+    val hasArchive = model.tools.tools.any { it.saved && it.archived }
+    val libraryLoaded = !model.tools.busy && !model.tools.storageUnavailable
+    LaunchedEffect(libraryOrigin, selectedTool?.id, selectedTool?.archived, hasArchive, libraryLoaded) {
         if (libraryOrigin && selectedTool != null) libraryArchive = selectedTool.archived
+        else if (!hasArchive && libraryLoaded) libraryArchive = false
     }
     val selectedSpec = remember(selectedTool?.spec) { selectedTool?.let { com.alpha.assistant.tools.ToolSpec.availablePersisted(it.spec) } }
     var immersiveExited by rememberSaveable(selectedTool?.id, selectedTool?.revision, destination == ShellDestination.MiniApps) { mutableStateOf(false) }
@@ -297,7 +300,8 @@ import kotlinx.coroutines.launch
                         val currentImmersive by rememberUpdatedState(immersive)
                         val currentCompact by rememberUpdatedState(compact)
                         val currentLibraryOrigin by rememberUpdatedState(libraryOrigin)
-                        val currentLibraryArchive by rememberUpdatedState(libraryArchive)
+                        val currentLibraryArchive by rememberUpdatedState(libraryArchive && hasArchive)
+                        val currentHasArchive by rememberUpdatedState(hasArchive)
                         @Composable fun ChatEntry(conversation: Conversation?) {
                             BoxWithConstraints(Modifier.fillMaxSize().clipToBounds().testTag("chat").then(
                                 if (currentLayout.tabletopGap != null) Modifier.imePadding() else Modifier,
@@ -383,7 +387,7 @@ import kotlinx.coroutines.launch
                                 metadata = ListDetailSceneStrategy.listPane() +
                                     ListDetailSceneStrategy.preferredPaneSize(width = 320.dp)) {
                                 Box(Modifier.fillMaxSize()) {
-                                    MiniAppLibrary(model.tools, currentLibraryArchive, onArchiveChange = {
+                                    MiniAppLibrary(model.tools, currentLibraryArchive, currentHasArchive, onArchiveChange = {
                                         if (currentLibraryArchive != it) {
                                             libraryArchive = it
                                             model.tools.select(null)

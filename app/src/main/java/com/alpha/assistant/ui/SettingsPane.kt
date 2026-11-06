@@ -71,7 +71,6 @@ internal val SettingsDetailWidth = 740.dp
 
 internal enum class SettingsSection(@StringRes val label: Int, val glyph: Glyph) {
     DeepSeek(R.string.settings_deepseek, Glyph.Cloud),
-    Name(R.string.settings_name_label, Glyph.Profile),
     Voice(R.string.settings_voice, Glyph.Mic),
     Access(R.string.access, Glyph.Shield),
     Memory(R.string.memory_title, Glyph.Notebook),
@@ -79,7 +78,7 @@ internal enum class SettingsSection(@StringRes val label: Int, val glyph: Glyph)
 }
 
 private val settingsGroups = listOf(
-    R.string.settings_group_app to listOf(SettingsSection.DeepSeek, SettingsSection.Name, SettingsSection.Voice),
+    R.string.settings_group_app to listOf(SettingsSection.DeepSeek, SettingsSection.Voice),
     R.string.settings_group_data to listOf(SettingsSection.Access, SettingsSection.Memory),
     R.string.settings_group_maintenance to listOf(SettingsSection.Updates),
 )
@@ -115,7 +114,7 @@ private fun SettingsLayout(
         Row(Modifier.fillMaxSize()) {
             if (split || section == null) {
                 SettingsMenu(
-                    section, select, split,
+                    model, section, select, split,
                     if (split) Modifier.width(railWidth).fillMaxHeight() else Modifier.fillMaxSize(),
                 )
             }
@@ -132,7 +131,6 @@ private fun SettingsLayout(
                     key(section) {
                         when (section) {
                             SettingsSection.DeepSeek -> DeepSeekSettings(model)
-                            SettingsSection.Name -> SettingsDetail(section) { SettingsPanel { NameSettings(model) } }
                             SettingsSection.Voice -> SettingsDetail(section) { SettingsPanel { VoiceControls(model, settingsDisclosure = true) } }
                             SettingsSection.Access -> SettingsDetail(section) { AccessSettings(model.tools.networkAccessHost) }
                             SettingsSection.Memory -> MemoryScreen(model.memoryPage, settingsPage = true)
@@ -146,7 +144,7 @@ private fun SettingsLayout(
 }
 
 @Composable
-private fun SettingsMenu(selected: SettingsSection?, select: (SettingsSection) -> Unit, split: Boolean, modifier: Modifier) {
+private fun SettingsMenu(model: ShellViewModel, selected: SettingsSection?, select: (SettingsSection) -> Unit, split: Boolean, modifier: Modifier) {
     val colors = MaterialTheme.colorScheme
     Column(
         modifier.testTag("settings-menu")
@@ -155,6 +153,7 @@ private fun SettingsMenu(selected: SettingsSection?, select: (SettingsSection) -
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         SettingsHeading(R.string.settings, if (split) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall)
+        NameSettings(model)
         for ((title, sections) in settingsGroups) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(stringResource(title), Modifier.padding(start = 8.dp).semantics { heading() },

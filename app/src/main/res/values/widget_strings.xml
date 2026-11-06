@@ -6,10 +6,6 @@
     <string name="widget_details">Показывать подробности</string>
     <string name="widget_preview">Предпросмотр. Размер зависит от рабочего стола Android.</string>
     <string name="widget_preview_failed">Не удалось показать предпросмотр.</string>
-    <string name="widget_add_to_home">Добавить на главный экран</string>
-    <string name="widget_home_title">На главном экране</string>
-    <string name="widget_kind">Виджет</string>
-    <string name="widget_shortcut">Ярлык</string>
     <string name="widget_shortcut_detail">Открывает это мини-приложение в Alphy.</string>
     <string name="widget_pin_explanation">Виджет использует общее состояние. На нём работают кнопки и переключатели. Остальные действия открывают Alphy. Добавление подтверждает Android.</string>
     <string name="widget_configure_title">Виджет Alphy</string>

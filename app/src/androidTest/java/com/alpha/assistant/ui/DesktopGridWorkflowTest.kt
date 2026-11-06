@@ -114,6 +114,13 @@ class DesktopGridWorkflowTest {
             robot.awaitDrawerClosed(scenario)
             click("Water counter")
             reveal("Glasses: 2")
+            click(R.string.tool_options)
+            click(R.string.tool_chat)
+            click(R.string.desktop_edit)
+            click(R.string.desktop_remove_tile, "Steps counter")
+            robot.waitGone(robot.text(R.string.desktop_done))
+            reveal(robot.text(R.string.desktop_open_library))
+            assertNull(robot.find(robot.text(R.string.desktop_edit)))
         }
         assertEquals(0, fixture.provider.calls)
     }
@@ -154,11 +161,11 @@ class DesktopGridWorkflowTest {
         fixture.launch().use {
             robot.waitFor(robot.text(R.string.desktop_now_automation_attention))
             assertEquals(null, robot.find(robot.text(R.string.desktop_now_calendar)))
-            reveal(robot.text(R.string.desktop_open_library))
-            click(R.string.desktop_edit)
+            reveal(robot.text(R.string.desktop_add_automation))
+            assertNull(robot.find(robot.text(R.string.desktop_edit)))
             click(R.string.desktop_add_automation)
             click(R.string.desktop_place_automation, rule.definition.name)
-            click(R.string.desktop_done)
+            reveal(robot.text(R.string.desktop_edit))
             val switch = robot.text(R.string.desktop_automation_switch, rule.definition.name)
             reveal(switch)
             robot.assertTarget(switch)
@@ -287,10 +294,8 @@ class DesktopGridWorkflowTest {
     }
 
     private fun placeAutomation(rule: AutomationRule): String {
-        click(R.string.desktop_edit)
         click(R.string.desktop_add_automation)
         click(R.string.desktop_place_automation, rule.definition.name)
-        click(R.string.desktop_done)
         val label = robot.text(R.string.desktop_automation_switch, rule.definition.name)
         reveal(label)
         return label
@@ -321,6 +326,7 @@ class DesktopGridWorkflowTest {
     private fun placeFromLibrary(id: String, title: String) {
         click(title)
         click(R.string.tool_options)
+        robot.click("Закрепить")
         click(R.string.tool_desktop_add)
         robot.waitUntil { record(id)?.onDesktop == true }
         click(R.string.tool_options)

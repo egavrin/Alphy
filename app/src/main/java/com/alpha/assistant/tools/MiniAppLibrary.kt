@@ -41,6 +41,7 @@ import com.alpha.assistant.ui.RussianHyphenation
 @Composable internal fun MiniAppLibrary(
     controller: ToolController,
     archived: Boolean,
+    hasArchive: Boolean,
     onArchiveChange: (Boolean) -> Unit,
     onOpen: () -> Unit,
     onMenu: () -> Unit,
@@ -97,6 +98,8 @@ import com.alpha.assistant.ui.RussianHyphenation
                 item {
                     LibrarySearch(query, { query = it })
                     Spacer(Modifier.height(8.dp))
+                }
+                if (hasArchive) item {
                     val tab = if (archived) 1 else 0
                     PrimaryTabRow(
                         selectedTabIndex = tab,

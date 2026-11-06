@@ -423,22 +423,27 @@ class MiniAppPresentationWorkflowTest {
         screenshot("live-canvas-same-activity-resume")
     }
 
-    @Test fun inlineRestoreQuiescesActiveCanvasAndKeepsCurrentData() = fixture(
+    @Test fun versionHistoryRestoreQuiescesActiveCanvasAndKeepsCurrentData() = fixture(
         specJson=activeCardSpec("Current live canvas",true,"Current data"),
         previousJson=activeCardSpec("Earlier live canvas",false,"Earlier data")
     ) {_,store,_ ->
         fun state()=JSONObject(checkNotNull(store.tool("lake")).state)
         diagnostics.state={"state="+store.tool("lake")?.state+" revision="+store.tool("lake")?.revision}
-        shown("v2")
+        shown("Current live canvas")
+        assertNull(find("v2"))
+        assertNull(find("Вернуть v1"))
         waitUntil("The current canvas did not commit a frame") {state().getInt("ticks")>0}
         val ticks=state().getInt("ticks")
+        click("Действия мини-приложения Current live canvas")
+        click("Версии")
         click("Вернуть v1")
-        waitUntil("Inline restore did not commit a new revision") {store.tool("lake")?.revision==3}
+        waitUntil("Version history restore did not commit a new revision") {store.tool("lake")?.revision==3}
         assertTrue("Restore must keep canvas progress",state().getInt("ticks")>=ticks)
         assertEquals("Current data",state().getString("note"))
         assertEquals("Восстановление v1",store.revisions("lake").first().label)
-        shown("v3");shown("Earlier live canvas")
-        screenshot("inline-restore-live-canvas")
+        shown("Earlier live canvas")
+        assertNull(find("v3"))
+        screenshot("version-history-restore-live-canvas")
     }
 
     @Test fun restoreUsesTheFinalPauseFromEitherVisibleHost() {

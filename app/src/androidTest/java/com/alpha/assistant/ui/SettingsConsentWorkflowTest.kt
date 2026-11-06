@@ -29,12 +29,12 @@ class SettingsConsentWorkflowTest {
         robot.edit(robot.text(R.string.composer_label), text)
         robot.click(robot.text(R.string.composer_send))
     }
-    private fun openSettings(scenario: ActivityScenario<*>, section: Int = R.string.settings_deepseek) {
+    private fun openSettings(scenario: ActivityScenario<*>, section: Int? = R.string.settings_deepseek) {
         robot.openDrawer(scenario)
         robot.click(robot.text(R.string.settings))
         robot.awaitDrawerClosed(scenario)
         robot.waitUntil { robot.secure(scenario) }
-        robot.click(robot.text(section))
+        if (section != null) robot.click(robot.text(section))
     }
     private fun saveKey() {
         robot.reveal(robot.text(R.string.key_label))
@@ -238,7 +238,7 @@ class SettingsConsentWorkflowTest {
     @Test fun longNameKeepsWholeCharacters() {
         fixture.install()
         fixture.launch().use { scenario ->
-            openSettings(scenario, R.string.settings_name_label)
+            openSettings(scenario, section = null)
             robot.reveal(robot.text(R.string.settings_name_label))
             val letters = "а".repeat(39)
             robot.enter(robot.text(R.string.settings_name_label), letters + "\uD83D\uDE00")
@@ -263,7 +263,7 @@ class SettingsConsentWorkflowTest {
     @Test fun nameSurvivesRecreation() {
         fixture.install()
         fixture.launch().use { scenario ->
-            openSettings(scenario, R.string.settings_name_label)
+            openSettings(scenario, section = null)
             robot.reveal(robot.text(R.string.settings_name_label))
             robot.edit(robot.text(R.string.settings_name_label), "Евгений")
             robot.waitUntil { fixture.store.load().userName == "Евгений" }
@@ -271,7 +271,6 @@ class SettingsConsentWorkflowTest {
             robot.waitUntil { robot.secure(scenario) }
             robot.reveal(robot.text(R.string.settings_name_label))
             robot.waitUntil { robot.field(robot.text(R.string.settings_name_label)).text?.toString() == "Евгений" }
-            robot.back()
             robot.back()
             robot.waitUntil { !robot.secure(scenario) }
             robot.openDrawer(scenario)

@@ -122,8 +122,14 @@ class AdaptiveShellWorkflowTest {
         robot.waitUntil { count(tools) == 1 }
         robot.edit(composer, "Chat edit in the wide pane")
         assertEquals(1, robot.texts().count { it == "Increment item" })
-        robot.waitFor(robot.text(R.string.tool_details_versions, 1, checkNotNull(tools.tool(TOOL_ID)).stateVersion))
-        robot.waitFor(robot.text(R.string.tool_card_actions, "Adaptive fixture"))
+        val versionSummary = robot.text(R.string.tool_details_versions, 1, checkNotNull(tools.tool(TOOL_ID)).stateVersion)
+        val cardMenu = robot.text(R.string.tool_card_actions, "Adaptive fixture")
+        robot.waitFor(cardMenu)
+        assertNull(robot.find(versionSummary))
+        robot.click(cardMenu)
+        robot.click(robot.text(R.string.tool_versions))
+        robot.waitFor(versionSummary)
+        robot.click(robot.text(R.string.tool_dialog_close))
         assertSession(session)
         robot.diagnostics.capture("wide-after-action")
 
@@ -269,6 +275,19 @@ class AdaptiveShellWorkflowTest {
         robot.waitUntil { !robot.secure(scenario) }
         assertEquals("denied", tools.effects(TOOL_ID).single().result.status)
         assertEquals(0, fixture.provider.calls)
+    }
+
+    @Test fun wideSettingsNameFieldEditsWithoutOpeningADetail() = withTool(selectedChat = false) { fixture, _, scenario ->
+        constrain(scenario, fixture, 900)
+        robot.openDrawer(scenario)
+        robot.click(robot.text(R.string.settings))
+        robot.awaitDrawerClosed(scenario)
+        robot.waitUntil { robot.composed(scenario, "settings-detail") && robot.secure(scenario) }
+        val label = robot.text(R.string.settings_name_label)
+        robot.reveal(label)
+        robot.edit(label, "Евгений")
+        robot.waitUntil { fixture.store.load().userName == "Евгений" }
+        robot.reveal(robot.text(R.string.key_label))
     }
 
     @Test fun wideNewChatKeepsDesktopBackPath() = withTool(selectedChat = false) { fixture, _, scenario ->

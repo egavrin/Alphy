@@ -426,6 +426,7 @@ class LibraryManagementWorkflowTest {
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitUntil {!model.loading && !model.tools.busy}
                 robot.openDrawer(scenario);click(app.getString(R.string.mini_apps));robot.awaitDrawerClosed(scenario)
+                assertNull(find(diagnostics.freshRoot(), app.getString(R.string.tool_archive)))
                 edit("Поиск мини-приложений","  СЧЁТ  ")
                 waitFor("Мой счётчик"); waitUntil { find(diagnostics.freshRoot(),"Покупки") == null }
                 click("Мой счётчик"); waitFor("Счёт: 7")
@@ -439,11 +440,24 @@ class LibraryManagementWorkflowTest {
                 waitUntil {!model.loading && !model.tools.busy}
                 robot.openDrawer(scenario);click(app.getString(R.string.mini_apps));robot.awaitDrawerClosed(scenario)
                 click(app.getString(R.string.tool_archive))
+                edit("Поиск мини-приложений", "не найдено");waitFor("Ничего не найдено")
+                waitFor(app.getString(R.string.tool_archive))
+                edit("Поиск мини-приложений", "счётчик")
                 waitFor("Мой счётчик");click("Мой счётчик")
                 click("Восстановить из архива");waitFor("Счёт: 7")
                 waitUntil {!model.tools.busy}
                 AutomationStore(app,rulesName).use {assertFalse(it.rules().single().enabled)}
-                click(app.getString(R.string.tool_library_back));edit("Поиск мини-приложений","не найдено");waitFor("Ничего не найдено");diagnostics.capture("empty-search-result")
+                click(app.getString(R.string.tool_library_back));waitFor("Мой счётчик")
+                assertNull(find(diagnostics.freshRoot(), app.getString(R.string.tool_archive)))
+                edit("Поиск мини-приложений", "");click("Покупки")
+                click("Действия мини-приложения");click("Архивировать");click("Архивировать")
+                waitFor(app.getString(R.string.tool_archived_detail))
+                click("Действия мини-приложения");click("Удалить")
+                waitFor(app.getString(R.string.tool_delete_widgets, 0));click("Удалить")
+                waitFor(app.getString(R.string.tool_search))
+                edit("Поиск мини-приложений", "счётчик");waitFor("Мой счётчик")
+                assertNull(find(diagnostics.freshRoot(), app.getString(R.string.tool_archive)))
+                diagnostics.capture("archive-empty-after-delete")
             }
         } finally {
             CloudTestActivity.factory=null;shell.close();keys.clear()
@@ -479,8 +493,10 @@ class LibraryManagementWorkflowTest {
             CloudTestActivity.factory={ ShellViewModel(it,offline,shell,keys).also { model=it } }
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitUntil {!model.loading && !model.tools.busy}
-                waitFor("v2"); waitFor("Счёт: 7")
+                waitFor("Счёт: 7")
+                assertNull(find(diagnostics.freshRoot(), "v2"))
                 click("Действия мини-приложения Версионный счётчик");click("Версии")
+                waitFor(app.getString(R.string.tool_details_versions, 2, 2))
                 waitFor("v2 · Новая кнопка");waitFor(app.getString(R.string.tool_generation_preview_state))
                 assertNull(find(diagnostics.freshRoot(),"Вернуть v1"))
                 click("Закрыть")
@@ -488,11 +504,21 @@ class LibraryManagementWorkflowTest {
                 waitFor("Зависимый сценарий"); waitFor("Проверить и включить")
                 assertNull(find(diagnostics.freshRoot(),"Другой сценарий"))
                 instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
-                click("Действия мини-приложения Версионный счётчик");click(app.getString(R.string.tool_desktop_add))
+                click("Действия мини-приложения Версионный счётчик")
+                waitFor("Закрепить")
+                assertNull(find(diagnostics.freshRoot(), app.getString(R.string.tool_shortcut_add)))
+                assertNull(find(diagnostics.freshRoot(), app.getString(R.string.tool_widget_add)))
+                click("Закрепить")
+                waitFor(app.getString(R.string.tool_shortcut_add));waitFor(app.getString(R.string.tool_widget_add))
+                click(app.getString(R.string.tool_desktop_add))
                 waitUntil {model.tools.tools.single().onDesktop && !model.tools.busy}
                 robot.openDrawer(scenario);click(app.getString(R.string.mini_apps));robot.awaitDrawerClosed(scenario)
-                waitFor("Версионный счётчик")
-                instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+                click("Версионный счётчик");click(app.getString(R.string.tool_options));click("Закрепить")
+                click(app.getString(R.string.tool_desktop_remove))
+                waitUntil {!model.tools.tools.single().onDesktop && !model.tools.busy}
+                click(app.getString(R.string.tool_library_back))
+                waitFor(app.getString(R.string.tool_search))
+                robot.openDrawer(scenario);click("Обсуждение счётчика");robot.awaitDrawerClosed(scenario)
                 click("Действия мини-приложения Версионный счётчик");click("Удалить")
                 waitFor("Удалить «Версионный счётчик»?");click("Отмена")
                 assertEquals(1,model.tools.tools.size)

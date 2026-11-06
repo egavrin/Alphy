@@ -27,6 +27,10 @@ class DesktopWorkflowTest {
         fixture.launch().use { scenario ->
             robot.waitUntil { greetings("Евгений").any { robot.find(it) != null } }
             robot.waitFor(robot.text(R.string.desktop_prompt))
+            robot.reveal("Здесь появятся твои инструменты")
+            robot.reveal("«Сделай таймер для готовки»")
+            assertNull(robot.find(robot.text(R.string.desktop_edit)))
+            assertNull(robot.find(robot.text(R.string.desktop_open_library)))
             assertNull(robot.find(robot.text(R.string.now_connect_title)))
             assertNull(robot.find(robot.text(R.string.now_day_title)))
             robot.assertTarget(robot.text(R.string.composer_label))

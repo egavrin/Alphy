@@ -70,7 +70,7 @@ import org.json.JSONObject
 import java.text.DateFormat
 import java.util.Date
 
-internal enum class MiniAppAction { Versions, Shortcut, Widget, Delete, Export, ManualEdit, RecurringSearch }
+internal enum class MiniAppAction { Versions, Pin, Shortcut, Widget, Delete, Export, ManualEdit, RecurringSearch }
 
 internal val LocalMiniAppLiveAllowed = staticCompositionLocalOf { true }
 
@@ -169,7 +169,6 @@ internal class MiniAppActions {
     val history by produceState<List<ToolRevision>?>(null, tool.id, tool.revision) {
         value = readToolDetails { controller.revisionHistory(tool.id) }
     }
-    val previous = history?.firstOrNull { it.revision < tool.revision }
     val stopped = history?.firstOrNull { it.revision == tool.revision }?.stoppedAutomations.orEmpty()
     val title = ToolSpec.storedTitle(tool.spec)
     val covered = actions.covers(tool.id)
@@ -178,9 +177,6 @@ internal class MiniAppActions {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-            val version = if (compact) stringResource(R.string.tool_details_versions, tool.revision, tool.stateVersion)
-                else stringResource(R.string.tool_version, tool.revision)
-            Text(version, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (tool.archived) Text(stringResource(R.string.tool_placed_archive))
             if (spec == null) Text(stringResource(R.string.tool_closed_format))
             else if (compact) {
@@ -211,12 +207,6 @@ internal class MiniAppActions {
                     DropdownMenu(menu, { menu = false }) {
                         MiniAppMenuItems(controller, tool, actions) { menu = false }
                     }
-                }
-            }
-            if (previous != null && !tool.archived && spec != null) {
-                TextButton(onClick = { actions.requestRestore(tool, previous.revision) },
-                    enabled = !controller.busy && actions.restore == null, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Text(stringResource(R.string.tool_restore_version, previous.revision))
                 }
             }
             if (stopped.isNotEmpty()) {
@@ -335,12 +325,10 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
     if (tool.saved && !tool.archived && available) {
         item(R.string.tool_export, Glyph.Export, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.Export }
         item(R.string.tool_manual_edit, Glyph.Compose, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.ManualEdit }
-        item(if (tool.onDesktop) R.string.tool_desktop_remove else R.string.tool_desktop_add, Glyph.Grid, enabled) {
+        item(R.string.tool_pin, Glyph.Grid, enabled) {
             dismiss()
-            controller.setDesktopPlacement(tool, !tool.onDesktop)
+            actions.request = tool.id to MiniAppAction.Pin
         }
-        item(R.string.tool_shortcut_add, Glyph.Link, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.Shortcut }
-        item(R.string.tool_widget_add, Glyph.Screen, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.Widget }
         item(R.string.recurring_search_title, Glyph.Repeat, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.RecurringSearch }
     }
     if (archive != null && tool.saved && !tool.archived) {
@@ -403,8 +391,30 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
     val dismiss = { actions.request = null }
     key(id, action) {
         when (action) {
-            MiniAppAction.Widget -> PinToolDialog(tool, only = PinToolKind.Widget, controller = controller, dismiss = dismiss)
-            MiniAppAction.Shortcut -> PinToolDialog(tool, only = PinToolKind.Shortcut, dismiss = dismiss)
+            MiniAppAction.Pin -> AlertDialog(
+                onDismissRequest = dismiss,
+                title = { Text(stringResource(R.string.tool_pin)) },
+                text = {
+                    val enabled = !controller.busy && tool.saved && !tool.archived &&
+                        remember(tool.spec) { ToolSpec.availablePersisted(tool.spec) != null }
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        val alphyLabel = if (tool.onDesktop) R.string.tool_desktop_remove else R.string.tool_desktop_add
+                        MiniAppActionRow(alphyLabel, Glyph.Grid, enabled) {
+                            dismiss()
+                            controller.setDesktopPlacement(tool, !tool.onDesktop)
+                        }
+                        MiniAppActionRow(R.string.tool_shortcut_add, Glyph.Link, enabled) {
+                            actions.request = id to MiniAppAction.Shortcut
+                        }
+                        MiniAppActionRow(R.string.tool_widget_add, Glyph.Screen, enabled) {
+                            actions.request = id to MiniAppAction.Widget
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = dismiss) { Text(stringResource(R.string.cancel)) } },
+            )
+            MiniAppAction.Widget -> PinToolDialog(tool, PinToolKind.Widget, controller = controller, dismiss = dismiss)
+            MiniAppAction.Shortcut -> PinToolDialog(tool, PinToolKind.Shortcut, dismiss = dismiss)
             MiniAppAction.Versions -> VersionsDialog(controller, tool, actions, dismiss)
             MiniAppAction.Delete -> DeleteMiniAppDialog(controller, tool, dismiss)
             MiniAppAction.Export, MiniAppAction.ManualEdit ->
@@ -432,7 +442,13 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
             }
         }
     }
-    AlertDialog(onDismissRequest = dismiss, title = { Text(stringResource(R.string.tool_versions)) },
+    AlertDialog(onDismissRequest = dismiss, title = {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(stringResource(R.string.tool_versions))
+            Text(stringResource(R.string.tool_details_versions, tool.revision, tool.stateVersion),
+                style = MaterialTheme.typography.bodySmall)
+        }
+    },
         text = {
             val loaded = versions
             when {
@@ -774,9 +790,7 @@ catch (_: Exception) { null }
                     TextButton(onClick={details=null}) {Text(stringResource(R.string.tool_details_close))}
                 }
                 if(tool != null && details == "details") {
-                    Text(stringResource(R.string.tool_details_versions, tool.revision, tool.stateVersion),style=MaterialTheme.typography.bodySmall)
                     Text(stringResource(R.string.tool_changes_privacy),style=MaterialTheme.typography.bodySmall)
-                    if(tool.saved && !tool.archived && spec!=null) com.alpha.assistant.surfaces.PinToolButton(tool)
                     if(!tool.saved && !tool.archived) Button(onClick={controller.save(tool.id)},enabled=!controller.busy) {Text(stringResource(R.string.tool_save_library))}
                 }
             }

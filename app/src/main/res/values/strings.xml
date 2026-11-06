@@ -267,6 +267,7 @@
     <string name="tool_open">Открыть</string>
     <string name="tool_refine">Изменить</string>
     <string name="tool_card_actions">Действия мини-приложения %1$s</string>
+    <string name="tool_pin">Закрепить</string>
     <string name="tool_desktop_add">На рабочий стол Alphy</string>
     <string name="tool_desktop_added">Добавлено на рабочий стол Alphy</string>
     <string name="tool_desktop_removed">Убрано с рабочего стола Alphy</string>
