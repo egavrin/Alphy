@@ -16,6 +16,7 @@ import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.math.BigInteger
 import java.security.MessageDigest
@@ -29,9 +30,34 @@ internal data class AppRelease(
     val url: HttpUrl,
 ) {
     val versionName: String get() = tag.removePrefix("v")
+
+    fun isNewerThan(installed: String): Boolean {
+        val version = SemVer.parse(versionName) ?: return false
+        val current = SemVer.parse(installed) ?: return false
+        return version > current
+    }
+
+    companion object {
+        private val downloadUrl = "https://github.com/egavrin/Alphy/releases/download".toHttpUrl()
+
+        fun assetUrl(tag: String): HttpUrl =
+            downloadUrl.newBuilder().addPathSegment(tag).addPathSegment("Alphy-$tag.apk").build()
+
+        fun restore(tag: String, notes: String, size: Long, digest: String): AppRelease? {
+            if (!tag.startsWith("v") || SemVer.parse(tag.removePrefix("v")) == null ||
+                size <= 0 || !sha256.matches(digest)
+            ) return null
+            return AppRelease(tag, notes, size, digest, assetUrl(tag))
+        }
+
+        private val sha256 = Regex("[a-fA-F0-9]{64}")
+    }
 }
 
 internal class InvalidUpdate : IOException()
+internal class RetryUpdate(cause: IOException? = null) : IOException(cause)
+private class GitHubHttpError(val status: Int) : IOException("GitHub HTTP $status")
+private class UpdateStorageError(cause: IOException) : IOException(cause)
 
 internal class GitHubReleases(httpClient: OkHttpClient) {
     private val client = httpClient.newBuilder()
@@ -68,35 +94,88 @@ internal class GitHubReleases(httpClient: OkHttpClient) {
     }
 
     suspend fun download(release: AppRelease, file: File, onProgress: (Int) -> Unit) {
-        val request = Request.Builder().url(release.url).build()
-        fetch(request, timeoutSeconds = 300) { response ->
-            val digest = MessageDigest.getInstance("SHA-256")
-            var received = 0L
-            var percent = 0
-            response.body.byteStream().use { input ->
-                file.outputStream().use { output ->
-                    val buffer = ByteArray(64 * 1024)
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count == -1) break
-                        if (count > release.size - received) throw InvalidUpdate()
-                        output.write(buffer, 0, count)
-                        digest.update(buffer, 0, count)
-                        received += count
-                        val progress = (received.toDouble() / release.size * 100).toInt()
-                        if (progress != percent) {
-                            percent = progress
-                            onProgress(progress)
+        val offset = withContext(Dispatchers.IO) { file.length() }
+        if (offset > release.size) throw InvalidUpdate()
+        if (offset == release.size) return
+
+        val request = Request.Builder().url(release.url).header("Accept-Encoding", "identity").apply {
+            if (offset > 0) header("Range", "bytes=$offset-")
+        }.build()
+        try {
+            fetch(request) { response ->
+                val encoding = response.header("Content-Encoding")
+                if (encoding != null && !encoding.equals("identity", ignoreCase = true)) throw InvalidUpdate()
+                var received = when (response.code) {
+                    200 -> 0L
+                    206 -> {
+                        val expectedRange = "bytes $offset-${release.size - 1}/${release.size}"
+                        if (offset == 0L || response.header("Content-Range") != expectedRange) throw InvalidUpdate()
+                        offset
+                    }
+                    else -> throw InvalidUpdate()
+                }
+                val length = response.body.contentLength()
+                if (length > release.size - received) throw InvalidUpdate()
+
+                response.body.byteStream().use { input ->
+                    var percent = (received * 100.0 / release.size).toInt()
+                    try {
+                        FileOutputStream(file, received > 0).use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                val count = try {
+                                    input.read(buffer)
+                                } catch (error: IOException) {
+                                    throw RetryUpdate(error)
+                                }
+                                if (count == -1) break
+                                if (count > release.size - received) throw InvalidUpdate()
+                                output.write(buffer, 0, count)
+                                received += count
+                                val progress = (received * 100.0 / release.size).toInt()
+                                if (progress != percent) {
+                                    percent = progress
+                                    onProgress(progress)
+                                }
+                            }
                         }
+                    } catch (error: IOException) {
+                        if (error is InvalidUpdate || error is RetryUpdate) throw error
+                        throw UpdateStorageError(error)
                     }
                 }
+                if (received != release.size) throw RetryUpdate()
             }
-            val actualDigest = digest.digest().joinToString("") { "%02x".format(it) }
-            if (received != release.size || !actualDigest.equals(release.digest, ignoreCase = true)) throw InvalidUpdate()
+        } catch (error: IOException) {
+            when (error) {
+                is InvalidUpdate, is UpdateStorageError, is RetryUpdate -> throw error
+                is GitHubHttpError -> {
+                    if (error.status == 408 || error.status == 429 || error.status >= 500) throw RetryUpdate(error)
+                    if (error.status == 416) throw InvalidUpdate()
+                    throw error
+                }
+                else -> throw RetryUpdate(error)
+            }
         }
     }
 
-    private suspend fun <T> fetch(request: Request, timeoutSeconds: Long, read: (Response) -> T): T =
+    suspend fun verifyDigest(release: AppRelease, file: File) = withContext(Dispatchers.IO) {
+        if (file.length() != release.size) throw InvalidUpdate()
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                ensureActive()
+                val count = input.read(buffer)
+                if (count == -1) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        val actualDigest = digest.digest().joinToString("") { "%02x".format(it) }
+        if (!actualDigest.equals(release.digest, ignoreCase = true)) throw InvalidUpdate()
+    }
+
+    private suspend fun <T> fetch(request: Request, timeoutSeconds: Long = 0, read: (Response) -> T): T =
         withContext(Dispatchers.IO) {
             coroutineScope {
                 val call = client.newCall(request)
@@ -112,7 +191,7 @@ internal class GitHubReleases(httpClient: OkHttpClient) {
                 try {
                     call.execute().use { response ->
                         ensureActive()
-                        if (!response.isSuccessful) throw IOException("GitHub HTTP ${response.code}")
+                        if (!response.isSuccessful) throw GitHubHttpError(response.code)
                         read(response)
                     }
                 } finally {
@@ -132,7 +211,7 @@ internal class GitHubReleases(httpClient: OkHttpClient) {
             val size = (value as Number).toLong()
             val digest = digestPattern.matchEntire(asset.optString("digest"))?.groupValues?.get(1) ?: continue
             val url = asset.optString("browser_download_url").toHttpUrlOrNull() ?: continue
-            val expected = downloadUrl.newBuilder().addPathSegment(tag).addPathSegment(name).build()
+            val expected = AppRelease.assetUrl(tag)
             if (size <= 0 || url != expected) continue
             return AppRelease(tag, optString("body").takeUnless { isNull("body") }.orEmpty(), size, digest, url)
         }
@@ -141,7 +220,6 @@ internal class GitHubReleases(httpClient: OkHttpClient) {
 
     private companion object {
         val releasesUrl = "https://api.github.com/repos/egavrin/Alphy/releases".toHttpUrl()
-        val downloadUrl = "https://github.com/egavrin/Alphy/releases/download".toHttpUrl()
         val digestPattern = Regex("sha256:([a-fA-F0-9]{64})")
         val nextLink = Regex(""";\s*rel="next"(?:\s*[,;]|\s*$)""")
     }

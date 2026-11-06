@@ -11,9 +11,9 @@ import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
-import okhttp3.ResponseBody
-import okhttp3.ResponseBody.Companion.asResponseBody
+import okhttp3.Request
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okhttp3.ResponseBody.Companion.asResponseBody
 import okio.buffer
 import okio.source
 import org.json.JSONArray
@@ -26,12 +26,14 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class AppUpdateWorkflowTest {
     private val robot = ShellRobot("app-update")
     private val app = robot.instrumentation.targetContext.applicationContext as AssistantFixtureApplication
-    private val apk = File(app.filesDir, "update-test/Alphy-v0.1.0-alpha.4.apk")
+    private val apk = File(app.filesDir, "update-test/Alphy-v0.1.0-alpha.5.apk")
 
     @Test fun selectsNewestReleaseAndRejectsCorruptDownload() {
         val tag = "v0.1.0-alpha.10"
@@ -44,7 +46,7 @@ class AppUpdateWorkflowTest {
             .put(release("v0.1.0-alpha.3"))
             .put(release("v0.1.0-alpha.9"))
         val nextPage = JSONArray().put(release(tag))
-        val client = fixtureClient(releases, checkRequests, assetRequests, nextPage) { "bad".toResponseBody() }
+        val client = fixtureClient(releases, checkRequests, assetRequests, nextPage) { _, response -> response.body("bad".toResponseBody()).build() }
         withShell(client) { scenario ->
             openSettings(scenario)
             val available = robot.text(R.string.update_available, tag)
@@ -65,7 +67,51 @@ class AppUpdateWorkflowTest {
             robot.waitFor(robot.text(R.string.update_invalid_apk))
             assertEquals(1, assetRequests.get())
             assertEquals(null, robot.find(robot.text(R.string.update_install)))
-            assertTrue(File(app.cacheDir, "app-updates").listFiles().orEmpty().isEmpty())
+            robot.waitUntil { File(app.filesDir, "app-updates").listFiles().orEmpty().isEmpty() }
+        }
+    }
+
+    @Test fun resumesInterruptedDownloadAfterActivityCloses() {
+        assumeTrue("Stage the signed Alpha 5 APK in ${apk.path}", apk.isFile)
+        val data = apk.readBytes()
+        val offset = data.size / 2
+        val tag = "v0.1.0-alpha.5"
+        val digest = MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }
+        val disconnected = CountDownLatch(1)
+        val allowResume = CountDownLatch(1)
+        val resumed = CountDownLatch(1)
+        val requests = AtomicInteger()
+        val client = fixtureClient(JSONArray().put(release(tag, digest, data.size.toLong()))) { request, response ->
+            when (requests.incrementAndGet()) {
+                1 -> {
+                    assertNull(request.header("Range"))
+                    disconnected.countDown()
+                    response.body(data.copyOfRange(0, offset).toResponseBody()).build()
+                }
+                2 -> {
+                    assertTrue(allowResume.await(30, TimeUnit.SECONDS))
+                    assertEquals("bytes=$offset-", request.header("Range"))
+                    resumed.countDown()
+                    response.code(206).header("Content-Range", "bytes $offset-${data.lastIndex}/${data.size}")
+                        .body(data.copyOfRange(offset, data.size).toResponseBody()).build()
+                }
+                else -> error("Unexpected download attempt")
+            }
+        }
+        withShell(client) { scenario ->
+            openSettings(scenario)
+            val available = robot.text(R.string.update_available, tag)
+            if (robot.find(available) == null) robot.click(robot.text(R.string.update_check))
+            robot.waitFor(available)
+            robot.click(robot.text(R.string.update_download))
+            assertTrue(disconnected.await(15, TimeUnit.SECONDS))
+            scenario.close()
+            allowResume.countDown()
+            assertTrue(resumed.await(45, TimeUnit.SECONDS))
+            ActivityScenario.launch(MainActivity::class.java).use { reopened ->
+                openSettings(reopened)
+                robot.waitFor(robot.text(R.string.update_ready, tag))
+            }
         }
     }
 
@@ -73,7 +119,6 @@ class AppUpdateWorkflowTest {
         assumeFalse("Set REQUEST_INSTALL_PACKAGES to default before this test", app.packageManager.canRequestPackageInstalls())
         withReadyUpdate { tag ->
             val allow = robot.text(R.string.update_allow_install)
-            robot.reveal(allow, forward = null)
             robot.click(allow)
             robot.waitUntil { robot.diagnostics.freshRoot()?.packageName == "com.android.settings" }
             robot.back()
@@ -88,9 +133,7 @@ class AppUpdateWorkflowTest {
     @Test fun opensAndroidInstallerWithVerifiedUpdate() {
         assumeTrue("Set REQUEST_INSTALL_PACKAGES to allow before this test", app.packageManager.canRequestPackageInstalls())
         withReadyUpdate { tag ->
-            val install = robot.text(R.string.update_install)
-            robot.reveal(install, forward = null)
-            robot.click(install)
+            robot.click(robot.text(R.string.update_install))
             robot.waitUntil {
                 robot.diagnostics.freshRoot()?.packageName?.contains("packageinstaller") == true
             }
@@ -106,8 +149,8 @@ class AppUpdateWorkflowTest {
     }
 
     private fun withReadyUpdate(run: (String) -> Unit) {
-        assumeTrue("Stage the signed Alpha 4 APK in ${apk.path}", apk.isFile)
-        val tag = "v0.1.0-alpha.4"
+        assumeTrue("Stage the signed Alpha 5 APK in ${apk.path}", apk.isFile)
+        val tag = "v0.1.0-alpha.5"
         val sha256 = MessageDigest.getInstance("SHA-256")
         apk.inputStream().use { input ->
             val buffer = ByteArray(64 * 1024)
@@ -119,15 +162,16 @@ class AppUpdateWorkflowTest {
         }
         val digest = sha256.digest().joinToString("") { "%02x".format(it) }
         val releases = JSONArray().put(release(tag, digest, apk.length()))
-        withShell(fixtureClient(releases) { apk.source().buffer().asResponseBody(contentLength = apk.length()) }) { scenario ->
+        withShell(fixtureClient(releases) { _, response ->
+            response.body(apk.source().buffer().asResponseBody(contentLength = apk.length())).build()
+        }) { scenario ->
             openSettings(scenario)
             val available = robot.text(R.string.update_available, tag)
             if (robot.find(available) == null) robot.click(robot.text(R.string.update_check))
             robot.waitFor(available)
-            val download = robot.text(R.string.update_download)
-            robot.reveal(download, forward = null)
-            robot.click(download)
+            robot.click(robot.text(R.string.update_download))
             robot.waitFor(robot.text(R.string.update_ready, tag))
+            showUpdates()
             run(tag)
         }
     }
@@ -135,14 +179,18 @@ class AppUpdateWorkflowTest {
     private fun withShell(client: OkHttpClient, run: (ActivityScenario<MainActivity>) -> Unit) {
         val fixture = ShellFixture("app-update")
         robot.instrumentation.runOnMainSync {
+            app.installUpdateFixture(client)
             app.installAssistantFixture {
-                ShellViewModel(it, fixture.provider, fixture.store, fixture.keys, updateHttpClient = client)
+                ShellViewModel(it, fixture.provider, fixture.store, fixture.keys)
             }
         }
         try {
             ActivityScenario.launch(MainActivity::class.java).use(run)
         } finally {
-            robot.instrumentation.runOnMainSync { app.removeAssistantFixture() }
+            robot.instrumentation.runOnMainSync {
+                app.removeAssistantFixture()
+                app.removeUpdateFixture()
+            }
             fixture.remove()
         }
     }
@@ -189,7 +237,7 @@ class AppUpdateWorkflowTest {
         checkRequests: AtomicInteger = AtomicInteger(),
         assetRequests: AtomicInteger = AtomicInteger(),
         nextPage: JSONArray? = null,
-        asset: () -> ResponseBody,
+        asset: (Request, Response.Builder) -> Response,
     ): OkHttpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
         val request = chain.request()
         val response = Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
@@ -208,7 +256,7 @@ class AppUpdateWorkflowTest {
             }
             "github.com" -> {
                 assetRequests.incrementAndGet()
-                asset()
+                return@Interceptor asset(request, response)
             }
             else -> error("Unexpected update host ${request.url.host}")
         }

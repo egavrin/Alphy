@@ -41,6 +41,8 @@ The app uses the application ID `com.alpha.assistant` and the device label `Alph
 
 Alphy checks public GitHub releases, including prereleases, once per day when the app enters the foreground. [Alphy releases](https://github.com/egavrin/Alphy/releases)
 Open «Настройки» → «Обновления Alphy» to check at any time, read release notes, and download an update.
+Android continues the download when you leave Alphy and retries interrupted transfers using the saved bytes.
+If you explicitly stop Alphy in Android settings or Task Manager, reopen Alphy and select Download to resume.
 After the download, select «Установить обновление» to open the Android installer.
 If Android requires permission for Alphy to install apps, grant it and return to Alphy to select «Установить обновление».
 If you use Alpha 2, install the first updater build (Alpha 3) over your current app through Android.
@@ -68,19 +70,19 @@ Some workflows require device permissions, Google Play services, or the local vo
 
 ### Update installer workflow
 
-Use a disposable ARM64 emulator with the Alpha 3 debug APK and its instrumentation APK.
-Use a compatible Alpha 4 fixture with application ID `com.alpha.assistant`, version name `0.1.0-alpha.4`, and version code `4`.
-Sign the fixture with the same key as the installed Alpha 3 APK.
+Use a disposable ARM64 emulator with the Alpha 4 debug APK and its instrumentation APK.
+Use a compatible Alpha 5 fixture with application ID `com.alpha.assistant`, version name `0.1.0-alpha.5`, and version code `5`.
+Sign the fixture with the same key as the installed Alpha 4 APK.
 Replace the example emulator serial and fixture path with your values.
 
 ```sh
 serial=emulator-5570
-fixture=/path/to/Alphy-v0.1.0-alpha.4.apk
+fixture=/path/to/Alphy-v0.1.0-alpha.5.apk
 test=com.alpha.assistant.ui.AppUpdateWorkflowTest
 runner=com.alpha.assistant.test/androidx.test.runner.AndroidJUnitRunner
 
 adb -s "$serial" shell run-as com.alpha.assistant mkdir -p files/update-test
-adb -s "$serial" exec-in 'run-as com.alpha.assistant sh -c "cat > files/update-test/Alphy-v0.1.0-alpha.4.apk"' < "$fixture"
+adb -s "$serial" exec-in 'run-as com.alpha.assistant sh -c "cat > files/update-test/Alphy-v0.1.0-alpha.5.apk"' < "$fixture"
 
 adb -s "$serial" shell appops set com.alpha.assistant REQUEST_INSTALL_PACKAGES default
 adb -s "$serial" shell am instrument -w -r -e class "$test#returnsFromInstallPermissionWithVerifiedUpdate" "$runner"
@@ -89,7 +91,7 @@ adb -s "$serial" shell appops set com.alpha.assistant REQUEST_INSTALL_PACKAGES a
 adb -s "$serial" shell am instrument -w -r -e class "$test#opensAndroidInstallerWithVerifiedUpdate" "$runner"
 
 adb -s "$serial" shell appops set com.alpha.assistant REQUEST_INSTALL_PACKAGES default
-adb -s "$serial" shell run-as com.alpha.assistant rm files/update-test/Alphy-v0.1.0-alpha.4.apk
+adb -s "$serial" shell run-as com.alpha.assistant rm files/update-test/Alphy-v0.1.0-alpha.5.apk
 ```
 
 For an actual replacement, add `-e holdInstaller true` before `"$runner"` in the installer test command.

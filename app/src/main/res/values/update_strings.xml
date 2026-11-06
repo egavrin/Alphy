@@ -7,6 +7,7 @@
     <string name="update_available">Доступно обновление %1$s</string>
     <string name="update_download">Скачать обновление</string>
     <string name="update_downloading">Скачано %1$d%%</string>
+    <string name="update_waiting">Загрузка продолжится автоматически. Скачано %1$d%%</string>
     <string name="update_cancel_download">Отменить скачивание</string>
     <string name="update_ready">Обновление %1$s готово к установке.</string>
     <string name="update_allow_install">Разрешить установку</string>

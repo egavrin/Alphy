@@ -80,7 +80,7 @@ import com.alpha.assistant.updates.UpdateState
             update.error?.let { UpdateError(it) }
         }
         is UpdateState.Downloading -> {
-            Text(stringResource(R.string.update_downloading, update.percent))
+            Text(stringResource(if (update.waiting) R.string.update_waiting else R.string.update_downloading, update.percent))
             LinearProgressIndicator(progress = { update.percent / 100f }, modifier = Modifier.fillMaxWidth())
         }
         is UpdateState.Ready -> {

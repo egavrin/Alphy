@@ -1,6 +1,10 @@
 package com.alpha.assistant.updates
 
 import android.app.Application
+import android.app.job.JobInfo
+import android.app.job.JobScheduler
+import android.content.ComponentName
+import android.os.PersistableBundle
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -13,14 +17,18 @@ import androidx.core.content.FileProvider
 import com.alpha.assistant.R
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
 import org.json.JSONException
+import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.util.UUID
@@ -31,7 +39,7 @@ internal sealed interface UpdateState {
     data object Checking : UpdateState
     data object Current : UpdateState
     data class Available(val release: AppRelease, @StringRes val error: Int? = null) : UpdateState
-    data class Downloading(val release: AppRelease, val percent: Int) : UpdateState
+    data class Downloading(val release: AppRelease, val percent: Int, val waiting: Boolean = false) : UpdateState
     data class Ready(
         val release: AppRelease,
         val file: File,
@@ -42,87 +50,240 @@ internal sealed interface UpdateState {
 
 internal class AppUpdater(
     private val app: Application,
-    private val scope: CoroutineScope,
-    httpClient: OkHttpClient,
+    httpClient: OkHttpClient = OkHttpClient(),
 ) {
+    internal interface Source {
+        fun updateFixture(): AppUpdater?
+    }
+
+    private data class Transfer(val id: String, val release: AppRelease, val ready: Boolean = false)
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val releases = GitHubReleases(httpClient)
     private val preferences = app.getSharedPreferences("app_updates", Context.MODE_PRIVATE)
-    private val directory = File(app.cacheDir, "app-updates")
-    private val cleanup = scope.launch(Dispatchers.IO) { directory.listFiles()?.forEach { it.delete() } }
+    private val directory = File(app.filesDir, "app-updates")
     private val packageManager = app.packageManager
+    private val scheduler = app.getSystemService(JobScheduler::class.java).forNamespace("app-updates")
+    private val writer = Mutex()
     val installedVersion: String = packageManager.getPackageInfo(app.packageName, PackageManager.PackageInfoFlags.of(0)).versionName.orEmpty()
-    private val mutableState = MutableStateFlow<UpdateState>(UpdateState.Idle())
+    private var transfer = readTransfer()
+    private var attempt: Any? = null
+    private val mutableState = MutableStateFlow<UpdateState>(
+        transfer?.let { UpdateState.Downloading(it.release, 0, waiting = true) } ?: UpdateState.Idle(),
+    )
     val state = mutableState.asStateFlow()
-    private var downloadJob: Job? = null
+    private val cleanup = transfer?.let(::file).let { keep ->
+        scope.launch(Dispatchers.IO) {
+            directory.listFiles()?.filter { it != keep }?.forEach { it.delete() }
+        }
+    }
+
+    init {
+        val saved = transfer
+        if (saved != null) scope.launch { restore(saved) }
+    }
 
     val canInstall: Boolean get() = packageManager.canRequestPackageInstalls()
 
     fun check(manual: Boolean = false) {
         val previous = state.value
-        if (previous == UpdateState.Checking || previous is UpdateState.Downloading || previous is UpdateState.Ready) return
+        if (previous is UpdateState.Downloading && previous.waiting && transfer?.ready == false &&
+            scheduler.getPendingJob(JOB_ID) == null
+        ) {
+            mutableState.value = UpdateState.Available(previous.release, R.string.update_download_failed)
+            if (!manual) return
+        }
+        if (state.value == UpdateState.Checking || state.value is UpdateState.Downloading || state.value is UpdateState.Ready) return
         val now = System.currentTimeMillis()
         val last = preferences.getLong("last_check", 0)
         if (!manual && last != 0L && now >= last && now - last < TimeUnit.DAYS.toMillis(1)) return
         preferences.edit().putLong("last_check", now).apply()
+        val available = state.value as? UpdateState.Available
         mutableState.value = UpdateState.Checking
         scope.launch {
             mutableState.value = try {
                 releases.latestAfter(installedVersion)?.let { UpdateState.Available(it) } ?: UpdateState.Current
             } catch (_: IOException) {
-                failedCheck(previous)
+                failedCheck(available)
             } catch (_: JSONException) {
-                failedCheck(previous)
+                failedCheck(available)
             }
         }
     }
 
-    private fun failedCheck(previous: UpdateState): UpdateState =
-        if (previous is UpdateState.Available) previous.copy(error = R.string.update_check_failed)
-        else UpdateState.Idle(R.string.update_check_failed)
+    private fun failedCheck(previous: UpdateState.Available?): UpdateState =
+        previous?.copy(error = R.string.update_check_failed) ?: UpdateState.Idle(R.string.update_check_failed)
 
     fun download() {
         val release = (state.value as? UpdateState.Available)?.release ?: return
-        val file = File(directory, "${UUID.randomUUID()}.apk")
-        mutableState.value = UpdateState.Downloading(release, 0)
-        downloadJob = scope.launch {
-            var result: UpdateState = UpdateState.Available(release)
-            try {
-                cleanup.join()
-                withContext(Dispatchers.IO) {
-                    if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Cannot create update cache")
-                }
-                releases.download(release, file) { mutableState.value = UpdateState.Downloading(release, it) }
-                withContext(Dispatchers.IO) { verifyApk(release, file) }
-                result = UpdateState.Ready(release, file)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: InvalidUpdate) {
-                result = UpdateState.Available(release, R.string.update_invalid_apk)
-            } catch (_: IOException) {
-                result = UpdateState.Available(release, R.string.update_download_failed)
-            } finally {
-                if (result !is UpdateState.Ready) file.delete()
-                mutableState.value = result
-            }
+        val previous = transfer
+        val saved = previous?.takeIf {
+            !it.ready && it.release.tag == release.tag && it.release.digest == release.digest && it.release.size == release.size
+        } ?: Transfer(UUID.randomUUID().toString(), release)
+        if (!save(saved)) {
+            mutableState.value = UpdateState.Available(release, R.string.update_download_failed)
+            return
+        }
+        if (previous != null && previous.id != saved.id) deleteFile(previous)
+        val job = JobInfo.Builder(JOB_ID, ComponentName(app, AppUpdateJobService::class.java))
+            .setUserInitiated(true)
+            .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+            .setEstimatedNetworkBytes((release.size - file(saved).length()).coerceAtLeast(0), 0)
+            .setBackoffCriteria(10_000, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
+            .setPersisted(true)
+            .setExtras(PersistableBundle().apply { putString(TRANSFER_ID, saved.id) })
+            .build()
+        mutableState.value = try {
+            if (scheduler.schedule(job) == JobScheduler.RESULT_SUCCESS) waiting(saved)
+            else UpdateState.Available(release, R.string.update_download_failed)
+        } catch (_: IllegalStateException) {
+            UpdateState.Available(release, R.string.update_download_failed)
         }
     }
 
+    suspend fun runTransfer(id: String): Boolean = writer.withLock {
+        val saved = transfer?.takeIf { it.id == id && !it.ready } ?: return@withLock false
+        if (!saved.release.isNewerThan(installedVersion)) {
+            forget(saved, UpdateState.Current)
+            return@withLock false
+        }
+        val token = Any()
+        attempt = token
+        val release = saved.release
+        val file = file(saved)
+        mutableState.value = UpdateState.Downloading(release, progress(saved))
+        try {
+            cleanup.join()
+            withContext(Dispatchers.IO) {
+                if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Cannot create update directory")
+            }
+            var retry = true
+            while (true) {
+                try {
+                    releases.download(release, file) { percent ->
+                        scope.launch {
+                            if (attempt === token) mutableState.value = UpdateState.Downloading(release, percent)
+                        }
+                    }
+                    break
+                } catch (error: RetryUpdate) {
+                    if (!retry) throw error
+                    retry = false
+                    mutableState.value = waiting(saved)
+                    delay(1_000)
+                }
+            }
+            validate(saved)
+            if (transfer?.id == id) {
+                if (!save(saved.copy(ready = true))) throw IOException("Cannot save update status")
+                mutableState.value = UpdateState.Ready(release, file)
+            }
+            false
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: RetryUpdate) {
+            pause(id)
+        } catch (_: InvalidUpdate) {
+            forget(saved, UpdateState.Available(release, R.string.update_invalid_apk))
+            false
+        } catch (_: IOException) {
+            if (transfer?.id == id) mutableState.value = UpdateState.Available(release, R.string.update_download_failed)
+            false
+        } finally {
+            if (attempt === token) attempt = null
+        }
+    }
+
+    fun pause(id: String): Boolean {
+        val saved = transfer?.takeIf { it.id == id && !it.ready } ?: return false
+        attempt = null
+        mutableState.value = waiting(saved)
+        return true
+    }
+
     fun cancelDownload() {
-        if (state.value is UpdateState.Downloading) downloadJob?.cancel()
+        val saved = transfer?.takeUnless { it.ready } ?: return
+        if (forget(saved, UpdateState.Available(saved.release))) scheduler.cancel(JOB_ID)
     }
 
     fun discard() {
         val ready = state.value as? UpdateState.Ready ?: return
         if (ready.handoffPending) return
-        ready.file.delete()
-        mutableState.value = UpdateState.Available(ready.release)
+        transfer?.let { forget(it, UpdateState.Available(ready.release)) }
+    }
+
+    private suspend fun restore(saved: Transfer) {
+        if (!saved.release.isNewerThan(installedVersion)) {
+            if (forget(saved, UpdateState.Current)) scheduler.cancel(JOB_ID)
+        } else if (saved.ready) {
+            try {
+                validate(saved)
+                if (transfer == saved) mutableState.value = UpdateState.Ready(saved.release, file(saved))
+            } catch (_: IOException) {
+                forget(saved, UpdateState.Available(saved.release, R.string.update_invalid_apk))
+            }
+        } else if (attempt == null && transfer == saved) {
+            mutableState.value = if (scheduler.getPendingJob(JOB_ID) != null) waiting(saved)
+            else UpdateState.Available(saved.release, R.string.update_download_failed)
+        }
+    }
+
+    private suspend fun validate(saved: Transfer) {
+        val file = file(saved)
+        releases.verifyDigest(saved.release, file)
+        withContext(Dispatchers.IO) { verifyApk(saved.release, file) }
+    }
+
+    private fun file(saved: Transfer) = File(directory, "${saved.id}.apk")
+
+    private fun progress(saved: Transfer) =
+        (file(saved).length() * 100.0 / saved.release.size).toInt().coerceIn(0, 100)
+
+    private fun waiting(saved: Transfer) = UpdateState.Downloading(saved.release, progress(saved), waiting = true)
+
+    private fun deleteFile(saved: Transfer) {
+        scope.launch { writer.withLock { withContext(Dispatchers.IO) { file(saved).delete() } } }
+    }
+
+    private fun forget(saved: Transfer, next: UpdateState): Boolean {
+        if (transfer?.id != saved.id || !save(null)) return false
+        attempt = null
+        mutableState.value = next
+        deleteFile(saved)
+        return true
+    }
+
+    private fun save(saved: Transfer?): Boolean {
+        val value = saved?.let {
+            JSONObject().put("id", it.id).put("tag", it.release.tag).put("notes", it.release.notes)
+                .put("size", it.release.size).put("digest", it.release.digest).put("ready", it.ready).toString()
+        }
+        if (!preferences.edit().putString("transfer", value).commit()) return false
+        transfer = saved
+        return true
+    }
+
+    private fun readTransfer(): Transfer? {
+        val raw = preferences.getString("transfer", null) ?: return null
+        return try {
+            val data = JSONObject(raw)
+            val id = data.getString("id")
+            if (UUID.fromString(id).toString() != id) return null
+            val release = AppRelease.restore(data.getString("tag"), data.getString("notes"),
+                data.getLong("size"), data.getString("digest")) ?: return null
+            Transfer(id, release, data.getBoolean("ready"))
+        } catch (_: JSONException) {
+            null
+        } catch (_: IllegalArgumentException) {
+            null
+        }
     }
 
     fun handoff(launch: (Intent) -> Unit) {
         val ready = state.value as? UpdateState.Ready ?: return
         if (ready.handoffPending) return
         if (!ready.file.isFile) {
-            mutableState.value = UpdateState.Available(ready.release, R.string.update_download_missing)
+            transfer?.let { forget(it, UpdateState.Available(ready.release, R.string.update_download_missing)) }
             return
         }
         try {
@@ -150,10 +311,6 @@ internal class AppUpdater(
         mutableState.value = ready.copy(handoffPending = false)
     }
 
-    fun close() {
-        (state.value as? UpdateState.Ready)?.file?.delete()
-    }
-
     private fun verifyApk(release: AppRelease, file: File) {
         val flags = PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong())
         val installed = packageManager.getPackageInfo(app.packageName, flags)
@@ -168,6 +325,16 @@ internal class AppUpdater(
             currentSigners.isEmpty() ||
             currentSigners != candidateSigners
         ) throw InvalidUpdate()
+    }
+
+    companion object {
+        const val JOB_ID = 1
+        const val TRANSFER_ID = "transfer"
+
+        private var instance: AppUpdater? = null
+
+        fun get(app: Application): AppUpdater =
+            (app as? Source)?.updateFixture() ?: instance ?: AppUpdater(app).also { instance = it }
     }
 }
 

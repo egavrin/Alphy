@@ -42,7 +42,6 @@ import com.alpha.assistant.tools.ToolController
 import com.alpha.assistant.tools.ToolLibraryStorage
 import com.alpha.assistant.tools.ToolStore
 import com.alpha.assistant.updates.AppUpdater
-import okhttp3.OkHttpClient
 import com.alpha.assistant.data.*
 import com.alpha.assistant.cloud.*
 import kotlinx.coroutines.currentCoroutineContext
@@ -82,9 +81,8 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     private val keys: SecureKeyStore = SecureKeyStore(application),
     voiceFactory: ((Application, kotlinx.coroutines.CoroutineScope, (String) -> Unit) -> com.alpha.assistant.voice.VoiceSession)? = null,
     private val weatherLocator: WeatherLocator = AndroidWeatherLocator(application),
-    updateHttpClient: OkHttpClient = OkHttpClient(),
 ) : AndroidViewModel(application) {
-    internal val updates = AppUpdater(application, viewModelScope, updateHttpClient)
+    internal val updates = AppUpdater.get(application)
     private var voiceOrigin: Pair<String?, Draft>? = null
     private var submitVoiceOnTranscript = false
     val voice = voiceFactory?.invoke(application, viewModelScope, ::receiveTranscript)
@@ -1195,7 +1193,6 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         activeConversationId = null
     }
     override fun onCleared() {
-        updates.close()
         active?.session?.cancel()
         dismissCourseSetup()
         cancelCourseRequests()

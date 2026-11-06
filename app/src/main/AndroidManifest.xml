@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <uses-permission android:name="android.permission.READ_ASSIST_STRUCTURE_SCREEN_CONTENT" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.RUN_USER_INITIATED_JOBS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -73,6 +74,8 @@
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/tool_widget_info" />
         </receiver>
         <receiver android:name=".surfaces.PinResultReceiver" android:exported="false" />
+        <service android:name=".updates.AppUpdateJobService" android:exported="true"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
         <service android:name=".scheduling.SourceRefreshJobService" android:exported="true"
             android:permission="android.permission.BIND_JOB_SERVICE" />
         <service android:name=".surfaces.AlphaTileService" android:label="Alphy" android:icon="@drawable/ic_alpha"

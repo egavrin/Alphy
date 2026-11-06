@@ -6,9 +6,31 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import com.alpha.assistant.surfaces.AssistantChat
 import com.alpha.assistant.ui.ShellViewModel
+import com.alpha.assistant.updates.AppUpdater
+import okhttp3.OkHttpClient
+import java.io.File
 
 /** A separate store lets instrumentation exercise both activities with one isolated model. */
-class AssistantFixtureApplication : Application(), AssistantChat.ModelSource {
+internal class AssistantFixtureApplication : Application(), AssistantChat.ModelSource, AppUpdater.Source {
+    private var updater: AppUpdater? = null
+
+    internal fun installUpdateFixture(client: OkHttpClient) {
+        check(updater == null)
+        updater = AppUpdater(this, client)
+    }
+
+    internal fun removeUpdateFixture() {
+        updater?.cancelDownload()
+        updater?.discard()
+        updater = null
+    }
+
+    private val restartUpdater by lazy {
+        updateRestartFixture(File(filesDir, "update-test"))?.let { AppUpdater(this, it) }
+    }
+
+    override fun updateFixture() = updater ?: restartUpdater
+
     private val fixtureStore = ViewModelStore()
     private var fixtureFactory: ViewModelProvider.Factory? = null
 
