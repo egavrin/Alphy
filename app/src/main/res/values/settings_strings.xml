@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_group_app">Приложение</string>
+    <string name="settings_group_data">Данные и разрешения</string>
+    <string name="settings_group_maintenance">Обслуживание</string>
+    <string name="settings_deepseek_disclosure">Какие данные получает DeepSeek</string>
+    <string name="settings_voice_disclosure">Модели и лицензии</string>
+    <string name="settings_access_android">Разрешения Android</string>
+    <string name="settings_access_automation">Уведомления и автоматизации</string>
+    <string name="settings_access_scope">Как Alphy использует разрешения</string>
+    <string name="settings_network_disclosure">Как работает доступ к сети</string>
+</resources>

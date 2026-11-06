@@ -58,8 +58,10 @@ class SavedCourseShellWorkflowTest {
             robot.openDrawer(scenario)
             robot.click(robot.text(R.string.settings))
             robot.awaitDrawerClosed(scenario)
+            robot.click(robot.text(R.string.settings_deepseek))
             robot.reveal(robot.text(R.string.key_label))
             assertTrue(robot.secure(scenario))
+            robot.back()
             robot.back()
             robot.waitFor("Original discussion message")
             robot.waitUntil { !robot.secure(scenario) }

@@ -51,6 +51,7 @@ internal data class ShellPaneLayout(
     val verticalHinge: Rect? = null,
     val tabletopGap: IntRange? = null,
     val automationSplit: AutomationPaneSplit? = null,
+    val settingsHinge: IntRange? = null,
     val singlePanePadding: PaddingValues = PaddingValues(),
 ) {
     val paired: Boolean get() = wide || tabletopGap != null
@@ -61,6 +62,7 @@ internal data class ShellPaneLayout(
     pairApp: Boolean,
     systemInsets: WindowInsets,
     splitAutomations: Boolean = false,
+    pairSettings: Boolean = false,
     content: @Composable (ShellPaneLayout) -> Unit,
 ) {
     val posture = currentWindowAdaptiveInfoV2().windowPosture
@@ -73,7 +75,7 @@ internal data class ShellPaneLayout(
         val safeWidth = if (hinges.isNotEmpty() || immersive) maxWidth else with(density) {
             maxWidth - (systemInsets.getLeft(density, layoutDirection) + systemInsets.getRight(density, layoutDirection)).toDp()
         }
-        val placement = density.shellPaneLayout(safeWidth, viewport, posture, pairApp, splitAutomations)
+        val placement = density.shellPaneLayout(safeWidth, viewport, posture, pairApp, splitAutomations, pairSettings)
         val padding = placement.singlePanePadding
         Box(Modifier.fillMaxSize().onGloballyPositioned { coordinates ->
             viewport = IntRect(coordinates.positionInWindow().round(), coordinates.size)
@@ -84,7 +86,7 @@ internal data class ShellPaneLayout(
 }
 
 private fun Density.shellPaneLayout(
-    width: Dp, viewport: IntRect?, posture: Posture, pairApp: Boolean, splitAutomations: Boolean,
+    width: Dp, viewport: IntRect?, posture: Posture, pairApp: Boolean, splitAutomations: Boolean, pairSettings: Boolean,
 ): ShellPaneLayout {
     val hinges = posture.hingeList.filter { it.isSeparating || it.isOccluding }
     if (hinges.isEmpty() || viewport == null) return ShellPaneLayout(wide = pairApp && width >= 840.dp)
@@ -92,6 +94,9 @@ private fun Density.shellPaneLayout(
     val (vertical, horizontal) = hinges.partition { it.isVertical }
     val columns = visibleSpans(viewport.left, viewport.right, vertical.map { it.bounds.left to it.bounds.right })
     val rows = visibleSpans(viewport.top, viewport.bottom, horizontal.map { it.bounds.top to it.bounds.bottom })
+    if (pairSettings && width >= SettingsSplitWidth && horizontal.isEmpty() && vertical.size == 1 &&
+        columns.size == 2 && columns.first().length >= 240.dp.roundToPx() && columns.last().length >= 360.dp.roundToPx()
+    ) return ShellPaneLayout(settingsHinge = (columns.first().end - viewport.left)..(columns.last().first - viewport.left))
     if (pairApp && horizontal.isEmpty() && vertical.size == 1 && columns.size == 2 &&
         columns.all { it.length >= 360.dp.roundToPx() }
     ) return ShellPaneLayout(wide = true, verticalHinge = vertical.single().bounds)

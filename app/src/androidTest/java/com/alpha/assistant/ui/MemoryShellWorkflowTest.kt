@@ -4,6 +4,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -66,8 +67,10 @@ class MemoryShellWorkflowTest {
             robot.openDrawer(scenario)
             robot.click(robot.text(R.string.settings))
             robot.awaitDrawerClosed(scenario)
+            robot.click(robot.text(R.string.settings_deepseek))
             robot.reveal(robot.text(R.string.key_label))
             assertTrue(robot.secure(scenario))
+            robot.back()
             robot.back()
             robot.waitFor("Original memory discussion")
             robot.waitUntil { !robot.secure(scenario) }
@@ -91,7 +94,7 @@ class MemoryShellWorkflowTest {
                 openMemory(scenario)
                 robot.waitFor(robot.text(R.string.memory_empty))
                 robot.waitGone(UPDATED_FACT)
-                robot.click(robot.text(R.string.memory_exit))
+                robot.back()
                 robot.waitGone(robot.text(R.string.memory_empty))
                 robot.waitFor(robot.text(R.string.settings))
                 robot.back()
@@ -130,7 +133,7 @@ class MemoryShellWorkflowTest {
                 val model = checkNotNull(fixture.model)
                 activity.setContent {
                     CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale = 1.5f)) {
-                        Box(Modifier.fillMaxWidth().height(320.dp)) {
+                        Box(Modifier.widthIn(max = 390.dp).fillMaxWidth().height(320.dp)) {
                             AlphaTheme { AlphaShell(model) }
                         }
                     }
@@ -138,11 +141,11 @@ class MemoryShellWorkflowTest {
             }
             robot.waitUntil { robot.composed(scenario, "desktop") }
             openMemory(scenario)
-            val title = robot.waitFor(robot.text(R.string.memory_title))
+            val title = robot.reveal(robot.text(R.string.memory_title), forward = null)
             assertTrue(title.isHeading)
             assertEquals(1, robot.texts().count { it == robot.text(R.string.memory_title) })
             robot.assertTarget(robot.text(R.string.menu))
-            robot.assertTarget(robot.text(R.string.memory_exit))
+            robot.assertTarget(robot.text(R.string.settings))
             robot.reveal(robot.text(R.string.memory_empty))
             robot.diagnostics.capture("short-window-large-text")
             robot.back()
@@ -160,7 +163,7 @@ class MemoryShellWorkflowTest {
         robot.awaitDrawerClosed(scenario)
         robot.reveal(title)
         robot.click(title)
-        robot.waitFor(robot.text(R.string.memory_exit))
+        robot.reveal(robot.text(R.string.memory_add), forward = null)
     }
 
     private fun withFixture(test: (ShellFixture) -> Unit) {

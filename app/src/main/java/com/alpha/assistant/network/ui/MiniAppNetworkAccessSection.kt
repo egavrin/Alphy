@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alpha.assistant.R
 import com.alpha.assistant.ui.PoliteLiveRegion
+import com.alpha.assistant.ui.SettingsDisclosure
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -62,18 +63,14 @@ internal class MiniAppNetworkAccessHost(
 
 /** Place this section inside the caller's scroll container. Pass null if the host cannot manage grants. */
 @Composable
-internal fun MiniAppNetworkAccessSection(host: MiniAppNetworkAccessHost?) {
+internal fun MiniAppNetworkAccessSection(host: MiniAppNetworkAccessHost?, showDisclosure: Boolean = false) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
             stringResource(R.string.mini_app_network_title),
             Modifier.semantics { heading() },
             style = MaterialTheme.typography.titleMedium,
         )
-        Text(stringResource(R.string.mini_app_network_explain_grant))
-        Text(stringResource(R.string.mini_app_network_explain_scope))
-        Text(stringResource(R.string.mini_app_network_explain_data))
-        Text(stringResource(R.string.mini_app_network_explain_android))
-        Text(stringResource(R.string.mini_app_network_explain_ai))
+        if (!showDisclosure) MiniAppNetworkExplanation()
         if (host == null) {
             Text(stringResource(R.string.mini_app_network_unavailable), PoliteLiveRegion)
         } else {
@@ -84,6 +81,18 @@ internal fun MiniAppNetworkAccessSection(host: MiniAppNetworkAccessHost?) {
                 MiniAppNetworkAccessRow(app, host.writeState(app.id)) { host.setGranted(app.id, !app.granted) }
             }
         }
+        if (showDisclosure) SettingsDisclosure(R.string.settings_network_disclosure) { MiniAppNetworkExplanation() }
+    }
+}
+
+@Composable
+private fun MiniAppNetworkExplanation() {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(stringResource(R.string.mini_app_network_explain_grant))
+        Text(stringResource(R.string.mini_app_network_explain_scope))
+        Text(stringResource(R.string.mini_app_network_explain_data))
+        Text(stringResource(R.string.mini_app_network_explain_android))
+        Text(stringResource(R.string.mini_app_network_explain_ai))
     }
 }
 

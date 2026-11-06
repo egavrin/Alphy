@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -103,7 +104,7 @@ import com.alpha.assistant.updates.UpdateState
                 }
             }
             else -> {
-                TextButton(onClick = { updater.check(manual = true) }, enabled = update != UpdateState.Checking) {
+                Button(onClick = { updater.check(manual = true) }, enabled = update != UpdateState.Checking, shape = MaterialTheme.shapes.small) {
                     Text(stringResource(R.string.update_check))
                 }
                 if (update is UpdateState.Available) {

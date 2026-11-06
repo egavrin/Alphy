@@ -12,5 +12,5 @@ internal sealed interface ShellRoute {
 
 internal enum class ShellDestination(@StringRes val title: Int) : ShellRoute {
     Search(R.string.search), MiniApps(R.string.mini_apps), Automations(R.string.automations),
-    Courses(R.string.course_learning), Memory(R.string.memory_title), Settings(R.string.settings)
+    Courses(R.string.course_learning), Settings(R.string.settings)
 }

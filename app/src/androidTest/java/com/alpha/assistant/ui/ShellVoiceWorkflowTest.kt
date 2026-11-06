@@ -1,5 +1,7 @@
 package com.alpha.assistant.ui
 
+import com.alpha.assistant.R
+
 import com.alpha.assistant.voice.VoiceSession
 import com.offlineassistant.app.voice.AudioTranscription
 import kotlinx.coroutines.CompletableDeferred
@@ -13,11 +15,28 @@ class ShellVoiceWorkflowTest {
     private val robot = ShellRobot("shell-voice")
     @After fun remove() = fixture.remove()
 
+    @Test fun continuousVoiceStopsWhenLeavingVoiceSettings() {
+        installVoiceFixture()
+        fixture.launch().use { scenario ->
+            robot.waitFor(robot.text(R.string.desktop_prompt))
+            robot.allowMicrophone(scenario)
+            robot.openDrawer(scenario)
+            robot.click(robot.text(R.string.settings))
+            robot.awaitDrawerClosed(scenario)
+            robot.click(robot.text(R.string.settings_voice))
+            robot.click(robot.text(R.string.voice_start))
+            val model = checkNotNull(fixture.model)
+            robot.waitFor(robot.text(R.string.voice_stop))
+            assertTrue(model.voice.active)
+            robot.back()
+            robot.waitUntil { !model.voice.active && model.voice.phase == "idle" }
+            assertTrue(robot.composed(scenario, "settings-menu"))
+        }
+    }
+
     @Test fun continuousVoiceSurvivesDesktopSend() {
         fixture.provider.gate = CompletableDeferred()
-        fixture.install(voice = { app, scope, transcript ->
-            VoiceSession(app, scope, transcript, prepareModels = {}, captureAudio = { AudioTranscription("Голосовой вопрос", null, 0) })
-        })
+        installVoiceFixture()
         fixture.launch().use { scenario ->
             robot.allowMicrophone(scenario)
             val model = fixture.model!!
@@ -37,4 +56,10 @@ class ShellVoiceWorkflowTest {
             robot.waitUntil { model.voice.status == "Не удалось озвучить ответ. Текст ответа сохранён в чате." }
         }
     }
+    private fun installVoiceFixture() {
+        fixture.install(voice = { app, scope, transcript ->
+            VoiceSession(app, scope, transcript, prepareModels = {}, captureAudio = { AudioTranscription("Голосовой вопрос", null, 0) })
+        })
+    }
+
 }

@@ -32,13 +32,13 @@ class AccessPageWorkflowTest {
                 assertTrue("The microphone row title is a heading", robot.reveal(robot.text(R.string.access_microphone), forward = null).isHeading)
                 val shown = mutableSetOf<String>()
                 val systemSettings = robot.text(R.string.access_system_settings)
-                repeat(15) {
+                repeat(20) {
                     if (systemSettings !in shown) {
-                        shown += robot.texts().takeWhile { it != robot.text(R.string.settings_deepseek) }
+                        shown += robot.texts()
                         if (systemSettings !in shown) robot.scrollForward()
                     }
                 }
-                assertTrue("The access section ends within 15 scrolls", systemSettings in shown)
+                assertTrue("The access section ends within 20 scrolls", systemSettings in shown)
                 assertTrue(robot.text(R.string.access_note) in shown)
                 val titles = listOf(R.string.access_microphone, R.string.access_location, R.string.access_background_title, R.string.access_calendar,
                     R.string.access_owned_calendar, R.string.access_camera, R.string.access_notifications_title, R.string.access_exact_title,

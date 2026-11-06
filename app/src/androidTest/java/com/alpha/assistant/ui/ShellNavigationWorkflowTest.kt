@@ -101,6 +101,24 @@ class ShellNavigationWorkflowTest {
         } finally { if (shared === fixture.model) AssistantChat.viewModelStore.clear() }
     }
 
+    @Test fun selectingSettingsAfterDirectEntryReturnsToTheMenu() {
+        fixture.launch().use { scenario ->
+            robot.waitFor(robot.text(R.string.desktop_prompt))
+            scenario.onActivity { checkNotNull(fixture.model).openSurface(null, settings = true) }
+            robot.waitFor(robot.text(R.string.key_ready))
+            if (!robot.composed(scenario, "settings-menu")) robot.click(robot.text(R.string.settings))
+            robot.click(robot.text(R.string.access))
+            robot.waitFor(robot.text(R.string.access_intro))
+            robot.back()
+            robot.waitGone(robot.text(R.string.access_intro))
+            assertTrue(robot.composed(scenario, "settings-menu"))
+            assertTrue(robot.secure(scenario))
+            robot.back()
+            robot.waitFor(robot.text(R.string.desktop_prompt))
+            robot.waitUntil { !robot.secure(scenario) }
+        }
+    }
+
     @Test fun settingsStaySecureUntilTheyLeave() {
         fixture.launch().use { scenario ->
             openSettings(scenario)

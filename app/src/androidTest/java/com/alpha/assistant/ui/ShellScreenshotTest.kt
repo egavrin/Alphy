@@ -9,9 +9,11 @@ import android.os.SystemClock
 import androidx.annotation.StringRes
 import androidx.compose.ui.graphics.toArgb
 import androidx.test.core.app.ActivityScenario
+import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.R
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -82,31 +84,90 @@ class ShellScreenshotTest {
         robot.waitFor(robot.text(R.string.search_results))
         screen(directory, "search-results")
         robot.click(robot.text(R.string.search_back))
-        open(scenario, R.string.settings)
-        robot.click(robot.text(R.string.access))
-        robot.waitFor(robot.text(R.string.access_intro))
-        save(directory, "access", settled { draw(scenario) })
-        robot.click(robot.text(R.string.access))
-        robot.waitUntil { robot.secure(scenario) }
-        robot.waitFor(robot.text(R.string.key_ready))
-        assertEquals("Settings center pixel", Color.BLACK, center(screen(directory, "settings")))
-        // Only the page counts, because the top bar alone can give 16 colors.
-        val pane = robot.composedBounds(scenario, "secure").first
-        var page = 0
-        var end = false
-        while (!end && page < 15) {
-            val image = settled { draw(scenario) }
-            save(directory, "settings-$page", image)
-            val pixels = IntArray(pane.width() * pane.height()).also { image.getPixels(it, 0, pane.width(), pane.left, pane.top, pane.width(), pane.height()) }
-            val colors = pixels.toSet().size
-            assertTrue("settings-$page has $colors colors", colors >= 16)
-            page++
-            // A clipped child can keep the same outer bounds while the content scrolls.
-            end = !robot.scrollForward(requireBoundsChange = false)
+        captureSettings(scenario, directory)
+    }
+
+    @Test fun captureAdaptiveSettings() {
+        val directory = checkNotNull(fixture.context.getExternalFilesDir("alphy-settings-screens"))
+        fixture.install()
+        fixture.launch().use { scenario ->
+            robot.waitFor(robot.text(R.string.desktop_prompt))
+            captureSettings(scenario, directory)
         }
-        assertTrue("The Settings page ends within 15 pages", end)
-        val version = robot.text(R.string.app_version, "")
-        assertTrue("The last Settings page shows the app version", robot.texts().any { it.startsWith(version) })
+    }
+
+    private fun captureSettings(scenario: ActivityScenario<*>, directory: File) {
+        open(scenario, R.string.settings)
+        robot.waitUntil { robot.composed(scenario, "settings-menu") && robot.secure(scenario) }
+        val split = robot.composed(scenario, "settings-detail")
+        InstrumentationRegistry.getArguments().getString("settingsLayout")?.let {
+            assertEquals("The device uses the expected Settings layout", it == "split", split)
+        }
+        if (split) {
+            val rail = robot.composedBounds(scenario, "settings-menu").first
+            val detail = robot.composedBounds(scenario, "settings-detail").first
+            assertTrue("Settings rail and detail must not overlap", rail.right <= detail.left)
+        }
+        assertEquals("Settings center pixel", Color.BLACK, center(screen(directory, "settings-secure")))
+        captureSettingsPage(scenario, directory, "settings")
+        for ((section, target, name) in listOf(
+            Triple(R.string.settings_deepseek, R.string.key_ready, "deepseek"),
+            Triple(R.string.settings_name_label, R.string.settings_name_hint, "name"),
+            Triple(R.string.settings_voice, R.string.voice_start, "voice"),
+            Triple(R.string.access, R.string.access_intro, "access"),
+            Triple(R.string.memory_title, R.string.memory_empty, "memory"),
+            Triple(R.string.update_title, R.string.update_check, "updates"),
+        )) {
+            val label = robot.text(section)
+            robot.reveal(label, forward = null)
+            robot.click(label)
+            robot.reveal(robot.text(target), forward = null)
+            assertTrue(robot.secure(scenario))
+            assertEquals(split, robot.composed(scenario, "settings-menu"))
+            captureSettingsPage(scenario, directory, name)
+            if (section == R.string.access) {
+                robot.reveal(robot.text(R.string.access_system_settings))
+                captureSettingsPage(scenario, directory, "access-end")
+            }
+            if (section == R.string.memory_title) {
+                robot.reveal(robot.text(R.string.memory_add))
+                robot.click(robot.text(R.string.memory_add))
+                robot.waitFor(robot.text(R.string.memory_text))
+                captureSettingsPage(scenario, directory, "memory-editor")
+                robot.reveal(robot.text(R.string.memory_cancel), forward = null)
+                robot.click(robot.text(R.string.memory_cancel))
+                robot.waitFor(robot.text(R.string.memory_empty))
+            }
+            if (!split) {
+                robot.back()
+                robot.waitUntil {
+                    robot.composed(scenario, "settings-menu") && !robot.composed(scenario, "settings-detail")
+                }
+            }
+        }
+        if (split) {
+            robot.back()
+            robot.waitFor(robot.text(R.string.key_ready))
+        }
+        robot.back()
+        robot.waitUntil { !robot.secure(scenario) }
+        assertFalse(robot.composed(scenario, "settings-menu"))
+    }
+
+    private fun captureSettingsPage(scenario: ActivityScenario<*>, directory: File, name: String) {
+        val image = settled { draw(scenario) }
+        try {
+            save(directory, name, image)
+            val pane = robot.composedBounds(scenario, "secure").first
+            val sample = IntArray(pane.width())
+            val colors = mutableSetOf<Int>()
+            for (y in pane.top until pane.bottom step 4) {
+                image.getPixels(sample, 0, pane.width(), pane.left, y, pane.width(), 1)
+                sample.toCollection(colors)
+                if (colors.size >= 16) break
+            }
+            assertTrue("$name has ${colors.size} colors", colors.size >= 16)
+        } finally { image.recycle() }
     }
 
     private fun open(scenario: ActivityScenario<*>, @StringRes row: Int) {
@@ -132,7 +193,9 @@ class ShellScreenshotTest {
         while (true) {
             SystemClock.sleep(100)
             val next = take()
-            if (next.sameAs(last)) return next
+            val same = next.sameAs(last)
+            last.recycle()
+            if (same) return next
             assertTrue("The screen did not settle within 3 seconds", SystemClock.uptimeMillis() < deadline)
             last = next
         }

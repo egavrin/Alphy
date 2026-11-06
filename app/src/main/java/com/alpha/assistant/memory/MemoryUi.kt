@@ -2,6 +2,9 @@ package com.alpha.assistant.memory
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -17,29 +20,38 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.alpha.assistant.R
+import com.alpha.assistant.ui.AlphaIcon
+import com.alpha.assistant.ui.Glyph
+import com.alpha.assistant.ui.SettingsDetailWidth
+import com.alpha.assistant.ui.SettingsHeading
+import com.alpha.assistant.ui.SettingsPanel
 
 /** Show local facts. Supply the same state when the activity is recreated. */
 @Composable
-internal fun MemoryScreen(state: MemoryPageState, onExit: () -> Unit, modifier: Modifier = Modifier) {
+internal fun MemoryScreen(
+    state: MemoryPageState,
+    onExit: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    settingsPage: Boolean = false,
+) {
     LifecycleResumeEffect(state) {
         state.refresh()
         onPauseOrDispose { }
@@ -50,31 +62,51 @@ internal fun MemoryScreen(state: MemoryPageState, onExit: () -> Unit, modifier: 
         if (state.deleteTarget != null) state.cancelDelete() else state.cancelEditor()
     }
 
-    if (draft != null) {
-        MemoryEditor(draft, state, modifier)
-    } else {
-        val facts = state.facts
-        LazyColumn(
-            modifier.fillMaxSize(), state = scroll, contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                MemoryHeading(R.string.memory_title)
-                TextButton(onClick = onExit, enabled = !state.busy) { Text(stringResource(R.string.memory_exit)) }
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        val content = if (settingsPage) Modifier.widthIn(max = SettingsDetailWidth + 40.dp) else Modifier
+        if (draft != null) {
+            Column(content.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
+                if (settingsPage) {
+                    SettingsHeading(R.string.memory_title, MaterialTheme.typography.headlineMedium)
+                    Box(Modifier.align(Alignment.CenterHorizontally).widthIn(max = 480.dp).padding(top = 14.dp)) {
+                        SettingsPanel { MemoryEditor(draft, state) }
+                    }
+                } else MemoryEditor(draft, state)
             }
-            state.notice?.let { notice -> item { MemoryNotice(notice) } }
-            when {
-                state.loadFailed -> item { MemoryLoadFailure(state) }
-                facts == null -> item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-                else -> {
-                    item {
-                        Button(onClick = { state.openEditor() }, enabled = !state.busy) {
-                            Text(stringResource(R.string.memory_add))
+        } else {
+            val facts = state.facts
+            LazyColumn(
+                content.fillMaxSize(), state = scroll, contentPadding = PaddingValues(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                item {
+                    SettingsHeading(R.string.memory_title, MaterialTheme.typography.headlineMedium)
+                    onExit?.let { exit ->
+                        TextButton(onClick = exit, enabled = !state.busy) { Text(stringResource(R.string.memory_exit)) }
+                    }
+                }
+                state.notice?.let { notice -> item { MemoryNotice(notice) } }
+                when {
+                    state.loadFailed -> item { MemoryLoadFailure(state) }
+                    facts == null -> item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                    facts.isEmpty() -> item {
+                        SettingsPanel {
+                            Column(
+                                Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                AlphaIcon(Glyph.Notebook, Modifier.size(28.dp), accent = true)
+                                Text(stringResource(R.string.memory_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                AddFactButton(state)
+                            }
                         }
                     }
-                    if (facts.isEmpty()) item { Text(stringResource(R.string.memory_empty)) }
-                    itemsIndexed(facts, key = { _, fact -> fact.id }) { index, fact ->
-                        MemoryFactCard(fact, index + 1, state)
+                    else -> {
+                        item { AddFactButton(state) }
+                        itemsIndexed(facts, key = { _, fact -> fact.id }) { index, fact ->
+                            MemoryFactCard(fact, index + 1, state)
+                        }
                     }
                 }
             }
@@ -106,16 +138,21 @@ internal fun MemoryScreen(state: MemoryPageState, onExit: () -> Unit, modifier: 
     }
 }
 
+@Composable
+private fun AddFactButton(state: MemoryPageState) {
+    Button(onClick = { state.openEditor() }, enabled = !state.busy, shape = MaterialTheme.shapes.small) {
+        Text(stringResource(R.string.memory_add))
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MemoryFactCard(fact: MemoryFact, number: Int, state: MemoryPageState) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp)) {
-            Text(fact.text, style = MaterialTheme.typography.bodyLarge)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MemoryFactAction(R.string.memory_edit, R.string.memory_edit_fact, number, !state.busy) { state.openEditor(fact) }
-                MemoryFactAction(R.string.memory_delete, R.string.memory_delete_fact, number, !state.busy) { state.requestDelete(fact) }
-            }
+    SettingsPanel {
+        Text(fact.text, style = MaterialTheme.typography.bodyLarge)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MemoryFactAction(R.string.memory_edit, R.string.memory_edit_fact, number, !state.busy) { state.openEditor(fact) }
+            MemoryFactAction(R.string.memory_delete, R.string.memory_delete_fact, number, !state.busy) { state.requestDelete(fact) }
         }
     }
 }
@@ -130,13 +167,10 @@ private fun MemoryFactAction(label: Int, accessibleLabel: Int, number: Int, enab
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun MemoryEditor(draft: MemoryDraft, state: MemoryPageState, modifier: Modifier) {
+private fun MemoryEditor(draft: MemoryDraft, state: MemoryPageState) {
     val issue = state.draftIssue
-    Column(
-        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        MemoryHeading(if (draft.original == null) R.string.memory_add else R.string.memory_edit_title)
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SettingsHeading(if (draft.original == null) R.string.memory_add else R.string.memory_edit_title, MaterialTheme.typography.titleLarge)
         OutlinedTextField(
             value = draft.text,
             onValueChange = state::changeDraft,
@@ -152,7 +186,7 @@ private fun MemoryEditor(draft: MemoryDraft, state: MemoryPageState, modifier: M
                 MemoryNotice(R.string.memory_stale_edit)
                 val latest = state.currentRevision
                 if (latest != null) {
-                    MemoryHeading(R.string.memory_current_text)
+                    SettingsHeading(R.string.memory_current_text, MaterialTheme.typography.titleLarge)
                     Text(latest.text)
                     TextButton(onClick = state::useCurrentRevision, enabled = !state.busy) {
                         Text(stringResource(R.string.memory_use_latest))
@@ -174,11 +208,6 @@ private fun MemoryEditor(draft: MemoryDraft, state: MemoryPageState, modifier: M
             TextButton(onClick = state::cancelEditor, enabled = !state.busy) { Text(stringResource(R.string.memory_cancel)) }
         }
     }
-}
-
-@Composable
-private fun MemoryHeading(label: Int) {
-    Text(stringResource(label), Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)
 }
 
 @Composable

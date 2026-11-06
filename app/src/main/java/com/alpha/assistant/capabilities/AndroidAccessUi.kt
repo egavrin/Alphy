@@ -39,6 +39,9 @@ import com.alpha.assistant.network.ui.MiniAppNetworkAccessSection
 import com.alpha.assistant.ui.Glyph
 import com.alpha.assistant.ui.PoliteLiveRegion
 import com.alpha.assistant.ui.StatusLine
+import com.alpha.assistant.ui.SettingsDisclosure
+import com.alpha.assistant.ui.SettingsHeading
+import com.alpha.assistant.ui.SettingsPanel
 
 private fun Context.activity(): Activity? = when (this) {
     is Activity -> this
@@ -92,26 +95,26 @@ private fun Context.activity(): Activity? = when (this) {
     if (divider) HorizontalDivider()
 }
 
-/** «Доступ и функции». The top bar shows the title, so the page has none. */
+/** Render permission groups inside the Settings detail scroll container. */
 @Composable internal fun AccessSettings(network: MiniAppNetworkAccessHost?) {
     val context = LocalContext.current
     var openFailed by remember { mutableStateOf(false) }
-    AndroidAccessOverview()
-    com.alpha.assistant.automations.AutomationDeviceSettings()
-    MiniAppNetworkAccessSection(network)
-    HorizontalDivider()
-    Text(stringResource(R.string.access_note))
-    OutlinedButton(onClick = {
-        openFailed = try {
-            context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))); false
-        } catch (_: ActivityNotFoundException) { true }
-    }) { Text(stringResource(R.string.access_system_settings), textAlign = TextAlign.Center) }
-    if (openFailed) StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.access_app_settings_failed), PoliteLiveRegion)
+    AndroidAccessOverview(grouped = true)
+    SettingsPanel { MiniAppNetworkAccessSection(network, showDisclosure = true) }
+    SettingsPanel {
+        Text(stringResource(R.string.access_note))
+        OutlinedButton(onClick = {
+            openFailed = try {
+                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))); false
+            } catch (_: ActivityNotFoundException) { true }
+        }) { Text(stringResource(R.string.access_system_settings), textAlign = TextAlign.Center) }
+        if (openFailed) StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.access_app_settings_failed), PoliteLiveRegion)
+    }
 }
 
 
 /** The access rows, emitted into the column of the caller. */
-@Composable fun AndroidAccessOverview() {
+@Composable fun AndroidAccessOverview(grouped: Boolean = false) {
     val context = LocalContext.current
     val revision = platformAccessRevision()
     var refresh by remember { mutableIntStateOf(0) }
@@ -132,45 +135,64 @@ private fun Context.activity(): Activity? = when (this) {
         ComponentName(context, com.alpha.assistant.automations.AutomationNotificationListener::class.java)) }
     val locationHardware = context.packageManager.hasSystemFeature(PackageManager.FEATURE_LOCATION)
     Text(stringResource(R.string.access_intro))
-    AndroidPermissionControl(stringResource(R.string.access_microphone), listOf(Manifest.permission.RECORD_AUDIO), PackageManager.FEATURE_MICROPHONE)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.CINNAMON_BUN) {
-        AndroidPermissionControl(stringResource(R.string.access_local_network), listOf(Manifest.permission.ACCESS_LOCAL_NETWORK))
+    AccessGroup(grouped, R.string.settings_access_android) {
+        AndroidPermissionControl(stringResource(R.string.access_microphone), listOf(Manifest.permission.RECORD_AUDIO), PackageManager.FEATURE_MICROPHONE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.CINNAMON_BUN) {
+            AndroidPermissionControl(stringResource(R.string.access_local_network), listOf(Manifest.permission.ACCESS_LOCAL_NETWORK))
+        }
+        AndroidPermissionControl(stringResource(R.string.access_location), listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION), PackageManager.FEATURE_LOCATION, onChanged = { refresh++ })
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(stringResource(R.string.access_background_title), Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+            // Android does not tell the app that the user denied background access, so no state shows Close.
+            if (locationHardware && background) StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(R.string.access_background_granted))
+            else StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(when {
+                !locationHardware -> R.string.access_background_no_hardware
+                !foreground -> R.string.access_background_needs_location
+                else -> R.string.access_background_missing
+            }))
+            if (Build.VERSION.SDK_INT == 29 && foreground && !background) {
+                AndroidPermissionControl(stringResource(R.string.access_background_next), listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), onChanged = { refresh++ }, divider = false)
+            } else TextButton(onClick = { open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) },
+                enabled = foreground && locationHardware) { Text(stringResource(R.string.access_background_open)) }
+        }
+        HorizontalDivider()
+        AndroidPermissionControl(stringResource(R.string.access_calendar), listOf(Manifest.permission.READ_CALENDAR))
+        AndroidPermissionControl(stringResource(R.string.access_owned_calendar), listOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR),
+            partial = R.string.access_owned_calendar_partial)
+        AndroidPermissionControl(stringResource(R.string.access_camera), listOf(Manifest.permission.CAMERA), PackageManager.FEATURE_CAMERA_ANY)
+        if (Build.VERSION.SDK_INT >= 33) AndroidPermissionControl(stringResource(R.string.access_notification_permission), listOf(Manifest.permission.POST_NOTIFICATIONS), onChanged = { refresh++ })
+        if (grouped) SettingsDisclosure(R.string.settings_access_scope) {
+            Text(stringResource(R.string.access_scope_note), style = MaterialTheme.typography.bodySmall)
+        }
     }
-    AndroidPermissionControl(stringResource(R.string.access_location), listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION), PackageManager.FEATURE_LOCATION, onChanged = { refresh++ })
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(stringResource(R.string.access_background_title), Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-        // Android does not tell the app that the user denied background access, so no state shows Close.
-        if (locationHardware && background) StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(R.string.access_background_granted))
-        else StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(when {
-            !locationHardware -> R.string.access_background_no_hardware
-            !foreground -> R.string.access_background_needs_location
-            else -> R.string.access_background_missing
-        }))
-        if (Build.VERSION.SDK_INT == 29 && foreground && !background) {
-            AndroidPermissionControl(stringResource(R.string.access_background_next), listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), onChanged = { refresh++ }, divider = false)
-        } else TextButton(onClick = { open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) },
-            enabled = foreground && locationHardware) { Text(stringResource(R.string.access_background_open)) }
+    AccessGroup(grouped, R.string.settings_access_automation) {
+        AccessSettingRow(R.string.access_notifications_title, if (notifications) R.string.access_notifications_on else R.string.access_notifications_off, notifications, R.string.access_notifications_open) {
+            open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
+        }
+        // Below API 31, Android gives exact alarms without a separate access, so the row has no button.
+        AccessSettingRow(R.string.access_exact_title, if (exact) R.string.access_exact_on else R.string.access_exact_off, exact, if (Build.VERSION.SDK_INT >= 31) R.string.access_exact_open else null) {
+            if (Build.VERSION.SDK_INT >= 31) open(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))
+        }
+        AccessSettingRow(R.string.access_listener_title, if (listener) R.string.access_listener_on else R.string.access_listener_off, listener, R.string.access_listener_open) {
+            open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
+        if (grouped) com.alpha.assistant.automations.AutomationDeviceSettings()
     }
-    HorizontalDivider()
-    AndroidPermissionControl(stringResource(R.string.access_calendar), listOf(Manifest.permission.READ_CALENDAR))
-    AndroidPermissionControl(stringResource(R.string.access_owned_calendar), listOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR),
-        partial = R.string.access_owned_calendar_partial)
-    AndroidPermissionControl(stringResource(R.string.access_camera), listOf(Manifest.permission.CAMERA), PackageManager.FEATURE_CAMERA_ANY)
-    if (Build.VERSION.SDK_INT >= 33) AndroidPermissionControl(stringResource(R.string.access_notification_permission), listOf(Manifest.permission.POST_NOTIFICATIONS), onChanged = { refresh++ })
-    AccessSettingRow(R.string.access_notifications_title, if (notifications) R.string.access_notifications_on else R.string.access_notifications_off, notifications, R.string.access_notifications_open) {
-        open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
+    if (grouped) SettingsPanel { AssistantSettingsRow() }
+    else {
+        AssistantSettingsRow()
+        HorizontalDivider()
+        Text(stringResource(R.string.access_scope_note), style = MaterialTheme.typography.bodySmall)
     }
-    // Below API 31, Android gives exact alarms without a separate access, so the row has no button.
-    AccessSettingRow(R.string.access_exact_title, if (exact) R.string.access_exact_on else R.string.access_exact_off, exact, if (Build.VERSION.SDK_INT >= 31) R.string.access_exact_open else null) {
-        if (Build.VERSION.SDK_INT >= 31) open(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))
-    }
-    AccessSettingRow(R.string.access_listener_title, if (listener) R.string.access_listener_on else R.string.access_listener_off, listener, R.string.access_listener_open) {
-        open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-    }
-    AssistantSettingsRow()
-    HorizontalDivider()
-    Text(stringResource(R.string.access_scope_note), style = MaterialTheme.typography.bodySmall)
     message?.let { StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(it), PoliteLiveRegion) }
+}
+
+@Composable
+private fun AccessGroup(grouped: Boolean, @StringRes title: Int, content: @Composable () -> Unit) {
+    if (grouped) SettingsPanel {
+        SettingsHeading(title)
+        content()
+    } else content()
 }
 
 /** The assistant role is not requestable, so the row opens the Android assistant settings and tells the user to pick Alphy there. */

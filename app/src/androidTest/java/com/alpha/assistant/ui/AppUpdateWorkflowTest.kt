@@ -52,11 +52,17 @@ class AppUpdateWorkflowTest {
             val available = robot.text(R.string.update_available, tag)
             if (robot.find(available) == null) robot.click(robot.text(R.string.update_check))
             robot.waitFor(available)
+            robot.back()
+            robot.back()
+            robot.waitUntil { !robot.secure(scenario) }
+            robot.waitFor(available)
+            robot.click(robot.text(R.string.update_title))
+            robot.waitUntil { robot.secure(scenario) }
+            robot.waitFor(available)
             assertEquals(0, assetRequests.get())
 
             val previousChecks = checkRequests.get()
             scenario.recreate()
-            showUpdates()
             robot.waitFor(available)
             assertEquals(previousChecks, checkRequests.get())
             robot.click(robot.text(R.string.update_check))
@@ -171,7 +177,6 @@ class AppUpdateWorkflowTest {
             robot.waitFor(available)
             robot.click(robot.text(R.string.update_download))
             robot.waitFor(robot.text(R.string.update_ready, tag))
-            showUpdates()
             run(tag)
         }
     }
@@ -199,17 +204,9 @@ class AppUpdateWorkflowTest {
         robot.openDrawer(scenario)
         robot.click(robot.text(R.string.settings))
         robot.awaitDrawerClosed(scenario)
-        robot.waitFor(robot.text(R.string.settings_deepseek))
-        showUpdates()
-    }
-
-    private fun showUpdates() {
-        val heading = robot.text(R.string.update_title)
-        robot.waitUntil { robot.find(heading) != null || robot.scrollForward() }
-        while (robot.scrollForward()) {
-            // Keep the update actions in the viewport below the heading.
-        }
-        robot.waitFor(heading)
+        robot.click(robot.text(R.string.update_title))
+        val version = app.packageManager.getPackageInfo(app.packageName, 0).versionName.orEmpty()
+        robot.waitFor(robot.text(R.string.app_version, version))
     }
 
     private fun release(

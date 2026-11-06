@@ -121,19 +121,27 @@ import com.alpha.assistant.voice.VoiceSession
     }
 }
 
-@Composable fun VoiceControls(model: ShellViewModel) {
+@Composable fun VoiceControls(model: ShellViewModel, settingsDisclosure: Boolean = false) {
     val voice = model.voice
     val start = rememberVoiceStart(model, oneShot = false)
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(vertical = 12.dp)) {
         Text(stringResource(R.string.voice_session), style = MaterialTheme.typography.titleMedium)
         Text(stringResource(R.string.voice_session_text))
-        Text(stringResource(R.string.voice_models))
-        Text(stringResource(R.string.voice_licenses))
+        if (!settingsDisclosure) VoiceModelDetails()
         if (voice.permissionRequired) MicrophonePermissionGuidance(voice, start)
         else if (voice.status.isNotBlank()) StatusLine(Glyph.Mic, MaterialTheme.colorScheme.onSurfaceVariant, voice.status)
         if (voice.partial.isNotBlank()) Text(voice.partial)
-        // A tonal button keeps the key action of «Настройки» as the one primary action.
         if (voice.active) FilledTonalButton(onClick = { voice.stop() }) { Text(stringResource(R.string.voice_stop)) }
+        else if (settingsDisclosure) Button(onClick = start, shape = MaterialTheme.shapes.small) { Text(stringResource(R.string.voice_start)) }
         else FilledTonalButton(onClick = start) { Text(stringResource(R.string.voice_start)) }
+        if (settingsDisclosure) SettingsDisclosure(R.string.settings_voice_disclosure) { VoiceModelDetails() }
+    }
+}
+
+@Composable
+private fun VoiceModelDetails() {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(stringResource(R.string.voice_models))
+        Text(stringResource(R.string.voice_licenses))
     }
 }

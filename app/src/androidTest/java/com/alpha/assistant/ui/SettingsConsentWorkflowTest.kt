@@ -29,11 +29,12 @@ class SettingsConsentWorkflowTest {
         robot.edit(robot.text(R.string.composer_label), text)
         robot.click(robot.text(R.string.composer_send))
     }
-    private fun openSettings(scenario: ActivityScenario<*>) {
+    private fun openSettings(scenario: ActivityScenario<*>, section: Int = R.string.settings_deepseek) {
         robot.openDrawer(scenario)
         robot.click(robot.text(R.string.settings))
         robot.awaitDrawerClosed(scenario)
         robot.waitUntil { robot.secure(scenario) }
+        robot.click(robot.text(section))
     }
     private fun saveKey() {
         robot.reveal(robot.text(R.string.key_label))
@@ -136,6 +137,7 @@ class SettingsConsentWorkflowTest {
         fixture.launch().use { scenario ->
             openSettings(scenario)
             robot.waitFor(robot.text(R.string.key_ready))
+            robot.click(robot.text(R.string.settings_deepseek_disclosure))
             robot.waitFor(robot.text(R.string.consent_text))
             robot.reveal(robot.text(R.string.key_delete))
             robot.click(robot.text(R.string.key_delete))
@@ -144,6 +146,7 @@ class SettingsConsentWorkflowTest {
             robot.waitFor(robot.text(R.string.key_missing))
             assertNull(fixture.keys.read().getOrThrow())
             assertFalse(fixture.keys.consented())
+            robot.back()
             robot.back()
             send("Without key")
             robot.waitFor(robot.text(R.string.cloud_key_missing))
@@ -235,7 +238,7 @@ class SettingsConsentWorkflowTest {
     @Test fun longNameKeepsWholeCharacters() {
         fixture.install()
         fixture.launch().use { scenario ->
-            openSettings(scenario)
+            openSettings(scenario, R.string.settings_name_label)
             robot.reveal(robot.text(R.string.settings_name_label))
             val letters = "а".repeat(39)
             robot.enter(robot.text(R.string.settings_name_label), letters + "\uD83D\uDE00")
@@ -248,8 +251,7 @@ class SettingsConsentWorkflowTest {
         val monitor = robot.instrumentation.addMonitor(IntentFilter(Settings.ACTION_VOICE_INPUT_SETTINGS), null, true)
         try {
             fixture.launch().use { scenario ->
-                openSettings(scenario)
-                robot.click(robot.text(R.string.access))
+                openSettings(scenario, R.string.access)
                 robot.reveal(robot.text(R.string.assistant_pick_hint))
                 robot.reveal(robot.text(R.string.assistant_open))
                 robot.click(robot.text(R.string.assistant_open))
@@ -261,7 +263,7 @@ class SettingsConsentWorkflowTest {
     @Test fun nameSurvivesRecreation() {
         fixture.install()
         fixture.launch().use { scenario ->
-            openSettings(scenario)
+            openSettings(scenario, R.string.settings_name_label)
             robot.reveal(robot.text(R.string.settings_name_label))
             robot.edit(robot.text(R.string.settings_name_label), "Евгений")
             robot.waitUntil { fixture.store.load().userName == "Евгений" }
@@ -269,6 +271,7 @@ class SettingsConsentWorkflowTest {
             robot.waitUntil { robot.secure(scenario) }
             robot.reveal(robot.text(R.string.settings_name_label))
             robot.waitUntil { robot.field(robot.text(R.string.settings_name_label)).text?.toString() == "Евгений" }
+            robot.back()
             robot.back()
             robot.waitUntil { !robot.secure(scenario) }
             robot.openDrawer(scenario)
@@ -279,7 +282,7 @@ class SettingsConsentWorkflowTest {
     @Test fun settingsShowVoiceStart() {
         fixture.install()
         fixture.launch().use { scenario ->
-            openSettings(scenario)
+            openSettings(scenario, R.string.settings_voice)
             robot.reveal(robot.text(R.string.voice_start))
             robot.assertTarget(robot.text(R.string.voice_start))
         }

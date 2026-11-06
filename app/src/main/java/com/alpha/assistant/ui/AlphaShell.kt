@@ -90,7 +90,8 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable fun AlphaShell(model: ShellViewModel) {
     var destination by rememberSaveable { mutableStateOf<ShellDestination?>(null) }
-    var openSettingsAtUpdates by rememberSaveable { mutableStateOf(false) }
+    var settingsSection by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
+    var settingsFromMenu by rememberSaveable { mutableStateOf(true) }
     val updateHandoff = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         model.updates.handoffReturned()
     }
@@ -139,7 +140,8 @@ import kotlinx.coroutines.launch
             }
             libraryOrigin = false
             destination = model.surfaceDestination
-            openSettingsAtUpdates = false
+            settingsSection = SettingsSection.DeepSeek
+            settingsFromMenu = false
             automationRequest = model.surfaceAutomationRequest
             automationRuleId = model.surfaceAutomationRuleId
             model.consumeSurface()
@@ -172,8 +174,19 @@ import kotlinx.coroutines.launch
         automationRuleId = null
         libraryOrigin = false
         destination = target
-        openSettingsAtUpdates = false
+        settingsSection = null
+        settingsFromMenu = true
         focus.clearFocus()
+    }
+    fun openSettings(section: SettingsSection) {
+        navigate(ShellDestination.Settings)
+        settingsSection = section
+        settingsFromMenu = false
+    }
+    fun selectSettings(section: SettingsSection?) {
+        focus.clearFocus()
+        settingsSection = section
+        settingsFromMenu = true
     }
     fun newChat() {
         model.select(null)
@@ -202,7 +215,7 @@ import kotlinx.coroutines.launch
     fun back() {
         when {
             focusedMiniApp -> model.tools.select(null)
-            destination == ShellDestination.Memory -> navigate(ShellDestination.Settings)
+            destination == ShellDestination.Settings && settingsFromMenu && settingsSection != null -> selectSettings(null)
             destination != null -> navigate(null)
             snapshot.selectedId == null && newChatPage -> newChatPage = false
             else -> model.select(null)
@@ -234,8 +247,11 @@ import kotlinx.coroutines.launch
                 Text(stringResource(R.string.load_failed_text))
                 Button(onClick = model::load) { Text(stringResource(R.string.retry)) }
             }
-        } else AdaptiveShellLayout(immersive, focusedMiniApp && !immersive, systemInsets,
-            splitAutomations = destination == ShellDestination.Automations && !model.tools.storageUnavailable) { paneLayout ->
+        } else AdaptiveShellLayout(
+            immersive, focusedMiniApp && !immersive, systemInsets,
+            splitAutomations = destination == ShellDestination.Automations && !model.tools.storageUnavailable,
+            pairSettings = destination == ShellDestination.Settings,
+        ) { paneLayout ->
             val sceneStrategies = shellSceneStrategies(paneLayout)
             ModalNavigationDrawer({
                 ShellDrawerSheet(drawerState, snapshot.conversations, snapshot.selectedId, destination, snapshot.userName.ifBlank { stringResource(R.string.profile) },
@@ -253,7 +269,7 @@ import kotlinx.coroutines.launch
                     if (destination == null) contextPaneTop = it.boundsInWindow().top
                 }) {
                     if (!focusedMiniApp && !compact && !libraryVisible && destination != ShellDestination.Search) {
-                        val title = if (destination == ShellDestination.Memory) null else stringResource(destination?.title ?: R.string.app_name)
+                        val title = stringResource(if (destination == ShellDestination.Settings) R.string.app_name else destination?.title ?: R.string.app_name)
                         ShellTopBar(title, onMenu = { focus.clearFocus(); scope.launch { drawerState.open() } },
                             onNewChat = if (destination == null && snapshot.selectedId != null) ::newChat else null)
                     }
@@ -269,13 +285,13 @@ import kotlinx.coroutines.launch
                         }
                     }
                     UpdateNotice(model.updates, visible = !immersive && !compact && destination != ShellDestination.Settings) {
-                        navigate(ShellDestination.Settings)
-                        openSettingsAtUpdates = true
+                        openSettings(SettingsSection.Updates)
                     }
                     if (model.saveFailed && !immersive && !compact && (!paneLayout.paired || libraryOrigin)) SaveFailure()
                     Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.TopCenter) {
                         // A session continues while the shell shows a composer or VoiceControls.
-                        val voiceShown = destination == null || (paneLayout.paired && !libraryOrigin) || destination == ShellDestination.Settings
+                        val voiceShown = destination == null || (paneLayout.paired && !libraryOrigin) ||
+                            (destination == ShellDestination.Settings && settingsSection == SettingsSection.Voice)
                         LaunchedEffect(voiceShown) { if (!voiceShown) model.voice.stop() }
                         // Navigation 3 retains each entry by content key when the scene changes.
                         val currentLayout by rememberUpdatedState(paneLayout)
@@ -295,7 +311,7 @@ import kotlinx.coroutines.launch
                                 }, horizontalAlignment = Alignment.CenterHorizontally) {
                                     if (paired && model.saveFailed && !compactComposer) SaveFailure()
                                     ChatPane(model, conversation, { navigate(ShellDestination.MiniApps) },
-                                        settings = { navigate(ShellDestination.Settings) }, modifier = Modifier.weight(1f).testTag("chat-content"),
+                                        settings = { openSettings(SettingsSection.DeepSeek) }, modifier = Modifier.weight(1f).testTag("chat-content"),
                                         actions = miniAppActions, openAutomation = ::openAutomation,
                                         pairedToolId = model.tools.selectedId.takeIf { destination == ShellDestination.MiniApps },
                                         pairedDraftId = model.tools.selectedDraftId.takeIf { destination == ShellDestination.MiniApps },
@@ -388,7 +404,7 @@ import kotlinx.coroutines.launch
                                         if (model.tools.storageUnavailable) ToolLibraryUnavailablePane()
                                         else ToolsPane(model.tools, currentSnapshot.selectedId, miniAppActions, miniAppRequests, refine = model::refineTool,
                                             immersive = currentImmersive, exitImmersive = { immersiveExited = true },
-                                            settings = { navigate(ShellDestination.Settings) }) { navigate(null) }
+                                            settings = { openSettings(SettingsSection.DeepSeek) }) { navigate(null) }
                                     }
                                     ShellDestination.Search -> SearchPane(
                                         currentSnapshot.conversations, search, { search = it },
@@ -408,11 +424,11 @@ import kotlinx.coroutines.launch
                                         entryRequest = model.courseEntry?.takeUnless { it.inChat }?.request,
                                         onEntryHandled = model::courseEntryHandled,
                                     )
-                                    ShellDestination.Memory -> MemoryScreen(model.memoryPage, onExit = { navigate(ShellDestination.Settings) })
                                     ShellDestination.Settings -> SecureWindow {
-                                        SettingsPane(model, openSettingsAtUpdates, { model.updates.handoff { updateHandoff.launch(it) } }) {
-                                            navigate(ShellDestination.Memory)
-                                        }
+                                        SettingsPane(
+                                            model, settingsSection, currentLayout.settingsHinge, ::selectSettings,
+                                            openUpdateInstaller = { model.updates.handoff { updateHandoff.launch(it) } },
+                                        )
                                     }
                                 }
                             }
@@ -462,7 +478,7 @@ import kotlinx.coroutines.launch
     }
     if (model.memoryPage.reviewingChatFact) {
         ChatSetupDialog(model.memoryPage::cancelEditor) {
-            MemoryScreen(model.memoryPage, onExit = model.memoryPage::cancelEditor)
+            MemoryScreen(model.memoryPage)
         }
     }
 }
