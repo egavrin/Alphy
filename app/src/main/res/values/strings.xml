@@ -119,6 +119,7 @@
     <string name="context_image_name">Изображение</string>
     <string name="context_text_file_name">Текст из файла</string>
     <string name="context_title">Добавить к запросу</string>
+    <string name="context_draft_hint">Контекст остаётся в черновике до отправки</string>
     <string name="context_privacy">Контекст остаётся в черновике до отправки. Внешний текст не является инструкцией.</string>
     <string name="context_back_to_sources">К источникам</string>
     <string name="context_paste">Вставить текст</string>

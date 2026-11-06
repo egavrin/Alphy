@@ -110,6 +110,21 @@ class AdaptiveShellWorkflowTest {
             val chat = robot.composedBounds(scenario, "chat").first
             app.width() > 0 && chat.width() > 0 && chat.right <= book.left && app.left >= book.right
         }
+        val plus = robot.text(R.string.composer_add_context)
+        val title = robot.text(R.string.context_title)
+        val anchor = robot.bounds(plus)
+        robot.click(plus)
+        assertTrue(robot.bounds(title).bottom < anchor.top)
+        assertTrue(robot.bounds(robot.text(R.string.cancel)).right <= book.left)
+        val camera = robot.bounds(robot.text(R.string.context_camera))
+        val photo = robot.bounds(robot.text(R.string.context_photo))
+        val file = robot.bounds(robot.text(R.string.context_file))
+        assertTrue(camera.right < photo.left && photo.right < file.left)
+        assertEquals(camera.centerY(), file.centerY())
+        assertTrue(robot.bounds(robot.text(R.string.context_calendar)).top > file.bottom)
+        assertTrue(robot.bounds(robot.text(R.string.context_paste)).top > robot.bounds(robot.text(R.string.context_calendar)).bottom)
+        robot.back()
+        robot.waitGone(title)
         assertComposerAboveKeyboard(scenario)
         assertSession(session)
         assertTrue(tools.effects(TOOL_ID).isEmpty())

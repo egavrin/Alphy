@@ -28,12 +28,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.roundToIntRect
 import androidx.compose.ui.unit.sp
 import com.alpha.assistant.R
 
@@ -45,6 +48,7 @@ import com.alpha.assistant.R
     modifier: Modifier = Modifier,
     compact: Boolean = false,
     @StringRes placeholder: Int = R.string.composer_placeholder,
+    onContextAnchorChanged: ((ContextMenuAnchor) -> Unit)? = null,
 ) {
     val snapshot = model.snapshot
     val busy = model.activeConversationId != null
@@ -77,7 +81,18 @@ import com.alpha.assistant.R
                 Column {
                     if (model.voice.active && model.voice.oneShot) InlineVoiceRecorder(model)
                     else {
-                        @Composable fun AddContext() = RoundAction(Glyph.Plus, stringResource(R.string.composer_add_context), context)
+                        @Composable fun AddContext() {
+                            val anchorModifier = if (onContextAnchorChanged == null) Modifier else Modifier.onGloballyPositioned { button ->
+                                val row = checkNotNull(button.parentLayoutCoordinates)
+                                onContextAnchorChanged(ContextMenuAnchor(
+                                    button.boundsInWindow().roundToIntRect(),
+                                    row.boundsInWindow().roundToIntRect(),
+                                ))
+                            }
+                            Box(anchorModifier) {
+                                RoundAction(Glyph.Plus, stringResource(R.string.composer_add_context), context)
+                            }
+                        }
                         @Composable fun VoiceAndSend() {
                             if (activeRequest != null) {
                                 RoundAction(Glyph.Stop, stringResource(R.string.composer_stop), { model.cancelRequest(activeRequest) }, primary = !hasInput)

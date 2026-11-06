@@ -30,6 +30,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import android.graphics.BitmapFactory
@@ -93,6 +95,8 @@ import kotlinx.coroutines.launch
     }
     var newChatPage by rememberSaveable { mutableStateOf(false) }
     var contextSheet by rememberSaveable { mutableStateOf(false) }
+    var contextAnchor by remember { mutableStateOf<ContextMenuAnchor?>(null) }
+    var contextPaneTop by remember { mutableFloatStateOf(0f) }
     var automationRequest by rememberSaveable { mutableStateOf<String?>(null) }
     var automationRuleId by rememberSaveable { mutableStateOf<String?>(null) }
     val miniAppActions = remember { MiniAppActions() }
@@ -229,7 +233,9 @@ import kotlinx.coroutines.launch
                     paneLayout.tabletopGap != null -> Modifier.windowInsetsPadding(systemInsets)
                     else -> Modifier.windowInsetsPadding(systemInsets).imePadding()
                 }
-                Column(Modifier.fillMaxSize().then(drawingInsets)) {
+                Column(Modifier.fillMaxSize().then(drawingInsets).onGloballyPositioned {
+                    if (destination == null) contextPaneTop = it.boundsInWindow().top
+                }) {
                     if (!focusedMiniApp && !compact) {
                         val title = if (destination == ShellDestination.Memory) null else stringResource(destination?.title ?: R.string.app_name)
                         ShellTopBar(title, onMenu = { focus.clearFocus(); scope.launch { drawerState.open() } },
@@ -266,7 +272,9 @@ import kotlinx.coroutines.launch
                             )) {
                                 val paired = currentLayout.paired && destination == ShellDestination.MiniApps
                                 val compactComposer = currentCompact || (imeVisible && maxHeight < 250.dp)
-                                Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Column(Modifier.fillMaxSize().onGloballyPositioned {
+                                    if (paired) contextPaneTop = it.boundsInWindow().top
+                                }, horizontalAlignment = Alignment.CenterHorizontally) {
                                     if (paired && model.saveFailed && !compactComposer) SaveFailure()
                                     ChatPane(model, conversation, { navigate(ShellDestination.MiniApps) },
                                         settings = { navigate(ShellDestination.Settings) }, modifier = Modifier.weight(1f).testTag("chat-content"),
@@ -276,7 +284,7 @@ import kotlinx.coroutines.launch
                                         showLivePreviews = paired || destination != ShellDestination.MiniApps,
                                         resumeCourse = if (destination == null) model::resumeChatCourse else null)
                                     if (paired) Composer(model, { contextSheet = true }, Modifier.widthIn(max = 620.dp).testTag("composer"),
-                                        compact = compactComposer)
+                                        compact = compactComposer, onContextAnchorChanged = { contextAnchor = it })
                                 }
                             }
                         }
@@ -373,7 +381,8 @@ import kotlinx.coroutines.launch
                     }
                     // One call place keeps the voice start state when the Chat route replaces the Desktop route.
                     if (destination == null) Composer(model, { contextSheet = true },
-                        Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp).fillMaxWidth().testTag("composer"), compact = compact)
+                        Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp).fillMaxWidth().testTag("composer"),
+                        compact = compact, onContextAnchorChanged = { contextAnchor = it })
                 }
             }
         }
@@ -396,7 +405,11 @@ import kotlinx.coroutines.launch
     model.requestError?.let { error ->
         AlertDialog(onDismissRequest = model::clearRequestError, title = { Text(stringResource(R.string.send_failed)) }, text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(error) } }, confirmButton = { TextButton(onClick = model::clearRequestError) { Text(stringResource(R.string.understood)) } })
     }
-    if (contextSheet && !model.loadFailed && !model.loading) ReviewedContextDialog(model) { contextSheet = false }
+    if (contextSheet && !model.loadFailed && !model.loading) {
+        ReviewedContextDialog(model, contextAnchor, contextPaneTop) {
+            contextSheet = false
+        }
+    }
     if (destination == null) ChatSetupDialogs(model)
 }
 

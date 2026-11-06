@@ -18,6 +18,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
@@ -38,6 +40,8 @@ import java.io.InputStreamReader
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable internal fun ReviewedContextDialog(
     model: ShellViewModel,
+    anchor: ContextMenuAnchor? = null,
+    paneTop: Float = 0f,
     dismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -140,6 +144,41 @@ import java.io.InputStreamReader
             camera.launch(uri)
         }.onFailure { cameraPending = false; discardCapture(); error = R.string.context_camera_open_failed }
     }
+    val canClose = !cameraPending && !model.attachmentBusy
+    @Composable fun Sources() {
+        ContextSourceMenu(
+            tiles = listOf(
+                ContextSourceAction(R.string.context_camera, Glyph.Camera) { if (checkOrigin()) page = "camera" },
+                ContextSourceAction(R.string.context_photo, Glyph.Photo) {
+                    launchPicker("photo") { photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+                },
+                ContextSourceAction(R.string.context_file, Glyph.File) { launchPicker("file") { files.launch(arrayOf("*/*")) } },
+            ),
+            rows = listOf(
+                ContextSourceAction(R.string.context_calendar, Glyph.Calendar) { if (checkOrigin()) page = "calendar" },
+                ContextSourceAction(R.string.context_paste, Glyph.Clipboard) { if (checkOrigin()) page = "paste" },
+            ),
+            enabled = pickerSource == null && !model.attachmentBusy,
+            canClose = canClose,
+            close = ::close,
+        )
+    }
+    @Composable fun Feedback() {
+        error?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
+        if (model.attachmentBusy || pickedUri != null) LinearProgressIndicator(Modifier.fillMaxWidth())
+    }
+    val density = LocalDensity.current
+    val top = maxOf(paneTop.toInt(), WindowInsets.safeDrawing.getTop(density))
+    val wide = with(density) { LocalWindowInfo.current.containerSize.width.toDp() >= 600.dp }
+    if (page == "sources" && wide && anchor != null && anchor.row.width > 0 &&
+        with(density) { (anchor.button.top - top).toDp() >= 96.dp }
+    ) {
+        AnchoredContextSourceMenu(anchor, top, ::close) {
+            Sources()
+            Feedback()
+        }
+        return
+    }
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = ::close, sheetState = sheet,
         properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false)) {
@@ -155,22 +194,15 @@ import java.io.InputStreamReader
         }
         Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(stringResource(R.string.context_title), style = MaterialTheme.typography.titleLarge)
-                if (page != "sources") Text(stringResource(R.string.context_privacy))
-                if (page != "sources") TextButton(onClick = { page = "sources"; error = null }, enabled = !cameraPending && !model.attachmentBusy) { Text(stringResource(R.string.context_back_to_sources)) }
-                when (page) {
-                    "sources" -> {
-                        fun canChooseSource() = pickerSource == null && !model.attachmentBusy
-                        val enabled = canChooseSource()
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            AssistChip(onClick = { if (checkOrigin()) page = "camera" }, label = { Text(stringResource(R.string.context_camera)) }, enabled = enabled)
-                            AssistChip(onClick = { launchPicker("photo") { photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) } },
-                                label = { Text(stringResource(R.string.context_photo)) }, enabled = enabled)
-                            AssistChip(onClick = { launchPicker("file") { files.launch(arrayOf("*/*")) } }, label = { Text(stringResource(R.string.context_file)) }, enabled = enabled)
-                            AssistChip(onClick = { if (checkOrigin()) page = "calendar" }, label = { Text(stringResource(R.string.context_calendar)) }, enabled = enabled)
-                        }
-                        TextButton(onClick = { if (checkOrigin()) page = "paste" }, enabled = enabled) { Text(stringResource(R.string.context_paste)) }
+                if (page != "sources") {
+                    Text(stringResource(R.string.context_title), style = MaterialTheme.typography.titleLarge)
+                    Text(stringResource(R.string.context_privacy))
+                    TextButton(onClick = { page = "sources"; error = null }, enabled = canClose) {
+                        Text(stringResource(R.string.context_back_to_sources))
                     }
+                }
+                when (page) {
+                    "sources" -> Sources()
                     "camera" -> {
                         AndroidPermissionControl(stringResource(R.string.context_camera), listOf(Manifest.permission.CAMERA), PackageManager.FEATURE_CAMERA_ANY)
                         if (cameraReady && cameraUri != null) {
@@ -205,9 +237,8 @@ import java.io.InputStreamReader
                     }
                 }
             }
-            error?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
-            if (model.attachmentBusy || pickedUri != null) LinearProgressIndicator(Modifier.fillMaxWidth())
-            TextButton(onClick = ::close, enabled = !cameraPending && !model.attachmentBusy) { Text(stringResource(R.string.cancel)) }
+            Feedback()
+            if (page != "sources") TextButton(onClick = ::close, enabled = canClose) { Text(stringResource(R.string.cancel)) }
         }
     }
 }
