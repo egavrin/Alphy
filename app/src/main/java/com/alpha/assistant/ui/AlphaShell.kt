@@ -11,7 +11,6 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -81,8 +80,6 @@ import com.alpha.assistant.tools.LocalMiniAppLiveAllowed
 import com.alpha.assistant.tools.MiniAppActionDialogs
 import com.alpha.assistant.tools.MiniAppActions
 import com.alpha.assistant.tools.MiniAppLibrary
-import com.alpha.assistant.tools.MiniAppsDarkColors
-import com.alpha.assistant.tools.MiniAppsLightColors
 import com.alpha.assistant.tools.NativeToolEditDialog
 import com.alpha.assistant.tools.ToolsPane
 import com.alpha.assistant.tools.miniAppDeviceUnlocked
@@ -237,12 +234,9 @@ import kotlinx.coroutines.launch
     val detailRoute = destination.takeUnless { libraryVisible && !focusedMiniApp }
     val backStack = listOfNotNull(ShellRoute.Desktop, chatRoute, libraryRoute, detailRoute)
     val systemInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
-    val miniAppColors = if (isSystemInDarkTheme()) MiniAppsDarkColors else MiniAppsLightColors
-    val shellBackground = if (libraryRoute != null && !immersive) miniAppColors.background
-        else MaterialTheme.colorScheme.background
     VoiceVisibility(model.voice)
     WeatherLocationAccess(model)
-    Surface(Modifier.fillMaxSize(), color = shellBackground) {
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         if (model.loading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         } else if (model.loadFailed) {
@@ -388,21 +382,19 @@ import kotlinx.coroutines.launch
                             entry<ShellRoute.MiniAppLibrary>(clazzContentKey = { it.toString() },
                                 metadata = ListDetailSceneStrategy.listPane() +
                                     ListDetailSceneStrategy.preferredPaneSize(width = 320.dp)) {
-                                MaterialTheme(colorScheme = miniAppColors) {
-                                    Box(Modifier.fillMaxSize()) {
-                                        MiniAppLibrary(model.tools, currentLibraryArchive, onArchiveChange = {
-                                            if (currentLibraryArchive != it) {
-                                                libraryArchive = it
-                                                model.tools.select(null)
-                                            }
-                                        }, onOpen = { libraryOrigin = true }, onMenu = {
-                                            focus.clearFocus()
-                                            scope.launch { drawerState.open() }
-                                        }, settings = { navigate(ShellDestination.Settings) })
-                                        if (currentLibraryOrigin && currentLayout.wide) {
-                                            VerticalDivider(Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
-                                                color = miniAppColors.outlineVariant)
+                                Box(Modifier.fillMaxSize()) {
+                                    MiniAppLibrary(model.tools, currentLibraryArchive, onArchiveChange = {
+                                        if (currentLibraryArchive != it) {
+                                            libraryArchive = it
+                                            model.tools.select(null)
                                         }
+                                    }, onOpen = { libraryOrigin = true }, onMenu = {
+                                        focus.clearFocus()
+                                        scope.launch { drawerState.open() }
+                                    }, settings = { navigate(ShellDestination.Settings) })
+                                    if (currentLibraryOrigin && currentLayout.wide) {
+                                        VerticalDivider(Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                                            color = MaterialTheme.colorScheme.outlineVariant)
                                     }
                                 }
                             }
@@ -414,14 +406,12 @@ import kotlinx.coroutines.launch
                                 when (route) {
                                     ShellDestination.MiniApps -> Box(Modifier.fillMaxSize().clipToBounds().testTag("mini-app")) {
                                         if (model.tools.storageUnavailable) ToolLibraryUnavailablePane()
-                                        else MaterialTheme(colorScheme = if (currentImmersive) MaterialTheme.colorScheme else miniAppColors) {
-                                            Surface(Modifier.fillMaxSize()) {
-                                                ToolsPane(model.tools, currentSnapshot.selectedId, miniAppActions, miniAppRequests,
-                                                    refine = model::refineTool, immersive = currentImmersive,
-                                                    alignDetailStart = currentLibraryOrigin && currentLayout.wide,
-                                                    exitImmersive = { immersiveExited = true },
-                                                    settings = { openSettings(SettingsSection.DeepSeek) }) { navigate(null) }
-                                            }
+                                        else Surface(Modifier.fillMaxSize()) {
+                                            ToolsPane(model.tools, currentSnapshot.selectedId, miniAppActions, miniAppRequests,
+                                                refine = model::refineTool, immersive = currentImmersive,
+                                                alignDetailStart = currentLibraryOrigin && currentLayout.wide,
+                                                exitImmersive = { immersiveExited = true },
+                                                settings = { openSettings(SettingsSection.DeepSeek) }) { navigate(null) }
                                         }
                                     }
                                     ShellDestination.Search -> SearchPane(
@@ -470,9 +460,7 @@ import kotlinx.coroutines.launch
             entryRequest = chatCourseEntry.request, composerModel = model,
             onOutlineApplied = model::updateChatCourse)
     }
-    MaterialTheme(colorScheme = if (destination == ShellDestination.MiniApps && !immersive) miniAppColors else MaterialTheme.colorScheme) {
-        MiniAppActionDialogs(model.tools, miniAppActions)
-    }
+    MiniAppActionDialogs(model.tools, miniAppActions)
     model.nativeRefinementTarget?.let { target ->
         key(model.tools, target) {
             NativeToolEditDialog(model.tools, target, model::dismissNativeRefinement)

@@ -103,19 +103,26 @@ class SavedCourseShellWorkflowTest {
         robot.waitFor(robot.text(R.string.course_library))
     }
 
-    private fun seedCourse(fixture: ShellFixture) {
-        val ui = """{"type":"text","text":"$SLIDE_TEXT"}"""
-        val definition = """{"formatVersion":3,"title":"Saved course fixture","description":"","capabilities":[],
-            "stateSchema":{"value":"string"},"initialState":{"value":""},"ui":$ui,"source":"return {state:input.state};"}"""
-        CourseStore(fixture.context, databaseName(fixture)).use { store ->
-            val course = store.create(CourseSetup(COURSE_TITLE, "Beginner", "Practice saved examples"),
-                CourseOutline(listOf(CourseLessonPlan("lesson", "Saved lesson", listOf(
-                    CourseSlidePlan("example", CourseSlideKind.EXPLANATION, "Read a saved example"),
-                    CourseSlidePlan("summary", CourseSlideKind.SUMMARY, "Review the example"),
-                )))))
-            val operation = store.beginGeneration(course.id, course.revision, "example")
-            store.commitGeneration(operation, CourseSlideContent(definition, ui, """{"value":""}"""))
+    internal companion object {
+        const val COURSE_TITLE = "Saved course for the shell"
+        const val SLIDE_TEXT = "Saved shell course slide"
+
+        fun seedCourse(fixture: ShellFixture) {
+            val ui = """{"type":"text","text":"$SLIDE_TEXT"}"""
+            val definition = """{"formatVersion":3,"title":"Saved course fixture","description":"","capabilities":[],
+                "stateSchema":{"value":"string"},"initialState":{"value":""},"ui":$ui,"source":"return {state:input.state};"}"""
+            CourseStore(fixture.context, databaseName(fixture)).use { store ->
+                val course = store.create(CourseSetup(COURSE_TITLE, "Beginner", "Practice saved examples"),
+                    CourseOutline(listOf(CourseLessonPlan("lesson", "Saved lesson", listOf(
+                        CourseSlidePlan("example", CourseSlideKind.EXPLANATION, "Read a saved example"),
+                        CourseSlidePlan("summary", CourseSlideKind.SUMMARY, "Review the example"),
+                    )))))
+                val operation = store.beginGeneration(course.id, course.revision, "example")
+                store.commitGeneration(operation, CourseSlideContent(definition, ui, """{"value":""}"""))
+            }
         }
+
+        fun databaseName(fixture: ShellFixture) = "${fixture.store.databaseName}-courses.db"
     }
 
     private fun withFixture(test: (ShellFixture) -> Unit) {
@@ -126,12 +133,5 @@ class SavedCourseShellWorkflowTest {
             fixture.remove()
             fixture.context.deleteDatabase(databaseName(fixture))
         }
-    }
-
-    private fun databaseName(fixture: ShellFixture) = "${fixture.store.databaseName}-courses.db"
-
-    private companion object {
-        const val COURSE_TITLE = "Saved course for the shell"
-        const val SLIDE_TEXT = "Saved shell course slide"
     }
 }

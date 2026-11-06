@@ -5,12 +5,17 @@ import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Rect
 import android.os.SystemClock
+import android.util.Log
 import androidx.annotation.StringRes
 import androidx.compose.ui.graphics.toArgb
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.R
+import com.alpha.assistant.tools.ToolRecord
+import com.alpha.assistant.tools.ToolSpec
+import com.alpha.assistant.tools.ToolStore
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -93,6 +98,99 @@ class ShellScreenshotTest {
         fixture.launch().use { scenario ->
             robot.waitFor(robot.text(R.string.desktop_prompt))
             captureSettings(scenario, directory)
+        }
+    }
+
+    @Test fun destinationColorsFollowTheShellInBothModes() {
+        val night = checkNotNull(Regex("""Night mode: (\S+)""").find(robot.shell("cmd uimode night"))).groupValues[1]
+        val nightBits = Resources.getSystem().configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        val root = checkNotNull(fixture.context.getExternalFilesDir("alphy-theme-screens"))
+        val failures = mutableListOf<String>()
+        try {
+            fixture.install()
+            SavedCourseShellWorkflowTest.seedCourse(fixture)
+            val spec = ToolSpec.parse("""{"formatVersion":3,"title":"Theme fixture","description":"","capabilities":[],
+                "stateSchema":{"value":"string"},"initialState":{"value":""},"ui":{"type":"text","text":"Theme fixture content"},
+                "source":"return {state:input.state};"}""")
+            ToolStore(fixture.context, "${fixture.store.databaseName}-tools.db").use { store ->
+                store.commitTool(ToolRecord("theme-fixture", 1, 1, spec.json, spec.initialState, spec.ui.toString(), "chat", true), null, true)
+            }
+            for ((mode, bits) in listOf("no" to Configuration.UI_MODE_NIGHT_NO, "yes" to Configuration.UI_MODE_NIGHT_YES)) {
+                setNight(mode, bits)
+                val dir = File(root, mode).apply { mkdirs() }
+                fixture.launch().use { scenario ->
+                    scenario.onActivity { assertEquals(bits, it.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) }
+                    val colors = alphaColorScheme(fixture.context, mode == "yes")
+                    fun capture(name: String, vararg roles: Pair<String, Int>, bounds: Rect? = null) {
+                        val image = screen(dir, name)
+                        try { checkColors(image, "$mode/$name", roles, failures, bounds) } finally { image.recycle() }
+                    }
+                    val background = "background" to colors.background.toArgb()
+                    val surface = "surface" to colors.surface.toArgb()
+                    val primary = "primary" to colors.primary.toArgb()
+                    robot.waitFor(robot.text(R.string.desktop_prompt))
+                    capture("desktop", background)
+                    open(scenario, R.string.course_learning)
+                    robot.click(SavedCourseShellWorkflowTest.COURSE_TITLE)
+                    robot.click(robot.text(R.string.course_open))
+                    robot.waitFor(SavedCourseShellWorkflowTest.SLIDE_TEXT)
+                    capture("learning-player", background, primary)
+                    robot.back()
+                    robot.waitFor(robot.text(R.string.course_outline))
+                    open(scenario, R.string.automations)
+                    robot.waitFor(robot.text(R.string.automation_empty_title))
+                    capture("automations", surface, primary)
+                    open(scenario, R.string.mini_apps)
+                    robot.waitFor("Theme fixture")
+                    capture("mini-app-library", surface, primary, bounds = robot.composedBounds(scenario, "mini-app-library").first)
+                    robot.click("Theme fixture")
+                    robot.waitFor("Theme fixture content")
+                    capture("mini-app-host", surface, bounds = robot.composedBounds(scenario, "mini-app").first)
+                    robot.click(robot.text(R.string.tool_options))
+                    robot.click(robot.text(R.string.tool_versions))
+                    robot.waitFor(robot.text(R.string.tool_version_current))
+                    capture("mini-app-dialog", "surfaceContainerHigh" to colors.surfaceContainerHigh.toArgb())
+                    robot.click(robot.text(R.string.tool_dialog_close))
+                    robot.click(robot.text(R.string.tool_library_back))
+                    robot.waitFor(robot.text(R.string.tool_search))
+                    open(scenario, R.string.search)
+                    robot.waitFor(robot.text(R.string.search_field))
+                    capture("search", background)
+                    robot.click(robot.text(R.string.search_back))
+                    open(scenario, R.string.settings)
+                    robot.waitUntil { robot.composed(scenario, "settings-menu") && robot.secure(scenario) }
+                    val settings = settled { draw(scenario) }
+                    try {
+                        save(dir, "settings", settings)
+                        val menuColor = if (robot.composed(scenario, "settings-detail")) {
+                            "surfaceContainerLow" to colors.surfaceContainerLow.toArgb()
+                        } else background
+                        checkColors(settings, "$mode/settings", arrayOf(menuColor), failures,
+                            robot.composedBounds(scenario, "settings-menu").first)
+                    } finally { settings.recycle() }
+                    robot.back()
+                    robot.waitFor(robot.text(R.string.desktop_prompt))
+                    robot.waitUntil { !robot.secure(scenario) }
+                    capture("returned-desktop", background)
+                }
+            }
+        } finally {
+            try { setNight(night, nightBits) } finally { fixture.context.deleteDatabase(SavedCourseShellWorkflowTest.databaseName(fixture)) }
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
+    private fun checkColors(
+        image: Bitmap, screen: String, roles: Array<out Pair<String, Int>>, failures: MutableList<String>, bounds: Rect?,
+    ) {
+        val region = bounds ?: Rect(0, 0, image.width, image.height)
+        val pixels = IntArray(region.width() * region.height())
+        image.getPixels(pixels, 0, region.width(), region.left, region.top, region.width(), region.height())
+        for ((role, color) in roles) {
+            val count = pixels.count { it == color }
+            val result = "$screen $role #${Integer.toHexString(color)}: $count pixels"
+            Log.i("AlphyThemeWorkflow", result)
+            if (count < 32) failures += result
         }
     }
 

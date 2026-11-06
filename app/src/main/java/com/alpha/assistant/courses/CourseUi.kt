@@ -2,7 +2,6 @@ package com.alpha.assistant.courses
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -68,7 +67,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -399,28 +397,26 @@ internal fun CourseLibraryScreen(
     if (fullWindow) {
         Dialog(onDismissRequest = { if (tutorSession.open) tutorSession.close() else back() },
             properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-            CoursePlayerTheme(playing) {
-                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    CoursePlayerLayout(
-                        session = tutorSession,
-                        slide = slide,
-                        composerModel = composerModel.takeIf { tutor != null },
-                        backLabel = backLabel,
-                        busy = busy,
-                        onBack = ::back,
-                        slidePane = {
-                            if (slide == null) {
-                                CoursePageFrame(Modifier.fillMaxSize(), backLabel, busy, notice, ::back) { PageContent() }
-                            } else {
-                                Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-                                    if (notice != 0) Text(stringResource(notice),
-                                        Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-                                    PageContent()
-                                }
+            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                CoursePlayerLayout(
+                    session = tutorSession,
+                    slide = slide,
+                    composerModel = composerModel.takeIf { tutor != null },
+                    backLabel = backLabel,
+                    busy = busy,
+                    onBack = ::back,
+                    slidePane = {
+                        if (slide == null) {
+                            CoursePageFrame(Modifier.fillMaxSize(), backLabel, busy, notice, ::back) { PageContent() }
+                        } else {
+                            Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                                if (notice != 0) Text(stringResource(notice),
+                                    Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                                PageContent()
                             }
-                        },
-                    )
-                }
+                        }
+                    },
+                )
             }
         }
     } else {
@@ -442,35 +438,6 @@ private fun CoursePageFrame(
         if (notice != 0) Text(stringResource(notice), Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         content()
     }
-}
-
-@Composable
-private fun CoursePlayerTheme(playing: Boolean, content: @Composable () -> Unit) {
-    if (!playing) {
-        content()
-        return
-    }
-    val shell = MaterialTheme.colorScheme
-    val colors = if (isSystemInDarkTheme()) shell.copy(
-        primary = Color(0xFFA6D7B9), onPrimary = Color(0xFF103824),
-        primaryContainer = Color(0xFF204F36), onPrimaryContainer = Color(0xFFD0EDD8),
-        secondaryContainer = Color(0xFF294632), onSecondaryContainer = Color(0xFFD6EADB),
-        background = Color(0xFF171A17), onBackground = Color(0xFFE4E9E0),
-        surface = Color(0xFF171A17), onSurface = Color(0xFFE4E9E0),
-        onSurfaceVariant = Color(0xFFC3CDC2), outlineVariant = Color(0xFF454F45),
-        surfaceContainerLow = Color(0xFF202620), surfaceContainer = Color(0xFF252D25),
-        surfaceContainerHigh = Color(0xFF2D362D), surfaceTint = Color(0xFFA6D7B9),
-    ) else shell.copy(
-        primary = Color(0xFF196344), onPrimary = Color.White,
-        primaryContainer = Color(0xFFD5E6D9), onPrimaryContainer = Color(0xFF124831),
-        secondaryContainer = Color(0xFFDBEAD8), onSecondaryContainer = Color(0xFF213C29),
-        background = Color(0xFFF9F8F5), onBackground = Color(0xFF1A1D19),
-        surface = Color(0xFFF9F8F5), onSurface = Color(0xFF1A1D19),
-        onSurfaceVariant = Color(0xFF444D44), outlineVariant = Color(0xFFCDD4CA),
-        surfaceContainerLow = Color(0xFFECEFE8), surfaceContainer = Color(0xFFE8EAE5),
-        surfaceContainerHigh = Color(0xFFE1E6DF), surfaceTint = Color(0xFF196344),
-    )
-    MaterialTheme(colorScheme = colors, content = content)
 }
 
 @OptIn(ExperimentalMaterial3AdaptiveApi::class, ExperimentalMaterial3Api::class)

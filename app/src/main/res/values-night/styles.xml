@@ -4,4 +4,10 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
+    <style name="Theme.Alpha.CompactTimePicker" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:timePickerStyle">@style/Widget.Alpha.CompactTimePicker</item>
+    </style>
+    <style name="Widget.Alpha.CompactTimePicker" parent="android:style/Widget.Material.TimePicker">
+        <item name="android:timePickerMode">spinner</item>
+    </style>
 </resources>

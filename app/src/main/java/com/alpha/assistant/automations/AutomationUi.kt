@@ -151,7 +151,7 @@ private val automationChatProposalSaver = listSaver<AutomationChatProposal?, Str
     split: AutomationPaneSplit? = null,
     createInChat: () -> Unit = {},
     exit: () -> Unit = {},
-) = AutomationTheme {
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val appLabels=remember { context.packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0)

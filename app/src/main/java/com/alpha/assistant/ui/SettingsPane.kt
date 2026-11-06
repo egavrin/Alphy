@@ -4,7 +4,6 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -93,19 +92,8 @@ internal fun SettingsPane(
     select: (SettingsSection?) -> Unit,
     openUpdateInstaller: () -> Unit,
 ) {
-    val colors = MaterialTheme.colorScheme
-    val settingsColors = if (isSystemInDarkTheme()) colors else colors.copy(
-        background = Color(0xFFF5F7FC), surfaceContainerLow = Color(0xFFEDF1FB),
-        surface = Color.White, onSurface = Color(0xFF19213A), onSurfaceVariant = Color(0xFF556178),
-        outline = Color(0xFF9DA9C3), outlineVariant = Color(0xFFE4E8F2),
-        primary = Color(0xFF4056A6), onPrimary = Color.White, primaryContainer = Color(0xFFDFE6FF),
-        onPrimaryContainer = Color(0xFF253D92), secondaryContainer = Color(0xFFE9EEFF),
-        onSecondaryContainer = Color(0xFF294397),
-    )
-    MaterialTheme(colorScheme = settingsColors) {
-        CompositionLocalProvider(LocalContentColor provides settingsColors.onSurface) {
-            SettingsLayout(model, selected, hinge, select, openUpdateInstaller)
-        }
+    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+        SettingsLayout(model, selected, hinge, select, openUpdateInstaller)
     }
 }
 

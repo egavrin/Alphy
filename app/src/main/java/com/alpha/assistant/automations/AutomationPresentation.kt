@@ -36,24 +36,6 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-@Composable internal fun AutomationTheme(content: @Composable () -> Unit) {
-    val colors = MaterialTheme.colorScheme
-    val dark = isSystemInDarkTheme()
-    MaterialTheme(
-        colorScheme = colors.copy(
-            primary = if (dark) Color(0xFFC5C2FF) else Color(0xFF4541AD),
-            onPrimary = if (dark) Color(0xFF272478) else Color.White,
-            primaryContainer = if (dark) Color(0xFF37347D) else Color(0xFFE8E7FA),
-            onPrimaryContainer = if (dark) Color(0xFFE8E7FA) else Color(0xFF292686),
-            surface = if (dark) Color(0xFF171720) else Color(0xFFFAFAFC),
-            surfaceContainer = if (dark) Color(0xFF22222D) else Color(0xFFF5F5FA),
-            surfaceContainerHigh = if (dark) Color(0xFF282834) else Color(0xFFFAFAFC),
-            outlineVariant = if (dark) Color(0xFF49495C) else Color(0xFFDCDDE7),
-        ),
-        content = content,
-    )
-}
-
 private val automationTimeFormat = DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT)
 
 @Composable internal fun automationRunTime(at: Long): String {
