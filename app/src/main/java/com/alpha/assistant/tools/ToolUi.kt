@@ -331,9 +331,9 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
 ) {
     val available = remember(tool.spec) { ToolSpec.availablePersisted(tool.spec) != null }
     val enabled = !controller.busy
-    item(R.string.tool_versions, Glyph.History, true) { dismiss(); actions.request = tool.id to MiniAppAction.Versions }
+    item(R.string.tool_versions, Glyph.Layers, true) { dismiss(); actions.request = tool.id to MiniAppAction.Versions }
     if (tool.saved && !tool.archived && available) {
-        item(R.string.tool_export, Glyph.Arrow, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.Export }
+        item(R.string.tool_export, Glyph.Export, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.Export }
         item(R.string.tool_manual_edit, Glyph.Compose, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.ManualEdit }
         item(if (tool.onDesktop) R.string.tool_desktop_remove else R.string.tool_desktop_add, Glyph.Grid, enabled) {
             dismiss()
@@ -344,9 +344,9 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
         item(R.string.recurring_search_title, Glyph.Repeat, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.RecurringSearch }
     }
     if (archive != null && tool.saved && !tool.archived) {
-        item(R.string.tool_archive_action, Glyph.File, archiveEnabled && enabled) { dismiss(); archive() }
+        item(R.string.tool_archive_action, Glyph.Archive, archiveEnabled && enabled) { dismiss(); archive() }
     }
-    if (tool.saved) item(R.string.delete, Glyph.Close, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.Delete }
+    if (tool.saved) item(R.string.delete, Glyph.Trash, enabled) { dismiss(); actions.request = tool.id to MiniAppAction.Delete }
 }
 
 @Composable private fun MiniAppActionRow(label: Int, glyph: Glyph, enabled: Boolean = true, action: () -> Unit) {
@@ -361,8 +361,10 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
             .heightIn(min = 52.dp).padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
-        Surface(Modifier.size(36.dp), shape = RoundedCornerShape(10.dp), color = colors.surfaceContainerHigh) {
-            Box(contentAlignment = Alignment.Center) { AlphaIcon(glyph, color = color) }
+        Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = colors.primaryContainer) {
+            Box(contentAlignment = Alignment.Center) {
+                AlphaIcon(glyph, color = if (enabled && label != R.string.delete) colors.primary else color)
+            }
         }
         Text(stringResource(label), Modifier.weight(1f), color = color, style = MaterialTheme.typography.bodyLarge)
         AlphaIcon(Glyph.Chevron, color = color)
@@ -552,7 +554,7 @@ catch (cancel: CancellationException) { throw cancel }
 catch (_: Exception) { null }
 
 @Composable internal fun ToolsPane(controller: ToolController, conversationId: String?, actions: MiniAppActions,
-    requests: MutableState<Map<String, String>>, refine: (String) -> Unit, immersive: Boolean=false, exitImmersive: () -> Unit = {}, settings: () -> Unit, close: () -> Unit) {
+    requests: MutableState<Map<String, String>>, refine: (String) -> Unit, immersive: Boolean=false, alignDetailStart: Boolean = false, exitImmersive: () -> Unit = {}, settings: () -> Unit, close: () -> Unit) {
     val draft=controller.drafts.find {it.id == controller.selectedDraftId}
     val tool=controller.tools.find {it.id == (controller.selectedId ?: draft?.toolId)}
     val contextId=tool?.id ?: draft?.toolId ?: "new"
@@ -569,7 +571,7 @@ catch (_: Exception) { null }
     }
     if (tool != null || draft != null) key(tool?.id, draft?.id) {
         FocusedToolPane(controller,tool,draft,prompt,edit,submit,{archiveConfirm=true},actions,refine,immersive,exitImmersive,settings,close,
-            hostCovered = archiveConfirm)
+            hostCovered = archiveConfirm, alignDetailStart = alignDetailStart)
     }
     if(archiveConfirm && tool != null && !tool.archived) AlertDialog(onDismissRequest = { archiveConfirm = false },
         title = { Text(stringResource(R.string.tool_archive_title, ToolSpec.storedTitle(tool.spec))) },text = {
@@ -589,7 +591,7 @@ catch (_: Exception) { null }
 @OptIn(ExperimentalMaterial3Api::class,ExperimentalLayoutApi::class)
 @Composable private fun FocusedToolPane(controller: ToolController, tool: ToolRecord?, draft: ToolDraft?,
     prompt: String, edit: (String) -> Unit, submit: () -> Unit, archive: () -> Unit, actions: MiniAppActions, refine: (String) -> Unit,
-    immersive: Boolean, exitImmersive: () -> Unit, settings: () -> Unit, close: () -> Unit, hostCovered: Boolean) {
+    immersive: Boolean, exitImmersive: () -> Unit, settings: () -> Unit, close: () -> Unit, hostCovered: Boolean, alignDetailStart: Boolean) {
     val spec=remember(tool?.spec) {tool?.let {ToolSpec.availablePersisted(it.spec)}}
     val graphicsHost = if (tool != null && spec != null && (spec.surfaces.isNotEmpty() || immersive)) {
         remember(controller, tool.id, tool.revision) {
@@ -668,6 +670,7 @@ catch (_: Exception) { null }
         val dismiss = { menu = false }
         val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         val scope = rememberCoroutineScope()
+        val sheetHeight = (LocalConfiguration.current.screenHeightDp * 0.72f).dp
         ModalBottomSheet(
             onDismissRequest = dismiss,
             sheetState = sheet,
@@ -684,29 +687,35 @@ catch (_: Exception) { null }
                     }
                 }
             }
-            Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState())
-                .padding(start = 20.dp, end = 20.dp, bottom = 24.dp)) {
+            Column(Modifier.fillMaxWidth().heightIn(max = sheetHeight)
+                .padding(start = 20.dp, end = 20.dp, bottom = 16.dp)) {
                 Text(optionsLabel, Modifier.padding(bottom = 12.dp).semantics { heading() },
                     style = MaterialTheme.typography.titleLarge)
-                if (tool != null) {
-                    MiniAppActionRow(R.string.tool_details_desktop, Glyph.Screen) { details = "details"; dismiss() }
-                    MiniAppActionRow(R.string.tool_access_history, Glyph.Shield) { details = "access"; dismiss() }
-                    MiniAppMenuItems(controller, tool, actions, item = { label, glyph, enabled, action ->
-                        MiniAppActionRow(label, glyph, enabled, action)
-                    }, archive = archive, archiveEnabled = draft == null, dismiss = dismiss)
+                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                    if (tool != null) {
+                        MiniAppActionRow(R.string.tool_details_desktop, Glyph.Info) { details = "details"; dismiss() }
+                        MiniAppActionRow(R.string.tool_access_history, Glyph.Shield) { details = "access"; dismiss() }
+                        MiniAppMenuItems(controller, tool, actions, item = { label, glyph, enabled, action ->
+                            MiniAppActionRow(label, glyph, enabled, action)
+                        }, archive = archive, archiveEnabled = draft == null, dismiss = dismiss)
+                    }
+                    MiniAppActionRow(R.string.tool_chat, Glyph.Back) { dismiss(); close() }
                 }
-                MiniAppActionRow(R.string.tool_chat, Glyph.Back) { dismiss(); close() }
             }
         }
     }
-    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+    BoxWithConstraints(Modifier.fillMaxSize(),
+        contentAlignment = if (alignDetailStart) Alignment.TopStart else Alignment.TopCenter) {
     val refinementHeight=minOf(240.dp,maxHeight*0.45f)
-    Column(Modifier.widthIn(max = 640.dp).fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 8.dp),verticalAlignment=Alignment.CenterVertically) {
+    val detailGutter = if (alignDetailStart) 28.dp else 20.dp
+    val showPreviewIcons = LocalConfiguration.current.fontScale <= 1.3f && maxWidth >= 360.dp
+    Column(Modifier.widthIn(max = if (alignDetailStart) 780.dp else 640.dp).fillMaxSize().padding(top = 8.dp)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = detailGutter - 8.dp),verticalAlignment=Alignment.CenterVertically) {
             IconButton(onClick={controller.select(null)},modifier=Modifier.semantics {contentDescription=libraryBackLabel}) {AlphaIcon(Glyph.Back)}
             val header = if (preview != null) R.string.tool_preview_changes else R.string.mini_apps
-            Text(stringResource(header), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-            IconButton(onClick={menu=true},modifier=Modifier.semantics {contentDescription=optionsLabel}) {AlphaIcon(Glyph.More)}
+            if (alignDetailStart && preview == null) Spacer(Modifier.weight(1f))
+            else Text(stringResource(header), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+            IconButton(onClick={menu=true},modifier=Modifier.semantics {contentDescription=optionsLabel}) {AlphaIcon(Glyph.MoreVertical)}
         }
         if(controller.busy) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -730,21 +739,32 @@ catch (_: Exception) { null }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
         // Reserve the metadata, status, two native control rows, saved summary, and pane spacing.
         val canvasHeight=(maxHeight-330.dp).coerceAtLeast(120.dp)
-        Column(Modifier.fillMaxSize().verticalScroll(scroll).semantics {contentDescription=contentLabel}.padding(horizontal = 20.dp, vertical = 16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
-            if (preview != null) Text(stringResource(if (readyDraft == null) R.string.tool_preview_provisional else R.string.tool_preview_label),
-                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(candidate?.title ?: spec?.title ?: tool?.let { ToolSpec.storedTitle(it.spec) } ?: stringResource(R.string.tool_new),
-                    Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
+        Column(Modifier.fillMaxSize().verticalScroll(scroll).semantics {contentDescription=contentLabel}
+            .padding(horizontal = detailGutter, vertical = 20.dp),verticalArrangement=Arrangement.spacedBy(20.dp)) {
+            val title = candidate?.title ?: spec?.title ?: tool?.let { ToolSpec.storedTitle(it.spec) } ?: stringResource(R.string.tool_new)
+            val description = candidate?.description ?: spec?.description
+            val showBadge = preview != null || tool?.archived == true
+            val descriptionAfterContent = preview == null && tool?.saved == true && !tool.archived
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (showBadge) MiniAppBadge(title, size = 56.dp, draft = preview != null)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
+                    if (showBadge && !description.isNullOrBlank()) {
+                        Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 if (tool != null && spec != null && tool.saved && !tool.archived && draft == null) {
                     TextButton(onClick = { refine(tool.id) }, modifier = Modifier.heightIn(min = 48.dp)) {
                         Text(stringResource(R.string.tool_refine))
                     }
                 }
             }
-            val description = candidate?.description ?: spec?.description
-            val descriptionAfterContent = preview == null && tool?.saved == true && !tool.archived
-            if (!descriptionAfterContent && !description.isNullOrBlank()) {
+            if (preview != null) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Text(stringResource(if (readyDraft == null) R.string.tool_preview_provisional else R.string.tool_preview_label),
+                    style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            }
+            if (!showBadge && !descriptionAfterContent && !description.isNullOrBlank()) {
                 Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if(preview != null && spec != null) Text(stringResource(R.string.tool_preview_changes_label, spec.title),style=MaterialTheme.typography.bodySmall)
@@ -770,8 +790,10 @@ catch (_: Exception) { null }
             else if(tool != null) {
                 if(tool.archived) {
                     Text(stringResource(R.string.tool_archived_detail), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(onClick={controller.recover(tool)}, enabled=!controller.busy,
+                    Button(onClick={controller.recover(tool)}, enabled=!controller.busy, shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                        AlphaIcon(Glyph.History, Modifier.size(18.dp), color = LocalContentColor.current)
+                        Spacer(Modifier.width(8.dp))
                         Text(stringResource(R.string.tool_archive_restore))
                     }
                 }
@@ -793,15 +815,30 @@ catch (_: Exception) { null }
             }
         }
         }
-        if (readyDraft != null || savedDraft != null || canEditRequest) Surface(
-            color=MaterialTheme.colorScheme.surface,tonalElevation=2.dp,shadowElevation=4.dp
-        ) {
+        if (readyDraft != null || savedDraft != null || canEditRequest) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Column(Modifier.fillMaxWidth().heightIn(max=refinementHeight).verticalScroll(rememberScrollState())
-                .semantics {contentDescription=refinementLabel}.padding(horizontal=16.dp,vertical=12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                .semantics {contentDescription=refinementLabel}.padding(horizontal=detailGutter,vertical=12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 if(readyDraft != null) {
                     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick={controller.reject(readyDraft.id)},enabled=!controller.busy,modifier=Modifier.weight(1f).heightIn(min=48.dp)) {Text(stringResource(R.string.tool_discard_preview))}
-                        Button(onClick={controller.accept(readyDraft.id)},enabled=!controller.busy,modifier=Modifier.weight(1f).heightIn(min=48.dp)) {Text(stringResource(R.string.tool_apply_changes))}
+                        val shape = RoundedCornerShape(12.dp)
+                        val actionPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+                        OutlinedButton(onClick = { controller.reject(readyDraft.id) }, enabled = !controller.busy,
+                            modifier = Modifier.weight(1f).heightIn(min = 48.dp), shape = shape, contentPadding = actionPadding) {
+                            if (showPreviewIcons) {
+                                AlphaIcon(Glyph.Trash, Modifier.size(18.dp), color = LocalContentColor.current)
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text(stringResource(R.string.tool_discard_preview))
+                        }
+                        Button(onClick = { controller.accept(readyDraft.id) }, enabled = !controller.busy,
+                            modifier = Modifier.weight(1f).heightIn(min = 48.dp), shape = shape, contentPadding = actionPadding) {
+                            if (showPreviewIcons) {
+                                AlphaIcon(Glyph.Check, Modifier.size(18.dp), color = LocalContentColor.current)
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text(stringResource(R.string.tool_apply_changes))
+                        }
                     }
                 } else if (savedDraft != null) {
                     Text(savedDraft.prompt, style=MaterialTheme.typography.bodyLarge)

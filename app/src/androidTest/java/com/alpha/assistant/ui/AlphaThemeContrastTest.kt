@@ -9,6 +9,8 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.core.graphics.ColorUtils
 import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
+import com.alpha.assistant.tools.MiniAppsDarkColors
+import com.alpha.assistant.tools.MiniAppsLightColors
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -17,7 +19,8 @@ class AlphaThemeContrastTest {
     @Test fun everySchemeKeepsBodyContrast() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val schemes = mapOf("fixed light" to AlphaLightColors, "fixed dark" to AlphaDarkColors,
-            "device light" to alphaColorScheme(context, false), "device dark" to alphaColorScheme(context, true))
+            "device light" to alphaColorScheme(context, false), "device dark" to alphaColorScheme(context, true),
+            "mini apps light" to MiniAppsLightColors, "mini apps dark" to MiniAppsDarkColors)
         for ((name, s) in schemes) for ((pair, colors) in mapOf(
             "onSurface/surface" to (s.onSurface to s.surface),
             "onSurface/surfaceContainer" to (s.onSurface to s.surfaceContainer),

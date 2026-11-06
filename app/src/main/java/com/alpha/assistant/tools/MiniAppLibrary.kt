@@ -2,7 +2,13 @@ package com.alpha.assistant.tools
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
@@ -14,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -21,13 +28,15 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.KEY_ERRORS
 import com.alpha.assistant.ui.AlphaIcon
 import com.alpha.assistant.ui.Glyph
-import com.alpha.assistant.ui.MiniAppIcon
+import com.alpha.assistant.ui.RussianHyphenation
 
 @Composable internal fun MiniAppLibrary(
     controller: ToolController,
@@ -40,6 +49,7 @@ import com.alpha.assistant.ui.MiniAppIcon
     var query by rememberSaveable { mutableStateOf("") }
     var options by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
+    val colors = MaterialTheme.colorScheme
     val libraryLabel = stringResource(R.string.tool_library_content)
     val optionsLabel = stringResource(R.string.tool_catalog_options)
     val menuLabel = stringResource(R.string.menu)
@@ -55,50 +65,57 @@ import com.alpha.assistant.ui.MiniAppIcon
     }
 
     Surface(Modifier.fillMaxSize().testTag("mini-app-library").semantics { contentDescription = libraryLabel }) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Row(
-                Modifier.widthIn(max = 640.dp).fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onMenu, Modifier.semantics { contentDescription = menuLabel }) { AlphaIcon(Glyph.Menu) }
-                Text(stringResource(R.string.mini_apps), Modifier.weight(1f).padding(horizontal = 4.dp)
-                    .semantics { heading() }, style = MaterialTheme.typography.titleLarge)
-                Box {
-                    IconButton(onClick = { options = true }, Modifier.semantics { contentDescription = optionsLabel }) {
-                        AlphaIcon(Glyph.More)
-                    }
-                    DropdownMenu(options, { options = false }) {
-                        DropdownMenuItem(text = { Text(stringResource(R.string.tool_import)) }, onClick = {
-                            options = false
-                            importer.launch(arrayOf("application/zip", "application/octet-stream"))
-                        }, enabled = !controller.busy)
+        Column(Modifier.fillMaxSize().padding(top = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            BoxWithConstraints(Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
+                val titleStyle = MaterialTheme.typography.titleLarge.let {
+                    if (maxWidth < 360.dp) it.copy(fontSize = 20.sp) else it
+                }
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onMenu, Modifier.semantics { contentDescription = menuLabel }) { AlphaIcon(Glyph.Menu) }
+                    Text(stringResource(R.string.mini_apps), Modifier.weight(1f).padding(horizontal = 4.dp)
+                        .semantics { heading() }, style = titleStyle.merge(RussianHyphenation))
+                    Box {
+                        IconButton(onClick = { options = true }, Modifier.semantics { contentDescription = optionsLabel }) {
+                            AlphaIcon(Glyph.MoreVertical)
+                        }
+                        DropdownMenu(options, { options = false }) {
+                            DropdownMenuItem(text = { Text(stringResource(R.string.tool_import)) }, onClick = {
+                                options = false
+                                importer.launch(arrayOf("application/zip", "application/octet-stream"))
+                            }, enabled = !controller.busy)
+                        }
                     }
                 }
             }
             LazyColumn(
                 Modifier.widthIn(max = 640.dp).fillMaxWidth().weight(1f),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 24.dp),
             ) {
                 item {
-                    OutlinedTextField(
-                        query, { query = it }, Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                        label = { Text(stringResource(R.string.tool_search), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        leadingIcon = { AlphaIcon(Glyph.Search) }, singleLine = true, shape = RoundedCornerShape(14.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                        ),
-                    )
-                    PrimaryTabRow(selectedTabIndex = if (archived) 1 else 0) {
+                    LibrarySearch(query, { query = it })
+                    Spacer(Modifier.height(8.dp))
+                    val tab = if (archived) 1 else 0
+                    PrimaryTabRow(
+                        selectedTabIndex = tab,
+                        indicator = {
+                            TabRowDefaults.SecondaryIndicator(Modifier.tabIndicatorOffset(tab, matchContentSize = false),
+                                height = 2.dp, color = colors.primary)
+                        },
+                        divider = { HorizontalDivider(color = colors.outlineVariant) },
+                    ) {
                         Tab(selected = !archived, onClick = {
                             focus.clearFocus()
                             onArchiveChange(false)
-                        }, text = { Text(stringResource(R.string.tool_saved)) })
+                        }, text = { Text(stringResource(R.string.tool_saved)) },
+                            selectedContentColor = colors.primary, unselectedContentColor = colors.onSurfaceVariant)
                         Tab(selected = archived, onClick = {
                             focus.clearFocus()
                             onArchiveChange(true)
-                        }, text = { Text(stringResource(R.string.tool_archive)) })
+                        }, text = { Text(stringResource(R.string.tool_archive)) },
+                            selectedContentColor = colors.primary, unselectedContentColor = colors.onSurfaceVariant)
                     }
                 }
                 if (!hasDetail && controller.busy) item {
@@ -112,18 +129,21 @@ import com.alpha.assistant.ui.MiniAppIcon
                 } }
                 if (!archived && controller.drafts.isNotEmpty()) {
                     item {
-                        Text(stringResource(R.string.tool_drafts), Modifier.padding(top = 14.dp, bottom = 4.dp)
+                        Text(stringResource(R.string.tool_drafts), Modifier.padding(top = 20.dp, bottom = 6.dp)
                             .semantics { heading() }, style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     items(controller.drafts, key = { "draft-" + it.id }) { draft ->
-                        LibraryRow(draft.prompt.take(100), null, controller.selectedDraftId == draft.id, !controller.busy, Glyph.Compose) {
+                        val badgeTitle = remember(draft.candidate) { draft.candidate?.let { ToolSpec.availablePersisted(it)?.title } }
+                        LibraryRow(draft.prompt.take(100), null, controller.selectedDraftId == draft.id, !controller.busy,
+                            badgeTitle = badgeTitle, draft = true) {
                             focus.clearFocus()
                             onOpen()
                             controller.selectDraft(draft.id)
                         }
                     }
-                }
+                    item { Spacer(Modifier.height(12.dp)) }
+                } else if (tools.isNotEmpty()) item { Spacer(Modifier.height(10.dp)) }
                 if (tools.isEmpty()) item {
                     Text(stringResource(when {
                         query.isNotBlank() -> R.string.tool_no_matches
@@ -146,36 +166,65 @@ import com.alpha.assistant.ui.MiniAppIcon
     }
 }
 
+@Composable private fun LibrarySearch(query: String, change: (String) -> Unit) {
+    val label = stringResource(R.string.tool_search)
+    val colors = MaterialTheme.colorScheme
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(14.dp)
+    val style = MaterialTheme.typography.bodyMedium
+    BasicTextField(
+        value = query, onValueChange = change, singleLine = true,
+        modifier = Modifier.fillMaxWidth().semantics { contentDescription = label },
+        textStyle = style.copy(color = colors.onSurface), cursorBrush = SolidColor(colors.primary),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), interactionSource = interaction,
+        decorationBox = { input ->
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 48.dp).background(colors.surfaceContainerLow, shape)
+                    .border(1.dp, if (focused) colors.primary else colors.surfaceVariant, shape)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AlphaIcon(Glyph.Search, Modifier.size(20.dp))
+                Box(Modifier.weight(1f)) {
+                    if (query.isEmpty()) Text(label, style = style, color = colors.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    input()
+                }
+            }
+        },
+    )
+}
+
 @Composable private fun LibraryRow(
     title: String,
     description: String?,
     selected: Boolean,
     enabled: Boolean,
-    icon: Glyph? = null,
+    badgeTitle: String? = title,
+    draft: Boolean = false,
     open: () -> Unit,
 ) {
+    val colors = MaterialTheme.colorScheme
     Surface(
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        color = if (selected) colors.primaryContainer else Color.Transparent,
         shape = RoundedCornerShape(12.dp),
     ) {
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
                 .selectable(selected, enabled = enabled, role = Role.Button, onClick = open)
-                .heightIn(min = 68.dp).padding(horizontal = 10.dp, vertical = 8.dp),
+                .heightIn(min = if (draft) 64.dp else 76.dp).padding(horizontal = 6.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (icon == null) MiniAppIcon(title)
-            else Surface(Modifier.size(44.dp), shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.tertiaryContainer) {
-                Box(contentAlignment = Alignment.Center) { AlphaIcon(icon, color = MaterialTheme.colorScheme.onTertiaryContainer) }
-            }
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
+            MiniAppBadge(badgeTitle, draft = draft)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
                 if (!description.isNullOrBlank()) Text(description, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
+            if (draft) AlphaIcon(Glyph.Compose, Modifier.size(18.dp))
             AlphaIcon(Glyph.Chevron)
         }
     }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+    HorizontalDivider(color = colors.outlineVariant)
 }
