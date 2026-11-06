@@ -1317,10 +1317,20 @@ class AutomaticToolWorkflowTest {
             f.send("Do not send missing")
             main { f.model.select("removed-chat") }; f.send("Do not send removed")
             main { f.model.select("keep-chat") }; f.send("Change keep")
+            val survivingRequest = f.last.id
             val deletion = runBlocking { f.model.tools.prepareDeletion(f.toolStore.tool("missing")!!) }
             main { f.model.tools.delete(deletion); f.model.deleteConversation("removed-chat") }
             waitUntil { f.toolStore.tool("missing") == null && !f.model.tools.busy }
-            main { f.model.cancelRequest() }; f.idle()
+            main { f.model.cancelRequest() }
+            waitUntil {
+                var terminal = false
+                main {
+                    val status = f.model.snapshot.conversations.single { it.id == "keep-chat" }
+                        .messages.single { it.id == survivingRequest }.status
+                    terminal = status in setOf("complete", "error", "cancelled", "interrupted")
+                }
+                terminal
+            }
             assertEquals(listOf("Hold first","Change keep"),requests)
             assertEquals("tool_unavailable",f.model.snapshot.conversations.single { it.id == "chat" }.messages.last().errorCode)
             assertTrue(f.model.snapshot.conversations.none { it.id == "removed-chat" })

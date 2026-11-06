@@ -57,6 +57,7 @@ class DesktopCourseWorkflowTest {
             attention.forEach { reveal(it) }
             reveal(robot.text(R.string.desktop_now_course_detail, chosen.setup.topic, 2, 2))
             click(R.string.desktop_edit)
+            reveal(robot.text(R.string.desktop_done))
             click(R.string.desktop_add_course)
             click(R.string.desktop_place_course, chosen.setup.topic)
             click(R.string.desktop_done)
@@ -213,18 +214,7 @@ class DesktopCourseWorkflowTest {
         robot.click(label)
     }
 
-    private fun reveal(label: String): AccessibilityNodeInfo {
-        fun scrollBackward(node: AccessibilityNodeInfo?): Boolean {
-            if (node == null) return false
-            if (node.isScrollable && node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)) return true
-            return (0 until node.childCount).any { scrollBackward(node.getChild(it)) }
-        }
-        repeat(6) {
-            if (robot.find(label) != null || !scrollBackward(robot.diagnostics.freshRoot())) return robot.reveal(label)
-            robot.instrumentation.uiAutomation.waitForIdle(100, 3000)
-        }
-        return robot.reveal(label)
-    }
+    private fun reveal(label: String): AccessibilityNodeInfo = robot.reveal(label, forward = null)
 
     private fun seedCourse(title: String, reachedLesson: Int = 1, completed: Boolean = false, prepare: Boolean = true): CourseSnapshot =
         CourseStore(fixture.context, coursesName).use { store ->

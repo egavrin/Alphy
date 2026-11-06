@@ -751,7 +751,7 @@ class MiniAppPresentationWorkflowTest {
         screenshot("graphics-resumed")
         automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
         waitUntil {surface()==null}
-        shown("Содержимое библиотеки мини-приложений")
+        shown(instrumentation.targetContext.getString(R.string.tool_library_content))
         assertTrue(store.effects("lake").isEmpty())
         println("GRAPHICS_NATIVE touch=PASS durableState=PASS backgroundRelease=PASS back=PASS stateVersion=${saved.stateVersion}")
     }

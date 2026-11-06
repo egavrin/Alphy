@@ -18,6 +18,7 @@ import com.alpha.assistant.ui.ShellRobot
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.CopyOnWriteArrayList
@@ -30,8 +31,10 @@ class CourseEntryUiWorkflowTest {
     private val robot = ShellRobot("course-entry")
 
     @Test fun libraryShowsWhenTheCreationHostIsUnavailable() = withLibrary { _, store, saved ->
-        waitFor(R.string.course_new)
-        waitFor(R.string.course_creation_unavailable)
+        robot.waitFor(saved.setup.topic)
+        assertNull(robot.find(robot.text(R.string.course_new)))
+        robot.click(saved.setup.topic)
+        waitFor(R.string.course_outline)
         assertEquals(listOf(saved), store.courses())
     }
 

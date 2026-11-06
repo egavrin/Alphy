@@ -8,7 +8,6 @@ import com.alpha.assistant.R
 import com.alpha.assistant.data.Draft
 import com.alpha.assistant.surfaces.AssistContext
 import com.alpha.assistant.ui.FixtureProvider
-import com.alpha.assistant.ui.ShellDestination
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
@@ -27,7 +26,8 @@ class ExplicitChatMemoryWorkflowTest {
         scenario.onActivity {
             model.editDraft(draft)
             model.send()
-            assertEquals(ShellDestination.Memory, model.surfaceDestination)
+            assertNull(model.surfaceDestination)
+            assertTrue(model.memoryPage.reviewingChatFact)
             assertEquals(" Мой город — Казань.  ", model.memoryPage.draft?.text)
             assertEquals(draft, model.snapshot.draft)
             assertTrue(model.snapshot.conversations.isEmpty())
@@ -84,7 +84,9 @@ class ExplicitChatMemoryWorkflowTest {
             page.closeEditor()
             assertEquals(draft, model.snapshot.draft)
         }
-        robot.waitUntil { robot.find(robot.text(R.string.memory_add))?.isEnabled == true && !page.busy }
+        robot.waitGone(robot.text(R.string.memory_text))
+        robot.waitFor(robot.text(R.string.composer_label))
+        robot.waitUntil { !page.busy && page.draft == null }
         val path = fixture.context.getDatabasePath("${fixture.store.databaseName}-memory.db")
         SQLiteDatabase.openDatabase(path.path, null, SQLiteDatabase.OPEN_READWRITE).use { database ->
             database.execSQL("""CREATE TRIGGER fixture_reject_memory BEFORE INSERT ON memory_facts
