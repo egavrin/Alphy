@@ -65,13 +65,13 @@ def read_live_key(environment=None):
     raise RuntimeError("DEEPSEEK_API_KEY is absent from the process environment and ~/.env.")
 
 
-def transfer_key(adb, run_id, key):
+def transfer_key(adb, run_id, key, *, serial="emulator-5556"):
     payload = bytearray(key.encode("utf-8"))
     if not 1 <= len(payload) <= 8192 or not key.strip() or "\n" in key or "\r" in key:
         raise RuntimeError("DEEPSEEK_API_KEY has an invalid credential envelope.")
     port = None
     try:
-        result = subprocess.run(adb_command(adb, "forward", "tcp:0", "localabstract:compose-credential-" + run_id),
+        result = subprocess.run(adb_command(adb, "forward", "tcp:0", "localabstract:compose-credential-" + run_id, serial=serial),
                                 check=True, capture_output=True, text=True, env=child_environment())
         port = int(result.stdout.strip())
         with socket.create_connection(("127.0.0.1", port), timeout=5) as connection:
@@ -83,7 +83,7 @@ def transfer_key(adb, run_id, key):
     finally:
         payload[:] = b"\x00" * len(payload)
         if port is not None:
-            removed = subprocess.run(adb_command(adb, "forward", "--remove", "tcp:" + str(port)),
+            removed = subprocess.run(adb_command(adb, "forward", "--remove", "tcp:" + str(port), serial=serial),
                                      capture_output=True, env=child_environment())
             if removed.returncode != 0:
                 raise RuntimeError("Credential forward cleanup failed.")
@@ -100,6 +100,89 @@ def instrument_command(adb, scenario, repetition, revision, source_hash, live, s
     for key, value in args.items():
         command += ["-e", key, value]
     return command + [RUNNER]
+
+
+
+def run_course(args):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", args.label):
+        raise SystemExit("Use a course evidence label with letters, numbers, dots, dashes, or underscores.")
+    inputs = json.loads((ROOT / "app/src/androidTest/assets/course-scenarios.json").read_text())
+    run_id = "course-" + uuid.uuid4().hex[:12]
+    directory = args.output / args.label / run_id
+    directory.mkdir(parents=True, exist_ok=False)
+    manifest = {
+        "scenario": args.scenario, "input": inputs[args.scenario], "serial": args.serial,
+        "baseline": args.baseline, "status": "failed",
+    }
+    key = process = None
+    remote = "/sdcard/Android/data/com.alpha.assistant/files/course-acceptance/" + run_id
+
+    def device(*command):
+        return adb_command(args.adb, *command, serial=args.serial)
+
+    def read_device(*command):
+        return subprocess.run(device(*command), check=True, capture_output=True, text=True,
+                              timeout=20, env=child_environment()).stdout.strip()
+
+    try:
+        tested = identity()
+        (directory / "identity.json").write_text(json.dumps(tested, indent=2) + "\n")
+        if read_device("shell", "getprop", "ro.kernel.qemu") != "1":
+            raise RuntimeError("The selected device is not an Android emulator.")
+        key = read_live_key()
+        with (directory / "device.log").open("w") as log:
+            commands = []
+            installed = {
+                package: installed_apk_hash(args.adb, args.serial, package, commands, log)
+                for package in ("com.alpha.assistant", "com.alpha.assistant.test")
+            }
+        manifest["installed"] = installed
+        if list(installed.values()) != list(tested["apks"].values()):
+            raise RuntimeError("Installed APK hashes differ from the selected build.")
+        manifest["device"] = {
+            "fingerprint": read_device("shell", "getprop", "ro.build.fingerprint"),
+            "api": read_device("shell", "getprop", "ro.build.version.sdk"),
+            "size": read_device("shell", "wm", "size"),
+            "density": read_device("shell", "wm", "density"),
+            "fontScale": read_device("shell", "settings", "get", "system", "font_scale"),
+        }
+        command = device("shell", "am", "instrument", "-w", "-r",
+                         "-e", "class", "com.alpha.assistant.courses.LiveCourseWorkflowTest#generateAndPlay",
+                         "-e", "courseRunId", run_id, "-e", "courseScenario", args.scenario,
+                         "-e", "courseBaseline", str(args.baseline).lower(), RUNNER)
+        manifest["command"] = command
+        with (directory / "instrumentation.log").open("w") as log:
+            process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=child_environment())
+            deadline = time.monotonic() + 1500
+            while process.poll() is None and time.monotonic() < deadline:
+                if key is not None:
+                    probe = subprocess.run(device("shell", "cat", remote + "/report.json"), capture_output=True,
+                                           text=True, timeout=20, env=child_environment())
+                    if probe.returncode == 0 and json.loads(probe.stdout).get("phase") == "credentialReady":
+                        transfer_key(args.adb, run_id, key, serial=args.serial)
+                        key = None
+                time.sleep(0.25 if key is not None else 1)
+            if process.poll() is None:
+                raise RuntimeError("Course workflow timed out.")
+        read_device("pull", remote + "/.", str(directory))
+        report = json.loads((directory / "report.json").read_text())
+        instrumentation = (directory / "instrumentation.log").read_text()
+        if process.returncode == 0 and report["phase"] == "complete" and "OK (1 test)" in instrumentation:
+            manifest["status"] = "passed"
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as failure:
+        manifest["failure"] = str(failure)
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+                read_device("shell", "am", "force-stop", "com.alpha.assistant")
+                read_device("pull", remote + "/.", str(directory))
+            except (OSError, subprocess.SubprocessError):
+                manifest["cleanup"] = "Device cleanup or evidence pull failed."
+        (directory / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    print(f"{manifest['status']}: {directory}", flush=True)
+    return 0 if manifest["status"] == "passed" else 1
 
 
 def validate_results(case, rows):
@@ -553,6 +636,13 @@ def main():
     execute.add_argument("--seconds", type=int, choices=range(1, 181), default=30)
     execute.add_argument("--adb", default=ADB)
     execute.add_argument("--output", type=Path, default=ROOT / "evidence/compose-execution/scenarios")
+    course = commands.add_parser("course", help="Capture one live lesson on a dedicated emulator.")
+    course.add_argument("--serial", required=True)
+    course.add_argument("--label", required=True)
+    course.add_argument("--scenario", required=True, choices=("alphabet", "weather", "fractions"))
+    course.add_argument("--baseline", action="store_true", help="Measure whether the first slide appears.")
+    course.add_argument("--adb", default=ADB)
+    course.add_argument("--output", type=Path, default=ROOT / "evidence/lesson-reliability")
     device = commands.add_parser("suite", help="Build, replace-install, and run device tests on the selected emulator.")
     device.add_argument("--label", required=True)
     device.add_argument("--serial", required=True, help="Exact emulator serial, such as emulator-5556.")
@@ -583,6 +673,8 @@ def main():
             raise SystemExit(1)
     elif args.command == "verify-failed":
         verify_failed(args.directory)
+    elif args.command == "course":
+        raise SystemExit(run_course(args))
     elif args.command == "suite":
         raise SystemExit(suite(args))
     elif args.command == "host":

@@ -61,11 +61,23 @@ internal object PartsGeneration {
         lessonTarget: CourseSlideKind? = null,
         selectPresentation: Boolean = false,
         clock: PartClockSample? = null,
+        preparedLessonParts: List<PartRequest>? = null,
         ask: JevAsk,
     ): PartsAssembly {
-        lessonTarget?.let(plan::validateLesson)
-        val requests = ToolParts.requests(plan, lessonTarget, clock)
-        if (lessonTarget != null) requests.firstNotNullOfOrNull(PartRequest::slotFailure)?.let { throw it }
+        if (lessonTarget != null) {
+            val requests = preparedLessonParts ?: run {
+                plan.validateLesson(lessonTarget)
+                ToolParts.requests(plan, lessonTarget)
+            }
+            // Each typed lesson need has one native part. The plan already supplies its content.
+            val selected = requests.associate { request ->
+                request.slotFailure?.let { throw it }
+                request.id to (request.candidates.singleOrNull()
+                    ?: throw PartsContractFailure("$.needs", "one native part per lesson need"))
+            }
+            return assemble(plan, requests, selected, emptyList(), emptyList(), null)
+        }
+        val requests = ToolParts.requests(plan, clock = clock)
         val sections = requests.filter { it.candidates.isNotEmpty() }.associateWith { request ->
             request.candidates.map(PartCandidate::section).distinct()
         }
@@ -85,7 +97,7 @@ internal object PartsGeneration {
         val partQuestions = candidates.map { (request, options) ->
             JevQuestion("p_${request.id}", request.prompt(), options.map(PartCandidate::description) + NO_MATCH)
         }
-        val focalNeeds = if (selectPresentation && lessonTarget == null) candidates.keys.toList() else emptyList()
+        val focalNeeds = if (selectPresentation) candidates.keys.toList() else emptyList()
         val profiles = NativePresentationProfile.entries
         val presets = ToolUiCatalog.presets.sorted()
         val presentationQuestions = if (focalNeeds.isEmpty()) emptyList() else listOf(
@@ -106,16 +118,12 @@ internal object PartsGeneration {
         val numericOutputs = compatible.flatMap { (id, part) ->
             listOfNotNull(id.takeIf { part.numberOutput != null }) + part.aggregates.keys.map { "$id:$it" }
         }.toSet()
-        val selected = if (lessonTarget == null && compatible.isNotEmpty() && plan.needs.any { need ->
+        val selected = if (compatible.isNotEmpty() && plan.needs.any { need ->
                 val part = compatible[need.id]
                 if (part == null) (need.type == NeedType.OTHER && need.reads == null) || need.figure != null ||
                     need.uses.values.any(compatible::containsKey) || need.reads.orEmpty().any { compatible[it]?.numberOutput == null }
                 else part.fragment.readProjection?.reads.orEmpty().any { it !in numericOutputs }
             }) emptyMap() else compatible
-        if (lessonTarget != null) {
-            (sectionResult.failure ?: partResult.failure)?.let { throw it }
-            requireParts(selected.size == requests.size, "$.selector", "a supported part for every lesson need")
-        }
         val blockers = plan.questions.filter { (sectionResult.probability("q_${it.id}") ?: 1.0) >= 0.5 }
         val focalNeed = partResult.choice("v_focal")?.let(focalNeeds::getOrNull)
         val focalFailure = focalNeed?.takeUnless { it.id in picked }?.let {

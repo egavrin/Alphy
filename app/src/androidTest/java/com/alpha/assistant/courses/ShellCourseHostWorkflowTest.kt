@@ -145,7 +145,7 @@ class ShellCourseHostWorkflowTest {
             robot.waitFor(provider.source.url)
             assertEquals(listOf(cancelledQuery, submittedQuery), provider.searches.map { it.query })
             val completedCalls = provider.calls.toList()
-            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR),
+            assertEquals(listOf(CloudGenerationStage.PLAN),
                 completedCalls.map { it.request.generationStage })
             assertTrue(completedCalls.all { it.session === provider.searches.last().session })
             assertEquals(listOf(CourseSourceReference(provider.source.title, provider.source.url)),
@@ -287,7 +287,7 @@ class ShellCourseHostWorkflowTest {
             assertNotNull(store.slide(saved.id, "current"))
             assertNull(store.slide(saved.id, "future"))
             val slideCalls = provider.calls.toList()
-            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR),
+            assertEquals(listOf(CloudGenerationStage.PLAN),
                 slideCalls.map { it.request.generationStage })
             assertTrue(slideCalls.all { it.session === slideCalls.first().session })
             assertTrue(slideCalls.first().request.turns.single().text.contains("Explain the current fraction"))
@@ -470,15 +470,6 @@ class ShellCourseHostWorkflowTest {
                     "type":"explanation","label":"Fractions","description":"Explain the form","uses":{"body":"body"}}],"questions":[]}""")
                     if (sourceIds.isNotEmpty()) plan.getJSONArray("needs").getJSONObject(0).put("sourceIds", JSONArray(sourceIds))
                     emit(CloudEvent.Text(plan.toString()))
-                }
-                CloudGenerationStage.SELECTOR -> {
-                    val questions = JSONObject(request.turns.single().text).getJSONArray("questions")
-                    val answers = JSONArray()
-                    repeat(questions.length()) { index ->
-                        answers.put(JSONObject().put("id", questions.getJSONObject(index).getString("id"))
-                            .put("choice", "A").put("confidence", 1).put("probabilities", JSONObject().put("A", 1).put("B", 0)))
-                    }
-                    emit(CloudEvent.Text(JSONObject().put("answers", answers).toString()))
                 }
                 null -> emit(CloudEvent.RoundComplete(if (request.jsonObject) """{"lessons":[{"id":1,"title":"Common denominators",
                     "slides":[{"id":1,"kind":"EXPLANATION","goal":"Explain the current fraction"},

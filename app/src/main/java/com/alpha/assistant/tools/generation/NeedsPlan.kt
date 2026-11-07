@@ -403,12 +403,20 @@ internal class NeedsPlan private constructor(
             val lessonPrompt = fullPrompt + "\n\n" + """
                 The host selected a ${lessonTarget.name} course slide. Include a ${lessonTarget.lessonNeed.wire} need.
                 Leave inputs and questions empty. Include only that need and passive lesson content.
-                Passive needs use a body text constant of at most 300 characters. A check is passive feedback.
+                Every passive need must set uses.body to a text constant of at most 300 characters. A check is passive feedback.
+                For a requested picture card, use a short title as label and a short visible caption as body.
+                Preserve a title or caption supplied in the current goal. If the goal gives a pair of letters or symbols,
+                put both together in the title in the given order. Keep pictograms in the pictogram constant only.
+                Add uses.pictogram with a reference to a text constant containing exactly one basic color emoji, for example 🌻.
+                The app renders the pictogram as the card illustration. Omit pictogram when no suitable basic emoji fits.
+                Describe the actual card in description. Do not promise illustrations beyond the pictogram.
                 For a choice, fill-in, or order slide, include exactly one exercise. Its label is the question.
                 Choice uses two to four consecutive option1 through option4 text constants and correct as a one-based index.
                 Fill-in uses one to four consecutive accepted1 through accepted4 text constants.
                 Order uses two to four consecutive option1 through option4 text constants and one position per option.
                 Use position1 through position4 in answer order. Each is a one-based option index. Use every index once.
+                Exercise needs accept only the roles above for that exercise kind. Do not put body or pictogram on an exercise need.
+                Use a separate passive need if the exercise needs visible explanatory content.
                 The course supplies the answer controls. Include no action, code, or exercise metadata fields.
             """.trimIndent()
             if (allowedSourceIds.isEmpty()) return lessonPrompt

@@ -17,11 +17,13 @@ import com.alpha.assistant.tools.generation.GenerationBehavior
 import com.alpha.assistant.tools.generation.behaviorBindings
 import com.alpha.assistant.tools.generation.partsObject
 import com.alpha.assistant.tools.generation.PartClockSample
+import com.alpha.assistant.tools.generation.PartRequest
 import com.alpha.assistant.tools.generation.PartsContractFailure
 import com.alpha.assistant.tools.generation.PartsGeneration
 import com.alpha.assistant.tools.generation.StandaloneNativeEdit
 import com.alpha.assistant.tools.generation.StandaloneRefinementUnavailable
 import com.alpha.assistant.tools.generation.ToolComposition
+import com.alpha.assistant.tools.generation.ToolParts
 import com.alpha.assistant.tools.generation.jsonArray
 import com.alpha.assistant.tools.generation.requireParts
 import com.alpha.assistant.tools.generation.sameToolJson
@@ -307,6 +309,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         var planText = ""
         var needsText = ""
         var behavior: GenerationBehavior? = null
+        var lessonParts: List<PartRequest>? = null
         val planned = run {
             reportProgress(ToolGenerationProgress.PLANNING)
             val planInstructions = when {
@@ -340,7 +343,11 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                         planText = response(key, turns, session, CloudGenerationStage.PLAN, instructions)
                         if (lessonTarget != null) {
                             needsText = planText
-                            NeedsPlan.parseResponse(planText, lessonTarget, allowedSourceIds)
+                            val plan = NeedsPlan.parseResponse(planText, lessonTarget, allowedSourceIds) as GenerationPlan.Parts
+                            lessonParts = ToolParts.requests(plan.needs, lessonTarget).also { parts ->
+                                parts.firstNotNullOfOrNull(PartRequest::slotFailure)?.let { throw it }
+                            }
+                            plan
                         } else {
                             val response = partsObject(planText, "$")
                             val rawBehavior = response.remove("behavior")
@@ -409,7 +416,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                 trace.timed(attemptNumber, ToolGenerationStage.ASSEMBLY) {
                     session.checkActive(currentCoroutineContext())
                     PartsGeneration.build(plan,lessonTarget,selectPresentation=lessonTarget==null,
-                        clock=if(lessonTarget==null) samplePartClock() else null) { body ->
+                        clock=if(lessonTarget==null) samplePartClock() else null, preparedLessonParts = lessonParts) { body ->
                         val batch = JSONObject(body).getString("stage")
                         try {
                             trace.timed(attemptNumber, ToolGenerationStage.SELECTOR, batch, CloudGenerationStage.SELECTOR) {

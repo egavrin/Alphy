@@ -16,7 +16,6 @@ import com.alpha.assistant.tools.ToolExecutionPolicy
 import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolPreview
 import com.alpha.assistant.tools.ToolRecord
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -47,8 +46,8 @@ class LessonRouteWorkflowTest {
 
     private class Provider(
         private val plan: JSONObject,
-        private val select: (JSONObject) -> String = { "A" },
-        private val onSelection: (CloudSession) -> Unit = {},
+        private val onPlan: (CloudSession) -> Unit = {},
+        private val correctedPlan: JSONObject? = null,
     ) : ChatProvider {
         val requests = mutableListOf<CloudRequest>()
         val stages get() = requests.map { it.generationStage }
@@ -59,14 +58,17 @@ class LessonRouteWorkflowTest {
             assertTrue(request.turns.all { it.images.isEmpty() })
             requests += request
             val body = when (request.generationStage) {
-                CloudGenerationStage.PLAN -> plan.toString().let {
-                    if (request.systemInstructions.contains("top-level \"behavior\"")) it.withUncheckedBehavior() else it
+                CloudGenerationStage.PLAN -> {
+                    onPlan(session)
+                    val json = if (request.turns.size > 1) correctedPlan ?: plan else plan
+                    json.toString().let {
+                        if (request.systemInstructions.contains("top-level \"behavior\"")) it.withUncheckedBehavior() else it
+                    }
                 }
                 CloudGenerationStage.SELECTOR -> {
-                    onSelection(session)
                     val input = JSONObject(request.turns.single().text)
                     val questions = input.getJSONArray("questions")
-                    val selected = select(input)
+                    val selected = "A"
                     val answers = JSONArray()
                     repeat(questions.length()) { index ->
                         val question = questions.getJSONObject(index)
@@ -92,7 +94,37 @@ class LessonRouteWorkflowTest {
         "fixture", request, null, emptyList(), CloudSession(), "lesson", policy = policy, lessonTarget = kind,
     )
 
-    @Test fun typedTargetSelectsTrustedPartsForEveryLessonKind(): Unit = runBlocking {
+    @Test fun lessonPictogramsAreValidatedAndRenderThroughTheNativePart(): Unit = runBlocking {
+        for (pictogram in listOf("🦉", "☀️")) {
+            val definition = plan("example", listOf("body" to "A short example.", "pictogram" to pictogram))
+            val preview = generate(Provider(definition), CourseSlideKind.EXAMPLE)
+            assertTrue(preview.ui.contains(pictogram))
+            val config = JSONObject().put("label", "Example label").put("body", "A short example.")
+                .put("pictogram", pictogram)
+            val restored = ToolParts.restore("main", "information", config, "$.config")
+            assertTrue(restored.fragment.full.toString().contains(pictogram))
+        }
+        val plain = generate(Provider(plan("example", listOf("body" to "A short example."))), CourseSlideKind.EXAMPLE)
+        assertTrue(plain.ui.contains("A short example."))
+    }
+
+    @Test fun invalidPictogramFailsInPlanningBeforeSelection(): Unit = runBlocking {
+        for (invalid in listOf("☀", "🦉☀️", "text", " ", JSONObject.NULL, 42, "\uD83E", "👩‍🚀")) {
+            val provider = Provider(plan("example", listOf("body" to "Explain.", "pictogram" to invalid)))
+            val failure = assertThrows(CloudFailure::class.java) { runBlocking { generate(provider, CourseSlideKind.EXAMPLE) } }
+            assertEquals("widget_plan", failure.code)
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.PLAN), provider.stages)
+        }
+    }
+
+    @Test fun lessonRepairsInvalidPartSlotsBeforeSelection(): Unit = runBlocking {
+        val corrected = plan("choice_exercise", choice)
+        val provider = Provider(plan("choice_exercise", choice + ("body" to "Read this first.")), correctedPlan = corrected)
+        assertTrue(JSONObject(generate(provider, CourseSlideKind.CHOICE).state).has(EXERCISE_FIELD))
+        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.PLAN), provider.stages)
+    }
+
+    @Test fun typedTargetBuildsTrustedPartsLocallyForEveryLessonKind(): Unit = runBlocking {
         val cases = mapOf(
             CourseSlideKind.EXPLANATION to plan("explanation", listOf("body" to "Explain.")),
             CourseSlideKind.EXAMPLE to plan("example", listOf("body" to "Show an example.")),
@@ -117,16 +149,9 @@ class LessonRouteWorkflowTest {
                 require(JSONObject(json).keys().asSequence().toSet() == setOf("state"))
             })
             val preview = generate(provider, kind, policy)
-            assertEquals(kind.name, listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR), provider.stages)
+            assertEquals(kind.name, listOf(CloudGenerationStage.PLAN), provider.stages)
             assertTrue(provider.requests.first().systemInstructions.contains("The host selected a ${kind.name} course slide."))
             assertTrue(provider.requests.first().turns.first().text.contains(privateRequest))
-            assertEquals(listOf("sections", "parts"), provider.requests.drop(1).map {
-                val text = it.turns.single().text
-                assertFalse(text.contains("SOURCE_CONTEXT_FIXTURE"))
-                assertFalse(text.contains("The host selected"))
-                assertFalse(text.contains("\"v_profile\""))
-                JSONObject(text).getString("stage")
-            })
             assertEquals(kind.requiresAnswer, JSONObject(preview.state).has(EXERCISE_FIELD))
             assertNull(preview.spec.nativePresentation)
             assertEquals(1, definitions)
@@ -147,18 +172,14 @@ class LessonRouteWorkflowTest {
         assertNotNull(preview.spec.action(JSONObject(preview.ui), "p4_main_select"))
     }
 
-    @Test fun invalidLessonNeedsAndNoMatchCannotReachCodeOrSmoke(): Unit = runBlocking {
+    @Test fun invalidLessonNeedsCannotReachCodeOrSmoke(): Unit = runBlocking {
         val cases = listOf(
             Triple(Provider(plan("fill_exercise", listOf("accepted1" to "answer"))),
                 "widget_plan", listOf(CloudGenerationStage.PLAN, CloudGenerationStage.PLAN)),
             Triple(Provider(plan("choice_exercise", choice).put("lessonTarget", "CHOICE")),
                 "widget_plan", listOf(CloudGenerationStage.PLAN, CloudGenerationStage.PLAN)),
             Triple(Provider(plan("choice_exercise", choice.dropLast(1) + ("correct" to 3))),
-                "widget_incomplete", listOf(CloudGenerationStage.PLAN)),
-            Triple(Provider(plan("choice_exercise", choice), select = { "B" }),
-                "widget_incomplete", listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR)),
-            Triple(Provider(plan("choice_exercise", choice), select = { if (it.getString("stage") == "parts") "B" else "A" }),
-                "widget_incomplete", listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR)),
+                "widget_plan", listOf(CloudGenerationStage.PLAN, CloudGenerationStage.PLAN)),
         )
         var validated = false
         val policy = ToolExecutionPolicy(validateDefinition = { validated = true }, validateResult = { validated = true })
@@ -191,9 +212,9 @@ class LessonRouteWorkflowTest {
         assertEquals("widget_spec", policyFailure.code)
         assertFalse(rawResultSeen)
 
-        val canceled = Provider(plan, onSelection = { it.cancel(); it.check() })
+        val canceled = Provider(plan, onPlan = { it.cancel() })
         val failure = runCatching { generate(canceled, CourseSlideKind.CHOICE) }.exceptionOrNull()
-        assertTrue(failure is CancellationException)
-        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR), canceled.stages)
+        assertEquals("cancelled", (failure as CloudFailure).code)
+        assertEquals(listOf(CloudGenerationStage.PLAN), canceled.stages)
     }
 }

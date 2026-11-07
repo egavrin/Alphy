@@ -105,6 +105,7 @@ class CourseGenerationWorkflowTest {
                 val context = JSONObject(prompt.substringAfter("\nCourse and reached slide:\n")
                     .substringBefore("\nEarlier answers in order, including errors:\n"))
                 assertEquals(2, context.getInt("reachedSlideNumber"))
+                assertEquals("Review earlier errors", context.getString("reachedSlideGoal"))
                 assertEquals(2, context.getJSONArray("lessonPlan").getJSONObject(0).getInt("slideNumber"))
                 val answers = JSONArray(prompt.substringAfter("\nEarlier answers in order, including errors:\n")
                     .substringBefore("\nTrusted search result data:\n"))
@@ -323,17 +324,18 @@ class CourseGenerationWorkflowTest {
                 assertEquals(List(2) { CloudGenerationStage.PLAN }, provider.requests.drop(beforeRejection).map { it.generationStage })
                 reached = checkNotNull(store.course(course.id))
 
-                provider.plan = lessonPlan(CourseSlideKind.CHOICE)
-                provider.selection = "B"
-                workflowError(CourseWorkflowError.UNSUPPORTED_LESSON) {
+                provider.plan = lessonPlan(CourseSlideKind.CHOICE).apply {
+                    getJSONArray("needs").getJSONObject(0).getJSONObject("uses").put("body", "value0")
+                }
+                workflowError(CourseWorkflowError.INVALID_OUTPUT) {
                     player.generate(course.id, reached.revision, "practice", key, CloudSession())
                 }
                 reached = checkNotNull(store.course(course.id))
                 assertEquals(CourseGenerationFailure.INVALID_OUTPUT, reached.generationFailure)
                 assertEquals(1, reached.progress.completedSlides)
 
-                provider.selection = "A"
-                provider.beforeSelection = { it.cancel(); it.check() }
+                provider.plan = lessonPlan(CourseSlideKind.CHOICE)
+                provider.beforePlan = { it.cancel() }
                 val cancellation = runCatching {
                     player.generate(course.id, reached.revision, "practice", key, CloudSession())
                 }.exceptionOrNull()
@@ -588,25 +590,13 @@ class CourseGenerationWorkflowTest {
     private class LessonProvider : ChatProvider {
         lateinit var plan: JSONObject
         val requests = mutableListOf<CloudRequest>()
-        var selection = "A"
-        var beforeSelection: (CloudSession) -> Unit = {}
+        var beforePlan: (CloudSession) -> Unit = {}
 
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
             requests += request
-            val body = when (request.generationStage) {
-                CloudGenerationStage.PLAN -> plan
-                CloudGenerationStage.SELECTOR -> {
-                    beforeSelection(session)
-                    val question = JSONObject(request.turns.single().text).getJSONArray("questions").getJSONObject(0)
-                    val probabilities = JSONObject().put("A", if (selection == "A") 1 else 0)
-                        .put("B", if (selection == "B") 1 else 0)
-                    val answer = JSONObject().put("id", question.getString("id")).put("choice", selection)
-                        .put("confidence", 1).put("probabilities", probabilities)
-                    JSONObject().put("answers", JSONArray().put(answer))
-                }
-                else -> error("Unexpected lesson code request.")
-            }
-            emit(CloudEvent.Text(body.toString()))
+            assertEquals(CloudGenerationStage.PLAN, request.generationStage)
+            beforePlan(session)
+            emit(CloudEvent.Text(plan.toString()))
         }
     }
 
@@ -697,6 +687,6 @@ class CourseGenerationWorkflowTest {
 
     private val key = "PRIVATE-KEY"
     private val policyStages = listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE)
-    private val lessonStages = listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR)
+    private val lessonStages = listOf(CloudGenerationStage.PLAN)
     private val setup = CourseSetup("Past tense", "Beginner", "Use past tense", "PRIVATE-CONVERSATION")
 }

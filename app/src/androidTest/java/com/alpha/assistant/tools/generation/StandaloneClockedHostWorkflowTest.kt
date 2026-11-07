@@ -175,7 +175,7 @@ class StandaloneClockedHostWorkflowTest {
             assertTrue(host.store.effects(saved.id).isEmpty())
 
             val extra = """{"id":"help","type":"action","label":"Help","description":"Custom help"}"""
-            val assembly = PartsGeneration.build(NeedsPlan.parse(plan("$ideas,$extra")),null,false,today,::selectorAnswer)
+            val assembly = PartsGeneration.build(NeedsPlan.parse(plan("$ideas,$extra")),null,false,today,ask=::selectorAnswer)
             val mixed = ToolComposition.complete(assembly, """
                 {"capabilities":[],"stateSchema":{"fill_value":"number"},"initialState":{"fill_value":0},
                  "ui":{"type":"column","children":[{"type":"text","text":"Help","bind":"fill_value"}]},

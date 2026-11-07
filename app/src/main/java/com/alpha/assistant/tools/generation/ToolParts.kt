@@ -1,5 +1,7 @@
 package com.alpha.assistant.tools.generation
 
+import android.icu.lang.UCharacter
+import android.icu.lang.UProperty
 import com.alpha.assistant.courses.CourseSlideKind
 import com.alpha.assistant.courses.EXERCISE_FIELD
 import com.alpha.assistant.tools.ToolValueSchema
@@ -156,12 +158,19 @@ private class Slots(need: PlanNeed, private val constants: Map<String, PlanValue
 
     fun numeric(name: String): Double = planNumber(read(name)?.raw, "$path.$name")
 
+    fun pictogram(): String? = read("pictogram")?.let { lessonPictogram(it.raw, "$path.pictogram") }
+
     fun has(name: String) = name in remaining
 
     fun finish() {
         requireParts(remaining.isEmpty(), path, "references supported by the part")
     }
 }
+
+private fun lessonPictogram(value: Any?, path: String): String =
+    planText(value, path, 3).also {
+        requireParts(UCharacter.hasBinaryProperty(it, UProperty.BASIC_EMOJI), path, "one basic emoji")
+    }
 
 internal object ToolParts {
     private val counterInitial = -1_000_000..1_000_000
@@ -171,7 +180,7 @@ internal object ToolParts {
         "controls" to "Editable inputs, counters, native clocks, and computed numeric outputs with declared dependencies.",
         "records" to "Local notes, one-tap logs, points ledgers, and readings with history.",
         "plans" to "Local itineraries, due dates, and idea decks.",
-        "lesson" to "Static text and single-answer exercises with local feedback.",
+        "lesson" to "Native lesson text, picture cards with a color pictogram and caption, and exercises.",
         "course" to "A passive exercise graded by the course player."
     )
 
@@ -183,7 +192,7 @@ internal object ToolParts {
         try {
             val builder = FragmentBuilder(need.id)
             val part = if (lessonTarget != null) {
-                if (need.type in passiveLessonNeeds) content(builder, need.label, slots.text("body", 300))
+                if (need.type in passiveLessonNeeds) content(builder, need.label, slots.text("body", 300), slots.pictogram())
                 else lessonExercise(builder, need.label, lessonTarget, slots)
             } else when (need.type) {
                 NeedType.COUNTER -> counter(builder, need.label, slots.number("initial", counterInitial, 0),
@@ -311,8 +320,9 @@ internal object ToolParts {
                 ideaDeck(builder, label, ideas, russian(), NativePartEditMetadata.read(config, ideas.size, path))
             }
             "information" -> {
-                requireConfig("body")
-                content(builder, label, planText(config.opt("body"), "$path.body", 300))
+                config.requireKeys(path, setOf("label", "body"), setOf("pictogram"))
+                val pictogram = if (config.has("pictogram")) lessonPictogram(config.opt("pictogram"), "$path.pictogram") else null
+                content(builder, label, planText(config.opt("body"), "$path.body", 300), pictogram)
             }
             "choice_exercise" -> {
                 requireConfig("options", "correct", "russian")
@@ -1278,12 +1288,25 @@ internal object ToolParts {
             config, builder.finish(ui, partContainer("column", summary), readProjection = projection))
     }
 
-    private fun content(builder: FragmentBuilder, label: String, body: String): PartCandidate {
-        val full = if (label == body) partNode("text", body) else partContainer("section", listOf(partNode("text", body)))
+    private fun content(builder: FragmentBuilder, label: String, body: String, pictogram: String? = null): PartCandidate {
+        val config = JSONObject().put("label", label).put("body", body)
+        val plain = if (label == body) partNode("text", body) else partContainer("section", listOf(partNode("text", body)))
             .put("text", label)
-        return PartCandidate("information", "lesson", "Show one title and a short piece of text without interaction.",
-            JSONObject().put("label", label).put("body", body),
-            builder.finish(full, partNode("text", label)))
+        if (pictogram == null) {
+            return PartCandidate("information", "lesson", "Show one title and a short piece of text without interaction.",
+                config, builder.finish(plain, partNode("text", label)))
+        }
+
+        val card = partContainer("card", listOf(
+            partContainer("theme", listOf(
+                partNode("text", label).put("style", JSONObject().put("emphasis", "headline").put("align", "center")),
+                partNode("text", pictogram).put("style", JSONObject().put("emphasis", "number")),
+            )).put("preset", "playful").put("typeScale", 1.5).put("style", JSONObject().put("align", "center")),
+            partNode("text", body).put("style", JSONObject().put("align", "center")),
+        )).put("style", JSONObject().put("align", "center").put("gap", "medium"))
+            .put("layout", JSONObject().put("fillWidth", true))
+        return PartCandidate("information", "lesson", "Show a large title, the color pictogram $pictogram, and its caption.",
+            config.put("pictogram", pictogram), builder.finish(card, partNode("text", label)))
     }
 
     private fun exercise(builder: FragmentBuilder, label: String, options: List<String>, correct: Int, russian: Boolean): PartCandidate {
