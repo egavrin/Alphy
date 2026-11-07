@@ -125,7 +125,44 @@ private val CourseSlideKind.lessonNeed: NeedType get() = when (this) {
     CourseSlideKind.SUMMARY -> NeedType.SUMMARY
 }
 
-internal data class PlanInput(val id: String, val label: String, val initial: PlanValue)
+internal data class NumberControl(val min: Double, val max: Double, val step: Double?, val slider: Boolean) {
+    fun json() = JSONObject().put("min", min).put("max", max).apply {
+        if (step != null) put("step", step)
+        if (slider) put("control", "slider")
+    }
+
+    companion object {
+        val fields = setOf("min", "max", "step", "control")
+
+        fun read(row: JSONObject, initial: PlanValue, path: String): NumberControl? {
+            if (fields.none(row::has)) return null
+            val minimum = planNumber(row.opt("min"), "$path.min")
+            val maximum = planNumber(row.opt("max"), "$path.max")
+            requireParts(initial is PlanValue.Numeric && minimum < maximum && initial.raw.toDouble() in minimum..maximum,
+                path, "ordered numeric bounds containing the initial value")
+            val step = if (row.has("step")) planNumber(row.opt("step"), "$path.step") else null
+            requireParts(step == null || step > 0.0 && step <= maximum - minimum, "$path.step", "a positive step within the range")
+            requireParts(!row.has("control") || row.opt("control") == "slider", "$path.control", "slider or the default number input")
+            return NumberControl(minimum, maximum, step, row.opt("control") == "slider")
+        }
+    }
+}
+
+internal data class PlanInput(val id: String, val label: String, val initial: PlanValue, val control: NumberControl? = null)
+internal data class PlanFigure(val expression: NumberExpression, val unit: String, val example: JSONObject)
+internal data class PlanRecordField(val id: String, val label: String, val numeric: Boolean) {
+    fun json() = JSONObject().put("id", id).put("label", label).put("type", if (numeric) "number" else "text")
+    companion object {
+        fun read(row: JSONObject, path: String): List<PlanRecordField> = row.items("fields", 1..4, "$path.fields").mapIndexed { i, raw ->
+            val at = "$path.fields[$i]"
+            val field = raw as? JSONObject ?: throw PartsContractFailure(at, "a record field")
+            field.requireKeys(at, setOf("id", "label", "type"))
+            val id = planId(field.opt("id"), at)
+            requireParts(id != "id" && field.opt("type") in setOf("number", "text"), at, "a text or number field with a nonreserved ID")
+            PlanRecordField(id, planText(field.opt("label"), "$at.label", 100), field.opt("type") == "number")
+        }.also { fields -> requireParts(fields.map { it.id }.distinct().size == fields.size, path, "unique record fields") }
+    }
+}
 internal data class ItineraryStop(val name: String, val minutes: Int)
 internal data class ReadingBand(val label: String, val minimum: Double?)
 internal data class DueItemPlan(val name: String, val date: LocalDate?, val offsetDays: Int?, val repeatDays: Int)
@@ -215,6 +252,9 @@ internal data class PlanNeed(
     val readingBands: List<ReadingBand> = emptyList(),
     val dueItems: List<DueItemPlan> = emptyList(),
     val deckIdeas: List<DeckIdea> = emptyList(),
+    val figure: PlanFigure? = null,
+    val reads: Set<String>? = null,
+    val recordFields: List<PlanRecordField> = emptyList(),
 )
 internal data class PlanQuestion(val id: String, val ask: String, val options: List<String>)
 
@@ -257,7 +297,7 @@ internal class NeedsPlan private constructor(
             Include exactly title, description, language, inputs, constants, needs, and questions at the top level.
             Use arrays for inputs, constants, needs, and questions. Use [] for an unused list.
             Each need must include id, type, label, and a concise nonblank description of at most $MAX_NEED_DESCRIPTION_CHARS characters.
-            Summarize behavior in description. Do not put controls, formulas, or explanations in uses.
+            Summarize behavior in description. Put executable numeric calculations in figure.expression. Keep uses for named references.
             Omit uses without dependencies. Otherwise, use an object with at most 8 role-to-ID entries.
             Each uses value must exactly match an id declared in inputs or constants. Never use a literal value there.
             Declare every referenced value and reference every constant. Keep all IDs unique across the plan.
@@ -279,13 +319,13 @@ internal class NeedsPlan private constructor(
             Include all seven top-level fields. Use an empty array for an unused list.
             An input type is exactly text, number, or boolean. Match the JSON value to its type: "text" uses a string, "number" uses an unquoted number, and "boolean" uses true or false.
             Example of a separate independent input: {"id":"amount","label":"Amount","type":"number","value":0}.
-            Describe slider, stepper, and other control behavior in the need description.
+            For a bounded numeric input include min and max, and an optional positive step. Include control:"slider" when requested.
             Each constant has id and a value that is a JSON string, number, or boolean. Each question has id, ask, and an options array of strings.
             Include 1 to 12 inputs and needs in total, up to 24 constants, and at most 2 questions with 2 to 4 options each.
             Use unique IDs across the plan. Start each ID with an ASCII letter and use at most 24 letters, digits, or underscores.
             Limit the title and labels to 100 characters, the app description and constant text to 500, and question options to 80.
             Put independent editable values in inputs. Every constant must be used by a need. Each need may have up to 8 named references.
-            Use needs for independent supported parts. Put an editable value in inputs only when it can work independently. Preserve explicit units, currencies, and initial values. Leave unspecified currencies and sample amounts out of the plan.
+            Use needs for supported parts. Put editable inputs for figures in inputs. Preserve explicit units, currencies, and initial values. Leave unspecified currencies and sample amounts out of the plan.
             Complete example with a reference:
             {"title":"Counter","description":"Count by two","language":"en","inputs":[],
              "constants":[{"id":"increment","value":2}],
@@ -294,7 +334,17 @@ internal class NeedsPlan private constructor(
             Reference rules:
             In this example, step is a role and increment is the declared constant ID. The literal value 2 stays in constants.
             The type rules below name roles inside uses. Declare their values separately in constants or inputs.
-            Omit uses for a need without separate dependencies. Keep control descriptions and formulas in description.
+            Omit uses for a need without named part parameters. A figure expression declares its own dependencies.
+            A calculated result is a figure with expression, optional unit, and example. Example need:
+            {"id":"double","type":"figure","label":"Double","description":"Twice the amount",
+             "expression":{"op":"multiply","args":[{"ref":"amount"},{"number":2}]},
+             "example":{"inputs":{"amount":7},"result":14}}
+            Each expression node is exactly {"ref":"id"}, {"number":2}, or {"op":"add","args":[...]}. Refer to numeric inputs, numeric constants, and other figures. There must be no cycle.
+            Binary operations are add, subtract, multiply, divide, min, max, power, less, greater, and equal. Comparisons return 1 or 0. Unary operations are sqrt, abs, floor, ceil, and round. The if operation takes condition, true result, and false result.
+            Express unit conversions in the formula. Use unit only for the requested display label. Example inputs override initial values. An example must give a finite result.
+            Entries can declare fields:[{"id":"name","label":"Item","type":"text"},{"id":"amount","label":"Amount","type":"number"}]. Use 1 to 4 text or number fields. The host provides add and remove controls. Field IDs are unique and cannot be id.
+            A numeric expression can be {"aggregate":"count","need":"entries ID"} or {"aggregate":"sum","need":"entries ID","field":"numeric field ID"}. Record aggregates start at zero in worked examples.
+            An other or scene need can declare reads as an array of up to 8 numeric input or figure IDs. Use [] for a custom section independent of native parts. Omit reads when it needs to write native state or depends on unsupported data.
             Describe all requested behavior, including unsupported or unusual behavior.
             Use these need types:
             counter, entries, quick_log, points_ledger, itinerary, editable_itinerary, reading_status, due_items, idea_deck, content, figure, countdown, stopwatch, action, scene, other,
@@ -327,12 +377,13 @@ internal class NeedsPlan private constructor(
             Give it an ideas array in the supplied order. Each object has name, positive whole minutes, and effort low, medium, or high.
             For a choice exercise, use option1 to option4 text constants and correct as the one-based number of the correct option.
             Use scene for moving or touch-driven drawing, and include its interaction and result rules in description.
+            A countdown with no completion effect uses a length role referencing a positive whole seconds constant up to 86400. A stopwatch has no uses. Describe any required completion alert explicitly. Use wholeScreen when native parts cannot provide that alert or the requested timer transitions.
         """.trimIndent() + "\n\n" + structureChecklist
 
         val wholeScreenGuidance = """
             Choose one JSON response format.
-            If the request has enough information and connected controls and results require custom behavior that supported native parts cannot provide, use {"wholeScreen":true} for the generation choice. This includes custom calculators, converters, and estimators with derived results. Supply the behavior field as directed below.
-            Use a full plan for independent supported parts or a blocking clarification question. A native part can own its inputs and derived results when it covers the complete need. Its field rules apply only to the full plan.
+            Use the full plan for calculations and conversions expressible with numeric inputs and figures. Use {"wholeScreen":true} for custom behavior that supported parts and expressions cannot provide. Supply the behavior field as directed below.
+            Use a full plan for supported parts or a blocking clarification question. Its field rules apply only to the full plan.
         """.trimIndent()
 
         val prompt = fullPrompt + "\n\n" + wholeScreenGuidance
@@ -391,7 +442,7 @@ internal class NeedsPlan private constructor(
             val inputs = root.items("inputs", 0..12, "$.inputs").mapIndexed { index, item ->
                 val path = "$.inputs[$index]"
                 val row = item as? JSONObject ?: throw PartsContractFailure(path, "an input object")
-                row.requireKeys(path, setOf("id", "label", "type", "value"))
+                row.requireKeys(path, setOf("id", "label", "type", "value"), NumberControl.fields)
                 val inputId = id(row, path)
                 val label = planText(row.opt("label"), "$path.label", 100)
                 val value = PlanValue.parse(row.opt("value"), "$path.value")
@@ -402,7 +453,7 @@ internal class NeedsPlan private constructor(
                 }
                 if (row.opt("type") != type) planShapeFailure("$path.type",
                     "the exact input type \"$type\" for this starting value", "plan.input.type", row.opt("type"))
-                PlanInput(inputId, label, value)
+                PlanInput(inputId, label, value, NumberControl.read(row, value, path))
             }
             val constantRows = root.optJSONArray("constants")
                 ?: planShapeFailure("$.constants", "an array", "plan.constants.array", root.opt("constants"))
@@ -432,7 +483,10 @@ internal class NeedsPlan private constructor(
                 }
                 if (!row.has("description"))
                     planShapeFailure(path, "the declared fields", "plan.description.missing", null)
-                row.requireKeys(path, required, optionalNeedFields)
+                val figureFields = if (row.opt("type") == NeedType.FIGURE.wire) setOf("expression", "unit", "example") else emptySet()
+                val readFields = if (row.opt("type") in setOf(NeedType.OTHER.wire, NeedType.SCENE.wire)) setOf("reads") else emptySet()
+                val recordKeys = if (row.opt("type") == NeedType.ENTRIES.wire) setOf("fields") else emptySet()
+                row.requireKeys(path, required, optionalNeedFields + figureFields + readFields + recordKeys)
                 val needId = id(row, path)
                 val type = NeedType.entries.firstOrNull { it.wire == row.opt("type") }
                     ?: throw PartsContractFailure("$path.type", "a known need type")
@@ -463,13 +517,32 @@ internal class NeedsPlan private constructor(
                 val bands = if (readingStatus) row.readReadingBands(path) else emptyList()
                 val deadlines = if (dueItems) row.readDueItems(path, allowOffsets = true) else emptyList()
                 val ideas = if (ideaDeck) row.readDeckIdeas(path) else emptyList()
+                val figure = if (figureFields.any(row::has)) {
+                    val example = row.optJSONObject("example") ?: throw PartsContractFailure("$path.example", "a worked example")
+                    example.requireKeys("$path.example", setOf("inputs", "result"))
+                    PlanFigure(NumberExpression.parse(row.opt("expression"), "$path.expression"),
+                        if (row.has("unit")) planText(row.opt("unit"), "$path.unit", 20, allowEmpty = true) else "", example)
+                } else null
+                val reads = if (row.has("reads")) {
+                    val names = row.items("reads", 0..8, "$path.reads").map { planId(it, "$path.reads") }
+                    requireParts(names.size == names.toSet().size, "$path.reads", "distinct numeric value IDs")
+                    names.toSet()
+                } else null
                 PlanNeed(needId, type, planText(row.opt("label"), "$path.label", 100),
-                    needDescription(row.opt("description"), "$path.description"), refs, selectedSources, stops, bands, deadlines, ideas)
+                    needDescription(row.opt("description"), "$path.description"), refs, selectedSources, stops, bands, deadlines, ideas, figure, reads,
+                    if (row.has("fields")) PlanRecordField.read(row, path) else emptyList())
             }
             requireParts(inputs.size + needs.size in 1..12, "$.needs", "1 to 12 inputs and needs in total")
             requireParts(allowedSourceIds.isEmpty() || needs.any { it.sourceIds.isNotEmpty() },
                 "$.needs", "at least one current source ID across needs")
-            val usedIds = needs.flatMap { it.uses.values }.toSet()
+            val figures = needs.mapNotNull { need -> need.figure?.let { need.id to it } }.toMap()
+            val aggregates = needs.filter { it.recordFields.isNotEmpty() }.flatMap { need ->
+                listOf("${need.id}:count") + need.recordFields.filter { it.numeric }.map { "${need.id}:sum:${it.id}" }
+            }.associateWith { 0.0 }
+            validateFigures(inputs, constants, figures, aggregates)
+            val numericIds = inputs.filter { it.initial is PlanValue.Numeric }.map(PlanInput::id).toSet() + figures.keys
+            requireParts(needs.all { need -> numericIds.containsAll(need.reads.orEmpty()) }, "$.needs.reads", "declared numeric input or figure IDs")
+            val usedIds = needs.flatMap { it.uses.values }.toSet() + figures.values.flatMap { it.expression.references }
             if (!usedIds.containsAll(constants.keys))
                 planShapeFailure("$.constants", "constants referenced by a need", "plan.constants.unused", constantRows)
             val questions = root.items("questions", 0..2, "$.questions").mapIndexed { index, item ->
@@ -485,6 +558,34 @@ internal class NeedsPlan private constructor(
             }
             return NeedsPlan(title, description, language == "ru", inputs, constants, needs, questions).also { plan ->
                 lessonTarget?.let(plan::validateLesson)
+            }
+        }
+
+        private fun validateFigures(inputs: List<PlanInput>, constants: Map<String, PlanValue>, figures: Map<String, PlanFigure>, aggregates: Map<String, Double>) {
+            if (figures.isEmpty()) return
+            val numericInputs = inputs.filter { it.initial is PlanValue.Numeric }.associateBy(PlanInput::id)
+            val numbers = (numericInputs.mapValues { it.value.initial } + constants)
+                .mapNotNull { (id, value) -> (value as? PlanValue.Numeric)?.let { id to it.raw.toDouble() } }.toMap() + aggregates
+            val dependencies = figures.mapValues { it.value.expression.references }
+            requireParts(dependencies.values.all { refs -> refs.all { it in numbers || it in figures } },
+                "$.needs.expression", "declared numeric inputs, constants, or figures")
+            val order = dependencyOrder(dependencies, "$.needs.expression")
+            for ((id, figure) in figures) {
+                val path = "$.needs.example"
+                val example = figure.example.optJSONObject("inputs") ?: throw PartsContractFailure(path, "numeric example inputs")
+                val values = numbers.toMutableMap<String, Double?>()
+                for (name in example.keys()) {
+                    val input = numericInputs[name] ?: throw PartsContractFailure(path, "declared numeric example inputs")
+                    val value = planNumber(example.opt(name), path)
+                    val control = input.control
+                    requireParts(control == null || value in control.min..control.max, path, "example inputs within their bounds")
+                    values[name] = value
+                }
+                for (name in order) values[name] = figures.getValue(name).expression.value(values::get)
+                val expected = planNumber(figure.example.opt("result"), path)
+                val actual = values[id]
+                requireParts(actual != null && abs(actual - expected) <= maxOf(0.005, abs(expected) * 0.000001),
+                    path, "a worked example that matches the calculation")
             }
         }
     }

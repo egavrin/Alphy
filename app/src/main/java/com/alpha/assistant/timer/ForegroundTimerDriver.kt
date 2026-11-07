@@ -112,7 +112,22 @@ internal class ForegroundTimerDriver(
         snapshot = claimed
         val outcomes = spec.requests().map { request ->
             if (!current() || !ledger.authorized()) "cancelled"
-            else try { android.execute(request, true) { error("A timer cannot launch an activity.") }.status }
+            else try {
+                if (request.capability == "audio.tone") {
+                    val media = com.alpha.assistant.media.DeviceMediaPlayback()
+                    try {
+                        val result = media.playTone(com.alpha.assistant.media.DeviceTone.BEEP, request.args.getInt("durationMillis")) { start ->
+                            if (current() && ledger.authorized()) { start(); true } else false
+                        }
+                        when (result) {
+                            com.alpha.assistant.media.MediaPlaybackResult.COMPLETED -> "succeeded"
+                            com.alpha.assistant.media.MediaPlaybackResult.CANCELLED,
+                            com.alpha.assistant.media.MediaPlaybackResult.CLOSED -> "cancelled"
+                            else -> "failed"
+                        }
+                    } finally { media.close() }
+                } else android.execute(request, true) { error("A timer cannot launch an activity.") }.status
+            }
             catch (_: SecurityException) { "denied" }
         }
         val outcome = outcomes.firstOrNull { it != "succeeded" } ?: "succeeded"

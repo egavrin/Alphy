@@ -20,8 +20,21 @@ internal sealed interface PartHandler {
 
 internal data class PartReadProjection(
     val fields: Set<String>,
-    val render: (JSONObject, PartClockSample) -> JSONObject,
+    val reads: Set<String> = emptySet(),
+    val render: (JSONObject, PartClockSample, Map<String, Double?>) -> JSONObject,
 )
+
+internal data class PartNumberOutput(val field: String, val available: String? = null,
+    val records: Boolean = false, val member: String? = null) {
+    fun read(state: JSONObject): Double? {
+        if (available != null && !state.getBoolean(available)) return null
+        if (records) {
+            val rows = state.getJSONArray(field)
+            return if (member == null) rows.length().toDouble() else (0 until rows.length()).sumOf { rows.getJSONObject(it).getDouble(member) }
+        }
+        return (state.opt(field) as? Number)?.toDouble()
+    }
+}
 
 internal data class PartFragment(
     val full: JSONObject,
@@ -40,7 +53,12 @@ internal data class PartCandidate(
     val config: JSONObject,
     val fragment: PartFragment,
     val primaryActionId: String? = null,
-    val secondaryActionIds: Set<String> = emptySet()
+    val secondaryActionIds: Set<String> = emptySet(),
+    val numberOutput: PartNumberOutput? = null,
+    val valuePath: List<Int>? = null,
+    val behaviorActionId: String? = null,
+    val aggregates: Map<String, PartNumberOutput> = emptyMap(),
+    val clockTicks: ((JSONObject, PartClockSample) -> Boolean)? = null,
 )
 
 internal data class PartRequest(
@@ -66,7 +84,7 @@ internal fun dueDate(from: LocalDate, days: Int, path: String): LocalDate = try 
     throw PartsContractFailure(path, "a date in the supported calendar")
 }
 
-private class FragmentBuilder(id: String) {
+internal class FragmentBuilder(id: String) {
     val instance = partInstanceId(id)
     private val schema = JSONObject()
     private val initial = JSONObject()
@@ -170,7 +188,17 @@ internal object ToolParts {
             } else when (need.type) {
                 NeedType.COUNTER -> counter(builder, need.label, slots.number("initial", counterInitial, 0),
                     slots.number("step", counterStep, 1), plan.russian)
-                NeedType.ENTRIES -> entries(builder, need.label, plan.russian)
+                NeedType.COUNTDOWN -> ClockParts.build(need.id, need.label, slots.number("length", 1..86400), plan.russian)
+                NeedType.STOPWATCH -> ClockParts.build(need.id, need.label, null, plan.russian)
+                NeedType.FIGURE -> need.figure?.let { figure ->
+                    val constants = JSONObject()
+                    for (id in figure.expression.references) {
+                        (plan.constants[id] as? PlanValue.Numeric)?.let { constants.put(id, it.raw) }
+                    }
+                    figure(builder, need.label, figure.expression, constants, figure.unit, plan.russian)
+                }
+                NeedType.ENTRIES -> if (need.recordFields.isEmpty()) entries(builder, need.label, plan.russian)
+                    else RecordParts.build(need.id, need.label, need.recordFields, plan.russian)
                 NeedType.QUICK_LOG -> quickLog(builder, need.label, slots, plan.russian)
                 NeedType.POINTS_LEDGER -> pointsLedgerFromSlots(builder, need.label, slots, plan.russian)
                 NeedType.ITINERARY -> itinerary(builder, need.label, need.itineraryStops,
@@ -222,19 +250,36 @@ internal object ToolParts {
         val builder = FragmentBuilder(needId)
         return when (partId) {
             "string_input", "number_input", "boolean_input" -> {
-                requireConfig("initial")
-                val part = inputPart(PlanInput(needId, label, PlanValue.parse(config.opt("initial"), "$path.initial")))
+                config.requireKeys(path, setOf("label", "initial"), NumberControl.fields)
+                val initial = PlanValue.parse(config.opt("initial"), "$path.initial")
+                val part = inputPart(PlanInput(needId, label, initial, NumberControl.read(config, initial, path)))
                 requireParts(part.id == partId, "$path.initial", "the part input type")
                 part
+            }
+            "numeric_figure" -> {
+                requireConfig("expression", "constants", "unit", "russian")
+                val expression = NumberExpression.parse(config.opt("expression"), "$path.expression")
+                val constants = config.optJSONObject("constants") ?: throw PartsContractFailure(path, "numeric constants")
+                figure(builder, label, expression, constants, planText(config.opt("unit"), "$path.unit", 20, true), russian())
             }
             "counter" -> {
                 requireConfig("initial", "step", "russian")
                 counter(builder, label, integer(config.opt("initial"), counterInitial, "$path.initial"),
                     integer(config.opt("step"), counterStep, "$path.step"), russian())
             }
+            "countdown", "stopwatch" -> {
+                requireConfig("seconds", "russian")
+                val seconds = integer(config.opt("seconds"), 0..86400, "$path.seconds")
+                requireParts((partId == "stopwatch") == (seconds == 0), "$path.seconds", "the declared clock mode")
+                ClockParts.build(needId, label, seconds.takeIf { it != 0 }, russian())
+            }
             "notes" -> {
                 requireConfig("russian")
                 entries(builder, label, russian())
+            }
+            "record_log" -> {
+                requireConfig("fields", "russian")
+                RecordParts.build(needId, label, PlanRecordField.read(config, path), russian())
             }
             "points_ledger" -> pointsLedger(builder, label, config, path)
             "itinerary" -> {
@@ -368,7 +413,7 @@ internal object ToolParts {
         val builder = FragmentBuilder(input.id)
         val (type, schema) = when (input.initial) {
             is PlanValue.Text -> "input" to "string"
-            is PlanValue.Numeric -> "numberInput" to "number"
+            is PlanValue.Numeric -> (if (input.control?.slider == true) "slider" else "numberInput") to "number"
             is PlanValue.Flag -> "toggle" to "boolean"
         }
         val value = builder.state("value", schema, input.initial.raw)
@@ -377,14 +422,44 @@ internal object ToolParts {
         }
         val full = control(type, input.label, edit, value)
         if (type == "input") full.put("maxLength", 500)
+        val config = JSONObject().put("label", input.label).put("initial", input.initial.raw)
+        input.control?.let { bounds ->
+            full.put("min", bounds.min).put("max", bounds.max)
+            bounds.step?.let { full.put("step", it) }
+            val encoded = bounds.json()
+            encoded.keys().forEach { config.put(it, encoded.get(it)) }
+        }
         val compact = when (input.initial) {
             is PlanValue.Text -> partNode("text", input.label)
             is PlanValue.Numeric -> partNode("metric", input.label).put("bind", value)
             is PlanValue.Flag -> full
         }
         return PartCandidate(schema + "_input", "controls", "Edit one ${input.label} value and keep it locally.",
-            JSONObject().put("label", input.label).put("initial", input.initial.raw),
-            builder.finish(full, compact))
+            config, builder.finish(full, compact),
+            numberOutput = if (input.initial is PlanValue.Numeric) PartNumberOutput(value) else null, behaviorActionId = edit)
+    }
+
+    private fun figure(builder: FragmentBuilder, label: String, expression: NumberExpression,
+        constants: JSONObject, unit: String, russian: Boolean): PartCandidate {
+        val numbers = constants.keys().asSequence().associateWith { id ->
+            requireParts(id in expression.references, "$.figure.constants", "referenced numeric constants")
+            planNumber(constants.opt(id), "$.figure.constants")
+        }
+        val value = builder.state("value", "number", 0)
+        val available = builder.state("available", "boolean", false)
+        val invalid = builder.state("invalid", "boolean", true)
+        val title = if (unit.isEmpty()) label else "$label ($unit)"
+        val metric = partNode("metric", title).put("bind", value).put("visibleBind", available)
+        val feedback = if (russian) "$title: проверьте введённые значения" else "$title: check the input values"
+        val ui = partContainer("column", listOf(metric, partNode("text", feedback).put("visibleBind", invalid)))
+        val projection = PartReadProjection(setOf(value, available, invalid), expression.references - numbers.keys) { _, _, reads ->
+            val computed = expression.value { id -> numbers[id] ?: reads[id] }
+            JSONObject().put(value, computed ?: 0).put(available, computed != null).put(invalid, computed == null)
+        }
+        val config = JSONObject().put("label", label).put("expression", expression.json).put("constants", constants)
+            .put("unit", unit).put("russian", russian)
+        return PartCandidate("numeric_figure", "controls", "Calculate $label from the declared numeric values.", config,
+            builder.finish(ui, readProjection = projection), numberOutput = PartNumberOutput(value, available), valuePath = listOf(0))
     }
 
     private fun counter(builder: FragmentBuilder, label: String, initial: Int, step: Int, russian: Boolean): PartCandidate {
@@ -1043,7 +1118,7 @@ internal object ToolParts {
             .put("date", "string").put("status", "string")), JSONArray())
         val overdue = builder.state("overdue", "number", 0)
         val upcoming = builder.state("upcoming", "number", 0)
-        val projection = PartReadProjection(setOf(display, overdue, upcoming)) { state, clock ->
+        val projection = PartReadProjection(setOf(display, overdue, upcoming)) { state, clock, _ ->
             val current = state.getJSONArray(rows)
             val active = (0 until current.length()).filterNot(edit.retiredSlots::contains).map(current::getJSONObject)
                 .filterNot { it.getBoolean("completed") }
@@ -1139,7 +1214,7 @@ internal object ToolParts {
         fun advance(state: JSONObject) {
             state.put(version, state.getLong(version) + 1)
         }
-        val projection = PartReadProjection(setOf(display, availableCount, completedCount, historyFull)) { state, clock ->
+        val projection = PartReadProjection(setOf(display, availableCount, completedCount, historyFull)) { state, clock, _ ->
             val day = clock.localDate.toString()
             val done = doneToday(state, day)
             val choices = available(state, done)

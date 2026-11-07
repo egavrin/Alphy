@@ -10,11 +10,20 @@ internal object AudioContract {
     const val PICK = "audio.pick"
     const val PLAY = "audio.play"
     const val RESOURCE_KIND = "audio"
-    val playbackIds = setOf(TONE, PLAY)
+    val playbackIds = setOf(TONE, PLAY, TorchSequence.ID)
     val playbackStatuses = setOf("succeeded", "cancelled", "unavailable", "failed")
     val tones = mapOf("beep" to DeviceTone.BEEP, "acknowledgment" to DeviceTone.ACKNOWLEDGMENT)
 
     val definitions = listOf(
+        CapabilityDefinition(TorchSequence.ID, "Audio and flashlight sequence", CapabilityAction.AUDIO_PLAYBACK,
+            mapOf("notes" to CapabilityArgument("string", maxLength = 127),
+                "bpm" to CapabilityArgument("integer", minimum = 30, maximum = 240),
+                "durationMillis" to CapabilityArgument("integer", minimum = 1, maximum = 30_000),
+                "torchPulseMillis" to CapabilityArgument("integer", minimum = 1, maximum = 200)),
+            "Play a bounded comma-separated list of 1..32 MIDI notes as mono 8000 Hz signed 16-bit sine samples. Cycle one note per beat for durationMillis. Pulse the flashlight once per beat for torchPulseMillis. Use one foreground action and no parallel effects. Completion or cancellation stops audio and turns the torch off. Camera permission and flash hardware are required.",
+            "succeeded", "Native playback completed and torch requests were accepted. Physical audio/light output remains unverified. The receipt contains sample metadata, PCM hash, accepted beat count and monotonic pulse times.",
+            permission = android.Manifest.permission.CAMERA, feature = android.content.pm.PackageManager.FEATURE_CAMERA_FLASH, foreground = true,
+            resultData = """{"sampleRate":{"type":"integer","const":8000},"sampleCount":{"type":"integer"},"beats":{"type":"integer"},"pcmSha256":{"type":"string"},"physicalVerified":{"type":"boolean","const":false},"pulses":{"type":"array"}}"""),
         CapabilityDefinition(TONE, "Короткий звуковой сигнал", CapabilityAction.AUDIO_PLAYBACK,
             mapOf("tone" to CapabilityArgument("string", maxLength = 14, choices = tones.keys),
                 "durationMillis" to CapabilityArgument("integer", minimum = 1, maximum = MAX_TONE_MILLIS.toLong())),

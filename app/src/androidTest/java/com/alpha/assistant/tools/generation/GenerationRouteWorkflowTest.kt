@@ -12,6 +12,7 @@ import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.GraphicsContract
+import com.alpha.assistant.tools.NativeToolEditRequest
 import com.alpha.assistant.tools.ToolEngine
 import com.alpha.assistant.tools.ToolGenerationProgress
 import com.alpha.assistant.tools.ToolGenerationService
@@ -617,6 +618,170 @@ class GenerationRouteWorkflowTest {
             assertEquals(12.0,reopened.getDouble("tip"),0.0)
             assertEquals(92.0,reopened.getDouble("total"),0.0)
             assertEquals(23.0,reopened.getDouble("share"),0.0)
+        }
+    }
+
+    @Test fun connectedFiguresUseNativePartsAndRecomputeAfterReopen(): Unit = runBlocking {
+        val needs = """
+          {"id":"twice","type":"figure","label":"Double","description":"Twice the amount",
+           "expression":{"op":"multiply","args":[{"ref":"amount"},{"number":2}]},
+           "example":{"inputs":{"amount":4},"result":8}},
+          {"id":"share","type":"figure","label":"Share","description":"Divide the double by the divisor",
+           "expression":{"op":"divide","args":[{"ref":"twice"},{"ref":"divisor"}]},
+           "example":{"inputs":{"amount":4,"divisor":2},"result":4}}
+        """.trimIndent()
+        val scenario = """{"slots":{"edit":{"kind":"action","part":"amount"},
+            "share":{"kind":"value","part":"share"}},"steps":[{"op":"action","slot":"edit","value":6},
+            {"op":"assert","slot":"share","test":"equals","value":6}]}"""
+        val response = JSONObject(planWithBehavior(needs, scenario)).put("inputs", JSONArray("""
+            [{"id":"amount","label":"Amount","type":"number","value":4,"min":0,"max":100},
+             {"id":"divisor","label":"Divisor","type":"number","value":2,"min":0,"max":10}]
+        """.trimIndent())).toString()
+        val provider = FixtureProvider { turn, _ ->
+            when (turn.generationStage) {
+                CloudGenerationStage.PLAN -> response
+                CloudGenerationStage.SELECTOR -> answer(turn)
+                CloudGenerationStage.REFINE -> {
+                    val payload = JSONObject(turn.turns.single().text)
+                    val context = payload.getJSONObject("context")
+                    val figure = context.getJSONArray("parts").getJSONObject(0)
+                    assertEquals(setOf("alias", "type", "label", "expression", "unit"), figure.keys().asSequence().toSet())
+                    val expression = if (payload.getString("request") == "Introduce a cycle.") """{"ref":"share"}"""
+                        else """{"op":"multiply","args":[{"ref":"amount"},{"number":3}]}"""
+                    """{"token":${JSONObject.quote(context.getString("token"))},"operations":[
+                        {"op":"set_figure_expression","part":${JSONObject.quote(figure.getString("alias"))},"expression":$expression}]}"""
+                }
+                else -> error("The native calculation must not call the code writer.")
+            }
+        }
+        withEngine(provider) { store, engine, _ ->
+            val draft = engine.createDraft("Double an amount and divide by the editable divisor.", null)
+            engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+            var saved = engine.accept(draft.id)
+            assertTrue(ToolSpec.parsePersisted(saved.spec).isSealedStandalone)
+            saved = engine.interact(saved.id, saved.revision, saved.stateVersion, "p6_amount_edit", 12)
+            val reopened = checkNotNull(store.tool(saved.id))
+            val spec = ToolSpec.parsePersisted(reopened.spec)
+            val clock = com.alpha.assistant.tools.localPartClock(context)
+            val view = checkNotNull(spec.composition).projectState(JSONObject(reopened.state), clock)
+            assertEquals(12.0, view.getDouble("p5_share_value"), 0.0)
+            assertEquals(0.0, JSONObject(reopened.state).getDouble("p5_share_value"), 0.0)
+            saved = engine.interact(saved.id, saved.revision, saved.stateVersion, "p7_divisor_edit", 0)
+            assertFalse(checkNotNull(spec.composition).projectState(JSONObject(saved.state), clock).getBoolean("p5_share_available"))
+            assertFalse(CloudGenerationStage.COMPLETE in provider.stages)
+            saved = engine.interact(saved.id, saved.revision, saved.stateVersion, "p7_divisor_edit", 2)
+            val edit = NativeToolEditRequest("change-formula")
+            engine.prepareNativeEdit(saved, edit, "Multiply by three instead.", "fixture")
+            assertEquals(saved, store.tool(saved.id))
+            val refined = engine.confirmNativeEdit(edit)
+            assertEquals(saved.state, refined.state)
+            val revised = ToolSpec.parsePersisted(refined.spec)
+            assertEquals(18.0, checkNotNull(revised.composition).projectState(JSONObject(refined.state), clock)
+                .getDouble("p5_share_value"), 0.0)
+            val invalid = runCatching {
+                engine.prepareNativeEdit(refined, NativeToolEditRequest("cycle"), "Introduce a cycle.", "fixture")
+            }.exceptionOrNull() as? CloudFailure
+            assertEquals("tool_native_edit_unsupported", invalid?.code)
+            assertEquals(refined, store.tool(refined.id))
+        }
+    }
+
+    @Test fun mixedFillReadsOnlyDeclaredValuesAndRefreshesAfterNativeEdit(): Unit = runBlocking {
+        val needs = """
+          {"id":"twice","type":"figure","label":"Double","description":"Twice the amount",
+           "expression":{"op":"multiply","args":[{"ref":"amount"},{"number":2}]},
+           "example":{"inputs":{"amount":3},"result":6}},
+          {"id":"message","type":"other","label":"Summary","description":"Show a summary of the double", "reads":["twice"]}
+        """.trimIndent()
+        val response = JSONObject(plan(needs)).put("inputs", JSONArray("""
+            [{"id":"amount","label":"Amount","type":"number","value":3}]
+        """.trimIndent())).toString()
+        val provider = FixtureProvider { turn, _ ->
+            when (turn.generationStage) {
+                CloudGenerationStage.PLAN -> response
+                CloudGenerationStage.SELECTOR -> answer(turn)
+                CloudGenerationStage.COMPLETE -> {
+                    assertEquals(turn.turns.last().text, 1, turn.turns.size)
+                    assertTrue(turn.turns.first().text.contains("input.ports"))
+                    val fill = JSONObject(definition(source = """
+                        if (Object.keys(input.ports).join() !== 'twice') throw Error('Unexpected port');
+                        if (Object.keys(input.state).join() !== 'fill_value') throw Error('Foreign state');
+                        return {state:input.state,ui:{type:'column',children:[{type:'text',text:'Double: '+input.ports.twice}]}};
+                    """.trimIndent())).apply {
+                        remove("formatVersion")
+                        put("ui", JSONObject("""{"type":"column","children":[{"type":"text","text":"Summary"}]}"""))
+                    }
+                    mixed(fill, "message")
+                }
+                else -> error("Unexpected generation stage.")
+            }
+        }
+        withEngine(provider) { _, engine, _ ->
+            val draft = engine.createDraft("Double an amount and show a summary.", null)
+            engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+            val saved = engine.accept(draft.id)
+            assertTrue(saved.ui.contains("Double: 6"))
+            val changed = engine.interact(saved.id, saved.revision, saved.stateVersion, "p6_amount_edit", 7)
+            assertTrue(changed.ui.contains("Double: 14"))
+            assertEquals(0, JSONObject(changed.state).getInt("fill_value"))
+        }
+    }
+
+    @Test fun invalidCalculationPlansNeverReachTheWriterOrPublication(): Unit = runBlocking {
+        val expressions = listOf(
+            """{"ref":"result"}""",
+            """{"ref":"missing"}""",
+            """{"op":"eval","args":[{"number":1}]}""",
+            """{"op":"divide","args":[{"number":1},{"number":0}]}""",
+            """{"number":7}"""
+        )
+        for (expression in expressions) {
+            val need = """{"id":"result","type":"figure","label":"Result","description":"A calculation",
+                "expression":$expression,"example":{"inputs":{},"result":1}}"""
+            val provider = FixtureProvider { turn, _ ->
+                assertEquals(CloudGenerationStage.PLAN, turn.generationStage)
+                plan(need)
+            }
+            withEngine(provider) { store, engine, _ ->
+                val draft = engine.createDraft("Show the requested calculation.", null)
+                assertEquals("widget_plan", failure("widget_plan") {
+                    engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+                }.code)
+                assertTrue(store.tools().isEmpty())
+                assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.PLAN), provider.stages)
+            }
+        }
+    }
+
+    @Test fun nativeRecordTotalsFollowAddedAndRemovedRows(): Unit = runBlocking {
+        val id = "abcdefghijklmnopqrstuvwx"
+        val needs = """{"id":"$id","type":"entries","label":"Expenses","description":"Add and remove named amounts",
+            "fields":[{"id":"name","label":"Item","type":"text"},{"id":"$id","label":"Amount","type":"number"}]},
+            {"id":"total","type":"figure","label":"Total","description":"Sum the recorded amounts",
+            "expression":{"aggregate":"sum","need":"$id","field":"$id"},"example":{"inputs":{},"result":0}}"""
+        val provider = FixtureProvider { turn, _ -> when (turn.generationStage) {
+            CloudGenerationStage.PLAN -> plan(needs)
+            CloudGenerationStage.SELECTOR -> answer(turn)
+            else -> error("Record totals must use native parts.")
+        } }
+        withEngine(provider) { store, engine, _ ->
+            val draft = engine.createDraft("Keep named expenses and show their total.", null)
+            engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+            var saved = engine.accept(draft.id)
+            suspend fun act(action: String, value: Any?) {
+                saved = engine.interact(saved.id, saved.revision, saved.stateVersion, "${partInstanceId(id)}_$action", value)
+            }
+            act("edit_1", "Coffee"); act("edit_2", 3.5); act("add", null)
+            act("edit_1", "Lunch"); act("edit_2", 12); act("add", null)
+            fun total(): Double {
+                val reopened = checkNotNull(store.tool(saved.id))
+                return ToolSpec.parsePersisted(reopened.spec).composition!!.projectState(JSONObject(reopened.state),
+                    com.alpha.assistant.tools.localPartClock(context)).getDouble("p5_total_value")
+            }
+            assertEquals(15.5, total(), 0.0)
+            act("remove", "0")
+            assertEquals(12.0, total(), 0.0)
+            assertEquals("Lunch", JSONObject(saved.state).getJSONArray("${partInstanceId(id)}_items").getJSONObject(0).getString("name"))
         }
     }
 

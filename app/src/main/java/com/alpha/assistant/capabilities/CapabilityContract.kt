@@ -79,6 +79,7 @@ data class CapabilityDefinition(val id: String, val title: String, val action: C
             }))
     fun validate(args: JSONObject) {
         if(action==CapabilityAction.NETWORK_REQUEST) {NetworkEffectContract.request(args);return}
+        if(id==TorchSequence.ID) {TorchSequence.parse(args);return}
         val keys = args.keys().asSequence().toSet()
         require(keys.containsAll(parameters.filterValues { !it.optional }.keys) && keys.all { it in parameters }) { "Неверные параметры системной функции" }
         keys.forEach { parameters.getValue(it).validate(args.get(it)) }
@@ -136,7 +137,7 @@ object CapabilityCatalog {
             "Version 1. Select one writable calendar through the native picker. Both Android calendar permissions are required. Provider IDs and accounts remain native.","succeeded",
             "Returns only an opaque app-scoped calendarRef. Display names and accounts remain native.",Manifest.permission.READ_CALENDAR,foreground=true,resultData=OwnedCalendarContract.resultSchema),
         CapabilityDefinition("calendar.createOwned","Create owned calendar event",CapabilityAction.CALENDAR_OWNED,OwnedCalendarContract.create,
-            "Version 1. One timed nonrecurring event with one alert reminder, 0..10080 minutes before. Use an explicit selected calendarRef and stable eventKey. Start and end are explicit epoch milliseconds, with IANA timeZone and current deviceTimeZone. Do not invent dates, times, medical schedules, or doses. The native calendar control displays exact details. A repeated eventKey only reads the original operation and never repeats an uncertain insert.","succeeded",
+            "Version 1. One timed event, optionally repeatDaily:true, with one alert reminder 0..10080 minutes before. Daily events use whole-second duration and recur at the selected local time in the explicit IANA timeZone. Use a selected calendarRef and stable eventKey. Start and end are explicit epoch milliseconds with current deviceTimeZone. Do not invent dates, times, medical schedules, or doses. The native control displays exact details. A repeated eventKey only reads the original operation and never repeats an uncertain insert.","succeeded",
             "Success requires exact provider readback of the owned event and reminder. Delivery remains unverified. Partial or interrupted writes return unknownOutcome.",Manifest.permission.READ_CALENDAR,foreground=true,resultData=OwnedCalendarContract.resultSchema),
         CapabilityDefinition("calendar.readOwned","Read owned calendar event",CapabilityAction.CALENDAR_OWNED,OwnedCalendarContract.reference,
             "Version 1. Read only an eventRef returned for this app. No arbitrary event or calendar scan.","succeeded",
@@ -230,7 +231,7 @@ object CapabilityCatalog {
         val ids = mutableSetOf<String>()
         return (0 until json.length()).map { request(json.getJSONObject(it)).also { r ->
             require(r.capability in declared) { "Инструмент не объявил эту системную функцию" }
-            require(r.capability !in setOf(NetworkEffectContract.ID, MiniAppAi.ID) || json.length()==1) { "Запрос должен быть единственным эффектом действия." }
+            require(r.capability !in setOf(NetworkEffectContract.ID, MiniAppAi.ID, TorchSequence.ID) || json.length()==1) { "Запрос должен быть единственным эффектом действия." }
             require(ids.add(r.id)) { "Повторяется идентификатор системной операции" }
         } }
     }

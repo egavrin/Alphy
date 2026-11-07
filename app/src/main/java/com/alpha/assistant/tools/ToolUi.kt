@@ -54,6 +54,8 @@ import com.alpha.assistant.ui.AlphaIcon
 import com.alpha.assistant.ui.Glyph
 import com.alpha.assistant.ui.SheetBackHandler
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
@@ -909,7 +911,8 @@ private fun hasLiveControl(node: JSONObject): Boolean {
 @Composable private fun clockedToolState(spec: ToolSpec, ui: String, state: String, visible: Boolean): Result<String>? {
     val context = LocalContext.current.applicationContext
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val sample by produceState<PartClockSample?>(null, context, lifecycle, visible) {
+    val ticking = runCatching { spec.composition?.needsClockTicks(JSONObject(state), localPartClock(context)) == true }.getOrDefault(false)
+    val sample by produceState<PartClockSample?>(null, context, lifecycle, visible, ticking) {
         if (!visible) return@produceState
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             callbackFlow {
@@ -923,9 +926,12 @@ private fun hasLiveControl(node: JSONObject): Boolean {
                     addAction(Intent.ACTION_TIMEZONE_CHANGED)
                 }
                 ContextCompat.registerReceiver(context, receiver, timeChanges, ContextCompat.RECEIVER_NOT_EXPORTED)
+                val ticker = if (ticking) launch {
+                    while (isActive) { delay(250); trySend(Unit) }
+                } else null
                 trySend(Unit)
-                awaitClose { context.unregisterReceiver(receiver) }
-            }.conflate().collect { value = localPartClock() }
+                awaitClose { ticker?.cancel(); context.unregisterReceiver(receiver) }
+            }.conflate().collect { value = localPartClock(context) }
         }
     }
     return remember(spec, ui, state, sample) {

@@ -1,0 +1,118 @@
+{
+  "cases": {
+    "compose:tea": {
+      "checks": {
+        "timer": {
+          "kind": "physical",
+          "expected": "Select green, black, and herbal tea in turn. Verify each selection shows its preset. Complete one countdown and verify its vibration request."
+        }
+      },
+      "capabilities": [
+        "vibration.play"
+      ]
+    },
+    "compose:plank": {
+      "checks": {
+        "timer": {
+          "kind": "physical",
+          "expected": "Start a 60-second countdown. Verify completion and one beep request at the end."
+        }
+      },
+      "capabilities": [
+        "audio.tone"
+      ]
+    },
+    "bench:egg": {
+      "checks": {
+        "completion": {
+          "kind": "physical",
+          "expected": "Complete one timer. Verify a single vibration request at zero."
+        }
+      },
+      "capabilities": [
+        "vibration.play"
+      ]
+    },
+    "bench:melody": {
+      "checks": {
+        "audio": {
+          "kind": "physical",
+          "expected": "Start the melody. Verify C major at 120 BPM and a five-second stream of 8000 Hz signed 16-bit samples. Measure beat spacing at 500 ±10 ms and torch pulses at 80 ±10 ms with resolution of 2 ms or better. Retain PCM bytes, physical audio, and final torch-off evidence."
+        },
+        "torch": {
+          "kind": "physical",
+          "expected": "Verify torch on at each beat, off 80 milliseconds later, final off state, and the displayed count. Measure beat spacing at 500 ±10 ms and torch pulses at 80 ±10 ms with resolution of 2 ms or better. Retain PCM bytes, physical audio, and final torch-off evidence."
+        }
+      },
+      "capabilities": [
+        "audio.torchSequence"
+      ]
+    },
+    "bench:shanghai": {
+      "checks": {
+        "navigation": {
+          "kind": "readback",
+          "expected": "Mark one stop reached. Verify the next navigation request starts from that stop."
+        },
+        "calendar": {
+          "kind": "readback",
+          "expected": "Add one stop with a reminder in a test-owned calendar, open the calendar, and delete the created event. Verify an unrelated event remains."
+        }
+      },
+      "capabilities": [
+        "maps.markReached",
+        "maps.route",
+        "calendar.select",
+        "calendar.createOwned",
+        "calendar.readOwned",
+        "calendar.deleteOwned",
+        "calendar.deleteAllOwned",
+        "calendar.open"
+      ]
+    },
+    "bench:pill": {
+      "checks": {
+        "add": {
+          "kind": "readback",
+          "expected": "Add a fictional medicine named Sample at 08:15 with daily repeat. Verify a calendar event with its reminder in a test-owned calendar. Read back the recurrence, reminder and two instances. Verify permission denial, duplicate and interrupted submission, owned-series deletion, unrelated-event preservation, and daylight-saving transitions at the requested local time and IANA zone."
+        },
+        "result": {
+          "kind": "readback",
+          "expected": "Verify the list shows the schedule and the actual calendar response."
+        }
+      },
+      "capabilities": [
+        "calendar.select",
+        "calendar.createOwned",
+        "calendar.readOwned"
+      ]
+    },
+    "extra:reference-interval-timer": {
+      "checks": {
+        "pause_reset": {
+          "kind": "physical",
+          "expected": "Start and pause mid-round. Verify the displayed time stays fixed. Reset to round one with 12 seconds and no vibration request."
+        },
+        "phase_order": {
+          "kind": "physical",
+          "expected": "Start and keep the timer open. Verify 12 seconds of drawing, 5 seconds of rest, and 12 seconds of drawing in round two."
+        },
+        "restart": {
+          "kind": "physical",
+          "expected": "Start again from completion. Verify round one and a fresh 12-second drawing phase."
+        },
+        "terminal": {
+          "kind": "physical",
+          "expected": "Verify the timer finishes with no further countdown. Verify one terminal vibration request and none at the earlier transitions."
+        },
+        "vibration_unavailable": {
+          "kind": "physical",
+          "expected": "Repeat on a test device without a vibrator. Verify the timer finishes and shows that vibration was unavailable."
+        }
+      },
+      "capabilities": [
+        "vibration.play"
+      ]
+    }
+  }
+}

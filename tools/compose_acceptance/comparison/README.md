@@ -69,6 +69,113 @@ build or a generated card alone supplies no interaction result. Each request
 requires at least one passing repeat from each product. The audit also checks
 complete terminal evidence, category regressions, and critical defects.
 
+### Plan 5 capture queue
+
+Use the [Plan 5 workflows](plan5-workflows.json) and the nine proposed reference
+cases to prepare the inputs. The preparation tool carries forward the original
+observable checks for generated fresh-corpus cases. For a historical refusal,
+verify the current request and the current capability boundary. Review the
+criteria and freeze them before the final run.
+
+```sh
+jq -s '.[0] as $base | .[1] as $plan |
+  {approved_capabilities: $base.approved_capabilities, use_corpus_checks: $plan.use_corpus_checks,
+   interactions: $plan.interactions,
+   cases: (($base.cases | map(. * ($plan.reference_case_overrides[.id] // {}))) + $plan.cases)}' \
+  tools/compose_acceptance/comparison/reference-26eaacc-supplemental.proposed.json \
+  tools/compose_acceptance/comparison/plan5-workflows.json > functional-inputs.json
+```
+
+The full functional plan has 792 slots. Use the tuning plan during repairs and
+keep the final plan private to the comparison operator. Calculate the hash of
+the exact plan file passed to the runner.
+
+```sh
+python3 tools/compose_acceptance/comparison/run_functional.py \
+  --plan comparison-plan/tuning.json --plan-sha256 "$TUNING_SHA256" \
+  --captures evidence/captures
+```
+
+This command lists pending, complete, and interrupted captures. Add `--live`
+and `--slot SLOT_ID` for a reviewed capture. The default live run takes one
+pending slot. Use `--limit N` only when an operator can review each Android
+app during its review window. Set `--review-seconds` from 5 to 180 as needed.
+For a reference slot, pass `--reference-snapshot`, `--node`, and `--typescript`.
+Use `--exa` when the frozen reference identity enables Exa. Supply reference
+credentials as documented in the [reference adapter](reference_adapter/README.md).
+
+The runner preserves interrupted captures and terminal failures. Inspect a
+nonzero exit before starting more slots. A complete capture requires a separate
+functional review. The audit reports pass, fail, or missing for each repeat.
+
+Use `compare.py coverage` with the final plan and its hash to list all workflow
+families, check IDs, and slots. This inventory keeps functional status unverified
+until the live audit passes. It does not expose prompt text.
+
+### Physical workflow gate
+
+Keep the frozen host plan and its 792 slots unchanged. Use a separate device
+manifest for the required physical workflows. The
+[device criteria](device-workflows.json) bind each measurement to an existing
+case and check. Review and freeze these criteria before device execution.
+
+Record `candidate` and `reference` identities in `device-products.json`.
+Each identity requires `revision`, `source_sha256`, `build_sha256`, `signing`,
+and `route`. The revision must match the corresponding host revision.
+Its `device` object requires `kind` equal to `physical`, plus `model`, `os`,
+and `config`. Record provider configuration and measurement conditions there.
+
+```sh
+python3 tools/compose_acceptance/comparison/device_compare.py prepare \
+  --plan comparison-plan/final.json --plan-sha256 "$PLAN_SHA256" \
+  --criteria tools/compose_acceptance/comparison/device-workflows.json \
+  --products device-products.json --out device-plan
+```
+
+Retain the reported manifest hash separately. Run all device slots on the
+signed builds and physical devices from that manifest. The operator supplies
+native traces, provider dispatch evidence, readback, and physical recordings.
+The capture runner does not automate HarmonyOS installation or measurement.
+
+Each result repeats every field from its device slot. Add
+`device_manifest_sha256`, `host_plan_sha256`, `mode` equal to `live`, a unique
+32-character hexadecimal `run_id`, the exact `device`, and terminal `status`
+equal to `complete`. Record `outcome` as `generated`, `failed`, or `refused`.
+Each generated artifact has an `artifact` object with relative `path` and
+`sha256`. Each frozen check has `status`, `observed`, and a nonempty `evidence`
+array of file references with relative `path` and `sha256`.
+
+The `generation` object records `kind` as `fresh` or `deployed`, and a `trace`
+file reference. The trace JSON repeats `slot_id`, `run_id`, `request_sha256`,
+`execution_sha256`, and `device_manifest_sha256`. It records `artifact_sha256`
+and an `events` array. Each event has a `kind`.
+
+For fresh reference generation, retain one `provider-dispatch` event per
+measured `provider_http_calls`. This is a separate execution. For deployment,
+retain `host_artifact_sha256` and a `host_capture` file reference. Use the exact
+terminal Android `capture.json` or reference `attempt-N/result.json`. The audit
+compares the deployed artifact with the captured Android `artifact.json` or
+reference `program.vera`. Use the retained artifact for Android workflows.
+For a failed deployment, set the trace artifact hash to the attempted host
+artifact hash. Keep the same host capture reference.
+
+Keep distinct measurement files for each execution. Include its run identity
+in provider readback evidence. A failure or refusal has an empty check map and
+a `failure` description. It supplies terminal evidence for the audit.
+
+```sh
+python3 tools/compose_acceptance/comparison/device_compare.py audit \
+  --plan comparison-plan/final.json --plan-sha256 "$PLAN_SHA256" \
+  --manifest device-plan/device-manifest.json --manifest-sha256 "$DEVICE_SHA256" \
+  --results device-results.jsonl --evidence-dir evidence
+```
+
+The device audit requires terminal evidence for every slot and at least one
+passing repeat per product and workflow. Missing, altered, duplicate, synthetic,
+or emulator evidence blocks the gate. The operator must review the recordings
+against the frozen measurements. File hashes alone cannot prove an effect.
+Main requires both the host gate and the device gate to pass.
+
 ### Execution input
 
 `execution.json` contains:

@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools.generation
 
+import com.alpha.assistant.cloud.ResponseShape
 import com.alpha.assistant.tools.ToolUiCatalog
 import com.alpha.assistant.tools.ToolValueSchema
 import org.json.JSONArray
@@ -53,11 +54,20 @@ internal sealed interface GenerationBehavior {
         private const val FIELD = "$.behavior"
         private const val BINDINGS = "$.behaviorBindings"
         const val MAX_EVENTS = 64
+        val newAppPlanGuidance = """
+            The behavior field is part of the new mini-app plan. Include it beside wholeScreen or beside the full needs plan fields.
+            Return either exactly wholeScreen and behavior, or the seven full plan fields plus behavior.
+            For example, a whole-screen passive display plan is:
+            {"wholeScreen":true,"behavior":{"status":"checkable","scenario":{"slots":{"result":{"kind":"value"}},"steps":[{"op":"assert","slot":"result","test":"nonempty"}]}}}
+            For an interactive request, replace the example scenario with an action and a check of the requested result.
+            If the full plan asks a blocking question, omit behavior until the user answers.
+        """.trimIndent()
         val guidance = """
             Include a top-level "behavior" field. Plan one bounded executable check of the primary user-visible outcome.
             Use {"status":"checkable","scenario":{"slots":{...},"steps":[...]}}.
             Use short descriptive ASCII slot IDs such as amountInput, displayedTotal, or movingObject.
-            Map each slot ID to {"kind":"action|surface|timer|value|collection|geometry"}.
+            Use 1 to 12 slots. Map each slot ID to {"kind":"action|surface|timer|value|collection|geometry"}.
+            Use every declared slot in a step. End the interaction sequence with an assertion of its result.
             A value comes from visible text, metric, badge, fact, timeline item, or progress. Use the bound scalar when present.
             Collection assertions compare the number of records in a visible list, grid, or table.
             Use geometry for a drawing or part of a drawing. Do not equate a status change with motion.
@@ -66,16 +76,20 @@ internal sealed interface GenerationBehavior {
             With no path, the host selects the only suitable observation in that part, if there is exactly one.
             Begin from a fresh artifact after the host opens it, applies its viewport, and starts automatic playback.
             Use at most 16 steps and 59 explicit events. Use these step forms:
+            Each step is one flat object with exactly the fields in its form. Do not add descriptions or expected results to interaction steps.
             {"op":"action","slot":"action slot","value":7} (omit value for a button; use a scalar for input)
             {"op":"surface","slot":"surface slot","event":"start|pause|resume|restart|stop|viewport"}
             {"op":"surface","slot":"surface slot","event":"pointer","phase":"down|move|up|cancel","x":0.5,"y":0.5}
             {"op":"surface","slot":"surface slot","event":"control","direction":"left|right"}
+            A pointer step uses fractions from 0 to 1. Use 1 to 24 frames or timer events in each advance step.
             {"op":"frames","slot":"surface slot","count":4,"observe":"geometry slot","changes":3}
             {"op":"timers","slot":"timer slot","count":1}
             {"op":"capture","slot":"observation slot","as":"baseline"}
             {"op":"assert","slot":"observation slot","test":"equals|greater|less","value":14}
             {"op":"assert","slot":"observation slot","test":"equals|changed|unchanged","capture":"baseline"}
             {"op":"assert","slot":"observation slot","test":"nonempty"}
+            In an assertion, use value or capture, never both. For nonempty, omit both value and capture.
+            Keep assertions as separate steps. An action without an input value has only op and slot.
             Frames use positive elapsed time. Include observe and changes together to require at least two changes.
             At least one assertion must check the requested observable result. For passive UI, assert its requested content.
             Use {"status":"unchecked","reason":"external_outcome"} if the primary result depends on a native or external effect.
@@ -84,7 +98,48 @@ internal sealed interface GenerationBehavior {
             Do not ask to execute an effect or use private values, arbitrary code, or values supplied only by external sources.
         """.trimIndent()
 
-        fun parse(raw: Any?, needIds: Set<String>): GenerationBehavior {
+        fun parse(raw: Any?, needIds: Set<String>): GenerationBehavior = try {
+            parseBehavior(raw, needIds)
+        } catch (failure: PartsContractFailure) {
+            // Only host-owned rule codes enter traces, never candidate values or exception text.
+            val rule = when (failure.expected) {
+                "an object" -> "object"
+                "the declared fields" -> "fields"
+                "a supported unchecked reason" -> "unchecked_reason"
+                "a checkable or explicitly unchecked behavior" -> "status"
+                "1 to 12 slots" -> "slots_count"
+                "a supported slot kind" -> "slot_kind"
+                "a compatible declared part" -> "slot_part"
+                "a part action member" -> "slot_member"
+                "a part observation path" -> "slot_path"
+                "a compatible declared slot" -> "step_slot"
+                "an array" -> "steps_array"
+                "1 to 16 items" -> "steps_count"
+                "a supported surface event" -> "surface_event"
+                "a supported pointer phase" -> "pointer_phase"
+                "a supported direction" -> "direction"
+                "a frame observation" -> "frame_observation"
+                "a unique capture" -> "capture_unique"
+                "a supported assertion" -> "assertion"
+                "an earlier capture of the same kind" -> "capture_kind"
+                "a compatible expected value" -> "expected_value"
+                "a numeric comparison" -> "numeric_comparison"
+                "a supported behavior step" -> "step"
+                "only used slots and at most 64 events" -> "slots_or_events"
+                "an observable assertion" -> "observable_assertion"
+                "an assertion at or after the final interaction" -> "final_assertion"
+                "a valid identifier" -> "identifier"
+                "a normalized coordinate" -> "coordinate"
+                "an integer in the supported range" -> "integer"
+                "an index path", "at most 12 indices" -> "indices"
+                "a scalar value" -> "scalar"
+                else -> "value"
+            }
+            throw PartsContractFailure(failure.path, failure.expected,
+                ResponseShape("behavior.$rule", failure.path, "unknown"))
+        }
+
+        private fun parseBehavior(raw: Any?, needIds: Set<String>): GenerationBehavior {
             val behavior = obj(raw, FIELD)
             return when (behavior.opt("status") as? String) {
                 "unchecked" -> {
@@ -258,7 +313,7 @@ internal fun PartsAssembly.behaviorBindings(scenario: GenerationBehavior.Scenari
         val binding = when (slot.kind) {
             GenerationBehavior.Kind.ACTION -> {
                 val action = slot.member?.let { "${part.instanceId}_$it".takeIf(part.ids.actions::contains) }
-                    ?: part.primaryActionId.takeIf { slot.member == null }
+                    ?: (part.behaviorActionId ?: part.primaryActionId).takeIf { slot.member == null }
                 action?.let(GenerationBehavior.Binding::Id)
             }
             GenerationBehavior.Kind.VALUE, GenerationBehavior.Kind.COLLECTION -> {
@@ -268,13 +323,14 @@ internal fun PartsAssembly.behaviorBindings(scenario: GenerationBehavior.Scenari
                     val children = node.optJSONArray("children") ?: return emptyList()
                     return (0 until children.length()).flatMap { observations(children.getJSONObject(it), path + it) }
                 }
-                val path = slot.path?.takeIf { indices ->
+                val requestedPath = slot.path ?: part.valuePath
+                val path = requestedPath?.takeIf { indices ->
                     var node = part.full
                     for (index in indices) {
                         node = node.optJSONArray("children")?.optJSONObject(index) ?: return@takeIf false
                     }
                     matches(node)
-                } ?: if (slot.path == null) observations(part.full, emptyList()).singleOrNull() else null
+                } ?: if (requestedPath == null) observations(part.full, emptyList()).singleOrNull() else null
                 path?.let { GenerationBehavior.Binding.Ui(listOf(part.position) + it) }
             }
             else -> null

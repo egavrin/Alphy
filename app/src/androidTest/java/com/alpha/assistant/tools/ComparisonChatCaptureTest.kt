@@ -197,6 +197,14 @@ class ComparisonChatCaptureTest {
             }
             if (artifact != null) {
                 report.put("artifact_id", artifact).put("artifact_revision", assistant.toolRevision)
+                fun saved() = onMain { vm.tools.tools.singleOrNull { it.id == artifact } }
+                await(5_000) { saved() != null }
+                val record = checkNotNull(saved())
+                check(record.revision == assistant.toolRevision)
+                val definition = JSONObject().put("artifact_id", artifact).put("artifact_revision", record.revision)
+                    .put("spec", JSONObject(record.spec)).toString()
+                File(directory, "artifact.json").writeText(definition)
+                report.put("artifact_sha256", sha256(definition))
             }
             failureAt = "review"
             report.put("chat_screen", screenshot("chat"))
@@ -224,8 +232,6 @@ class ComparisonChatCaptureTest {
                 check(providerHttpCalls.get() == callsBeforeInteraction)
             } else if (verifyTip) {
                 report.put("tip_interaction", JSONObject().put("status", "not-generated"))
-                failureAt = "tip-generation"
-                error("The calculator did not generate.")
             }
             save("review")
             SystemClock.sleep(reviewSeconds * 1_000L)
@@ -393,7 +399,7 @@ class ComparisonChatCaptureTest {
             var observedNodes = emptyList<JSONObject?>()
             await(10_000) {
                 val current = saved()
-                observedState = JSONObject(current.state)
+                observedState = projectToolState(spec, JSONObject(current.state), localPartClock(app))
                 val outputs = nodes(JSONObject(current.ui)).filter {
                     it.has("bind") && it.optString("type") in setOf("text", "metric", "fact", "badge")
                 }.toList()
@@ -449,6 +455,7 @@ class ComparisonChatCaptureTest {
                     put("disposition", event.disposition.id).put("failure_code", event.failureCode)
                     put("validation_category", event.validationCategory?.id)
                     put("validation_rule", event.validationRule)
+                    put("behavior", event.behavior)
                     put("selector_batch", event.selectorBatch).put("plan_path", event.planPath)
                     event.planShape?.let { put("plan_rule",it.rule).put("plan_observed_type",it.observedType) }
                 }

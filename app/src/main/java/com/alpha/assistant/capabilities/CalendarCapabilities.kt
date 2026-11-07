@@ -32,7 +32,7 @@ internal object OwnedCalendarContract {
     val reference=version+mapOf("eventRef" to text(64,"reached-ref"))
     val details=mapOf("title" to text(200),"start" to integer(0,4102444800000L),"end" to integer(0,4102444800000L),
         "timeZone" to text(100),"deviceTimeZone" to text(100),"location" to CapabilityArgument("string",optional=true,maxLength=300,allowEmpty=true),
-        "reminderMinutes" to integer(0,10080))
+        "reminderMinutes" to integer(0,10080), "repeatDaily" to CapabilityArgument("boolean", optional=true))
     val create=version+details+mapOf("calendarRef" to text(64,"reached-ref"),"eventKey" to text(64,"stop-id"))
     val delete=reference+details
     fun validate(capability: String,args: JSONObject) {
@@ -40,11 +40,15 @@ internal object OwnedCalendarContract {
         if(capability in setOf("calendar.createOwned","calendar.deleteOwned")) {
             require(args.getLong("end")-args.getLong("start") in 1..2678400000L)
             for(key in listOf("timeZone","deviceTimeZone")) require(args.getString(key) in ZoneId.getAvailableZoneIds()) {"Use an explicit IANA timezone."}
+            if (args.optBoolean("repeatDaily")) require((args.getLong("end") - args.getLong("start")) % 1000 == 0L) {
+                "Daily event duration must use whole seconds."
+            }
         }
     }
     fun details(args: JSONObject)=JSONObject().apply {detailKeys.forEach {key ->
         if(key=="location") put(key,args.optString(key,"")) else put(key,args.get(key))
-    }}
+    }; if (args.optBoolean("repeatDaily")) put("repeatDaily", true) }
+    fun duration(details: JSONObject) = "PT${(details.getLong("end") - details.getLong("start")) / 1000}S"
     fun equal(a: JSONObject,b: JSONObject): Boolean = a.keys().asSequence().toSet()==b.keys().asSequence().toSet() && a.keys().asSequence().all {key ->
         val x=a.get(key);val y=b.get(key);if(x is Number && y is Number)x.toDouble()==y.toDouble() else x==y
     }
@@ -70,6 +74,7 @@ internal object OwnedCalendarContract {
                 val end=Instant.ofEpochMilli(args.getLong("end")).atZone(zone)
                 "${if(request.capability=="calendar.createOwned")"Create" else "Delete"} event: ${args.getString("title")}\n$start — $end\n"+
                     "Device timezone at creation: ${args.getString("deviceTimeZone")} · now: ${ZoneId.systemDefault().id}\nLocation: ${args.optString("location","")}\nReminder: ${args.getInt("reminderMinutes")} minutes before"+
+                    (if (args.optBoolean("repeatDaily")) "\nRepeats daily at the selected local time" else "") +
                     if(request.capability=="calendar.createOwned")"\nSelected calendar: ${args.getString("calendarRef").take(8)}" else "\nOwned event: ${args.getString("eventRef").take(8)}"
             }
         }
@@ -114,7 +119,8 @@ internal object OwnedCalendarContract {
             else -> {
                 require(capability in setOf("calendar.createOwned","calendar.readOwned"));ref("eventRef");ref("calendarRef")
                 require(data.get("reminderDeliveryVerified")==false)
-                val event=data.getJSONObject("event");require(event.keys().asSequence().toSet()==detailKeys)
+                val event=data.getJSONObject("event")
+                require(event.keys().asSequence().toSet()==detailKeys + if(event.optBoolean("repeatDaily")) setOf("repeatDaily") else emptySet())
                 CapabilityCatalog.definition("calendar.deleteOwned").validate(JSONObject(event.toString()).apply {
                     if(optString("location")=="") remove("location");put("version",1);put("eventRef",data.getString("eventRef"))
                 })
@@ -163,7 +169,11 @@ internal class AndroidOwnedCalendarProvider(private val context: Context): Owned
     }
     override fun insert(calendarId: Long,app: String,marker: String,details: JSONObject): Long {
         val values=ContentValues().apply {
-            put(Events.CALENDAR_ID,calendarId);put(Events.TITLE,details.getString("title"));put(Events.DTSTART,details.getLong("start"));put(Events.DTEND,details.getLong("end"))
+            put(Events.CALENDAR_ID,calendarId);put(Events.TITLE,details.getString("title"));put(Events.DTSTART,details.getLong("start"))
+            if (details.optBoolean("repeatDaily")) {
+                put(Events.RRULE, "FREQ=DAILY")
+                put(Events.DURATION, OwnedCalendarContract.duration(details))
+            } else put(Events.DTEND, details.getLong("end"))
             put(Events.EVENT_TIMEZONE,details.getString("timeZone"));put(Events.EVENT_END_TIMEZONE,details.getString("timeZone"));put(Events.EVENT_LOCATION,details.getString("location"))
             put(Events.ALL_DAY,0);put(Events.HAS_ALARM,1);put(Events.CUSTOM_APP_PACKAGE,app);put(Events.CUSTOM_APP_URI,marker)
         }
@@ -174,7 +184,7 @@ internal class AndroidOwnedCalendarProvider(private val context: Context): Owned
         return android.content.ContentUris.parseId(checkNotNull(result[0].uri))
     }
     override fun find(calendarId: Long,app: String,marker: String): List<NativeOwnedEvent> {
-        val fields=arrayOf(Events._ID,Events.CALENDAR_ID,Events.CUSTOM_APP_PACKAGE,Events.CUSTOM_APP_URI,Events.TITLE,Events.DTSTART,Events.DTEND,Events.EVENT_TIMEZONE,Events.EVENT_LOCATION,Events.DELETED,Events.ALL_DAY,Events.RRULE,Events.RDATE,Events.DURATION,Events.EVENT_END_TIMEZONE)
+        val fields=arrayOf(Events._ID,Events.CALENDAR_ID,Events.CUSTOM_APP_PACKAGE,Events.CUSTOM_APP_URI,Events.TITLE,Events.DTSTART,Events.DTEND,Events.EVENT_TIMEZONE,Events.EVENT_LOCATION,Events.DELETED,Events.ALL_DAY,Events.RRULE,Events.RDATE,Events.DURATION,Events.EVENT_END_TIMEZONE,Events.EXDATE,Events.EXRULE)
         return context.contentResolver.query(Events.CONTENT_URI,fields,"${Events.CALENDAR_ID}=? AND ${Events.CUSTOM_APP_PACKAGE}=? AND ${Events.CUSTOM_APP_URI}=?",
             arrayOf(calendarId.toString(),app,marker),null)?.use {cursor ->buildList {
             while(cursor.moveToNext() && size<2) {
@@ -182,10 +192,17 @@ internal class AndroidOwnedCalendarProvider(private val context: Context): Owned
                 val reminders=context.contentResolver.query(Reminders.CONTENT_URI,arrayOf(Reminders.MINUTES,Reminders.METHOD),"${Reminders.EVENT_ID}=?",arrayOf(id.toString()),null)?.use {rc ->
                     buildList<Pair<Int,Int>> {while(rc.moveToNext() && size<2)add(rc.getInt(0) to rc.getInt(1))}
                 } ?: error("Reminder provider unavailable")
-                val details=JSONObject().put("title",cursor.getString(4).orEmpty()).put("start",cursor.getLong(5)).put("end",cursor.getLong(6))
+                val daily = cursor.getString(11) == "FREQ=DAILY"
+                val duration = if (daily) runCatching { java.time.Duration.parse(cursor.getString(13)).toMillis() }.getOrNull() else null
+                val end = if (duration != null) cursor.getLong(5) + duration else cursor.getLong(6)
+                val details=JSONObject().put("title",cursor.getString(4).orEmpty()).put("start",cursor.getLong(5)).put("end",end)
                     .put("timeZone",cursor.getString(7).orEmpty()).put("location",cursor.getString(8).orEmpty())
+                if (daily) details.put("repeatDaily", true)
                 if(reminders.size==1 && reminders[0].second==Reminders.METHOD_ALERT)details.put("reminderMinutes",reminders[0].first)
-                if(cursor.getInt(10)!=0 || (11..13).any {!cursor.getString(it).isNullOrEmpty()} ||
+                val recurrenceInvalid = if (daily) duration == null || duration !in 1000L..2678400000L ||
+                    !cursor.isNull(6) || !cursor.getString(12).isNullOrEmpty()
+                    else (11..13).any { !cursor.getString(it).isNullOrEmpty() }
+                if(cursor.getInt(10)!=0 || recurrenceInvalid || (15..16).any { !cursor.getString(it).isNullOrEmpty() } ||
                     (!cursor.getString(14).isNullOrEmpty() && cursor.getString(14)!=cursor.getString(7))) details.put("unsupported",true)
                 add(NativeOwnedEvent(id,cursor.getLong(1),cursor.getString(2).orEmpty(),cursor.getString(3).orEmpty(),details,cursor.getInt(9)!=0))
             }
@@ -193,8 +210,12 @@ internal class AndroidOwnedCalendarProvider(private val context: Context): Owned
     }
     override fun delete(id: Long,calendarId: Long,app: String,marker: String,details: JSONObject): Int {
         // Keep ownership and the displayed snapshot on CONTENT_URI. Provider assertions share the delete batch.
-        val selection="${Events._ID}=? AND ${Events.CALENDAR_ID}=? AND ${Events.CUSTOM_APP_PACKAGE}=? AND ${Events.CUSTOM_APP_URI}=? AND ${Events.DELETED}=0 AND ${Events.TITLE}=? AND ${Events.DTSTART}=? AND ${Events.DTEND}=? AND ${Events.EVENT_TIMEZONE}=? AND COALESCE(${Events.EVENT_LOCATION},'')=? AND ${Events.ALL_DAY}=0 AND COALESCE(${Events.RRULE},'')='' AND COALESCE(${Events.RDATE},'')='' AND COALESCE(${Events.DURATION},'')=''"
-        val args=arrayOf(id.toString(),calendarId.toString(),app,marker,details.getString("title"),details.getLong("start").toString(),details.getLong("end").toString(),details.getString("timeZone"),details.getString("location"))
+        val daily = details.optBoolean("repeatDaily")
+        val endMatch = if (daily) "${Events.DTEND} IS NULL AND ${Events.DURATION}=?" else "${Events.DTEND}=? AND COALESCE(${Events.DURATION},'')=''"
+        val selection="${Events._ID}=? AND ${Events.CALENDAR_ID}=? AND ${Events.CUSTOM_APP_PACKAGE}=? AND ${Events.CUSTOM_APP_URI}=? AND ${Events.DELETED}=0 AND ${Events.TITLE}=? AND ${Events.DTSTART}=? AND $endMatch AND ${Events.EVENT_TIMEZONE}=? AND COALESCE(${Events.EVENT_LOCATION},'')=? AND ${Events.ALL_DAY}=0 AND COALESCE(${Events.RRULE},'')=? AND COALESCE(${Events.RDATE},'')='' AND COALESCE(${Events.EXDATE},'')='' AND COALESCE(${Events.EXRULE},'')=''"
+        val args=arrayOf(id.toString(),calendarId.toString(),app,marker,details.getString("title"),details.getLong("start").toString(),
+            if (daily) OwnedCalendarContract.duration(details) else details.getLong("end").toString(),
+            details.getString("timeZone"),details.getString("location"), if (daily) "FREQ=DAILY" else "")
         val operations=arrayListOf(
             ContentProviderOperation.newAssertQuery(Reminders.CONTENT_URI).withSelection("${Reminders.EVENT_ID}=?",arrayOf(id.toString()))
                 .withValue(Reminders.MINUTES,details.getInt("reminderMinutes")).withValue(Reminders.METHOD,Reminders.METHOD_ALERT).withExpectedCount(1).build(),

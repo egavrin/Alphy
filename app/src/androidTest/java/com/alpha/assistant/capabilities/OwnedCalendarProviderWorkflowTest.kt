@@ -44,6 +44,48 @@ internal class SyntheticOwnedCalendar(private val context: Context): AutoCloseab
 
 @RunWith(AndroidJUnit4::class)
 class OwnedCalendarProviderWorkflowTest {
+    @Test fun dailySeriesUsesProviderRecurrenceAndPreservesNeighbor() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        SyntheticOwnedCalendar(context).use { fixture ->
+            val provider = AndroidOwnedCalendarProvider(context)
+            val details = JSONObject().put("title", "Synthetic daily event").put("start", 1893485700000L)
+                .put("end", 1893486000000L).put("timeZone", "UTC").put("deviceTimeZone", java.time.ZoneId.systemDefault().id)
+                .put("location", "").put("reminderMinutes", 10).put("repeatDaily", true)
+            CapabilityCatalog.definition("calendar.createOwned").validate(JSONObject(details.toString())
+                .put("version", 1).put("calendarRef", "a".repeat(64)).put("eventKey", "daily"))
+            val marker = "daily-${UUID.randomUUID()}"
+            val neighbor = "neighbor-${UUID.randomUUID()}"
+            provider.insert(fixture.id, context.packageName, neighbor, JSONObject(details.toString()).apply { remove("repeatDaily") })
+            val id = provider.insert(fixture.id, context.packageName, marker, details)
+            val read = provider.find(fixture.id, context.packageName, marker).single()
+            assertTrue(OwnedCalendarContract.equal(details,
+                JSONObject(read.details.toString()).put("deviceTimeZone", java.time.ZoneId.systemDefault().id)))
+            val uri = CalendarContract.Instances.CONTENT_URI.buildUpon()
+            ContentUris.appendId(uri, details.getLong("start"))
+            ContentUris.appendId(uri, details.getLong("start") + 3 * 86_400_000L)
+            val starts = context.contentResolver.query(uri.build(), arrayOf(CalendarContract.Instances.BEGIN),
+                "${CalendarContract.Instances.EVENT_ID}=?", arrayOf(id.toString()), CalendarContract.Instances.BEGIN)?.use { cursor ->
+                buildList { while (cursor.moveToNext()) add(cursor.getLong(0)) }
+            }
+            assertNotNull(starts)
+            assertTrue(checkNotNull(starts).size >= 2)
+            assertEquals(86_400_000L, starts[1] - starts[0])
+            val events = CalendarContract.Events.CONTENT_URI
+            val row = ContentUris.withAppendedId(events, id)
+            assertEquals(1, context.contentResolver.update(row, ContentValues().apply {
+                put(CalendarContract.Events.EXDATE, "20300102T081500Z")
+            }, null, null))
+            assertTrue(provider.find(fixture.id, context.packageName, marker).single().details.optBoolean("unsupported"))
+            assertTrue(runCatching { provider.delete(id, fixture.id, context.packageName, marker, details) }.isFailure)
+            assertFalse(provider.find(fixture.id, context.packageName, marker).single().deleted)
+            assertEquals(1, context.contentResolver.update(row, ContentValues().apply {
+                putNull(CalendarContract.Events.EXDATE)
+            }, null, null))
+            assertEquals(1, provider.delete(id, fixture.id, context.packageName, marker, details))
+            assertTrue(provider.find(fixture.id, context.packageName, neighbor).single().deleted.not())
+        }
+    }
+
     @Test fun realProviderBatchReadbackAndGuardedDelete(): Unit=runBlocking {
         val instrumentation=InstrumentationRegistry.getInstrumentation();val context=instrumentation.targetContext
         val name="owned-calendar-provider-${UUID.randomUUID()}.db";val store=ToolStore(context,name)

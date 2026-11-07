@@ -235,6 +235,11 @@ class ForegroundTimerAuthorityTest {
     }
 
     @Test fun alertUsesTheCatalogBoundsAndCanRequestEitherOperationAlone() {
+        val tone = ForegroundTimerAlert(null, null, 100)
+        assertEquals(100, tone.toneMillis)
+        val spec = ForegroundTimerSpec("timer", 1000, tone)
+        assertEquals("audio.tone", spec.requests().single().capability)
+        assertThrows(IllegalArgumentException::class.java) { ForegroundTimerAlert(null, null, 1001) }
         assertEquals(1L, ForegroundTimerAlert(1, null).vibrationMillis)
         val notification = ForegroundTimerAlert.Notification("Timer", "Done")
         assertEquals(notification, ForegroundTimerAlert(null, notification).notification)

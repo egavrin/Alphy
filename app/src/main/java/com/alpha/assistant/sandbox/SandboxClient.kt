@@ -7,7 +7,7 @@ import kotlinx.coroutines.ensureActive
 import org.json.JSONObject
 
 class SandboxClient internal constructor(context: Context,private val runtime: AndroidJsRuntime) {
-    private val context=context.applicationContext
+    internal val context=context.applicationContext
     fun retainedSession()=GraphicsSession(context)
     constructor(context: Context): this(context,AndroidJsRuntime.get(context))
     suspend fun availability(): SandboxResult=runtime.availability()

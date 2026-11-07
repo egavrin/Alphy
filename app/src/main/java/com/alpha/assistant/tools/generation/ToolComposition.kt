@@ -39,12 +39,28 @@ internal class ToolComposition private constructor(private val layout: Layout, p
             .put("partId", part.id).put("instanceId", instanceId).put("config", part.config)
     }
 
-    private class Layout(parts: List<FixedPart>, val fillPositions: List<Int>) {
+    private class Layout(parts: List<FixedPart>, val fillPositions: List<Int>, val readPorts: Set<String> = emptySet()) {
         val fixed = parts.associateBy(FixedPart::position)
         val size = parts.size + fillPositions.size
+        val numbers = parts.flatMap { fixed ->
+            listOfNotNull(fixed.part.numberOutput?.let { fixed.needId to it }) +
+                fixed.part.aggregates.map { (key, output) -> "${fixed.needId}:$key" to output }
+        }.toMap()
+        val projections: List<FixedPart>
+
+        init {
+            requireParts((fillPositions.isNotEmpty() || readPorts.isEmpty()) && numbers.keys.containsAll(readPorts),
+                "$.composition.readPorts", "declared numeric outputs for generated fill")
+            val projected = parts.filter { it.projection != null }.associateBy(FixedPart::needId)
+            val dependencies = projected.mapValues { checkNotNull(it.value.projection).reads }
+            requireParts(dependencies.values.all { reads -> reads.all(numbers::containsKey) },
+                "$.composition.parts", "declared numeric part dependencies")
+            projections = dependencyOrder(dependencies, "$.composition.parts").map(projected::getValue)
+        }
 
         fun manifest() = JSONObject().put("version", VERSION)
             .put("parts", jsonArray(fixed.values.map(FixedPart::manifest))).put("fillPositions", jsonArray(fillPositions))
+            .apply { if (readPorts.isNotEmpty()) put("readPorts", jsonArray(readPorts.sorted())) }
 
         fun mergeUi(fill: JSONObject): JSONObject {
             val children = columnChildren(fill, fillPositions.size, "$.fill.ui")
@@ -61,15 +77,30 @@ internal class ToolComposition private constructor(private val layout: Layout, p
     }.toMap()
 
     val hasReadProjections: Boolean get() = layout.fixed.values.any { it.projection != null }
+    val requiresClockSample: Boolean get() = hasReadProjections || layout.fixed.values.any { fixed ->
+        fixed.part.fragment.handlers.values.any { it is PartHandler.Clocked }
+    }
     val isSealedStandalone: Boolean get() = layout.fillPositions.isEmpty()
+    val readPorts: Set<String> get() = layout.readPorts
+    fun needsClockTicks(state: JSONObject, clock: PartClockSample): Boolean =
+        layout.fixed.values.any { it.part.clockTicks?.invoke(state, clock) == true }
+
+    /** Values are a disposable snapshot. The sandbox cannot return them as state. */
+    fun fillPorts(state: JSONObject, clock: PartClockSample?): JSONObject {
+        val view = if (hasReadProjections) projectState(state, checkNotNull(clock)) else state
+        return JSONObject().apply {
+            for (name in readPorts) put(name, layout.numbers.getValue(name).read(view) ?: JSONObject.NULL)
+        }
+    }
 
     /** Project a validated durable state for display. Validate the aggregate before rendering it. */
     fun projectState(durableState: JSONObject, clock: PartClockSample): JSONObject {
         val view = JSONObject(durableState.toString())
-        for (fixed in layout.fixed.values) {
-            val projection = fixed.projection ?: continue
+        for (fixed in layout.projections) {
+            val projection = checkNotNull(fixed.projection)
             fixed.checkDisplayDefaults(durableState)
-            val display = projection.render(fixed.durableCopy(durableState), clock)
+            val reads = projection.reads.associateWith { layout.numbers.getValue(it).read(view) }
+            val display = projection.render(fixed.durableCopy(durableState), clock, reads)
             ToolValueSchema.state(fixed.displaySchema, display)
             display.keys().forEach { view.put(it, display.get(it)) }
         }
@@ -228,7 +259,7 @@ internal class ToolComposition private constructor(private val layout: Layout, p
             val total = assembly.parts.size + assembly.holes.size
             val fixed = restoreParts(assembly)
             val positions = fixed.map(FixedPart::position).toSet()
-            val layout = Layout(fixed, (0 until total).filterNot(positions::contains))
+            val layout = Layout(fixed, (0 until total).filterNot(positions::contains), assembly.readPorts)
             return seal(layout, assembly.preview.title, assembly.preview.description, partsObject(rawFill, "$.fill"),
                 assembly.preview.nativePresentation, observer)
         }
@@ -271,12 +302,18 @@ internal class ToolComposition private constructor(private val layout: Layout, p
         fun read(definition: JSONObject, schema: JSONObject, initial: JSONObject, surfaceIds: Set<String>): ToolComposition {
             val root = "$.composition"
             val manifest = objectField(definition, "composition", "$")
-            manifest.requireKeys(root, setOf("version", "parts", "fillPositions"))
+            manifest.requireKeys(root, setOf("version", "parts", "fillPositions"), setOf("readPorts"))
             requireParts(manifest.opt("version") == VERSION, "$root.version", "composition version $VERSION")
             val fill = manifest.items("fillPositions", 0..MAX_POSITIONS, "$root.fillPositions").mapIndexed { index, item ->
                 position(item, "$root.fillPositions[$index]")
             }
             val standalone = fill.isEmpty()
+            val readPorts = if (manifest.has("readPorts")) {
+                val names = manifest.items("readPorts", 1..MAX_POSITIONS, "$root.readPorts")
+                    .map { planText(it, "$root.readPorts", 24) }
+                requireParts(names == names.distinct().sorted(), "$root.readPorts", "ordered distinct IDs")
+                names.toSet()
+            } else emptySet()
             if (standalone) {
                 requireParts(definition.opt("source") == STANDALONE_SOURCE, "$.source", "the fixed host no-op")
                 requireParts(definition.optJSONArray("capabilities")?.length() == 0, "$.capabilities", "no capabilities")
@@ -301,7 +338,8 @@ internal class ToolComposition private constructor(private val layout: Layout, p
                 FixedPart(position(entry.opt("position"), "$path.position"), needId, part)
             }
             if (standalone) {
-                requireParts(parts.any { it.projection != null }, "$root.parts", "a host-projected part")
+                requireParts(parts.any { it.projection != null || it.part.fragment.handlers.values.any { handler -> handler is PartHandler.Clocked } },
+                    "$root.parts", "a host-owned part")
             }
             val positions = parts.map(FixedPart::position) + fill
             requireParts(parts.map(FixedPart::needId).toSet().size == parts.size, "$root.parts", "unique instances")
@@ -326,7 +364,7 @@ internal class ToolComposition private constructor(private val layout: Layout, p
             }
             requireParts(surfaceIds.all(::isFillId), "$.surfaces", "fill-owned surface IDs")
             val fillSchema = JSONObject().apply { fillFields.forEach { put(it, schema.get(it)) } }
-            return ToolComposition(Layout(parts, fill), fillSchema)
+            return ToolComposition(Layout(parts, fill, readPorts), fillSchema)
         }
 
         private fun position(value: Any?, path: String): Int {

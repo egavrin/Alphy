@@ -150,9 +150,23 @@ def add_inputs(cases, path):
     criteria = inputs["interactions"]
     require(isinstance(criteria, dict) and criteria.keys() <= {case["id"] for case in cases},
             "Use known English case IDs in the interaction map.")
+    use_corpus_checks = inputs.get("use_corpus_checks", False)
+    require(type(use_corpus_checks) is bool, "use_corpus_checks must be a Boolean.")
     for case in cases:
         if case["id"] in criteria:
             apply_criteria(case, criteria[case["id"]])
+        elif use_corpus_checks and case["historical_check"]:
+            generated = case["historical_outcome"] == "compose"
+            checks = {"requested_workflow": "Operate the requested controls and verify the requested result. "
+                      "A refusal passes only for an unavailable capability or an existing permission boundary."}
+            if generated:
+                checks["corpus_result"] = case["historical_check"]
+            rules = []
+            if case["game"]:
+                checks["game_rules"] = "Check the applicable rules, score or result, completion, and restart from the request."
+                rules.append("game_rules")
+            apply_criteria(case, {"expected_outcome": "generated" if generated else "either",
+                                  "interactions": checks, "game_rules": rules})
     for case in inputs["cases"]:
         require(re.fullmatch(r"[a-z0-9][a-z0-9-]*", case["id"]) is not None, "Invalid supplemental case ID.")
         require(case["language"] in {"en", "ru"}, "Use en or ru for a supplemental request.")
@@ -167,6 +181,8 @@ def add_inputs(cases, path):
         }
         apply_criteria(frozen, case)
         cases.append(frozen)
+    require(all(set(case.get("capabilities", [])) <= set(capabilities) for case in cases),
+            "Every workflow capability must be in the approved inventory.")
     return capabilities, rubric
 
 
@@ -179,6 +195,17 @@ def apply_criteria(case, criteria):
     require(isinstance(rules, list) and set(rules) <= checks.keys(), f"Invalid game rules for {case['id']}.")
     require(not case["game"] or outcome == "refused" or rules, f"Freeze game-rule checks for {case['id']}.")
     case.update(interactions=checks, expected_outcome=outcome, game_rules=rules)
+    if "capabilities" in criteria:
+        ids = criteria["capabilities"]
+        require(isinstance(ids, list) and len(ids) == len(set(ids)) and all(nonempty(value) for value in ids),
+                "Use distinct workflow capability IDs.")
+        case["capabilities"] = ids
+    if "device_checks" in criteria:
+        device_checks = criteria["device_checks"]
+        require(isinstance(device_checks, dict) and device_checks.keys() <= checks.keys() and
+                all(kind in {"readback", "physical"} for kind in device_checks.values()),
+                "Bind required device evidence to frozen interaction IDs.")
+        case["device_checks"] = device_checks
     if "change_interaction" in criteria:
         require(criteria["change_interaction"] in checks and outcome != "refused",
                 f"Use a frozen change interaction for {case['id']}.")
@@ -187,7 +214,7 @@ def apply_criteria(case, criteria):
 
 def make_plan(cases, execution, rubric, capabilities, purpose):
     slots = []
-    identities = {product: digest(encode(execution["products"][product])) for product in PRODUCTS}
+    identities = {product: digest(encode(identity)) for product, identity in execution["products"].items()}
     for case in cases:
         request_sha256 = digest(case["request"].encode("utf-8"))
         for product in PRODUCTS:
@@ -756,7 +783,7 @@ def audit_functional(args):
     slots, cases, directory, captures, invalid_captures = audit_inputs(args, plan, products)
     seen, state_ids, invalid, complete = set(), set(), [], {}
     groups = defaultdict(Counter)
-    coverage = set()
+    coverage, passed_slots = set(), set()
     critical = []
     for line, text in enumerate(args.results.read_text(encoding="utf-8").splitlines(), 1):
         if not text.strip():
@@ -801,12 +828,13 @@ def audit_functional(args):
             if passed:
                 groups[f"{case['split']}/{case['category']}"][slot["product"]] += 1
                 coverage.add((case["id"], slot["product"]))
+                passed_slots.add(slot_id)
         except (ValueError, KeyError, TypeError, AttributeError, OSError) as error:
             invalid.append({"line": line, "reason": str(error)})
 
     extras = [case for case in plan["cases"] if case["split"] == "supplemental"]
     approved = set(plan["approved_capabilities"])
-    covered = {capability for case in extras for capability in case["capabilities"]}
+    covered = {capability for case in plan["cases"] for capability in case.get("capabilities", [])}
     gaps = [case["id"] for case in plan["cases"] if not case.get("interactions")]
     regressions = sorted(key for key, counts in groups.items() if counts["candidate"] < counts["reference"])
     uncovered = sorted(case["id"] for case in plan["cases"] if
@@ -822,11 +850,38 @@ def audit_functional(args):
         blockers.append("At least one request lacks passing evidence on both products or a category regressed.")
     if critical:
         blockers.append("The matrix contains critical defects.")
+    case_results = {case_id: {product: [] for product in PRODUCTS} for case_id in cases}
+    for slot_id, slot in slots.items():
+        status = "pass" if slot_id in passed_slots else "fail" if slot_id in complete else "missing"
+        case_results[slot["case_id"]][slot["product"]].append(status)
     return {"gate": "blocked" if blockers else "pass", "scope": "android-and-reference-host-functionality",
             "plan_sha256": args.plan_sha256, "blockers": blockers, "planned_slots": len(slots),
             "complete_slots": len(complete), "outcomes": Counter(complete.values()), "critical_slots": critical,
-            "uncovered_cases": uncovered, "categories": groups, "regressions": regressions,
+            "uncovered_cases": uncovered, "categories": groups, "cases": case_results, "regressions": regressions,
             "invalid_records": invalid, "invalid_captures": invalid_captures}
+
+
+def coverage(args):
+    plan = load_final_plan(args)
+    families = {
+        "calculated-values": {"unit-conversion", "money", "home-diy", "hard-math"},
+        "timers-and-records": {"cooking", "fitness", "goals", "health", "logs", "calendar", "dose-schedule", "due-items",
+                               "idea-deck", "interval-timer", "itinerary", "itinerary-source-selection", "points-ledger",
+                               "quick-log", "reading-status", "timer"},
+        "general-parts": {"compose-parts", "terse"},
+        "custom-and-boundary": {"compose-boundary", "beyond-logic", "embedded-scene", "grid-game", "near-miss"},
+        "device-and-live-data": {"audio-torch", "navigation-calendar", "outside-data", "phone-action"},
+    }
+    rows = []
+    for case in plan["cases"]:
+        family = next((name for name, categories in families.items() if case["category"] in categories), None)
+        rows.append({"case_id": case["id"], "split": case["split"], "family": family,
+                     "expected_outcome": case["expected_outcome"], "checks": sorted(case["interactions"]),
+                     "device_checks": case.get("device_checks", {}), "capabilities": case.get("capabilities", [])})
+    return {"plan_sha256": args.plan_sha256, "planning_status": "mapped" if all(row["family"] for row in rows) else "incomplete",
+            "functional_status": "unverified", "cases": rows, "case_count": len(rows),
+            "check_count": sum(len(row["checks"]) for row in rows), "slot_count": len(plan["slots"]),
+            "families": Counter(row["family"] for row in rows), "splits": Counter(row["split"] for row in rows)}
 
 
 def main():
@@ -838,6 +893,9 @@ def main():
     preparation.add_argument("--execution", type=Path, required=True)
     preparation.add_argument("--inputs", type=Path)
     preparation.add_argument("--out", type=Path, required=True)
+    inventory = commands.add_parser("coverage")
+    inventory.add_argument("--plan", type=Path, required=True)
+    inventory.add_argument("--plan-sha256", required=True)
     for name in ("audit", "audit-functional"):
         auditing = commands.add_parser(name)
         auditing.add_argument("--plan", type=Path, required=True)
@@ -847,11 +905,11 @@ def main():
         auditing.add_argument("--capture-dir", type=Path, required=name == "audit-functional")
     args = parser.parse_args()
     try:
-        result = {"prepare": prepare, "audit": audit, "audit-functional": audit_functional}[args.command](args)
+        result = {"prepare": prepare, "audit": audit, "audit-functional": audit_functional, "coverage": coverage}[args.command](args)
     except (ValueError, KeyError, TypeError, AttributeError, OSError) as error:
         parser.exit(2, f"{error}\n")
     print(encode(result).decode(), end="")
-    return int(result.get("gate") == "blocked")
+    return int(result.get("gate") == "blocked" or result.get("planning_status") == "incomplete")
 
 
 if __name__ == "__main__":

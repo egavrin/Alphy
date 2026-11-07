@@ -14,7 +14,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /** Opens only selected local audio. The player borrows the descriptor for a single claimed effect. */
-internal class AudioCapabilities(context: Context, private val store: ToolStore,
+internal class AudioCapabilities(private val context: Context, private val store: ToolStore,
     private val playback: () -> DeviceMediaPlayback = { DeviceMediaPlayback() },
     private val openDescriptor: (suspend (CapabilityResource) -> AssetFileDescriptor?)? = null) {
     private val resources = CapabilityResources(context,store)
@@ -49,9 +49,11 @@ internal class AudioCapabilities(context: Context, private val store: ToolStore,
         }
 
         val media = playback()
+        val sequence = if (request.capability == TorchSequence.ID) TorchSequencePlayer(context, TorchSequence.parse(request.args)) else null
         try {
             val result = playWhileCurrent(store.changes, ::current) {
-                if (selected == null) media.playTone(AudioContract.tones.getValue(request.args.getString("tone")),
+                if (sequence != null) sequence.play(::authorizeStart) { active() && current() }
+                else if (selected == null) media.playTone(AudioContract.tones.getValue(request.args.getString("tone")),
                     request.args.getInt("durationMillis"), ::authorizeStart)
                 else {
                     val descriptor = if (openDescriptor == null) resources.openMedia(selected) else openDescriptor.invoke(selected)
@@ -60,7 +62,8 @@ internal class AudioCapabilities(context: Context, private val store: ToolStore,
             }
             if (accessLost) return@withContext AudioContract.unavailable()
             when (result) {
-                MediaPlaybackResult.COMPLETED -> CapabilityResult("succeeded", if (selected == null)
+                MediaPlaybackResult.COMPLETED -> if (sequence != null) CapabilityResult("succeeded",
+                    "Android completed the sequence. Physical output is unverified.", sequence.receipt) else CapabilityResult("succeeded", if (selected == null)
                     "Длительность звукового сигнала истекла. Слышимость не подтверждена."
                     else "Проигрыватель сообщил о завершении. Слышимость не подтверждена.")
                 null, MediaPlaybackResult.CANCELLED, MediaPlaybackResult.CLOSED -> AudioContract.cancelled()
@@ -72,6 +75,7 @@ internal class AudioCapabilities(context: Context, private val store: ToolStore,
         } catch (cancel: CancellationException) { throw cancel }
           catch (_: android.os.OperationCanceledException) { AudioContract.cancelled() }
           catch (_: SecurityException) { AudioContract.unavailable() }
+          catch (_: android.hardware.camera2.CameraAccessException) { AudioContract.unavailable() }
           catch (_: java.io.IOException) { AudioContract.unavailable() }
           catch (_: IllegalArgumentException) { AudioContract.unavailable() }
         finally { withContext(NonCancellable + Dispatchers.Main.immediate) { media.close() } }

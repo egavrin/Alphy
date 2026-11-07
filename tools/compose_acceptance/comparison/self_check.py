@@ -87,6 +87,17 @@ def main(reference):
         assert len({slot["id"] for slot in final["slots"]}) == 732
         assert sum(slot["case_id"] in held_out for slot in final["slots"]) == 270
         assert all(len(case["source"]["sha256"]) == 64 for case in final["cases"])
+        with_corpus_checks = json.loads(inputs.read_text())
+        with_corpus_checks["use_corpus_checks"] = True
+        inputs.write_text(json.dumps(with_corpus_checks))
+        checked = root / "with-corpus-checks"
+        run("prepare", "--reference-repo", reference, "--corpus-revision", CORPUS,
+            "--inputs", str(inputs), "--execution", str(execution), "--out", str(checked))
+        checks = json.loads((checked / "tuning.json").read_text())["cases"]
+        by_id = {case["id"]: case for case in checks}
+        assert by_id["fresh:unit-1"]["interactions"]["corpus_result"] == "10 km -> 6.21 miles"
+        assert by_id["fresh:outside-1"]["expected_outcome"] == "either"
+        assert by_id["fresh:beyond-5"]["game_rules"] == ["game_rules"]
         duplicate = json.loads(inputs.read_text())
         duplicate["cases"][0]["request"] = "  POUNDS to   kilograms converter  "
         inputs.write_text(json.dumps(duplicate))
@@ -202,6 +213,7 @@ def main(reference):
         report = run(*functional, expected=1)
         assert report["scope"] == "android-and-reference-host-functionality"
         assert report["planned_slots"] == 732 and report["complete_slots"] == 0
+        assert report["cases"]["extra:calendar"]["reference"] == ["missing"] * 3
         results.write_text(json.dumps({
             **frozen, "capture_sha256": digest(encoded(manifest)), "outcome": "refused",
         }) + "\n" + json.dumps({
@@ -244,6 +256,7 @@ def main(reference):
         program.write_bytes(fixture_artifact)
         report = run(*functional, expected=1)
         assert report["complete_slots"] == 1 and not report["invalid_records"]
+        assert report["cases"]["extra:calendar"]["reference"] == ["pass", "missing", "missing"]
         program.write_bytes(b"changed")
         report = run(*functional, expected=1)
         assert "host program" in report["invalid_records"][0]["reason"]

@@ -35,7 +35,7 @@ class MixedClockHostWorkflowTest {
     // a fill-owned state leak, and refresh dispatch of the fill open handler.
     @Test fun savedMiniAppShowsTheDueRowAndItsNativeAction(): Unit = runBlocking {
         val fixture = ShellFixture("mixed-clock-visible")
-        val sample = localPartClock()
+        val sample = localPartClock(fixture.context)
         val spec = spec(sample)
         val tool = ToolRecord(UUID.randomUUID().toString(), 1, 1, spec.json, spec.initialState, spec.ui.toString(), null, true)
         val robot = ShellRobot("mixed-clock-visible")

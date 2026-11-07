@@ -28,7 +28,9 @@ internal data class PartPlacement(
     val position: Int,
     val config: JSONObject,
     val primaryActionId: String?,
-    val secondaryActionIds: Set<String>
+    val secondaryActionIds: Set<String>,
+    val valuePath: List<Int>? = null,
+    val behaviorActionId: String? = null,
 )
 
 internal data class PartsAssembly(
@@ -38,11 +40,13 @@ internal data class PartsAssembly(
     val blockingQuestions: List<PlanQuestion>,
     val selectorFailures: List<PartsContractFailure>,
     val requiresReadProjection: Boolean = false,
+    val readPorts: Set<String> = emptySet(),
+    val requiresHostRuntime: Boolean = requiresReadProjection,
 ) {
     fun requireComplete(): ToolSpec {
         requireParts(blockingQuestions.isEmpty(), "$.questions", "answers to the blocking questions")
         requireParts(holes.isEmpty(), "$.holes", "a completed screen")
-        requireParts(!requiresReadProjection, "$.composition", "a sealed host projection")
+        requireParts(!requiresHostRuntime, "$.composition", "a sealed host runtime")
         return preview
     }
 }
@@ -99,8 +103,14 @@ internal object PartsGeneration {
         val compatible = if (picked.size == requests.size && !needsHostProjection) picked
             else picked.filterValues { it.fragment.projectionSource == null }
         // A custom need has no declared independence from the selected parts.
+        val numericOutputs = compatible.flatMap { (id, part) ->
+            listOfNotNull(id.takeIf { part.numberOutput != null }) + part.aggregates.keys.map { "$id:$it" }
+        }.toSet()
         val selected = if (lessonTarget == null && compatible.isNotEmpty() && plan.needs.any { need ->
-                need.id !in compatible && (need.type == NeedType.OTHER || need.uses.values.any(compatible::containsKey))
+                val part = compatible[need.id]
+                if (part == null) (need.type == NeedType.OTHER && need.reads == null) || need.figure != null ||
+                    need.uses.values.any(compatible::containsKey) || need.reads.orEmpty().any { compatible[it]?.numberOutput == null }
+                else part.fragment.readProjection?.reads.orEmpty().any { it !in numericOutputs }
             }) emptyMap() else compatible
         if (lessonTarget != null) {
             (sectionResult.failure ?: partResult.failure)?.let { throw it }
@@ -207,10 +217,13 @@ internal object PartsGeneration {
             val compact = ToolUiCatalog.validate(part.fragment.compact, preview.schema, state)
             PartPlacement(request.id, part.id, partInstanceId(request.id), "$.ui.children[$position]", part.fragment.full, compact,
                 ToolUiCatalog.widgetNodes(compact, state), identifiers[index], position, part.config,
-                part.primaryActionId, part.secondaryActionIds)
+                part.primaryActionId, part.secondaryActionIds, part.valuePath, part.behaviorActionId)
         }
         val requiresReadProjection = pending.any { (_, part) -> part.fragment.readProjection != null }
-        return PartsAssembly(preview, holes, placements, blockers, failures, requiresReadProjection)
+        val readPorts = if (selected.isEmpty()) emptySet() else plan.needs.filter { it.id !in selected }
+            .flatMap { it.reads.orEmpty() }.toSet()
+        val requiresHostRuntime = requiresReadProjection || pending.any { (_, part) -> part.fragment.handlers.values.any { it is PartHandler.Clocked } }
+        return PartsAssembly(preview, holes, placements, blockers, failures, requiresReadProjection, readPorts, requiresHostRuntime)
     }
 
     internal fun requireUniqueIds(fragments: List<PartFragmentIds>) {

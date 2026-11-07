@@ -1,0 +1,87 @@
+{
+  "use_corpus_checks": true,
+  "interactions": {
+    "compose:soft-egg": {"expected_outcome":"generated","interactions":{"timer":"Start the soft-egg preset. Verify a labeled duration, a decreasing countdown, and a completion state."}},
+    "compose:tea": {"expected_outcome":"generated","interactions":{"timer":"Select green, black, and herbal tea in turn. Verify each selection shows its preset. Complete one countdown and verify its vibration request."}},
+    "compose:plank": {"expected_outcome":"generated","interactions":{"timer":"Start a 60-second countdown. Verify completion and one beep request at the end."}},
+    "compose:stopwatch": {"expected_outcome":"generated","interactions":{"timer":"Start, stop, and reset. Verify elapsed time increases only while running and returns to zero on reset."}},
+    "compose:discount": {"expected_outcome":"generated","interactions":{"calculate":"Enter price 80 and discount 25 percent. Verify savings 20 and payable amount 60."}},
+    "compose:bmi": {"expected_outcome":"generated","interactions":{"calculate":"Enter weight 70 kg and height 1.75 m. Verify BMI about 22.86."}},
+    "compose:fuel": {"expected_outcome":"generated","interactions":{"calculate":"Enter 200 km, 6 L per 100 km, and 1.50 per liter. Verify trip cost 18."}},
+    "compose:convert": {"expected_outcome":"generated","interactions":{"calculate":"Enter 10 km. Verify about 6.21 miles."}},
+    "compose:split": {"expected_outcome":"generated","interactions":{"calculate":"Enter a bill of 80 and four people. Verify 20 per person."}},
+    "compose:savings": {"expected_outcome":"generated","interactions":{"calculate":"Enter goal 5000 and saved 1250. Verify 25 percent reached and 3750 left."}},
+    "compose:pace": {"expected_outcome":"generated","interactions":{"calculate":"Enter 50 minutes and 10 km. Verify 5 minutes per km."}},
+    "compose:tiles": {"expected_outcome":"generated","interactions":{"calculate":"Enter 8 square meters. Verify 6 boxes at 1.5 square meters per box."}},
+    "compose:counter": {"expected_outcome":"generated","interactions":{"count":"Record three push-ups. Verify the visible count advances from zero to three."}},
+    "compose:expenses": {"expected_outcome":"generated","interactions":{"entries":"Add coffee 3.50 and lunch 12. Verify both labels and amounts, and total 15.50."}},
+    "compose:shopping": {"expected_outcome":"generated","interactions":{"entries":"Add milk and bread. Remove milk. Verify that bread remains and milk disappears."}},
+    "compose:weather": {"expected_outcome":"either","interactions":{"location":"Use the same test location when the route supports location. Verify current weather is sourced. Otherwise verify that the response explains the unavailable location or weather source."}},
+    "compose:notes": {"expected_outcome":"generated","interactions":{"entries":"Add two notes with different tags. Search for a term in one note and filter by its tag. Verify that each operation finds the right note."}},
+    "compose:alarm": {"expected_outcome":"either","interactions":{"effect":"Verify a 07:00 alarm request to the system clock when supported. Otherwise verify that the response explains the unavailable system action and shows no claim of success."}},
+    "compose:quiz": {"expected_outcome":"generated","interactions":{"game_rules":"Play through ten capital-city questions. Verify correct and incorrect answers affect the score as stated, and verify completion and restart."},"game_rules":["game_rules"]},
+    "compose:mortgage": {"expected_outcome":"generated","interactions":{"calculate":"Enter principal 120000, annual rate 6 percent, and term 30 years. Verify a monthly payment of about 719.46."}},
+    "compose:dice": {"expected_outcome":"generated","interactions":{"roll":"Roll twice. Verify each roll produces two independent dice values in the range 1 to 6. Inspect the sampled behavior without requiring unequal successive results."}},
+    "bench:egg": {"expected_outcome":"generated","interactions":{"presets":"Select soft, medium, and hard presets. Verify their durations and a usable countdown with progress.","completion":"Complete one timer. Verify a single vibration request at zero."}},
+    "bench:melody": {"expected_outcome":"generated","interactions":{"audio":"Start the melody. Verify C major at 120 BPM and a five-second stream of 8000 Hz signed 16-bit samples.","torch":"Verify torch on at each beat, off 80 milliseconds later, final off state, and the displayed count."}},
+    "bench:shanghai": {"expected_outcome":"generated","interactions":{"schedule":"Verify the 09:00 arrival, 11-hour window, sourced coordinates, stop durations, and latest airport departure.","navigation":"Mark one stop reached. Verify the next navigation request starts from that stop.","calendar":"Add one stop with a reminder in a test-owned calendar, open the calendar, and delete the created event. Verify an unrelated event remains."}},
+    "bench:pill": {
+      "expected_outcome": "generated",
+      "interactions": {
+        "add": "Add a fictional medicine named Sample at 08:15 with daily repeat. Verify a calendar event with its reminder in a test-owned calendar.",
+        "result": "Verify the list shows the schedule and the actual calendar response."
+      }
+    },
+    "bench:tip": {
+      "expected_outcome": "generated",
+      "interactions": {
+        "change": "Enter a bill of 80, a 15 percent tip, and four people through the generated controls.",
+        "result": "Verify tip 12, total 92, and 23 per person."
+      }
+    },
+    "fresh:phone-5": {
+      "expected_outcome": "refused",
+      "interactions": {
+        "refusal": "Verify the product explains that it cannot send the text automatically and makes no messaging request."
+      }
+    }
+  },
+  "reference_case_overrides": {
+    "reference-points-ledger": {
+      "change_interaction": "change_quiz_points",
+      "interactions": {
+        "change_quiz_points": "After the history check, request 4 points for future quizzes. Verify that existing balances and entries stay intact, then record a quiz for Янтарь and verify its balance becomes 5."
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "russian-grid-game",
+      "language": "ru",
+      "category": "grid-game",
+      "capabilities": [],
+      "game": true,
+      "expected_outcome": "generated",
+      "request": "Сделай игру на русском «Три звезды». На поле 3 на 3 пронумеруй клетки от 1 до 9. Звёзды находятся в клетках 2, 5 и 8. За каждую звезду начисляй одно очко только один раз. Пустая клетка очков не даёт. После трёх звёзд покажи победу и заблокируй поле. Кнопка «Заново» начинает игру с нулём очков.",
+      "interactions": {
+        "score": "Tap cells 1, 2, 2, and 5 in order. Verify that the score goes from 0 to 0, 1, 1, and 2.",
+        "terminal": "Tap cell 8. Verify score 3 and a Russian victory message. Verify that further taps cannot change the score.",
+        "restart": "Tap «Заново». Verify score 0, the victory message is absent, and tapping cell 2 scores 1 again."
+      },
+      "game_rules": ["score", "terminal", "restart"]
+    },
+    {
+      "id": "russian-embedded-drawing",
+      "language": "ru",
+      "category": "embedded-scene",
+      "capabilities": [],
+      "expected_outcome": "generated",
+      "request": "Сделай мини-приложение на русском с заголовком «Метка на холсте». Внутри экрана размести отдельный холст. При касании холста поставь в этой точке оранжевую метку и убери предыдущую. Покажи число касаний. Кнопка «Сбросить» очищает холст и возвращает счётчик к нулю.",
+      "interactions": {
+        "initial": "Verify a blank drawing area embedded below the heading, a zero count, and a reset control outside the drawing area.",
+        "touch": "Tap near the upper left and then near the lower right of the drawing area. Verify one orange mark at the last touch and count 2.",
+        "reset": "Tap «Сбросить». Verify that the mark disappears and the count returns to zero."
+      }
+    }
+  ]
+}

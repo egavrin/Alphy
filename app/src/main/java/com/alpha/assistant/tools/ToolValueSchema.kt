@@ -6,6 +6,7 @@ import kotlin.math.abs
 
 /** Shared bounded values for UI state and native-owned collection records. */
 internal object ToolValueSchema {
+    const val MAX_SAFE_NUMBER = 9_007_199_254_740_991.0
     const val LIST_MAX_ITEMS=100
     const val ARRAY_MAX_ITEMS=512
     private val scalars=setOf("string","number","boolean")
@@ -92,7 +93,7 @@ internal object ToolValueSchema {
                 require(when(contract) {
                     "string" -> item is String && item.length <= 2048
                     "boolean" -> item is Boolean
-                    "number" -> item is Number && item.toDouble().isFinite() && abs(item.toDouble()) <= 9007199254740991.0
+                    "number" -> item is Number && item.toDouble().isFinite() && abs(item.toDouble()) <= MAX_SAFE_NUMBER
                     else -> false
                 }) { "Invalid scalar value." }
                 return

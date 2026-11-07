@@ -120,7 +120,15 @@ internal object SandboxContract {
         }
         if(event.getString("type") == "recordResults") com.alpha.assistant.tools.ToolRecords.validateEvent(event)
         json.getJSONObject("state")
-        require(json.keys().asSequence().toSet() == setOf("artifactId", "revision", "event", "state"))
+        val fields = setOf("artifactId", "revision", "event", "state")
+        if (json.has("ports")) {
+            require(json.keys().asSequence().toSet() == fields + "ports")
+            val ports = json.getJSONObject("ports")
+            require(ports.length() in 1..12 && ports.keys().asSequence().all { id ->
+                id.matches(Regex("[A-Za-z][A-Za-z0-9_]{0,23}")) &&
+                    (ports.isNull(id) || (ports.opt(id) as? Number)?.toDouble()?.isFinite() == true)
+            }) { "Invalid numeric input ports." }
+        } else require(json.keys().asSequence().toSet() == fields)
     }
 
     fun validateLiveInputEvent(event: JSONObject) {

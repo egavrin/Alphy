@@ -71,6 +71,27 @@ The adapter then keeps the generated `program.vera` in the private attempt direc
 with its verified SHA-256. Use that exact program for the host interaction review.
 The adapter does not retain a native screenshot, interaction result, latency measurement, or provider call count.
 
+## Replay a captured program
+
+Use a clean checkout at the captured revision and the same Node and TypeScript
+binaries. Pass an empty JSON array as `steps.json` to record the initial view.
+Select each control by its decoded kind and exact label or text.
+
+```sh
+VERA_TYPESCRIPT_PATH="$TYPESCRIPT_JS" "$NODE" \
+  tools/compose_acceptance/comparison/reference_adapter/replay.cjs \
+  "$REFERENCE_SNAPSHOT" attempt-1/result.json steps.json > replay.json
+```
+
+For a control step, use `{"type":"control","kind":"field","label":"Amount","value":"80"}`.
+For a tap, omit `value` to use the control's event value. A pointer step uses
+`type` `pointer`, `kind` `surface`, `phase`, `x`, and `y` in surface units.
+A `frame` step advances the selected surface by `count` frames of 16 ms each.
+The replay records each queued effect. Use an `effect-result` step with its
+`id` and a controlled string `value` to test the callback. This proves the
+request and response handling in the host. The actual device effect needs
+separate evidence. Use the replay observations in the functional review.
+
 ## Offline check
 
 ```sh

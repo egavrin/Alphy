@@ -18,6 +18,10 @@ object CapabilityResultEvent {
         if(capability==VideoContract.PLAY) require(result.status in VideoContract.statuses)
         val data = JSONObject(result.data.toString())
         require(data.toString().toByteArray().size <= MAX_DATA_BYTES)
+        if(capability==TorchSequence.ID) {
+            TorchSequence.validateReceipt(result)
+            return data
+        }
         if(capability==NetworkEffectContract.ID) {
             NetworkEffectContract.validateResult(result.status,data)
             return data

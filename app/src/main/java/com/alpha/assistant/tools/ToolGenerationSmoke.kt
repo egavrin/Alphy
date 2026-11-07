@@ -48,6 +48,8 @@ internal class ToolGenerationSmoke(
         var frames=emptySet<String>()
         var timers=emptyMap<String,Int>()
         var fenced=false
+        private var clock = generation.partClockFor(spec)
+        fun displayState(): JSONObject = projectToolState(spec, JSONObject(state), clock)
         suspend fun event(event: JSONObject,path: String): ToolPreview {
             checkActive()
             try {
@@ -57,7 +59,8 @@ internal class ToolGenerationSmoke(
                     if(type=="frame") require(event.getString("surfaceId") in frames)
                     if(type=="timer") require(event.getString("timerId") in timers)
                 }
-                val result=generation.executeEvent(spec,id,revision,state,event,ui,policy) { source,input ->
+                clock = generation.partClockFor(spec)
+                val result=generation.executeEvent(spec,id,revision,state,event,ui,policy,clock) { source,input ->
                     execute(source,input.toString())
                 }
                 val merged=JSONObject(surfaces.toString())
@@ -134,7 +137,7 @@ internal class ToolGenerationSmoke(
                 val kind = scenario.slots.getValue(slot).kind
                 return when (val binding = target(slot)) {
                     is Binding.Ui -> {
-                        val values = JSONObject(state)
+                        val values = displayState()
                         val node = visibleNode(JSONObject(ui), values, binding.path) ?: fail("visible output unavailable")
                         behaviorUiObservation(node, values, kind) ?: fail("compatible visible output unavailable")
                     }

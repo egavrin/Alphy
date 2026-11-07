@@ -3,6 +3,7 @@ package com.alpha.assistant.tools.generation
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolUiDiagnostic
 import com.alpha.assistant.tools.ToolValueSchema
+import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
 import java.util.UUID
@@ -17,9 +18,10 @@ internal data class NativeEditBase(
 
 internal data class NativeEditResult(val spec: String, val state: String)
 
-internal enum class NativeEditKind(val wire: String, val field: String, val capacity: Int) {
+internal enum class NativeEditKind(val wire: String, val field: String?, val capacity: Int) {
     DUE("due_items", "items", ToolValueSchema.LIST_MAX_ITEMS),
-    IDEAS("idea_deck", "ideas", ToolValueSchema.ARRAY_MAX_ITEMS)
+    IDEAS("idea_deck", "ideas", ToolValueSchema.ARRAY_MAX_ITEMS),
+    FIGURE("numeric_figure", null, 0)
 }
 
 internal data class NativeEditablePart(val position: Int, val instanceId: String, val kind: NativeEditKind, val definition: String) {
@@ -69,22 +71,26 @@ internal class StandaloneNativeEdit private constructor(
 ) {
     private class PartDefinition(val part: NativeEditablePart) {
         val config = JSONObject(part.definition)
-        val items = config.getJSONArray(part.kind.field)
+        val items = part.kind.field?.let(config::getJSONArray) ?: JSONArray()
         val metadata = NativePartEditMetadata.read(config, items.length(), "$.parts.config")
 
         fun providerFields() = JSONObject().put("alias", part.alias).put("type", part.kind.wire)
-            .put("label", config.getString("label")).put("slots", jsonArray((0 until items.length()).map { index ->
+            .put("label", config.getString("label")).apply {
+            if (part.kind == NativeEditKind.FIGURE) {
+                put("expression", config.getJSONObject("expression"))
+                put("unit", config.getString("unit"))
+                return@apply
+            }
+            put("slots", jsonArray((0 until items.length()).map { index ->
                 val item = items.getJSONObject(index)
                 JSONObject().put("alias", slotAlias(index)).put("name", item.getString("name"))
                     .put("retired", index in metadata.retiredSlots).apply {
-                        when (part.kind) {
-                            NativeEditKind.DUE -> put("repeatDays", item.optInt("repeatDays", 0))
-                            NativeEditKind.IDEAS -> put("minutes", item.getInt("minutes")).put("effort", item.getString("effort"))
-                        }
+                        if (part.kind == NativeEditKind.DUE) put("repeatDays", item.optInt("repeatDays", 0))
+                        else put("minutes", item.getInt("minutes")).put("effort", item.getString("effort"))
                     }
-            })).apply {
-                if (part.kind == NativeEditKind.DUE) put("windowDays", config.getInt("window"))
-            }
+            }))
+            if (part.kind == NativeEditKind.DUE) put("windowDays", config.getInt("window"))
+        }
 
         fun checkDurable(state: JSONObject) {
             if (part.kind == NativeEditKind.DUE) {
@@ -100,7 +106,7 @@ internal class StandaloneNativeEdit private constructor(
                     requireParts(occurrence.toDouble() == occurrence.toLong().toDouble() && occurrence.toLong() >= 0,
                         "$.state.occurrence", "a nonnegative whole occurrence number")
                 }
-            } else {
+            } else if (part.kind == NativeEditKind.IDEAS) {
                 val history = state.getJSONArray(part.stateKey("history"))
                 val seen = mutableSetOf<Pair<Int, String>>()
                 for (index in 0 until history.length()) {
@@ -117,6 +123,7 @@ internal class StandaloneNativeEdit private constructor(
         data class App(val title: String?, val description: String?) : Edit
         data class Rename(val part: PartDefinition, val label: String) : Edit
         data class Window(val part: PartDefinition, val days: Int) : Edit
+        data class Figure(val part: PartDefinition, val expression: NumberExpression) : Edit
         data class Due(val part: PartDefinition, val slot: Int?, val name: String?, val date: LocalDate?, val repeatDays: Int?) : Edit
         data class Idea(val part: PartDefinition, val slot: Int?, val name: String?, val minutes: Int?, val effort: IdeaEffort?) : Edit
         data class Lifecycle(val part: PartDefinition, val slot: Int, val retired: Boolean) : Edit
@@ -124,7 +131,7 @@ internal class StandaloneNativeEdit private constructor(
 
     private class PartDraft(val original: PartDefinition, state: JSONObject) {
         val config = JSONObject(original.part.definition)
-        val items = config.getJSONArray(original.part.kind.field)
+        val items = original.part.kind.field?.let(config::getJSONArray) ?: JSONArray()
         val retired = original.metadata.retiredSlots.toMutableSet()
         var showLabel = original.metadata.showLabel
         val dueRows = if (original.part.kind == NativeEditKind.DUE) state.getJSONArray(original.part.stateKey("items")) else null
@@ -139,6 +146,7 @@ internal class StandaloneNativeEdit private constructor(
             val old = original.metadata
             if (sameToolJson(config, original.config) && previousDue == dueRows?.toString() &&
                 retired == old.retiredSlots && showLabel == old.showLabel) return null
+            if (original.part.kind == NativeEditKind.FIGURE) return config
             requireParts(old.version < Int.MAX_VALUE, "$.composition", "room for a new view version")
             NativePartEditMetadata(old.version + 1, retired, showLabel).write(config)
             return config
@@ -163,9 +171,16 @@ internal class StandaloneNativeEdit private constructor(
                 }
                 is Edit.Rename -> draft(edit.part).apply {
                     config.put("label", edit.label)
-                    showLabel = true
+                    if (edit.part.part.kind != NativeEditKind.FIGURE) showLabel = true
                 }
                 is Edit.Window -> draft(edit.part).config.put("window", edit.days)
+                is Edit.Figure -> draft(edit.part).config.apply {
+                    val constants = getJSONObject("constants")
+                    put("constants", JSONObject().apply {
+                        edit.expression.references.filter(constants::has).forEach { put(it, constants.get(it)) }
+                    })
+                    put("expression", edit.expression.json)
+                }
                 is Edit.Due -> applyDue(draft(edit.part), edit)
                 is Edit.Idea -> applyIdea(draft(edit.part), edit)
                 is Edit.Lifecycle -> if (edit.retired) draft(edit.part).retired.add(edit.slot)
@@ -232,6 +247,15 @@ internal class StandaloneNativeEdit private constructor(
                     requireParts(part.part.kind == NativeEditKind.DUE, "$path.part", "a due part")
                     unique(part.part.alias, "window", path)
                     Edit.Window(part, boundedInt(row.opt("days"), 0..PLAN_NUMBER_LIMIT, "$path.days"))
+                }
+                "set_figure_expression" -> {
+                    row.requireKeys(path, required + "expression")
+                    requireParts(part.part.kind == NativeEditKind.FIGURE, "$path.part", "a numeric figure")
+                    unique(part.part.alias, "expression", path)
+                    val expression = NumberExpression.parse(row.opt("expression"), "$path.expression")
+                    val old = NumberExpression.parse(part.config.getJSONObject("expression"), "$path.expression")
+                    requireParts(old.references.containsAll(expression.references), "$path.expression", "only existing value references")
+                    Edit.Figure(part, expression)
                 }
                 "update_due", "append_due" -> {
                     val updating = op == "update_due"
@@ -317,6 +341,7 @@ internal class StandaloneNativeEdit private constructor(
             Each operation object has op and exactly the fields below.
             update_app: title and/or description.
             rename_part: part, label.
+            set_figure_expression: part, expression. Use the current figure's numeric expression format and existing references only.
             set_due_window: part, days.
             update_due: part, slot, and one or more of name, date or offsetDays, and repeatDays.
             append_due: part, name, either date or offsetDays, and optional repeatDays.
