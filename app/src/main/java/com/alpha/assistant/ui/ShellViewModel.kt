@@ -848,7 +848,6 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         contextFailure(getApplication<Application>().getString(R.string.context_draft_changed), destination)
         return false
     }
-    fun addScreenText(text: String): Boolean = addReviewedText(text, "Текст экрана", contextDraftKey())
     fun addReviewedText(text: String, source: String, origin: String): Boolean =
         addReviewedComposerText(text, source, origin, null)
 

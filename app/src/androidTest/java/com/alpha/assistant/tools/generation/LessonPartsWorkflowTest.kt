@@ -43,7 +43,7 @@ class LessonPartsWorkflowTest {
 
     private fun choice() = plan("choice_exercise", "option1" to "comí", "option2" to "comía", "correct" to 2)
     private suspend fun build(raw: JSONObject, target: CourseSlideKind): PartsAssembly =
-        PartsGeneration.build(NeedsPlan.parse(raw.toString(), target), target, selector)
+        PartsGeneration.build(NeedsPlan.parse(raw.toString(), target), target, ask = selector)
 
     @Test fun allSevenKindsUseTheTargetAndTheCourseGradesPassiveExercises(): Unit = runBlocking {
         for ((target, need) in listOf(
@@ -164,7 +164,7 @@ class LessonPartsWorkflowTest {
     }
 
     @Test fun normalChoiceKeepsItsNativeActionAndHasNoCourseMetadata(): Unit = runBlocking {
-        val normal = PartsGeneration.build(NeedsPlan.parse(choice().toString()), selector)
+        val normal = PartsGeneration.build(NeedsPlan.parse(choice().toString()), ask = selector)
         val spec = normal.requireComplete()
         assertEquals("choice_exercise", normal.parts.single().partId)
         assertFalse(spec.schema.has(EXERCISE_FIELD))

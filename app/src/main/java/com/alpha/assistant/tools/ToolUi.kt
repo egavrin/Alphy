@@ -853,7 +853,7 @@ catch (_: Exception) { null }
                         if(draft != null && !controller.busy) TextButton(onClick={controller.reject(draft.id)}, modifier=Modifier.heightIn(min=48.dp)) {Text(stringResource(R.string.tool_discard_draft))}
                         val retry=draft != null && prompt == draft.prompt
                         Button(onClick=if(retry) {{controller.retry(checkNotNull(draft).id)}} else submit,
-                            enabled=!controller.busy && prompt.isNotBlank() && prompt.length <= 16000,modifier=Modifier.heightIn(min=48.dp)) {Text(stringResource(if(retry) R.string.tool_retry_preview else R.string.tool_preview_changes))}
+                            enabled=!controller.busy && isValidToolPrompt(prompt),modifier=Modifier.heightIn(min=48.dp)) {Text(stringResource(if(retry) R.string.tool_retry_preview else R.string.tool_preview_changes))}
                     }
                 }
             }

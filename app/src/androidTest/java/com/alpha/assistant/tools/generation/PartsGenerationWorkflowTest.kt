@@ -76,7 +76,7 @@ class PartsGenerationWorkflowTest {
 
     @Test fun invalidSlotsAndUnsupportedNeedsBecomeExplicitHoles(): Unit = runBlocking {
         for (value in listOf("0", "1000001", "\"two\"")) {
-            val assembly = PartsGeneration.build(NeedsPlan.parse(raw.replace("\"value\":2", "\"value\":$value")), chooseFirst)
+            val assembly = PartsGeneration.build(NeedsPlan.parse(raw.replace("\"value\":2", "\"value\":$value")), ask = chooseFirst)
             assertEquals(listOf("count"), assembly.holes.single().needIds)
             assertEquals(HoleKind.NEED, assembly.holes.single().kind)
             assertEquals("$.ui.children[1]", assembly.holes.single().rootPath)
@@ -84,7 +84,7 @@ class PartsGenerationWorkflowTest {
             assertTrue(rejected { assembly.requireComplete() }.path.startsWith("$.holes"))
         }
         val unsupported = raw.replace("\"type\":\"counter\"", "\"type\":\"scene\"")
-        val assembly = PartsGeneration.build(NeedsPlan.parse(unsupported), chooseFirst)
+        val assembly = PartsGeneration.build(NeedsPlan.parse(unsupported), ask = chooseFirst)
         assertEquals(listOf("count", "count_value"), assembly.holes.map { it.needIds.single() })
         assertTrue(assembly.holes.all { it.kind == HoleKind.SCENE })
         ToolSpec.parse(assembly.preview.json)
@@ -102,17 +102,17 @@ class PartsGenerationWorkflowTest {
             { it.put("id", "s_ready") }
         )
         for (edit in invalid) {
-            val result = PartsGeneration.build(plan, { answer(it, edit) })
+            val result = PartsGeneration.build(plan) { answer(it, edit) }
             assertTrue(result.parts.isEmpty())
             assertEquals(HoleKind.SCREEN, result.holes.single().kind)
             assertEquals(listOf("ready", "count", "count_value", "notes"), result.holes.single().needIds)
             assertFalse(result.selectorFailures.isEmpty())
             rejected { result.requireComplete() }
         }
-        val empty = PartsGeneration.build(plan, { "" })
+        val empty = PartsGeneration.build(plan) { "" }
         assertEquals(HoleKind.SCREEN, empty.holes.single().kind)
         assertFalse(empty.selectorFailures.isEmpty())
-        val canceled = runCatching { PartsGeneration.build(plan, { throw CancellationException("stop") }) }
+        val canceled = runCatching { PartsGeneration.build(plan) { throw CancellationException("stop") } }
         assertTrue(canceled.exceptionOrNull() is CancellationException)
     }
 
@@ -121,13 +121,13 @@ class PartsGenerationWorkflowTest {
             "\"questions\":[]",
             "\"questions\":[{\"id\":\"target\",\"ask\":\"Что считать?\",\"options\":[\"Круги\",\"Шаги\"]}]"
         ))
-        val blocked = PartsGeneration.build(plan, chooseFirst)
+        val blocked = PartsGeneration.build(plan, ask = chooseFirst)
         assertEquals("target", blocked.blockingQuestions.single().id)
         assertTrue(blocked.holes.isEmpty())
         assertEquals("$.questions", rejected { blocked.requireComplete() }.path)
-        val completed = PartsGeneration.build(plan, { body ->
+        val completed = PartsGeneration.build(plan) { body ->
             answer(body) { if (it.has("probability")) it.put("probability", 0.1) }
-        })
+        }
         assertTrue(completed.blockingQuestions.isEmpty())
         assertEquals("Домашние записи", completed.requireComplete().title)
     }
@@ -137,9 +137,9 @@ class PartsGenerationWorkflowTest {
         val source = JSONObject(raw)
         source.getJSONArray("needs").getJSONObject(2).put("label", injectedText)
         val plan = NeedsPlan.parse(source.toString())
-        val result = PartsGeneration.build(plan, chooseFirst)
+        val result = PartsGeneration.build(plan, ask = chooseFirst)
         val spec = result.requireComplete()
-        assertEquals(result.preview.json, PartsGeneration.build(plan, chooseFirst).requireComplete().json)
+        assertEquals(result.preview.json, PartsGeneration.build(plan, ask = chooseFirst).requireComplete().json)
         assertEquals(listOf("ready", "count", "count_value", "notes"), result.parts.map { it.needId })
         assertEquals(4, result.parts.map { it.instanceId }.toSet().size)
         assertEquals(4, result.parts.map { it.rootPath }.toSet().size)

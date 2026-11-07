@@ -52,16 +52,12 @@ internal object PartsGeneration {
 
     private data class PresentationChoice(val profile: NativePresentationProfile, val preset: String, val needId: String)
 
-    suspend fun build(plan: NeedsPlan, ask: JevAsk): PartsAssembly = build(plan, null, false, ask)
-
-    suspend fun build(plan: NeedsPlan, lessonTarget: CourseSlideKind?, ask: JevAsk): PartsAssembly =
-        build(plan, lessonTarget, false, ask)
-
-    suspend fun build(plan: NeedsPlan, lessonTarget: CourseSlideKind?, selectPresentation: Boolean, ask: JevAsk): PartsAssembly =
-        build(plan, lessonTarget, selectPresentation, null, ask)
-
     suspend fun build(
-        plan: NeedsPlan, lessonTarget: CourseSlideKind?, selectPresentation: Boolean, clock: PartClockSample?, ask: JevAsk,
+        plan: NeedsPlan,
+        lessonTarget: CourseSlideKind? = null,
+        selectPresentation: Boolean = false,
+        clock: PartClockSample? = null,
+        ask: JevAsk,
     ): PartsAssembly {
         lessonTarget?.let(plan::validateLesson)
         val requests = ToolParts.requests(plan, lessonTarget, clock)

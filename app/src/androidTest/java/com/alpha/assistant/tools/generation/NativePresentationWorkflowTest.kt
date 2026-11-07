@@ -68,7 +68,7 @@ class NativePresentationWorkflowTest {
 
     @Test fun closedChoicesPickDifferentPresentationsInTheExistingBatches(): Unit = runBlocking {
         val batches = mutableListOf<String>()
-        val plain = PartsGeneration.build(NeedsPlan.parse(needs), selector()).requireComplete()
+        val plain = PartsGeneration.build(NeedsPlan.parse(needs), ask = selector()).requireComplete()
         val first = generate(ask = selector(batches = batches)).requireComplete()
         val second = generate(ask = selector(mapOf("v_profile" to "B", "v_preset" to "B", "v_focal" to "B"))).requireComplete()
         assertEquals(listOf("sections", "parts"), batches)
@@ -140,7 +140,7 @@ class NativePresentationWorkflowTest {
     }
 
     @Test fun mixedPartsKeepCanonicalActionsAndFillCannotSeeOrForgeTheRecipe(): Unit = runBlocking {
-        val old = ToolComposition.complete(PartsGeneration.build(NeedsPlan.parse(needsWithHole()), selector()), fill)
+        val old = ToolComposition.complete(PartsGeneration.build(NeedsPlan.parse(needsWithHole()), ask = selector()), fill)
         assertNull(old.nativePresentation)
         assertEquals(old.json, ToolSpec.parsePersisted(old.json).json)
         val assembly = generate(needsWithHole())

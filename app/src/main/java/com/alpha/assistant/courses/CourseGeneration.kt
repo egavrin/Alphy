@@ -6,6 +6,7 @@ import com.alpha.assistant.cloud.validSourceUrl
 import com.alpha.assistant.data.Source
 import com.alpha.assistant.sandbox.SandboxContract
 import com.alpha.assistant.tools.LessonToolPreview
+import com.alpha.assistant.tools.MAX_TOOL_PROMPT_LENGTH
 import com.alpha.assistant.tools.ToolExecutionPolicy
 import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolPreview
@@ -73,7 +74,7 @@ internal class CourseGeneration(
         val exerciseBySlide = mutableMapOf<String, CourseExercise>()
         val prompt = StringBuilder(SLIDE_INSTRUCTIONS)
         fun append(value: String) {
-            if (value.length > MAX_PROMPT_LENGTH - prompt.length) courseFailure(CourseWorkflowError.CONTEXT_LIMIT)
+            if (value.length > MAX_TOOL_PROMPT_LENGTH - prompt.length) courseFailure(CourseWorkflowError.CONTEXT_LIMIT)
             prompt.append(value)
         }
         append("\nCourse and reached slide:\n")
@@ -108,7 +109,7 @@ internal class CourseGeneration(
             if (source.title.isBlank() || source.title.length > 512 || source.url.length > 2048 || !validSourceUrl(source.url)) {
                 courseFailure(CourseWorkflowError.INVALID_SOURCE)
             }
-            if (source.summary.length > MAX_PROMPT_LENGTH - prompt.length) courseFailure(CourseWorkflowError.CONTEXT_LIMIT)
+            if (source.summary.length > MAX_TOOL_PROMPT_LENGTH - prompt.length) courseFailure(CourseWorkflowError.CONTEXT_LIMIT)
             val sourceId = "s${index + 1}"
             sources[sourceId] = CourseSourceReference(source.title, source.url)
             if (index > 0) append(",")
@@ -171,8 +172,6 @@ internal class CourseGeneration(
     }
 
     private companion object {
-        // Keep this limit equal to the ToolGenerationService request limit.
-        const val MAX_PROMPT_LENGTH = 16_000
         const val MAX_SEARCH_RESULTS = 20
         val SEARCH_LINK = Regex("""(?i)https?://[^\s<>"']+""")
         val INVALID_GENERATION_CODES = setOf(

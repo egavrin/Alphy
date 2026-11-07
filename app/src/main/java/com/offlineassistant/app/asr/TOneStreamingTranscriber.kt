@@ -8,7 +8,6 @@ import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineStream
 import com.k2fsa.sherpa.onnx.OnlineToneCtcModelConfig
-import com.k2fsa.sherpa.onnx.WaveReader
 import com.offlineassistant.app.models.ModelNames
 import com.offlineassistant.app.models.ModelOperations
 import com.offlineassistant.app.models.ModelReadiness
@@ -46,23 +45,6 @@ class TOneStreamingTranscriber(
                 lock = lock
             )
         }
-    }
-
-    override fun transcribe(audioFile: File): AudioTranscription {
-        if (!readiness.ready) {
-            return AudioTranscription(
-                text = null,
-                error = "T-one model is not installed: ${readiness.location}. Audio: ${audioFile.name}",
-                latencyMs = 0
-            )
-        }
-        val wave = WaveReader.readWave(audioFile.absolutePath)
-        val session = requireNotNull(startStreaming(onPartialTranscript = {}, onEndpointDetected = {}))
-        val pcm16 = ShortArray(wave.samples.size) { index ->
-            (wave.samples[index].coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt().toShort()
-        }
-        session.acceptPcm16(pcm16, wave.sampleRate)
-        return session.finish()
     }
 
     override fun release() = synchronized(lock) {

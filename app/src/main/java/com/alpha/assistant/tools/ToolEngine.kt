@@ -38,6 +38,10 @@ import org.json.JSONObject
 import java.util.Collections
 import java.util.UUID
 
+internal const val MAX_TOOL_PROMPT_LENGTH = 16_000
+
+internal fun isValidToolPrompt(prompt: String) = prompt.isNotBlank() && prompt.length <= MAX_TOOL_PROMPT_LENGTH
+
 data class ToolPreview(val spec: ToolSpec, val state: String, val ui: String, val effects: List<CapabilityRequest> = emptyList(), val records: JSONArray = JSONArray(), val surfaces: JSONObject? = null, val frames: Set<String>? = null, val timers: Map<String,Int>? = null, val playback: String? = null)
 internal data class LessonToolPreview(val preview: ToolPreview, val sourceIds: List<String>)
 
@@ -264,7 +268,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         progress: ((ToolGenerationProgress) -> Unit)?, draftPreview: ToolDraftPreviewPublisher?, allowedSourceIds: Set<String>,
         trace: ToolGenerationTrace.Run?, appLanguage: AppLanguage?, originalRequest: String,
     ): LessonToolPreview {
-        require(prompt.isNotBlank() && prompt.length <= 16000)
+        require(isValidToolPrompt(prompt))
         require(images.size <= ImageInput.MAX_IMAGES)
         var attemptNumber = session.generationAttempt
         if(lessonTarget!=null && (base!=null || images.isNotEmpty())) {
@@ -820,7 +824,7 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
     @Volatile private var artifactsClosed=false
     private val mutex = Mutex()
     suspend fun createDraft(prompt: String, toolId: String?, conversationId: String? = null, operationId: String? = null, expected: ToolRecord? = null, originalRequest: String = prompt): ToolDraft = mutex.withLock {
-        require(prompt.isNotBlank() && prompt.length <= 16000)
+        require(isValidToolPrompt(prompt))
         val id=operationId ?: UUID.randomUUID().toString()
         var existingLanguage: String? = null
         ArtifactCoordinator.get(store,toolId ?: id).ordered {

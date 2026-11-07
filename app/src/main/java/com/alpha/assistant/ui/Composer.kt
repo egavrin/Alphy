@@ -179,7 +179,6 @@ internal class CourseComposerState(
     FilledIconButton(onClick = action, enabled = enabled, modifier = Modifier.size(48.dp).semantics { contentDescription = label },
         colors = IconButtonDefaults.filledIconButtonColors(containerColor = if (primary) colors.primary else colors.secondaryContainer,
             contentColor = if (primary) colors.onPrimary else colors.onSecondaryContainer)) {
-        // The button content color keeps the contrast on the primary container and dims a disabled glyph.
         AlphaIcon(glyph, color = LocalContentColor.current)
     }
 }

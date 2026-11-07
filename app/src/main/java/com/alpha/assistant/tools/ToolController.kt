@@ -16,7 +16,6 @@ import com.alpha.assistant.R
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.data.Attachment
 import com.alpha.assistant.data.SecureKeyStore
-import com.alpha.assistant.network.NetworkGrant
 import com.alpha.assistant.network.ui.MiniAppNetworkAccessHost
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.scheduling.SourceOffer
@@ -167,12 +166,6 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     private val previews = ToolControllerDraftPreviews(scope) { id -> withContext(Dispatchers.IO) {store.draft(id)} }
     private val snapshotMutex=kotlinx.coroutines.sync.Mutex()
 
-    /** The caller binds the lease to an actual native foreground host. No request is executed here. */
-    internal suspend fun activateNetwork(tool: ToolRecord, sessionId: String, hostActive: () -> Boolean): NetworkGrant? =
-        networkAuthority?.activate(tool,networkSessionOwner,sessionId) { !closing && hostActive() }
-
-    internal fun networkGrantCurrent(grant: NetworkGrant): Boolean = !closing && networkAuthority?.isCurrent(grant) == true
-    internal fun invalidateNetwork(grant: NetworkGrant) { networkAuthority?.invalidate(grant) }
     private val watchStore=scope.launch {
         store.changes.drop(1).collect {
             try { withContext(Dispatchers.IO) { loadSnapshots() } }
