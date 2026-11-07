@@ -634,8 +634,8 @@ class GenerationRouteWorkflowTest {
             "share":{"kind":"value","part":"share"}},"steps":[{"op":"action","slot":"edit","value":6},
             {"op":"assert","slot":"share","test":"equals","value":6}]}"""
         val response = JSONObject(planWithBehavior(needs, scenario)).put("inputs", JSONArray("""
-            [{"id":"amount","label":"Amount","type":"number","value":4,"min":0,"max":100},
-             {"id":"divisor","label":"Divisor","type":"number","value":2,"min":0,"max":10}]
+            [{"id":"amount","label":"Amount","type":"number","value":4,"max":100},
+             {"id":"divisor","label":"Divisor","type":"number","value":2,"min":0,"step":1}]
         """.trimIndent())).toString()
         val provider = FixtureProvider { turn, _ ->
             when (turn.generationStage) {
@@ -669,6 +669,13 @@ class GenerationRouteWorkflowTest {
             saved = engine.interact(saved.id, saved.revision, saved.stateVersion, "p7_divisor_edit", 0)
             assertFalse(checkNotNull(spec.composition).projectState(JSONObject(saved.state), clock).getBoolean("p5_share_available"))
             assertFalse(CloudGenerationStage.COMPLETE in provider.stages)
+            assertEquals(1, provider.stages.count { it == CloudGenerationStage.PLAN })
+            val parts = JSONObject(reopened.spec).getJSONObject("composition").getJSONArray("parts")
+            val configs = (0 until parts.length()).map { parts.getJSONObject(it) }.associate {
+                it.getString("needId") to it.getJSONObject("config")
+            }
+            assertFalse(configs.getValue("amount").has("min"))
+            assertFalse(configs.getValue("divisor").has("max"))
             saved = engine.interact(saved.id, saved.revision, saved.stateVersion, "p7_divisor_edit", 2)
             val edit = NativeToolEditRequest("change-formula")
             engine.prepareNativeEdit(saved, edit, "Multiply by three instead.", "fixture")

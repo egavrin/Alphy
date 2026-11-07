@@ -125,8 +125,12 @@ private val CourseSlideKind.lessonNeed: NeedType get() = when (this) {
     CourseSlideKind.SUMMARY -> NeedType.SUMMARY
 }
 
-internal data class NumberControl(val min: Double, val max: Double, val step: Double?, val slider: Boolean) {
-    fun json() = JSONObject().put("min", min).put("max", max).apply {
+internal data class NumberControl(val min: Double?, val max: Double?, val step: Double?, val slider: Boolean) {
+    val range get() = (min ?: -ToolValueSchema.MAX_SAFE_NUMBER)..(max ?: ToolValueSchema.MAX_SAFE_NUMBER)
+
+    fun json() = JSONObject().apply {
+        min?.let { put("min", it) }
+        max?.let { put("max", it) }
         if (step != null) put("step", step)
         if (slider) put("control", "slider")
     }
@@ -136,14 +140,18 @@ internal data class NumberControl(val min: Double, val max: Double, val step: Do
 
         fun read(row: JSONObject, initial: PlanValue, path: String): NumberControl? {
             if (fields.none(row::has)) return null
-            val minimum = planNumber(row.opt("min"), "$path.min")
-            val maximum = planNumber(row.opt("max"), "$path.max")
-            requireParts(initial is PlanValue.Numeric && minimum < maximum && initial.raw.toDouble() in minimum..maximum,
-                path, "ordered numeric bounds containing the initial value")
+            val slider = row.opt("control") == "slider"
+            requireParts(!row.has("control") || slider, "$path.control", "slider or the default number input")
+            val minimum = if (slider || row.has("min")) planNumber(row.opt("min"), "$path.min") else null
+            val maximum = if (slider || row.has("max")) planNumber(row.opt("max"), "$path.max") else null
             val step = if (row.has("step")) planNumber(row.opt("step"), "$path.step") else null
-            requireParts(step == null || step > 0.0 && step <= maximum - minimum, "$path.step", "a positive step within the range")
-            requireParts(!row.has("control") || row.opt("control") == "slider", "$path.control", "slider or the default number input")
-            return NumberControl(minimum, maximum, step, row.opt("control") == "slider")
+            val control = NumberControl(minimum, maximum, step, slider)
+            val range = control.range
+            requireParts(initial is PlanValue.Numeric && range.start < range.endInclusive && initial.raw.toDouble() in range,
+                path, "ordered numeric bounds containing the initial value")
+            requireParts(step == null || step > 0.0 && step <= range.endInclusive - range.start,
+                "$path.step", "a positive step within the range")
+            return control
         }
     }
 }
@@ -319,7 +327,7 @@ internal class NeedsPlan private constructor(
             Include all seven top-level fields. Use an empty array for an unused list.
             An input type is exactly text, number, or boolean. Match the JSON value to its type: "text" uses a string, "number" uses an unquoted number, and "boolean" uses true or false.
             Example of a separate independent input: {"id":"amount","label":"Amount","type":"number","value":0}.
-            For a bounded numeric input include min and max, and an optional positive step. Include control:"slider" when requested.
+            Ordinary number inputs can omit either min or max. Include only bounds the request needs. A slider requires control:"slider", min, and max. Both controls accept an optional positive step.
             Each constant has id and a value that is a JSON string, number, or boolean. Each question has id, ask, and an options array of strings.
             Include 1 to 12 inputs and needs in total, up to 24 constants, and at most 2 questions with 2 to 4 options each.
             Use unique IDs across the plan. Start each ID with an ASCII letter and use at most 24 letters, digits, or underscores.
@@ -377,12 +385,13 @@ internal class NeedsPlan private constructor(
             Give it an ideas array in the supplied order. Each object has name, positive whole minutes, and effort low, medium, or high.
             For a choice exercise, use option1 to option4 text constants and correct as the one-based number of the correct option.
             Use scene for moving or touch-driven drawing, and include its interaction and result rules in description.
-            A countdown with no completion effect uses a length role referencing a positive whole seconds constant up to 86400. A stopwatch has no uses. Describe any required completion alert explicitly. Use wholeScreen when native parts cannot provide that alert or the requested timer transitions.
+            A countdown with no completion effect uses a length role referencing a positive whole seconds constant up to 86400. A stopwatch has no uses. Describe any required completion alert explicitly.
         """.trimIndent() + "\n\n" + structureChecklist
 
         val wholeScreenGuidance = """
             Choose one JSON response format.
             Use the full plan for calculations and conversions expressible with numeric inputs and figures. Use {"wholeScreen":true} for custom behavior that supported parts and expressions cannot provide. Supply the behavior field as directed below.
+            Use the whole-screen marker when native parts cannot provide the requested completion alert or timer transitions.
             Use a full plan for supported parts or a blocking clarification question. Its field rules apply only to the full plan.
         """.trimIndent()
 
@@ -578,7 +587,7 @@ internal class NeedsPlan private constructor(
                     val input = numericInputs[name] ?: throw PartsContractFailure(path, "declared numeric example inputs")
                     val value = planNumber(example.opt(name), path)
                     val control = input.control
-                    requireParts(control == null || value in control.min..control.max, path, "example inputs within their bounds")
+                    requireParts(control == null || value in control.range, path, "example inputs within their bounds")
                     values[name] = value
                 }
                 for (name in order) values[name] = figures.getValue(name).expression.value(values::get)

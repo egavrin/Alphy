@@ -141,10 +141,10 @@ object ToolUiCatalog {
     }
     private fun scalarValue(value: Any) = value is String || value is Boolean || (value is Number && value.toDouble().isFinite())
     private fun numeric(node: JSONObject, name: String, default: Double): Double = if(node.has(name)) {
-        val number=node.get(name); require(number is Number && number.toDouble().isFinite() && kotlin.math.abs(number.toDouble()) <= 9007199254740991.0); number.toDouble()
+        val number=node.get(name); require(number is Number && number.toDouble().isFinite() && kotlin.math.abs(number.toDouble()) <= ToolValueSchema.MAX_SAFE_NUMBER); number.toDouble()
     } else default
-    fun bounds(node: JSONObject): Pair<Double,Double> = numeric(node,"min",if(node.getString("type") in setOf("progress","progressRing","slider","rangeSlider")) 0.0 else -9007199254740991.0) to
-        numeric(node,"max",if(node.getString("type") in setOf("progress","progressRing","slider","rangeSlider")) 100.0 else 9007199254740991.0)
+    fun bounds(node: JSONObject): Pair<Double,Double> = numeric(node,"min",if(node.getString("type") in setOf("progress","progressRing","slider","rangeSlider")) 0.0 else -ToolValueSchema.MAX_SAFE_NUMBER) to
+        numeric(node,"max",if(node.getString("type") in setOf("progress","progressRing","slider","rangeSlider")) 100.0 else ToolValueSchema.MAX_SAFE_NUMBER)
     private fun validDate(value: Any?) = value is String && value.matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")) && runCatching {LocalDate.parse(value)}.isSuccess
     private fun options(node: JSONObject): JSONArray = node.getJSONArray("options")
     private fun matches(a: Any, b: Any?) = if(a is Number && b is Number) a.toDouble() == b.toDouble() else a == b
@@ -907,6 +907,7 @@ object ToolUiCatalog {
         return if(resourceHandle.containsMatchIn(label)) "${widgetText(node.optString("text"))} · Open in Alphy" else label
     }
     fun modelGuidance(): String = """Give every non-container node a nonempty text label, even when the node is hidden. A bind supplies a value. It does not supply the text label. The only non-container exceptions are ${unlabeledLeaves.joinToString(", ")}.
+Place allowed tone and emphasis inside the component's style object. For example, use {"type":"metric","text":"Total","bind":"total","style":{"emphasis":"number"}}. Omit style if it is unnecessary.
 Every supplied text value must contain 1 to 300 characters. For a checklist, use short, meaningful labels on bound row text, checkboxes, and inputs. Put empty strings in initialState when the data starts empty. Omit text on nodes where the catalog permits an unlabeled node.
 Native UI catalog: ${components.keys.joinToString(", ")}. Properties by type: ${components.values.joinToString("; ") {"${it.type}=${(it.properties-common).sorted().joinToString(",")} (style: ${it.styles.sorted().joinToString(",")})"}}.
 Binding schema types by component: ${components.values.filter {it.binding.isNotEmpty()}.joinToString("; ") {"${it.type}=${it.binding.sorted().joinToString("|")}"}}.

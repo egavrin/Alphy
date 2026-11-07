@@ -288,17 +288,27 @@ class GenerationAttemptDiagnosticTest {
             Triple(spec("return {state:input.state,ui:{type:'text',text:'Local',SECRET_PROPERTY:'$secret'}};"),"tool_ui_properties","smoke"),
             Triple(spec("if(input.event.type==='action')throw Error('$secret');return {state:input.state};"),"unknown","smoke"),
             Triple(spec("return {state:{count:8}};"),"unknown","smoke"),
+            Triple(spec("return {state:{count:input.event.type==='action'?Number.MAX_SAFE_INTEGER+1:7}};"),"tool_state_number","smoke"),
             Triple(JSONObject(spec("return {state:input.state,effects:[{id:'SECRET_EFFECT',capability:'vibration.play',args:{milliseconds:1}}]};")).put("capabilities",JSONArray("[\"vibration.play\"]")).toString(),"unknown","smoke")
         )
         for((bad,category,stage) in fixtures) {
             val events=mutableListOf<ToolGenerationAttemptDiagnostic>();val provider=Provider(listOf(bad,good))
-            val result=generate(provider,events,throwObserver=true)
+            val trace = mutableListOf<ToolGenerationTraceEvent>()
+            val result=generate(provider,events,throwObserver=true,trace=ToolGenerationTrace(UUID.randomUUID(), { trace += it }))
             assertEquals(2,provider.calls);assertEquals(listOf(1,2),events.map {it.attempt})
             val first=events.first().report()
             assertEquals("rejected",first.getString("outcome"));assertEquals(category,first.getString("category"));assertEquals(stage,first.getString("stage"))
             assertEquals("validated",events.last().report().getString("outcome"))
             assertEquals("{\"count\":7}",result.state);assertTrue(result.effects.isEmpty());safe(events)
             if(stage=="smoke")assertTrue(first.has("smoke"))
+            val rejected = trace.filterIsInstance<ToolGenerationTraceEvent.Attempt>()
+                .single { it.disposition == ToolGenerationDisposition.CORRECT }
+            assertEquals(first.optJSONObject("smoke")?.toString(), rejected.smoke?.toString())
+            assertFalse(trace.toString().contains("SECRET"))
+            if(category=="tool_state_number") {
+                assertEquals("action",first.getJSONObject("smoke").getString("event"))
+                assertTrue(provider.requests[1].turns.last().text.contains("9007199254740991"))
+            }
         }
         val events=mutableListOf<ToolGenerationAttemptDiagnostic>();val provider=Provider(listOf("$secret not JSON"))
         assertTrue(runCatching {generate(provider,events)}.exceptionOrNull() is CloudFailure)

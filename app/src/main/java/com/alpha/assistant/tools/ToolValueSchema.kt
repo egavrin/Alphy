@@ -4,6 +4,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.abs
 
+internal class ToolNumericRangeFailure : IllegalArgumentException("Numeric state value is out of range.")
+
 /** Shared bounded values for UI state and native-owned collection records. */
 internal object ToolValueSchema {
     const val MAX_SAFE_NUMBER = 9_007_199_254_740_991.0
@@ -90,10 +92,14 @@ internal object ToolValueSchema {
         fun visit(contract: Any, item: Any, structured: Boolean, root: Boolean = false) {
             require(++values <= 60000 && (!structured || ++structuredValues <= 4096)) { "Too many state values." }
             if(contract is String) {
+                if (contract == "number" && item is Number) {
+                    val number = item.toDouble()
+                    if (!number.isFinite() || abs(number) > MAX_SAFE_NUMBER) throw ToolNumericRangeFailure()
+                    return
+                }
                 require(when(contract) {
                     "string" -> item is String && item.length <= 2048
                     "boolean" -> item is Boolean
-                    "number" -> item is Number && item.toDouble().isFinite() && abs(item.toDouble()) <= MAX_SAFE_NUMBER
                     else -> false
                 }) { "Invalid scalar value." }
                 return

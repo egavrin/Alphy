@@ -424,7 +424,8 @@ internal object ToolParts {
         if (type == "input") full.put("maxLength", 500)
         val config = JSONObject().put("label", input.label).put("initial", input.initial.raw)
         input.control?.let { bounds ->
-            full.put("min", bounds.min).put("max", bounds.max)
+            bounds.min?.let { full.put("min", it) }
+            bounds.max?.let { full.put("max", it) }
             bounds.step?.let { full.put("step", it) }
             val encoded = bounds.json()
             encoded.keys().forEach { config.put(it, encoded.get(it)) }

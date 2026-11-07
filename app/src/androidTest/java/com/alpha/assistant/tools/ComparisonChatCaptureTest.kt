@@ -456,6 +456,7 @@ class ComparisonChatCaptureTest {
                     put("validation_category", event.validationCategory?.id)
                     put("validation_rule", event.validationRule)
                     put("behavior", event.behavior)
+                    put("smoke", event.smoke)
                     put("selector_batch", event.selectorBatch).put("plan_path", event.planPath)
                     event.planShape?.let { put("plan_rule",it.rule).put("plan_observed_type",it.observedType) }
                 }

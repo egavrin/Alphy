@@ -51,6 +51,7 @@ internal sealed interface ToolGenerationTraceEvent {
         val planPath: String?,
         val planShape: ResponseShape?,
         val behavior: String?,
+        val smoke: JSONObject?,
     ) : ToolGenerationTraceEvent
 
     /** VALIDATED marks the candidate boundary. The caller owns publication. */
@@ -91,7 +92,7 @@ internal class ToolGenerationTrace(
                 diagnostic.outcome, diagnostic.disposition, diagnostic.failureCode,
                 diagnostic.category, diagnostic.ui?.rule ?: diagnostic.safeSchemaRule,
                 safeSelectorBatch(diagnostic.selectorBatch), diagnostic.planPath?.takeIf(needsPlanPath::matches),
-                diagnostic.planShape?.takeIf { needsPlanPath.matches(it.path) }, diagnostic.behavior) }
+                diagnostic.planShape?.takeIf { needsPlanPath.matches(it.path) }, diagnostic.behavior, diagnostic.safeSmoke()) }
         }
 
         fun finish(failure: Throwable? = null) {
@@ -128,7 +129,7 @@ internal inline fun <T> ToolGenerationTrace.Run?.timed(
 
 private fun safeSelectorBatch(batch: String?) = batch?.takeIf { it == "sections" || it == "parts" }
 private val needsPlanPath = Regex(
-    """\$(?:\.(?:wholeScreen|behavior|scenario|steps|title|description|language|inputs|constants|needs|questions|id|label|type|value|uses|sourceIds|stops|bands|items|ideas|name|minutes|min|date|offsetDays|repeatDays|effort|ask|options)(?:\[\d{1,2}])?)*"""
+    """\$(?:\.(?:wholeScreen|behavior|scenario|steps|title|description|language|inputs|constants|needs|questions|id|label|type|value|uses|sourceIds|stops|bands|items|ideas|name|minutes|min|max|step|control|expression|example|unit|date|offsetDays|repeatDays|effort|ask|options)(?:\[\d{1,2}])?)*"""
 )
 
 /** No candidate, exception message, private field name, or generated identifier enters this record.
@@ -154,6 +155,12 @@ internal data class ToolGenerationAttemptDiagnostic(
 ) {
     internal val safeSchemaRule get() = schemaRule?.takeIf { it in schemaRules }
 
+    internal fun safeSmoke() = smokeEvent?.let { event ->
+        JSONObject().put("event",event.takeIf {it in smokeEvents} ?: "unknown")
+            .put("path",smokePath?.takeIf {it.matches(smokeLocation)} ?: "unknown")
+            .put("failureCode",safeCode(smokeCode ?: "unknown"))
+    }
+
     fun report()=JSONObject().put("attempt",attempt).put("outcome",outcome.id).put("stage",stage.id)
         .put("failureCode",safeCode(failureCode)).put("category",category?.id ?: "unknown")
         .put("disposition",disposition.id).apply {
@@ -163,10 +170,7 @@ internal data class ToolGenerationAttemptDiagnostic(
                 .put("expected",diagnostic.expected).put("observed",diagnostic.observed).put("count",diagnostic.count ?: JSONObject.NULL))}
             safeSchemaRule?.let {put("schema",JSONObject().put("rule",it).put("path","unknown"))}
             behavior?.let { put("behavior", it) }
-        if(smokeEvent!=null) put("smoke",JSONObject()
-                .put("event",smokeEvent.takeIf {it in smokeEvents} ?: "unknown")
-                .put("path",smokePath?.takeIf {it.matches(smokeLocation)} ?: "unknown")
-                .put("failureCode",safeCode(smokeCode ?: "unknown")))
+            safeSmoke()?.let { put("smoke", it) }
         }
     companion object {
         private val codes=setOf("none","unknown","auth","cancelled","empty_response","incomplete","provider","quota","rate_limit",

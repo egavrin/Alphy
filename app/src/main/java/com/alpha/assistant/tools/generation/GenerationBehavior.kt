@@ -17,6 +17,19 @@ internal sealed interface GenerationBehavior {
             requested.forEach { (id, slot) ->
                 targets.put(id, slot.kind.wire)
             }
+            val actionTypes = JSONObject()
+            steps.filterIsInstance<Step.Action>().filter { it.slot in requested }.groupBy(Step.Action::slot)
+                .forEach { (id, actions) ->
+                    val types = actions.map { step ->
+                        when (step.value) {
+                            is Number -> "number"
+                            is String -> "string"
+                            is Boolean -> "boolean"
+                            else -> "null"
+                        }
+                    }.distinct()
+                    actionTypes.put(id, jsonArray(types))
+                }
             return """
                 Add behaviorBindings to the top-level response beside the existing fields. Its keys must be exactly the IDs below.
                 Each action, surface, or timer binding is the ID of an actual action, surface, or timer.
@@ -26,7 +39,9 @@ internal sealed interface GenerationBehavior {
                 Use a stable shape or group. A path of [] observes all drawing commands for that surface.
                 Keep bindings outside fill, ui, and source. Bindings describe existing targets, never tests or expected values.
                 Slots: $targets
-            """.trimIndent()
+            """.trimIndent() + if (actionTypes.length() == 0) "" else
+                "\nBind each action to a visible, enabled control that accepts its payload type. " +
+                    "Use null for a button press. Honor the request's input range. Action payload types: $actionTypes"
         }
     }
 
@@ -71,8 +86,10 @@ internal sealed interface GenerationBehavior {
             A value comes from visible text, metric, badge, fact, timeline item, or progress. Use the bound scalar when present.
             Collection assertions compare the number of records in a visible list, grid, or table.
             Use geometry for a drawing or part of a drawing. Do not equate a status change with motion.
-            For a slot owned by a catalog part, add "part":"need ID". For actions, omit "member" for the primary action
-            or give the action's local ID. For value and collection slots, give the exact relative children "path" if known.
+            To edit a declared input, use {"kind":"action","part":"the input ID"}. Omit member for input edits.
+            For a catalog need, set part to its need ID. A figure provides a value slot, never an input action.
+            For a need's action, omit member for the primary action or give the action's local ID.
+            For writer-owned slots, omit part and member. For native value and collection slots, give the relative children path if known.
             With no path, the host selects the only suitable observation in that part, if there is exactly one.
             Begin from a fresh artifact after the host opens it, applies its viewport, and starts automatic playback.
             Use at most 16 steps and 59 explicit events. Use these step forms:

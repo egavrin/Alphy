@@ -67,6 +67,9 @@ class GenerationBehaviorWorkflowTest {
             provider.calls.map { it.generationStage })
         val writer = provider.calls[1]
         assertTrue(writer.systemInstructions.contains("behaviorBindings"))
+        assertTrue(writer.systemInstructions.contains("\"enter\":[\"number\"]"))
+        assertTrue(writer.systemInstructions.contains("\"apply\":[\"null\"]"))
+        assertFalse(writer.systemInstructions.contains("\"value\":7"))
         assertFalse(writer.systemInstructions.contains("\"value\":14"))
         assertFalse(writer.turns.first().text.contains("\"value\":7"))
         val repair = provider.calls.last().turns.last().text
