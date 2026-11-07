@@ -78,7 +78,7 @@ internal sealed interface GenerationBehavior {
             For an interactive request, replace the example scenario with an action and a check of the requested result.
             If the full plan asks a blocking question, omit behavior until the user answers.
         """.trimIndent()
-        val guidance = """
+        private val scenarioGuidance = """
             Include a top-level "behavior" field. Plan one bounded executable check of the primary user-visible outcome.
             Use {"status":"checkable","scenario":{"slots":{...},"steps":[...]}}.
             Use short descriptive ASCII slot IDs such as amountInput, displayedTotal, or movingObject.
@@ -88,9 +88,9 @@ internal sealed interface GenerationBehavior {
             Collection assertions compare the number of records in a visible list, grid, or table.
             Use geometry for a drawing or part of a drawing. Do not equate a status change with motion.
             To edit a declared input, use {"kind":"action","part":"the input ID"}. Omit member for input edits.
-            For a catalog need, set part to its need ID. A figure provides a value slot, never an input action.
-            For a need's action, omit member for the primary action or give the action's local ID.
-            For writer-owned slots, omit part and member. For native value and collection slots, give the relative children path if known.
+            For a native catalog part, only action, value, and collection slots can use part with the declared need ID. A figure provides a value slot, never an input action.
+            For a native part action, omit member for the primary action or give the local action ID. For a native value or collection, give the relative children path if known.
+            A scene is written by the code writer even when the scene has a declared need ID. For every writer-owned slot, including surface, timer, and geometry slots, omit part, member, and path.
             With no path, the host selects the only suitable observation in that part, if there is exactly one.
             Begin from a fresh artifact after the host opens it, applies its viewport, and starts automatic playback.
             Use at most 16 steps and 59 explicit events. Use these step forms:
@@ -112,9 +112,18 @@ internal sealed interface GenerationBehavior {
             At least one assertion must check the requested observable result. For passive UI, assert its requested content.
             Use {"status":"unchecked","reason":"external_outcome"} if the primary result depends on a native or external effect.
             Use {"status":"unchecked","reason":"unsupported_observation"} only when these steps cannot express the primary check.
+        """.trimIndent()
+        private val touchSceneExample = """
+            Here is a complete example of the shape for a touch-driven scene. Use the request's language and behavior.
+            {"title":"Touch surface","description":"Draw a visible mark after a touch.","language":"en","inputs":[],"constants":[],"needs":[{"id":"scene","type":"scene","label":"Touch surface","description":"Draw a mark where the user touches.","reads":[]}],"questions":[],"behavior":{"status":"checkable","scenario":{"slots":{"canvas":{"kind":"surface"},"drawing":{"kind":"geometry"}},"steps":[{"op":"surface","slot":"canvas","event":"pointer","phase":"down","x":0.5,"y":0.5},{"op":"surface","slot":"canvas","event":"pointer","phase":"up","x":0.5,"y":0.5},{"op":"assert","slot":"drawing","test":"nonempty"}]}}}
+        """.trimIndent()
+        private val scenarioLimits = """
             Use synthetic inputs and deterministic expectations. Do not depend on elapsed wall-clock time.
             Do not ask to execute an effect or use private values, arbitrary code, or values supplied only by external sources.
         """.trimIndent()
+
+        val guidance = "$scenarioGuidance\n$scenarioLimits"
+        val newAppBehaviorGuidance = "$scenarioGuidance\n$touchSceneExample\n$scenarioLimits"
 
         fun parse(raw: Any?, needIds: Set<String>): GenerationBehavior = try {
             parseBehavior(raw, needIds)

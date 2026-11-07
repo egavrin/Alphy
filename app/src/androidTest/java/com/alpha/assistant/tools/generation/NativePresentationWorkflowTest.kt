@@ -3,6 +3,7 @@ package com.alpha.assistant.tools.generation
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolUiCatalog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -102,6 +103,50 @@ class NativePresentationWorkflowTest {
         val conflicting = generate(ask = selector(mapOf("p_count" to "B")))
         assertNull(conflicting.preview.nativePresentation)
         assertTrue(conflicting.selectorFailures.isNotEmpty())
+    }
+
+    @Test fun optionalPresentationErrorsKeepOnlyValidFunctionalSelections(): Unit = runBlocking {
+        val valid = selector()
+        suspend fun withAnswers(change: (JSONArray) -> Unit) = generate(ask = { raw ->
+            val response = JSONObject(valid(raw))
+            if (JSONObject(raw).getString("stage") == "parts") change(response.getJSONArray("answers"))
+            response.toString()
+        })
+        // The fixture requests two part choices followed by three presentation choices.
+        val presentationErrors = mapOf<String, (JSONArray) -> Unit>(
+            "missing style answer" to { it.remove(2) },
+            "duplicate style answer" to { it.put(2, it.getJSONObject(3)) },
+            "invalid style distribution" to { it.getJSONObject(2).remove("probabilities") },
+        )
+        for ((name, change) in presentationErrors) {
+            val result = withAnswers(change)
+            assertEquals(name, listOf("count", "notes"), result.parts.map { it.needId })
+            assertNull(name, result.requireComplete().nativePresentation)
+            assertEquals(name, 1, result.selectorFailures.size)
+        }
+
+        val batchErrors = mapOf<String, (JSONArray) -> Unit>(
+            "missing part answer" to { it.remove(0) },
+            "duplicate part answer" to { it.put(1, it.getJSONObject(0)) },
+            "invalid part choice" to { it.getJSONObject(0).put("choice", "Z") },
+            "non-object row" to { it.put(2, "invalid") },
+            "unidentifiable row" to { it.getJSONObject(2).remove("id") },
+            "unknown style ID" to { it.getJSONObject(2).put("id", "v_unknown") },
+            "too many rows" to { it.put(it.getJSONObject(2)) },
+        )
+        for ((name, change) in batchErrors) {
+            val result = withAnswers(change)
+            assertTrue(name, result.parts.isEmpty())
+            assertEquals(name, HoleKind.SCREEN, result.holes.single().kind)
+            assertEquals(name, 1, result.selectorFailures.size)
+        }
+        val canceled = runCatching {
+            generate(ask = { raw ->
+                if (JSONObject(raw).getString("stage") == "parts") throw CancellationException("Fixture canceled.")
+                valid(raw)
+            })
+        }.exceptionOrNull()
+        assertTrue(canceled is CancellationException)
     }
 
     @Test fun persistedRecipeSurvivesRefinementAndRejectsStaleFocalUi(): Unit = runBlocking {

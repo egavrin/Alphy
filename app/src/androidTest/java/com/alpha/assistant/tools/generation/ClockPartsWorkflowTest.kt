@@ -16,6 +16,87 @@ import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
 class ClockPartsWorkflowTest {
+    @Test fun stopwatchKeepsItsNativeClockWhenPresentationIsInvalid(): Unit = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val name = "stopwatch-parts-${UUID.randomUUID()}.db"
+        val store = ToolStore(context, name)
+        var elapsed = 10_000L
+        fun clock() = PartClockSample.from(Instant.EPOCH, ZoneId.of("UTC")).copy(elapsedMillis = elapsed, bootCount = 1)
+        val stages = mutableListOf<CloudGenerationStage?>()
+        val batches = mutableListOf<String>()
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                stages += request.generationStage
+                val output = when (request.generationStage) {
+                    CloudGenerationStage.PLAN -> """{"title":"Stopwatch","description":"","language":"en","inputs":[],
+                        "constants":[],"needs":[{"id":"clock","type":"stopwatch","label":"Elapsed","description":"Start, pause, and reset"}],
+                        "questions":[],"behavior":{"status":"checkable","scenario":{"slots":{
+                        "reset":{"kind":"action","part":"clock","member":"reset"},
+                        "elapsed":{"kind":"value","part":"clock","path":[0]}},"steps":[
+                        {"op":"action","slot":"reset"},{"op":"assert","slot":"elapsed","test":"equals","value":0}]}}}"""
+                    CloudGenerationStage.SELECTOR -> {
+                        val body = JSONObject(request.turns.single().text)
+                        batches += body.getString("stage")
+                        selectorAnswer(body, invalidPresentation = true)
+                    }
+                    CloudGenerationStage.COMPLETE -> """{"formatVersion":3,"title":"Stopwatch","description":"",
+                        "capabilities":[],"stateSchema":{"value":"number"},"initialState":{"value":0},
+                        "ui":{"type":"column","children":[{"type":"metric","text":"Elapsed","bind":"value"},
+                        {"type":"button","text":"Reset","action":"reset"}]},
+                        "source":"return {state:input.state};","behaviorBindings":{"reset":"reset","elapsed":[0]}}"""
+                    else -> error("Unexpected stopwatch stage.")
+                }
+                emit(CloudEvent.Text(output))
+            }
+        }
+        val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context), ::clock))
+        try {
+            val draft = engine.createDraft("A simple stopwatch", null)
+            engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+            assertEquals(listOf("sections", "parts"), batches)
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR), stages)
+            var saved = engine.accept(draft.id)
+            val spec = ToolSpec.parsePersisted(saved.spec)
+            assertNull(spec.nativePresentation)
+            val clockPart = checkNotNull(spec.composition)
+            val metric = JSONObject(saved.ui).getJSONArray("children").getJSONObject(0)
+                .getJSONArray("children").getJSONObject(0)
+            val visibleBinding = metric.getString("bind")
+            assertEquals("metric", metric.getString("type"))
+            assertEquals("${partInstanceId("clock")}_value", visibleBinding)
+            fun shown() = clockPart.projectState(JSONObject(saved.state), clock()).getDouble(visibleBinding)
+            suspend fun act(member: String) {
+                saved = engine.interact(saved.id, saved.revision, saved.stateVersion, "${partInstanceId("clock")}_$member", null)
+            }
+            assertEquals(0.0, shown(), 0.0)
+            act("start")
+            elapsed += 3_000
+            assertEquals(3.0, shown(), 0.0)
+            act("pause")
+            elapsed += 3_000
+            assertEquals(3.0, shown(), 0.0)
+            act("reset")
+            assertEquals(0.0, shown(), 0.0)
+        } finally {
+            engine.closeArtifacts()
+            store.close()
+            context.deleteDatabase(name)
+            context.deleteDatabase(store.automationDatabase)
+        }
+    }
+
+    private fun selectorAnswer(body: JSONObject, invalidPresentation: Boolean = false): String {
+        val questions = body.getJSONArray("questions")
+        return JSONObject().put("answers", jsonArray((0 until questions.length()).map { index ->
+            val question = questions.getJSONObject(index)
+            val id = question.getString("id")
+            val choices = question.getJSONObject("choices")
+            val choice = if (invalidPresentation && id == "v_profile") "Z" else "A"
+            JSONObject().put("id", id).put("choice", choice).put("confidence", 1)
+                .put("probabilities", JSONObject().apply { choices.keys().forEach { put(it, if (it == "A") 1 else 0) } })
+        })).toString()
+    }
+
     @Test fun nativeClocksPauseResetAndReopenWithoutACodeWriter(): Unit = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val name = "clock-parts-${UUID.randomUUID()}.db"
@@ -31,15 +112,7 @@ class ClockPartsWorkflowTest {
                         {"id":"down","type":"countdown","label":"Countdown","description":"Ten seconds","uses":{"length":"seconds"}},
                         {"id":"up","type":"stopwatch","label":"Stopwatch","description":"Measure elapsed seconds"}],"questions":[],
                         "behavior":{"status":"unchecked","reason":"external_outcome"}}"""
-                    CloudGenerationStage.SELECTOR -> {
-                        val questions = JSONObject(request.turns.single().text).getJSONArray("questions")
-                        JSONObject().put("answers", jsonArray((0 until questions.length()).map { i ->
-                            val question = questions.getJSONObject(i)
-                            val choices = question.getJSONObject("choices")
-                            JSONObject().put("id", question.getString("id")).put("choice", "A").put("confidence", 1)
-                                .put("probabilities", JSONObject().apply { choices.keys().forEach { put(it, if (it == "A") 1 else 0) } })
-                        })).toString()
-                    }
+                    CloudGenerationStage.SELECTOR -> selectorAnswer(JSONObject(request.turns.single().text))
                     else -> error("Native clocks must not call the writer.")
                 }
                 emit(CloudEvent.Text(output))

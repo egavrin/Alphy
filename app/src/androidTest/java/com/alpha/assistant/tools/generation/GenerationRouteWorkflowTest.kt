@@ -227,7 +227,7 @@ class GenerationRouteWorkflowTest {
         }
     }
 
-    @Test fun invalidVisualChoiceReportsTheSelectorFailureAndUsesThePlainWholeScreen(): Unit = runBlocking {
+    @Test fun invalidVisualChoiceReportsTheSelectorFailureAndKeepsTheSelectedPart(): Unit = runBlocking {
         val events = mutableListOf<JSONObject>()
         val provider = FixtureProvider { turn, _ ->
             when (turn.generationStage) {
@@ -240,9 +240,11 @@ class GenerationRouteWorkflowTest {
         withEngine(provider, { events += it }) { _, engine, _ ->
             val draft = engine.createDraft(request, null)
             val candidate = engine.generate(draft.id, "fixture", emptyList(), CloudSession())
-            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR,
-                CloudGenerationStage.COMPLETE), provider.stages)
-            assertNull(ToolSpec.parsePersisted(checkNotNull(candidate.candidate)).nativePresentation)
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR),
+                provider.stages)
+            val spec = ToolSpec.parsePersisted(checkNotNull(candidate.candidate))
+            assertNull(spec.nativePresentation)
+            assertNotNull(spec.action(spec.ui, counterAction))
             assertTrue(events.any {
                 it.getString("stage") == "selector" && it.getString("failureCode") == "widget_selector"
             })
@@ -402,7 +404,17 @@ class GenerationRouteWorkflowTest {
         var rejectRefinement = false
         val provider = FixtureProvider { turn, _ ->
             when (turn.generationStage) {
-                CloudGenerationStage.PLAN -> planWithBehavior("$count,$scene", scenario)
+                CloudGenerationStage.PLAN -> {
+                    assertTrue(turn.systemInstructions.contains("A scene is written by the code writer"))
+                    val example = turn.systemInstructions.lineSequence()
+                        .first { it.startsWith("""{"title":"Touch surface",""") }
+                    val plan = JSONObject(example)
+                    val behavior = plan.remove("behavior")
+                    val needs = NeedsPlan.parse(plan.toString()).needs
+                    assertEquals("scene", needs.single().id)
+                    assertTrue(GenerationBehavior.parse(behavior, setOf("scene")) is GenerationBehavior.Scenario)
+                    planWithBehavior("$count,$scene", scenario)
+                }
                 CloudGenerationStage.SELECTOR -> answer(turn)
                 CloudGenerationStage.COMPLETE -> {
                     assertTrue(turn.turns.first().text.contains("Move a dot on each frame"))
@@ -980,6 +992,9 @@ class GenerationRouteWorkflowTest {
             provider.requests.clear()
             val good = engine.generate(draft.id, "fixture", emptyList(), CloudSession())
             assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE), provider.stages)
+            val instructions = provider.requests.first().systemInstructions
+            assertTrue(instructions.startsWith("Plan the requested revision."))
+            assertFalse(instructions.contains("""{"title":"Touch surface","""))
             assertEquals(live.state, good.previewState)
             invalid = true
             provider.requests.clear()

@@ -106,7 +106,7 @@ internal object PartsGeneration {
             JevQuestion("v_focal", "Which need should be the focal part? Choose a need that receives a part in this batch.",
                 focalNeeds.map { "${it.label}. ${it.description}" } + "Use no focal part.")
         )
-        val partResult = JevSelector.ask(ask, "parts", plan, partQuestions + presentationQuestions)
+        val partResult = JevSelector.ask(ask, "parts", plan, partQuestions, presentationQuestions)
         val picked = candidates.mapNotNull { (request, options) ->
             partResult.choice("p_${request.id}")?.let(options::getOrNull)?.let { request.id to it }
         }.toMap()

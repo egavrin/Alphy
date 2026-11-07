@@ -320,7 +320,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                     requiresWholeScreen -> "\nNative parts supply English or Russian labels. Use the whole-screen marker with a behavior field."
                     appTag != null -> "\nFor a parts plan set language to $appTag."
                     else -> ""
-                } + "\n\n" + GenerationBehavior.newAppPlanGuidance + "\n\n" + GenerationBehavior.guidance
+                } + "\n\n" + GenerationBehavior.newAppPlanGuidance + "\n\n" + GenerationBehavior.newAppBehaviorGuidance
             }
             val planningText = if (lessonTarget != null) prompt else JSONObject().put("request", originalRequest).apply {
                 if (prompt != originalRequest) put("context", prompt)
