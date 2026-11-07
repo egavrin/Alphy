@@ -216,7 +216,7 @@ class GenerationAttemptDiagnosticTest {
             for (alreadyCorrected in listOf(false,true)) {
                 val requests = mutableListOf<CloudRequest>()
                 val events = mutableListOf<ToolGenerationTraceEvent>()
-                val session = CloudSession().apply { if (alreadyCorrected) assertTrue(claimCorrection()) }
+                val session = CloudSession().apply { if (alreadyCorrected) assertTrue(claimGenerationCorrection()) }
                 val provider = object : ChatProvider {
                     override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent) -> Unit) {
                         assertEquals(CloudGenerationStage.PLAN,request.generationStage)
@@ -276,7 +276,7 @@ class GenerationAttemptDiagnosticTest {
         assertTrue(hostCorrection.contains("output limit"))
         assertTrue(hostCorrection.contains("shorter complete JSON object"))
         assertFalse(requests.toString().contains(secret))
-        assertFalse(session.claimCorrection())
+        assertFalse(session.claimGenerationCorrection())
     }
 
     @Test fun typedFailuresAreAssociatedWithFirstAndCorrectionAttempts(): Unit=runBlocking {

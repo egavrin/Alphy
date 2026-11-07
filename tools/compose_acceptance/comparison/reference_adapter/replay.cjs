@@ -87,6 +87,7 @@ function controlInput(node, value) {
     case 'toggle':
       assert.equal(typeof value, 'boolean')
       return new VeraBooleanValue(value)
+    case 'select':
     case 'tabs':
       assert(Number.isInteger(value) && value >= 0 && value < node.options.length)
       return new VeraNumberValue(value)

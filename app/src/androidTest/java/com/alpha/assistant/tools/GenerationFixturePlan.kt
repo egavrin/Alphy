@@ -3,12 +3,25 @@ package com.alpha.assistant.tools
 import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudRequest
+import org.json.JSONArray
 import org.json.JSONObject
 
 private val uncheckedBehavior = """{"status":"unchecked","reason":"unsupported_observation"}"""
 
 internal fun String.withUncheckedBehavior(): String =
     JSONObject(this).apply { if (!has("behavior")) put("behavior", JSONObject(uncheckedBehavior)) }.toString()
+
+internal fun firstSelectorChoices(body: String): String {
+    val questions = JSONObject(body).getJSONArray("questions")
+    val answers = (0 until questions.length()).map { index ->
+        val question = questions.getJSONObject(index)
+        val probabilities = JSONObject()
+        question.getJSONObject("choices").keys().forEach { probabilities.put(it, if (it == "A") 1 else 0) }
+        JSONObject().put("id", question.getString("id")).put("choice", "A")
+            .put("confidence", 1).put("probabilities", probabilities)
+    }
+    return JSONObject().put("answers", JSONArray(answers)).toString()
+}
 
 internal val CloudRequest.isFixtureRevisionPlan: Boolean
     get() = generationStage == CloudGenerationStage.PLAN &&

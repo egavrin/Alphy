@@ -7,6 +7,7 @@ import com.alpha.assistant.courses.EXERCISE_FIELD
 import com.alpha.assistant.tools.ToolValueSchema
 import org.json.JSONArray
 import org.json.JSONObject
+import com.alpha.assistant.tools.generation.NativeObservation.*
 import java.time.DateTimeException
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
@@ -57,7 +58,7 @@ internal data class PartCandidate(
     val primaryActionId: String? = null,
     val secondaryActionIds: Set<String> = emptySet(),
     val numberOutput: PartNumberOutput? = null,
-    val valuePath: List<Int>? = null,
+    val observationPaths: Map<NativeObservation, List<Int>> = emptyMap(),
     val behaviorActionId: String? = null,
     val aggregates: Map<String, PartNumberOutput> = emptyMap(),
     val clockTicks: ((JSONObject, PartClockSample) -> Boolean)? = null,
@@ -447,7 +448,8 @@ internal object ToolParts {
         }
         return PartCandidate(schema + "_input", "controls", "Edit one ${input.label} value and keep it locally.",
             config, builder.finish(full, compact),
-            numberOutput = if (input.initial is PlanValue.Numeric) PartNumberOutput(value) else null, behaviorActionId = edit)
+            numberOutput = if (input.initial is PlanValue.Numeric) PartNumberOutput(value) else null,
+            observationPaths = mapOf(VALUE to emptyList()), behaviorActionId = edit)
     }
 
     private fun figure(builder: FragmentBuilder, label: String, expression: NumberExpression,
@@ -470,7 +472,8 @@ internal object ToolParts {
         val config = JSONObject().put("label", label).put("expression", expression.json).put("constants", constants)
             .put("unit", unit).put("russian", russian)
         return PartCandidate("numeric_figure", "controls", "Calculate $label from the declared numeric values.", config,
-            builder.finish(ui, readProjection = projection), numberOutput = PartNumberOutput(value, available), valuePath = listOf(0))
+            builder.finish(ui, readProjection = projection), numberOutput = PartNumberOutput(value, available),
+            observationPaths = nativeObservationPaths(ui, VALUE to metric))
     }
 
     private fun counter(builder: FragmentBuilder, label: String, initial: Int, step: Int, russian: Boolean): PartCandidate {
@@ -485,10 +488,11 @@ internal object ToolParts {
             control("button", if (russian) "Прибавить" else "Increase", add),
             control("button", if (russian) "Сбросить" else "Reset", reset)
         ))
+        val full = partContainer("column", listOf(metric, buttons))
         return PartCandidate("counter", "controls", "A local counter with a fixed positive step and reset.",
             JSONObject().put("label", label).put("initial", initial).put("step", step).put("russian", russian),
-            builder.finish(partContainer("column", listOf(metric, buttons)), metric),
-            primaryActionId = add, secondaryActionIds = setOf(reset))
+            builder.finish(full, metric), primaryActionId = add, secondaryActionIds = setOf(reset),
+            observationPaths = nativeObservationPaths(full, VALUE to metric))
     }
 
     private fun entries(builder: FragmentBuilder, label: String, russian: Boolean): PartCandidate {
@@ -528,10 +532,11 @@ internal object ToolParts {
         val list = partNode("list", label).put("bind", items)
             .put("columns", JSONArray().put(column)).put("rowActions", JSONArray().put(removal))
             .put("emptyText", if (russian) "Записей пока нет" else "No notes yet")
+        val full = partContainer("column", listOf(input, button, list))
         return PartCandidate("notes", "records", "Add or remove up to 20 short text notes. No other fields or actions.",
             JSONObject().put("label", label).put("russian", russian),
-            builder.finish(partContainer("column", listOf(input, button, list)), partNode("text", label)),
-            primaryActionId = add)
+            builder.finish(full, partNode("text", label)), primaryActionId = add,
+            observationPaths = nativeObservationPaths(full, RECORDS to list))
     }
 
     private fun quickLog(builder: FragmentBuilder, label: String, slots: Slots, russian: Boolean): PartCandidate {
@@ -599,10 +604,12 @@ internal object ToolParts {
         val historyView = partNode("list", historyLabel).put("bind", history).put("columns", jsonArray(columns))
             .put("rowActions", JSONArray().put(JSONObject().put("text", localized("Удалить", "Remove")).put("action", remove)))
             .put("emptyText", localized("Записей пока нет", "No readings yet"))
+        val todayView = partNode("text", todayLabel + readings.sum() + goalSuffix)
+            .put("style", JSONObject().put("emphasis", "headline"))
+        val countView = partNode("text", countLabel + readings.size)
+        val yesterdayView = partNode("text", yesterdayLabel + "0" + suffix).put("visible", false)
         val view = partContainer("column", listOf(
-            partNode("text", todayLabel + readings.sum() + goalSuffix).put("style", JSONObject().put("emphasis", "headline")),
-            partNode("text", countLabel + readings.size),
-            partNode("text", yesterdayLabel + "0" + suffix).put("visible", false),
+            todayView, countView, yesterdayView,
             partNode("text", localized("Журнал заполнен", "The log is full")).put("visible", false)
         ) + addButtons + listOf(
             control("button", localized("Отменить последнюю", "Undo last"), undo).put("visible", readings.isNotEmpty()),
@@ -632,7 +639,9 @@ internal object ToolParts {
                 .put("button", buttonLabel).put("initialReadings", jsonArray(readings)).apply {
                     if (alternateAmount != null) put("alternateAmount", alternateAmount).put("alternateButton", alternateLabel)
                 },
-            builder.finish(view, partNode("text", label), projection), primaryActionId = addId, secondaryActionIds = setOf(undo))
+            builder.finish(view, partNode("text", label), projection), primaryActionId = addId, secondaryActionIds = setOf(undo),
+            observationPaths = nativeObservationPaths(view, TODAY to todayView, COUNT to countView,
+                YESTERDAY to yesterdayView, HISTORY to historyView))
     }
 
     private val ledgerPoints = 1..1_000_000
@@ -732,15 +741,18 @@ internal object ToolParts {
             "points" to localized("Очки", "Points")
         ).map { (field, title) -> JSONObject().put("field", field).put("text", title) }
         val ledger = partNode("list", localized("История", "History")).put("bind", history).put("columns", jsonArray(columns))
+        val deniedView = partNode("text", localized("Недостаточно очков", "Not enough points")).put("visibleBind", denied)
         val fullUi = partContainer("column", metrics + teamSelect + buttons + listOf(
-            partNode("text", localized("Недостаточно очков", "Not enough points")).put("visibleBind", denied),
+            deniedView,
             partNode("text", localized("Журнал заполнен", "The ledger is full")).put("visibleBind", full),
             control("button", localized("Отменить последнее", "Undo last"), undo).put("enabledBind", canUndo),
             ledger
         ))
         return PartCandidate("points_ledger", "records",
             "Track two teams with two fixed credit amounts, one fixed redemption, separate balances, and undoable history. Prevent debt.",
-            config, builder.finish(fullUi, partContainer("column", metrics)), secondaryActionIds = setOf(undo))
+            config, builder.finish(fullUi, partContainer("column", metrics)), secondaryActionIds = setOf(undo),
+            observationPaths = nativeObservationPaths(fullUi, BALANCE1 to metrics[0], BALANCE2 to metrics[1],
+                DENIED to deniedView, HISTORY to ledger))
     }
 
     private val itineraryGap = 0..1_000_000_000
@@ -833,7 +845,7 @@ internal object ToolParts {
             .put("stops", jsonArray(stops.map { JSONObject().put("name", it.name).put("minutes", it.minutes) }))
         return PartCandidate("itinerary", "plans",
             "Schedule predefined stops from an editable start time with fixed gaps and independent visit marks.",
-            config, builder.finish(full, end))
+            config, builder.finish(full, end), observationPaths = nativeObservationPaths(full, END to end, STOPS to list))
     }
 
     private fun editableItinerary(builder: FragmentBuilder, label: String, duration: Int, start: Int?, russian: Boolean): PartCandidate {
@@ -986,7 +998,8 @@ internal object ToolParts {
         if (start != null) config.put("start", start)
         return PartCandidate("editable_itinerary", "plans",
             "Build a local schedule from a start time, a fixed window, and stops the user enters and edits. Use no external information.",
-            config, builder.finish(ui, partContainer("column", listOf(end, minutesLeft))), primaryActionId = add)
+            config, builder.finish(ui, partContainer("column", listOf(end, minutesLeft))), primaryActionId = add,
+            observationPaths = nativeObservationPaths(ui, END to end, REMAINING to minutesLeft, STOPS to list))
     }
 
     private val decimalReading = "[+-]?[0-9]+(?:[.,][0-9]+)?"
@@ -1082,10 +1095,9 @@ internal object ToolParts {
             sync(state, next)
         }
         val suffix = if (unit.isEmpty()) "" else " ($unit)"
-        val summary = partContainer("column", listOf(
-            partNode("metric", localized("Последнее", "Latest") + suffix).put("bind", latest),
-            partNode("metric", localized("Метка", "Status")).put("bind", status)
-        )).put("visibleBind", hasReading)
+        val latestView = partNode("metric", localized("Последнее", "Latest") + suffix).put("bind", latest)
+        val statusView = partNode("metric", localized("Метка", "Status")).put("bind", status)
+        val summary = partContainer("column", listOf(latestView, statusView)).put("visibleBind", hasReading)
         val series = JSONObject().put("text", localized("Показания", "Readings")).put("bind", chartValues)
         val chart = partNode("chart", localized("График показаний", "Reading chart") + suffix)
             .put("kind", "line").put("categories", categories).put("series", JSONArray().put(series)).put("visibleBind", hasChart)
@@ -1111,7 +1123,8 @@ internal object ToolParts {
         if (initial != null) config.put("initial", initial)
         return PartCandidate("reading_status", "records",
             "Classify numeric readings using supplied bands. Show the latest status, newest-first history, and a line chart.",
-            config, builder.finish(ui, summary), primaryActionId = add)
+            config, builder.finish(ui, summary), primaryActionId = add,
+            observationPaths = nativeObservationPaths(ui, LATEST to latestView, STATUS to statusView, HISTORY to list))
     }
 
     private fun dueItems(builder: FragmentBuilder, label: String, items: List<DueItemPlan>, window: Int, russian: Boolean,
@@ -1169,10 +1182,10 @@ internal object ToolParts {
         val list = partNode("list", if (edit.showLabel) label else localized("Сроки", "Due items")).put("bind", display)
             .put("columns", jsonArray(columns)).put("rowActions", JSONArray().put(action))
             .put("emptyText", localized("Нет открытых задач", "No open items"))
-        val summary = listOf(
-            partNode("metric", localized("Просрочено", "Overdue")).put("bind", overdue),
-            partNode("metric", localized("В ближайшие $window дн.", "Next $window days")).put("bind", upcoming)
-        )
+        val overdueView = partNode("metric", localized("Просрочено", "Overdue")).put("bind", overdue)
+        val upcomingView = partNode("metric", localized("В ближайшие $window дн.", "Next $window days")).put("bind", upcoming)
+        val summary = listOf(overdueView, upcomingView)
+        val full = partContainer("column", summary + list)
         val config = JSONObject().put("label", label).put("russian", russian).put("window", window)
             .put("items", jsonArray(items.map { item ->
                 JSONObject().put("name", item.name).put("date", checkNotNull(item.date).toString()).apply {
@@ -1181,7 +1194,8 @@ internal object ToolParts {
             })).also(edit::write)
         return PartCandidate("due_items", "plans",
             "Sort supplied deadlines, show local-day counts, and complete or reschedule an item from the current day.",
-            config, builder.finish(partContainer("column", summary + list), partContainer("column", summary), readProjection = projection))
+            config, builder.finish(full, partContainer("column", summary), readProjection = projection),
+            observationPaths = nativeObservationPaths(full, OVERDUE to overdueView, UPCOMING to upcomingView, ITEMS to list))
     }
 
     private fun ideaDeck(builder: FragmentBuilder, label: String, ideas: List<DeckIdea>, russian: Boolean,
@@ -1273,10 +1287,9 @@ internal object ToolParts {
         )
         val list = partNode("list", if (edit.showLabel) label else localized("Идея", "Idea")).put("bind", display).put("columns", jsonArray(columns))
             .put("rowActions", jsonArray(rowActions)).put("emptyText", localized("Нет подходящих идей", "No matching ideas"))
-        val summary = listOf(
-            partNode("metric", localized("Доступно", "Available")).put("bind", availableCount),
-            partNode("metric", localized("Сделано сегодня", "Done today")).put("bind", completedCount)
-        )
+        val availableView = partNode("metric", localized("Доступно", "Available")).put("bind", availableCount)
+        val completedView = partNode("metric", localized("Сделано сегодня", "Done today")).put("bind", completedCount)
+        val summary = listOf(availableView, completedView)
         val ui = partContainer("column", listOf(timeInput, effortInput) + summary + listOf(
             list, partNode("text", localized("История заполнена", "Completion history is full")).put("visibleBind", historyFull)
         ))
@@ -1285,16 +1298,17 @@ internal object ToolParts {
             .also(edit::write)
         return PartCandidate("idea_deck", "plans",
             "Cycle supplied ideas with time and effort filters. Keep daily completions and their history.",
-            config, builder.finish(ui, partContainer("column", summary), readProjection = projection))
+            config, builder.finish(ui, partContainer("column", summary), readProjection = projection),
+            observationPaths = nativeObservationPaths(ui, AVAILABLE to availableView, COMPLETED to completedView, IDEAS to list))
     }
 
     private fun content(builder: FragmentBuilder, label: String, body: String, pictogram: String? = null): PartCandidate {
         val config = JSONObject().put("label", label).put("body", body)
-        val plain = if (label == body) partNode("text", body) else partContainer("section", listOf(partNode("text", body)))
-            .put("text", label)
+        val bodyView = partNode("text", body)
+        val plain = if (label == body) bodyView else partContainer("section", listOf(bodyView)).put("text", label)
         if (pictogram == null) {
             return PartCandidate("information", "lesson", "Show one title and a short piece of text without interaction.",
-                config, builder.finish(plain, partNode("text", label)))
+                config, builder.finish(plain, partNode("text", label)), observationPaths = nativeObservationPaths(plain, BODY to bodyView))
         }
 
         val card = partContainer("card", listOf(
@@ -1302,11 +1316,12 @@ internal object ToolParts {
                 partNode("text", label).put("style", JSONObject().put("emphasis", "headline").put("align", "center")),
                 partNode("text", pictogram).put("style", JSONObject().put("emphasis", "number")),
             )).put("preset", "playful").put("typeScale", 1.5).put("style", JSONObject().put("align", "center")),
-            partNode("text", body).put("style", JSONObject().put("align", "center")),
+            bodyView.put("style", JSONObject().put("align", "center")),
         )).put("style", JSONObject().put("align", "center").put("gap", "medium"))
             .put("layout", JSONObject().put("fillWidth", true))
         return PartCandidate("information", "lesson", "Show a large title, the color pictogram $pictogram, and its caption.",
-            config.put("pictogram", pictogram), builder.finish(card, partNode("text", label)))
+            config.put("pictogram", pictogram), builder.finish(card, partNode("text", label)),
+            observationPaths = nativeObservationPaths(card, BODY to bodyView))
     }
 
     private fun exercise(builder: FragmentBuilder, label: String, options: List<String>, correct: Int, russian: Boolean): PartCandidate {
@@ -1326,9 +1341,10 @@ internal object ToolParts {
         val choice = control("singleChoice", label, select, answer).put("options", jsonArray(optionNodes))
         val right = partNode("text", if (russian) "Верно" else "Correct").put("visibleBind", success)
         val wrong = partNode("text", if (russian) "Попробуйте ещё раз" else "Try again").put("visibleBind", failure)
+        val full = partContainer("column", listOf(choice, right, wrong))
         return PartCandidate("choice_exercise", "lesson", "Choose one answer and show whether it is correct.",
             JSONObject().put("label", label).put("options", jsonArray(options)).put("correct", correct).put("russian", russian),
-            builder.finish(partContainer("column", listOf(choice, right, wrong)), partNode("text", label)))
+            builder.finish(full, partNode("text", label)), observationPaths = nativeObservationPaths(full, CORRECT to right, INCORRECT to wrong))
     }
 
     private val JS_WHITESPACE = ('\u0009'..'\u000d').toSet() + ('\u2000'..'\u200a') +

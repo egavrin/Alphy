@@ -84,6 +84,7 @@ VERA_TYPESCRIPT_PATH="$TYPESCRIPT_JS" "$NODE" \
 ```
 
 For a control step, use `{"type":"control","kind":"field","label":"Amount","value":"80"}`.
+For `select` and `tabs`, pass the zero-based option index as an integer `value`.
 For a tap, omit `value` to use the control's event value. A pointer step uses
 `type` `pointer`, `kind` `surface`, `phase`, `x`, and `y` in surface units.
 A `frame` step advances the selected surface by `count` frames of 16 ms each.

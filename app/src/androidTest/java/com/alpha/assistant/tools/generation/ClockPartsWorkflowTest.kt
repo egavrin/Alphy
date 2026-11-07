@@ -32,7 +32,7 @@ class ClockPartsWorkflowTest {
                         "constants":[],"needs":[{"id":"clock","type":"stopwatch","label":"Elapsed","description":"Start, pause, and reset"}],
                         "questions":[],"behavior":{"status":"checkable","scenario":{"slots":{
                         "reset":{"kind":"action","part":"clock","member":"reset"},
-                        "elapsed":{"kind":"value","part":"clock","path":[0]}},"steps":[
+                        "elapsed":{"kind":"value","part":"clock","member":"value"}},"steps":[
                         {"op":"action","slot":"reset"},{"op":"assert","slot":"elapsed","test":"equals","value":0}]}}}"""
                     CloudGenerationStage.SELECTOR -> {
                         val body = JSONObject(request.turns.single().text)

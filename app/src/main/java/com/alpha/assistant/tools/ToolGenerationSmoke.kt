@@ -139,7 +139,7 @@ internal class ToolGenerationSmoke(
                     is Binding.Ui -> {
                         val values = displayState()
                         val node = visibleNode(JSONObject(ui), values, binding.path) ?: fail("visible output unavailable")
-                        behaviorUiObservation(node, values, kind) ?: fail("compatible visible output unavailable")
+                        behaviorUiObservation(node, values, kind, binding.native) ?: fail("compatible visible output unavailable")
                     }
                     is Binding.Drawing -> {
                         val commands = surfaces.optJSONObject(binding.surface)?.optJSONArray("commands")

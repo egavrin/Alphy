@@ -29,8 +29,7 @@ internal data class PartPlacement(
     val config: JSONObject,
     val primaryActionId: String?,
     val secondaryActionIds: Set<String>,
-    val valuePath: List<Int>? = null,
-    val behaviorActionId: String? = null,
+    val behaviorTargets: NativeBehaviorTargets,
 )
 
 internal data class PartsAssembly(
@@ -61,11 +60,11 @@ internal object PartsGeneration {
         lessonTarget: CourseSlideKind? = null,
         selectPresentation: Boolean = false,
         clock: PartClockSample? = null,
-        preparedLessonParts: List<PartRequest>? = null,
+        preparedParts: List<PartRequest>? = null,
         ask: JevAsk,
     ): PartsAssembly {
         if (lessonTarget != null) {
-            val requests = preparedLessonParts ?: run {
+            val requests = preparedParts ?: run {
                 plan.validateLesson(lessonTarget)
                 ToolParts.requests(plan, lessonTarget)
             }
@@ -77,7 +76,7 @@ internal object PartsGeneration {
             }
             return assemble(plan, requests, selected, emptyList(), emptyList(), null)
         }
-        val requests = ToolParts.requests(plan, clock = clock)
+        val requests = preparedParts ?: ToolParts.requests(plan, clock = clock)
         val sections = requests.filter { it.candidates.isNotEmpty() }.associateWith { request ->
             request.candidates.map(PartCandidate::section).distinct()
         }
@@ -225,7 +224,7 @@ internal object PartsGeneration {
             val compact = ToolUiCatalog.validate(part.fragment.compact, preview.schema, state)
             PartPlacement(request.id, part.id, partInstanceId(request.id), "$.ui.children[$position]", part.fragment.full, compact,
                 ToolUiCatalog.widgetNodes(compact, state), identifiers[index], position, part.config,
-                part.primaryActionId, part.secondaryActionIds, part.valuePath, part.behaviorActionId)
+                part.primaryActionId, part.secondaryActionIds, part.behaviorTargets(request.id))
         }
         val requiresReadProjection = pending.any { (_, part) -> part.fragment.readProjection != null }
         val readPorts = if (selected.isEmpty()) emptySet() else plan.needs.filter { it.id !in selected }

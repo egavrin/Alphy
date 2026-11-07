@@ -25,6 +25,7 @@ internal sealed interface GenerationBehavior {
                             is Number -> "number"
                             is String -> "string"
                             is Boolean -> "boolean"
+                            is JSONObject -> "row payload"
                             else -> "null"
                         }
                     }.distinct()
@@ -50,7 +51,7 @@ internal sealed interface GenerationBehavior {
         ACTION("action"), SURFACE("surface"), TIMER("timer"), VALUE("value"), COLLECTION("collection"), GEOMETRY("geometry");
         val observable get() = this == VALUE || this == COLLECTION || this == GEOMETRY
     }
-    data class Slot(val kind: Kind, val part: String?, val member: String?, val path: List<Int>?)
+    data class Slot(val kind: Kind, val part: String?, val member: String?)
 
     sealed interface Step {
         data class Action(val slot: String, val value: Any?) : Step
@@ -62,7 +63,7 @@ internal sealed interface GenerationBehavior {
 
     sealed interface Binding {
         data class Id(val value: String) : Binding
-        data class Ui(val path: List<Int>) : Binding
+        data class Ui(val path: List<Int>, val native: Boolean = false) : Binding
         data class Drawing(val surface: String, val path: List<Int>) : Binding
     }
 
@@ -89,9 +90,10 @@ internal sealed interface GenerationBehavior {
             Use geometry for a drawing or part of a drawing. Do not equate a status change with motion.
             To edit a declared input, use {"kind":"action","part":"the input ID"}. Omit member for input edits.
             For a native catalog part, only action, value, and collection slots can use part with the declared need ID. A figure provides a value slot, never an input action.
-            For a native part action, omit member for the primary action or give the local action ID. For a native value or collection, give the relative children path if known.
-            A scene is written by the code writer even when the scene has a declared need ID. For every writer-owned slot, including surface, timer, and geometry slots, omit part, member, and path.
-            With no path, the host selects the only suitable observation in that part, if there is exactly one.
+            For a native action use its catalog member. Omit member only for an input edit or a primary action.
+            For a native value or collection specify its catalog member, such as {"kind":"value","part":"the need ID","member":"value"}.
+            For a complete native app, bind every slot to its native control or output. Use writer-owned slots for custom needs and whole-screen plans.
+            A scene is written by the code writer even when the scene has a declared need ID. For every writer-owned slot, including surface, timer, and geometry slots, omit part and member.
             Begin from a fresh artifact after the host opens it, applies its viewport, and starts automatic playback.
             Use at most 16 steps and 59 explicit events. Use these step forms:
             Each step is one flat object with exactly the fields in its form. Do not add descriptions or expected results to interaction steps.
@@ -123,7 +125,7 @@ internal sealed interface GenerationBehavior {
         """.trimIndent()
 
         val guidance = "$scenarioGuidance\n$scenarioLimits"
-        val newAppBehaviorGuidance = "$scenarioGuidance\n$touchSceneExample\n$scenarioLimits"
+        val newAppBehaviorGuidance = "$scenarioGuidance\n${NativeBehaviorCatalog.guidance}\n$touchSceneExample\n$scenarioLimits"
 
         fun parse(raw: Any?, needIds: Set<String>): GenerationBehavior = try {
             parseBehavior(raw, needIds)
@@ -137,8 +139,8 @@ internal sealed interface GenerationBehavior {
                 "1 to 12 slots" -> "slots_count"
                 "a supported slot kind" -> "slot_kind"
                 "a compatible declared part" -> "slot_part"
-                "a part action member" -> "slot_member"
-                "a part observation path" -> "slot_path"
+                "a native behavior member" -> "slot_member"
+                "a native observation member" -> "slot_member"
                 "a compatible declared slot" -> "step_slot"
                 "an array" -> "steps_array"
                 "1 to 16 items" -> "steps_count"
@@ -190,16 +192,15 @@ internal sealed interface GenerationBehavior {
             val slots = ToolValueSchema.keys(slotObject).associateWith { id ->
                 identifier(id, FIELD)
                 val row = obj(slotObject.opt(id), FIELD)
-                row.requireKeys(FIELD, setOf("kind"), setOf("part", "member", "path"))
+                row.requireKeys(FIELD, setOf("kind"), setOf("part", "member"))
                 val kind = Kind.entries.firstOrNull { it.wire == row.opt("kind") }
                     ?: throw PartsContractFailure(FIELD, "a supported slot kind")
                 val part = row.opt("part")?.let { identifier(it, FIELD) }
                 val member = row.opt("member")?.let { identifier(it, FIELD) }
-                val path = row.opt("path")?.let { indices(it, FIELD) }
                 requireParts(part == null || part in needIds && kind in setOf(Kind.ACTION, Kind.VALUE, Kind.COLLECTION), FIELD, "a compatible declared part")
-                requireParts(member == null || part != null && kind == Kind.ACTION, FIELD, "a part action member")
-                requireParts(path == null || part != null && kind in setOf(Kind.VALUE, Kind.COLLECTION), FIELD, "a part observation path")
-                Slot(kind, part, member, path)
+                requireParts(member == null || part != null, FIELD, "a native behavior member")
+                requireParts(part == null || kind == Kind.ACTION || member != null, FIELD, "a native observation member")
+                Slot(kind, part, member)
             }
             val captures = mutableMapOf<String, Kind>()
             val used = mutableSetOf<String>()
@@ -220,7 +221,8 @@ internal sealed interface GenerationBehavior {
                     "action" -> {
                         row.requireKeys(at, setOf("op", "slot"), setOf("value"))
                         events++
-                        Step.Action(slot(Kind.ACTION), row.opt("value")?.let { scalar(it, at) })
+                        val action = slot(Kind.ACTION)
+                        Step.Action(action, row.opt("value")?.let { actionValue(it, slots.getValue(action), at) })
                     }
                     "surface" -> {
                         val event = row.opt("event") as? String
@@ -323,6 +325,13 @@ internal sealed interface GenerationBehavior {
         private fun identifier(raw: Any?, path: String, limit: Int = 24): String = planText(raw, path, limit).also {
             requireParts(it.matches(Regex("[A-Za-z][A-Za-z0-9_]*")), path, "a valid identifier")
         }
+        private fun actionValue(raw: Any, slot: Slot, path: String): Any {
+            if (raw !is JSONObject || slot.member == null) return scalar(raw, path)
+            raw.requireKeys(path, setOf("key", "value"))
+            return JSONObject().put("key", planText(raw.get("key"), path, 512))
+                .put("value", scalar(raw.get("value"), path))
+        }
+
         private fun scalar(raw: Any?, path: String): Any = when (raw) {
             is String -> planText(raw, path, 512, allowEmpty = true)
             is Boolean -> raw
@@ -333,50 +342,51 @@ internal sealed interface GenerationBehavior {
     }
 }
 
-/** Null means a selected part could not expose a requested slot. Unselected needs stay with the writer. */
-internal fun PartsAssembly.behaviorBindings(scenario: GenerationBehavior.Scenario): Map<String, GenerationBehavior.Binding>? {
-    val result = mutableMapOf<String, GenerationBehavior.Binding>()
-    val state = JSONObject(preview.initialState)
-    for ((id, slot) in scenario.slots) {
-        val part = parts.find { it.needId == slot.part } ?: continue
-        val binding = when (slot.kind) {
-            GenerationBehavior.Kind.ACTION -> {
-                val action = slot.member?.let { "${part.instanceId}_$it".takeIf(part.ids.actions::contains) }
-                    ?: (part.behaviorActionId ?: part.primaryActionId).takeIf { slot.member == null }
-                action?.let(GenerationBehavior.Binding::Id)
-            }
-            GenerationBehavior.Kind.VALUE, GenerationBehavior.Kind.COLLECTION -> {
-                fun matches(node: JSONObject) = behaviorUiObservation(node, state, slot.kind) != null
-                fun observations(node: JSONObject, path: List<Int>): List<List<Int>> {
-                    if (matches(node)) return listOf(path)
-                    val children = node.optJSONArray("children") ?: return emptyList()
-                    return (0 until children.length()).flatMap { observations(children.getJSONObject(it), path + it) }
-                }
-                val requestedPath = slot.path ?: part.valuePath
-                val path = requestedPath?.takeIf { indices ->
-                    var node = part.full
-                    for (index in indices) {
-                        node = node.optJSONArray("children")?.optJSONObject(index) ?: return@takeIf false
-                    }
-                    matches(node)
-                } ?: if (requestedPath == null) observations(part.full, emptyList()).singleOrNull() else null
-                path?.let { GenerationBehavior.Binding.Ui(listOf(part.position) + it) }
-            }
-            else -> null
+internal fun GenerationBehavior.Scenario.validateNativeReferences(requests: List<PartRequest>) {
+    val candidates = requests.associateBy(PartRequest::id)
+    for ((index, slot) in slots.values.withIndex()) {
+        val request = candidates[slot.part] ?: continue
+        if (request.candidates.isEmpty()) continue
+        val path = "$.behavior.scenario.slots[$index]"
+        if (request.candidates.none { it.behaviorTargets(request.id).binding(slot) != null }) {
+            val available = request.candidates.flatMap { part ->
+                val targets = part.behaviorTargets(request.id)
+                if (slot.kind == GenerationBehavior.Kind.ACTION) targets.actions.keys.toList()
+                else targets.observations.keys.filter { it.kind == slot.kind }.map { it.member }
+            }.distinct()
+            val expected = "an available native ${slot.kind.wire} member" +
+                if (available.isEmpty()) "" else " (${available.joinToString()})"
+            throw PartsContractFailure(path, expected, ResponseShape("behavior.native_member", path, "unknown"))
         }
-        result[id] = binding ?: return null
     }
-    return result
 }
+
+internal fun PartsAssembly.behaviorBindings(scenario: GenerationBehavior.Scenario): Map<String, GenerationBehavior.Binding> =
+    buildMap {
+        val selected = parts.associateBy(PartPlacement::needId)
+        for ((index, entry) in scenario.slots.entries.withIndex()) {
+            val (id, slot) = entry
+            val part = selected[slot.part] ?: continue
+            val path = "$.behavior.scenario.slots[$index]"
+            val binding = part.behaviorTargets.binding(slot)
+                ?: throw PartsContractFailure(path, "a declared target on the selected native part")
+            put(id, if (binding is GenerationBehavior.Binding.Ui) {
+                binding.copy(path = listOf(part.position) + binding.path)
+            } else binding)
+        }
+    }
 
 private val behaviorScalarNodes = setOf("text", "metric", "badge", "fact", "timelineItem", "progress", "progressRing")
 private val behaviorCollectionNodes = setOf("list", "table", "groupedList", "lazyList", "lazyGrid")
 
-internal fun behaviorUiObservation(node: JSONObject, state: JSONObject, kind: GenerationBehavior.Kind): Any? {
+private val nativeInputObservationNodes = setOf("input", "numberInput", "slider", "toggle")
+
+internal fun behaviorUiObservation(node: JSONObject, state: JSONObject, kind: GenerationBehavior.Kind, native: Boolean = false): Any? {
     val type = node.getString("type")
     if (kind == GenerationBehavior.Kind.COLLECTION && type in behaviorCollectionNodes)
         return ToolUiCatalog.records(node, state).length()
-    if (kind != GenerationBehavior.Kind.VALUE || type !in behaviorScalarNodes) return null
+    if (kind != GenerationBehavior.Kind.VALUE ||
+        (type !in behaviorScalarNodes && !(native && type in nativeInputObservationNodes))) return null
     val field = node.optString("bind")
     val value = if (field.isEmpty()) node.opt("text") else ToolUiCatalog.value(state, field)
     return when (value) {

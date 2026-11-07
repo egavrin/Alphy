@@ -50,6 +50,7 @@ internal object RecordParts {
             "sum:${it.id}" to PartNumberOutput(items, records = true, member = it.id)
         }
         return PartCandidate("record_log", "records", "Add and remove typed local records with count and numeric totals.", config,
-            builder.finish(ui), primaryActionId = add, secondaryActionIds = setOf(remove), aggregates = aggregates)
+            builder.finish(ui), primaryActionId = add, secondaryActionIds = setOf(remove), aggregates = aggregates,
+            observationPaths = nativeObservationPaths(ui, NativeObservation.RECORDS to list))
     }
 }

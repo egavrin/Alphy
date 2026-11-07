@@ -157,7 +157,7 @@ class GenerationRouteWorkflowTest {
     @Test fun selectedPartsRunBehaviorWithoutACodeWriter(): Unit = runBlocking {
         val scenario = """{"slots":{
             "add":{"kind":"action","part":"count"},
-            "count":{"kind":"value","part":"count","path":[0]}},
+            "count":{"kind":"value","part":"count","member":"value"}},
             "steps":[{"op":"action","slot":"add"},{"op":"assert","slot":"count","test":"equals","value":1}]}"""
         val provider = FixtureProvider { turn, _ ->
             when (turn.generationStage) {
@@ -174,6 +174,110 @@ class GenerationRouteWorkflowTest {
             assertEquals(0, JSONObject(saved.state).getInt(counterState))
             assertEquals("behavior", diagnostics.last().getString("stage"))
             assertEquals("validated", diagnostics.last().getString("outcome"))
+        }
+    }
+
+    @Test fun namedRowActionsUseTheNativeRowPayload(): Unit = runBlocking {
+        val plan = """{"title":"Stops","description":"","language":"en","inputs":[],"questions":[],
+            "constants":[{"id":"window","value":60}],
+            "needs":[{"id":"stops","type":"editable_itinerary","label":"Stops",
+                "description":"Add and edit stops in a one-hour window","uses":{"duration":"window"}}],
+            "behavior":{"status":"checkable","scenario":{"slots":{
+                "name":{"kind":"action","part":"stops","member":"name"},
+                "minutes":{"kind":"action","part":"stops","member":"minutes"},
+                "add":{"kind":"action","part":"stops"},
+                "resize":{"kind":"action","part":"stops","member":"resize"},
+                "remove":{"kind":"action","part":"stops","member":"remove"},
+                "remaining":{"kind":"value","part":"stops","member":"remaining"},
+                "stops":{"kind":"collection","part":"stops","member":"stops"}},
+                "steps":[{"op":"action","slot":"name","value":"Park"},{"op":"action","slot":"minutes","value":20},
+                {"op":"action","slot":"add"},{"op":"action","slot":"resize","value":{"key":"stop1","value":25}},
+                {"op":"assert","slot":"remaining","test":"equals","value":35},
+                {"op":"action","slot":"remove","value":{"key":"stop1","value":null}},
+                {"op":"assert","slot":"stops","test":"equals","value":0}]}}}"""
+        val provider = FixtureProvider { turn, _ ->
+            when (turn.generationStage) {
+                CloudGenerationStage.PLAN -> plan
+                CloudGenerationStage.SELECTOR -> answer(turn)
+                else -> error("The native itinerary must avoid the writer.")
+            }
+        }
+        withEngine(provider) { _, engine, _ ->
+            val draft = engine.createDraft("Add and edit stops in a one-hour window.", null)
+            engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR,
+                CloudGenerationStage.SELECTOR), provider.stages)
+            engine.accept(draft.id)
+        }
+    }
+
+    @Test fun invalidNativeReferencesUseTheSharedPlanCorrection(): Unit = runBlocking {
+        val slots = listOf(
+            """{"kind":"value","part":"count"}""",
+            """{"kind":"value","part":"count","member":"missing"}""",
+            """{"kind":"value","part":"count","member":"add"}""",
+            """{"kind":"value","part":"count","path":[0]}""",
+            """{"kind":"value","part":"count","member":null}"""
+        )
+        val valid = """{"kind":"value","part":"count","member":"value"}"""
+        fun response(slot: String) = planWithBehavior(count, """{"slots":{"PRIVATE_SENTINEL":$slot},
+            "steps":[{"op":"assert","slot":"PRIVATE_SENTINEL","test":"equals","value":0}]}""")
+        for (slot in slots) {
+            val provider = FixtureProvider { turn, _ ->
+                when (turn.generationStage) {
+                    CloudGenerationStage.PLAN -> if (turn.turns.size == 1) response(slot) else response(valid)
+                    CloudGenerationStage.SELECTOR -> answer(turn)
+                    else -> error("A bad native reference must not reach the writer.")
+                }
+            }
+            withEngine(provider) { _, engine, _ ->
+                val draft = engine.createDraft("Show a counter.", null)
+                val session = CloudSession()
+                val events = mutableListOf<ToolGenerationTraceEvent>()
+                val trace = ToolGenerationTrace(UUID.fromString(draft.id), onEvent = { events += it })
+                engine.generate(draft.id, "fixture", emptyList(), session, progress = null,
+                    previewObserver = null, trace = trace)
+                val rejection = events.filterIsInstance<ToolGenerationTraceEvent.Attempt>()
+                    .single { it.failureCode == "widget_plan" }
+                if (slot.contains("missing") || slot.contains("add")) {
+                    assertEquals("behavior.native_member", rejection.planShape?.rule)
+                    assertEquals("$.behavior.scenario.slots[0]", rejection.planPath)
+                }
+                assertFalse(rejection.toString().contains("PRIVATE_SENTINEL"))
+                assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.PLAN,
+                    CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR), provider.stages)
+                assertFalse(session.claimGenerationCorrection())
+                engine.accept(draft.id)
+            }
+        }
+    }
+
+    @Test fun unboundScenarioOnACompleteNativeAssemblyNeverCallsTheWriter(): Unit = runBlocking {
+        val scenario = """{"slots":{"PRIVATE_SENTINEL":{"kind":"value"}},
+            "steps":[{"op":"assert","slot":"PRIVATE_SENTINEL","test":"equals","value":0}]}"""
+        var unbound = false
+        val provider = FixtureProvider { turn, _ ->
+            when (turn.generationStage) {
+                CloudGenerationStage.PLAN -> if (unbound) planWithBehavior(count, scenario) else plan(count)
+                CloudGenerationStage.SELECTOR -> answer(turn)
+                else -> error("A complete native assembly must never be replaced by the writer.")
+            }
+        }
+        val diagnostics = mutableListOf<JSONObject>()
+        withEngine(provider, { diagnostics += it }) { store, engine, _ ->
+            val good = engine.createDraft("Make a counter.", null)
+            engine.generate(good.id, "fixture", emptyList(), CloudSession())
+            val saved = engine.accept(good.id)
+            unbound = true
+            val rejected = engine.createDraft("Make another counter.", null)
+            val session = CloudSession()
+            val failed = failure("widget_behavior") { engine.generate(rejected.id, "fixture", emptyList(), session) }
+            assertFalse(failed.message.orEmpty().contains("PRIVATE_SENTINEL"))
+            assertEquals("no native binding for behavior slot 1", diagnostics.last().getString("behavior"))
+            assertEquals(saved, store.tool(saved.id))
+            assertNull(store.tool(rejected.id))
+            assertNull(store.draft(rejected.id)?.candidate)
+            assertTrue(session.claimGenerationCorrection())
         }
     }
 
@@ -396,7 +500,7 @@ class GenerationRouteWorkflowTest {
     @Test fun mixedSceneSurvivesSaveReopenAndFillOnlyRefinement(): Unit = runBlocking {
         val scenario = """{"slots":{
             "add":{"kind":"action","part":"count"},
-            "count":{"kind":"value","part":"count","path":[0]},
+            "count":{"kind":"value","part":"count","member":"value"},
             "scene":{"kind":"surface"},
             "dot":{"kind":"geometry"}},
             "steps":[{"op":"action","slot":"add"},{"op":"assert","slot":"count","test":"equals","value":1},
@@ -616,8 +720,8 @@ class GenerationRouteWorkflowTest {
         }
         withEngine(provider) { store, engine, _ ->
             val draft = engine.createDraft("Build a tip calculator with a bill, tip slider, people and totals.", null)
-            // A prior chat correction must leave a valid detailed plan usable.
-            val session = CloudSession().apply { assertTrue(claimCorrection()) }
+            // A spent generation correction still permits the writer to fill a valid plan.
+            val session = CloudSession().apply { assertTrue(claimGenerationCorrection()) }
             engine.generate(draft.id, "fixture", emptyList(), session)
             assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR,
                 CloudGenerationStage.COMPLETE), provider.stages)
@@ -643,7 +747,7 @@ class GenerationRouteWorkflowTest {
            "example":{"inputs":{"amount":4,"divisor":2},"result":4}}
         """.trimIndent()
         val scenario = """{"slots":{"edit":{"kind":"action","part":"amount"},
-            "share":{"kind":"value","part":"share"}},"steps":[{"op":"action","slot":"edit","value":6},
+            "share":{"kind":"value","part":"share","member":"value"}},"steps":[{"op":"action","slot":"edit","value":6},
             {"op":"assert","slot":"share","test":"equals","value":6}]}"""
         val response = JSONObject(planWithBehavior(needs, scenario)).put("inputs", JSONArray("""
             [{"id":"amount","label":"Amount","type":"number","value":4,"max":100},
@@ -785,8 +889,20 @@ class GenerationRouteWorkflowTest {
             "fields":[{"id":"name","label":"Item","type":"text"},{"id":"$id","label":"Amount","type":"number"}]},
             {"id":"total","type":"figure","label":"Total","description":"Sum the recorded amounts",
             "expression":{"aggregate":"sum","need":"$id","field":"$id"},"example":{"inputs":{},"result":0}}"""
+        val scenario = """{"slots":{
+            "editName":{"kind":"action","part":"$id","member":"edit_1"},
+            "editAmount":{"kind":"action","part":"$id","member":"edit_2"},
+            "add":{"kind":"action","part":"$id"},
+            "remove":{"kind":"action","part":"$id","member":"remove"},
+            "records":{"kind":"collection","part":"$id","member":"records"},
+            "total":{"kind":"value","part":"total","member":"value"}},
+            "steps":[{"op":"action","slot":"editName","value":"Notebook"},
+            {"op":"action","slot":"editAmount","value":3.5},{"op":"action","slot":"add"},
+            {"op":"assert","slot":"records","test":"equals","value":1},
+            {"op":"assert","slot":"total","test":"equals","value":3.5},
+            {"op":"action","slot":"remove","value":"0"},{"op":"assert","slot":"total","test":"equals","value":0}]}"""
         val provider = FixtureProvider { turn, _ -> when (turn.generationStage) {
-            CloudGenerationStage.PLAN -> plan(needs)
+            CloudGenerationStage.PLAN -> planWithBehavior(needs, scenario)
             CloudGenerationStage.SELECTOR -> answer(turn)
             else -> error("Record totals must use native parts.")
         } }
@@ -794,6 +910,10 @@ class GenerationRouteWorkflowTest {
             val draft = engine.createDraft("Keep named expenses and show their total.", null)
             engine.generate(draft.id, "fixture", emptyList(), CloudSession())
             var saved = engine.accept(draft.id)
+            val opened = engine.openArtifact(checkNotNull(store.tool(saved.id)))
+            assertEquals(saved.id, opened.tool.id)
+            engine.closeArtifact(saved.id, saved.revision, opened.sessionGeneration)
+            saved = checkNotNull(store.tool(saved.id))
             suspend fun act(action: String, value: Any?) {
                 saved = engine.interact(saved.id, saved.revision, saved.stateVersion, "${partInstanceId(id)}_$action", value)
             }
@@ -864,9 +984,9 @@ class GenerationRouteWorkflowTest {
             ), reports(events))
             provider.requests.clear()
             events.clear()
-            val correctedDecision = CloudSession()
-            assertTrue(correctedDecision.claimCorrection())
-            failure("response_length") { engine.generate(draft.id, "fixture", emptyList(), correctedDecision) }
+            val correctedGeneration = CloudSession()
+            assertTrue(correctedGeneration.claimGenerationCorrection())
+            failure("response_length") { engine.generate(draft.id, "fixture", emptyList(), correctedGeneration) }
             assertEquals(listOf(CloudGenerationStage.PLAN), provider.stages)
             assertEquals(listOf("2 plan - providerFailure response_length finish"), reports(events))
             assertEquals(good, store.draft(draft.id))

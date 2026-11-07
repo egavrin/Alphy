@@ -45,11 +45,14 @@ internal object ClockParts {
                 .put(done, limit != null && current >= limit)
         }
         val config = JSONObject().put("label", label).put("seconds", seconds ?: 0).put("russian", russian)
+        val full = partContainer("column", listOf(metric, completed, controls))
+        val observations = if (seconds == null) nativeObservationPaths(full, NativeObservation.VALUE to metric)
+            else nativeObservationPaths(full, NativeObservation.VALUE to metric, NativeObservation.COMPLETE to completed)
         return PartCandidate(if (seconds == null) "stopwatch" else "countdown", "controls",
             "Start, pause and reset $label locally. This clock has no completion effect.", config,
-            builder.finish(partContainer("column", listOf(metric, completed, controls)), readProjection = projection),
+            builder.finish(full, readProjection = projection),
             primaryActionId = start, secondaryActionIds = setOf(pause, reset),
-            numberOutput = PartNumberOutput(value), valuePath = listOf(0),
+            numberOutput = PartNumberOutput(value), observationPaths = observations,
             clockTicks = { state, clock -> isRunning(state, clock) && (limit == null || time(state, clock) < limit) })
     }
 }

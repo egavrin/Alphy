@@ -2,9 +2,18 @@ package com.alpha.assistant.tools.generation
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.alpha.assistant.cloud.ChatProvider
+import com.alpha.assistant.cloud.CloudEvent
+import com.alpha.assistant.cloud.CloudGenerationStage
+import com.alpha.assistant.cloud.CloudRequest
+import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.tools.ToolEngine
+import com.alpha.assistant.tools.ToolGenerationService
+import com.alpha.assistant.tools.ToolStore
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolUiCatalog
+import com.alpha.assistant.tools.firstSelectorChoices
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -60,6 +69,65 @@ class PointsLedgerGenerationWorkflowTest {
             val output = JSONObject(checkNotNull(result.json))
             assertEquals(setOf("state"), output.keys().asSequence().toSet())
             output.getJSONObject("state")
+        }
+    }
+
+    @Test fun namedBalancesAndHistoryGenerateSaveAndReopenWithoutWriter(): Unit = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val name = "native-ledger-${java.util.UUID.randomUUID()}.db"
+        val store = ToolStore(context, name)
+        val stages = mutableListOf<CloudGenerationStage?>()
+        val plan = JSONObject(raw).put("behavior", JSONObject("""{"status":"checkable","scenario":{"slots":{
+            "credit":{"kind":"action","part":"scores","member":"post1"},
+            "spend":{"kind":"action","part":"scores","member":"post3"},
+            "choose":{"kind":"action","part":"scores","member":"select"},
+            "undo":{"kind":"action","part":"scores","member":"undo"},
+            "amber":{"kind":"value","part":"scores","member":"balance1"},
+            "chalk":{"kind":"value","part":"scores","member":"balance2"},
+            "history":{"kind":"collection","part":"scores","member":"history"},
+            "denied":{"kind":"value","part":"scores","member":"denied"}},
+            "steps":[{"op":"action","slot":"spend"},
+            {"op":"assert","slot":"denied","test":"nonempty"},
+            {"op":"action","slot":"credit"},{"op":"action","slot":"credit"},{"op":"action","slot":"spend"},
+            {"op":"assert","slot":"amber","test":"equals","value":1},
+            {"op":"action","slot":"choose","value":2},{"op":"action","slot":"credit"},
+            {"op":"assert","slot":"chalk","test":"equals","value":3},
+            {"op":"action","slot":"undo"},{"op":"assert","slot":"chalk","test":"equals","value":0},
+            {"op":"assert","slot":"history","test":"equals","value":3}]}}""")).toString()
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                stages += request.generationStage
+                val response = when (request.generationStage) {
+                    CloudGenerationStage.PLAN -> plan
+                    CloudGenerationStage.SELECTOR -> firstSelectorChoices(request.turns.single().text)
+                    else -> error("The native ledger must avoid the code writer.")
+                }
+                emit(CloudEvent.Text(response))
+            }
+        }
+        val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context)))
+        try {
+            val draft = engine.createDraft("Сделай счёт очков для команд «Янтарь» и «Мел».", null)
+            engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+            var saved = engine.accept(draft.id)
+            val restored = checkNotNull(store.tool(saved.id))
+            val opened = engine.openArtifact(restored)
+            assertEquals(saved.id, opened.tool.id)
+            engine.closeArtifact(saved.id, saved.revision, opened.sessionGeneration)
+            saved = checkNotNull(store.tool(saved.id))
+            val spec = ToolSpec.parsePersisted(saved.spec)
+            assertNotNull(spec.action(spec.ui, "p6_scores_post1"))
+            exercise(spec) { event, _ ->
+                saved = engine.interact(saved.id, saved.revision, saved.stateVersion, event.getString("actionId"),
+                    event.opt("value").takeUnless { it == JSONObject.NULL })
+                JSONObject(checkNotNull(store.tool(saved.id)).state)
+            }
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR), stages)
+        } finally {
+            engine.closeArtifacts()
+            store.close()
+            context.deleteDatabase(name)
+            context.deleteDatabase(store.automationDatabase)
         }
     }
 

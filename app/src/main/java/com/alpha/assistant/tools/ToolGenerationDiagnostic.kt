@@ -129,7 +129,7 @@ internal inline fun <T> ToolGenerationTrace.Run?.timed(
 
 private fun safeSelectorBatch(batch: String?) = batch?.takeIf { it == "sections" || it == "parts" }
 private val needsPlanPath = Regex(
-    """\$(?:\.(?:wholeScreen|behavior|scenario|steps|title|description|language|inputs|constants|needs|questions|id|label|type|value|uses|sourceIds|stops|bands|items|ideas|name|minutes|min|max|step|control|expression|example|unit|date|offsetDays|repeatDays|effort|ask|options)(?:\[\d{1,2}])?)*"""
+    """\$(?:\.(?:wholeScreen|behavior|scenario|steps|title|description|language|inputs|constants|needs|questions|id|label|type|value|uses|sourceIds|stops|bands|items|ideas|name|minutes|min|max|step|control|expression|example|unit|date|offsetDays|repeatDays|effort|ask|options)(?:\[\d{1,2}])?)*|\$\.behavior\.scenario\.slots\[\d{1,2}]"""
 )
 
 /** No candidate, exception message, private field name, or generated identifier enters this record.

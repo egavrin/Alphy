@@ -15,6 +15,7 @@ import com.alpha.assistant.tools.generation.NeedsPlan
 import com.alpha.assistant.tools.generation.GenerationPlan
 import com.alpha.assistant.tools.generation.GenerationBehavior
 import com.alpha.assistant.tools.generation.behaviorBindings
+import com.alpha.assistant.tools.generation.validateNativeReferences
 import com.alpha.assistant.tools.generation.partsObject
 import com.alpha.assistant.tools.generation.PartClockSample
 import com.alpha.assistant.tools.generation.PartRequest
@@ -124,7 +125,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                 code !in setOf("widget_plan","widget_selector","widget_questions") -> ToolGenerationOutcome.PROVIDER_FAILURE
             else -> ToolGenerationOutcome.REJECTED
         }
-        // Diagnostics must not change validation, cancellation, or the single correction allowance.
+        // Diagnostics must not change validation, cancellation, or the generation correction allowance.
         val diagnostic=ToolGenerationAttemptDiagnostic(attempt,outcome,stage,ToolGenerationAttemptDiagnostic.safeCode(code),disposition,validation?.category,
             validation?.uiDiagnostic,validation?.details?.rule,location?.event,location?.path,
             (location?.cause as? CloudFailure)?.code?.let(ToolGenerationAttemptDiagnostic::safeCode),selectorBatch,
@@ -309,7 +310,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         var planText = ""
         var needsText = ""
         var behavior: GenerationBehavior? = null
-        var lessonParts: List<PartRequest>? = null
+        var preparedParts: List<PartRequest>? = null
         val planned = run {
             reportProgress(ToolGenerationProgress.PLANNING)
             val planInstructions = when {
@@ -344,7 +345,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                         if (lessonTarget != null) {
                             needsText = planText
                             val plan = NeedsPlan.parseResponse(planText, lessonTarget, allowedSourceIds) as GenerationPlan.Parts
-                            lessonParts = ToolParts.requests(plan.needs, lessonTarget).also { parts ->
+                            preparedParts = ToolParts.requests(plan.needs, lessonTarget).also { parts ->
                                 parts.firstNotNullOfOrNull(PartRequest::slotFailure)?.let { throw it }
                             }
                             plan
@@ -363,10 +364,16 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                                     requireParts(!requiresWholeScreen, "$.wholeScreen", "true for this interface language")
                                     requireParts(needs.russian == (appTag == "ru"), "$.language", appTag)
                                 }
-                                if (needs?.questions.isNullOrEmpty() || rawBehavior != null) {
+                                val parsedBehavior = if (needs?.questions.isNullOrEmpty() || rawBehavior != null) {
                                     val partIds = needs?.let { plan -> (plan.inputs.map { it.id } + plan.needs.map { it.id }).toSet() }.orEmpty()
-                                    behavior = GenerationBehavior.parse(rawBehavior, partIds)
+                                    GenerationBehavior.parse(rawBehavior, partIds)
+                                } else null
+                                preparedParts = needs?.let {
+                                    ToolParts.requests(it, clock = samplePartClock()).also { requests ->
+                                        (parsedBehavior as? GenerationBehavior.Scenario)?.validateNativeReferences(requests)
+                                    }
                                 }
+                                behavior = parsedBehavior
                                 generation
                             }
                         }
@@ -395,7 +402,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                         (failure as? CloudFailure)?.code == "response_length" -> lengthCorrection
                         else -> null
                     }
-                    if (next == null || !session.claimCorrection()) {
+                    if (next == null || !session.claimGenerationCorrection()) {
                         observeAttempt(attemptNumber, ToolGenerationStage.PLAN, error, trace = trace, planFailure = rejected)
                         throw error
                     }
@@ -416,7 +423,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                 trace.timed(attemptNumber, ToolGenerationStage.ASSEMBLY) {
                     session.checkActive(currentCoroutineContext())
                     PartsGeneration.build(plan,lessonTarget,selectPresentation=lessonTarget==null,
-                        clock=if(lessonTarget==null) samplePartClock() else null, preparedLessonParts = lessonParts) { body ->
+                        preparedParts = checkNotNull(preparedParts)) { body ->
                         val batch = JSONObject(body).getString("stage")
                         try {
                             trace.timed(attemptNumber, ToolGenerationStage.SELECTOR, batch, CloudGenerationStage.SELECTOR) {
@@ -476,13 +483,24 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             }
             selected to installedSourceIds
         } else null to emptyList()
-        val selectedBindings = scenario?.let { selectedAssembly?.behaviorBindings(it) }
-        val fallbackWhole = scenario != null && selectedAssembly?.parts?.isNotEmpty() == true &&
-            (selectedBindings == null || selectedAssembly.holes.isEmpty() && selectedBindings.keys != scenario.slots.keys)
-        val assembly = selectedAssembly.takeUnless { fallbackWhole }
-        val hostBindings = if (fallbackWhole) emptyMap() else selectedBindings.orEmpty()
+        val assembly = selectedAssembly
+        fun rejectNativeBinding(reason: String): Nothing {
+            val error = InvalidGeneratedOutput(GenerationProblem.BEHAVIOR,
+                behavior = BehaviorCheckFailure(null, reason))
+            observeAttempt(attemptNumber, ToolGenerationStage.BEHAVIOR, error, trace = trace)
+            throw error.failure()
+        }
+        val hostBindings = try {
+            scenario?.let { assembly?.behaviorBindings(it) }.orEmpty()
+        } catch (failure: PartsContractFailure) {
+            rejectNativeBinding("selected native target unavailable at ${failure.path}")
+        }
         val writerSlots = scenario?.slots.orEmpty().filterKeys { it !in hostBindings }
         val partsOnly = assembly != null && assembly.holes.isEmpty()
+        if (partsOnly && writerSlots.isNotEmpty()) {
+            val slotNumber = checkNotNull(scenario).slots.keys.indexOf(writerSlots.keys.first()) + 1
+            rejectNativeBinding("no native binding for behavior slot $slotNumber")
+        }
         trace?.partsOnly = partsOnly
         val sealStandalone = lessonTarget==null && partsOnly && assembly.requiresHostRuntime
         if(base==null && lessonTarget==null && !sealStandalone) requireSandbox(attemptNumber)
@@ -490,7 +508,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         val holeIds=mixedAssembly?.holes?.flatMap {it.needIds}
         val sceneHoles=mixedAssembly?.holes?.count {it.kind==HoleKind.SCENE} ?: 0
         val mixed=mixedAssembly!=null || previous?.composition!=null
-        val wholeScreen = planned == GenerationPlan.WholeScreen || fallbackWhole
+        val wholeScreen = planned == GenerationPlan.WholeScreen
         val modelStage = if (base == null) CloudGenerationStage.COMPLETE else CloudGenerationStage.REFINE
         if (!partsOnly) {
             reportProgress(if (base == null) ToolGenerationProgress.COMPLETING else ToolGenerationProgress.REFINING)
@@ -718,7 +736,7 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
                     (failure as? CloudFailure)?.code == "response_length" -> lengthCorrection
                     else -> null
                 }
-                if (next == null || !session.claimCorrection()) {
+                if (next == null || !session.claimGenerationCorrection()) {
                     observeAttempt(attemptNumber, stage, failure, smoke, trace = trace)
                     throw if (failure is InvalidGeneratedOutput) {
                         if(mixed && failure.problem != GenerationProblem.BEHAVIOR) incompleteMixed() else failure.failure()

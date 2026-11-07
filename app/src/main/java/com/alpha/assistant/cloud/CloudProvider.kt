@@ -76,14 +76,19 @@ sealed interface CloudEvent {
 /** Each request owns its connection. A canceled request cannot cancel a later request. */
 class CloudSession {
     private val canceled = AtomicBoolean(false)
-    private val correctionUsed = AtomicBoolean(false)
+    private val chatCorrectionUsed = AtomicBoolean(false)
+    private val generationCorrectionUsed = AtomicBoolean(false)
     private val connection = AtomicReference<HttpURLConnection?>(null)
-    internal val generationAttempt: Int get() = if (correctionUsed.get()) 2 else 1
+    internal val chatAttempt: Int get() = if (chatCorrectionUsed.get()) 2 else 1
+    internal val generationAttempt: Int get() = if (generationCorrectionUsed.get()) 2 else 1
     internal var beforeHttp: (() -> Unit)? = null
     internal var decisionRejectionObserver: ((DecisionRejection) -> Unit)? = null
-    internal fun claimCorrection(): Boolean {
+    internal fun claimChatCorrection(): Boolean = claimCorrection(chatCorrectionUsed)
+    internal fun claimGenerationCorrection(): Boolean = claimCorrection(generationCorrectionUsed)
+
+    private fun claimCorrection(used: AtomicBoolean): Boolean {
         check()
-        return correctionUsed.compareAndSet(false, true)
+        return used.compareAndSet(false, true)
     }
     fun attach(value: HttpURLConnection) {
         connection.set(value)
@@ -400,8 +405,8 @@ For a current weather question with no named place, ${if(canLocate) "return exac
             } catch (failure: CloudFailure) {
                 val shape = failure.shape ?: throw failure
                 currentCoroutineContext().ensureActive()
-                val attempt = session.generationAttempt
-                val correcting = session.claimCorrection()
+                val attempt = session.chatAttempt
+                val correcting = session.claimChatCorrection()
                 report(failure, attempt, correcting)
                 if (!correcting) throw failure
                 val notice = "\nThe prior decision failed ${shape.rule} at ${shape.path}. Return one JSON object for the same latest user request. " +
@@ -411,7 +416,7 @@ For a current weather question with no named place, ${if(canLocate) "return exac
                         notice + " For an automation request, return one valid draft_automation call instead."
                         else notice))
                 } catch (second: CloudFailure) {
-                    report(second, session.generationAttempt, false)
+                    report(second, session.chatAttempt, false)
                     throw second
                 }
             }
@@ -560,7 +565,7 @@ For a current weather question with no named place, ${if(canLocate) "return exac
             } catch (failure: CloudFailure) {
                 if (!weather || failure.code !in setOf("source_support", "source_attribution")) throw failure
                 currentCoroutineContext().ensureActive()
-                if (!session.claimCorrection()) throw failure
+                if (!session.claimChatCorrection()) throw failure
                 val correction = "The previous weather answer failed source validation. Use only this request and the existing excerpts. " +
                     "Use a short answer with a citation and only directly reported values, units, and times. Omit any missing value or time. " +
                     "If the excerpts do not give the requested current conditions, say so and cite the most relevant source."

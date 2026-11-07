@@ -16,6 +16,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.data.*
 import com.alpha.assistant.surfaces.AssistContext
+import com.alpha.assistant.tools.firstSelectorChoices
 import com.alpha.assistant.tools.replyWithFixturePlan
 import com.alpha.assistant.ui.ShellViewModel
 import org.json.JSONArray
@@ -1238,11 +1239,49 @@ class CloudWorkflowTest {
             assertEquals(prompt,result.brief)
             assertEquals(listOf(result),authorizations)
             assertEquals(2,server.requests.size)
-            assertEquals(2,session.generationAttempt)
+            assertEquals(2,session.chatAttempt)
+            assertEquals(1,session.generationAttempt)
             assertEquals(DecisionRejection("DECISION",1,ResponseShape("decision.fields","$","object"),true),
                 rejections.single())
             assertTrue(server.failures.isEmpty())
         }
+    }
+
+    @Test fun correctedChatDecisionStillLetsTheNativePlanCorrectOnce() {
+        val prompt = "Build a counter that starts at zero and adds one."
+        val plan = JSONObject("""{"title":"Counter","description":"Add one and reset","language":"en",
+            "inputs":[],"constants":[],"questions":[],
+            "needs":[{"id":"count","type":"counter","label":"Count","description":"Add one and reset"}],
+            "behavior":{"status":"checkable","scenario":{"slots":{
+              "add":{"kind":"action","part":"count","member":"add"},
+              "total":{"kind":"value","part":"count","member":"value"}},
+              "steps":[{"op":"action","slot":"add"},{"op":"assert","slot":"total","test":"equals","value":1}]}}}""")
+        val rejected = JSONObject(plan.toString()).put("constants", JSONArray().put(JSONObject().put("id", "unused").put("value", 2)))
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        Server { request, output ->
+            val messages = request.json.getJSONArray("messages")
+            val reply = when (calls.getAndIncrement()) {
+                0 -> """{"kind":"create","text":"I can build that."}"""
+                1 -> decision("I can build that.", "create", "none", prompt)
+                2 -> rejected.toString()
+                3 -> {
+                    assertTrue(messages.getJSONObject(0).getString("content").contains("constants referenced by a need"))
+                    plan.toString()
+                }
+                4, 5 -> firstSelectorChoices(messages.getJSONObject(messages.length() - 1).getString("content"))
+                else -> error("Unexpected provider call after native generation.")
+            }
+            output.answer(reply)
+        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+            fixture.submit(prompt)
+            fixture.idle()
+            val saved = fixture.last
+            assertNotNull("Generation ended with ${saved.errorCode}", saved.toolId)
+            assertEquals(1, saved.toolRevision)
+            assertEquals(saved.toolId, fixture.persisted().selected!!.messages.last().toolId)
+            assertEquals(6, server.requests.size)
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+        } }
     }
 
     @Test fun unknownRefinementTargetCannotRunSearch() {
