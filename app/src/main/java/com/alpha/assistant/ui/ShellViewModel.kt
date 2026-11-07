@@ -33,6 +33,8 @@ import com.alpha.assistant.courses.CourseTutorRequest
 import com.alpha.assistant.courses.encode
 import com.alpha.assistant.courses.kind
 import com.alpha.assistant.surfaces.AssistContext
+import com.alpha.assistant.surfaces.AssistantCapture
+import com.alpha.assistant.surfaces.assistantUnavailable
 import com.alpha.assistant.memory.MemoryPageState
 import com.alpha.assistant.memory.MemoryStore
 import com.alpha.assistant.sandbox.SandboxClient
@@ -53,6 +55,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -87,7 +90,12 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     private val weatherLocator: WeatherLocator = AndroidWeatherLocator(application),
 ) : AndroidViewModel(application) {
     internal val updates = AppUpdater.get(application)
-    private data class VoiceOrigin(val destination: CourseComposerState?, val draft: Draft, val conversationId: String?)
+    private data class VoiceOrigin(
+        val destination: CourseComposerState?,
+        val draft: Draft,
+        val conversationId: String?,
+        val assistantInvocation: String?,
+    )
     private var voiceOrigin: VoiceOrigin? = null
     private var voiceDestination by mutableStateOf<CourseComposerState?>(null)
     private var submitVoiceOnTranscript = false
@@ -105,19 +113,24 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         }
     }
 
-    internal fun sendComposer(destination: CourseComposerState?) {
-        if (destination == null) send()
+    internal fun sendComposer(destination: CourseComposerState?, assistantInvocation: String? = null) {
+        if (destination == null) {
+            if (assistantInvocation == null) send() else sendAssistant(assistantInvocation)
+        }
         else if (destination.active && !destination.busy && !attachmentBusy) {
             if (voiceBelongsTo(destination)) voice.submitted()
             destination.send()
         }
     }
 
-    private fun currentVoiceOrigin(destination: CourseComposerState?) =
-        VoiceOrigin(destination, composerDraft(destination), snapshot.selectedId.takeIf { destination == null })
+    private fun currentVoiceOrigin(destination: CourseComposerState?, assistantInvocation: String?) =
+        VoiceOrigin(destination, composerDraft(destination), snapshot.selectedId.takeIf { destination == null }, assistantInvocation)
 
-    private fun validVoiceOrigin() = voiceDestination?.active != false &&
-        voiceOrigin == currentVoiceOrigin(voiceDestination)
+    private fun validVoiceOrigin(): Boolean {
+        val origin = voiceOrigin ?: return false
+        return voiceDestination?.active != false && origin == currentVoiceOrigin(voiceDestination, origin.assistantInvocation) &&
+            (origin.assistantInvocation == null || AssistantCapture.current?.id == origin.assistantInvocation)
+    }
 
     private fun receiveTranscript(text: String) {
         if (voice.oneShot) {
@@ -128,11 +141,12 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
             val destination = voiceDestination
             val draft = composerDraft(destination)
             val submit = submitVoiceOnTranscript
+            val assistantInvocation = voiceOrigin?.assistantInvocation
             submitVoiceOnTranscript = false
             voice.stop()
             val combined = listOf(draft.text, text.trim()).filter { it.isNotBlank() }.joinToString("\n")
             editComposerDraft(destination, draft.copy(text = combined))
-            if (submit) sendComposer(destination)
+            if (submit) sendComposer(destination, assistantInvocation)
         } else if (snapshot.draft.text.isBlank() && snapshot.draft.attachments.isEmpty()) editDraft(snapshot.draft.copy(text = text))
         else voiceDraftConflict()
     }
@@ -140,11 +154,12 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     private fun voiceDraftConflict() { voice.stop(getApplication<Application>().getString(R.string.voice_draft_changed)) }
     fun startVoice(oneShot: Boolean = true) = startComposerVoice(oneShot, null)
 
-    internal fun startComposerVoice(oneShot: Boolean, destination: CourseComposerState?) {
+    internal fun startComposerVoice(oneShot: Boolean, destination: CourseComposerState?, assistantInvocation: String? = null) {
         if (loading || loadFailed || attachmentBusy || voice.active || destination?.active == false) return
+        if (assistantInvocation != null && AssistantCapture.current?.id != assistantInvocation) return
         submitVoiceOnTranscript = false
         voiceDestination = destination
-        val origin = currentVoiceOrigin(destination)
+        val origin = currentVoiceOrigin(destination, assistantInvocation)
         voiceOrigin = origin
         voice.start(origin.draft.text.isBlank() && origin.draft.attachments.isEmpty(),
             destination?.busy ?: (activeConversationId != null), oneShot)
@@ -872,6 +887,21 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     }
     fun clearRequestError() { requestError = null }
     fun contextDraftKey(): String = snapshot.draft.id
+
+    internal fun bindAssistantScreenshot(invocation: String) {
+        val draft = snapshot.draft
+        AssistantCapture.bindScreenshot(invocation, draft.id)
+        if (draft.attachments.size >= ImageInput.MAX_IMAGES &&
+            AssistantCapture.current?.takeIf { it.id == invocation }?.screenshotFor(draft.id) != null
+        ) {
+            AssistantCapture.discardScreenshot(invocation)
+            requestError = getApplication<Application>().getString(R.string.context_attachment_count_limit)
+        }
+    }
+
+    private fun composerAttachmentCount(destination: CourseComposerState?, draft: Draft): Int =
+        draft.attachments.size + if (destination == null && AssistantCapture.current?.screenshotFor(draft.id) != null) 1 else 0
+
     internal fun composerContextKey(destination: CourseComposerState?): String? =
         composerDraft(destination).id.takeIf { destination?.active != false && destination?.busy != true }
 
@@ -897,7 +927,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
             return false
         }
         val draft = composerDraft(destination)
-        if (draft.attachments.size >= ImageInput.MAX_IMAGES || draft.attachments.any { it.contextText != null }) {
+        if (composerAttachmentCount(destination, draft) >= ImageInput.MAX_IMAGES || draft.attachments.any { it.contextText != null }) {
             contextFailure(application.getString(R.string.context_text_attachment_limit), destination)
             return false
         }
@@ -919,7 +949,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         canAttach: () -> Boolean = { true },
     ): Boolean {
         if (attachmentBusy || !acceptsComposerContext(origin, destination)) return false
-        if (composerDraft(destination).attachments.size >= ImageInput.MAX_IMAGES) {
+        if (composerAttachmentCount(destination, composerDraft(destination)) >= ImageInput.MAX_IMAGES) {
             contextFailure(getApplication<Application>().getString(R.string.context_attachment_count_limit), destination)
             return false
         }
@@ -990,12 +1020,64 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         }
         return true
     }
-    fun send(search: Boolean = true) {
+    private fun sendAssistant(invocation: String) {
+        val application = getApplication<Application>()
+        val capture = AssistantCapture.current?.takeIf { it.id == invocation } ?: return
+        if (application.assistantUnavailable()) return
         val draft = snapshot.draft
-        if (loading || loadFailed || attachmentBusy || (draft.text.isBlank() && draft.attachments.isEmpty())) return
-        if (draft.text.length > MAX_CHAT_INPUT) { requestError = "Сообщение превышает 16 000 символов. Сократите текст."; return }
-        if (reviewMemoryCommand(draft)) return
-        if (!queueHasRoom()) return
+        val bitmap = capture.screenshotFor(draft.id)
+        if (bitmap == null) {
+            if (submitDraft(draft, search = true)) AssistantCapture.discardScreenshot(invocation)
+            return
+        }
+        if (loading || loadFailed || attachmentBusy || draft.text.isBlank()) return
+        if (draft.attachments.size >= ImageInput.MAX_IMAGES) {
+            requestError = application.getString(R.string.context_attachment_count_limit)
+            return
+        }
+        fun stillCurrent(): Boolean = AssistantCapture.current?.let {
+            it.id == invocation && it.screenshotFor(draft.id) === bitmap
+        } == true && !application.assistantUnavailable()
+
+        attachmentBusy = true
+        viewModelScope.launch {
+            var attachment: Attachment? = null
+            var submitted = false
+            try {
+                // Keep the screenshot in memory until Send. The message owns the file after submission.
+                withContext(Dispatchers.IO) { attachment = AssistContext.screenshot(application, bitmap) }
+                if (stillCurrent()) {
+                    attachmentBusy = false
+                    if (snapshot.draft == draft) {
+                        submitted = submitDraft(draft.copy(attachments = draft.attachments + checkNotNull(attachment)), search = true)
+                        if (submitted) AssistantCapture.discardScreenshot(invocation)
+                    } else requestError = application.getString(R.string.context_draft_changed)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (stillCurrent()) requestError = application.getString(R.string.assistant_image_error)
+            } finally {
+                attachmentBusy = false
+                val rejected = attachment?.takeUnless { submitted }
+                if (rejected != null) withContext(NonCancellable + Dispatchers.IO) {
+                    AssistContext.mediaFile(application, Uri.parse(rejected.uri)).delete()
+                }
+            }
+        }
+    }
+
+    fun send(search: Boolean = true) {
+        submitDraft(snapshot.draft, search)
+    }
+
+    private fun submitDraft(draft: Draft, search: Boolean): Boolean {
+        if (loading || loadFailed || attachmentBusy || (draft.text.isBlank() && draft.attachments.isEmpty())) return false
+        if (draft.text.length > MAX_CHAT_INPUT) {
+            requestError = "Сообщение превышает 16 000 символов. Сократите текст."
+            return false
+        }
+        if (reviewMemoryCommand(draft) || !queueHasRoom()) return false
         if (voiceBelongsTo(null)) voice.submitted()
         requestError = null
         val now = System.currentTimeMillis()
@@ -1016,6 +1098,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         enqueue(updated, assistant, persist {
             if (selected == null) store.createFromNewDraft(updated, nextNewDraft) else store.updateConversation(updated)
         })
+        return true
     }
     fun retry(messageId: String, search: Boolean = true) {
         val conversation = snapshot.selected ?: return

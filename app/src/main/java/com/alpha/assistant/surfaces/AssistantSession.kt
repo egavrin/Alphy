@@ -41,8 +41,14 @@ internal const val ASSIST_INVOCATION = "assist_invocation"
 internal fun Context.assistantUnavailable(): Boolean =
     ToolWidgets.isLocked(this) || !getSystemService(PowerManager::class.java).isInteractive
 
-data class AssistCapture(val id: String, val text: String? = null, val screenshot: Bitmap? = null) {
-    val hasContent: Boolean get() = text != null || screenshot != null
+data class AssistCapture(
+    val id: String,
+    val text: String? = null,
+    val screenshot: Bitmap? = null,
+    val screenshotDraft: String? = null,
+    val screenshotDiscarded: Boolean = false,
+) {
+    fun screenshotFor(draft: String): Bitmap? = screenshot.takeIf { screenshotDraft == draft }
 }
 
 object AssistantCapture {
@@ -57,7 +63,18 @@ object AssistantCapture {
 
     fun update(id: String, text: String? = current?.text, screenshot: Bitmap? = current?.screenshot) {
         val capture = current?.takeIf { it.id == id } ?: return
-        current = capture.copy(text = text, screenshot = screenshot)
+        current = capture.copy(text = text, screenshot = screenshot.takeUnless { capture.screenshotDiscarded })
+    }
+
+    fun bindScreenshot(id: String, draft: String) {
+        val capture = current?.takeIf { it.id == id && !it.screenshotDiscarded } ?: return
+        if (capture.screenshotDraft == null) current = capture.copy(screenshotDraft = draft)
+        else if (capture.screenshotDraft != draft) discardScreenshot(id)
+    }
+
+    fun discardScreenshot(id: String) {
+        val capture = current?.takeIf { it.id == id } ?: return
+        current = capture.copy(screenshot = null, screenshotDiscarded = true)
     }
 
     fun clear(id: String) {

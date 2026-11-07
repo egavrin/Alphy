@@ -51,17 +51,20 @@ import com.alpha.assistant.voice.VoiceSession
     model: ShellViewModel,
     oneShot: Boolean,
     destination: CourseComposerState? = null,
+    assistantInvocation: String? = null,
 ): () -> Unit {
     val context = LocalContext.current
     val owner = androidx.activity.compose.LocalActivity.current as? ComponentActivity
-    var origin by remember(destination) { mutableStateOf<String?>(null) }
-    var pending by remember(destination) { mutableStateOf(false) }
+    var origin by remember(destination, assistantInvocation) { mutableStateOf<String?>(null) }
+    var pending by remember(destination, assistantInvocation) { mutableStateOf(false) }
     fun startIfVisible() {
         val power = context.getSystemService(PowerManager::class.java)
         val keyguard = context.getSystemService(KeyguardManager::class.java)
         if (pending && power.isInteractive && !keyguard.isDeviceLocked && owner?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true) {
             pending = false
-            if (origin != null && origin == model.composerContextKey(destination)) model.startComposerVoice(oneShot, destination)
+            if (origin != null && origin == model.composerContextKey(destination)) {
+                model.startComposerVoice(oneShot, destination, assistantInvocation)
+            }
         }
     }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed ->
@@ -71,7 +74,7 @@ import com.alpha.assistant.voice.VoiceSession
             if (origin != null && origin == model.composerContextKey(destination)) model.denyVoicePermission(destination)
         }
     }
-    DisposableEffect(owner, model, oneShot, destination) {
+    DisposableEffect(owner, model, oneShot, destination, assistantInvocation) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) startIfVisible() }
         owner?.lifecycle?.addObserver(observer)
         onDispose { pending = false; origin = null; owner?.lifecycle?.removeObserver(observer) }

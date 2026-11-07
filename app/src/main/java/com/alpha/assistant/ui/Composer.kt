@@ -86,15 +86,17 @@ internal class CourseComposerState(
     onContextAnchorChanged: ((ContextMenuAnchor) -> Unit)? = null,
     destination: CourseComposerState? = null,
     @StringRes label: Int = R.string.composer_label,
+    assistantInvocation: String? = null,
+    requiresQuestion: Boolean = false,
 ) {
     val draft = model.composerDraft(destination)
     val busy = destination?.busy ?: (model.activeConversationId != null)
     val request = model.activeRequestMessageId.takeIf { model.activeConversationId == model.snapshot.selectedId }
     val cancel = if (destination != null) destination.cancel.takeIf { destination.busy && destination.cancellable }
         else request?.let { { model.cancelRequest(it) } }
-    val send = { model.sendComposer(destination) }
-    val hasInput = draft.text.isNotBlank() || draft.attachments.isNotEmpty()
-    val startVoice = rememberVoiceStart(model, oneShot = true, destination = destination)
+    val send = { model.sendComposer(destination, assistantInvocation) }
+    val hasInput = draft.text.isNotBlank() || !requiresQuestion && draft.attachments.isNotEmpty()
+    val startVoice = rememberVoiceStart(model, oneShot = true, destination = destination, assistantInvocation = assistantInvocation)
     val ownsVoice = model.voiceBelongsTo(destination)
     val editable = destination == null || destination.active && !destination.busy
     Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {

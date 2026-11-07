@@ -66,6 +66,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import com.alpha.assistant.R
 import com.alpha.assistant.capabilities.AccessSettings
+import com.alpha.assistant.capabilities.AssistantSettingsRow
 import com.alpha.assistant.memory.MemoryScreen
 
 internal val SettingsSplitWidth = 700.dp
@@ -159,6 +160,7 @@ private fun SettingsMenu(model: ShellViewModel, selected: SettingsSection?, sele
     ) {
         SettingsHeading(R.string.settings, if (split) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall)
         NameSettings(model)
+        SettingsPanel { AssistantSettingsRow() }
         for ((title, sections) in settingsGroups) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(stringResource(title), Modifier.padding(start = 8.dp).semantics { heading() },

@@ -12,7 +12,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-/** Screen context stays local until the user attaches it and confirms a request. */
+/** Screen context stays local until the user sends a request. */
 object AssistContext {
     fun textAttachment(text: String, source: String = "Текст экрана"): Attachment {
         require(text.isNotBlank() && text.length <= 8000)

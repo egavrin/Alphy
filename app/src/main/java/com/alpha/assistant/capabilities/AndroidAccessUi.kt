@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -36,6 +37,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.alpha.assistant.R
 import com.alpha.assistant.network.ui.MiniAppNetworkAccessHost
 import com.alpha.assistant.network.ui.MiniAppNetworkAccessSection
+import com.alpha.assistant.ui.AlphaIcon
 import com.alpha.assistant.ui.Glyph
 import com.alpha.assistant.ui.PoliteLiveRegion
 import com.alpha.assistant.ui.StatusLine
@@ -201,16 +203,27 @@ private fun AccessGroup(grouped: Boolean, @StringRes title: Int, content: @Compo
     val revision = platformAccessRevision()
     val selected = remember(revision) { context.getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true }
     var openFailed by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(R.string.assistant_title), Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-        if (selected) StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(R.string.assistant_selected))
-        else StatusLine(Glyph.Shield, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.assistant_not_selected))
-        Text(stringResource(R.string.assistant_pick_hint))
-        TextButton(onClick = {
+    val colors = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(shape = MaterialTheme.shapes.small, color = colors.surfaceContainerHigh) {
+                Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { AlphaIcon(Glyph.Mic) }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                SettingsHeading(R.string.assistant_title)
+                if (selected) StatusLine(Glyph.Check, colors.primary, stringResource(R.string.assistant_selected))
+                else Text(stringResource(R.string.assistant_not_selected), color = colors.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium)
+            }
+        }
+        Text(stringResource(R.string.assistant_invoke_hint))
+        Button(modifier = Modifier.fillMaxWidth(), onClick = {
             openFailed = try { context.startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)); false } catch (_: ActivityNotFoundException) { true }
-        }) { Text(stringResource(R.string.assistant_open)) }
-        if (openFailed) StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.assistant_open_failed), PoliteLiveRegion)
-        Text(stringResource(R.string.assistant_tile_hint))
+        }) { Text(stringResource(R.string.assistant_open), textAlign = TextAlign.Center) }
+        if (openFailed) StatusLine(Glyph.Close, colors.error, stringResource(R.string.assistant_open_failed), PoliteLiveRegion)
+        HorizontalDivider()
+        Text(stringResource(R.string.assistant_pick_hint), style = MaterialTheme.typography.bodySmall)
+        Text(stringResource(R.string.assistant_device_hint), style = MaterialTheme.typography.bodySmall)
     }
 }
 

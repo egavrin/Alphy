@@ -251,7 +251,8 @@ class SettingsConsentWorkflowTest {
         val monitor = robot.instrumentation.addMonitor(IntentFilter(Settings.ACTION_VOICE_INPUT_SETTINGS), null, true)
         try {
             fixture.launch().use { scenario ->
-                openSettings(scenario, R.string.access)
+                openSettings(scenario, section = null)
+                robot.reveal(robot.text(R.string.assistant_title))
                 robot.reveal(robot.text(R.string.assistant_pick_hint))
                 robot.reveal(robot.text(R.string.assistant_open))
                 robot.click(robot.text(R.string.assistant_open))
