@@ -34,6 +34,10 @@
     <string name="course_generation_unavailable">Подготовка слайдов сейчас недоступна.</string>
     <string name="course_slide_invalid">Этот слайд недоступен в сохранённом курсе.</string>
     <string name="course_next">Дальше</string>
+    <string name="course_next_preparing">Готовим следующий слайд…</string>
+    <string name="course_next_failed">Не удалось подготовить следующий слайд.</string>
+    <string name="course_next_changed">Состояние курса изменилось. Обновите слайд.</string>
+    <string name="course_next_unavailable">Подготовка следующего слайда недоступна.</string>
     <string name="course_check">Проверить ответ</string>
     <string name="course_answer_label">Ваш ответ</string>
     <string name="course_answer_correct">Верно.</string>

@@ -112,6 +112,23 @@ class CourseStoreException(val reason: CourseRejection) : IllegalStateException(
 
 internal data class CourseStep(val lessonId: String, val lessonTitle: String, val slide: CourseSlidePlan)
 
+internal data class CourseNextRequest(val courseId: String, val revision: Long, val visibleSlideId: String)
+
+internal data class CourseNextTarget(val index: Int, val step: CourseStep)
+
+internal fun CourseSnapshot.nextTarget(visibleSlideId: String): CourseNextTarget? {
+    val steps = outline.steps()
+    val position = progress.completedSlides
+    val reached = steps.getOrNull(position)
+    val previous = steps.getOrNull(position - 1)
+    val index = when {
+        reached?.slide?.id == visibleSlideId && !reached.slide.kind.requiresAnswer -> position + 1
+        previous?.slide?.id == visibleSlideId && previous.slide.kind.requiresAnswer -> position
+        else -> throw CourseStoreException(CourseRejection.SLIDE_NOT_REACHED)
+    }
+    return steps.getOrNull(index)?.let { CourseNextTarget(index, it) }
+}
+
 internal fun CourseOutline.steps(): List<CourseStep> = lessons.flatMap { lesson ->
     lesson.slides.map { CourseStep(lesson.id, lesson.title, it) }
 }

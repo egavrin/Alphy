@@ -143,9 +143,8 @@ class CourseTutorUiWorkflowTest {
             click(R.string.course_tutor_close)
             robot.waitFor(robot.text(R.string.course_answer_correct))
             robot.diagnostics.capture("lesson-returned-to-exercise")
-            click(R.string.course_next)
-            robot.waitFor("Explain the result")
-            robot.waitFor(robot.text(R.string.course_generation_unavailable))
+            robot.waitFor(robot.text(R.string.course_next_unavailable))
+            robot.waitFor(robot.text(R.string.course_answer_correct))
             assertEquals("second", store.course(saved.id)?.progress?.currentSlideId)
         }
     }

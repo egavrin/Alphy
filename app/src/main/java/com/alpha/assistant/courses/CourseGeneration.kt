@@ -67,10 +67,11 @@ internal class CourseGeneration(
         val sources: Map<String, CourseSourceReference>,
     )
 
-    fun input(store: CourseStore, course: CourseSnapshot, step: CourseStep, searchResults: List<Source>): Input {
+    fun input(store: CourseStore, course: CourseSnapshot, index: Int, searchResults: List<Source>): Input {
         val steps = course.outline.steps()
+        val step = steps[index]
         val lesson = steps.withIndex().filter { it.value.lessonId == step.lessonId }
-        val priorSteps = steps.take(course.progress.completedSlides).withIndex().associateBy { it.value.slide.id }
+        val priorSteps = steps.take(index).withIndex().associateBy { it.value.slide.id }
         val exerciseBySlide = mutableMapOf<String, CourseExercise>()
         val prompt = StringBuilder(SLIDE_INSTRUCTIONS)
         fun append(value: String) {
@@ -82,7 +83,7 @@ internal class CourseGeneration(
             .put("goal", course.setup.goal).put("lessonTitle", step.lessonTitle)
             .put("lessonPlan", JSONArray(lesson.map { (index, plan) ->
                 JSONObject().put("slideNumber", index + 1).put("kind", plan.slide.kind.name).put("goal", plan.slide.goal)
-            })).put("reachedSlideNumber", course.progress.completedSlides + 1)
+            })).put("reachedSlideNumber", index + 1)
             .put("reachedSlideGoal", step.slide.goal).toString())
 
         append("\nEarlier answers in order, including errors:\n[")

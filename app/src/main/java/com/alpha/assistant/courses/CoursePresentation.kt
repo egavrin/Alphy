@@ -2,6 +2,7 @@ package com.alpha.assistant.courses
 
 import com.alpha.assistant.cloud.CloudFailure
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import java.util.concurrent.ConcurrentHashMap
@@ -49,6 +50,17 @@ internal fun interface CourseSourcedSlideGenerationHost {
 }
 
 internal data class CourseSlideGenerationRequest(val courseId: String, val expectedRevision: Long, val slideId: String)
+
+internal fun interface CourseNextGenerationHost {
+    suspend fun generate(request: CourseNextRequest): CourseSlideContent
+}
+
+internal sealed interface CourseNextPreparation {
+    data class Ready(val request: CourseNextRequest, val page: CoursePage.Slide, val draft: CourseSlideContent?) : CourseNextPreparation
+    data object Failed : CourseNextPreparation
+    data object Unavailable : CourseNextPreparation
+    data object Stale : CourseNextPreparation
+}
 
 internal enum class CourseSourceSearchIssue { QUERY, EMPTY, UNAVAILABLE, FAILED }
 
@@ -109,12 +121,48 @@ internal class CoursePresentation(
         }
     }
 
-    fun next(slide: CoursePage.Slide): CoursePlayerUpdate {
+    fun next(slide: CoursePage.Slide, prepared: CourseNextPreparation.Ready? = null): CoursePlayerUpdate {
         val courseId = slide.course.id
+        if (prepared != null) return update(courseId) {
+            check(prepared.request == slide.nextRequest)
+            val updated = store.adoptNext(prepared.request, prepared.draft)
+            prepared.page.copy(course = updated)
+        }
         if (slide.feedback?.correct == true) return CoursePlayerUpdate.Open(player(courseId))
         return update(courseId) {
             controller.advance(courseId, slide.course.revision, slide.step.slide.id)
             player(courseId)
+        }
+    }
+
+    suspend fun prepareNext(request: CourseNextRequest, host: CourseNextGenerationHost?): CourseNextPreparation {
+        val slot = GenerationSlot(prefetch = true)
+        check(acquireGeneration(request.courseId, slot))
+        try {
+            val course = store.courseAt(request.courseId, request.revision)
+            val target = course.nextTarget(request.visibleSlideId) ?: return CourseNextPreparation.Stale
+            val saved = store.slide(course.id, target.step.slide.id)?.content
+            val content = saved ?: host?.generate(request) ?: return CourseNextPreparation.Unavailable
+            currentCoroutineContext().ensureActive()
+            store.courseAt(request.courseId, request.revision)
+            val attempt = if (saved != null && target.step.slide.kind.requiresAnswer) {
+                store.answerAttempts(course.id).lastOrNull { it.slideId == target.step.slide.id }
+            } else null
+            val page = checkedSlide(course, target.step, target.index + 1, attempt, content)
+            return CourseNextPreparation.Ready(request, page, content.takeIf { saved == null })
+        } catch (_: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            return CourseNextPreparation.Failed
+        } catch (failure: CourseStoreException) {
+            return when (failure.reason) {
+                CourseRejection.STALE_REVISION, CourseRejection.COURSE_NOT_FOUND, CourseRejection.SLIDE_NOT_REACHED ->
+                    CourseNextPreparation.Stale
+                else -> CourseNextPreparation.Failed
+            }
+        } catch (_: Exception) {
+            return CourseNextPreparation.Failed
+        } finally {
+            releaseGeneration(request.courseId, slot)
         }
     }
 
@@ -138,7 +186,8 @@ internal class CoursePresentation(
         mode: GenerationMode,
     ): CourseSlideGenerationUpdate {
         val request = page.generationRequest ?: return CourseSlideGenerationUpdate(page)
-        if (!activeGenerations.add(request.courseId)) {
+        val slot = GenerationSlot(prefetch = false)
+        if (!acquireGeneration(request.courseId, slot)) {
             return CourseSlideGenerationUpdate(page.copy(issue = CourseSlideIssue.GENERATION_BUSY))
         }
         try {
@@ -197,7 +246,7 @@ internal class CoursePresentation(
                 else -> CourseSlideGenerationUpdate(saved, reloaded)
             }
         } finally {
-            activeGenerations.remove(request.courseId)
+            releaseGeneration(request.courseId, slot)
         }
     }
 
@@ -218,21 +267,25 @@ internal class CoursePresentation(
             return CoursePage.Unavailable(course, issue, step)
         }
         return try {
-            validateCourseOutput {
-                content.encodeSources()
-                val spec = parseCourseSpec(content)
-                require(spec.composition == null)
-                val exercise = CourseExercise.read(spec, step.slide.kind)
-                require(exercise?.actionId == null)
-                checkedCourseUi(spec, spec.ui.toString(), spec.initialState, exercise)
-                val (ui, state) = checkedCourseUi(spec, content.uiJson, content.stateJson, exercise)
-                val feedback = attempt?.let { CourseAnswerFeedback(it.answer, it.correct) }
-                CoursePage.Slide(course, step, number, ui.toString(), state.toString(), exercise?.prompt,
-                    content.sources, content.adaptationNote, feedback)
-            }
+            checkedSlide(course, step, number, attempt, content)
         } catch (_: CourseWorkflowException) {
             CoursePage.Unavailable(course, CourseSlideIssue.INVALID, step)
         }
+    }
+
+    private fun checkedSlide(
+        course: CourseSnapshot, step: CourseStep, number: Int, attempt: CourseAnswerAttempt?, content: CourseSlideContent,
+    ): CoursePage.Slide = validateCourseOutput {
+        content.encodeSources()
+        val spec = parseCourseSpec(content)
+        require(spec.composition == null)
+        val exercise = CourseExercise.read(spec, step.slide.kind)
+        require(exercise?.actionId == null)
+        checkedCourseUi(spec, spec.ui.toString(), spec.initialState, exercise)
+        val (ui, state) = checkedCourseUi(spec, content.uiJson, content.stateJson, exercise)
+        val feedback = attempt?.let { CourseAnswerFeedback(it.answer, it.correct) }
+        CoursePage.Slide(course, step, number, ui.toString(), state.toString(), exercise?.prompt,
+            content.sources, content.adaptationNote, feedback)
     }
 
     private fun requireCourse(id: String): CourseSnapshot =
@@ -253,7 +306,7 @@ internal class CoursePresentation(
     } catch (failure: CourseStoreException) {
         when (failure.reason) {
             CourseRejection.STALE_REVISION, CourseRejection.DUPLICATE_ANSWER,
-            CourseRejection.SLIDE_NOT_REACHED, CourseRejection.SLIDE_NOT_GENERATED,
+            CourseRejection.SLIDE_NOT_REACHED, CourseRejection.SLIDE_NOT_GENERATED, CourseRejection.SLIDE_ALREADY_GENERATED,
             CourseRejection.COURSE_NOT_FOUND -> CoursePlayerUpdate.Open(player(courseId), reloaded = true)
             else -> CoursePlayerUpdate.SaveFailed
         }
@@ -261,8 +314,30 @@ internal class CoursePresentation(
         CoursePlayerUpdate.SaveFailed
     }
 
+    private class GenerationSlot(val prefetch: Boolean) {
+        val finished = CompletableDeferred<Unit>()
+    }
+
     private companion object {
-        // A recreated player must wait for the old host call to finish.
-        val activeGenerations = ConcurrentHashMap.newKeySet<String>()
+        val activeGenerations = ConcurrentHashMap<String, GenerationSlot>()
+
+        suspend fun acquireGeneration(courseId: String, slot: GenerationSlot): Boolean {
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                val active = activeGenerations.putIfAbsent(courseId, slot) ?: return true
+                if (!slot.prefetch && !active.prefetch) return false
+                active.finished.await()
+            }
+        }
+
+        fun releaseGeneration(courseId: String, slot: GenerationSlot) {
+            activeGenerations.remove(courseId, slot)
+            slot.finished.complete(Unit)
+        }
     }
 }
+
+internal val CoursePage.Slide.nextRequest: CourseNextRequest?
+    get() = if (number < course.progress.totalSlides && (prompt == null || feedback?.correct == true)) {
+        CourseNextRequest(course.id, course.revision, step.slide.id)
+    } else null

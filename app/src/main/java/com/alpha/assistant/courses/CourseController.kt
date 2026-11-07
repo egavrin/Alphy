@@ -38,7 +38,7 @@ internal class CourseController(
         val (course, step) = reached(courseId, expectedRevision, slideId)
         if (store.slide(courseId, slideId) != null) return reached(courseId, expectedRevision, slideId).first
         checkActive(session)
-        val input = generation.input(store, course, step, trustedSearchResults)
+        val input = generation.input(store, course, course.progress.completedSlides, trustedSearchResults)
         checkActive(session)
         val operation = store.beginGeneration(courseId, expectedRevision, slideId)
         val content = try {
@@ -55,6 +55,19 @@ internal class CourseController(
             throw failure
         }
         return store.commitGeneration(operation, content)
+    }
+
+    suspend fun prepareNext(request: CourseNextRequest, key: String, session: CloudSession): CourseSlideContent {
+        val course = store.courseAt(request.courseId, request.revision)
+        val target = course.nextTarget(request.visibleSlideId) ?: reject(CourseRejection.SLIDE_NOT_REACHED)
+        checkActive(session)
+        val input = generation.input(store, course, target.index, emptyList())
+        store.courseAt(request.courseId, request.revision)
+        val step = target.step.slide
+        return generation.generate(key, input, session, artifactId(course.id, step.id), step.kind).also {
+            checkActive(session)
+            store.courseAt(request.courseId, request.revision)
+        }
     }
 
     /** The player supplies an answer and a request ID. The saved definition supplies the grade. */
@@ -106,8 +119,7 @@ internal class CourseController(
     }
 
     private fun reached(courseId: String, expectedRevision: Long, slideId: String): Pair<CourseSnapshot, CourseStep> {
-        val course = store.course(courseId) ?: reject(CourseRejection.COURSE_NOT_FOUND)
-        if (course.revision != expectedRevision) reject(CourseRejection.STALE_REVISION)
+        val course = store.courseAt(courseId, expectedRevision)
         if (course.progress.currentSlideId != slideId) reject(CourseRejection.SLIDE_NOT_REACHED)
         return course to course.outline.steps()[course.progress.completedSlides]
     }

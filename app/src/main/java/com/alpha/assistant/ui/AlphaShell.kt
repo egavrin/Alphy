@@ -432,6 +432,7 @@ import kotlinx.coroutines.launch
                                     ShellDestination.Courses -> CourseLibraryScreen(
                                         model.courseStore, model.courseController, onExit = { navigate(null) },
                                         tutor = model.courseTutor, generation = model.courseGeneration,
+                                        nextGeneration = model.courseNextGeneration,
                                         refinement = model.courseRefinement, sourcedGeneration = sourcedCourseGeneration,
                                         entryRequest = model.courseEntry?.takeUnless { it.inChat }?.request,
                                         onEntryHandled = model::courseEntryHandled, composerModel = model,
@@ -460,6 +461,7 @@ import kotlinx.coroutines.launch
             onExit = { model.closeChatCourse(chatCourseEntry.request.requestId) },
             modifier = Modifier.size(0.dp),
             tutor = model.courseTutor, generation = model.courseGeneration,
+            nextGeneration = model.courseNextGeneration,
             refinement = model.courseRefinement, sourcedGeneration = sourcedCourseGeneration,
             entryRequest = chatCourseEntry.request, composerModel = model,
             onOutlineApplied = model::updateChatCourse)

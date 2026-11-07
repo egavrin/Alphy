@@ -154,7 +154,7 @@ class DesktopCourseWorkflowTest {
         assertEquals(1, fixture.provider.calls)
     }
 
-    @Test fun coursePlacementReordersWithOtherTilesAndRefreshesOnReturn() {
+    @Test fun coursePlacementReordersWithOtherTilesAndKeepsProgressWhenNextFails() {
         val course = seedCourse("Placed course")
         seedTool()
         val automation = seedAutomation("Placed routine")
@@ -178,15 +178,14 @@ class DesktopCourseWorkflowTest {
             reveal(robot.text(R.string.desktop_course_lesson_progress, 1, 2))
             click(R.string.desktop_open_tile, course.setup.topic)
             robot.waitFor(slideText(course, 1))
-            click(R.string.course_next)
-            robot.waitFor("Review the example")
-            assertEquals("second", saved(course.id)?.progress?.currentLessonId)
+            robot.waitFor(robot.text(R.string.course_next_failed))
+            assertEquals("first", saved(course.id)?.progress?.currentLessonId)
             backToDesktop()
-            reveal(robot.text(R.string.desktop_course_lesson_progress, 2, 2))
+            reveal(robot.text(R.string.desktop_course_lesson_progress, 1, 2))
             assertEquals(listOf("desktop-tool", course.id, automation.id), layoutIds())
 
             scenario.recreate()
-            reveal(robot.text(R.string.desktop_course_lesson_progress, 2, 2))
+            reveal(robot.text(R.string.desktop_course_lesson_progress, 1, 2))
             assertEquals(listOf("desktop-tool", course.id, automation.id), layoutIds())
             click(R.string.desktop_edit)
             click(R.string.desktop_remove_tile, course.setup.topic)
@@ -196,7 +195,7 @@ class DesktopCourseWorkflowTest {
             click(R.string.course_learning)
             robot.awaitDrawerClosed(scenario)
             reveal(course.setup.topic)
-            assertEquals(1, saved(course.id)?.progress?.completedSlides)
+            assertEquals(0, saved(course.id)?.progress?.completedSlides)
         }
         assertEquals(0, fixture.provider.calls)
     }

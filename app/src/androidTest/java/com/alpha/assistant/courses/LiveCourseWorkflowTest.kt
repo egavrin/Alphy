@@ -139,6 +139,14 @@ class LiveCourseWorkflowTest {
                 if (!baseline) check(steps.size == cardCount + 2 && exercises == listOf(kind)) {
                     "Unexpected outline slide count or exercise kinds: ${steps.map { it.slide.kind }}"
                 }
+                var nextTappedAt: Long? = null
+                val next = robot.text(R.string.course_next)
+                fun waitForNext() {
+                    robot.waitUntil(240_000) {
+                        check(robot.find(robot.text(R.string.course_next_failed)) == null) { "Next slide preparation failed." }
+                        robot.find(next)?.isEnabled == true
+                    }
+                }
                 for ((index, step) in steps.withIndex()) {
                     checkpoint = "slide-${index + 1}-${step.slide.kind}"
                     robot.waitUntil(240_000) {
@@ -149,11 +157,17 @@ class LiveCourseWorkflowTest {
                         "Slide generation failed: ${store.course(course.id)?.generationFailure}"
                     }
                     val exercise = CourseExercise.read(parseCourseSpec(slide.content), step.slide.kind)
-                    robot.waitUntil(240_000) {
-                        robot.find(robot.text(R.string.course_next)) != null ||
-                            robot.find(robot.text(R.string.course_check)) != null
+                    val position = robot.text(R.string.course_slide_position, index + 1, steps.size)
+                    robot.waitUntil(240_000) { robot.find(position)?.isVisibleToUser == true }
+                    val visibleAt = SystemClock.elapsedRealtime()
+                    if (index == 0) event(JSONObject().put("first_visible_ms", visibleAt - started))
+                    nextTappedAt?.let { event(JSONObject().put("visible_slide", index + 1).put("tap_to_visible_ms", visibleAt - it)) }
+                    fun recordReadiness(eligibleAt: Long) {
+                        waitForNext()
+                        event(JSONObject().put("from_slide", index + 1)
+                            .put("until_next_ready_ms", SystemClock.elapsedRealtime() - eligibleAt))
                     }
-                    if (index == 0) event(JSONObject().put("first_visible_ms", SystemClock.elapsedRealtime() - started))
+                    if (!baseline && index != 0 && exercise == null) recordReadiness(visibleAt)
                     screenshot("slide-${index + 1}")
                     if (!baseline && index < cards.length()) {
                         val expected = cards.getJSONArray(index)
@@ -169,12 +183,11 @@ class LiveCourseWorkflowTest {
                     }
                     event(JSONObject().put("course", course.id).put("slide", step.slide.id).put("kind", step.slide.kind.name))
                     if (index == 0 && !baseline) {
-                        val before = calls.get()
                         robot.back()
                         click(R.string.shell_course_continue)
-                        robot.waitFor(robot.text(R.string.course_next))
+                        robot.waitFor(position)
+                        if (exercise == null) recordReadiness(SystemClock.elapsedRealtime())
                         check(store.course(course.id)?.progress?.currentSlideId == step.slide.id)
-                        check(calls.get() == before) { "Reopening a saved slide called the provider" }
                         screenshot("resumed")
                     }
                     if (baseline) break
@@ -203,10 +216,13 @@ class LiveCourseWorkflowTest {
                             reveal(robot.text(R.string.course_check))
                             click(R.string.course_check)
                             reveal(robot.text(feedback))
+                            if (answer == "right") recordReadiness(SystemClock.elapsedRealtime())
                             screenshot(answer)
                         }
                     }
-                    click(R.string.course_next)
+                    val action = generateSequence(robot.waitFor(next)) { it.parent }.first { it.isClickable }
+                    nextTappedAt = SystemClock.elapsedRealtime()
+                    check(robot.diagnostics.click(next, action))
                 }
                 if (!baseline) {
                     robot.waitFor(robot.text(R.string.course_complete))

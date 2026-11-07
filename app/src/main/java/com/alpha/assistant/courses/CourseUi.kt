@@ -131,6 +131,7 @@ internal fun CourseLibraryScreen(
     sourcedGeneration: CourseSourcedSlideGenerationHost? = null,
     composerModel: ShellViewModel? = null,
     onOutlineApplied: (CourseSnapshot) -> Unit = {},
+    nextGeneration: CourseNextGenerationHost? = null,
 ) {
     val presentation = remember(store, controller) { CoursePresentation(store, controller) }
     val scope = rememberCoroutineScope()
@@ -152,6 +153,18 @@ internal fun CourseLibraryScreen(
     var handledEntryId by rememberSaveable { mutableStateOf<String?>(null) }
     val handleEntry by rememberUpdatedState(onEntryHandled)
     val slide = page as? CoursePage.Slide
+    val nextRequest = slide?.nextRequest
+    var nextRetry by remember(presentation, nextRequest, nextGeneration) { mutableIntStateOf(0) }
+    var nextPreparation by remember(presentation, nextRequest, nextGeneration, nextRetry) {
+        mutableStateOf<CourseNextPreparation?>(null)
+    }
+    LaunchedEffect(presentation, nextRequest, nextGeneration, nextRetry) {
+        if (nextRequest != null) {
+            val result = withContext(Dispatchers.IO) { presentation.prepareNext(nextRequest, nextGeneration) }
+            ensureActive()
+            nextPreparation = result
+        }
+    }
     val currentSlide by rememberUpdatedState(slide)
     val tutorSession = remember(slide?.course?.id, slide?.step?.slide?.id, tutor, composerModel) {
         CourseTutorSession(scope, composerModel) { draft, history ->
@@ -240,23 +253,31 @@ internal fun CourseLibraryScreen(
         }
     }
 
-    fun update(answerId: String? = null, generateOnReach: Boolean = false, work: suspend () -> CoursePlayerUpdate) {
+    fun update(answerId: String? = null, work: suspend () -> CoursePlayerUpdate) {
         if (busy) return
         busy = true
-        heldAnswerId = answerId
+        if (answerId != null) heldAnswerId = answerId
         notice = 0
         scope.launch {
             try {
-                when (val result = withContext(Dispatchers.IO) { work() }) {
+                val result = withContext(Dispatchers.IO) {
+                    ensureActive()
+                    work()
+                }
+                when (result) {
                     is CoursePlayerUpdate.Open -> {
-                        show(result.page, generateOnReach && !result.reloaded)
-                        if (result.reloaded || (result.page as? CoursePage.Slide)?.feedback?.correct != true) {
-                            heldAnswerId = null
+                        if (result.reloaded && result.page is CoursePage.Unavailable && page is CoursePage.Slide) {
+                            nextPreparation = CourseNextPreparation.Stale
+                        } else {
+                            show(result.page, generateOnReach = false)
+                            if (result.reloaded || (result.page as? CoursePage.Slide)?.feedback?.correct != true) {
+                                heldAnswerId = null
+                            }
+                            if (result.reloaded) notice = R.string.course_reloaded
                         }
-                        if (result.reloaded) notice = R.string.course_reloaded
                     }
                     CoursePlayerUpdate.SaveFailed -> {
-                        heldAnswerId = null
+                        if (answerId != null) heldAnswerId = null
                         notice = R.string.course_save_failed
                     }
                 }
@@ -388,7 +409,21 @@ internal fun CourseLibraryScreen(
                         val requestId = UUID.randomUUID().toString()
                         update(requestId) { presentation.submit(current, requestId, answer) }
                     },
-                    onNext = { update(generateOnReach = true) { presentation.next(current) } },
+                    nextPreparation = nextPreparation,
+                    onRetryNext = {
+                        when (nextPreparation) {
+                            CourseNextPreparation.Stale -> refresh++
+                            CourseNextPreparation.Failed -> {
+                                nextPreparation = null
+                                nextRetry++
+                            }
+                            else -> Unit
+                        }
+                    },
+                    onNext = {
+                        val prepared = nextPreparation as? CourseNextPreparation.Ready
+                        update { presentation.next(current, prepared) }
+                    },
                     scroll = lessonScroll,
                 )
             }
@@ -929,6 +964,8 @@ private fun CourseSlidePlayer(
     onText: (String) -> Unit,
     onOrder: (List<String>) -> Unit,
     onSubmit: (CourseAnswer) -> Unit,
+    nextPreparation: CourseNextPreparation?,
+    onRetryNext: () -> Unit,
     onNext: () -> Unit,
     scroll: ScrollState,
 ) {
@@ -977,12 +1014,30 @@ private fun CourseSlidePlayer(
                 }
             }
             if (slide.prompt == null || correct == true) {
-                Button(onClick = onNext, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.course_next))
+                when {
+                    slide.nextRequest == null || nextPreparation is CourseNextPreparation.Ready ->
+                        Button(onClick = onNext, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.course_next))
+                        }
+                    nextPreparation == null -> CourseNextNotice(R.string.course_next_preparing)
+                    nextPreparation == CourseNextPreparation.Unavailable -> CourseNextNotice(R.string.course_next_unavailable)
+                    else -> {
+                        val stale = nextPreparation == CourseNextPreparation.Stale
+                        CourseNextNotice(if (stale) R.string.course_next_changed
+                            else R.string.course_next_failed)
+                        TextButton(onClick = onRetryNext, enabled = !busy) {
+                            Text(stringResource(if (stale) R.string.course_reload else R.string.course_generation_retry))
+                        }
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun CourseNextNotice(label: Int) {
+    Text(stringResource(label), Modifier.semantics { liveRegion = LiveRegionMode.Polite })
 }
 
 @Composable

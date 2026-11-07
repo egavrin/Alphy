@@ -23,6 +23,7 @@ import com.alpha.assistant.courses.CourseOutlineService
 import com.alpha.assistant.courses.CourseRejection
 import com.alpha.assistant.courses.CourseSetup
 import com.alpha.assistant.courses.CourseSlideGenerationHost
+import com.alpha.assistant.courses.CourseNextGenerationHost
 import com.alpha.assistant.courses.CourseSlideGenerationRequest
 import com.alpha.assistant.courses.CourseSnapshot
 import com.alpha.assistant.courses.CourseStore
@@ -181,6 +182,9 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         courseRequest { key, session ->
             courseController.generate(request.courseId, request.expectedRevision, request.slideId, key, session)
         }
+    }
+    internal val courseNextGeneration = CourseNextGenerationHost { request ->
+        courseRequest { key, session -> courseController.prepareNext(request, key, session) }
     }
     internal suspend fun generateSourcedCourseSlide(request: CourseSlideGenerationRequest, query: String) {
         requireWebSearchQuery(query)

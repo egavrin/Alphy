@@ -1,5 +1,6 @@
 package com.alpha.assistant.courses
 
+import android.database.sqlite.SQLiteDatabase
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -22,6 +23,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -58,9 +60,142 @@ class CoursePlayerGenerationUiWorkflowTest {
             robot.waitFor(generatedText)
             assertEquals(1, runtime.requests.size)
             assertNull(store.slide(saved.id, "future"))
+        }
+    }
+
+    @Test fun preparesOneSuccessorAndOpensItLocallyOnNext() {
+        val release = CompletableDeferred<Unit>()
+        val runtime = Runtime { attempt -> if (attempt == 2) release.await() }
+        withPlayer(runtime, prefetch = true) { store, saved ->
+            openPlayer()
+            robot.waitFor(generatedText)
+            waitFor(R.string.course_next_preparing)
+            robot.waitUntil { runtime.preparations.size == 1 }
+            assertNull(robot.find(robot.text(R.string.course_next)))
+            assertSavedWork(store, saved)
+            assertNull(store.slide(saved.id, "future"))
+            robot.diagnostics.capture("next-preparing-on-current-slide")
+
+            release.complete(Unit)
+            waitFor(R.string.course_next)
+            robot.waitFor(generatedText)
+            assertNull(store.slide(saved.id, "future"))
+            SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+                db.execSQL("""CREATE TRIGGER fixture_reject_progress BEFORE UPDATE OF completed_slides ON courses
+                    BEGIN SELECT RAISE(ABORT, 'Fixture save failure'); END""")
+                click(R.string.course_next)
+                waitFor(R.string.course_save_failed)
+                robot.waitFor(generatedText)
+                assertSavedWork(store, saved)
+                assertNull(store.slide(saved.id, "future"))
+                db.execSQL("DROP TRIGGER fixture_reject_progress")
+            }
             click(R.string.course_next)
-            robot.waitUntil { runtime.requests.size == 2 && store.slide(saved.id, "future") != null }
-            assertEquals(listOf("explanation", "future"), runtime.requests.map { it.slideId })
+            robot.waitFor(generatedFuture)
+            assertEquals("future", store.course(saved.id)?.progress?.currentSlideId)
+            assertEquals(1, runtime.preparations.size)
+            assertTrue(store.slide(saved.id, "future") != null)
+            robot.diagnostics.capture("next-opened-locally")
+
+            robot.back()
+            waitFor(R.string.course_outline)
+            click(R.string.course_resume)
+            robot.waitFor(generatedFuture)
+            click(R.string.course_next)
+            waitFor(R.string.course_complete)
+            assertEquals(1, runtime.requests.size)
+            assertEquals(1, runtime.preparations.size)
+        }
+    }
+
+    @Test fun leavingWhilePreparingCancelsTheDraftAndResumeStartsAReplacement() {
+        val canceled = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val runtime = Runtime { attempt ->
+            if (attempt == 2) try {
+                release.await()
+            } finally {
+                canceled.complete(Unit)
+            }
+        }
+        withPlayer(runtime, prefetch = true) { store, saved ->
+            openPlayer()
+            waitFor(R.string.course_next_preparing)
+            robot.waitUntil { runtime.prompts.size == 2 }
+            robot.back()
+            waitFor(R.string.course_outline)
+            robot.waitUntil { canceled.isCompleted }
+            assertSavedWork(store, saved)
+            assertNull(store.slide(saved.id, "future"))
+
+            click(R.string.course_resume)
+            waitFor(R.string.course_next)
+            assertEquals(2, runtime.preparations.size)
+            assertEquals(1, runtime.requests.size)
+            click(R.string.course_next)
+            robot.waitFor(generatedFuture)
+        }
+    }
+
+    @Test fun correctFeedbackStaysVisibleDuringPreparationAndRetry() {
+        val release = CompletableDeferred<Unit>()
+        val runtime = Runtime { attempt ->
+            if (attempt == 1) {
+                release.await()
+                error("Private preparation failure")
+            }
+        }
+        withPlayer(runtime, prefetch = true, startAtPractice = true) { store, saved ->
+            robot.click("Fractions")
+            click(R.string.course_open)
+            val answer = robot.text(R.string.course_answer_label)
+            robot.edit(answer, "whole")
+            robot.reveal(robot.text(R.string.course_check))
+            click(R.string.course_check)
+            robot.reveal(robot.text(R.string.course_answer_wrong))
+            assertTrue(runtime.preparations.isEmpty())
+
+            robot.reveal(answer, forward = false)
+            robot.edit(answer, "half")
+            robot.reveal(robot.text(R.string.course_check))
+            click(R.string.course_check)
+            robot.reveal(robot.text(R.string.course_answer_correct))
+            waitFor(R.string.course_next_preparing)
+            val progress = checkNotNull(store.course(saved.id)).progress
+            assertEquals("explanation", progress.currentSlideId)
+            release.complete(Unit)
+            waitFor(R.string.course_next_failed)
+            robot.reveal(robot.text(R.string.course_answer_correct))
+            assertNull(store.slide(saved.id, "explanation"))
+
+            click(R.string.course_generation_retry)
+            click(R.string.course_next)
+            robot.waitFor(generatedText)
+            assertEquals(progress, store.course(saved.id)?.progress)
+            assertEquals(listOf(false, true), store.answers(saved.id).map { it.correct })
+            assertTrue(runtime.prompts.first().contains("\"correct\":false"))
+            assertTrue(runtime.prompts.first().contains("\"correct\":true"))
+            assertTrue(runtime.requests.isEmpty())
+        }
+    }
+
+    @Test fun outlineEditInvalidatesAReadyDraftBeforeNextCanSaveIt() {
+        val runtime = Runtime {}
+        withPlayer(runtime, prefetch = true) { store, saved ->
+            openPlayer()
+            waitFor(R.string.course_next)
+            val current = checkNotNull(store.course(saved.id))
+            val lesson = current.outline.lessons.single()
+            val replacement = CourseSlidePlan("replacement", CourseSlideKind.SUMMARY, "Review the revised topic")
+            val edited = store.editOutline(current.id, current.revision,
+                CourseOutline(listOf(lesson.copy(slides = lesson.slides.dropLast(1) + replacement))))
+            click(R.string.course_next)
+            waitFor(R.string.course_next_changed)
+            robot.waitFor(generatedText)
+            assertNull(store.slide(saved.id, "future"))
+            assertEquals(edited, store.course(saved.id))
+            assertEquals(1, runtime.preparations.size)
+            assertNull(robot.find(robot.text(R.string.course_generation_waiting)))
         }
     }
 
@@ -281,14 +416,16 @@ class CoursePlayerGenerationUiWorkflowTest {
         runtime: Runtime,
         provideHost: Boolean = true,
         search: (suspend (String) -> List<Source>)? = null,
-        run: (CourseStore, CourseSnapshot) -> Unit,
+        prefetch: Boolean = false,
+        startAtPractice: Boolean = false,
+        run: File.(CourseStore, CourseSnapshot) -> Unit,
     ) {
         val fixture = ShellFixture("course-player-generation")
         val database = "${fixture.name}-course-fixture.db"
         try {
             fixture.install(saveKey = false)
             CourseStore(fixture.context, database).use { store ->
-                val saved = seed(store)
+                val saved = seed(store, startAtPractice)
                 val controller = CourseController(store, runtime.generation)
                 val host = CourseSlideGenerationHost { request ->
                     runtime.requests += request
@@ -309,11 +446,15 @@ class CoursePlayerGenerationUiWorkflowTest {
                                 CourseLibraryScreen(
                                     store, controller, onExit = {}, generation = host.takeIf { provideHost },
                                     sourcedGeneration = sourcedHost,
+                                    nextGeneration = if (prefetch) CourseNextGenerationHost { request ->
+                                        runtime.preparations += request
+                                        controller.prepareNext(request, "fixture", CloudSession())
+                                    } else null,
                                 )
                             }
                         }
                     }
-                    run(store, saved)
+                    run(fixture.context.getDatabasePath(database), store, saved)
                     assertEquals(0, fixture.provider.calls)
                 }
             }
@@ -323,7 +464,7 @@ class CoursePlayerGenerationUiWorkflowTest {
         }
     }
 
-    private fun seed(store: CourseStore): CourseSnapshot {
+    private fun seed(store: CourseStore, startAtPractice: Boolean): CourseSnapshot {
         val course = store.create(CourseSetup("Fractions", "Beginner", "Compare fractions"),
             CourseOutline(listOf(CourseLessonPlan("lesson", "Compare fractions", listOf(
                 CourseSlidePlan("practice", CourseSlideKind.FILL_IN, "Name the part"),
@@ -335,6 +476,7 @@ class CoursePlayerGenerationUiWorkflowTest {
         val spec = fixtureSpec("Saved practice", practice)
         var saved = store.commitGeneration(store.beginGeneration(course.id, course.revision, "practice"),
             CourseSlideContent(spec.json, spec.ui.toString(), spec.initialState))
+        if (startAtPractice) return saved
         saved = store.commitAnswer(course.id, CourseAnswerSubmission("wrong", saved.revision, "practice",
             CourseAnswer.FillIn("whole"), false, spec.initialState))
         return store.commitAnswer(course.id, CourseAnswerSubmission("correct", saved.revision, "practice",
@@ -343,12 +485,17 @@ class CoursePlayerGenerationUiWorkflowTest {
 
     private class Runtime(beforeResult: suspend (Int) -> Unit) {
         val requests = CopyOnWriteArrayList<CourseSlideGenerationRequest>()
+        val preparations = CopyOnWriteArrayList<CourseNextRequest>()
+        val prompts = CopyOnWriteArrayList<String>()
         val sourceRequests = CopyOnWriteArrayList<Pair<CourseSlideGenerationRequest, String>>()
         private val calls = AtomicInteger()
         val generation = CourseGeneration(
             generateTool = { _, input, _, _, policy, _ ->
+                prompts += input.prompt
                 beforeResult(calls.incrementAndGet())
-                val spec = fixtureSpec(generatedText)
+                val target = JSONObject(input.prompt.substringAfter("\nCourse and reached slide:\n")
+                    .substringBefore("\nEarlier answers in order, including errors:\n"))
+                val spec = fixtureSpec(if (target.getInt("reachedSlideNumber") == 3) generatedFuture else generatedText)
                 policy.validateDefinition(spec.json)
                 policy.validateResult(JSONObject().put("ui", spec.ui).put("state", JSONObject(spec.initialState)).toString())
                 LessonToolPreview(ToolPreview(spec, spec.initialState, spec.ui.toString()), input.sources.keys.toList())
@@ -360,6 +507,7 @@ class CoursePlayerGenerationUiWorkflowTest {
     companion object {
         private const val goal = "Explain the fraction"
         private const val generatedText = "Generated course explanation"
+        private const val generatedFuture = "Generated course summary"
         private const val sourceQuery = "Examples of comparing fractions"
 
         private fun fixtureSpec(text: String, exercise: JSONObject? = null): ToolSpec {

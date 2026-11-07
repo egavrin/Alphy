@@ -48,6 +48,8 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
 
     fun course(id: String): CourseSnapshot? = read { readCourse(id) }
 
+    internal fun courseAt(id: String, revision: Long): CourseSnapshot = read { requireRevision(id, revision) }
+
     fun courses(): List<CourseSnapshot> = read {
         rawQuery("SELECT $COURSE_COLUMNS FROM courses ORDER BY rowid DESC", null).use { rows ->
             buildList { while (rows.moveToNext()) add(rows.courseSnapshot()) }
@@ -104,10 +106,34 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
 
     fun commitGeneration(operation: CourseGenerationOperation, content: CourseSlideContent): CourseSnapshot = write {
         val course = requireGeneration(operation)
+        insertSlide(course, operation.slideId, content)
+        updateCourse(course, ContentValues().apply { putNull("generation_id") })
+    }
+
+    internal fun adoptNext(request: CourseNextRequest, content: CourseSlideContent?): CourseSnapshot = write {
+        val course = requireRevision(request.courseId, request.revision)
+        val target = course.nextTarget(request.visibleSlideId) ?: reject(CourseRejection.SLIDE_NOT_REACHED)
+        val slideId = target.step.slide.id
+        if (!slideExists(course.id, request.visibleSlideId)) reject(CourseRejection.SLIDE_NOT_GENERATED)
+        if (content == null) {
+            if (!slideExists(course.id, slideId)) reject(CourseRejection.SLIDE_NOT_GENERATED)
+            if (target.index == course.progress.completedSlides) return@write course
+        } else {
+            if (slideExists(course.id, slideId)) reject(CourseRejection.SLIDE_ALREADY_GENERATED)
+            insertSlide(course, slideId, content)
+        }
+        updateCourse(course, ContentValues().apply {
+            put("completed_slides", target.index)
+            putNull("generation_id")
+            putNull("generation_failure")
+        })
+    }
+
+    private fun SQLiteDatabase.insertSlide(course: CourseSnapshot, slideId: String, content: CourseSlideContent) {
         val sources = content.encodeSources()
         insertOrThrow("slides", null, ContentValues().apply {
             put("course_id", course.id)
-            put("slide_id", operation.slideId)
+            put("slide_id", slideId)
             put("outline_revision", course.outlineRevision)
             put("definition", content.definitionJson)
             put("ui", content.uiJson)
@@ -115,7 +141,6 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
             put("sources", sources)
             put("adaptation_note", content.adaptationNote)
         })
-        updateCourse(course, ContentValues().apply { putNull("generation_id") })
     }
 
     fun failGeneration(operation: CourseGenerationOperation, reason: CourseGenerationFailure): CourseSnapshot = write {
