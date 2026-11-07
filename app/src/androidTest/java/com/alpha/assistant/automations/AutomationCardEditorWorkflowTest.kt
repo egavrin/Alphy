@@ -74,6 +74,10 @@ class AutomationCardEditorWorkflowTest {
             info.flags=previousFlags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
             automation.serviceInfo=info
             robot.click("16")
+            robot.waitUntil {
+                robot.diagnostics.freshRoot()?.findAccessibilityNodeInfosByText("16")
+                    ?.any { it.isVisibleToUser && it.isEditable && it.text?.toString() == "16" } == true
+            }
             var confirm: AccessibilityNodeInfo? = null
             robot.diagnostics.target("android:id/button1")
             robot.waitUntil {

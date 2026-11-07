@@ -207,7 +207,7 @@ class CapabilityResultsWorkflowTest {
             }
         }
         val result=ToolGenerationService(capture,SandboxClient(context)).generate("fixture","Change label",base,emptyList(),CloudSession(),tool.id)
-        assertFalse(requests.flatMap { it.turns }.any { marker in it.text })
+        assertFalse(requests.any { marker in it.systemInstructions || it.turns.any { turn -> marker in turn.text } })
         assertEquals(marker,JSONObject(result.state).getString("secret"))
     } }
     // Review regressions: permission changes in the final guard, aggregate IPC limits, resource capacity after expiry,

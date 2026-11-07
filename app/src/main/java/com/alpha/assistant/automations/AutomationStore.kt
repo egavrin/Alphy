@@ -45,7 +45,11 @@ class AutomationStore(private val context: Context, name: String = ToolLibrarySt
         }
         return checkNotNull(rule(key))
     }
-    fun active(id: String, revision: Int) = rule(id)?.let { it.enabled && it.revision == revision && it.approvedRevision == revision && it.attention.isEmpty() } == true
+    fun active(id: String, revision: Int) = active(id, revision, scheduledAt = null)
+    private fun active(id: String, revision: Int, scheduledAt: Long?) = rule(id)?.let {
+        it.enabled && it.revision == revision && it.approvedRevision == revision && it.attention.isEmpty() &&
+            (scheduledAt == null || it.nextAt == scheduledAt)
+    } == true
     fun approve(id: String, revision: Int) {
         check(writableDatabase.update("rules",ContentValues().apply { put("approved",revision); put("enabled",1); put("attention","") },"id=? AND revision=?",arrayOf(id,revision.toString())) == 1) { "Сценарий изменился" }
     }
@@ -130,7 +134,7 @@ class AutomationStore(private val context: Context, name: String = ToolLibrarySt
         if(event.token.startsWith(AutomationOneTime.TOKEN_PREFIX)) return null
         var result: AutomationRun? = null
         transaction {
-            if(!dry && !active(rule.id,rule.revision)) return@transaction
+            if(!dry && !active(rule.id, rule.revision, event.scheduledAt)) return@transaction
             result=insertClaim(rule,event.token,now)
         }
         return result

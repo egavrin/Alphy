@@ -573,7 +573,7 @@ object AutomationRuntime {
             val token=store.approvalToken(rule.id)
             var at=rule.nextAt
             if(at!=null && at<now-AutomationSchedule.MAX_LATENESS) {
-                val missed=AutomationEvent("schedule",rule.definition.occurrenceToken(at))
+                val missed=AutomationEvent("schedule",rule.definition.occurrenceToken(at), scheduledAt = at)
                 store.begin(rule,missed,now,false)?.let { store.finish(it,"missed","Время прошло, пока расписание было недоступно. Просроченное действие не воспроизводилось.") }
                 at=null
             }

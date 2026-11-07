@@ -1,8 +1,8 @@
 package com.alpha.assistant.surfaces
 
+import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.ContextWrapper
-import android.appwidget.AppWidgetManager
 import android.database.DatabaseErrorHandler
 import android.database.sqlite.SQLiteDatabase
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -11,6 +11,7 @@ import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,11 +36,17 @@ class WidgetRestoreStateWorkflowTest {
     }
 
     @Test fun disjointRestorePreservesBindings() = withFixture { context ->
+        val settings = ToolWidgets.settings(context)
+        settings.edit().putBoolean("201-deleted", true).apply()
         restore(context, intArrayOf(101, 102), intArrayOf(201, 202))
         assertEquals(first, binding(context, 201))
         assertEquals(second, binding(context, 202))
-        assertNull(ToolWidgets.toolId(context, 101))
-        assertNull(ToolWidgets.toolId(context, 102))
+        assertFalse(ToolWidgets.deleted(context, 201))
+        for (id in listOf(101, 102)) {
+            for (key in listOf("tool", "format", "details", "deleted")) {
+                assertFalse(settings.contains("$id-$key"))
+            }
+        }
     }
 
     @Test fun restoreCyclePreservesBothOriginalBindings() = withFixture { context ->
@@ -48,12 +55,17 @@ class WidgetRestoreStateWorkflowTest {
         assertEquals(first, binding(context, 102))
     }
 
-    @Test fun invalidMappingLeavesItsSourceAndAllowsOtherMoves() = withFixture { context ->
-        restore(context, intArrayOf(101, 102), intArrayOf(AppWidgetManager.INVALID_APPWIDGET_ID, 202))
+    @Test fun rejectedMappingsLeaveTheirSourcesAndAllowOtherMoves() = withFixture { context ->
+        val invalid = AppWidgetManager.INVALID_APPWIDGET_ID
+        ToolWidgets.settings(context).edit().putString("103-tool", "missing").apply()
+        restore(context, intArrayOf(101, 103, 104, 102), intArrayOf(invalid, 203, 204, 202))
         assertEquals(first, binding(context, 101))
+        assertEquals("missing", ToolWidgets.toolId(context, 103))
+        assertNull(ToolWidgets.toolId(context, invalid))
+        assertNull(ToolWidgets.toolId(context, 203))
+        assertNull(ToolWidgets.toolId(context, 204))
         assertEquals(second, binding(context, 202))
         assertNull(ToolWidgets.toolId(context, 102))
-        assertNull(ToolWidgets.toolId(context, AppWidgetManager.INVALID_APPWIDGET_ID))
     }
 
     private val first = "first" to WidgetPreferences("compact", true)

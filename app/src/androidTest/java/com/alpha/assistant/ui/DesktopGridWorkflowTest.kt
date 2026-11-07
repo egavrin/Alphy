@@ -455,7 +455,7 @@ class DesktopGridWorkflowTest {
     }
 
     private fun assertReviewRequired(rule: AutomationRule) {
-        reveal(robot.text(R.string.automation_all))
+        robot.waitFor(robot.text(R.string.automation_all))
         reveal(rule.definition.name)
         reveal("Проверить и включить")
         val current = checkNotNull(automation(rule.id))

@@ -254,8 +254,8 @@ class DesktopCourseWorkflowTest {
 
     private fun click(id: Int, vararg args: Any) {
         val label = robot.text(id, *args)
-        reveal(label)
-        robot.waitUntil { robot.find(label)?.isEnabled == true }
+        if (id in setOf(R.string.desktop_place_course, R.string.desktop_place_automation)) robot.waitFor(label)
+        else reveal(label)
         robot.click(label)
     }
 

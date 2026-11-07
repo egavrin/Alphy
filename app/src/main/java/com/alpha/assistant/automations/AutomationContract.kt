@@ -144,7 +144,7 @@ data class AutomationDefinition(val json: String, val name: String, val trigger:
         }
     }
 }
-data class AutomationEvent(val type: String, val token: String, val source: String = "")
+data class AutomationEvent(val type: String, val token: String, val source: String = "", val scheduledAt: Long? = null)
 data class AutomationRule(val id: String, val revision: Int, val approvedRevision: Int, val enabled: Boolean,
     val definition: AutomationDefinition, val nextAt: Long?, val attention: String)
 data class AutomationRun(val id: String, val ruleId: String, val revision: Int, val token: String,
