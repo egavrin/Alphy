@@ -11,7 +11,7 @@ import java.util.UUID
 
 /** Separate local storage never opens conversations or credentials. */
 class AutomationStore(private val context: Context, name: String = ToolLibraryStorage.current(context).automation) :
-    SQLiteOpenHelper(context,name,null,2,ToolLibraryStorage.preserveOnCorruption) {
+    SQLiteOpenHelper(context,name,null,3,ToolLibraryStorage.preserveOnCorruption) {
     override fun getReadableDatabase(): SQLiteDatabase {
         ToolLibraryStorage.requireRelated(context,databaseName,"automations")
         return super.getReadableDatabase()
@@ -25,8 +25,63 @@ class AutomationStore(private val context: Context, name: String = ToolLibrarySt
         db.execSQL("CREATE TABLE runs(id TEXT PRIMARY KEY, rule_id TEXT NOT NULL, revision INTEGER NOT NULL, token TEXT NOT NULL, time INTEGER NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, details TEXT NOT NULL, UNIQUE(rule_id,token))")
         db.execSQL("CREATE TABLE effects(run_id TEXT NOT NULL, action_id TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(run_id,action_id))")
         db.execSQL("CREATE TABLE trigger_state(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        createAgentRuns(db)
     }
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) { error("Неизвестная схема автоматизаций. Данные сохранены.") }
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        check(oldVersion == 2 && newVersion == 3) { "Неизвестная схема автоматизаций. Данные сохранены." }
+        createAgentRuns(db)
+    }
+
+    private fun createAgentRuns(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE agent_runs(slot INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL UNIQUE, target INTEGER NOT NULL, zone TEXT NOT NULL, prepare_at INTEGER NOT NULL, approval TEXT NOT NULL, credential TEXT NOT NULL, process TEXT, result TEXT)")
+    }
+
+    internal fun agentRun(id: String): AgentOccurrence? = agentRuns("runs.id=?", arrayOf(id)).singleOrNull()
+
+    internal fun unfinishedAgentRuns(): List<AgentOccurrence> =
+        agentRuns("runs.status IN ('pending','preparing','ready','notifying')", emptyArray())
+
+    private fun agentRuns(where: String, args: Array<String>): List<AgentOccurrence> = readableDatabase.rawQuery(
+        "SELECT runs.*, a.slot, a.target, a.zone, a.prepare_at, a.approval, a.credential, a.process, a.result " +
+            "FROM agent_runs a JOIN runs ON runs.id=a.run_id WHERE $where", args,
+    ).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) add(AgentOccurrence(cursor.runRecord(), cursor.getInt(8), cursor.getLong(9),
+                java.time.ZoneId.of(cursor.getString(10)), cursor.getLong(11), cursor.getString(12), cursor.getString(13),
+                cursor.getString(14), cursor.getString(15)))
+        }
+    }
+
+    internal fun addAgentRun(run: AutomationRun, target: Long, zone: java.time.ZoneId, prepareAt: Long, approval: String, credential: String): AgentOccurrence {
+        writableDatabase.insertOrThrow("agent_runs", null, ContentValues().apply {
+            put("run_id", run.id); put("target", target); put("zone", zone.id); put("prepare_at", prepareAt)
+            put("approval", approval); put("credential", credential)
+        })
+        finish(run, "pending", "Задача ожидает подготовки.")
+        return checkNotNull(agentRun(run.id))
+    }
+
+    /** Release only a reservation that never started a provider call or produced a result. */
+    internal fun supersedeAgentReservation(run: AgentOccurrence) {
+        check(run.process == null && run.result == null)
+        writableDatabase.update("runs", ContentValues().apply {
+            put("token", "superseded:${run.run.id}")
+            put("status", "cancelled")
+            put("message", "Будущий запуск заменён текущим расписанием.")
+        }, "id=?", arrayOf(run.run.id))
+    }
+
+    internal fun markAgentPreparing(run: AgentOccurrence, process: String) {
+        writableDatabase.update("agent_runs", ContentValues().apply { put("process", process) }, "run_id=?", arrayOf(run.run.id))
+        finish(run.run, "preparing", "Alphy готовит результат.")
+    }
+
+    internal fun markAgentReady(run: AgentOccurrence, result: JSONObject) {
+        writableDatabase.update("agent_runs", ContentValues().apply { put("result", result.toString()); putNull("process") },
+            "run_id=?", arrayOf(run.run.id))
+        finish(run.run, "ready", "Результат готов и ожидает отправки.")
+    }
+
     fun rules(): List<AutomationRule> = readableDatabase.rawQuery("SELECT * FROM rules ORDER BY rowid DESC",null).use { c ->
         buildList { while(c.moveToNext()) add(AutomationRule(c.getString(0),c.getInt(1),c.getInt(2),c.getInt(3) == 1,AutomationDefinition.parse(JSONObject(c.getString(4))),if(c.isNull(5)) null else c.getLong(5),c.getString(6))) }
     }
@@ -104,6 +159,7 @@ class AutomationStore(private val context: Context, name: String = ToolLibrarySt
         }
         writableDatabase.delete("trigger_state","key=? OR key GLOB ? OR key GLOB ?",
             arrayOf("approval-archive:$id","geo:$id:*","geo-clock:$id:*"))
+        writableDatabase.delete("trigger_state", "key=?", arrayOf("agent-consent:$id"))
     }
 
     fun next(id: String, revision: Int, at: Long?) {
@@ -189,8 +245,11 @@ class AutomationStore(private val context: Context, name: String = ToolLibrarySt
         return changed
     }
     fun prune(now: Long = System.currentTimeMillis()) = transaction {
-        writableDatabase.delete("effects","run_id IN (SELECT id FROM runs WHERE time<?)",arrayOf((now-30L*86400000).toString()))
-        writableDatabase.delete("runs","time<?",arrayOf((now-30L*86400000).toString()))
+        val expired = "time<? AND status NOT IN ('pending','preparing','ready','notifying')"
+        val cutoff = arrayOf((now-30L*86400000).toString())
+        writableDatabase.delete("agent_runs", "run_id IN (SELECT id FROM runs WHERE $expired)", cutoff)
+        writableDatabase.delete("effects", "run_id IN (SELECT id FROM runs WHERE $expired)", cutoff)
+        writableDatabase.delete("runs", expired, cutoff)
     }
     fun transaction(block: () -> Unit) {
         writableDatabase.beginTransaction()

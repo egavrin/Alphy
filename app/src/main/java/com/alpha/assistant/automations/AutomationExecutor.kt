@@ -5,17 +5,19 @@ import com.alpha.assistant.capabilities.CapabilityResult
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 
-/** No model, network client, or credentials are reachable from this executor. */
+/** Native actions run here. Agent actions enqueue through the host. */
 class AutomationExecutor(private val store: AutomationStore, private val charging: () -> Boolean?,
     private val accessFailure: (AutomationRule,CapabilityRequest) -> String?,
     private val preview: suspend (AutomationRule,CapabilityRequest,AutomationStep) -> CapabilityResult = { _,action,_ ->
         CapabilityResult("succeeded","Предполагаемое действие без выполнения.",org.json.JSONObject().put("preview",AutomationDataflow.describe(action)))
     },
+    private val enqueueAgent: ((AutomationRule, AutomationEvent, Long) -> AutomationRun?)? = null,
     private val execute: suspend (AutomationRule,CapabilityRequest,AutomationStep) -> CapabilityResult) {
     suspend fun run(id: String, revision: Int, event: AutomationEvent, dry: Boolean = false, now: Long = System.currentTimeMillis()): AutomationRun? {
         if(event.token.startsWith(AutomationOneTime.TOKEN_PREFIX)) return null
         val rule = store.rule(id) ?: return null
         if(rule.revision != revision || !rule.definition.matches(event)) return null
+        if (!dry && rule.definition.agent != null) return enqueueAgent?.invoke(rule, event, now)
         val claim = store.begin(rule,event,now,dry) ?: return store.occurrence(id,event.token)
         store.prune(now)
         val condition = rule.definition.conditionFailure(charging(),now)

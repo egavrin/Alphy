@@ -87,9 +87,9 @@ internal val automationEditTargetSaver = listSaver<AutomationEditTarget?, Any>(
 private val automationJsonSaver = Saver<JSONObject, String>(save = { it.toString() }, restore = ::JSONObject)
 
 @Composable internal fun AutomationEditor(
-    rule: AutomationEditTarget?, tools: ToolController, proposal: AutomationChatProposal?,
+    rule: AutomationEditTarget?, tools: ToolController, proposal: AutomationDefinition?,
     initialSection: AutomationEditorSection, appLabels: Map<String,String>, busy: Boolean,
-    storeFailure: String?, back: Boolean, cancel: () -> Unit, save: (JSONObject) -> Unit
+    storeFailure: String?, back: Boolean, cancel: () -> Unit, testAgent: (AutomationDefinition) -> Unit, save: (JSONObject) -> Unit
 ) {
     val old=rule?.definition
     val defaultName=stringResource(R.string.automation_editor_default_name)
@@ -100,25 +100,24 @@ private val automationJsonSaver = Saver<JSONObject, String>(save = { it.toString
     var trigger by rememberSaveable(stateSaver = automationJsonSaver) {
         mutableStateOf(old?.trigger ?: proposal?.trigger ?: newTrigger("manual"))
     }
-    var conditions by rememberSaveable(stateSaver = automationJsonSaver) { mutableStateOf(old?.conditions ?: JSONObject()) }
+    var conditions by rememberSaveable(stateSaver = automationJsonSaver) { mutableStateOf(old?.conditions ?: proposal?.conditions ?: JSONObject()) }
     var actions by rememberSaveable(stateSaver = automationActionDraftsSaver) {
-        mutableStateOf(old?.actions?.map { AutomationActionDraft(it) }
-            ?: if(proposal!=null) newDayActions(notice) else listOf(newAutomationAction("notification.post",notice)))
+        mutableStateOf((old ?: proposal)?.actions?.map { AutomationActionDraft(it) }
+            ?: listOf(newAutomationAction("notification.post",notice)))
     }
     var section by rememberSaveable { mutableStateOf(initialSection) }
     var failure by remember { mutableStateOf<String?>(null) }
 
-    fun saveDraft() {
+    fun validatedDraft(use: (AutomationDefinition) -> Unit) {
         runCatching {
-            val input=JSONObject().put("name",name).put("trigger",triggerForSave(trigger,old?.trigger))
-                .put("conditions",conditions).put("actions",JSONArray(actions.map { it.output(tools.tools,staleTarget) }))
+            val input = JSONObject().put("name", name).put("trigger", triggerForSave(trigger, (old ?: proposal)?.trigger))
+                .put("conditions", conditions).put("actions", JSONArray(actions.map { it.output(tools.tools, staleTarget) }))
             AutomationDefinition.parse(input)
-            input
         }.onSuccess {
-            failure=null
-            save(it)
+            failure = null
+            use(it)
         }.onFailure {
-            failure=it.message?.takeIf {message -> message.any { c -> c in 'А'..'я' || c=='ё' }} ?: invalid
+            failure = it.message?.takeIf { message -> message.any { c -> c in 'А'..'я' || c == 'ё' } } ?: invalid
         }
     }
 
@@ -132,8 +131,7 @@ private val automationJsonSaver = Saver<JSONObject, String>(save = { it.toString
                 cancel.takeIf { back && !busy },
             )
             if (proposal != null) {
-                Text(stringResource(R.string.automation_editor_prompt, proposal.request))
-                Text(stringResource(R.string.automation_editor_local_proposal), style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.automation_agent_proposal), style = MaterialTheme.typography.bodySmall)
             }
             AutomationField(stringResource(R.string.automation_editor_name), name) { name = it }
             SecondaryTabRow(selectedTabIndex = section.ordinal, containerColor = Color.Transparent) {
@@ -165,7 +163,12 @@ private val automationJsonSaver = Saver<JSONObject, String>(save = { it.toString
                 TextButton(enabled = !busy, onClick = cancel, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text(stringResource(R.string.cancel))
                 }
-                Button(enabled = !busy, onClick = ::saveDraft, modifier = Modifier.heightIn(min = 48.dp),
+                if (actions.singleOrNull()?.capability == AGENT_ACTION) {
+                    TextButton(enabled = !busy, onClick = { validatedDraft(testAgent) }) {
+                        Text(stringResource(R.string.automation_test_run))
+                    }
+                }
+                Button(enabled = !busy, onClick = { validatedDraft { save(JSONObject(it.json)) } }, modifier = Modifier.heightIn(min = 48.dp),
                     shape = MaterialTheme.shapes.small) {
                     Text(stringResource(R.string.automation_editor_save))
                 }

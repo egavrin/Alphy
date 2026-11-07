@@ -11,9 +11,10 @@ data class AutomationDefinition(val json: String, val name: String, val trigger:
     val conditions: JSONObject, val actions: List<CapabilityRequest>) {
     val type get() = trigger.getString("type")
     val scheduled get() = type in setOf("schedule","interval")
+    internal val agent get() = actions.singleOrNull()?.takeIf { it.capability == AGENT_ACTION }?.let { AgentAutomation.read(it.args) }
     fun occurrenceToken(at: Long): String {
         if(type == "interval") return "interval:$at"
-        val zone=if(trigger.optString("zone","device") == "device") ZoneId.systemDefault() else ZoneId.of(trigger.getString("zone"))
+        val zone=zone()
         val date=Instant.ofEpochMilli(at).atZone(zone).toLocalDate()
         return "schedule:${date}T${LocalTime.parse(trigger.getString("time"))}"
     }
@@ -24,7 +25,7 @@ data class AutomationDefinition(val json: String, val name: String, val trigger:
             return if(now < anchor) anchor else anchor+((now-anchor)/duration+1)*duration
         }
         if(type != "schedule") return null
-        val zone = if(trigger.optString("zone","device") == "device") ZoneId.systemDefault() else ZoneId.of(trigger.getString("zone"))
+        val zone = zone()
         val time = LocalTime.parse(trigger.getString("time"))
         if(trigger.getString("repeat") == "once") return LocalDate.parse(trigger.getString("date")).atTime(time).atZone(zone).toInstant().toEpochMilli().takeIf { it > now }
         val local = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
@@ -110,13 +111,15 @@ data class AutomationDefinition(val json: String, val name: String, val trigger:
             val a = j.getJSONArray("actions"); require(a.length() in 1..3)
             val actions = (0 until a.length()).map { i ->
                 val raw = a.getJSONObject(i); val capability = raw.getString("capability")
-                require(capability in actionIds)
-                if(capability !in setOf("tool.state.set","tool.records.calendar","calendar.read.rolling")) CapabilityCatalog.request(raw)
+                require(capability in actionIds || capability == AGENT_ACTION)
+                if(capability !in setOf("tool.state.set","tool.records.calendar","calendar.read.rolling",AGENT_ACTION)) CapabilityCatalog.request(raw)
                 else {
                     require(raw.keys().asSequence().toSet() == setOf("id","capability","args"))
                     require(raw.getString("id").matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")))
                     val args = raw.getJSONObject("args")
-                    if(capability == "calendar.read.rolling") {
+                    if(capability == AGENT_ACTION) {
+                        AgentAutomation.read(args)
+                    } else if(capability == "calendar.read.rolling") {
                         require(args.keys().asSequence().toSet() == setOf("calendarId","days","zone"))
                         require(args.get("calendarId") is Number && args.getLong("calendarId") in 0..4102444800000L && args.getDouble("calendarId") == args.getLong("calendarId").toDouble())
                         require(args.get("days") is Int && args.getInt("days") in 1..30)
@@ -139,7 +142,8 @@ data class AutomationDefinition(val json: String, val name: String, val trigger:
                 require(actions.take(index).any { it.id == action.args.getString("source") && it.capability in setOf("calendar.read","calendar.read.rolling") }) { "Записи должны получать результат предыдущего чтения календаря" }
             } }
             if(actions.any { it.capability in setOf("app.open","link.open","maps.open","calendar.create") }) require(actions.size == 1) { "Открытие приложения должно быть отдельным сценарием" }
-            if(type == "schedule" && t.getBoolean("exact")) require(actions.all { it.capability == "notification.post" }) { "Точное время доступно только для уведомлений Alphy. Остальные действия выполняются приблизительно." }
+            if(actions.any { it.capability == AGENT_ACTION }) require(actions.size == 1) { "Задача Alphy выполняется отдельным сценарием." }
+            if(type == "schedule" && t.getBoolean("exact")) require(actions.all { it.capability in setOf("notification.post", AGENT_ACTION) }) { "Точное время доступно только для уведомлений Alphy. Остальные действия выполняются приблизительно." }
             return AutomationDefinition(j.toString(),name,t,c,actions)
         }
     }

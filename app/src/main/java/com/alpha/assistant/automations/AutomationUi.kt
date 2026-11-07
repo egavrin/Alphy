@@ -11,7 +11,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +43,7 @@ internal fun date(at: Long?) = at?.let { DateFormat.getDateTimeInstance(DateForm
 private val testTimeFormat=DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss.SSS XXX")
 private fun testTime(at: Long)=testTimeFormat.withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(at))
 internal fun status(status: String) = when(status) {
+    "pending" -> "Ожидает подготовки"; "preparing" -> "Подготовка"; "ready" -> "Готово к отправке"; "notifying" -> "Отправка"
     "succeeded" -> "Выполнено"; "unknownOutcome" -> "Результат неизвестен"; "awaitingUser" -> "Нужно открыть Alphy и выполнить действие вручную"
     "cancelled" -> "Отменено"; "skipped" -> "Условия не выполнены"; "dryRun" -> "Проверка без действий"; "missed" -> "Пропущено"
     "launched" -> "Открыт интерфейс приложения"; "denied","revoked" -> "Нужен доступ"; "unavailable" -> "Недоступно"; "failed" -> "Ошибка"; else -> status
@@ -62,6 +62,7 @@ internal fun triggerText(d: AutomationDefinition, appLabels: Map<String,String> 
 private fun actionText(d: AutomationDefinition, tools: ToolController): String = d.actions.joinToString("\n") { action ->
     val a = action.args
     when(action.capability) {
+        AGENT_ACTION -> a.getString("instruction")
         "notification.post" -> "Уведомление Alphy: «${a.getString("title") }» — ${a.getString("text") }"
         "calendar.read" -> "Календарь ${a.getLong("calendarId")}: ${date(a.getLong("from"))} — ${date(a.getLong("to"))}. До 50 событий, только на устройстве."
         "calendar.read.rolling" -> "Каждый запуск: календарь ${a.getLong("calendarId")}, от начала текущего дня на ${a.getInt("days")} дн., ${if(a.getString("zone") == "device") "часовой пояс устройства (${ZoneId.systemDefault().id})" else a.getString("zone")}. До 50 событий, только на устройстве."
@@ -135,22 +136,17 @@ private fun conditionText(d: AutomationDefinition): String = buildList {
     }
 }
 
-private val automationChatProposalSaver = listSaver<AutomationChatProposal?, String>(
-    save = { proposal -> proposal?.let { listOf(it.name, it.trigger.toString(), it.request) }.orEmpty() },
-    restore = { AutomationChatProposal(it[0], JSONObject(it[1]), it[2]) },
-)
-
 @Composable internal fun AutomationsPane(
     tools: ToolController,
-    chatRequest: String? = null,
     openRuleId: String? = null,
     showAll: () -> Unit = {},
     chatSetup: String? = null,
     finishSetup: () -> Unit = {},
-    consumeRequest: () -> Unit = {},
     split: AutomationPaneSplit? = null,
     createInChat: () -> Unit = {},
     exit: () -> Unit = {},
+    chatTitle: (String) -> String? = { null },
+    agentTest: suspend (AutomationDefinition, Long, com.alpha.assistant.cloud.CloudSession) -> JSONObject,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -169,9 +165,10 @@ private val automationChatProposalSaver = listSaver<AutomationChatProposal?, Str
     var editing by rememberSaveable(chatSetup) { mutableStateOf(chatSetup != null) }
     var editRule by rememberSaveable(stateSaver = automationEditTargetSaver) { mutableStateOf<AutomationEditTarget?>(null) }
     var editSection by rememberSaveable { mutableStateOf(AutomationEditorSection.WHEN) }
-    var proposal by rememberSaveable(chatSetup, stateSaver = automationChatProposalSaver) {
-        mutableStateOf(chatSetup?.let { runCatching { AutomationDrafts.fromChat(it) }.getOrNull() })
-    }
+    var proposal by rememberSaveable(chatSetup) { mutableStateOf(chatSetup) }
+    val proposedDefinition = remember(proposal) { proposal?.let { AutomationDefinition.parse(JSONObject(it)) } }
+    var agentTestDefinition by remember { mutableStateOf<AutomationDefinition?>(null) }
+    agentTestDefinition?.let { definition -> AgentTestDialog(definition, agentTest) { agentTestDefinition = null } }
     var approval by remember { mutableStateOf<AutomationApproval?>(null) }
     var activating by remember { mutableStateOf<AutomationApproval?>(null) }
     var requestingAccess by remember { mutableStateOf(false) }
@@ -211,12 +208,6 @@ private val automationChatProposalSaver = listSaver<AutomationChatProposal?, Str
         if (rule != null) selectRule(rule.id)
         editRule=rule?.let { AutomationEditTarget(it.id, it.revision, it.definition) }
         editSection=section; proposal=null; error=null; errorRuleId=null; editing=true
-    }
-    LaunchedEffect(chatRequest) {
-        if(chatRequest != null) {
-            runCatching {AutomationDrafts.fromChat(chatRequest)}.onSuccess {edit(null); proposal=it}.onFailure {error=it.message}
-            consumeRequest()
-        }
     }
     val activationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { requestingAccess=false }
     val activationSettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { requestingAccess=false }
@@ -385,7 +376,14 @@ private val automationChatProposalSaver = listSaver<AutomationChatProposal?, Str
                         }
                     }
                     Text(stringResource(R.string.automation_enable_permission))
-                    Text(stringResource(R.string.automation_enable_safety))
+                    val agent = rule.definition.agent
+                    if (agent == null) Text(stringResource(R.string.automation_enable_safety))
+                    else {
+                        Text(stringResource(R.string.automation_agent_destination,
+                            chatTitle(agent.conversationId) ?: stringResource(R.string.automation_agent_missing_chat)))
+                        Text(stringResource(R.string.automation_agent_consent))
+                        if (rule.definition.type == "schedule") Text(stringResource(R.string.automation_agent_timing))
+                    }
                 }
             },
             confirmButton = {
@@ -489,20 +487,21 @@ private val automationChatProposalSaver = listSaver<AutomationChatProposal?, Str
                         if (editing) {
                             val captured = editRule
                             val notificationApps = appLabels.filterKeys { it != context.packageName }
-                            key(captured?.id, proposal?.request) {
+                            key(captured?.id, proposal) {
                                 AutomationEditor(
-                                    captured, tools, proposal, editSection, notificationApps, busy, error,
-                                    back = !wide, cancel = ::cancelEdit,
+                                    captured, tools, proposedDefinition, editSection, notificationApps, busy, error,
+                                    back = !wide, cancel = ::cancelEdit, testAgent = { agentTestDefinition = it },
                                 ) { definition ->
                                     operation { store ->
                                         val saved = store.save(captured?.id, definition, captured?.revision)
                                         AutomationRuntime.reconcile(context, store)
+                                        val pending = if (chatSetup != null) AutomationRuntime.prepareApproval(store, saved.id, saved.revision) else null
                                         withContext(Dispatchers.Main) {
                                             selectRule(saved.id)
                                             editing = false
                                             editRule = null
                                             proposal = null
-                                            if (chatSetup != null) finishSetup()
+                                            if (chatSetup != null) approval = pending
                                         }
                                     }
                                 }
@@ -521,16 +520,19 @@ private val automationChatProposalSaver = listSaver<AutomationChatProposal?, Str
                                     primaryEnabled = rule.id !in pausing && (rule.enabled || (!busy && activating == null)),
                                     testEnabled = !busy && pendingTest == null && testProposal == null,
                                     error = if (errorRuleId == rule.id) error else globalError.takeUnless { showList },
-                                    back = if (wide) null else if (openRuleId != null) exit else { { detailOpen = false } },
+                                    back = if (chatSetup != null) finishSetup else if (wide) null else if (openRuleId != null) exit else { { detailOpen = false } },
                                     showAll = if (openRuleId != null) ::clearFocus else null,
                                     toggle = { if (rule.enabled) pauseRule(rule) else resumeRule(rule) },
                                     edit = { edit(rule, it) },
                                     test = {
-                                        testPermissionAsked = false
-                                        testSettingsVisited = false
-                                        operation(rule.id) { store ->
-                                            val request = AutomationRuntime.requestOneTime(store, rule)
-                                            withContext(Dispatchers.Main) { pendingTest = request }
+                                        if (rule.definition.agent != null) agentTestDefinition = rule.definition
+                                        else {
+                                            testPermissionAsked = false
+                                            testSettingsVisited = false
+                                            operation(rule.id) { store ->
+                                                val request = AutomationRuntime.requestOneTime(store, rule)
+                                                withContext(Dispatchers.Main) { pendingTest = request }
+                                            }
                                         }
                                     },
                                     dryRun = {

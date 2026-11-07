@@ -65,12 +65,18 @@ internal typealias VoiceFactory = (Application, CoroutineScope, (String) -> Unit
 
 internal class FixtureProvider(private val reply: String = "Fixture response") : ChatProvider {
     @Volatile var calls = 0
+    var automationDraft: String? = null
     @Volatile var failure: Exception? = null              // thrown after the count
     @Volatile var gate: CompletableDeferred<Unit>? = null // awaited before the answer
     override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
         synchronized(this) { calls++ }
         failure?.let { throw it }
         gate?.await()
+        automationDraft?.let { arguments ->
+            val definition = com.alpha.assistant.automations.AutomationDraftTool.bind(arguments, checkNotNull(request.automationDraftChatId))
+            emit(CloudEvent.RoundComplete("", false, com.alpha.assistant.data.MessageProvenance.CLEAN, automationDraft = definition.json))
+            return
+        }
         if (request.replyWithFixturePlan(emit)) return
         if (request.generationStage != null) {
             emit(CloudEvent.Text("""{"formatVersion":3,"title":"Fixture","description":"","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"text","text":"Count","bind":"count"},"source":"return {state:input.state};"}"""))

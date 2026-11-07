@@ -104,6 +104,7 @@ internal fun newDayActions(notice: String): List<AutomationActionDraft> {
 }
 
 internal val automationActionLabels=linkedMapOf(
+    AGENT_ACTION to R.string.automation_agent_action,
     "notification.post" to R.string.automation_editor_action_notice,
     "calendar.read" to R.string.automation_editor_action_read,
     "calendar.read.rolling" to R.string.automation_editor_action_rolling,
@@ -147,8 +148,10 @@ internal val automationActionLabels=linkedMapOf(
                         val update: (AutomationActionDraft) -> Unit = { next ->
                             changed(actions.map { if (it.id == next.id) next else it })
                         }
-                        AutomationChoice(action.capability, labels) { capability ->
-                            if (capability != action.capability) update(newAutomationAction(capability, notice, action.id))
+                        if (action.capability != AGENT_ACTION) {
+                            AutomationChoice(action.capability, labels - AGENT_ACTION) { capability ->
+                                if (capability != action.capability) update(newAutomationAction(capability, notice, action.id))
+                            }
                         }
                         AutomationActionFields(action, actions.take(index), tools, update)
                     }
@@ -169,7 +172,7 @@ internal val automationActionLabels=linkedMapOf(
             }
         }
     }
-    FilledTonalButton(
+    if (actions.none { it.capability == AGENT_ACTION }) FilledTonalButton(
         enabled = actions.size < 3,
         onClick = {
             val next = newAutomationAction("notification.post", notice)
@@ -187,7 +190,7 @@ internal val automationActionLabels=linkedMapOf(
         Spacer(Modifier.width(8.dp))
         Text(stringResource(R.string.automation_editor_add_action))
     }
-    if(actions.size==1) TextButton(onClick={changed(actions+newDayActions(notice))},modifier=Modifier.heightIn(min=48.dp)) {
+    if(actions.size==1 && actions.none { it.capability == AGENT_ACTION }) TextButton(onClick={changed(actions+newDayActions(notice))},modifier=Modifier.heightIn(min=48.dp)) {
         Text(stringResource(R.string.automation_editor_day_template))
     }
 }
@@ -200,6 +203,7 @@ internal val automationActionLabels=linkedMapOf(
     val args=draft.args
     fun set(key: String,value: Any) { changed(draft.edit { put(key,value) }) }
     when(draft.capability) {
+        AGENT_ACTION -> AutomationField(stringResource(R.string.automation_agent_action), args.getString("instruction")) { set("instruction", it) }
         "notification.post" -> {
             AutomationField(stringResource(R.string.automation_editor_notice_title),args.optString("title")) {set("title",it)}
             AutomationField(stringResource(R.string.automation_editor_notice_text),args.optString("text")) {set("text",it)}

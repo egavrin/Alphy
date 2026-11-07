@@ -57,14 +57,18 @@ class DesktopWorkflowTest {
         }
     }
 
-    @Test fun explicitAutomationRequestOpensReviewFromTheComposerWithoutEnablingARule() {
-        fixture.install(saveKey = false)
+    @Test fun ordinaryAutomationRequestOpensReviewWithoutEnablingARule() {
+        fixture.provider.automationDraft = """
+            {"name":"Новости","trigger":{"type":"schedule","repeat":"daily","time":"07:00","zone":"device","exact":true},
+            "conditions":{},"actions":[{"id":"task","capability":"agent.run","args":{"instruction":"Подготовь новости за прошлый день."}}]}
+        """.trimIndent()
+        fixture.install()
         fixture.launch().use {
-            val request = "Создай автоматизацию Мой день из календаря каждый день в 08:00"
+            val request = "присылай мне каждое утро в семь утра подборку самых важных новостей за прошлый день"
             robot.edit(robot.text(R.string.composer_label), request)
             robot.click(robot.text(R.string.composer_send))
-            robot.waitFor(robot.text(R.string.automation_editor_local_proposal))
-            assertEquals(0, fixture.provider.calls)
+            robot.waitFor(robot.text(R.string.automation_agent_proposal))
+            assertEquals(1, fixture.provider.calls)
             robot.reveal(robot.text(R.string.cancel), null)
             robot.click(robot.text(R.string.cancel))
             robot.waitFor(robot.text(R.string.chat_automation_setup))

@@ -97,7 +97,6 @@ import kotlinx.coroutines.launch
     var contextSheet by rememberSaveable { mutableStateOf(false) }
     var contextAnchor by remember { mutableStateOf<ContextMenuAnchor?>(null) }
     var contextPaneTop by remember { mutableFloatStateOf(0f) }
-    var automationRequest by rememberSaveable { mutableStateOf<String?>(null) }
     var automationRuleId by rememberSaveable { mutableStateOf<String?>(null) }
     val miniAppActions = remember { MiniAppActions() }
     var libraryOrigin by rememberSaveable { mutableStateOf(false) }
@@ -140,7 +139,6 @@ import kotlinx.coroutines.launch
             destination = model.surfaceDestination
             settingsSection = SettingsSection.DeepSeek
             settingsFromMenu = false
-            automationRequest = model.surfaceAutomationRequest
             automationRuleId = model.surfaceAutomationRuleId
             model.consumeSurface()
             contextSheet = false
@@ -193,7 +191,6 @@ import kotlinx.coroutines.launch
         navigate(null)
     }
     fun openAutomation(id: String) {
-        automationRequest = null
         navigate(ShellDestination.Automations)
         automationRuleId = id
     }
@@ -425,10 +422,10 @@ import kotlinx.coroutines.launch
                                         back = ::back, focusReady = destination == ShellDestination.Search && drawerState.isClosed && !drawerTargetsOpen,
                                     )
                                     ShellDestination.Automations -> if (model.tools.storageUnavailable) ToolLibraryUnavailablePane()
-                                        else com.alpha.assistant.automations.AutomationsPane(model.tools, automationRequest,
+                                        else com.alpha.assistant.automations.AutomationsPane(model.tools,
                                             openRuleId = automationRuleId, showAll = { automationRuleId = null },
                                             split = currentLayout.automationSplit, createInChat = ::newChat, exit = ::back,
-                                            consumeRequest = { automationRequest = null })
+                                            chatTitle = model::automationChatTitle, agentTest = model::testAutomation)
                                     ShellDestination.Courses -> CourseLibraryScreen(
                                         model.courseStore, model.courseController, onExit = { navigate(null) },
                                         tutor = model.courseTutor, generation = model.courseGeneration,
@@ -487,8 +484,9 @@ import kotlinx.coroutines.launch
     val automationSetup = model.chatAutomationSetup?.takeIf { it.conversationId == model.snapshot.selectedId }
     if (automationSetup != null) key(automationSetup) {
         ChatSetupDialog(model::dismissAutomationSetup) {
-            com.alpha.assistant.automations.AutomationsPane(model.tools, chatSetup = automationSetup.request,
-                finishSetup = model::dismissAutomationSetup)
+            com.alpha.assistant.automations.AutomationsPane(model.tools, chatSetup = automationSetup.definition,
+                finishSetup = model::dismissAutomationSetup, chatTitle = model::automationChatTitle,
+                agentTest = model::testAutomation)
         }
     }
     if (model.memoryPage.reviewingChatFact) {

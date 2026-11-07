@@ -12,6 +12,7 @@ import android.os.BatteryManager
 import android.os.Build
 import android.provider.Settings
 import com.alpha.assistant.capabilities.*
+import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.tools.*
 import com.alpha.assistant.surfaces.SurfaceEntry
 import com.alpha.assistant.surfaces.ToolWidgets
@@ -97,7 +98,7 @@ object AutomationRuntime {
         AutomationApproval(rule,store.approvalToken(id))
     }
 
-    suspend fun approve(store: AutomationStore, approval: AutomationApproval, validate: (AutomationRule) -> Unit) = mutex.withLock {
+    suspend fun approve(store: AutomationStore, approval: AutomationApproval, agentConsent: String? = null, validate: (AutomationRule) -> Unit) = mutex.withLock {
         val expected=approval.rule
         fun checkApproval() {
             check(store.approvalToken(expected.id)==approval.archiveToken && expected.id !in deleting) {
@@ -110,6 +111,8 @@ object AutomationRuntime {
         validate(current)
         store.transaction {
             checkApproval()
+            if (current.definition.agent != null)
+                store.setState(AgentAutomationRuntime.consentKey(current.id), checkNotNull(agentConsent))
             store.approve(expected.id,expected.revision)
         }
     }
@@ -119,8 +122,8 @@ object AutomationRuntime {
             "Выбери будущее время расписания."
         } else null
 
-    internal suspend fun activateApproved(store: AutomationStore,approval: AutomationApproval,validate: (AutomationRule)->String?) {
-        approve(store,approval) { current ->
+    internal suspend fun activateApproved(store: AutomationStore,approval: AutomationApproval,agentConsent: String? = null,validate: (AutomationRule)->String?) {
+        approve(store,approval,agentConsent) { current ->
             eligibilityFailure(current,validate)?.let { failure ->
                 store.attention(current.id,current.revision,failure)
                 error(failure)
@@ -148,7 +151,7 @@ object AutomationRuntime {
             cancelAlarm(context,store,expected)
         }
         notifyChanged(context)
-        if(expected.definition.type=="geofence") refreshDatabase(context,store.databaseName)
+        if(expected.definition.type=="geofence" || expected.definition.agent != null) refreshDatabase(context,store.databaseName)
         return true
     }
 
@@ -160,7 +163,8 @@ object AutomationRuntime {
     }
 
     internal suspend fun activate(context: Context,store: AutomationStore,approval: AutomationApproval) {
-        try { activateApproved(store,approval) {accessFailure(context,store,it)} }
+        val consent = SecureKeyStore(context).consentIdentity().takeIf { approval.rule.definition.agent != null }
+        try { activateApproved(store,approval,consent) {accessFailure(context,store,it,requireAgentConsent = false)} }
         finally {notifyChanged(context)}
         refreshDatabase(context,store.databaseName)
     }
@@ -193,6 +197,7 @@ object AutomationRuntime {
             }
         } finally {
             deleting.remove(expected.id)
+            if (expected.definition.agent != null) refreshDatabase(context, store.databaseName)
             notifyChanged(context)
         }
     }
@@ -223,6 +228,8 @@ object AutomationRuntime {
             context.checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION)!=PackageManager.PERMISSION_GRANTED) {
             add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
         }
+        if (rule.definition.agent != null && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+            add(Manifest.permission.POST_NOTIFICATIONS)
         addAll(oneTimePermissions(context,rule.definition))
     }.toTypedArray()
 
@@ -251,8 +258,8 @@ object AutomationRuntime {
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,appUri)
             rule.definition.type=="geofence" && !context.getSystemService(android.location.LocationManager::class.java).isLocationEnabled ->
                 Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
-            rule.definition.actions.any {it.capability=="notification.post"} &&
-                !context.getSystemService(NotificationManager::class.java).areNotificationsEnabled() ->
+            (rule.definition.agent != null || rule.definition.actions.any {it.capability=="notification.post"}) &&
+                notificationUnavailable(context) ->
                 Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,context.packageName)
             else -> null
         }
@@ -433,7 +440,7 @@ object AutomationRuntime {
     }
 
     private fun nativeActionFailure(context: Context,action: CapabilityRequest): String? {
-        if(action.capability in setOf("tool.state.set","tool.records.calendar")) return null
+        if(action.capability in setOf("tool.state.set","tool.records.calendar",AGENT_ACTION)) return null
         val id=if(action.capability=="calendar.read.rolling") "calendar.read" else action.capability
         return when {
             !AndroidCapabilities(context).permissionGranted(id) -> "Доступ Android к действию отозван: ${CapabilityCatalog.definition(id).title}."
@@ -441,8 +448,8 @@ object AutomationRuntime {
             else -> null
         }
     }
-    private fun accessFailure(context: Context,store: AutomationStore,rule: AutomationRule): String? = try {
-        triggerFailure(context,rule) ?: dependencyFailure(context,store,rule) ?:
+    private fun accessFailure(context: Context,store: AutomationStore,rule: AutomationRule,requireAgentConsent: Boolean = true): String? = try {
+        triggerFailure(context,rule) ?: AgentAutomationRuntime.accessFailure(context,store,rule,requireAgentConsent) ?: dependencyFailure(context,store,rule) ?:
             rule.definition.actions.firstNotNullOfOrNull {actionFailure(context,store,it)}
     } catch(_: SecurityException) {
         "Доступ Android отозван. Проверь разрешения и включи сценарий снова."
@@ -450,7 +457,9 @@ object AutomationRuntime {
 
     fun executor(context: Context, store: AutomationStore) = AutomationExecutor(store,{ charging(context) },{ rule,action ->
         triggerFailure(context,rule) ?: dependencyFailure(context,store,rule) ?: actionFailure(context,store,action)
-    },preview={ rule,action,step -> perform(context,store,rule,action,step) }) { rule,action,step -> perform(context,store,rule,action,step) }
+    },preview={ rule,action,step -> perform(context,store,rule,action,step) },
+        enqueueAgent = { rule, event, now -> AgentAutomationRuntime.queue(context, store, rule, event, now) }
+    ) { rule,action,step -> perform(context,store,rule,action,step) }
 
     private fun toolsForRules(context: Context,store: AutomationStore): ToolStore =
         ToolStore(context,ToolLibraryStorage.relatedSelection(context,store.databaseName,"automations")?.physical ?: ToolLibraryStorage.DEFAULT)
@@ -564,6 +573,7 @@ object AutomationRuntime {
         store.prune()
         val manager = context.getSystemService(AlarmManager::class.java)
         val now = System.currentTimeMillis()
+        AgentAutomationRuntime.reconcile(context, store, now)
         for(rule in store.rules()) {
             if(rule.approvedRevision!=rule.revision || rule.attention.isNotEmpty()) {cancelInactiveAlarm(context,store,rule);continue}
             val failure=accessFailure(context,store,rule)
@@ -578,23 +588,30 @@ object AutomationRuntime {
                 at=null
             }
             if(at==null || resetGeofences && at>now && rule.definition.type!="interval") at=rule.definition.nextAfter(now)
-            synchronized(alarmLock) {
+            val armed = synchronized(alarmLock) {
                 val current=store.rule(rule.id)
                 if(current==null || !current.enabled || current.revision!=rule.revision ||
                     current.approvedRevision!=current.revision || current.attention.isNotEmpty() ||
-                    current.nextAt!=rule.nextAt || store.approvalToken(rule.id)!=token) return@synchronized
+                    current.nextAt!=rule.nextAt || store.approvalToken(rule.id)!=token) return@synchronized false
                 store.next(rule.id,rule.revision,at)
-                if(at==null) {cancelAlarm(context,store,rule);return@synchronized}
+                if(at==null) {cancelAlarm(context,store,rule);return@synchronized false}
                 val pending=alarm(context,store,rule.copy(nextAt=at))
                 try {
                     if(rule.definition.trigger.optBoolean("exact")) manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,at,pending)
                     else manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,at,pending)
+                    true
                 } catch(_: SecurityException) {
                     store.attention(rule.id,rule.revision,"Android запретил расписание. Проверь доступ к точным напоминаниям.")
                     cancelAlarm(context,store,rule)
+                    false
                 }
             }
+            if (armed && at != null && at > now && rule.definition.type == "schedule" && rule.definition.agent != null) {
+                val event = AutomationEvent("schedule", rule.definition.occurrenceToken(at), scheduledAt = at)
+                AgentAutomationRuntime.queue(context, store, rule, event, now)
+            }
         }
+        AgentAutomationRuntime.reconcile(context, store, now)
         com.alpha.assistant.tools.ToolStore.effectMutex.withLock {
             toolsForRules(context,store).use {tools -> MedicineStore(context,MedicineRuntime.database(tools)).use {medicine -> MedicineRuntime.reconcile(context,tools,medicine)}}
         }

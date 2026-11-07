@@ -76,6 +76,8 @@
         <receiver android:name=".surfaces.PinResultReceiver" android:exported="false" />
         <service android:name=".updates.AppUpdateJobService" android:exported="true"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+        <service android:name=".automations.AgentAutomationJobService" android:exported="true"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
         <service android:name=".scheduling.SourceRefreshJobService" android:exported="true"
             android:permission="android.permission.BIND_JOB_SERVICE" />
         <service android:name=".surfaces.AlphaTileService" android:label="Alphy" android:icon="@drawable/ic_alpha"

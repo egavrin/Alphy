@@ -101,38 +101,7 @@ class AutomationRepairWorkflowTest {
     }
     private fun calendarFixture() = CapabilityResult("succeeded","Fixture",JSONObject().put("events",JSONArray().put(JSONObject().put("id",42).put("title","Meeting").put("start",1793347200000L).put("end",1793350800000L))))
 
-    @Test fun explicitChatSchedulesUseWholeTokensAndRejectUnsupportedForms() {
-        val supported=mapOf(
-            "Мой день" to "08:00",
-            "Мой день каждый день" to "08:00",
-            "Мой день ежедневно в 0:00" to "00:00",
-            "Мой день в 00:00" to "00:00",
-            "Мой день в 9:05" to "09:05",
-            "Мой день в (23:59)." to "23:59",
-            "Мой день в «08:30», пожалуйста" to "08:30"
-        )
-        supported.forEach { (request,time) ->
-            val proposal=AutomationDrafts.fromChat(request)
-            assertEquals(request,"schedule",proposal.trigger.getString("type"))
-            assertEquals(request,time,proposal.trigger.getString("time"))
-        }
-        listOf("каждые 15 минут","каждые 10080 минут","каждые 30 мин.").forEach { schedule ->
-            assertEquals(schedule,"interval",AutomationDrafts.fromChat("Мой день $schedule").trigger.getString("type"))
-        }
-        listOf(
-            "в 25:00","в 24:00","в 125:00","в 008:00","в 23:60","в 08:000","в 8:5",
-            "в -1:00","в +08:00","в x08:00","в 08:00x","в 08:00:30","в 08 : 00",
-            "в 08:00 и в 09:00","каждые 15 часов","каждый час","каждые пятнадцать минут",
-            "каждые 14 минут","каждые 10081 минут","каждые 15 минут в 08:00",
-            "каждый день каждые 15 минут","через 15 минут","по понедельникам","завтра в 08:00","в 9 утра"
-        ).forEach { schedule ->
-            val result=runCatching {AutomationDrafts.fromChat("Мой день $schedule")}
-            assertTrue(schedule,result.isFailure)
-            assertTrue(schedule,result.exceptionOrNull()?.message.orEmpty().any {it in 'А'..'я'})
-        }
-    }
-
-    @Test fun renderEffectsCannotCommitAndChatCreatesOnlyAnUnapprovedProposal() = runBlocking {
+    @Test fun renderEffectsCannotCommitAndInvalidIntervalIsRejected() = runBlocking {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val name="automation-render-${UUID.randomUUID()}.db"
         try {ToolStore(context,name).use { tools ->
@@ -145,9 +114,6 @@ class AutomationRepairWorkflowTest {
             val definition=AutomationDefinition.parse(notice(JSONObject().put("type","manual")).put("actions",JSONArray().put(action.json())))
             assertTrue(runCatching {AutomationTools.execute(tools,definition,action,AutomationStep("fixture",0,emptyMap(),false),AutomationTools.renderer(context,tools)) {true}}.isFailure)
             assertEquals(bad,tools.tool(bad.id))
-            val proposal=AutomationDrafts.fromChat("Обновляй Мой день из календаря каждые 15 минут")
-            assertEquals("interval",proposal.trigger.getString("type")); assertEquals(15,proposal.trigger.getInt("minutes"))
-            assertTrue(runCatching {AutomationDrafts.fromChat("Обновляй Мой день каждые 5 минут")}.isFailure)
             assertTrue(runCatching {AutomationDefinition.parse(notice(JSONObject().put("type","interval").put("minutes",14).put("anchor",1000)))}.isFailure)
         }} finally {context.deleteDatabase(name)}
     }
