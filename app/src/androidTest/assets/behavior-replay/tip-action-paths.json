@@ -1,0 +1,208 @@
+{
+  "scenario": {
+    "slots": {
+      "billInput": {
+        "kind": "action"
+      },
+      "tipInput": {
+        "kind": "action"
+      },
+      "peopleInput": {
+        "kind": "action"
+      },
+      "tipValue": {
+        "kind": "value"
+      },
+      "totalValue": {
+        "kind": "value"
+      },
+      "perPersonValue": {
+        "kind": "value"
+      }
+    },
+    "steps": [
+      {
+        "op": "action",
+        "slot": "billInput",
+        "value": 100
+      },
+      {
+        "op": "action",
+        "slot": "tipInput",
+        "value": 20
+      },
+      {
+        "op": "action",
+        "slot": "peopleInput",
+        "value": 2
+      },
+      {
+        "op": "assert",
+        "slot": "tipValue",
+        "test": "equals",
+        "value": 20
+      },
+      {
+        "op": "assert",
+        "slot": "totalValue",
+        "test": "equals",
+        "value": 120
+      },
+      {
+        "op": "assert",
+        "slot": "perPersonValue",
+        "test": "equals",
+        "value": 60
+      }
+    ]
+  },
+  "candidate": {
+    "formatVersion": 3,
+    "title": "Tip calculator",
+    "description": "Enter a bill, choose a tip percent, and split the total between people.",
+    "capabilities": [],
+    "capabilityResults": false,
+    "stateSchema": {
+      "bill": "number",
+      "tipPercent": "number",
+      "people": "number",
+      "tip": "number",
+      "total": "number",
+      "perPerson": "number"
+    },
+    "initialState": {
+      "bill": 0,
+      "tipPercent": 15,
+      "people": 1,
+      "tip": 0,
+      "total": 0,
+      "perPerson": 0
+    },
+    "ui": {
+      "type": "column",
+      "style": {
+        "gap": "medium",
+        "padding": "small"
+      },
+      "children": [
+        {
+          "type": "numberInput",
+          "text": "Bill amount",
+          "bind": "bill",
+          "action": "billInput",
+          "min": 0,
+          "max": 1000000,
+          "step": 0.01
+        },
+        {
+          "type": "row",
+          "wrap": false,
+          "style": {
+            "crossAlign": "center",
+            "gap": "small"
+          },
+          "children": [
+            {
+              "type": "slider",
+              "text": "Tip percent",
+              "bind": "tipPercent",
+              "action": "tipInput",
+              "min": 0,
+              "max": 50,
+              "step": 1,
+              "layout": {
+                "weight": 1
+              }
+            },
+            {
+              "type": "metric",
+              "text": "Tip %",
+              "bind": "tipPercent",
+              "format": "number",
+              "style": {
+                "emphasis": "number"
+              }
+            }
+          ]
+        },
+        {
+          "type": "numberInput",
+          "text": "Number of people",
+          "bind": "people",
+          "action": "peopleInput",
+          "min": 1,
+          "max": 1000,
+          "step": 1
+        },
+        {
+          "type": "card",
+          "text": "Results",
+          "style": {
+            "gap": "small"
+          },
+          "children": [
+            {
+              "type": "metric",
+              "text": "Tip",
+              "bind": "tip",
+              "format": "number",
+              "style": {
+                "emphasis": "number"
+              }
+            },
+            {
+              "type": "metric",
+              "text": "Total",
+              "bind": "total",
+              "format": "number",
+              "style": {
+                "emphasis": "number"
+              }
+            },
+            {
+              "type": "metric",
+              "text": "Each person pays",
+              "bind": "perPerson",
+              "format": "number",
+              "style": {
+                "emphasis": "number"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "Amounts are shown without a currency.",
+          "style": {
+            "tone": "muted"
+          }
+        }
+      ]
+    },
+    "source": "const s=input.state;const e=input.event;\nif(e.type==='action'){\n  const v=e.value;\n  if(e.actionId==='billInput')s.bill=Math.max(0,Math.min(1000000,v));\n  if(e.actionId==='tipInput')s.tipPercent=Math.max(0,Math.min(50,v));\n  if(e.actionId==='peopleInput')s.people=Math.max(1,Math.min(1000,Math.round(v)));\n  const tip=s.bill*s.tipPercent/100;\n  const total=s.bill+tip;\n  s.tip=tip;\n  s.total=total;\n  s.perPerson=s.people>0?total/s.people:0;\n}\nreturn {state:s};",
+    "behaviorBindings": {
+      "billInput": [
+        0
+      ],
+      "tipInput": [
+        1,
+        0
+      ],
+      "peopleInput": [
+        2
+      ],
+      "tipValue": [
+        3,
+        0
+      ],
+      "totalValue": [
+        3,
+        1
+      ],
+      "perPersonValue": [
+        3,
+        2
+      ]
+    }
+  }
+}

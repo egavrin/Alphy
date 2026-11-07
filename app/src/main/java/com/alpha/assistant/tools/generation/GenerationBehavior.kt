@@ -32,9 +32,10 @@ internal sealed interface GenerationBehavior {
                 }
             return """
                 Add behaviorBindings to the top-level response beside the existing fields. Its keys must be exactly the IDs below.
-                Each action, surface, or timer binding is the ID of an actual action, surface, or timer.
-                Each value or collection binding is an array of zero-based children indices from the final UI root.
-                An empty UI path selects the root. Bind the visible result, not an input or unrelated label.
+                An action binding uses the action ID string or a UI path to a control with its own action field.
+                Surface and timer bindings use their actual ID strings.
+                A UI path is an array of zero-based children indices from the final assembled UI root. An empty path selects the root.
+                Use stable UI paths throughout the workflow. Value and collection bindings use UI paths to visible results.
                 Each geometry binding is {"surface":"surface ID","path":[0]} where path indexes drawing commands, then group children.
                 Use a stable shape or group. A path of [] observes all drawing commands for that surface.
                 Keep bindings outside fill, ui, and source. Bindings describe existing targets, never tests or expected values.
@@ -280,11 +281,13 @@ internal sealed interface GenerationBehavior {
 
         fun bindings(raw: Any?, slots: Map<String, Slot>): Map<String, Binding> {
             val objectValue = obj(raw, BINDINGS)
-            objectValue.requireKeys(BINDINGS, slots.keys)
+            requireParts(ToolValueSchema.keys(objectValue) == slots.keys, BINDINGS, "exactly the requested slot IDs")
             return slots.mapValues { (id, slot) ->
                 val value = objectValue.opt(id)
                 when (slot.kind) {
-                    Kind.ACTION, Kind.SURFACE, Kind.TIMER -> Binding.Id(identifier(value, BINDINGS, 48))
+                    Kind.ACTION -> if (value is JSONArray) Binding.Ui(indices(value, BINDINGS))
+                        else Binding.Id(identifier(value, BINDINGS, 48))
+                    Kind.SURFACE, Kind.TIMER -> Binding.Id(identifier(value, BINDINGS, 48))
                     Kind.VALUE, Kind.COLLECTION -> Binding.Ui(indices(value, BINDINGS))
                     Kind.GEOMETRY -> {
                         val drawing = obj(value, BINDINGS)

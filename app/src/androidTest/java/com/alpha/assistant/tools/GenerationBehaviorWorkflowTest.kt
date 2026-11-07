@@ -67,6 +67,11 @@ class GenerationBehaviorWorkflowTest {
             provider.calls.map { it.generationStage })
         val writer = provider.calls[1]
         assertTrue(writer.systemInstructions.contains("behaviorBindings"))
+        val example = JSONObject(writer.systemInstructions.substringAfter("Schema:\n").lineSequence().first())
+            .getJSONObject("behaviorBindings")
+        assertEquals(JSONObject(appBindings).keys().asSequence().toSet(), example.keys().asSequence().toSet())
+        assertTrue(example.get("enter") is String)
+        assertEquals(0, example.getJSONArray("result").getInt(0))
         assertTrue(writer.systemInstructions.contains("\"enter\":[\"number\"]"))
         assertTrue(writer.systemInstructions.contains("\"apply\":[\"null\"]"))
         assertFalse(writer.systemInstructions.contains("\"value\":7"))
@@ -75,6 +80,31 @@ class GenerationBehaviorWorkflowTest {
         val repair = provider.calls.last().turns.last().text
         assertTrue(repair.contains("assertion"))
         assertFalse(repair.contains("14"))
+    }
+
+    @Test fun capturedTipWriterActionPathsPassTheBehaviorCheck(): Unit = runBlocking {
+        val fixture = InstrumentationRegistry.getInstrumentation().context.assets
+            .open("behavior-replay/tip-action-paths.json").bufferedReader().use { JSONObject(it.readText()) }
+        val raw = fixture.getJSONObject("candidate").toString()
+        val provider = Provider(plan(fixture.getJSONObject("scenario").toString()), raw, raw)
+        generate(provider)
+        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE), provider.calls.map { it.generationStage })
+    }
+
+    @Test fun unavailableActionPathsStillRejectTheCandidate(): Unit = runBlocking {
+        val ordinary = app(true)
+        val hidden = JSONObject(ordinary).apply {
+            getJSONObject("ui").getJSONArray("children").getJSONObject(0).put("visible", false)
+        }.toString()
+        for ((definition, path) in listOf(ordinary to "[]", ordinary to "[2]", ordinary to "[8]",
+            ordinary to "[0.5]", ordinary to "[1]", hidden to "[0]")) {
+            val bindings = JSONObject(appBindings).put("enter", org.json.JSONArray(path))
+            val raw = candidate(definition, bindings.toString())
+            val provider = Provider(plan(appPlan), raw, raw)
+            val failure = runCatching { generate(provider) }.exceptionOrNull() as? CloudFailure
+            assertEquals(path, "widget_behavior", failure?.code)
+            assertEquals(path, 3, provider.calls.size)
+        }
     }
 
     @Test fun terminalBehaviorFailurePreservesTheSavedTool(): Unit = runBlocking {

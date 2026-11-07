@@ -168,7 +168,7 @@ internal object ToolParts {
     private val counterStep = 1..1_000_000
 
     val sectionDescriptions = mapOf(
-        "controls" to "Independent editable values and counters with local controls.",
+        "controls" to "Editable inputs, counters, native clocks, and computed numeric outputs with declared dependencies.",
         "records" to "Local notes, one-tap logs, points ledgers, and readings with history.",
         "plans" to "Local itineraries, due dates, and idea decks.",
         "lesson" to "Static text and single-answer exercises with local feedback.",

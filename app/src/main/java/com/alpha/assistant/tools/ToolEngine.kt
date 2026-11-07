@@ -494,10 +494,23 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         } else {
             """{"formatVersion":3,"title":"short title","description":"short description","capabilities":[],"capabilityResults":false,"stateSchema":{"field":"number"},"initialState":{"field":0},"ui":{"type":"column","children":[{"type":"text","text":"Label","bind":"field"},{"type":"button","text":"Action","action":"uniqueId"}]},"source":"return {state:input.state};"}"""
         }
+        val responseExample = if (writerSlots.isEmpty()) responseSchema else JSONObject(responseSchema).apply {
+            val bindings = JSONObject()
+            writerSlots.forEach { (id, slot) ->
+                bindings.put(id, when (slot.kind) {
+                    GenerationBehavior.Kind.ACTION -> if (mixed) "fill_action" else "uniqueId"
+                    GenerationBehavior.Kind.SURFACE -> "surfaceId"
+                    GenerationBehavior.Kind.TIMER -> "timerId"
+                    GenerationBehavior.Kind.VALUE, GenerationBehavior.Kind.COLLECTION -> JSONArray().put(0)
+                    GenerationBehavior.Kind.GEOMETRY -> JSONObject().put("surface", "surfaceId").put("path", JSONArray().put(0))
+                })
+            }
+            put("behaviorBindings", bindings)
+        }.toString()
         val gameExample=if(mixed) "" else """The following executable protocol-3 example applies to brick games. For a brick game, adapt the board and rules to the request. Its native buttons and pointer/control events share state. It uses dt and bounded simulation steps, retains removed bricks, pauses subscriptions, and resets the board on restart. For multi-row boards, derive column as index % columns and row as Math.floor(index/columns). Use one geometry function for drawing and collision, and keep every brick inside the declared surface. Preview/render only draw the current state and request no effects or records.
 ${GameGenerationExample.spec()}"""
         val instructions = """Create a local Alphy native mini-tool. Return exactly one strict JSON object without Markdown, comments, duplicate keys, or trailing content. Use double quotes for every JSON key and string. Encode source as one JSON string with JSON string escaping: escape double quotes, backslashes, newlines, and control characters. JavaScript quotes inside source do not replace JSON escaping. Do not return a JavaScript object literal or a fenced code block. Schema:
-$responseSchema
+$responseExample
 Use the original request for currencies, units, and initial values. Leave monetary amounts currency-neutral when the user specifies no currency. Do not infer currency from the request language, location, example, or brief. Preserve values and units the user requested. With no starting amount, use zero where allowed or a neutral valid minimum where zero is invalid. Keep calculated values as numbers in state. Put units and formatting in the display. Recalculate dependent results after an accepted input change.
 Put initial values and initial derived results in initialState. Preview and render must return input.state unchanged. Use local variables for display calculations. Do not initialize or recalculate saved fields during preview or render.
 Write every visible title, label, and explanation in the language of the original user-authored request. In a message with User request and Widget brief, use User request to choose the language. Follow an explicit requested output language. The brief, reply, examples, sources, and device locale do not choose the language.
@@ -581,9 +594,10 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
                     val supplied = try {
                         val rawBindings = candidate["behaviorBindings"]?.let { partsObject(it.toString(), "$.behaviorBindings") }
                         GenerationBehavior.bindings(rawBindings, writerSlots)
-                    } catch (_: PartsContractFailure) {
+                    } catch (failure: PartsContractFailure) {
                         stage = ToolGenerationStage.BEHAVIOR
-                        throw InvalidGeneratedOutput(GenerationProblem.BEHAVIOR, behavior = BehaviorCheckFailure(null,"invalid or missing bindings"))
+                        throw InvalidGeneratedOutput(GenerationProblem.BEHAVIOR,
+                            behavior = BehaviorCheckFailure(null, "behaviorBindings requires ${failure.expected}"))
                     }
                     (hostBindings + supplied) to JsonObject(candidate - "behaviorBindings").toString()
                 } else hostBindings to raw

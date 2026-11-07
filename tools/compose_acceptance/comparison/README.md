@@ -35,13 +35,20 @@ slots, of which 270 use held-out requests. Each supplemental case adds six slots
 The plan directory is private to the current user. The tool does not overwrite
 an existing directory. Access to the original corpus is outside this tool.
 
-## Android prerelease functional audit
+## App-generation functional audit
 
-Use a separately frozen plan with `alphy-android-chat` as the candidate route
-and `vera-reference-host` as the reference route. Record the device and
-provider conditions for each product. Use the same frozen interactions for
-both routes. The functional audit covers those interactions and recovery.
-Native rendering and performance have their own audit.
+Run the Alphy chat workflow on an Android emulator. Run reference generation
+and interaction replay in the Deal Studio OHOS host runner. These routes
+provide the functional evidence for app-generation work.
+
+Freeze a plan with `alphy-android-chat` as the candidate route and
+`vera-reference-host` as the reference route. Record each product's runtime
+and provider conditions. Use the same frozen interactions for both routes.
+For device-related interactions, record the effect request and the app's
+response on the selected route. Identify simulated effects in the evidence.
+The app-generation merge gate requires a passing `audit-functional` result.
+Physical devices, HarmonyOS signing, and native trace capture belong to the
+separate device-effect audit when that evidence is requested.
 
 ```sh
 python3 tools/compose_acceptance/comparison/compare.py audit-functional \
@@ -112,10 +119,10 @@ Use `compare.py coverage` with the final plan and its hash to list all workflow
 families, check IDs, and slots. This inventory keeps functional status unverified
 until the live audit passes. It does not expose prompt text.
 
-### Physical workflow gate
+### Separate device-effect audit
 
-Keep the frozen host plan and its 792 slots unchanged. Use a separate device
-manifest for the required physical workflows. The
+Use this audit for a separate claim about a physical device effect. Keep the
+functional plan and its 792 slots as the source of case identities. The
 [device criteria](device-workflows.json) bind each measurement to an existing
 case and check. Review and freeze these criteria before device execution.
 
@@ -172,9 +179,9 @@ python3 tools/compose_acceptance/comparison/device_compare.py audit \
 
 The device audit requires terminal evidence for every slot and at least one
 passing repeat per product and workflow. Missing, altered, duplicate, synthetic,
-or emulator evidence blocks the gate. The operator must review the recordings
-against the frozen measurements. File hashes alone cannot prove an effect.
-Main requires both the host gate and the device gate to pass.
+or emulator evidence blocks the device-effect audit. The operator must review
+the recordings against the frozen measurements. File hashes alone cannot prove
+an effect.
 
 ### Execution input
 

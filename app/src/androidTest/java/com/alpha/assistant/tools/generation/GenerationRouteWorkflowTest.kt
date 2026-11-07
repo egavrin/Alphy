@@ -640,7 +640,14 @@ class GenerationRouteWorkflowTest {
         val provider = FixtureProvider { turn, _ ->
             when (turn.generationStage) {
                 CloudGenerationStage.PLAN -> response
-                CloudGenerationStage.SELECTOR -> answer(turn)
+                CloudGenerationStage.SELECTOR -> {
+                    val questions = JSONObject(turn.turns.single().text).getJSONArray("questions")
+                    val omitted = (0 until questions.length()).map(questions::getJSONObject)
+                        .filter { it.getString("id") in setOf("s_twice", "s_share") }
+                        .filterNot { it.getJSONObject("choices").getString("A").contains("computed numeric outputs") }
+                        .associate { it.getString("id") to "B" }
+                    answer(turn, omitted)
+                }
                 CloudGenerationStage.REFINE -> {
                     val payload = JSONObject(turn.turns.single().text)
                     val context = payload.getJSONObject("context")

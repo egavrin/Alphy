@@ -161,9 +161,14 @@ internal class ToolGenerationSmoke(
                 checkActive()
                 when (step) {
                     is Step.Action -> {
-                        val action = targetId(step.slot)
-                        val value = step.value.takeUnless { it == JSONObject.NULL }
                         val root = JSONObject(ui)
+                        val action = when (val binding = target(step.slot)) {
+                            is Binding.Id -> binding.value
+                            is Binding.Ui -> visibleNode(root, displayState(), binding.path)?.optString("action")
+                                ?.takeIf(String::isNotEmpty) ?: fail("action binding path is unavailable")
+                            is Binding.Drawing -> fail("invalid action binding")
+                        }
+                        val value = step.value.takeUnless { it == JSONObject.NULL }
                         val liveInput = ToolUiCatalog.action(root, action)?.let(ToolUiCatalog::isLiveInput) == true
                         val event = try {
                             controlEvent(root, JSONObject(state), action, value, liveInput)
