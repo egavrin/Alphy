@@ -117,7 +117,7 @@ internal class CourseComposerState(
         }
         val colors = MaterialTheme.colorScheme
         Surface(shape = MaterialTheme.shapes.extraLarge, color = colors.surfaceContainerLow,
-            border = BorderStroke(1.dp, colors.outlineVariant)) {
+            border = BorderStroke(1.dp, colors.outline)) {
             BoxWithConstraints(Modifier.fillMaxWidth().padding(3.dp)) {
                 val singleRow = compact || maxWidth >= 270.dp && LocalDensity.current.fontScale < 1.4f
                 Column {

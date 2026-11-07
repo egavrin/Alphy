@@ -12,6 +12,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -32,8 +34,11 @@ class WidgetConfigurationActivity : AlphyActivity() {
             AlphaTheme {
                 var tools by remember { mutableStateOf<List<ToolRecord>>(emptyList()) }
                 var loaded by remember { mutableStateOf(false) }
-                var selected by remember { mutableStateOf(runCatching {ToolWidgets.toolId(this,id)}.getOrNull()) }
-                var prefs by remember { mutableStateOf(runCatching {ToolWidgets.preferences(this,id)}.getOrDefault(WidgetPreferences())) }
+                var selected by rememberSaveable { mutableStateOf(runCatching {ToolWidgets.toolId(this,id)}.getOrNull()) }
+                var prefs by rememberSaveable(stateSaver = listSaver(
+                    save = { listOf(it.format, it.details) },
+                    restore = { WidgetPreferences(it[0] as String, it[1] as Boolean) },
+                )) { mutableStateOf(runCatching {ToolWidgets.preferences(this,id)}.getOrDefault(WidgetPreferences())) }
                 var generation by remember {mutableStateOf<String?>(null)}
                 var error by remember { mutableStateOf<String?>(null) }
                 LaunchedEffect(Unit) {

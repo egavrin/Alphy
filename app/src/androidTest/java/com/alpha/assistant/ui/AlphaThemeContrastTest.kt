@@ -4,8 +4,10 @@ import android.os.Build
 import android.util.Log
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.unit.dp
 import androidx.core.graphics.ColorUtils
 import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
@@ -21,6 +23,7 @@ class AlphaThemeContrastTest {
         for ((name, s) in schemes) for ((pair, colors) in mapOf(
             "onSurface/surface" to (s.onSurface to s.surface),
             "onSurface/surfaceContainer" to (s.onSurface to s.surfaceContainer),
+            "onSurface/surfaceContainerLow" to (s.onSurface to s.surfaceContainerLow),
             "primary/surfaceContainer" to (s.primary to s.surfaceContainer),
             "onSurfaceVariant/surface" to (s.onSurfaceVariant to s.surface),
             "onSurfaceVariant/surfaceContainer" to (s.onSurfaceVariant to s.surfaceContainer),
@@ -32,6 +35,8 @@ class AlphaThemeContrastTest {
             "onPrimary/primary" to (s.onPrimary to s.primary),
             "onPrimaryContainer/primaryContainer" to (s.onPrimaryContainer to s.primaryContainer),
             "onSecondaryContainer/secondaryContainer" to (s.onSecondaryContainer to s.secondaryContainer),
+            "onSecondary/secondary" to (s.onSecondary to s.secondary),
+            "onTertiary/tertiary" to (s.onTertiary to s.tertiary),
             "onTertiaryContainer/tertiaryContainer" to (s.onTertiaryContainer to s.tertiaryContainer),
             "onError/error" to (s.onError to s.error),
             "onErrorContainer/errorContainer" to (s.onErrorContainer to s.errorContainer),
@@ -43,19 +48,42 @@ class AlphaThemeContrastTest {
             Log.i("AlphaThemeContrast", "$name $pair $ratio")
             assertTrue("$name $pair is $ratio:1", ratio >= 4.5)
         }
-        assertEquals(Color(0xFF63568F), AlphaLightColors.primary)
-        assertEquals(Color(0xFFCDBDFF), AlphaDarkColors.primary)
+        for ((name, s) in schemes) {
+            for (surface in listOf(s.background, s.surfaceContainerLow, s.secondaryContainer)) {
+                val ratio = ColorUtils.calculateContrast(s.outline.toArgb(), surface.toArgb())
+                assertTrue("$name outline on $surface is $ratio:1", ratio >= 3)
+            }
+        }
     }
 
-    // Failure case: the shell uses the fixed palette, so it ignores the wallpaper colors.
+    // A wallpaper must change accents without tinting reading surfaces, including elevated ones.
     @SdkSuppress(minSdkVersion = Build.VERSION_CODES.S)
-    @Test fun deviceSchemesUseDynamicColor() {
+    @Test fun deviceSchemesKeepNeutralSurfacesAndDynamicAccents() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         for ((dark, dynamic) in listOf(false to dynamicLightColorScheme(context), true to dynamicDarkColorScheme(context))) {
             val scheme = alphaColorScheme(context, dark)
+            val canvas = if (dark) Color(0xFF171717) else Color(0xFFFAFAFA)
+            val card = if (dark) Color(0xFF232323) else Color(0xFFF1F1F1)
+            val bubble = if (dark) Color(0xFF2B2B2B) else Color(0xFFEDEDED)
+            val text = if (dark) Color(0xFFEEEEEE) else Color(0xFF1D1D1F)
+            Log.i("AlphaThemeContrast", "dark=$dark primary=${scheme.primary.toArgb().toUInt().toString(16)}")
             assertEquals("dark=$dark primary", dynamic.primary, scheme.primary)
-            assertEquals("dark=$dark background", dynamic.background, scheme.background)
-            assertEquals("dark=$dark surface", dynamic.surface, scheme.surface)
+            assertEquals("dark=$dark onPrimary", dynamic.onPrimary, scheme.onPrimary)
+            val wallpaperContrast = ColorUtils.calculateContrast(dynamic.primary.toArgb(), dynamic.primaryContainer.toArgb())
+            if (wallpaperContrast >= 4.5) {
+                assertEquals("dark=$dark primaryContainer", dynamic.primaryContainer, scheme.primaryContainer)
+                assertEquals("dark=$dark onPrimaryContainer", dynamic.onPrimaryContainer, scheme.onPrimaryContainer)
+            } else {
+                assertEquals("dark=$dark low-contrast wallpaper container", card, scheme.primaryContainer)
+                assertEquals("dark=$dark accessible selection text", dynamic.primary, scheme.onPrimaryContainer)
+            }
+            assertEquals("dark=$dark background", canvas, scheme.background)
+            assertEquals("dark=$dark surface", canvas, scheme.surface)
+            assertEquals("dark=$dark elevated surface", canvas, scheme.surfaceColorAtElevation(6.dp))
+            assertEquals("dark=$dark reading card", card, scheme.surfaceContainerLow)
+            assertEquals("dark=$dark user bubble", bubble, scheme.secondaryContainer)
+            assertEquals("dark=$dark main text", text, scheme.onSurface)
+            assertEquals("dark=$dark bubble text", text, scheme.onSecondaryContainer)
         }
     }
 }

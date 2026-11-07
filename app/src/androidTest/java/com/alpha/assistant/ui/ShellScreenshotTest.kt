@@ -212,6 +212,7 @@ class ShellScreenshotTest {
         for ((section, target, name) in listOf(
             Triple(R.string.settings_deepseek, R.string.key_ready, "deepseek"),
             Triple(R.string.settings_voice, R.string.voice_start, "voice"),
+            Triple(R.string.settings_appearance, R.string.settings_theme, "appearance"),
             Triple(R.string.access, R.string.access_intro, "access"),
             Triple(R.string.memory_title, R.string.memory_empty, "memory"),
             Triple(R.string.update_title, R.string.update_check, "updates"),

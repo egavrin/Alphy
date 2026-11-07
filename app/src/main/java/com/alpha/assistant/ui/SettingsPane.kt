@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -31,6 +32,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -48,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -72,13 +75,14 @@ internal val SettingsDetailWidth = 740.dp
 internal enum class SettingsSection(@StringRes val label: Int, val glyph: Glyph) {
     DeepSeek(R.string.settings_deepseek, Glyph.Cloud),
     Voice(R.string.settings_voice, Glyph.Mic),
+    Appearance(R.string.settings_appearance, Glyph.Screen),
     Access(R.string.access, Glyph.Shield),
     Memory(R.string.memory_title, Glyph.Notebook),
     Updates(R.string.update_title, Glyph.Refresh),
 }
 
 private val settingsGroups = listOf(
-    R.string.settings_group_app to listOf(SettingsSection.DeepSeek, SettingsSection.Voice),
+    R.string.settings_group_app to listOf(SettingsSection.DeepSeek, SettingsSection.Voice, SettingsSection.Appearance),
     R.string.settings_group_data to listOf(SettingsSection.Access, SettingsSection.Memory),
     R.string.settings_group_maintenance to listOf(SettingsSection.Updates),
 )
@@ -132,6 +136,7 @@ private fun SettingsLayout(
                         when (section) {
                             SettingsSection.DeepSeek -> DeepSeekSettings(model)
                             SettingsSection.Voice -> SettingsDetail(section) { SettingsPanel { VoiceControls(model, settingsDisclosure = true) } }
+                            SettingsSection.Appearance -> SettingsDetail(section) { AppearanceSettings() }
                             SettingsSection.Access -> SettingsDetail(section) { AccessSettings(model.tools.networkAccessHost) }
                             SettingsSection.Memory -> MemoryScreen(model.memoryPage, settingsPage = true)
                             SettingsSection.Updates -> SettingsDetail(section) { SettingsPanel { UpdateSettings(model.updates, openUpdateInstaller) } }
@@ -196,6 +201,46 @@ private fun SettingsDetail(
         ) {
             SettingsHeading(section.label, MaterialTheme.typography.headlineMedium)
             content()
+        }
+    }
+}
+
+@Composable
+private fun AppearanceSettings() {
+    val context = LocalContext.current
+    val colors = MaterialTheme.colorScheme
+    var mode by remember(context) { mutableStateOf(AppearanceMode.read(context)) }
+    SettingsPanel {
+        SettingsHeading(R.string.settings_theme)
+        Column(Modifier.selectableGroup()) {
+            AppearanceMode.entries.forEach { option ->
+                val selected = mode == option
+                val label = when (option) {
+                    AppearanceMode.System -> R.string.settings_theme_system
+                    AppearanceMode.Light -> R.string.settings_theme_light
+                    AppearanceMode.Dark -> R.string.settings_theme_dark
+                }
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                        .selectable(selected, role = Role.RadioButton) {
+                            if (!selected) {
+                                option.select(context)
+                                mode = option
+                            }
+                        }.padding(horizontal = 8.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected, onClick = null)
+                    Column {
+                        Text(stringResource(label))
+                        if (option == AppearanceMode.System) {
+                            Text(stringResource(R.string.settings_theme_system_description),
+                                color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
         }
     }
 }

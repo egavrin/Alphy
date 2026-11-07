@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_group_app">Приложение</string>
+    <string name="settings_appearance">Оформление</string>
+    <string name="settings_theme">Тема</string>
+    <string name="settings_theme_system">Как в системе</string>
+    <string name="settings_theme_system_description">По настройкам Android</string>
+    <string name="settings_theme_light">Светлая</string>
+    <string name="settings_theme_dark">Тёмная</string>
     <string name="settings_group_data">Данные и разрешения</string>
     <string name="settings_group_maintenance">Обслуживание</string>
     <string name="settings_deepseek_disclosure">Какие данные получает DeepSeek</string>

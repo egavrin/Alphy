@@ -544,7 +544,8 @@ private fun CourseLessonIndex(slide: CoursePage.Slide) {
         itemsIndexed(course.outline.lessons, key = { _, lesson -> lesson.id }) { index, lesson ->
             val current = index == currentIndex
             Surface(shape = MaterialTheme.shapes.medium,
-                color = if (current) colors.secondaryContainer else colors.surfaceContainerLow) {
+                color = if (current) colors.primaryContainer else colors.surfaceContainerLow,
+                contentColor = if (current) colors.onPrimaryContainer else colors.onSurface) {
                 Column(Modifier.fillMaxWidth().padding(12.dp)) {
                     Text("${index + 1}. ${lesson.title}", style = MaterialTheme.typography.titleSmall)
                     Text(stringResource(when {
@@ -1002,7 +1003,8 @@ private fun CourseExerciseControls(
                     val selected = text == option.id
                     val colors = MaterialTheme.colorScheme
                     Surface(shape = MaterialTheme.shapes.medium,
-                        color = if (selected) colors.secondaryContainer else colors.surface) {
+                        color = if (selected) colors.primaryContainer else colors.surface,
+                        contentColor = if (selected) colors.onPrimaryContainer else colors.onSurface) {
                         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
                             .selectable(selected, enabled = enabled, role = Role.RadioButton) { onText(option.id) }
                             .padding(horizontal = 12.dp),
