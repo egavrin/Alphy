@@ -9,7 +9,7 @@ object AutomationSchedule {
             store.begin(rule,event,now,false)?.let { store.finish(it,"missed","Запуск задержан более чем на 60 минут. Действия не выполнялись.") }
                 ?: store.occurrence(rule.id,event.token)
         } else executor.run(rule.id,rule.revision,event,false,now)
-        store.next(rule.id,rule.revision,null)
+        store.clearDeliveredOccurrence(rule.id, rule.revision, at)
         return result
     }
 }

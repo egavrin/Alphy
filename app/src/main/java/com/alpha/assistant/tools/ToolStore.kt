@@ -264,9 +264,7 @@ class ToolStore private constructor(internal val context: Context, internal val 
         put("tools",toolValues(t))
         if(revision) put("revisions",revisionValues(t,if(t.revision==1) "Создание" else "Изменение",emptyList()))
         if(old!=null && (old.revision!=t.revision || old.archived!=t.archived || old.saved!=t.saved)) {
-            ToolNetworkGrants.invalidateApp(this,t.id)
-            SourceRefresh.stop(this,t.id)
-            RecurringSearch.stop(this,t.id)
+            invalidateAppSchedulesAndGrants(t.id)
         }
     }
     /** SQLite tokens protect writes across foreground and widget engine instances. */
@@ -308,9 +306,7 @@ class ToolStore private constructor(internal val context: Context, internal val 
             else deleteDraft(draft.id)
         }
         if(old!=null && (old.revision!=t.revision || old.saved!=t.saved)) {
-            ToolNetworkGrants.invalidateApp(this,t.id)
-            SourceRefresh.stop(this,t.id)
-            RecurringSearch.stop(this,t.id)
+            invalidateAppSchedulesAndGrants(t.id)
         }
     }
     fun effects(owner: String): List<CapabilityEffect> = readableDatabase.rawQuery(
@@ -628,6 +624,12 @@ class ToolStore private constructor(internal val context: Context, internal val 
     }
     fun deleteResource(id: String) { writableDatabase.delete("capability_resources","resource_id=?",arrayOf(id)) }
     fun transferResourceGrant(id: String) { writableDatabase.update("capability_resources",ContentValues().apply { put("owns_grant",1) },"resource_id=?",arrayOf(id)) }
+    private fun invalidateAppSchedulesAndGrants(owner: String) {
+        ToolNetworkGrants.invalidateApp(this, owner)
+        SourceRefresh.stop(this, owner)
+        RecurringSearch.stop(this, owner)
+    }
+
     private val ownedTables = listOf(
         "revisions" to "tool_id=?", "drafts" to "(tool_id=? OR (tool_id IS NULL AND id=?))",
         "capability_grants" to "owner=?", "capability_effects" to "owner=?", "capability_deliveries" to "owner=?",
@@ -644,9 +646,7 @@ class ToolStore private constructor(internal val context: Context, internal val 
     internal fun isDeleted(owner: String) = readableDatabase.rawQuery("SELECT 1 FROM deleted_tools WHERE id=?",arrayOf(owner)).use { it.moveToFirst() }
     internal fun beginDeletion(snapshot: ToolDeletionSnapshot) {
         val owner=snapshot.tool.id
-        ToolNetworkGrants.invalidateApp(this,owner)
-        SourceRefresh.stop(this,owner)
-        RecurringSearch.stop(this,owner)
+        invalidateAppSchedulesAndGrants(owner)
         writableDatabase.delete("live_sources","owner=?",arrayOf(owner))
         writableDatabase.insertOrThrow("deleted_tools",null,ContentValues().apply {
             put("id",owner);put("cleanup_pending",1);put("widget_ids",JSONArray(snapshot.widgetIds.toList()).toString())
@@ -684,9 +684,7 @@ class ToolStore private constructor(internal val context: Context, internal val 
             arrayOf(expected.id,expected.revision.toString(),expected.stateVersion.toString(),if(expected.archived) "1" else "0")) == 1) {
             "Инструмент изменился. Открой текущую версию."
         }
-        ToolNetworkGrants.invalidateApp(this,expected.id)
-        SourceRefresh.stop(this,expected.id)
-        RecurringSearch.stop(this,expected.id)
+        invalidateAppSchedulesAndGrants(expected.id)
         if(archived) NavigationLedger(this).revoke(expected.id)
         if(archived) ToolRecords(this).pending(expected.id)?.let { ToolRecords(this).reject(it) }
         if(archived) effects(expected.id).filter {it.phase != "terminal"}.forEach {

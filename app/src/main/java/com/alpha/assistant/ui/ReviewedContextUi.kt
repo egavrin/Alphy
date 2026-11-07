@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.OpenableColumns
-import androidx.activity.compose.BackHandler
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -20,13 +19,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
-import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
-import androidx.navigationevent.findViewTreeNavigationEventDispatcherOwner
 import com.alpha.assistant.R
 import com.alpha.assistant.capabilities.AndroidPermissionControl
 import com.alpha.assistant.data.Attachment
@@ -190,16 +186,7 @@ import java.io.InputStreamReader
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = ::close, sheetState = sheet,
         properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false)) {
-        // System Back goes to the sheet window, which has its own dispatcher.
-        val dialogOwner = checkNotNull(LocalView.current.findViewTreeNavigationEventDispatcherOwner())
-        CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides dialogOwner) {
-            BackHandler {
-                if (!cameraPending && !model.attachmentBusy) scope.launch {
-                    sheet.hide()
-                    if (!sheet.isVisible) close()
-                }
-            }
-        }
+        SheetBackHandler(sheet, scope, canClose = { !cameraPending && !model.attachmentBusy }, close = ::close)
         Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (page != "sources") {

@@ -197,7 +197,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         instructions: String = ""): String {
         val output = StringBuilder()
         fun tooLarge() = CloudFailure("widget_response_size", "The generator response exceeds the allowed size. Request a smaller tool.")
-        currentCoroutineContext().ensureActive(); session.check()
+        session.checkActive(currentCoroutineContext())
         try {
             provider.respond(key, CloudRequest(turns, false, systemInstructions = instructions, jsonObject = true,
                 generationStage = stage), session) { event ->
@@ -207,11 +207,11 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                 }
             }
         } catch (failure: java.io.IOException) {
-            currentCoroutineContext().ensureActive(); session.check()
+            session.checkActive(currentCoroutineContext())
             if (failure is CloudFailure) throw failure
             throw CloudFailure("widget_generation", "The tool generation connection failed. Retry the request.")
         }
-        currentCoroutineContext().ensureActive(); session.check()
+        session.checkActive(currentCoroutineContext())
         return output.toString().also { if (it.toByteArray(Charsets.UTF_8).size > SandboxContract.MAX_BYTES) throw tooLarge() }
     }
 
@@ -396,7 +396,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             var selectorCancellationReported = false
             val selected = try {
                 trace.timed(attemptNumber, ToolGenerationStage.ASSEMBLY) {
-                    currentCoroutineContext().ensureActive(); session.check()
+                    session.checkActive(currentCoroutineContext())
                     PartsGeneration.build(plan,lessonTarget,selectPresentation=lessonTarget==null,
                         clock=if(lessonTarget==null) samplePartClock() else null) { body ->
                         val batch = JSONObject(body).getString("stage")
@@ -426,7 +426,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                                 CloudFailure("widget_selector", "Part selection returned an invalid response."),
                                 disposition = ToolGenerationDisposition.CONTINUE, trace = trace)
                         }
-                        currentCoroutineContext().ensureActive(); session.check()
+                        session.checkActive(currentCoroutineContext())
                         if(lessonTarget!=null) result.requireComplete()
                     }
                 }
@@ -551,7 +551,7 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
             var stage=if (partsOnly) ToolGenerationStage.DEFINITION else ToolGenerationStage.PROVIDER
             var smoke: ToolSmokeFailure?=null
             try {
-                currentCoroutineContext().ensureActive(); session.check()
+                session.checkActive(currentCoroutineContext())
                 val raw = if (partsOnly) null else {
                     val turns = listOf(original) + if (correction == null) emptyList() else
                         listOfNotNull(rejectedCandidate?.let { CloudTurn("assistant", it) }, CloudTurn("user", correction))
@@ -611,7 +611,7 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
                         (if(previous == null) spec.initialState else ToolSpec.stateForRevision(previous,spec,checkNotNull(base).state)).also(spec::validateState)
                     }
                 }
-                currentCoroutineContext().ensureActive(); session.check()
+                session.checkActive(currentCoroutineContext())
                 stage=ToolGenerationStage.SMOKE
                 val onInitialPreview: (suspend (ToolPreview) -> Unit)? =
                     if(sceneHoles>0 || draftPreview!=null) { initial ->
@@ -625,7 +625,7 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
                         if(drawn>0 && draftPreview!=null) draftPreview.publish(attemptNumber,initial,checkNotNull(surfaces).toString())
                     } else null
                 val checker = ToolGenerationSmoke(sandbox,spec,artifactId,(base?.revision ?: 0)+1,state,
-                    checkActive={currentCoroutineContext().ensureActive();session.check()},
+                    checkActive={session.checkActive(currentCoroutineContext())},
                     generation=this@ToolGenerationService,policy=policy,onInitialPreview=onInitialPreview,
                     checkUi=if (languageCheck == null) null else { ui -> checkLanguage(JSONObject(ui)) })
                 val preview = try {
@@ -668,7 +668,7 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
                         throw InvalidGeneratedOutput(problem)
                     }
                     catch(_: Exception) { throw GenerationProblem.RESULT.failure() }
-                currentCoroutineContext().ensureActive(); session.check()
+                session.checkActive(currentCoroutineContext())
                 observeAttempt(attemptNumber, stage, trace = trace,
                     uncheckedBehavior = (behavior as? GenerationBehavior.Unchecked)?.reason)
                 return preview
@@ -859,9 +859,9 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
                 privateState = base?.let { store.privateResults(it.id) } == true, progress = progress, draftPreview = draftPreview,
                 trace = trace?.takeIf { it.operationId.toString() == draftId }, appLanguage = draft.appLanguage,
                 originalRequest = originalRequest ?: draft.prompt)
-            currentCoroutineContext().ensureActive(); session.check()
+            session.checkActive(currentCoroutineContext())
             return mutex.withLock {
-                currentCoroutineContext().ensureActive(); session.check()
+                session.checkActive(currentCoroutineContext())
                 val next = draft.copy(candidate = preview.spec.json, previewState = preview.state, previewUi = preview.ui)
                 store.transaction {
                     check(store.draft(draftId) == draft) { "Черновик изменился" }

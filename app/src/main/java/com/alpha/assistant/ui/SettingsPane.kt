@@ -290,8 +290,14 @@ private fun DeepSeekSettings(model: ShellViewModel) {
             model.keyFailure?.let { StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(it), PoliteLiveRegion) }
         }
     }
-    if (confirmDelete) AlertDialog(properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn), onDismissRequest = { confirmDelete = false }, title = { Text(stringResource(R.string.key_delete_title)) },
+    val dismissDelete = { confirmDelete = false }
+    if (confirmDelete) AlertDialog(properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn), onDismissRequest = dismissDelete, title = { Text(stringResource(R.string.key_delete_title)) },
         text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(stringResource(R.string.key_delete_text)) } },
-        confirmButton = { TextButton(onClick = { model.clearKey(); confirmDelete = false }) { Text(stringResource(R.string.delete)) } },
-        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.cancel)) } })
+        confirmButton = {
+            TextButton(onClick = {
+                model.clearKey()
+                dismissDelete()
+            }) { Text(stringResource(R.string.delete)) }
+        },
+        dismissButton = { TextButton(onClick = dismissDelete) { Text(stringResource(R.string.cancel)) } })
 }

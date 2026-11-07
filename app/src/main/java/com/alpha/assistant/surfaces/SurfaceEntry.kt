@@ -114,8 +114,7 @@ class PinResultReceiver : BroadcastReceiver() {
         if(uri.scheme != "alpha-pin" || uri.authority != "result") return
         val token = uri.lastPathSegment ?: return
         val library=runCatching {ToolLibraryStorage.production(context)}.getOrNull() ?: return
-        if((intent.getStringExtra(ToolLibraryStorage.GENERATION_EXTRA) ?:
-                ToolLibraryStorage.ORIGINAL)!=library.generation) return
+        if(ToolLibraryStorage.intentGeneration(intent)!=library.generation) return
         val prefs=context.getSharedPreferences(ToolWidgets.libraryPreferences("alpha-pin-requests",library.generation),Context.MODE_PRIVATE)
         if(!prefs.getBoolean("$token-pending",false)) {
             val owner=intent.getStringExtra("owner") ?: return

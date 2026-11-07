@@ -106,6 +106,12 @@ class AutomationStore(private val context: Context, name: String = ToolLibrarySt
         writableDatabase.update("rules",ContentValues().apply { if(at==null) putNull("next_at") else put("next_at",at) },
             "id=? AND revision=? AND enabled=1 AND approved=revision AND attention=''",arrayOf(id,revision.toString()))
     }
+
+    internal fun clearDeliveredOccurrence(id: String, revision: Int, due: Long) {
+        writableDatabase.update("rules", ContentValues().apply { putNull("next_at") },
+            "id=? AND revision=? AND enabled=1 AND approved=revision AND attention='' AND next_at=?",
+            arrayOf(id, revision.toString(), due.toString()))
+    }
     fun history(id: String): List<AutomationRun> = readableDatabase.rawQuery("SELECT * FROM runs WHERE rule_id=? ORDER BY time DESC,rowid DESC",arrayOf(id)).use { c ->
         buildList { while(c.moveToNext()) add(c.runRecord()) }
     }

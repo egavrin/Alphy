@@ -602,7 +602,7 @@ object AutomationRuntime {
     }
     fun alarmReceived(context: Context, intent: Intent, done: () -> Unit) {
         launch(context,done) { store ->
-            if((intent.getStringExtra(ToolLibraryStorage.GENERATION_EXTRA) ?: ToolLibraryStorage.ORIGINAL)!=rulesGeneration(context,store)) return@launch
+            if(ToolLibraryStorage.intentGeneration(intent)!=rulesGeneration(context,store)) return@launch
             val rule = intent.getStringExtra("id")?.let(store::rule) ?: return@launch
             val at = intent.getLongExtra("at",0)
             if(rule.revision != intent.getIntExtra("revision",-1)) return@launch
@@ -675,7 +675,7 @@ object AutomationRuntime {
     }
     fun geofence(context: Context, intent: Intent, done: () -> Unit) = launch(context,done) { store ->
             val generation=rulesGeneration(context,store)
-            if((intent.getStringExtra(ToolLibraryStorage.GENERATION_EXTRA) ?: ToolLibraryStorage.ORIGINAL)!=generation) return@launch
+            if(ToolLibraryStorage.intentGeneration(intent)!=generation) return@launch
             val event = GeofencingEvent.fromIntent(intent) ?: return@launch
             if(event.hasError()) {
                 store.setState("geofences","!unregistered")

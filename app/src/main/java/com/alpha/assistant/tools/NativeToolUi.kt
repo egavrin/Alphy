@@ -1726,8 +1726,9 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
         val narrowWindow = configuration.screenWidthDp in 1..399
         val initialStart = LocalDate.parse(dates.getString(0)).toEpochDay() * 86400000
         val initialEnd = LocalDate.parse(dates.getString(1)).toEpochDay() * 86400000
+        val dismiss = { open = false }
         val cancel: @Composable () -> Unit = {
-            TextButton(onClick = { open = false }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.cancel)) }
+            TextButton(onClick = dismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.cancel)) }
         }
         val apply: @Composable (Long?, Long?) -> Unit = { start, end ->
             val valid = start != null && end != null && start <= end
@@ -1738,7 +1739,7 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
                             .put(LocalDate.ofEpochDay(Math.floorDiv(start, 86400000L)).toString())
                             .put(LocalDate.ofEpochDay(Math.floorDiv(end, 86400000L)).toString())
                         event(node.getString("action"), range)
-                        open = false
+                        dismiss()
                     }
                 },
                 enabled = valid,
@@ -1750,7 +1751,7 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
             val end = rememberDatePickerState(initialSelectedDateMillis = initialEnd, yearRange = 1..9999, initialDisplayMode = DisplayMode.Input)
             val startDate = start.selectedDateMillis
             val endDate = end.selectedDateMillis
-            DateRangeInputDialog(text, { open = false }, cancel, { apply(startDate, endDate) }) {
+            DateRangeInputDialog(text, dismiss, cancel, { apply(startDate, endDate) }) {
                 val rangeError: @Composable () -> Unit = {
                     if (startDate != null && endDate != null && startDate > endDate) Text(
                         stringResource(R.string.tool_date_range_invalid), Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
@@ -1784,7 +1785,7 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
                 yearRange = 1..9999,
             )
             val confirm: @Composable () -> Unit = { apply(picker.selectedStartDateMillis, picker.selectedEndDateMillis) }
-            androidx.compose.material3.DatePickerDialog(onDismissRequest = { open = false }, confirmButton = confirm, dismissButton = cancel) {
+            androidx.compose.material3.DatePickerDialog(onDismissRequest = dismiss, confirmButton = confirm, dismissButton = cancel) {
                 DateRangePicker(picker, modifier = Modifier.heightIn(max = 500.dp), title = { Text(text, Modifier.padding(16.dp)) })
             }
         }

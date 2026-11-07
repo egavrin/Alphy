@@ -4,18 +4,12 @@ import android.content.Context
 import android.content.res.AssetFileDescriptor
 import com.alpha.assistant.media.DeviceMediaPlayback
 import com.alpha.assistant.media.MediaPlaybackResult
+import com.alpha.assistant.media.playWhileCurrent
 import com.alpha.assistant.tools.ArtifactCoordinator
 import com.alpha.assistant.tools.ToolStore
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
@@ -56,7 +50,7 @@ internal class AudioCapabilities(context: Context, private val store: ToolStore,
 
         val media = playback()
         try {
-            val result = whileCurrent(::current) {
+            val result = playWhileCurrent(store.changes, ::current) {
                 if (selected == null) media.playTone(AudioContract.tones.getValue(request.args.getString("tone")),
                     request.args.getInt("durationMillis"), ::authorizeStart)
                 else {
@@ -81,16 +75,5 @@ internal class AudioCapabilities(context: Context, private val store: ToolStore,
           catch (_: java.io.IOException) { AudioContract.unavailable() }
           catch (_: IllegalArgumentException) { AudioContract.unavailable() }
         finally { withContext(NonCancellable + Dispatchers.Main.immediate) { media.close() } }
-    }
-
-    private suspend fun <T> whileCurrent(current: () -> Boolean, play: suspend () -> T): T? = coroutineScope {
-        val operation = async(start = CoroutineStart.LAZY) { play() }
-        val watch = launch(start = CoroutineStart.UNDISPATCHED) {
-            store.changes.first { !runCatching(current).getOrDefault(false) }
-            operation.cancel()
-        }
-        try { operation.await() }
-        catch (_: CancellationException) { currentCoroutineContext().ensureActive(); null }
-        finally { watch.cancel() }
     }
 }

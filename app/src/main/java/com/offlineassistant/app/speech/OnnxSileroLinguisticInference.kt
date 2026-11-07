@@ -3,8 +3,6 @@ package com.offlineassistant.app.speech
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
-import java.nio.FloatBuffer
-import java.nio.LongBuffer
 
 class OnnxSileroLinguisticInference(
     private val bundle: SileroFrontendBundle,
@@ -24,8 +22,8 @@ class OnnxSileroLinguisticInference(
         try {
             val shape = longArrayOf(batch.rowCount.toLong(), batch.columnCount.toLong())
             val inputs = mapOf(
-                "ngram_ids" to batch.ids.tensor(shape, tensors),
-                "ngram_mask" to batch.mask.tensor(shape, tensors)
+                "ngram_ids" to batch.ids.tensor(environment, shape, tensors),
+                "ngram_mask" to batch.mask.tensor(environment, shape, tensors)
             )
             return sessions().accentor.run(inputs).use { result ->
                 val stress = result.floatOutput("stress_logits")
@@ -45,11 +43,12 @@ class OnnxSileroLinguisticInference(
         try {
             val inputs = mapOf(
                 "input_ids" to batch.inputIds.tensor(
+                    environment,
                     longArrayOf(batch.rowCount.toLong(), batch.columnCount.toLong()),
                     tensors
                 ),
-                "homo_start_ids" to batch.starts.tensor(longArrayOf(batch.rowCount.toLong()), tensors),
-                "homo_end_ids" to batch.ends.tensor(longArrayOf(batch.rowCount.toLong()), tensors)
+                "homo_start_ids" to batch.starts.tensor(environment, longArrayOf(batch.rowCount.toLong()), tensors),
+                "homo_end_ids" to batch.ends.tensor(environment, longArrayOf(batch.rowCount.toLong()), tensors)
             )
             return sessions().homosolver.run(inputs).use { result ->
                 result.floatOutput("logits").also { logits ->
@@ -81,16 +80,6 @@ class OnnxSileroLinguisticInference(
                 options = options
             ).also { sessions = it }
         }
-    }
-
-    private fun LongArray.tensor(shape: LongArray, owner: MutableList<OnnxTensor>): OnnxTensor = OnnxTensor.createTensor(environment, LongBuffer.wrap(this), shape).also(owner::add)
-
-    private fun FloatArray.tensor(shape: LongArray, owner: MutableList<OnnxTensor>): OnnxTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(this), shape).also(owner::add)
-
-    private fun OrtSession.Result.floatOutput(name: String): FloatArray {
-        val tensor = get(name).orElseThrow { IllegalStateException("Missing Silero output: $name") } as OnnxTensor
-        val buffer = tensor.floatBuffer
-        return FloatArray(buffer.remaining()).also(buffer::get)
     }
 
     private data class Sessions(

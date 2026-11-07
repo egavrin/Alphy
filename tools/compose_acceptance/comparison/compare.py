@@ -610,15 +610,20 @@ def load_final_plan(args):
     return plan
 
 
-def audit(args):
-    plan = load_final_plan(args)
+def audit_inputs(args, plan, products):
     slots = {slot["id"]: slot for slot in plan["slots"]}
     cases = {case["id"]: case for case in plan["cases"]}
     require(len(cases) == len(plan["cases"]), "Duplicate case ID.")
     directory = args.evidence_dir.resolve()
     require(directory.is_dir(), "The evidence directory does not exist.")
-    products = plan["execution"]["products"]
     captures, invalid_captures = read_captures(args.capture_dir, directory, slots, products, args.plan_sha256)
+    return slots, cases, directory, captures, invalid_captures
+
+
+def audit(args):
+    plan = load_final_plan(args)
+    products = plan["execution"]["products"]
+    slots, cases, directory, captures, invalid_captures = audit_inputs(args, plan, products)
     accepted = {}
     seen_slots = set()
     identities = set()
@@ -748,12 +753,7 @@ def audit_functional(args):
     products = plan["execution"]["products"]
     require(products["candidate"]["route"] == ANDROID_ROUTE and products["reference"]["route"] == HOST_ROUTE,
             "Functional audit requires Android chat and the reference host runtime.")
-    slots = {slot["id"]: slot for slot in plan["slots"]}
-    cases = {case["id"]: case for case in plan["cases"]}
-    require(len(cases) == len(plan["cases"]), "Duplicate case ID.")
-    directory = args.evidence_dir.resolve()
-    require(directory.is_dir(), "The evidence directory does not exist.")
-    captures, invalid_captures = read_captures(args.capture_dir, directory, slots, products, args.plan_sha256)
+    slots, cases, directory, captures, invalid_captures = audit_inputs(args, plan, products)
     seen, state_ids, invalid, complete = set(), set(), [], {}
     groups = defaultdict(Counter)
     coverage = set()

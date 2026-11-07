@@ -383,7 +383,7 @@ internal object MedicineRuntime {
         catch(_: SecurityException) {store.state(owner,key,"permissionUnavailable",null);platform.cancel(r)}
     }
     fun deliver(context: Context,tools: ToolStore,store: MedicineStore,intent: Intent,now: Long=System.currentTimeMillis(),platform: MedicinePlatform=android(context,tools.library.generation)) {
-        if((intent.getStringExtra(ToolLibraryStorage.GENERATION_EXTRA) ?: ToolLibraryStorage.ORIGINAL)!=tools.library.generation) return
+        if(ToolLibraryStorage.intentGeneration(intent)!=tools.library.generation) return
         val r=store.reminders().find {it.getString("owner")==intent.getStringExtra("owner") && it.getString("reminderKey")==intent.getStringExtra("key")} ?: return
         if(r.getString("status")!="scheduled" || r.isNull("nextAt") || r.getLong("nextAt")!=intent.getLongExtra("at",-1)) return
         val at=r.getLong("nextAt");if(now<at)return
@@ -425,7 +425,7 @@ class MedicineReportActivity: AlphyActivity() {
         val token=intent.getStringExtra("token") ?: return finish()
         val database=intent.getStringExtra("toolsDatabase") ?: return finish()
         fun snapshot(): String?=runCatching {ToolStore(this,database).use {tools ->
-            if((intent.getStringExtra(ToolLibraryStorage.GENERATION_EXTRA) ?: ToolLibraryStorage.ORIGINAL)!=tools.library.generation) return null
+            if(ToolLibraryStorage.intentGeneration(intent)!=tools.library.generation) return null
             MedicineStore(this,MedicineRuntime.database(tools)).use {store ->
             store.readableDatabase.rawQuery("SELECT owner,body,expires FROM reports WHERE token=?",arrayOf(token)).use {c ->
                 if(!c.moveToFirst() || c.getLong(2)<System.currentTimeMillis()) return@use null

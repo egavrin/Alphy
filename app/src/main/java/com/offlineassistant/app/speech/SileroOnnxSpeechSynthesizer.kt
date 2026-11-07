@@ -10,8 +10,6 @@ import com.offlineassistant.app.models.NoOpModelRuntimeTelemetryStore
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.nio.FloatBuffer
-import java.nio.LongBuffer
 import java.util.concurrent.atomic.AtomicLong
 
 data class SileroSynthesisInput(
@@ -188,14 +186,15 @@ class OnnxSileroAcousticInference(
         val pitch: FloatArray
         try {
             val values = mapOf(
-                "sequence" to input.sequence.tensor(longArrayOf(1, tokenCount.toLong()), predictorInputs),
-                "speaker_ids" to longArrayOf(XeniaSpeakerId).tensor(longArrayOf(1), predictorInputs),
-                "duration_rate" to input.durationRate.tensor(longArrayOf(1, tokenCount.toLong()), predictorInputs),
+                "sequence" to input.sequence.tensor(environment, longArrayOf(1, tokenCount.toLong()), predictorInputs),
+                "speaker_ids" to longArrayOf(XeniaSpeakerId).tensor(environment, longArrayOf(1), predictorInputs),
+                "duration_rate" to input.durationRate.tensor(environment, longArrayOf(1, tokenCount.toLong()), predictorInputs),
                 "pitch_coefficients" to input.pitchCoefficients.tensor(
+                    environment,
                     longArrayOf(1, tokenCount.toLong()),
                     predictorInputs
                 ),
-                "type_ids" to input.typeIds.tensor(longArrayOf(1, tokenCount.toLong()), predictorInputs)
+                "type_ids" to input.typeIds.tensor(environment, longArrayOf(1, tokenCount.toLong()), predictorInputs)
             )
             activeSessions.predictors.run(values).use { result ->
                 duration = result.floatOutput("duration")
@@ -219,10 +218,11 @@ class OnnxSileroAcousticInference(
         val acousticInputs = mutableListOf<OnnxTensor>()
         try {
             val values = mapOf(
-                "sequence" to input.sequence.tensor(longArrayOf(1, tokenCount.toLong()), acousticInputs),
-                "speaker_ids" to longArrayOf(XeniaSpeakerId).tensor(longArrayOf(1), acousticInputs),
-                "pitch" to pitch.tensor(longArrayOf(1, 1, tokenCount.toLong()), acousticInputs),
+                "sequence" to input.sequence.tensor(environment, longArrayOf(1, tokenCount.toLong()), acousticInputs),
+                "speaker_ids" to longArrayOf(XeniaSpeakerId).tensor(environment, longArrayOf(1), acousticInputs),
+                "pitch" to pitch.tensor(environment, longArrayOf(1, 1, tokenCount.toLong()), acousticInputs),
                 "alignment" to alignment.tensor(
+                    environment,
                     longArrayOf(1, tokenCount.toLong(), frameCount.toLong()),
                     acousticInputs
                 )
@@ -264,16 +264,6 @@ class OnnxSileroAcousticInference(
                 options = options
             ).also { sessions = it }
         }
-    }
-
-    private fun LongArray.tensor(shape: LongArray, owner: MutableList<OnnxTensor>): OnnxTensor = OnnxTensor.createTensor(environment, LongBuffer.wrap(this), shape).also(owner::add)
-
-    private fun FloatArray.tensor(shape: LongArray, owner: MutableList<OnnxTensor>): OnnxTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(this), shape).also(owner::add)
-
-    private fun OrtSession.Result.floatOutput(name: String): FloatArray {
-        val tensor = get(name).orElseThrow { IllegalStateException("Missing Silero output: $name") } as OnnxTensor
-        val buffer = tensor.floatBuffer
-        return FloatArray(buffer.remaining()).also { buffer.get(it) }
     }
 
     private data class Sessions(

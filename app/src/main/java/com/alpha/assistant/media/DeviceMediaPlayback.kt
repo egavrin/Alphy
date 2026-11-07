@@ -11,7 +11,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -39,6 +43,26 @@ enum class MediaPlaybackResult {
     LIMIT_EXCEEDED,
     TIMED_OUT,
     PLAYBACK_FAILED,
+}
+
+internal suspend fun playWhileCurrent(
+    changes: Flow<*>,
+    current: () -> Boolean,
+    play: suspend () -> MediaPlaybackResult,
+): MediaPlaybackResult? = coroutineScope {
+    val operation = async(start = CoroutineStart.LAZY) { play() }
+    val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
+        changes.first { !runCatching(current).getOrDefault(false) }
+        operation.cancel()
+    }
+    try {
+        operation.await()
+    } catch (_: CancellationException) {
+        currentCoroutineContext().ensureActive()
+        null
+    } finally {
+        watcher.cancel()
+    }
 }
 
 /** Owns one playback operation for a foreground host. The host closes it when that authority ends. */

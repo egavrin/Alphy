@@ -40,8 +40,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
-import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
-import androidx.navigationevent.findViewTreeNavigationEventDispatcherOwner
 import com.alpha.assistant.R
 import com.alpha.assistant.capabilities.DeviceReadHost
 import com.alpha.assistant.capabilities.ForegroundCapabilityEffects
@@ -54,6 +52,7 @@ import com.alpha.assistant.tools.generation.NativePresentation
 import com.alpha.assistant.tools.generation.PartClockSample
 import com.alpha.assistant.ui.AlphaIcon
 import com.alpha.assistant.ui.Glyph
+import com.alpha.assistant.ui.SheetBackHandler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.awaitClose
@@ -645,16 +644,7 @@ catch (_: Exception) { null }
             ModalBottomSheet(onDismissRequest={if(mayCloseControls()) appControls=false}, sheetState=sheet,
                 sheetGesturesEnabled = !liveInputUnfinished,
                 properties=ModalBottomSheetProperties(shouldDismissOnBackPress=false)) {
-                // The sheet inherits the shell's dispatcher, but system Back goes to the dialog window.
-                val dialogOwner = checkNotNull(LocalView.current.findViewTreeNavigationEventDispatcherOwner())
-                CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides dialogOwner) {
-                    BackHandler {
-                        if (mayCloseControls()) scope.launch {
-                            sheet.hide()
-                            if (!sheet.isVisible) appControls = false
-                        }
-                    }
-                }
+                SheetBackHandler(sheet, scope, canClose = ::mayCloseControls) { appControls = false }
                 Column(Modifier.fillMaxWidth().heightIn(max=600.dp).verticalScroll(rememberScrollState()).padding(16.dp)) {
                     if (finishInputNotice) Text(stringResource(R.string.tool_live_input_finish_first))
                     if (priorUnsavedNotice) Text(stringResource(R.string.tool_live_input_unsaved))
@@ -693,16 +683,7 @@ catch (_: Exception) { null }
             containerColor = MaterialTheme.colorScheme.surface,
             properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false),
         ) {
-            // Android Back is sent to the sheet window, which has its own dispatcher.
-            val dialogOwner = checkNotNull(LocalView.current.findViewTreeNavigationEventDispatcherOwner())
-            CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides dialogOwner) {
-                BackHandler {
-                    scope.launch {
-                        sheet.hide()
-                        if (!sheet.isVisible) dismiss()
-                    }
-                }
-            }
+            SheetBackHandler(sheet, scope, close = dismiss)
             Column(Modifier.fillMaxWidth().heightIn(max = sheetHeight)
                 .padding(start = 20.dp, end = 20.dp, bottom = 16.dp)) {
                 Text(optionsLabel, Modifier.padding(bottom = 12.dp).semantics { heading() },

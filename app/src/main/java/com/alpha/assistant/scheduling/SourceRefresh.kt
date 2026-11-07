@@ -39,6 +39,10 @@ internal data class SourceStatus(val offer: SourceOffer, val sample: JSONObject?
 internal data class SourceRefreshRun(val offer: SourceOffer, val token: String)
 internal data class ScheduledTicket(val delivery: ScheduleDelivery, val slot: Int, val turn: Int, val due: Long) {
     val jobId get() = Math.addExact(Math.multiplyExact(slot, 2), turn)
+    val nextTurn get() = 1 - turn
+
+    fun nextDue(now: Long, interval: Long): Long =
+        if (now < due) due else due + ((now - due) / interval + 1) * interval
 }
 
 /** The selected tool database owns the approval, refresh cache, and durable occurrence claim. */
@@ -102,12 +106,10 @@ internal class SourceRefresh(private val store: ToolStore, private val clock: ()
             return@inTransaction null
         }
         if (current != finished) return@inTransaction current
-        val now = clock()
-        val next = if (now < current.due) current.due
-            else current.due + ((now - current.due) / INTERVAL + 1) * INTERVAL
+        val next = current.nextDue(clock(), INTERVAL)
         db.update("source_schedules", ContentValues().apply {
             put("due", next)
-            put("turn", 1 - current.turn)
+            put("turn", current.nextTurn)
             if (next != current.due) put("claimed", 0)
         }, "owner=?", arrayOf(owner))
         ticket(owner)

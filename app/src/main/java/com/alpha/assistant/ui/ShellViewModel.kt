@@ -605,13 +605,17 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         weatherVisibilityChanged(false, owner)
         if(!weatherForeground && active?.weatherDraft != null) cancelRequest()
     }
+    private fun ensureWeatherRequestCurrent(request: Active) {
+        if (!isActive(request) || snapshot.selectedId != request.conversationId || snapshot.draft != request.originDraft) {
+            if (isActive(request)) cancelRequest()
+            throw CancellationException()
+        }
+    }
+
     private suspend fun resolveWeatherPlace(request: Active, userText: String): WeatherPlace {
         withContext(Dispatchers.Main) {
             currentCoroutineContext().ensureActive()
-            if(!isActive(request) || snapshot.selectedId != request.conversationId || snapshot.draft != request.originDraft) {
-                if(isActive(request)) cancelRequest()
-                throw CancellationException()
-            }
+            ensureWeatherRequestCurrent(request)
             if(!weatherForeground) throw CloudFailure("weather_location", "Откройте Alphy для определения примерной геопозиции или укажите город для прогноза.")
             if(!WeatherRequest.canLocate(userText)) throw CloudFailure("weather_location", WeatherRequest.MANUAL_CITY)
             request.weatherDraft = snapshot.draft
@@ -637,10 +641,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
             val place = weatherLocator.locate()
             withContext(Dispatchers.Main) {
                 currentCoroutineContext().ensureActive()
-                if(!isActive(request) || snapshot.selectedId != request.conversationId || snapshot.draft != request.originDraft) {
-                    if(isActive(request)) cancelRequest()
-                    throw CancellationException()
-                }
+                ensureWeatherRequestCurrent(request)
                 if(!weatherForeground) throw CloudFailure("weather_location", "Откройте Alphy для определения примерной геопозиции или укажите город для прогноза.")
             }
             if(!place.isFresh()) throw CloudFailure("weather_location", WeatherRequest.MANUAL_CITY)

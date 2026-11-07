@@ -22,11 +22,14 @@ object ToolWidgets {
     private const val ACTION = "com.alpha.assistant.WIDGET_ACTION"
     internal const val REFRESH = "com.alpha.assistant.WIDGET_REFRESH"
     internal val refreshes = MutableStateFlow(0L)
-    internal fun settings(context: Context) = context.getSharedPreferences(
-        libraryPreferences("alpha-widgets",ToolLibraryStorage.current(context).generation),Context.MODE_PRIVATE)
+    internal fun settings(context: Context) = settings(context, ToolLibraryStorage.current(context).generation)
+    private fun settings(context: Context, generation: String) = context.getSharedPreferences(
+        libraryPreferences("alpha-widgets",generation),Context.MODE_PRIVATE)
     internal fun libraryPreferences(prefix: String,generation: String)=if(generation==ToolLibraryStorage.ORIGINAL) prefix else "$prefix-$generation"
     internal fun shortcutId(owner: String,generation: String)=libraryPreferences("tool",generation)+"-$owner"
-    fun preferences(context: Context, id: Int) = WidgetPreferences(settings(context).getString("$id-format","adaptive") ?: "adaptive",settings(context).getBoolean("$id-details",true))
+    fun preferences(context: Context, id: Int) = settings(context).widgetPreferences(id)
+    private fun SharedPreferences.widgetPreferences(id: Int) =
+        WidgetPreferences(getString("$id-format","adaptive") ?: "adaptive",getBoolean("$id-details",true))
     fun toolId(context: Context, id: Int) = settings(context).getString("$id-tool",null)
     private val bindingLock=Any()
     internal fun <T> withBindings(block: ()->T): T = synchronized(bindingLock,block)
@@ -34,13 +37,44 @@ object ToolWidgets {
         .mapNotNull { (key,value) -> if(value==owner && key.endsWith("-tool")) key.removeSuffix("-tool").toIntOrNull() else null }.toSet()
     fun deleted(context: Context,id: Int) = settings(context).getBoolean("$id-deleted",false)
     fun bind(context: Context, id: Int, tool: String, prefs: WidgetPreferences, store: ToolStore? = null) = withBindings {
+        requireBinding(id, tool, prefs, store)
+        check(settings(context).edit().putBinding(id, tool, prefs).commit()) { "Widget settings could not be saved" }
+    }
+    private fun requireBinding(id: Int, tool: String, prefs: WidgetPreferences, store: ToolStore?) {
         require(id != AppWidgetManager.INVALID_APPWIDGET_ID && prefs.format in listOf("adaptive","compact","wide"))
         if(store!=null) check(store.tool(tool)?.let { it.saved && !it.archived } == true) { "The mini-app is unavailable." }
-        check(settings(context).edit().putString("$id-tool",tool).putString("$id-format",prefs.format).putBoolean("$id-details",prefs.details)
-            .remove("$id-deleted").commit()) { "Widget settings could not be saved" }
     }
+    private fun SharedPreferences.Editor.putBinding(id: Int, tool: String, prefs: WidgetPreferences) =
+        putString("$id-tool",tool).putString("$id-format",prefs.format).putBoolean("$id-details",prefs.details).remove("$id-deleted")
+
+    private fun SharedPreferences.Editor.removeBinding(id: Int) =
+        remove("$id-tool").remove("$id-format").remove("$id-details").remove("$id-deleted")
+
     fun remove(context: Context, id: Int) = withBindings {
-        settings(context).edit().remove("$id-tool").remove("$id-format").remove("$id-details").remove("$id-deleted").apply()
+        settings(context).edit().removeBinding(id).apply()
+    }
+
+    internal fun restoreBindings(context: Context, store: ToolStore, oldIds: IntArray, newIds: IntArray) = withBindings {
+        data class Move(val from: Int, val to: Int, val owner: String, val preferences: WidgetPreferences)
+
+        val settings = settings(context, store.library.generation)
+        // Read every source before writing, since a destination can also be a source.
+        val moves = oldIds.zip(newIds).mapNotNull { (from, to) ->
+            val owner = settings.getString("$from-tool", null) ?: return@mapNotNull null
+            runCatching {
+                val preferences = settings.widgetPreferences(from)
+                requireBinding(to, owner, preferences, store)
+                Move(from, to, owner, preferences)
+            }.getOrNull()
+        }
+        if (moves.isEmpty()) return@withBindings
+        val destinations = moves.mapTo(mutableSetOf()) { it.to }
+        val edit = settings.edit()
+        for ((from, to, owner, preferences) in moves) {
+            if (from !in destinations) edit.removeBinding(from)
+            edit.putBinding(to, owner, preferences)
+        }
+        check(edit.commit()) { "Widget settings could not be saved" }
     }
     internal fun removeDeletedBindings(context: Context,owner: String,ids: Set<Int>,store: ToolStore) = withBindings {
         val preferences=settings(context)
@@ -75,7 +109,7 @@ object ToolWidgets {
     suspend fun perform(context: Context, intent: Intent, store: ToolStore, engine: ToolEngine,
         locked: Boolean = isLocked(context)): Boolean {
         if (locked || intent.action != ACTION) return false
-        if((intent.getStringExtra(ToolLibraryStorage.GENERATION_EXTRA) ?: ToolLibraryStorage.ORIGINAL)!=store.library.generation) return false
+        if(ToolLibraryStorage.intentGeneration(intent)!=store.library.generation) return false
         val id = intent.getStringExtra("tool_id") ?: return false
         if (toolId(context,intent.getIntExtra("widget_id",0)) != id) return false
         val tool = runCatching {store.tool(id)}.getOrNull() ?: return false
@@ -132,12 +166,7 @@ class ToolWidgetProvider : GlanceAppWidgetReceiver() {
     override fun onRestored(context: Context, oldWidgetIds: IntArray, newWidgetIds: IntArray) {
         runCatching {ToolStore(context).use { store ->
             store.readableDatabase
-            oldWidgetIds.zip(newWidgetIds).forEach { (from,to) ->
-                ToolWidgets.toolId(context,from)?.let { owner ->
-                    runCatching { ToolWidgets.bind(context,to,owner,ToolWidgets.preferences(context,from),store) }
-                        .onSuccess {ToolWidgets.remove(context,from)}
-                }
-            }
+            ToolWidgets.restoreBindings(context, store, oldWidgetIds, newWidgetIds)
         }}
         super.onRestored(context,oldWidgetIds,newWidgetIds)
     }

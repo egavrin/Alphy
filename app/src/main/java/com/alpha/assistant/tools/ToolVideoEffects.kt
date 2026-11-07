@@ -9,16 +9,12 @@ import com.alpha.assistant.capabilities.CapabilityResult
 import com.alpha.assistant.capabilities.VideoContract
 import com.alpha.assistant.media.DeviceMediaPlayback
 import com.alpha.assistant.media.MediaPlaybackResult
+import com.alpha.assistant.media.playWhileCurrent
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -96,7 +92,7 @@ internal class ToolVideoEffects(context: Context, private val store: ToolStore, 
             }
         }
         return try {
-            val result=whileCurrent({active() && bindingCurrent() && selectedCurrent()}) {
+            val result=playWhileCurrent(store.changes, {active() && bindingCurrent() && selectedCurrent()}) {
                 val descriptor=if(openDescriptor==null) resources.openMedia(selected) else openDescriptor.invoke(selected)
                 descriptor?.use {player.playVideo(it,lease.surface,::authorizeStart)} ?: MediaPlaybackResult.SOURCE_UNAVAILABLE
             }
@@ -112,16 +108,5 @@ internal class ToolVideoEffects(context: Context, private val store: ToolStore, 
           catch(_: java.io.IOException) {VideoContract.unavailable()}
           catch(_: android.os.OperationCanceledException) {VideoContract.cancelled()}
           catch(_: IllegalArgumentException) {VideoContract.unavailable()}
-    }
-
-    private suspend fun <T> whileCurrent(current: () -> Boolean, playback: suspend () -> T): T? = coroutineScope {
-        val operation=async(start=CoroutineStart.LAZY) {playback()}
-        val watcher=launch(start=CoroutineStart.UNDISPATCHED) {
-            store.changes.first {!runCatching(current).getOrDefault(false)}
-            operation.cancel()
-        }
-        try {operation.await()}
-        catch(_: CancellationException) {currentCoroutineContext().ensureActive();null}
-        finally {watcher.cancel()}
     }
 }

@@ -137,12 +137,10 @@ internal class RecurringSearch(
         val owner = finished.delivery.key.ownerId
         val current = status(owner)?.ticket ?: return@inTransaction null
         if (current != finished) return@inTransaction current
-        val now = clock()
-        val next = if (now < current.due) current.due
-            else current.due + ((now - current.due) / INTERVAL + 1) * INTERVAL
+        val next = current.nextDue(clock(), INTERVAL)
         db.update("recurring_searches", ContentValues().apply {
             put("due", next)
-            put("turn", 1 - current.turn)
+            put("turn", current.nextTurn)
         }, "owner=?", arrayOf(owner))
         ticket(owner)
     }

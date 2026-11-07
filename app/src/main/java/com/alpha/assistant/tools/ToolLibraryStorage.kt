@@ -1,6 +1,7 @@
 package com.alpha.assistant.tools
 
 import android.content.Context
+import android.content.Intent
 import android.database.DatabaseErrorHandler
 import android.util.AtomicFile
 import org.json.JSONObject
@@ -28,6 +29,8 @@ internal object ToolLibraryStorage {
     private val generated=Regex("(.+)\\.library-([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\\.db")
     private val sidecars=listOf("-wal","-shm","-journal")
     val preserveOnCorruption=DatabaseErrorHandler { }
+
+    fun intentGeneration(intent: Intent): String = intent.getStringExtra(GENERATION_EXTRA) ?: ORIGINAL
 
     fun logicalName(name: String): String = generated.matchEntire(name)?.groupValues?.get(1) ?: name
 

@@ -130,8 +130,7 @@ internal class CourseGeneration(
         } catch (failure: CourseWorkflowException) {
             throw failure
         } catch (failure: CloudFailure) {
-            if (failure.code == "cancelled") throw CancellationException(CourseGenerationFailure.INTERRUPTED.name)
-            checks.rejection?.let { throw it }
+            checks.throwIfInterruptedOrRejected(failure)
             when {
                 failure.code == "widget_incomplete" -> courseFailure(CourseWorkflowError.UNSUPPORTED_LESSON)
                 failure.code in INVALID_GENERATION_CODES -> courseFailure(CourseWorkflowError.INVALID_OUTPUT)
@@ -164,8 +163,7 @@ internal class CourseGeneration(
         } catch (failure: CourseWorkflowException) {
             throw failure
         } catch (failure: CloudFailure) {
-            if (failure.code == "cancelled") throw CancellationException(CourseGenerationFailure.INTERRUPTED.name)
-            checks.rejection?.let { throw it }
+            checks.throwIfInterruptedOrRejected(failure)
             courseFailure(CourseWorkflowError.UNAVAILABLE)
         } catch (_: Exception) {
             courseFailure(CourseWorkflowError.INVALID_OUTPUT)
@@ -215,8 +213,12 @@ private class CourseExecutionChecks {
     private var answerAction: String? = null
 
     // The shared service reports a generic failure. Keep this call's course reason locally.
-    var rejection: CourseWorkflowException? = null
-        private set
+    private var rejection: CourseWorkflowException? = null
+
+    fun throwIfInterruptedOrRejected(failure: CloudFailure) {
+        if (failure.code == "cancelled") throw CancellationException(CourseGenerationFailure.INTERRUPTED.name)
+        rejection?.let { throw it }
+    }
 
     val policy = ToolExecutionPolicy(
         validateDefinition = { raw -> check { answerAction = checkCourseDefinition(JSONObject(raw)) } },

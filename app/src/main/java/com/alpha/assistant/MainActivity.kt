@@ -30,7 +30,7 @@ class MainActivity : AlphyActivity() {
             val tool=intent.getStringExtra("tool_id")
             if(tool!=null && intent.data?.scheme=="alpha" && intent.data?.authority=="tool") {
                 val library=runCatching {ToolLibraryStorage.current(this)}.getOrNull()
-                val expected=intent.getStringExtra(ToolLibraryStorage.GENERATION_EXTRA) ?: ToolLibraryStorage.ORIGINAL
+                val expected=ToolLibraryStorage.intentGeneration(intent)
                 if(library?.generation!=expected) {
                     model.openCreationSurface(com.alpha.assistant.ui.ShellDestination.MiniApps,"")
                     return

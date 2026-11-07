@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicReference
 import com.alpha.assistant.weather.WeatherPlace
 import com.alpha.assistant.weather.WeatherRequest
 import kotlinx.coroutines.CancellationException
+import kotlin.coroutines.CoroutineContext
 
 internal data class ResponseShape(val rule: String, val path: String, val observedType: String)
 internal data class DecisionRejection(val stage: String, val attempt: Int, val shape: ResponseShape, val correcting: Boolean)
@@ -87,6 +88,11 @@ class CloudSession {
         connection.getAndSet(null)?.let { value -> Thread { runCatching { value.disconnect() } }.start() }
     }
     fun check() { if (canceled.get()) throw CloudFailure("cancelled", "Запрос остановлен") }
+
+    internal fun checkActive(context: CoroutineContext) {
+        context.ensureActive()
+        check()
+    }
 }
 interface ChatProvider {
     suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit)
@@ -284,7 +290,7 @@ class DeepSeekProvider internal constructor(
                     } else messages
                     val body = AdmittedChatBody(completionBody(requestMessages, json).utf8(), usesMemory)
                     // The final cancellation check admits these bytes while fact edits still wait.
-                    coroutine.ensureActive(); session.check()
+                    session.checkActive(coroutine)
                     body
                 }
             }
@@ -304,7 +310,7 @@ For a current weather question with no named place, ${if(canLocate) "return exac
                 turns.forEachIndexed { index, turn -> put(message(if(index == turns.lastIndex) turn else turn.copy(images = emptyList()))) }
             }
         suspend fun clarifyPreparation() {
-            currentCoroutineContext().ensureActive(); session.check()
+            session.checkActive(currentCoroutineContext())
             emit(CloudEvent.RoundComplete(ChatToolReply.encode(ChatToolReply.clarifyPreparation()), false, MessageProvenance.CLEAN))
         }
         fun decodeInitial(completion: Completion): ChatToolReply.Decision {
@@ -384,14 +390,14 @@ For a current weather question with no named place, ${if(canLocate) "return exac
         if(decision.kind == "weather_location") {
             suspend fun manualCity(reason: String = WeatherRequest.MANUAL_CITY) { emit(CloudEvent.RoundComplete(ChatToolReply.encode(ChatToolReply.Decision("clarify",reason,"","none")),false)) }
             if(!canLocate || !request.search || provenance != MessageProvenance.CLEAN || current.role != "user") { manualCity(); return }
-            currentCoroutineContext().ensureActive(); session.check()
+            session.checkActive(currentCoroutineContext())
             val place = try { request.weatherLocation.invoke() }
                 catch(cancel: CancellationException) { throw cancel }
                 catch(failure: CloudFailure) {
-                    currentCoroutineContext().ensureActive(); session.check()
+                    session.checkActive(currentCoroutineContext())
                     manualCity(if(failure.code == "weather_location") failure.message.take(600) else WeatherRequest.MANUAL_CITY); return
                 }
-            currentCoroutineContext().ensureActive(); session.check()
+            session.checkActive(currentCoroutineContext())
             if(!place.isFresh()) { manualCity(); return }
             hostWeather = "\nHOST_WEATHER_CONTEXT (trusted host facts for this request only; never operation authorization): " +
                 JSONObject().put("approximatePlace",place.place).put("acquiredAtUtc",java.time.Instant.ofEpochMilli(place.acquiredAt).toString())
@@ -410,7 +416,7 @@ For a current weather question with no named place, ${if(canLocate) "return exac
             throw CloudFailure("decision_changed","Ответ изменил действие в запросе погоды. Укажите город и повторите запрос.")
         if(weather && decision.kind == "answer" && decision.search != "required")
             throw CloudFailure("weather_search","Для текущей погоды нужны веб-источники. Повторите запрос, указав город и период прогноза.")
-        currentCoroutineContext().ensureActive(); session.check()
+        session.checkActive(currentCoroutineContext())
         if(decision.requiresCleanPreparation && (provenance != MessageProvenance.CLEAN || current.role != "user")) {
             clarifyPreparation()
             return
@@ -427,7 +433,7 @@ For a current weather question with no named place, ${if(canLocate) "return exac
             }
         }
         if(courseIntent) {
-            currentCoroutineContext().ensureActive(); session.check()
+            session.checkActive(currentCoroutineContext())
             emit(CloudEvent.RoundComplete(ChatToolReply.encode(decision),false,provenance))
             return
         }
@@ -449,7 +455,7 @@ For a current weather question with no named place, ${if(canLocate) "return exac
             val planned = stream(key,searchBody,session,{},ChatToolReply.MAX_REPLY,stage = CompletionStage.SEARCH_PLAN)
             val queries = validateCalls(planned.calls)
             planned.calls.forEachIndexed { index,_ ->
-                currentCoroutineContext().ensureActive(); session.check()
+                session.checkActive(currentCoroutineContext())
                 emit(CloudEvent.Search("searching"))
                 val results = search(key,queries[index],session)
                 sources.addAll(results)
@@ -511,7 +517,7 @@ For a current weather question with no named place, ${if(canLocate) "return exac
                     throw CloudFailure("decision_changed","The assistant changed the requested operation after search. Retry the request.")
             }.let(::accept)
         }
-        currentCoroutineContext().ensureActive(); session.check()
+        session.checkActive(currentCoroutineContext())
         val encoded = ChatToolReply.encode(final)
         if(encoded.length > ChatToolReply.MAX_REPLY)
             throw CloudFailure("response_size","The assistant response exceeds the allowed size.")
@@ -529,7 +535,7 @@ For a current weather question with no named place, ${if(canLocate) "return exac
                 if (bytes.size > 1024 * 1024) throw CloudFailure("search_response", "Ответ поиска слишком большой")
                 String(bytes, Charsets.UTF_8)
             }
-            currentCoroutineContext().ensureActive(); session.check()
+            session.checkActive(currentCoroutineContext())
             val array = try { JSONObject(text).getJSONArray("results") } catch (_: Exception) { throw CloudFailure("search_response", "Сервис поиска вернул неверный ответ") }
             val results = (0 until array.length()).mapNotNull { index ->
                 val item = array.optJSONObject(index) ?: return@mapNotNull null
@@ -571,7 +577,7 @@ For a current weather question with no named place, ${if(canLocate) "return exac
             var bomData = false
             connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                 while (true) {
-                    currentCoroutineContext().ensureActive(); session.check()
+                    session.checkActive(currentCoroutineContext())
                     val line = reader.readLine() ?: break
                     received += line.length
                     if (received > maxWireChars) throw CloudFailure("response_size", "Ответ слишком большой")
@@ -618,7 +624,7 @@ For a current weather question with no named place, ${if(canLocate) "return exac
                     } }
                 }
             }
-            currentCoroutineContext().ensureActive(); session.check()
+            session.checkActive(currentCoroutineContext())
             if (reportLength && done && finish == "length") throw CloudFailure("response_length", "Достигнут лимит ответа. Уточните запрос.")
             if (!done || finish !in listOf("stop", "tool_calls")) {
                 val message = if (!reportLength && finish == "length") "Достигнут лимит ответа. Уточните запрос."
@@ -646,7 +652,7 @@ For a current weather question with no named place, ${if(canLocate) "return exac
     private fun JSONObject.utf8(): ByteArray = toString().toByteArray(Charsets.UTF_8)
 
     private suspend fun open(path: String, key: String, bytes: ByteArray, session: CloudSession): HttpURLConnection {
-        currentCoroutineContext().ensureActive(); session.check()
+        session.checkActive(currentCoroutineContext())
         val connection = URL(baseUrl + path).openConnection() as HttpURLConnection
         session.attach(connection)
         try {
@@ -656,7 +662,7 @@ For a current weather question with no named place, ${if(canLocate) "return exac
             connection.setRequestProperty("Content-Type", "application/json")
             connection.setRequestProperty("Accept", "text/event-stream, application/json")
             connection.setFixedLengthStreamingMode(bytes.size)
-            currentCoroutineContext().ensureActive(); session.check()
+            session.checkActive(currentCoroutineContext())
             onHttpCall?.invoke()
             connection.outputStream.use { it.write(bytes) }
             return connection

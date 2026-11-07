@@ -191,25 +191,43 @@ import java.util.Date
             ),
         )
     }
-    if (renameId != null) AlertDialog(onDismissRequest = { renameId = null }, title = { Text(stringResource(R.string.rename_title)) }, text = {
+    val dismissRename = { renameId = null }
+    if (renameId != null) AlertDialog(onDismissRequest = dismissRename, title = { Text(stringResource(R.string.rename_title)) }, text = {
         val renameLabel = stringResource(R.string.rename_label)
         OutlinedTextField(value = renameText, onValueChange = { renameText = it }, label = { Text(renameLabel) }, singleLine = true,
             modifier = Modifier.fillMaxWidth().semantics { contentDescription = renameLabel }, isError = renameText.isBlank(),
             supportingText = { if (renameText.isBlank()) Text(stringResource(R.string.rename_placeholder)) })
-    }, confirmButton = { TextButton(onClick = { renameId?.let { rename(it, renameText) }; renameId = null }, enabled = renameText.isNotBlank()) { Text(stringResource(R.string.rename_save)) } },
-        dismissButton = { TextButton(onClick = { renameId = null }) { Text(stringResource(R.string.cancel)) } })
+    }, confirmButton = {
+        TextButton(onClick = {
+            renameId?.let { rename(it, renameText) }
+            dismissRename()
+        }, enabled = renameText.isNotBlank()) { Text(stringResource(R.string.rename_save)) }
+    },
+        dismissButton = { TextButton(onClick = dismissRename) { Text(stringResource(R.string.cancel)) } })
     val deleting = conversations.find { it.id == deleteId }
-    if (deleting != null) AlertDialog(onDismissRequest = { deleteId = null }, title = { Text(stringResource(R.string.conversation_delete_title)) }, text = {
+    val dismissDelete = { deleteId = null }
+    if (deleting != null) AlertDialog(onDismissRequest = dismissDelete, title = { Text(stringResource(R.string.conversation_delete_title)) }, text = {
         Column(Modifier.verticalScroll(rememberScrollState())) { Text(stringResource(R.string.conversation_delete_text, deleting.title)) }
-    }, confirmButton = { TextButton(onClick = { delete(deleting.id); deleteId = null }) { Text(stringResource(R.string.delete)) } },
-        dismissButton = { TextButton(onClick = { deleteId = null }) { Text(stringResource(R.string.cancel)) } })
-    if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text(stringResource(R.string.clear_history_title)) }, text = {
+    }, confirmButton = {
+        TextButton(onClick = {
+            delete(deleting.id)
+            dismissDelete()
+        }) { Text(stringResource(R.string.delete)) }
+    },
+        dismissButton = { TextButton(onClick = dismissDelete) { Text(stringResource(R.string.cancel)) } })
+    val dismissClear = { confirmClear = false }
+    if (confirmClear) AlertDialog(onDismissRequest = dismissClear, title = { Text(stringResource(R.string.clear_history_title)) }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(stringResource(R.string.clear_history_text))
             Text(stringResource(R.string.clear_history_kept))
         }
-    }, confirmButton = { TextButton(onClick = { clear(); confirmClear = false }) { Text(stringResource(R.string.clear_history_confirm)) } },
-        dismissButton = { TextButton(onClick = { confirmClear = false }) { Text(stringResource(R.string.cancel)) } })
+    }, confirmButton = {
+        TextButton(onClick = {
+            clear()
+            dismissClear()
+        }) { Text(stringResource(R.string.clear_history_confirm)) }
+    },
+        dismissButton = { TextButton(onClick = dismissClear) { Text(stringResource(R.string.cancel)) } })
 }
 
 private data class SearchResult(val chat: Conversation, val preview: AnnotatedString?)

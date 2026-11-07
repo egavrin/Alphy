@@ -20,9 +20,9 @@ class SandboxClient internal constructor(context: Context,private val runtime: A
                 if(!valid) SandboxResult("INVALID_REQUEST") else {
                     val type=JSONObject(input).getJSONObject("event").getString("type")
                     val deadline=if(type in setOf("frame","pointer","timer","control")) com.alpha.assistant.tools.GraphicsContract.EVALUATION_MS else SandboxContract.EVALUATION_MS
-                    val result=isolate.evaluate("JSON.stringify((function(input){'use strict';\n$source\n})(JSON.parse(${JSONObject.quote(input)})))",deadline)
+                    val result=isolate.evaluate(evaluationScript(source, input),deadline)
                     currentCoroutineContext().ensureActive()
-                    if(result.status=="OK" && runCatching {SandboxContract.validateResult(checkNotNull(result.json))}.isFailure) SandboxResult("INVALID_RESULT") else result
+                    if (result.hasValidOutput()) result else SandboxResult("INVALID_RESULT")
                 }
             }
         } finally {isolate.close()}
@@ -35,10 +35,16 @@ class SandboxClient internal constructor(context: Context,private val runtime: A
             catch(cancel: CancellationException) {throw cancel}
             catch(failure: RuntimeFailure) {return SandboxResult(failure.status)}
         try {
-            val result=isolate.evaluate("JSON.stringify((function(input){'use strict';\n$source\n})(JSON.parse(${JSONObject.quote(input)})))",SandboxContract.EVALUATION_MS)
-            if(result.status=="OK" && runCatching {SandboxContract.validateResult(checkNotNull(result.json))}.isFailure)return SandboxResult("INVALID_RESULT")
+            val result=isolate.evaluate(evaluationScript(source, input),SandboxContract.EVALUATION_MS)
+            if (!result.hasValidOutput()) return SandboxResult("INVALID_RESULT")
             currentCoroutineContext().ensureActive()
             return result
         } finally {isolate.close()}
     }
+
+    private fun evaluationScript(source: String, input: String): String =
+        "JSON.stringify((function(input){'use strict';\n$source\n})(JSON.parse(${JSONObject.quote(input)})))"
+
+    private fun SandboxResult.hasValidOutput(): Boolean =
+        status != "OK" || runCatching { SandboxContract.validateResult(checkNotNull(json)) }.isSuccess
 }
