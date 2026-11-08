@@ -28,7 +28,14 @@ class GenerationSmokeWorkflowTest {
         var afterResponse: (()->Unit)?=null
         override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend(CloudEvent)->Unit) {
             if (request.replyWithFixturePlan(emit)) return
-            requests+=request;emit(CloudEvent.Text(outputs[(requests.size-1).coerceAtMost(outputs.lastIndex)]));afterResponse?.invoke()
+            requests += request
+            val definition = outputs[(requests.size - 1).coerceAtMost(outputs.lastIndex)]
+            val output = if (request.generationStage == CloudGenerationStage.COMPLETE &&
+                request.turns.last().text.contains("Return one JSON patch object only")) {
+                writerFixturePatch(request.turns[1].text, definition)
+            } else request.patchSavedFixture(definition)
+            emit(CloudEvent.Text(output))
+            afterResponse?.invoke()
         }
     }
     @Test fun previewLayoutControlsAlsoReceiveSmokeActions(): Unit=runBlocking {
@@ -61,7 +68,7 @@ class GenerationSmokeWorkflowTest {
         val invalid=spec("if(e.type==='action')throw Error('SECRET_RUNTIME');")
         val provider=Provider(listOf(invalid))
         val failure=runCatching {ToolGenerationService(provider,SandboxClient(context)).generate("offline","Local fixture",null,emptyList(),CloudSession(),"fixture")}.exceptionOrNull()
-        assertTrue(failure is CloudFailure);assertEquals(2,provider.requests.size)
+        assertTrue(failure is CloudFailure);assertEquals(4,provider.requests.size)
         assertFalse(failure.toString().contains("SECRET_"))
     }
     @Test fun typedControlsAndIndependentBranchesUseDisposableInitialState(): Unit=runBlocking {
@@ -104,7 +111,8 @@ class GenerationSmokeWorkflowTest {
             assertEquals(saved.state,accepted.state);assertEquals("abcdef",JSONObject(accepted.state).getString("text"))
             assertTrue(store.effects(accepted.id).isEmpty())
             val invalid=inputSpec(3,true)
-            provider.requests.clear();provider.outputs=listOf(invalid,bounded)
+            provider.requests.clear();provider.outputs=listOf(invalid,
+                JSONObject(bounded).put("description","Repair valid input submissions").toString())
             val repaired=engine.createDraft("Repair a valid submitted value",accepted.id)
             assertEquals(accepted.state,engine.generate(repaired.id,"offline",emptyList(),CloudSession()).previewState)
             assertEquals(2,provider.requests.size);assertEquals(accepted,store.tool(accepted.id));engine.reject(repaired.id)
@@ -113,7 +121,7 @@ class GenerationSmokeWorkflowTest {
             provider.requests.clear();provider.outputs=listOf(invalid)
             val rejected=engine.createDraft("Reject repeated handler failure",accepted.id)
             assertTrue(runCatching {engine.generate(rejected.id,"offline",emptyList(),CloudSession())}.exceptionOrNull() is CloudFailure)
-            assertEquals(2,provider.requests.size);assertNull(store.draft(rejected.id)!!.candidate)
+            assertEquals(4,provider.requests.size);assertNull(store.draft(rejected.id)!!.candidate)
             assertEquals(accepted,store.tool(accepted.id));assertTrue(store.effects(accepted.id).isEmpty())
         } finally {engine.closeArtifacts();store.close();context.deleteDatabase(name)}
     }
@@ -136,7 +144,7 @@ class GenerationSmokeWorkflowTest {
             provider.outputs=listOf(JSONObject(definition.toString()).put("source",JSONObject(spec(recordSource.replace("note:'private'","note:42"))).getString("source")).toString());provider.requests.clear()
             val bad=engine.createDraft("Bad record value",saved.id)
             assertTrue(runCatching {engine.generate(bad.id,"offline",emptyList(),CloudSession())}.exceptionOrNull() is CloudFailure)
-            assertEquals(2,provider.requests.size);assertEquals(saved,store.tool(saved.id));assertEquals(true,store.legacyDeviceGrant(saved.id,"vibration.play"));assertEquals(revisions,store.revisions(saved.id));engine.reject(bad.id)
+            assertEquals(4,provider.requests.size);assertEquals(saved,store.tool(saved.id));assertEquals(true,store.legacyDeviceGrant(saved.id,"vibration.play"));assertEquals(revisions,store.revisions(saved.id));engine.reject(bad.id)
             provider.requests.clear();provider.outputs=listOf(definition.toString());provider.afterResponse={throw CancellationException("fixture cancellation")}
             val canceled=engine.createDraft("Canceled refinement",saved.id)
             assertTrue(runCatching {engine.generate(canceled.id,"offline",emptyList(),CloudSession())}.exceptionOrNull() is CancellationException)

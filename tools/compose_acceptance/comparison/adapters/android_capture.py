@@ -118,6 +118,10 @@ def capture(args):
     verify_workflow = getattr(args, "verify_workflow", False)
     if verify_workflow:
         payload["verify_workflow"] = True
+    if getattr(args, "saved_edit", False):
+        require(verify_workflow and case["id"] in {"extra:reference-points-ledger", "extra:russian-grid-game"},
+                "A saved edit requires a frozen ledger or grid workflow.")
+        payload["saved_edit"] = True
     if args.verify_tip:
         require(case["id"] == "bench:tip", "The tip interaction check requires the tip benchmark.")
         payload["verify_tip"] = True
@@ -223,6 +227,7 @@ def main():
     live.add_argument("--review-seconds", type=int, default=20)
     live.add_argument("--verify-tip", action="store_true", help="Verify the generated tip calculator on Android.")
     live.add_argument("--verify-workflow", action="store_true", help="Run the supported frozen interaction checks on Android.")
+    live.add_argument("--saved-edit", action="store_true", help="Begin the workflow with the frozen saved app.")
     args = parser.parse_args()
     try:
         if args.command == "capture":

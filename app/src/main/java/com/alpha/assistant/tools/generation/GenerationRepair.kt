@@ -14,6 +14,7 @@ internal class GenerationRepair private constructor(
     private val expectedHoles: List<String>?,
     private val writer: Boolean,
     private val bindingsExpected: Boolean,
+    private val refinement: Boolean = false,
 ) {
     enum class Mode(val wire: String) { PATCH("patch"), REWRITE("rewrite") }
 
@@ -52,7 +53,7 @@ internal class GenerationRepair private constructor(
             if (targetField == null && ("fill" in json || "holes" in json)) return
             if (targetField != null && (json.keys.any { it !in mixedKeys } ||
                     (!bindingsExpected && "behaviorBindings" in json) ||
-                    json["holes"] != JsonArray(checkNotNull(expectedHoles).map(::JsonPrimitive)))) return
+                    json["holes"] != expectedHoles?.let { JsonArray(it.map(::JsonPrimitive)) })) return
             val definition = if (targetField == null) json else json[targetField] as? JsonObject ?: return
             if (string(definition["source"]).isNullOrBlank()) return
         }
@@ -60,23 +61,33 @@ internal class GenerationRepair private constructor(
         seen += json
     }
 
+    fun firstRefinement(): Request = patch(0, "Apply the requested edit to the current saved definition.", checkNotNull(base))
+
     fun next(feedback: String, rewriteInstructions: String, claim: () -> Int?): Request? {
         val candidate = base
         if (candidate == null && rewritten) return null
         val number = claim() ?: return null
-        if (candidate == null) {
+        if (candidate == null || refinement && number == 3) {
             rewritten = true
             return Request(Mode.REWRITE, number, rewriteInstructions, null)
         }
+        return patch(number, feedback, candidate)
+    }
+
+    private fun patch(number: Int, feedback: String, candidate: Candidate): Request {
         val structure = "Use fields, a JSON object, to set named fields in ${targetField ?: "the candidate root"}. " +
             "Allowed fields: ${editableFields.joinToString()}. " +
             "Use removeFields, an array of strings, to delete existing fields. Do not set and remove the same field."
-        val bindings = if (bindingsExpected) {
-            " Use behaviorBindings, a JSON object, to replace the complete writer binding map."
-        } else ""
+        val bindings = when {
+            bindingsExpected && refinement -> " Include behaviorBindings at the patch root with every requested slot. " +
+                "Use an action ID string for an action, or an array of integer UI indices where a path is required. " +
+                "Do not wrap a binding in an object unless the slot is geometry. Include the complete map even when the UI is unchanged."
+            bindingsExpected -> " Use behaviorBindings, a JSON object, to replace the complete writer binding map."
+            else -> ""
+        }
         val source = if (writer) {
             " Use sourceEdits, an array of objects, for JavaScript. Each object has exactly search and replace strings. " +
-                "Copy a unique search fragment from the decoded source. Use nonoverlapping edits. " +
+                "Copy a short, unique search fragment exactly from the decoded source. Use nonoverlapping edits. " +
                 "Keep source outside fields and removeFields. Set behaviorBindings only in its own section. " +
                 "Preserve native ownership and hole order." +
                 if ("behaviorBindings" !in protectedRemovals) " Use removeFields to delete an unexpected binding map in the editable object." else ""
@@ -158,6 +169,10 @@ internal class GenerationRepair private constructor(
 
         fun writer(fields: Set<String>, holes: List<String>?, bindingsExpected: Boolean) =
             GenerationRepair(fields - protectedFields, "fill".takeIf { holes != null }, holes, true, bindingsExpected)
+
+        fun refinement(fields: Set<String>, mixed: Boolean, bindingsExpected: Boolean, saved: String) =
+            GenerationRepair(fields - protectedFields, "fill".takeIf { mixed }, null, true, bindingsExpected, refinement = true)
+                .apply { retain(saved) }
 
         fun byteSize(text: String) = text.toByteArray(Charsets.UTF_8).size
 

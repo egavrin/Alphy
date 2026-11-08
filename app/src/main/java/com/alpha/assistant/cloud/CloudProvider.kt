@@ -82,6 +82,7 @@ class CloudSession {
     private val generationCorrectionUsed = AtomicBoolean(false)
     private val planRepairs = AtomicInteger()
     private val completeRepairs = AtomicInteger()
+    private val refineRepairs = AtomicInteger()
     private val connection = AtomicReference<HttpURLConnection?>(null)
     internal val chatAttempt: Int get() = if (chatCorrectionUsed.get()) 2 else 1
     internal val generationAttempt: Int get() = if (generationCorrectionUsed.get()) 2 else 1
@@ -95,6 +96,7 @@ class CloudSession {
         val counter = when (stage) {
             CloudGenerationStage.PLAN -> planRepairs
             CloudGenerationStage.COMPLETE -> completeRepairs
+            CloudGenerationStage.REFINE -> refineRepairs
             else -> error("This stage does not use patch repair.")
         }
         val used = counter.getAndUpdate { minOf(it + 1, 3) }

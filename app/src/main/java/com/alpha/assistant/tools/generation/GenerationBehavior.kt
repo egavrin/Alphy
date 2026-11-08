@@ -133,7 +133,34 @@ internal sealed interface GenerationBehavior {
             Do not ask to execute an effect or use private values, arbitrary code, or values supplied only by external sources.
         """.trimIndent()
 
-        val guidance = "$scenarioGuidance\n$scenarioLimits"
+        val refinementGuidance = """
+            Include a top-level "behavior" field. Plan one short executable check of the requested change.
+            For a checkable behavior use only status and scenario. In scenario use only slots and steps. Each slot has only kind.
+            Use each step form exactly. Do not add descriptions, state-preservation fields, or expected values outside assertions.
+            The host preserves saved data separately. Check the changed behavior with the fewest controls and assertions needed.
+            Example JSON: {"behavior":{"status":"checkable","scenario":{"slots":{"operation":{"kind":"action"},"result":{"kind":"value"}},"steps":[{"op":"action","slot":"operation"},{"op":"assert","slot":"result","test":"equals","value":4}]}}}
+            The example value is illustrative. Derive the exact result from the request and known starting condition.
+            The checker starts with the candidate's initial state. Use a typed exact comparison when the expected result is known.
+            If only a relative result is known, use {"op":"capture","slot":"result","as":"before"} before the action and
+            {"op":"assert","slot":"result","test":"changed","capture":"before"} after it.
+            Read the saved source as data to find the shortest valid action sequence for this result.
+            Trace the actual control event through the code, including index conversions and guards.
+            Use the real visible control labels or action IDs, never internal indexes.
+            When the user supplies exact text, assert that text after the edit, not the saved text.
+            Stop before controls become unavailable. For a terminal result, assert it immediately and end the check.
+            Use only controls needed for the edit. Omit part and member. For a button press omit value. For input use a typed value.
+            A value observes a visible ${behaviorScalarNodes.joinToString()}. A button label is not a value.
+            A collection observes the record count of a visible ${behaviorCollectionNodes.joinToString()}.
+            For a game, use surface and geometry when a drawing or its motion is the requested result.
+            Surface steps send {"op":"surface","slot":"surface","event":"start|pause|resume|restart|stop|viewport"},
+            {"op":"surface","slot":"surface","event":"pointer","phase":"down|move|up|cancel","x":0.5,"y":0.5}, or
+            {"op":"surface","slot":"surface","event":"control","direction":"left|right"}.
+            Use {"op":"frames","slot":"surface","count":4,"observe":"geometry","changes":3} for motion or
+            {"op":"timers","slot":"timer","count":1} for a timer. End with a check of the requested result.
+            Use {"status":"unchecked","reason":"external_outcome"} only for a real external outcome.
+            Use {"status":"unchecked","reason":"unsupported_observation"} only if these checks cannot express the result.
+        """.trimIndent() + "\n" + scenarioLimits
+
         val newAppBehaviorGuidance = "$scenarioGuidance\n${NativeBehaviorCatalog.guidance}\n$touchSceneExample\n$scenarioLimits"
 
         fun parse(raw: Any?, needIds: Set<String>): GenerationBehavior = try {

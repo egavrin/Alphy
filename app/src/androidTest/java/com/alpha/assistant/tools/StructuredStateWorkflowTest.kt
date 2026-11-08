@@ -393,7 +393,8 @@ class StructuredStateWorkflowTest {
         val provider=object: ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent)->Unit) {
                 requests.add(request)
-                if (!request.replyWithFixturePlan(emit)) emit(CloudEvent.Text(definition.json))
+                if (!request.replyWithFixturePlan(emit)) emit(CloudEvent.Text(request.patchSavedFixture(
+                    JSONObject(definition.json).apply { getJSONObject("ui").put("text", "Updated button") }.toString())))
             }
         }
         val engine=ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))
@@ -510,7 +511,7 @@ class StructuredStateWorkflowTest {
         val provider=object: ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent)->Unit) {
                 if (request.replyWithFixturePlan(emit)) return
-                capturedRequest=request; emit(CloudEvent.Text(answer))
+                capturedRequest=request; emit(CloudEvent.Text(request.patchSavedFixture(answer)))
             }
         }
         val service=ToolGenerationService(provider,SandboxClient(context)); val engine=ToolEngine(store,service)

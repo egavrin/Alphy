@@ -375,7 +375,7 @@ class StaticDraftPreviewUiWorkflowTest {
                 CloudGenerationStage.COMPLETE -> definition(responses.removeFirst(), mixed)
                 CloudGenerationStage.REFINE -> {
                     check(!mixed) { "The fixture only refines a full definition" }
-                    definition(responses.removeFirst(), mixed = false)
+                    request.patchSavedFixture(definition(responses.removeFirst(), mixed = false))
                 }
                 else -> error("Unexpected provider stage: ${request.generationStage}")
             }

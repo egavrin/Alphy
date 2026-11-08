@@ -112,7 +112,8 @@ internal class Plan5WorkflowChecks(
 
     private fun numeric(text: String) = numbers.findAll(text).mapNotNull { it.value.replace(',', '.').toDoubleOrNull() }.toList()
 
-    fun grid(reopen: () -> Unit, verifyHostRestart: Boolean = false) = ToolStore(context, toolDatabase).use { store ->
+    fun grid(reopen: () -> Unit, verifyHostRestart: Boolean = false,
+        refineVictory: ((String) -> Unit)? = null) = ToolStore(context, toolDatabase).use { store ->
         val spec = ToolSpec.parsePersisted(saved().spec)
         fun cellControl(cell: Int) = controls().singleOrNull {
             matching("""^\s*$cell(?:[^\p{L}\p{N}]|$)""").containsMatchIn(controlLabel(it))
@@ -158,10 +159,22 @@ internal class Plan5WorkflowChecks(
         fun labels() = robot.texts().flatMap { it.split(". ") }.map(String::trim).toSet()
         var initialLabels = emptySet<String>()
         var victoryLabels = emptySet<String>()
+        val victoryMessage = "Победа! Все три звезды найдены!"
+        if (refineVictory != null) step("edit_victory") {
+            score(0)
+            tapCell(2)
+            score(1)
+            val before = JSONObject(saved().state)
+            refineVictory("После победы показывай «$victoryMessage». Сохрани текущие очки и открытые клетки.")
+            check(sameToolJson(before, JSONObject(saved().state)))
+            score(1)
+            robot.waitFor("2 ★")
+        }
         step("score") {
-            val scores = mutableListOf(score(0))
+            val scores = mutableListOf(score(if (refineVictory == null) 0 else 1))
             initialLabels = labels()
-            for ((cell, value) in listOf(1 to 0, 2 to 1, 2 to 1, 5 to 2)) {
+            val moves = if (refineVictory == null) listOf(1 to 0, 2 to 1, 2 to 1, 5 to 2) else listOf(2 to 1, 5 to 2)
+            for ((cell, value) in moves) {
                 tapCell(cell)
                 scores += score(value)
             }
@@ -175,6 +188,7 @@ internal class Plan5WorkflowChecks(
                 victoryLabels = (labels() - initialLabels).filter(victory::containsMatchIn).toSet()
                 victoryLabels.isNotEmpty()
             }
+            if (refineVictory != null) check(robot.texts().any { victoryMessage in it })
             for (cell in listOf(7, 2)) {
                 if (drawnBoard) tapCell(cell) else {
                     val control = checkNotNull(cellControl(cell))

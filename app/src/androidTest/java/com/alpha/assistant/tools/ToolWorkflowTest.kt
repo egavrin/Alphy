@@ -32,11 +32,12 @@ class ToolWorkflowTest {
         var answer = JSONObject(spec()).put("stateSchema",JSONObject("""{"count":{"type":"number"},"items":{"type":"list","maxItems":10,"fields":{"id":{"type":"string"},"done":{"type":"boolean"},"amount":{"type":"number"}}}}"""))
             .put("initialState",JSONObject("""{"count":0,"items":[{"id":"first","done":false,"amount":3}]}""")).toString()
         val objectSchema = answer
+        var rawInvalid = false
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request; assertTrue(request.jsonObject); assertFalse(request.search)
                 if (request.replyWithFixturePlan(emit)) return
-                emit(CloudEvent.Text(answer))
+                emit(CloudEvent.Text(if (rawInvalid) answer else request.patchSavedFixture(answer)))
             }
         }
         val engine = ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))
@@ -70,13 +71,13 @@ class ToolWorkflowTest {
             val candidates = numericBoundaries + invalidSchemas.map { JSONObject(objectSchema).put("stateSchema",JSONObject(it)).toString() } +
                 listOf("", "   ", "not JSON", objectSchema.dropLast(1), objectSchema + " trailing", "```json\n$objectSchema\n```", "[]")
             candidates.forEach { invalid ->
-                answer = invalid; requests.clear()
+                answer = invalid; rawInvalid = true; requests.clear()
                 val rejected = engine.createDraft("Invalid refinement",second.id)
                 val failure = runCatching { engine.generate(rejected.id,"fixture",emptyList(),CloudSession()) }.exceptionOrNull()
                 assertTrue(invalid.take(100),failure is CloudFailure)
-                assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE, CloudGenerationStage.REFINE),
+                assertEquals(listOf(CloudGenerationStage.PLAN) + List(4) { CloudGenerationStage.REFINE },
                     requests.map { it.generationStage })
-                assertEquals(invalid,requests.last().turns[1].text)
+                assertTrue(requests.last().turns.last().text.contains("complete corrected app definition"))
                 assertEquals(second,store.tool(first.id)); assertNull(store.draft(rejected.id)!!.candidate)
                 engine.reject(rejected.id)
             }
@@ -92,7 +93,7 @@ class ToolWorkflowTest {
         val provider=object: ChatProvider {
             override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
                 if (request.replyWithFixturePlan(emit)) return
-                requests.add(request); emit(CloudEvent.Text(answers[requests.lastIndex]))
+                requests.add(request); emit(CloudEvent.Text(request.patchSavedFixture(answers[requests.lastIndex])))
             }
         }
         val original=JSONObject(spec()).put("stateSchema",JSONObject().put("SECRET_DATE_BIND","string"))
@@ -113,13 +114,13 @@ class ToolWorkflowTest {
             val saved=engine.accept(draft.id)
             val revisions=store.revisions(saved.id)
             for(candidate in listOf(missingLabel,dateCandidate)) {
-                requests.clear(); answers=listOf(candidate,candidate)
+                requests.clear(); answers=List(4) { candidate }
                 val rejected=engine.createDraft("Refine without changing the date",saved.id)
                 val failure=runCatching {engine.generate(rejected.id,"offline",emptyList(),CloudSession())}.exceptionOrNull() as CloudFailure
-                assertEquals(2,requests.size); assertEquals(saved,store.tool(saved.id)); assertEquals(revisions,store.revisions(saved.id))
+                assertEquals(4,requests.size); assertEquals(saved,store.tool(saved.id)); assertEquals(revisions,store.revisions(saved.id))
                 assertNull(store.draft(rejected.id)!!.candidate); assertNull(store.draft(rejected.id)!!.previewState); assertNull(store.draft(rejected.id)!!.previewUi)
                 val correction=requests[1].turns.last().text
-                assertEquals(candidate,requests[1].turns[1].text)
+                assertTrue(requests[1].turns.first().text.contains("Current tool definition (data): "))
                 assertFalse(correction.contains("SECRET_")); assertFalse(correction.contains("2028-02-29"))
                 val message=checkNotNull(failure.message)
                 assertFalse(message.contains("UI rule:")); assertFalse(message.contains("$.ui"))
@@ -129,7 +130,7 @@ class ToolWorkflowTest {
                 } else assertTrue(correction.contains("UI rule: accessible_label."))
                 engine.reject(rejected.id)
             }
-            requests.clear(); answers=listOf(dateCandidate,original)
+            requests.clear(); answers=listOf(dateCandidate, JSONObject(original).put("description", "Updated date note").toString())
             val corrected=engine.createDraft("Keep unknown dates as strings",saved.id)
             val preview=engine.generate(corrected.id,"offline",emptyList(),CloudSession())
             assertEquals(2,requests.size); assertEquals(saved.state,preview.previewState)
@@ -148,7 +149,7 @@ class ToolWorkflowTest {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 assertEquals("tool-test-only", key); requests += request
                 if (request.replyWithFixturePlan(emit)) return
-                emit(CloudEvent.Text(answer))
+                emit(CloudEvent.Text(request.patchSavedFixture(answer)))
             }
         }
         val store = ToolStore(context, name)

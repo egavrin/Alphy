@@ -49,7 +49,9 @@ class ComparisonChatCaptureTest {
         val request = input.getString("request")
         val reviewSeconds = input.getInt("review_seconds")
         val caseId = slotId.substringBeforeLast(":candidate:")
+        val savedEdit = input.optBoolean("saved_edit")
         val verifyWorkflow = input.optBoolean("verify_workflow")
+        require(!savedEdit || verifyWorkflow && caseId in setOf("extra:reference-points-ledger", "extra:russian-grid-game"))
         val verifyTip = input.optBoolean("verify_tip") || verifyWorkflow && caseId == "bench:tip"
         require(runId.matches(Regex("[a-f0-9]{32}")) && slotId.matches(Regex("[A-Za-z0-9:_-]{1,168}:candidate:[1-3]")))
         require(request.isNotBlank() && request.trim() == request && request.length <= MAX_CHAT_INPUT && '\u0000' !in request)
@@ -140,6 +142,20 @@ class ComparisonChatCaptureTest {
             }
             keys.save(marker).getOrThrow()
             failureAt = "launch"
+            val toolDatabase = "$database-tools.db"
+            val savedId = if (savedEdit) {
+                val asset = if (caseId == "extra:reference-points-ledger") "saved-edit-ledger" else "saved-edit-grid"
+                val frozen = instrumentation.context.assets.open("behavior-replay/$asset.json").bufferedReader().use { it.readText() }
+                report.put("frozen_artifact_sha256", sha256(frozen))
+                val artifact = JSONObject(frozen)
+                val spec = ToolSpec.parsePersisted(artifact.getJSONObject("spec").toString())
+                val id = artifact.getString("artifact_id")
+                ToolStore(app, toolDatabase).use { tools ->
+                    tools.saveTool(ToolRecord(id, artifact.getInt("artifact_revision"), 1, spec.json,
+                        spec.initialState, spec.ui.toString(), null, true), revision = true)
+                }
+                id
+            } else null
             val noLocation = object : WeatherLocator {
                 override fun hasPermission() = false
                 override suspend fun locate(): Nothing = error("No device location in a comparison fixture.")
@@ -151,7 +167,8 @@ class ComparisonChatCaptureTest {
             activity = scenario
             val vm = onMain { checkNotNull(model) }
             await(15_000) { onMain { !vm.loading && !vm.tools.busy } }
-            check(onMain { !vm.loadFailed && vm.snapshot.conversations.isEmpty() && vm.tools.tools.isEmpty() && vm.tools.drafts.isEmpty() })
+            check(onMain { !vm.loadFailed && vm.snapshot.conversations.isEmpty() &&
+                vm.tools.tools.map { it.id } == listOfNotNull(savedId) && vm.tools.drafts.isEmpty() })
             onMain { vm.tools.generationTraceObserver = { generationEvents += it } }
             val robot = ShellRobot(name)
             fun visible(id: Int): AccessibilityNodeInfo? {
@@ -166,6 +183,38 @@ class ComparisonChatCaptureTest {
                 try {
                     return File(directory, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
                 } finally { bitmap.recycle() }
+            }
+            if (savedId != null) {
+                failureAt = "workflow"
+                fun savedTool() = onMain { vm.tools.tools.single { it.id == savedId } }
+                val title = ToolSpec.parsePersisted(savedTool().spec).title
+                onMain { vm.openSurface(savedId) }
+                robot.waitFor(robot.text(R.string.tool_refine))
+                val proof = JSONObject().put("status", "failed")
+                report.put("workflow", proof)
+                fun reopen() {
+                    robot.back()
+                    robot.waitFor(robot.text(R.string.tool_search))
+                    robot.click(title)
+                    robot.waitFor(robot.text(R.string.tool_refine))
+                }
+                var edited = false
+                val refine: (String) -> Unit = {
+                    check(!edited && it == request && providerHttpCalls.get() == 0)
+                    report.put("send_action_elapsed_ns", SystemClock.elapsedRealtimeNanos())
+                    submitSavedEdit(vm, robot, ::savedTool, it, proof, directory)
+                    check(providerHttpCalls.get() > 0)
+                    edited = true
+                }
+                val checks = Plan5WorkflowChecks(robot, proof, ::savedTool, ::screenshot, toolDatabase)
+                if (caseId == "extra:reference-points-ledger") checks.ledger(::reopen, refine)
+                else checks.grid(::reopen, refineVictory = refine)
+                check(edited)
+                proof.put("status", "passed")
+                report.put("chat_outcome", "artifact-committed").put("artifact_id", savedId)
+                    .put("artifact_revision", savedTool().revision)
+                terminal = "complete"
+                return
             }
             failureAt = "send"
             robot.edit(robot.text(R.string.composer_label), request)
@@ -272,34 +321,9 @@ class ComparisonChatCaptureTest {
                         var localCalls = providerHttpCalls.get()
                         Plan5WorkflowChecks(robot, proof, ::savedTool, ::screenshot, toolDatabase).run(caseId, ::reopen) {
                             check(providerHttpCalls.get() == localCalls)
-                            val before = savedTool()
-                            val messagesBefore = onMain { checkNotNull(vm.snapshot.selected).messages.size }
-                            val refine = robot.text(R.string.tool_refine)
-                            robot.reveal(refine, null)
-                            robot.click(refine)
-                            robot.edit(robot.text(R.string.composer_label), it)
-                            robot.click(robot.text(R.string.composer_send))
-                            await(240_000) {
-                                onMain {
-                                    !vm.tools.busy && vm.activeConversationId == null &&
-                                        vm.snapshot.selected?.messages?.let { messages ->
-                                            messages.size > messagesBefore && messages.lastOrNull()?.status in
-                                                setOf("complete", "error", "cancelled", "interrupted")
-                                        } == true
-                                }
-                            }
-                            val revised = savedTool()
-                            check(revised.revision == before.revision + 1) { "Refinement did not publish." }
+                            submitSavedEdit(vm, robot, ::savedTool, it, proof, directory)
                             check(providerHttpCalls.get() > localCalls)
                             localCalls = providerHttpCalls.get()
-                            val definition = JSONObject().put("artifact_id", revised.id).put("artifact_revision", revised.revision)
-                                .put("spec", JSONObject(revised.spec)).toString()
-                            File(directory, "refinement.json").writeText(definition)
-                            proof.put("refinement_sha256", sha256(definition))
-                            val open = robot.text(R.string.tool_open)
-                            robot.reveal(open, null)
-                            robot.click(open)
-                            robot.waitFor(robot.text(R.string.tool_refine))
                         }
                         check(providerHttpCalls.get() == localCalls)
                     }
@@ -344,9 +368,42 @@ class ComparisonChatCaptureTest {
                     .put("accepted_operations", JSONArray(acceptedOperations.toList()))
                     .put("generation", JSONArray(generationEvents.map(::traceEvent))))
                 save(terminal)
+                if (savedEdit) check(terminal == "complete") { "Saved edit capture failed. Inspect its sanitized report." }
             }
         }
         check(terminal == "complete") { "Comparison capture failed. Inspect its sanitized report." }
+    }
+
+    private fun submitSavedEdit(vm: ShellViewModel, robot: ShellRobot, saved: () -> ToolRecord,
+        request: String, proof: JSONObject, directory: File) {
+        val before = saved()
+        val refine = robot.text(R.string.tool_refine)
+        robot.reveal(refine, null)
+        robot.click(refine)
+        robot.edit(robot.text(R.string.composer_label), request)
+        val messagesBefore = onMain { checkNotNull(vm.snapshot.selected).messages.size }
+        robot.click(robot.text(R.string.composer_send))
+        await(300_000) {
+            onMain {
+                !vm.tools.busy && vm.activeConversationId == null &&
+                    vm.snapshot.selected?.messages?.let { messages ->
+                        messages.size > messagesBefore && messages.lastOrNull()?.status in
+                            setOf("complete", "error", "cancelled", "interrupted")
+                    } == true
+            }
+        }
+        val assistant = onMain { checkNotNull(vm.snapshot.selected).messages.last() }
+        proof.put("edit_status", assistant.status).put("edit_error_code", ToolGenerationAttemptDiagnostic.safeCode(assistant.errorCode))
+        val revised = saved()
+        check(revised.revision == before.revision + 1) { "Refinement did not publish." }
+        val definition = JSONObject().put("artifact_id", revised.id).put("artifact_revision", revised.revision)
+            .put("spec", JSONObject(revised.spec)).toString()
+        File(directory, "refinement.json").writeText(definition)
+        proof.put("refinement_sha256", sha256(definition))
+        val open = robot.text(R.string.tool_open)
+        robot.reveal(open, null)
+        robot.click(open)
+        robot.waitFor(robot.text(R.string.tool_refine))
     }
 
     private fun verifyTipCalculator(

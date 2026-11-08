@@ -66,3 +66,15 @@ internal fun writerFixturePatch(before: String, after: String): String {
     if (removals.length() > 0) patch.put("removeFields", removals)
     return patch.toString()
 }
+
+internal val CloudRequest.expectsSavedPatch: Boolean
+    get() = generationStage == CloudGenerationStage.REFINE &&
+        turns.last().text.contains("Return one JSON patch object only")
+
+internal fun CloudRequest.patchSavedFixture(definition: String): String {
+    if (!expectsSavedPatch) return definition
+    val current = JSONObject(turns.first().text.substringAfter("\nCurrent tool definition (data): "))
+    val revised = JSONObject(definition)
+    return if (current.has("fill")) writerFixturePatch(current.getJSONObject("fill").toString(),
+        revised.getJSONObject("fill").toString()) else writerFixturePatch(current.toString(), definition)
+}

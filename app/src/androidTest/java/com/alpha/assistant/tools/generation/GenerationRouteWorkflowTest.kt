@@ -1,6 +1,8 @@
 package com.alpha.assistant.tools.generation
 
 import com.alpha.assistant.tools.isFixtureRevisionPlan
+import com.alpha.assistant.tools.patchSavedFixture
+import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.withUncheckedBehavior
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -107,13 +109,14 @@ class GenerationRouteWorkflowTest {
     private class FixtureProvider(
         var fixture: suspend (CloudRequest, CloudSession) -> String
     ) : ChatProvider {
+        var revisionPlan: String? = null
         val requests = mutableListOf<CloudRequest>()
         val stages get() = requests.map { it.generationStage }
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
             assertTrue(request.jsonObject)
             assertFalse(request.search)
             requests += request
-            val output = if (request.isFixtureRevisionPlan) "{}" else fixture(request, session)
+            val output = if (request.isFixtureRevisionPlan) revisionPlan ?: "{}" else fixture(request, session)
             emit(CloudEvent.Text(if (request.generationStage == CloudGenerationStage.PLAN && output.startsWith("{") &&
                 !request.turns.last().text.contains("Return one JSON patch object only"))
                 runCatching { output.withUncheckedBehavior() }.getOrDefault(output) else output))
@@ -401,7 +404,7 @@ class GenerationRouteWorkflowTest {
                     assertFalse(turn.turns.first().text.contains("\"nativePresentation\""))
                     assertFalse(turn.turns.first().text.contains("\"$counterState\":1"))
                     if (cancel) { session.cancel(); session.check() }
-                    checkNotNull(refinement)
+                    turn.patchSavedFixture(checkNotNull(refinement))
                 }
                 else -> error("Unexpected request stage.")
             }
@@ -429,7 +432,7 @@ class GenerationRouteWorkflowTest {
                 provider.requests.clear()
                 refinement = invalid.toString()
                 failure("widget_spec") { engine.generate(draft.id, "fixture", emptyList(), CloudSession()) }
-                assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE, CloudGenerationStage.REFINE), provider.stages)
+                assertEquals(listOf(CloudGenerationStage.PLAN) + List(4) { CloudGenerationStage.REFINE }, provider.stages)
                 assertEquals(good, store.draft(draft.id))
                 assertEquals(live, store.tool(live.id))
             }
@@ -592,7 +595,7 @@ class GenerationRouteWorkflowTest {
                     val fill = sceneFill()
                     fill.getJSONObject("ui").getJSONArray("children").getJSONObject(0).put("text", "Move the dot")
                     if (rejectRefinement) fill.put("composition", JSONObject())
-                    JSONObject().put("fill", fill).toString()
+                    turn.patchSavedFixture(JSONObject().put("fill", fill).toString())
                 }
                 else -> error("Unexpected request stage.")
             }
@@ -638,7 +641,7 @@ class GenerationRouteWorkflowTest {
             rejectRefinement = true
             provider.requests.clear()
             failure("widget_incomplete") { engine.generate(refine.id, "fixture", emptyList(), CloudSession()) }
-            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE, CloudGenerationStage.REFINE), provider.stages)
+            assertEquals(listOf(CloudGenerationStage.PLAN) + List(4) { CloudGenerationStage.REFINE }, provider.stages)
             assertEquals(live, store.tool(live.id))
             assertEquals(refined, store.draft(refine.id))
             val next = engine.accept(refine.id)
@@ -1230,6 +1233,94 @@ class GenerationRouteWorkflowTest {
         }
     }
 
+    @Test fun savedPatchKeepsPrivateFieldsLocalAndRepairsAnUnsupportedBinding(): Unit = runBlocking {
+        val source = """
+            if (input.event.type === 'action') {
+                input.state.fill_value += 3;
+                input.state.fill_other += 1;
+            }
+            return {state:input.state};
+        """.trimIndent()
+        val original = JSONObject(definition(source = source)).apply {
+            getJSONObject("stateSchema").put("fill_other", "number").put("fill_note", "string")
+            getJSONObject("initialState").put("fill_other", 0).put("fill_note", "PRIVATE_DEFAULT")
+            put("ui", JSONObject("""{"type":"column","children":[{"type":"button","text":"Copy","action":"fill_copy"},
+                {"type":"metric","text":"PRIVATE_LABEL","bind":"fill_value"}]}"""))
+        }
+        var writerCalls = 0
+        val provider = FixtureProvider { turn, _ ->
+            assertTrue(turn.turns.none { it.text.contains("PRIVATE_") || it.text.contains("7654321") })
+            when (turn.generationStage) {
+                CloudGenerationStage.REFINE -> when (writerCalls++) {
+                    0 -> """{"sourceEdits":[{"search":"fill_value += 3","replace":"fill_value += 4"},
+                        {"search":"fill_other += 1","replace":"fill_other += 2"}],"behaviorBindings":{"action":"fill_copy","value":[0]}}"""
+                    1 -> {
+                        assertTrue(turn.turns.last().text.contains("observation_kind"))
+                        assertTrue(turn.turns.any { it.text.contains("fill_value += 4") })
+                        """{"behaviorBindings":{"action":"fill_copy","value":[1]}}"""
+                    }
+                    else -> error("Unexpected retry")
+                }
+                else -> error("Unexpected request stage")
+            }
+        }.apply {
+            revisionPlan = """{"behavior":{"status":"checkable","scenario":{"slots":{"action":{"kind":"action"},
+                "value":{"kind":"value"}},"steps":[{"op":"action","slot":"action"},
+                {"op":"assert","slot":"value","test":"equals","value":4}]}}}"""
+        }
+        withEngine(provider) { _, _, generation ->
+            val spec = ToolSpec.parse(original.toString())
+            val liveState = JSONObject(spec.initialState).put("fill_value", 7654321).toString()
+            val live = ToolRecord("private-saved-app", 2, 4, spec.json, liveState, spec.ui.toString(), null, true)
+            val edited = generation.generate("fixture", "Change the increment to four", live, emptyList(), CloudSession(),
+                live.id, privateState = true, draftPreview = null, trace = null)
+            assertTrue(provider.requests.all { request -> request.turns.none { it.text.contains("PRIVATE_") || it.text.contains("7654321") } })
+            assertEquals(live.state, edited.state)
+            assertEquals(spec.ui.toString(), edited.spec.ui.toString())
+            assertEquals(spec.initialState, edited.spec.initialState)
+            assertTrue(edited.spec.source.contains("fill_other += 2"))
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE, CloudGenerationStage.REFINE), provider.stages)
+        }
+    }
+
+    @Test fun savedEditUsesOneFullFallbackAfterThreeRejectedPatches(): Unit = runBlocking {
+        val original = definition()
+        val fallback = JSONObject(original).put("title", "Fallback revision").toString()
+        val provider = FixtureProvider { turn, _ ->
+            when (turn.generationStage) {
+                CloudGenerationStage.PLAN -> plan(custom)
+                CloudGenerationStage.COMPLETE -> original
+                CloudGenerationStage.REFINE -> {
+                    val feedback = turn.turns.last().text
+                    when {
+                        feedback.startsWith("Apply the requested edit") ->
+                            """{"sourceEdits":[{"search":"state","replace":"value"}]}"""
+                        "(ambiguous_match)" in feedback ->
+                            """{"sourceEdits":[{"search":"return","replace":"x"},{"search":"return {state","replace":"y"}]}"""
+                        "(overlap)" in feedback -> """{"fields":{"title":"Generated"}}"""
+                        "(no_change)" in feedback && feedback.startsWith("Return the complete corrected app definition") -> fallback
+                        else -> error("Unexpected patch feedback")
+                    }
+                }
+                else -> error("Unexpected request stage")
+            }
+        }
+        withEngine(provider) { store, engine, _ ->
+            val draft = engine.createDraft(request, null)
+            engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+            val saved = engine.accept(draft.id)
+            val edit = engine.createDraft("Rename the app", saved.id)
+            provider.requests.clear()
+            engine.generate(edit.id, "fixture", emptyList(), CloudSession())
+            assertEquals(saved, store.tool(saved.id))
+            val revised = engine.accept(edit.id)
+            assertEquals(saved.revision + 1, revised.revision)
+            assertEquals(saved.state, revised.state)
+            assertEquals("Fallback revision", ToolSpec.parsePersisted(revised.spec).title)
+            assertEquals(listOf(CloudGenerationStage.PLAN) + List(4) { CloudGenerationStage.REFINE }, provider.stages)
+        }
+    }
+
     @Test fun refinementPlansBehaviorAndKeepsLiveStateOnRepeatedFailure(): Unit = runBlocking {
         val definition = definition()
         var invalid = false
@@ -1238,8 +1329,8 @@ class GenerationRouteWorkflowTest {
                 CloudGenerationStage.PLAN -> plan(custom)
                 CloudGenerationStage.COMPLETE -> definition
                 CloudGenerationStage.REFINE -> {
-                    assertFalse(turn.turns.first().text.contains("5418307"))
-                    if (invalid) "bad JSON" else definition
+                    assertFalse(turn.turns.any { it.text.contains("5418307") })
+                    if (invalid) "bad JSON" else """{"fields":{"title":"Revised"}}"""
                 }
                 else -> error("Unexpected request stage.")
             }
@@ -1250,18 +1341,31 @@ class GenerationRouteWorkflowTest {
             val saved = engine.accept(first.id)
             val live = saved.copy(state = """{"fill_value":5418307}""", stateVersion = saved.stateVersion + 1)
             store.saveTool(live, revision = false)
-            val draft = engine.createDraft("Change the button label", live.id)
+            val draft = engine.createDraft("Rename the app", live.id)
             provider.requests.clear()
             val good = engine.generate(draft.id, "fixture", emptyList(), CloudSession())
             assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE), provider.stages)
             val instructions = provider.requests.first().systemInstructions
             assertTrue(instructions.startsWith("Plan the requested revision."))
+            assertTrue(instructions.contains("JSON object"))
+            assertTrue(instructions.contains("button label"))
+            assertTrue(instructions.contains("Stop before controls become unavailable"))
+            assertTrue(instructions.contains("index conversions"))
+            val existing = JSONObject(provider.requests.first().turns.single().text).getJSONObject("existingDefinition")
+            assertEquals(ToolSpec.parsePersisted(live.spec).source, existing.getString("source"))
+            assertFalse(existing.has("initialState"))
             assertFalse(instructions.contains("""{"title":"Touch surface","""))
+            assertTrue(provider.requests.last().turns.last().text.contains("Return one JSON patch object only"))
+            assertFalse(provider.requests.last().turns.first().text.contains("Schema:"))
+            assertTrue(provider.requests.last().turns.first().text.contains("Change only what the user requested"))
+            assertEquals("Revised", ToolSpec.parsePersisted(checkNotNull(good.candidate)).title)
             assertEquals(live.state, good.previewState)
             invalid = true
             provider.requests.clear()
             failure("widget_spec") { engine.generate(draft.id, "fixture", emptyList(), CloudSession()) }
-            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE, CloudGenerationStage.REFINE), provider.stages)
+            assertEquals(listOf(CloudGenerationStage.PLAN) + List(4) { CloudGenerationStage.REFINE }, provider.stages)
+            assertTrue(provider.requests.drop(1).take(3).all { it.turns.last().text.contains("Return one JSON patch object only") })
+            assertTrue(provider.requests.last().turns.last().text.contains("complete corrected app definition"))
             assertEquals(good, store.draft(draft.id))
             assertEquals(live, store.tool(live.id))
         }
