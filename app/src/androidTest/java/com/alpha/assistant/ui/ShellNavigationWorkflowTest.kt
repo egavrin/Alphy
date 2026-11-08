@@ -29,15 +29,14 @@ class ShellNavigationWorkflowTest {
         robot.openDrawer(scenario)
         robot.click(robot.text(R.string.settings))
         robot.awaitDrawerClosed(scenario)
-        robot.waitUntil { robot.secure(scenario) }
+        robot.waitUntil { robot.composed(scenario, "settings-pane") }
     }
 
     // The shell applies an entry in its first frames, so the check waits 10 frames after the Desktop shows.
     private fun assertNoEntryApplied(scenario: ActivityScenario<*>) {
         robot.waitFor(robot.text(R.string.desktop_prompt))
         robot.awaitFrames(10)
-        assertFalse(robot.secure(scenario))
-        assertFalse(robot.composed(scenario, "secure"))
+        assertFalse(robot.composed(scenario, "settings-pane"))
     }
 
     @Test fun backLeavesSettingsThenChatThenApp() {
@@ -46,10 +45,10 @@ class ShellNavigationWorkflowTest {
             robot.waitFor("Nav fixture message")
             openSettings(scenario)
             scenario.recreate()
-            robot.waitUntil { robot.secure(scenario) }
+            robot.waitUntil { robot.composed(scenario, "settings-pane") }
             robot.back()
             robot.waitFor("Nav fixture message")
-            robot.waitUntil { !robot.secure(scenario) }
+            robot.waitUntil { !robot.composed(scenario, "settings-pane") }
             robot.back()
             robot.waitGone("Nav fixture message")
             robot.waitUntil { fixture.store.load().selectedId == null }
@@ -62,7 +61,7 @@ class ShellNavigationWorkflowTest {
         fixture.launch().use { scenario ->
             openSettings(scenario)
             robot.instrumentation.runOnMainSync { fixture.model!!.openSurface(null) }
-            robot.waitUntil { !robot.secure(scenario) }
+            robot.waitUntil { !robot.composed(scenario, "settings-pane") }
             robot.back()
             robot.waitUntil { scenario.state == Lifecycle.State.DESTROYED }
         }
@@ -73,11 +72,11 @@ class ShellNavigationWorkflowTest {
         fixture.launch().use { scenario ->
             robot.waitFor(robot.text(R.string.desktop_prompt))
             robot.instrumentation.runOnMainSync { fixture.model!!.openSurface(null, settings = true) }
-            robot.waitUntil { robot.secure(scenario) }
+            robot.waitUntil { robot.composed(scenario, "settings-pane") }
             robot.waitFor(robot.text(R.string.settings))
             robot.back()
             robot.waitFor(robot.text(R.string.desktop_prompt))
-            robot.waitUntil { !robot.secure(scenario) }
+            robot.waitUntil { !robot.composed(scenario, "settings-pane") }
         }
         // MainActivity gets the process-wide model, so the second launch gets the model of the first launch.
         val shared = checkNotNull(fixture.model)
@@ -112,26 +111,23 @@ class ShellNavigationWorkflowTest {
             robot.back()
             robot.waitGone(robot.text(R.string.access_intro))
             assertTrue(robot.composed(scenario, "settings-menu"))
-            assertTrue(robot.secure(scenario))
             robot.back()
             robot.waitFor(robot.text(R.string.desktop_prompt))
-            robot.waitUntil { !robot.secure(scenario) }
+            robot.waitUntil { !robot.composed(scenario, "settings-pane") }
         }
     }
 
-    @Test fun settingsStaySecureUntilTheyLeave() {
+    @Test fun settingsAllowScreenshotsThroughBackNavigation() {
         fixture.launch().use { scenario ->
+            assertFalse(robot.secure(scenario))
             openSettings(scenario)
-            robot.waitUntil { robot.composed(scenario, "secure") }
+            assertFalse(robot.secure(scenario))
             assertTrue(robot.automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK))
             robot.waitUntil {
-                // Read the flag first. The tagged content leaves composition in the frame that clears the flag.
-                val secure = robot.secure(scenario)
-                val shown = robot.composed(scenario, "secure")
-                assertTrue("Settings content shows without FLAG_SECURE", secure || !shown)
-                !shown
+                assertFalse("Back navigation enabled screenshot protection", robot.secure(scenario))
+                !robot.composed(scenario, "settings-pane")
             }
-            assertFalse(robot.secure(scenario))
+            robot.waitFor(robot.text(R.string.desktop_prompt))
         }
     }
 

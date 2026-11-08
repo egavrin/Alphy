@@ -67,7 +67,7 @@ class DesktopWorkflowTest {
             val request = "присылай мне каждое утро в семь утра подборку самых важных новостей за прошлый день"
             robot.edit(robot.text(R.string.composer_label), request)
             robot.click(robot.text(R.string.composer_send))
-            robot.waitFor(robot.text(R.string.automation_agent_proposal))
+            robot.assertScreenshotShows(robot.text(R.string.automation_agent_proposal))
             assertEquals(1, fixture.provider.calls)
             robot.reveal(robot.text(R.string.cancel), null)
             robot.click(robot.text(R.string.cancel))

@@ -57,17 +57,17 @@ class DrawerWorkflowTest {
             robot.openDrawer(scenario)
             robot.click(robot.text(R.string.settings))
             robot.awaitDrawerClosed(scenario)
-            robot.waitUntil { robot.secure(scenario) }
+            robot.waitUntil { robot.composed(scenario, "settings-pane") }
             robot.openDrawer(scenario)
-            assertTrue(robot.secure(scenario))
+            assertTrue(robot.composed(scenario, "settings-pane"))
             robot.back()
             robot.awaitDrawerClosed(scenario)
-            assertTrue(robot.secure(scenario))
+            assertTrue(robot.composed(scenario, "settings-pane"))
             robot.openDrawer(scenario)
-            assertTrue(robot.secure(scenario))
+            assertTrue(robot.composed(scenario, "settings-pane"))
             robot.instrumentation.runOnMainSync { fixture.model!!.openSurface(null) }
             robot.awaitDrawerClosed(scenario)
-            robot.waitUntil { !robot.secure(scenario) }
+            robot.waitUntil { !robot.composed(scenario, "settings-pane") }
             robot.assertTarget(robot.text(R.string.menu))
         }
     }

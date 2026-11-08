@@ -69,11 +69,11 @@ class MemoryShellWorkflowTest {
             robot.awaitDrawerClosed(scenario)
             robot.click(robot.text(R.string.settings_deepseek))
             robot.reveal(robot.text(R.string.key_label))
-            assertTrue(robot.secure(scenario))
+            assertTrue(robot.composed(scenario, "settings-detail"))
             robot.back()
             robot.back()
             robot.waitFor("Original memory discussion")
-            robot.waitUntil { !robot.secure(scenario) }
+            robot.waitUntil { !robot.composed(scenario, "settings-pane") }
         }
         assertEquals(0, fixture.provider.calls)
         val closedStore = checkNotNull(fixture.model).memoryStore

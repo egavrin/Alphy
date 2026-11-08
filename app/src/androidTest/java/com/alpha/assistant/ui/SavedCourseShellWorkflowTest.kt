@@ -60,11 +60,11 @@ class SavedCourseShellWorkflowTest {
             robot.awaitDrawerClosed(scenario)
             robot.click(robot.text(R.string.settings_deepseek))
             robot.reveal(robot.text(R.string.key_label))
-            assertTrue(robot.secure(scenario))
+            assertTrue(robot.composed(scenario, "settings-detail"))
             robot.back()
             robot.back()
             robot.waitFor("Original discussion message")
-            robot.waitUntil { !robot.secure(scenario) }
+            robot.waitUntil { !robot.composed(scenario, "settings-pane") }
         }
         assertEquals(0, fixture.provider.calls)
         val closedStore = checkNotNull(fixture.model).courseStore
@@ -87,7 +87,7 @@ class SavedCourseShellWorkflowTest {
                 robot.click(robot.text(R.string.course_exit))
                 robot.waitGone(robot.text(R.string.course_library))
                 robot.waitUntil { robot.composed(scenario, "desktop") }
-                assertFalse(robot.secure(scenario))
+                assertFalse(robot.composed(scenario, "settings-pane"))
             }
             assertEquals(0, empty.provider.calls)
         }

@@ -62,8 +62,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.SecureFlagPolicy
 import com.alpha.assistant.R
 import com.alpha.assistant.capabilities.AccessSettings
 import com.alpha.assistant.capabilities.AssistantSettingsRow
@@ -110,7 +108,7 @@ private fun SettingsLayout(
     openUpdateInstaller: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
-    BoxWithConstraints(Modifier.fillMaxSize().background(colors.background)) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(colors.background).testTag("settings-pane")) {
         val split = maxWidth >= SettingsSplitWidth
         val section = selected ?: SettingsSection.DeepSeek.takeIf { split }
         val density = LocalDensity.current
@@ -338,7 +336,7 @@ private fun DeepSeekSettings(model: ShellViewModel) {
         }
     }
     val dismissDelete = { confirmDelete = false }
-    if (confirmDelete) AlertDialog(properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn), onDismissRequest = dismissDelete, title = { Text(stringResource(R.string.key_delete_title)) },
+    if (confirmDelete) AlertDialog(onDismissRequest = dismissDelete, title = { Text(stringResource(R.string.key_delete_title)) },
         text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(stringResource(R.string.key_delete_text)) } },
         confirmButton = {
             TextButton(onClick = {

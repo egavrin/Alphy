@@ -16,7 +16,7 @@ The `settings` table stores `selected`, `newDraft`, and `userName`. Stale `theme
 
 `data/SecureKeyStore.kt` stores the DeepSeek key in private preferences named `alpha_credentials`. The values contain AES-GCM ciphertext and its IV. Android Keystore alias `alpha.deepseek.v1` holds the AES key. `save()`, `read()`, and `clear()` return `Result`. `read()` distinguishes absent credentials from decryption failures. A failed read does not create a replacement key, delete ciphertext, or log the credential. A blank save fails before encryption.
 
-Settings accepts a replacement key without displaying the stored key. A successful save clears the entry field. The entry field is not saved through activity recreation. Settings uses `FLAG_SECURE`. Existing `allowBackup="false"` excludes the application data from Android backup. A saved key writes the consent record in the same commit. A stored key without that record shows «Согласиться». «Удалить ключ» removes the key and the consent. `cloudKey()` is the only key read for requests. Key storage does not validate the provider credential.
+Settings accepts a replacement key without displaying the stored key. A successful save clears the entry field. The entry field is not saved through activity recreation. Existing `allowBackup="false"` excludes the application data from Android backup. A saved key writes the consent record in the same commit. A stored key without that record shows «Согласиться». «Удалить ключ» removes the key and the consent. `cloudKey()` is the only key read for requests. Key storage does not validate the provider credential.
 
 ## UI boundaries
 

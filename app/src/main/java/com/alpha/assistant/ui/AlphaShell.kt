@@ -3,8 +3,6 @@ package com.alpha.assistant.ui
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
-import android.view.WindowManager
-import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.EnterTransition
@@ -49,7 +47,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -434,12 +431,10 @@ import kotlinx.coroutines.launch
                                         entryRequest = model.courseEntry?.takeUnless { it.inChat }?.request,
                                         onEntryHandled = model::courseEntryHandled, composerModel = model,
                                     )
-                                    ShellDestination.Settings -> SecureWindow {
-                                        SettingsPane(
-                                            model, settingsSection, currentLayout.settingsHinge, ::selectSettings,
-                                            openUpdateInstaller = { model.updates.handoff { updateHandoff.launch(it) } },
-                                        )
-                                    }
+                                    ShellDestination.Settings -> SettingsPane(
+                                        model, settingsSection, currentLayout.settingsHinge, ::selectSettings,
+                                        openUpdateInstaller = { model.updates.handoff { updateHandoff.launch(it) } },
+                                    )
                                 }
                             }
                         })
@@ -498,8 +493,7 @@ import kotlinx.coroutines.launch
 
 @Composable private fun ChatSetupDialog(dismiss: () -> Unit, content: @Composable () -> Unit) {
     Dialog(onDismissRequest = dismiss,
-        properties = DialogProperties(dismissOnClickOutside = false, usePlatformDefaultWidth = false,
-            securePolicy = SecureFlagPolicy.SecureOn)) {
+        properties = DialogProperties(dismissOnClickOutside = false, usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(12.dp),
             shape = MaterialTheme.shapes.extraLarge, content = content)
     }
@@ -693,15 +687,6 @@ import kotlinx.coroutines.launch
             TextButton(onClick = refineOutline) { Text(stringResource(R.string.course_refinement_open)) }
         }
     }
-}
-
-@Composable private fun SecureWindow(content: @Composable () -> Unit) {
-    val window = LocalActivity.current?.window
-    DisposableEffect(Unit) {
-        window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
-    }
-    Box(Modifier.testTag("secure")) { content() }
 }
 
 @Composable internal fun ImagePreview(attachment: Attachment, modifier: Modifier = Modifier.size(76.dp)) {

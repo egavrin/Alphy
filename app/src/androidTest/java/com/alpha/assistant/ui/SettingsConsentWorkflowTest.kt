@@ -33,7 +33,7 @@ class SettingsConsentWorkflowTest {
         robot.openDrawer(scenario)
         robot.click(robot.text(R.string.settings))
         robot.awaitDrawerClosed(scenario)
-        robot.waitUntil { robot.secure(scenario) }
+        robot.waitUntil { robot.composed(scenario, "settings-pane") }
         if (section != null) robot.click(robot.text(section))
     }
     private fun saveKey() {
@@ -61,7 +61,7 @@ class SettingsConsentWorkflowTest {
         fixture.launch().use { scenario ->
             send("Before key")
             robot.click(robot.text(R.string.open_settings))
-            robot.waitUntil { robot.secure(scenario) }
+            robot.waitUntil { robot.composed(scenario, "settings-pane") }
             robot.waitFor(robot.text(R.string.key_missing))
             robot.waitFor(robot.text(R.string.consent_text))
             saveKey()
@@ -91,7 +91,7 @@ class SettingsConsentWorkflowTest {
             robot.waitUntil { tools.errorCode == "consent" }
             assertEquals(0, fixture.provider.calls)
             robot.click(robot.text(R.string.open_settings))
-            robot.waitUntil { robot.secure(scenario) }
+            robot.waitUntil { robot.composed(scenario, "settings-pane") }
             robot.waitFor(robot.text(R.string.key_needs_consent))
             robot.waitFor(robot.text(R.string.consent_text))
             robot.reveal(robot.text(R.string.consent_accept))
@@ -114,7 +114,7 @@ class SettingsConsentWorkflowTest {
         fixture.launch().use { scenario ->
             robot.waitFor(robot.text(R.string.menu))
             robot.instrumentation.runOnMainSync { fixture.model!!.openSurface(null, settings = true) }
-            robot.waitUntil { robot.secure(scenario) }
+            robot.waitUntil { robot.composed(scenario, "settings-pane") }
             robot.waitFor(robot.text(R.string.key_needs_consent))
             assertEquals(0, fixture.provider.calls)
         }
@@ -127,7 +127,7 @@ class SettingsConsentWorkflowTest {
             send("Rejected key")
             robot.waitFor("Fixture rejected key")
             robot.click(robot.text(R.string.open_settings))
-            robot.waitUntil { robot.secure(scenario) }
+            robot.waitUntil { robot.composed(scenario, "settings-pane") }
             robot.waitFor(robot.text(R.string.key_ready))
         }
     }
@@ -141,7 +141,7 @@ class SettingsConsentWorkflowTest {
             robot.waitFor(robot.text(R.string.consent_text))
             robot.reveal(robot.text(R.string.key_delete))
             robot.click(robot.text(R.string.key_delete))
-            robot.waitFor(robot.text(R.string.key_delete_text))
+            robot.assertScreenshotShows(robot.text(R.string.key_delete_text))
             robot.click(robot.text(R.string.delete))
             robot.waitFor(robot.text(R.string.key_missing))
             assertNull(fixture.keys.read().getOrThrow())
@@ -228,7 +228,7 @@ class SettingsConsentWorkflowTest {
             robot.enter(robot.text(R.string.key_label), "alpha-test-only")
             robot.waitUntil { keyText() != empty }
             scenario.recreate()
-            robot.waitUntil { robot.secure(scenario) }
+            robot.waitUntil { robot.composed(scenario, "settings-pane") }
             robot.reveal(robot.text(R.string.key_label))
             robot.waitUntil { keyText() == empty }
         }
@@ -269,11 +269,11 @@ class SettingsConsentWorkflowTest {
             robot.edit(robot.text(R.string.settings_name_label), "Евгений")
             robot.waitUntil { fixture.store.load().userName == "Евгений" }
             scenario.recreate()
-            robot.waitUntil { robot.secure(scenario) }
+            robot.waitUntil { robot.composed(scenario, "settings-pane") }
             robot.reveal(robot.text(R.string.settings_name_label))
             robot.waitUntil { robot.field(robot.text(R.string.settings_name_label)).text?.toString() == "Евгений" }
             robot.back()
-            robot.waitUntil { !robot.secure(scenario) }
+            robot.waitUntil { !robot.composed(scenario, "settings-pane") }
             robot.openDrawer(scenario)
             robot.waitFor("Евгений")
         }

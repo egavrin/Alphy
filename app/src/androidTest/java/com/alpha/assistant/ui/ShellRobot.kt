@@ -239,6 +239,23 @@ internal class ShellRobot(fixture: String) {
         return bounds
     }
     fun bounds(label: String): Rect = Rect().also { waitFor(label).getBoundsInScreen(it) }
+
+    fun assertScreenshotShows(label: String) {
+        diagnostics.target(label)
+        waitUntil {
+            val node = find(label)?.takeIf { it.isVisibleToUser } ?: return@waitUntil false
+            val region = Rect().also(node::getBoundsInScreen)
+            val image = checkNotNull(automation.takeScreenshot())
+            try {
+                if (region.isEmpty || !Rect(0, 0, image.width, image.height).contains(region)) return@waitUntil false
+                val pixels = IntArray(region.width() * region.height())
+                image.getPixels(pixels, 0, region.width(), region.left, region.top, region.width(), region.height())
+                pixels.any { it != pixels[0] }
+            } finally {
+                image.recycle()
+            }
+        }
+    }
     fun rotate(scenario: ActivityScenario<*>, landscape: Boolean) {
         scenario.onActivity { it.requestedOrientation = if (landscape) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
         val expected = if (landscape) Configuration.ORIENTATION_LANDSCAPE else Configuration.ORIENTATION_PORTRAIT

@@ -9,7 +9,6 @@ import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.provider.Settings
-import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Image
@@ -35,8 +34,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.core.content.ContextCompat
 import com.alpha.assistant.R
 import com.alpha.assistant.ui.*
@@ -56,7 +53,6 @@ class AssistantActivity : AlphyActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
         newChatPending = savedInstanceState?.getBoolean(NEW_CHAT_PENDING) == true
         receiveInvocation(intent, newEntry = savedInstanceState == null)
@@ -295,17 +291,16 @@ private fun CompactAssistant(
     }
 
     com.alpha.assistant.ui.ChatSetupDialogs(model)
-    val secure = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn)
     model.requestError?.let { error ->
         AlertDialog(
             onDismissRequest = model::clearRequestError, title = { Text(stringResource(R.string.assistant_request_error)) },
-            text = { Text(error) }, properties = secure,
+            text = { Text(error) },
             confirmButton = { TextButton(onClick = model::clearRequestError) { Text(stringResource(R.string.tool_dialog_close)) } },
         )
     }
     if (model.saveFailed) AlertDialog(
         onDismissRequest = {}, title = { Text(stringResource(R.string.assistant_save_error)) },
-        text = { Text(stringResource(R.string.assistant_save_detail)) }, properties = secure,
+        text = { Text(stringResource(R.string.assistant_save_detail)) },
         confirmButton = { TextButton(onClick = model::retrySave) { Text(stringResource(R.string.assistant_save_retry)) } },
     )
 
@@ -332,7 +327,7 @@ private fun CompactAssistant(
         ReviewedContextDialog(model) { menu = null }
     }
     if (menu != null && menu != AssistantMenu.Context) {
-        ModalBottomSheet(onDismissRequest = { menu = null }, properties = ModalBottomSheetProperties(securePolicy = SecureFlagPolicy.SecureOn)) {
+        ModalBottomSheet(onDismissRequest = { menu = null }) {
             Column(Modifier.safeDrawingPadding().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 when (menu) {
                     AssistantMenu.Voice -> VoiceControls(model)
@@ -411,7 +406,7 @@ private fun AssistantScreenshot(screenshot: Bitmap, compact: Boolean, remove: ()
 @Composable
 private fun ReviewScreenText(text: String, enabled: Boolean, attach: () -> Unit, done: () -> Unit, discard: () -> Unit) {
     AlertDialog(
-        onDismissRequest = done, properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
+        onDismissRequest = done,
         title = { Text(stringResource(R.string.assistant_review_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

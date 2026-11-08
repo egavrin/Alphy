@@ -3,7 +3,6 @@ package com.alpha.assistant.ui
 import android.content.res.Configuration
 import android.content.res.Resources
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Rect
 import android.os.SystemClock
@@ -25,10 +24,7 @@ import org.junit.Test
 import java.io.File
 import kotlin.math.roundToInt
 
-/**
- * The visual check method for FLAG_SECURE screens (spec 9). Each capture saves a screenshot and the node list of the screen.
- * The screenshot of «Настройки» is black, so the test also draws the window of that page into bitmaps in the app process.
- */
+/** Saves system screenshots and the node list for each screen. */
 class ShellScreenshotTest {
     private val fixture = ShellFixture("screens")
     private val robot = ShellRobot("screens")
@@ -69,7 +65,6 @@ class ShellScreenshotTest {
     private fun captureScreens(scenario: ActivityScenario<*>, directory: File, dark: Boolean) {
         robot.waitFor(robot.text(R.string.desktop_prompt))
         val desktop = screen(directory, "desktop")
-        // Color.BLACK is exactly 0xFF000000, the FLAG_SECURE black. A dark background is not black.
         assertNotEquals("Desktop center pixel", Color.BLACK, center(desktop))
         // The Desktop draws no background, so its side padding shows colorScheme.background, the color of the shell Surface (AlphaShell).
         val expected = alphaColorScheme(fixture.context, dark).background.toArgb()
@@ -158,10 +153,9 @@ class ShellScreenshotTest {
                     capture("search", background)
                     robot.click(robot.text(R.string.search_back))
                     open(scenario, R.string.settings)
-                    robot.waitUntil { robot.composed(scenario, "settings-menu") && robot.secure(scenario) }
-                    val settings = settled { draw(scenario) }
+                    robot.waitUntil { robot.composed(scenario, "settings-menu") }
+                    val settings = screen(dir, "settings")
                     try {
-                        save(dir, "settings", settings)
                         val menuColor = if (robot.composed(scenario, "settings-detail")) {
                             "surfaceContainerLow" to colors.surfaceContainerLow.toArgb()
                         } else background
@@ -170,7 +164,7 @@ class ShellScreenshotTest {
                     } finally { settings.recycle() }
                     robot.back()
                     robot.waitFor(robot.text(R.string.desktop_prompt))
-                    robot.waitUntil { !robot.secure(scenario) }
+                    robot.waitUntil { !robot.composed(scenario, "settings-pane") }
                     capture("returned-desktop", background)
                 }
             }
@@ -196,7 +190,7 @@ class ShellScreenshotTest {
 
     private fun captureSettings(scenario: ActivityScenario<*>, directory: File) {
         open(scenario, R.string.settings)
-        robot.waitUntil { robot.composed(scenario, "settings-menu") && robot.secure(scenario) }
+        robot.waitUntil { robot.composed(scenario, "settings-menu") }
         val split = robot.composed(scenario, "settings-detail")
         InstrumentationRegistry.getArguments().getString("settingsLayout")?.let {
             assertEquals("The device uses the expected Settings layout", it == "split", split)
@@ -206,7 +200,6 @@ class ShellScreenshotTest {
             val detail = robot.composedBounds(scenario, "settings-detail").first
             assertTrue("Settings rail and detail must not overlap", rail.right <= detail.left)
         }
-        assertEquals("Settings center pixel", Color.BLACK, center(screen(directory, "settings-secure")))
         robot.reveal(robot.text(R.string.settings_name_label), forward = null)
         captureSettingsPage(scenario, directory, "settings")
         for ((section, target, name) in listOf(
@@ -221,7 +214,6 @@ class ShellScreenshotTest {
             robot.reveal(label, forward = null)
             robot.click(label)
             robot.reveal(robot.text(target), forward = null)
-            assertTrue(robot.secure(scenario))
             assertEquals(split, robot.composed(scenario, "settings-menu"))
             captureSettingsPage(scenario, directory, name)
             if (section == R.string.access) {
@@ -249,15 +241,14 @@ class ShellScreenshotTest {
             robot.waitFor(robot.text(R.string.key_ready))
         }
         robot.back()
-        robot.waitUntil { !robot.secure(scenario) }
+        robot.waitUntil { !robot.composed(scenario, "settings-pane") }
         assertFalse(robot.composed(scenario, "settings-menu"))
     }
 
     private fun captureSettingsPage(scenario: ActivityScenario<*>, directory: File, name: String) {
-        val image = settled { draw(scenario) }
+        val image = screen(directory, name)
         try {
-            save(directory, name, image)
-            val pane = robot.composedBounds(scenario, "secure").first
+            val pane = robot.composedBounds(scenario, "settings-pane").first
             val sample = IntArray(pane.width())
             val colors = mutableSetOf<Int>()
             for (y in pane.top until pane.bottom step 4) {
@@ -298,17 +289,6 @@ class ShellScreenshotTest {
             assertTrue("The screen did not settle within 3 seconds", SystemClock.uptimeMillis() < deadline)
             last = next
         }
-    }
-
-    // Assumption: View.draw on a software canvas draws the Compose content, and FLAG_SECURE does not block it,
-    // because the flag protects only the window surface. The distinct-color assertion tests this.
-    private fun draw(scenario: ActivityScenario<*>): Bitmap {
-        var image: Bitmap? = null
-        scenario.onActivity { activity ->
-            val decor = activity.window.decorView
-            image = Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888).also { decor.draw(Canvas(it)) }
-        }
-        return checkNotNull(image)
     }
 
     private fun setNight(mode: String, bits: Int) {

@@ -270,9 +270,9 @@ class AdaptiveShellWorkflowTest {
 
         scenario.onActivity { checkNotNull(fixture.model).openSurface(null, settings = true) }
         robot.reveal(robot.text(R.string.key_label))
-        assertTrue(robot.secure(scenario))
+        assertTrue(robot.composed(scenario, "settings-detail"))
         robot.withBackInput(scenario) { input -> scenario.onActivity { input.complete() } }
-        robot.waitUntil { !robot.secure(scenario) }
+        robot.waitUntil { !robot.composed(scenario, "settings-pane") }
         assertEquals("denied", tools.effects(TOOL_ID).single().result.status)
         assertEquals(0, fixture.provider.calls)
     }
@@ -282,7 +282,7 @@ class AdaptiveShellWorkflowTest {
         robot.openDrawer(scenario)
         robot.click(robot.text(R.string.settings))
         robot.awaitDrawerClosed(scenario)
-        robot.waitUntil { robot.composed(scenario, "settings-detail") && robot.secure(scenario) }
+        robot.waitUntil { robot.composed(scenario, "settings-detail") }
         val label = robot.text(R.string.settings_name_label)
         robot.reveal(label)
         robot.edit(label, "Евгений")

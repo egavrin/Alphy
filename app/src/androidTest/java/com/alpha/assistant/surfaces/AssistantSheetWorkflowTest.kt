@@ -4,7 +4,6 @@ import android.app.KeyguardManager
 import android.content.Intent
 import android.content.res.Resources
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Rect
 import android.os.PowerManager
@@ -101,7 +100,7 @@ class AssistantSheetWorkflowTest {
         val discarded = capture("Discard this screen", withImage = false)
         launch(discarded).use {
             robot.click(suggestion("Discard this screen"))
-            robot.waitFor(review)
+            robot.assertScreenshotShows(review)
             robot.click(robot.text(R.string.assistant_discard_capture))
             robot.waitGone(suggestion("Discard this screen"))
             assertTrue(provider.requests.isEmpty())
@@ -165,6 +164,7 @@ class AssistantSheetWorkflowTest {
         launch(capture("Open the app without sending")).use {
             robot.waitFor(robot.text(R.string.assistant_image_attached))
             robot.click(robot.text(R.string.menu))
+            robot.assertScreenshotShows(robot.text(R.string.assistant_open_app))
             robot.click(robot.text(R.string.assistant_open_app))
             robot.waitUntil { resumedMainActivity() && AssistantCapture.current == null }
             assertEquals(draft, fixture.store.load().draft)
@@ -225,7 +225,7 @@ class AssistantSheetWorkflowTest {
         }
     }
 
-    @Test fun keyboardControlsAndSecureCaptureAtNormalAndLargeText() = withFixture { fixture, _ ->
+    @Test fun keyboardControlsAndScreenshotAtNormalAndLargeText() = withFixture { fixture, _ ->
         val previous = robot.shell("settings get system font_scale")
         val directory = checkNotNull(app.getExternalFilesDir("assistant-evidence"))
         val bitmap = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.CYAN) }
@@ -237,7 +237,7 @@ class AssistantSheetWorkflowTest {
                 launch(capture("Screen with existing photo")).use { scenario ->
                     robot.waitFor(composer)
                     robot.waitFor(robot.text(R.string.assistant_image_attached))
-                    assertTrue(robot.secure(scenario))
+                    assertFalse(robot.secure(scenario))
                     val sheet = robot.composedBounds(scenario, "assistant-sheet").first
                     for (id in listOf(R.string.composer_send, R.string.composer_voice, R.string.assistant_image_remove)) {
                         val label = robot.text(id)
@@ -246,21 +246,10 @@ class AssistantSheetWorkflowTest {
                     }
                     val capture = checkNotNull(robot.automation.takeScreenshot())
                     try {
-                        assertEquals("Secure sheet pixel at scale $scale", Color.BLACK, capture.getPixel(sheet.centerX(), sheet.centerY()))
+                        assertNotEquals("Assistant sheet pixel at scale $scale", Color.BLACK, capture.getPixel(sheet.centerX(), sheet.centerY()))
                         save(directory, "$scale-system", capture)
                     } finally {
                         capture.recycle()
-                    }
-                    scenario.onActivity { activity ->
-                        val decor = activity.window.decorView
-                        val drawn = Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888)
-                        try {
-                            decor.draw(Canvas(drawn))
-                            assertNotEquals("App-process sheet pixel at scale $scale", Color.BLACK, drawn.getPixel(sheet.centerX(), sheet.centerY()))
-                            save(directory, "$scale-app", drawn)
-                        } finally {
-                            drawn.recycle()
-                        }
                     }
                     File(directory, "$scale-labels.txt").writeText(robot.texts().joinToString("\n"))
                     robot.edit(composer, "The keyboard keeps the send action reachable")

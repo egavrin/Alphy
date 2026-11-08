@@ -445,7 +445,7 @@ Claude's choices (Claude, played back, unless marked):
 - The sheet grows to full height when the answer is long.
 - Chats from the sheet go to the chat history.
 - (Claude, new) Alphy keeps the activity layer: `setUiEnabled(false)` and then `startAssistantActivity` (`surfaces/AssistantSession.kt`).
-- (Claude, new) Alphy keeps `FLAG_SECURE`, the close on screen off, and no start from the lock screen.
+- (Claude, new) Alphy keeps the close on screen off and no start from the lock screen.
 - (Claude, new) The service declares the Android 17 attributes `usesAssistData`, `usesAssistScreenshots`, and `usesAssistStructureScreenContent`, and the READ_ASSIST_STRUCTURE_SCREEN_CONTENT permission.
 - (Claude, new) The screen capture stays in memory until the user adds «Экран». It is cleared when the sheet closes or the device locks. This is the current rule.
 - (Claude, new) «Настройки» open the Android assistant settings directly, because the role request shows no dialog (section 3). The text tells the user to pick Alphy there.
@@ -723,7 +723,7 @@ Devices:
 
 - The project test device is an OPPO CPH2765 with Android 17, API 37 (`docs/evidence/shell/run.md`).
 - OPPO blocks shell permission grants, so the tests use the Android permission dialog (`docs/voice-integration.md`).
-- `FLAG_SECURE` blocks screenshots of «Настройки» and the half sheet. (Builder) A method for visual checks of these screens.
+- Android screenshots show «Настройки» and the assistant half sheet.
 
 Gallery (Claude, new):
 
@@ -784,7 +784,7 @@ Items 1–13 record the choices from revision 2. Items 14–19 record requiremen
 - Widget charts and images, previews, and the shortcut option (5.4).
 - The navigation graph and the deep links, for example `alpha://tool/<id>`.
 - The tool-call loop of the agent and the IDs of new functions (5.7).
-- A method for visual checks of `FLAG_SECURE` screens (9).
+- System screenshot checks for «Настройки» and the assistant half sheet (9).
 - The test structure, within section 9.
 - Exact capacity ceilings, from the measurements in sections 6.6 and 9.
 - The supported capability and archive formats within the boundaries in sections 5.3 and 8.

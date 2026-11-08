@@ -54,10 +54,10 @@ class AppUpdateWorkflowTest {
             robot.waitFor(available)
             robot.back()
             robot.back()
-            robot.waitUntil { !robot.secure(scenario) }
+            robot.waitUntil { !robot.composed(scenario, "settings-pane") }
             robot.waitFor(available)
             robot.click(robot.text(R.string.update_title))
-            robot.waitUntil { robot.secure(scenario) }
+            robot.waitUntil { robot.composed(scenario, "settings-detail") }
             robot.waitFor(available)
             assertEquals(0, assetRequests.get())
 
@@ -204,6 +204,7 @@ class AppUpdateWorkflowTest {
         robot.openDrawer(scenario)
         robot.click(robot.text(R.string.settings))
         robot.awaitDrawerClosed(scenario)
+        robot.reveal(robot.text(R.string.update_title))
         robot.click(robot.text(R.string.update_title))
         val version = app.packageManager.getPackageInfo(app.packageName, 0).versionName.orEmpty()
         robot.waitFor(robot.text(R.string.app_version, version))
