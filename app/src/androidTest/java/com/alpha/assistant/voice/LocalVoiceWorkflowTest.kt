@@ -2,9 +2,6 @@ package com.alpha.assistant.voice
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.offlineassistant.app.speech.SileroSpeechSynthesizer
-import com.offlineassistant.app.speech.SileroModelBundle
-import com.offlineassistant.app.speech.SileroFrontendBundle
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -67,7 +64,7 @@ class LocalVoiceWorkflowTest {
         assertTrue(runCatching { Class.forName("com.offlineassistant.app.asr.WhisperTranscriber") }.isFailure)
     }
 
-    @Test fun recordedRussianAndLocalSpeech(): Unit = runBlocking {
+    @Test fun recordedRussianRecognition(): Unit = runBlocking {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val models = VoiceModels(context)
@@ -88,16 +85,6 @@ class LocalVoiceWorkflowTest {
                 report("T-one: $text")
                 assertTrue("T-one: $text", text.contains("таймер") && (text.contains("пять") || text.contains("5")))
             } finally { recognizer.release() }
-            val synth = models.synthesizer()
-            try {
-                val audio = synth.synthesize("Привет! Таймер на пять минут.")
-                assertEquals(48000, audio.sampleRate)
-                assertTrue(audio.samples.size > 4800)
-                assertTrue(audio.samples.all { it.isFinite() })
-                assertTrue(audio.samples.any { kotlin.math.abs(it) > 0.01f })
-                LocalPcmPlayback().use { it.play(audio) }
-                report("TTS played ${audio.samples.size} samples at ${audio.sampleRate} Hz")
-            } finally { synth.close() }
         } finally { wav.delete() }
     }
 }

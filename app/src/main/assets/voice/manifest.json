@@ -2,61 +2,6 @@
   "version": "alpha-voice-1",
   "files": [
     {
-      "path": "silero/accentor-exceptions.json",
-      "bytes": 512183,
-      "sha256": "13c3e27b061371a69df7864b47f3c1463db451d453f43a56b4e4aba2324e4ebf"
-    },
-    {
-      "path": "silero/accentor-ngrams.json",
-      "bytes": 2115100,
-      "sha256": "be0b6766c283f4b07f16395b28a804d86dc668e314ec09dd0d304d732d575680"
-    },
-    {
-      "path": "silero/accentor.onnx",
-      "bytes": 8246946,
-      "sha256": "7de681da2ce32d909fc7ce637a5d38fe00b7c01e5a1f3f7823e7ab294200189e"
-    },
-    {
-      "path": "silero/acoustic.onnx",
-      "bytes": 81480794,
-      "sha256": "58268ff1198defc2632aa661c2486a3e069e381cc43600375ff1c178c4801a9a"
-    },
-    {
-      "path": "silero/frontend.json",
-      "bytes": 784,
-      "sha256": "6480912dceefc9984c6af7c8e2b888a67df1a1a463026e81c3123868bea2b9c1"
-    },
-    {
-      "path": "silero/homographs.json",
-      "bytes": 101321,
-      "sha256": "9a9ca3d7c3afc62f7739997576158c9a4c65dcca9aa66ae0d7b3b2a66216e29e"
-    },
-    {
-      "path": "silero/homosolver-vocab.txt",
-      "bytes": 1080682,
-      "sha256": "ba3e116441d46278b3b13f633351230714118e7b58838951c56288879667bc1f"
-    },
-    {
-      "path": "silero/homosolver.onnx",
-      "bytes": 38645989,
-      "sha256": "15e2c4072f84c9d5bc7bbeb944ab88cff7df6acd1bd0b831840158e9a18e4bc4"
-    },
-    {
-      "path": "silero/manifest.json",
-      "bytes": 1800,
-      "sha256": "48059481b58b4051ae0c0b9b4d74f1f201cf2c09118488d0962d56a915828ab6"
-    },
-    {
-      "path": "silero/predictors.onnx",
-      "bytes": 4528066,
-      "sha256": "fdb93615bbed7566072693e4a133120c2fbfacf122a58f1d378be42be0e3ec68"
-    },
-    {
-      "path": "silero/window.f32",
-      "bytes": 9600,
-      "sha256": "615a1e89b017f6f4b8d460b07eabf2a61efee3f1f43094e617d9ebc78d6deacf"
-    },
-    {
       "path": "tone/LICENSE",
       "bytes": 553,
       "sha256": "c8e6ecb86af681d9815d1ada7b1a7780ea5e5cb68a5df94fc800adab1a6ce027"

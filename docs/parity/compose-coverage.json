@@ -10,7 +10,7 @@
     "app/src/main/java/com/alpha/assistant/tools/GraphicsContract.kt": "1627bd924d96cf010c77fde6d33d026d3621e04d75a7b70e663a884bd11cd270",
     "app/src/main/java/com/alpha/assistant/capabilities/CapabilityContract.kt": "fd227f77e467c285741a3d047f64959a55b9a609b3b9ea11ca1f08b726d4d5e8",
     "app/src/main/java/com/alpha/assistant/capabilities/MedicineCapabilities.kt": "89a148d2f00bc46270d0d4a459b75da7d7449edc4a53e5273970aab24662ec52",
-    "app/build.gradle.kts": "0e9b91aca7e4bba2545cd51469739bd25773c81d9fc0c8f15528d3e5f161ce24"
+    "app/build.gradle.kts": "2424611f434e979eae56080639809871555c4db43cba7f31eacb3d1f199d803e"
   },
   "catalog_types": [
     "actionChip",

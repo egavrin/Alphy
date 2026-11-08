@@ -8,7 +8,6 @@ import androidx.compose.runtime.*
 import com.alpha.assistant.R
 import com.offlineassistant.app.voice.AudioTranscriber
 import com.offlineassistant.app.voice.AudioTranscription
-import com.offlineassistant.app.speech.SileroSpeechSynthesizer
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import java.util.concurrent.Executors
@@ -19,7 +18,7 @@ class VoiceSession internal constructor(
     private val context: Context,
     private val scope: CoroutineScope,
     private val transcript: (String) -> Unit,
-    private val prepareModels: ((Boolean) -> Unit)? = null,
+    private val prepareModels: (() -> Unit)? = null,
     private val captureAudio: (suspend () -> AudioTranscription)? = null,
     private val capturePcmForTest: (suspend (suspend (ShortArray) -> Unit) -> Boolean)? = null,
 ) {
@@ -34,9 +33,7 @@ class VoiceSession internal constructor(
     private val worker = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val releaseScope = CoroutineScope(SupervisorJob() + worker)
     private val models = VoiceModels(context)
-    private val playback = LocalPcmPlayback()
     private var recognizer: AudioTranscriber? = null
-    private var synthesizer: SileroSpeechSynthesizer? = null
     private var job: Job? = null
     @Volatile private var generation = 0
     @Volatile private var recorder: AudioRecord? = null
@@ -62,17 +59,16 @@ class VoiceSession internal constructor(
         partial = ""
         active = true
         phase = "preparing"
-        status = context.getString(if (oneShot) R.string.voice_preparing else R.string.voice_preparing_session)
+        status = context.getString(R.string.voice_preparing)
         val token = ++generation
         job = scope.launch {
             try {
                 if (!oneShot || captureAudio != null) withContext(worker) {
-                    if (prepareModels != null) prepareModels.invoke(!oneShot)
+                    if (prepareModels != null) prepareModels.invoke()
                     else {
-                        models.prepare(includeSpeech = !oneShot)
+                        models.prepare()
                         recognizer = models.recognizer()
                         recognizer!!.warmUp()
-                        if (!oneShot) synthesizer = models.synthesizer()
                     }
                 }
                 if (active && token == generation) listen(token)
@@ -105,23 +101,14 @@ class VoiceSession internal constructor(
         synchronized(captureLock) { runCatching { recorder?.stop() } }
     }
     fun submitted() { if (oneShot && active) stop() else if (active && phase == "review") { phase = "waiting"; status = context.getString(R.string.voice_waiting) } else if (active) stop() }
-    fun reply(text: String) {
+    fun replyCompleted() {
         if (!active || oneShot || phase != "waiting") return
         val token = generation
-        phase = "speaking"; status = context.getString(R.string.voice_speaking)
-        job = scope.launch {
+        job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
-                // Bound each synthesis chunk so long replies do not allocate one large alignment matrix.
-                val chunks = text.split(Regex("(?<=[.!?])\\s+|\\n+")).filter { it.isNotBlank() }.flatMap { it.chunked(240) }
-                for (chunk in chunks) {
-                    val audio = withContext(worker) { synthesizer!!.synthesize(chunk) }
-                    if (!active || token != generation) return@launch
-                    withContext(worker) { if (active && token == generation) playback.play(audio) }
-                }
-                delay(350)
                 listen(token)
             } catch (error: CancellationException) { throw error }
-            catch (error: Throwable) { if (token == generation) stop(context.getString(R.string.voice_speech_failed)) }
+            catch (error: Throwable) { if (token == generation) stop(context.getString(R.string.voice_start_failed)) }
         }
     }
     fun requestFailed() { if (active) stop(context.getString(R.string.voice_request_failed)) }
@@ -129,10 +116,8 @@ class VoiceSession internal constructor(
         generation++; active = false; phase = "idle"; status = message; hasAttempted = message.isNotBlank(); partial = ""; levels = emptyList()
         job?.cancel(); job = null
         synchronized(captureLock) { runCatching { recorder?.stop() } }
-        playback.stop()
-        synthesizer?.cancel()
         releaseFocus()
-        releaseScope.launch { recognizer?.release(); recognizer = null; synthesizer?.close(); synthesizer = null }
+        releaseScope.launch { recognizer?.release(); recognizer = null }
     }
     private fun releaseFocus() { focus?.let { audioManager.abandonAudioFocusRequest(it) }; focus = null }
     fun close() { stop(); releaseScope.launch { worker.close(); releaseScope.cancel() } }
@@ -148,8 +133,8 @@ class VoiceSession internal constructor(
         }
         try {
             withContext(worker) {
-                prepareModels?.invoke(false)
-                models.prepare(includeSpeech = false)
+                prepareModels?.invoke()
+                models.prepare()
                 ensureActive()
                 val local = models.recognizer()
                 try {

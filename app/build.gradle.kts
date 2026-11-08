@@ -21,8 +21,8 @@ android {
     buildFeatures { compose = true }
     packaging { jniLibs { excludes += setOf("lib/armeabi-v7a/**", "lib/x86/**", "lib/x86_64/**") } }
     androidResources {
-        noCompress += listOf("onnx", "f32")
-        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:CVS:thumbs.db:picasa.ini:*~:whisper:whisper-MIT.txt"
+        noCompress += "onnx"
+        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:CVS:thumbs.db:picasa.ini:*~:whisper:whisper-MIT.txt:silero"
     }
 }
 dependencies {
@@ -31,8 +31,6 @@ dependencies {
     implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.30.0")
     implementation("com.squareup.okhttp3:okhttp:5.5.1")
     implementation(files("libs/sherpa-onnx-static-link-onnxruntime-1.13.4.aar"))
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.27.0")
-    implementation("com.github.wendykierp:JTransforms:3.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.activity:activity-compose:1.13.0")

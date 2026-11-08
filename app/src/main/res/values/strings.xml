@@ -82,9 +82,9 @@
     <string name="assistant_pick_hint">Выберите Alphy в списке ассистентов.</string>
     <string name="voice_start">Начать непрерывный сеанс</string>
     <string name="voice_session">Непрерывный голосовой сеанс</string>
-    <string name="voice_session_text">T-one распознаёт русскую речь на устройстве. Проверьте текст и нажмите «Отправить». Silero озвучит ответ, затем микрофон включится снова. Кнопка «Остановить сеанс» завершает работу.</string>
-    <string name="voice_models">Модели в приложении: T-one — 144 МБ, Silero Xenia — 137 МБ. Перед установкой проверяются контрольные суммы SHA-256. Требуется ARM64.</string>
-    <string name="voice_licenses">Silero v5.5 Xenia разрешён только для личного некоммерческого использования. T-one: Apache-2.0. Лицензии моделей и библиотек включены в приложение.</string>
+    <string name="voice_session_text">T-one распознаёт русскую речь на устройстве. Проверьте текст и нажмите «Отправить». Ответ появится в чате, затем микрофон включится снова. Кнопка «Остановить сеанс» завершает работу.</string>
+    <string name="voice_models">Модель в приложении: T-one — 144 МБ. Перед установкой проверяются контрольные суммы SHA-256. Требуется ARM64.</string>
+    <string name="voice_licenses">T-one: Apache-2.0. Лицензии модели и библиотек включены в приложение.</string>
     <string name="voice_stop">Остановить сеанс</string>
     <string name="greeting_morning">Доброе утро</string>
     <string name="greeting_day">Добрый день</string>
@@ -189,7 +189,6 @@
     <string name="voice_interrupted">Голосовой ввод прерван другим приложением. Повторите запись.</string>
     <string name="voice_mic_busy">Микрофон занят другим приложением. Повторите попытку.</string>
     <string name="voice_preparing">Подготовка T-one · распознавание на устройстве</string>
-    <string name="voice_preparing_session">Подготовка T-one и Silero · распознавание и ответы на устройстве</string>
     <string name="voice_start_failed">Не удалось включить голосовой ввод. Повторите попытку.</string>
     <string name="voice_listening">Микрофон включён · завершите запись для проверки текста</string>
     <string name="voice_listening_session">Микрофон включён · говорите, затем сделайте паузу</string>
@@ -197,8 +196,6 @@
     <string name="voice_review">Микрофон выключен · проверьте текст перед отправкой</string>
     <string name="voice_recognizing">Микрофон выключен · распознавание на устройстве</string>
     <string name="voice_waiting">Микрофон выключен · дождитесь ответа DeepSeek</string>
-    <string name="voice_speaking">Микрофон выключен · ответ звучит на устройстве</string>
-    <string name="voice_speech_failed">Не удалось озвучить ответ. Текст ответа сохранён в чате.</string>
     <string name="voice_request_failed">Голосовой сеанс остановлен: ответ не получен. Ваш текст сохранён в истории.</string>
     <string name="search_field">Поиск разговоров</string>
     <string name="search_back">Назад из поиска</string>

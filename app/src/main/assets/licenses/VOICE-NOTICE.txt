@@ -1,6 +1,6 @@
 Alphy local voice, bundle alpha-voice-1
 
-Adapted Android ASR, Silero frontend, ONNX inference, and ISTFT sources:
+Adapted Android speech recognition sources:
 Android Offline Assistant / deal-studio revision feea3d8a0e13.
 Original namespaces and available source notices remain intact.
 
@@ -9,17 +9,8 @@ Pinned Sherpa-compatible export:
 https://huggingface.co/csukuangfj/sherpa-onnx-streaming-t-one-russian-2025-09-08/tree/9d63341e0f2d8a8b2edaa825aa1fcfe3c5283b47
 See voice/tone/LICENSE for the full model license.
 
-Silero v5.5 Russian Xenia: Silero Team.
-Source weight: https://models.silero.ai/models/tts/ru/v5_5_ru.pt
-Source SHA-256: 50081637b602126ee06cb3bc8a744d25651d2da149ee8864b9a379bfdd934437.
-The historical export manifest identifies CC-BY-NC. The current upstream repository LICENSE states CC-BY-NC-SA 4.0.
-This personal-use build preserves both sources. Noncommercial use only. No commercial distribution is authorized.
-The ONNX split graphs and dictionaries come from the historical local export bundle.
-See silero-source.txt and voice/silero/manifest.json.
-
 Sherpa-ONNX 1.13.4: k2-fsa contributors, Apache-2.0. See sherpa-onnx.txt.
-ONNX Runtime Android 1.27.0: Microsoft, MIT. See onnxruntime.txt.
-JTransforms 3.2: Piotr Wendykier, BSD 2-Clause. See JTransforms.txt.
+Sherpa-ONNX includes ONNX Runtime: Microsoft, MIT. See onnxruntime.txt and onnxruntime-ThirdPartyNotices.txt.
 Other dependency notices remain in their original jars, native sources, and Android dependency artifacts.
 
 SHA-256 and byte sizes for every model file are in voice/manifest.json.

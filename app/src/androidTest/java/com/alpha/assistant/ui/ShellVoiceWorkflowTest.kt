@@ -1,7 +1,8 @@
 package com.alpha.assistant.ui
 
+import androidx.test.core.app.ActivityScenario
+import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
-
 import com.alpha.assistant.voice.VoiceSession
 import com.offlineassistant.app.voice.AudioTranscription
 import kotlinx.coroutines.CompletableDeferred
@@ -9,6 +10,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicInteger
 
 class ShellVoiceWorkflowTest {
     private val fixture = ShellFixture("shell-voice")
@@ -34,31 +36,73 @@ class ShellVoiceWorkflowTest {
         }
     }
 
-    @Test fun continuousVoiceSurvivesDesktopSend() {
+    @Test fun continuousVoiceResumesAfterDesktopSendAndTextReply() {
         fixture.provider.gate = CompletableDeferred()
-        installVoiceFixture()
+        val captures = AtomicInteger()
+        val followUp = CompletableDeferred<AudioTranscription>()
+        installVoiceFixture {
+            if (captures.incrementAndGet() == 1) question else followUp.await()
+        }
         fixture.launch().use { scenario ->
-            robot.allowMicrophone(scenario)
-            val model = fixture.model!!
-            robot.waitUntil { !model.loading }
-            robot.instrumentation.runOnMainSync { model.startVoice(oneShot = false) }
-            robot.waitUntil { model.voice.phase == "review" && model.snapshot.draft.text == "Голосовой вопрос" }
-            robot.waitUntil { robot.composed(scenario, "desktop") }
-            robot.instrumentation.runOnMainSync { model.send() }
+            val model = submitVoiceQuestion(scenario)
             robot.automation.waitForIdle(500, 5000)
-            robot.waitFor("Голосовой вопрос")
+            robot.waitFor(checkNotNull(question.text))
             // The Desktop entry leaves composition at the end of the transition.
             robot.waitUntil { !robot.composed(scenario, "desktop") }
             assertTrue(model.voice.active)
             assertEquals("waiting", model.voice.phase)
             fixture.provider.gate!!.complete(Unit)
-            // Only an active session reaches the speech step, and the fake models have no synthesizer.
-            robot.waitUntil { model.voice.status == "Не удалось озвучить ответ. Текст ответа сохранён в чате." }
+            robot.waitFor("Fixture response")
+            robot.waitUntil { model.voice.phase == "listening" && captures.get() == 2 }
+            followUp.complete(AudioTranscription("Следующий вопрос", null, 0))
+            robot.waitUntil { model.voice.phase == "review" && model.snapshot.draft.text == "Следующий вопрос" }
+            assertEquals(1, fixture.provider.calls)
         }
     }
-    private fun installVoiceFixture() {
+
+    @Test fun stoppingWhileWaitingPreventsCaptureAfterTheTextReply() {
+        fixture.provider.gate = CompletableDeferred()
+        val captures = AtomicInteger()
+        installVoiceFixture { captures.incrementAndGet(); question }
+        fixture.launch().use { scenario ->
+            val model = submitVoiceQuestion(scenario)
+            robot.waitUntil { model.voice.phase == "waiting" }
+            robot.click(robot.text(R.string.voice_stop))
+            fixture.provider.gate!!.complete(Unit)
+            robot.waitFor("Fixture response")
+            robot.waitUntil { model.activeConversationId == null }
+            assertEquals("idle", model.voice.phase)
+            assertEquals(1, captures.get())
+        }
+    }
+
+    @Test fun failedRequestStopsContinuousCapture() {
+        fixture.provider.failure = java.io.IOException("Voice fixture request failed")
+        val captures = AtomicInteger()
+        installVoiceFixture { captures.incrementAndGet(); question }
+        fixture.launch().use { scenario ->
+            val model = submitVoiceQuestion(scenario)
+            robot.waitUntil { model.snapshot.selected?.messages?.lastOrNull()?.status == "error" }
+            assertEquals("idle", model.voice.phase)
+            assertEquals(1, captures.get())
+        }
+    }
+
+    private fun submitVoiceQuestion(scenario: ActivityScenario<CloudTestActivity>): ShellViewModel {
+        robot.allowMicrophone(scenario)
+        val model = checkNotNull(fixture.model)
+        robot.waitUntil { !model.loading && robot.composed(scenario, "desktop") }
+        scenario.onActivity { model.startVoice(oneShot = false) }
+        robot.waitUntil { model.voice.phase == "review" && model.snapshot.draft.text == question.text }
+        scenario.onActivity { model.send() }
+        return model
+    }
+
+    private val question = AudioTranscription("Голосовой вопрос", null, 0)
+
+    private fun installVoiceFixture(capture: suspend () -> AudioTranscription = { question }) {
         fixture.install(voice = { app, scope, transcript ->
-            VoiceSession(app, scope, transcript, prepareModels = {}, captureAudio = { AudioTranscription("Голосовой вопрос", null, 0) })
+            VoiceSession(app, scope, transcript, prepareModels = {}, captureAudio = capture)
         })
     }
 

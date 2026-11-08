@@ -60,7 +60,7 @@ class InlineVoiceWorkflowTest {
                 }
             }, store, keys, voiceFactory = { application, scope, transcript ->
                 VoiceSession(application, scope, transcript,
-                    prepareModels = { speech -> assertFalse("One-shot must not prepare TTS", speech); preparations++ },
+                    prepareModels = { preparations++ },
                     captureAudio = { val pending = result; withContext(NonCancellable) { pending.await() } })
             }).also { model = it }
         }
@@ -111,7 +111,7 @@ class InlineVoiceWorkflowTest {
                 assertEquals("Keep my question\nПроверенный текст", user.text)
                 assertEquals(original.attachments, user.attachments)
                 assertFalse(model.voice.active)
-                scenario.onActivity { model.voice.reply("No one-shot restart") }
+                scenario.onActivity { model.voice.replyCompleted() }
                 assertFalse(model.voice.active)
 
                 waitUntil { model.activeConversationId == null }

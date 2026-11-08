@@ -8,7 +8,7 @@ Alphy is an Android assistant with cloud chat, local voice processing, generated
 - Create interactive tools with native controls and isolated JavaScript execution.
 - Use widgets and approved device capabilities, including notifications and calendar access.
 - Configure local automations for schedules, location, charging, and selected notifications.
-- Use T-one for local speech recognition and Silero for continuous-session speech replies when the required model files are present.
+- Use T-one for local speech recognition. Continuous voice sessions show replies in the chat and then resume recognition.
 
 Alphy stores conversations and tool data on the device. It stores the provider key with Android Keystore. Cloud requests send the content that the consent text names to DeepSeek and can incur provider charges. «Удалить ключ» stops all cloud requests. Device actions and permissions require user approval.
 
@@ -54,7 +54,7 @@ GitHub provides the asset size and SHA-256 digest that Alphy uses to verify the 
 
 ## Voice models
 
-The repository excludes the Silero model bundle because its license restricts commercial use. A fresh clone can build, but the complete local voice workflow does not work without that bundle. The historical ONNX export is not provided here. Local voice requires the exact files listed in [`app/src/main/assets/voice/manifest.json`](app/src/main/assets/voice/manifest.json), including Silero. The app verifies each file's size and SHA-256 before use. See [`docs/voice-integration.md`](docs/voice-integration.md) for source and license details.
+The APK includes the T-one recognition model from Git LFS. The app verifies each file's size and SHA-256 before use. [Asset manifest](app/src/main/assets/voice/manifest.json) · [Voice integration and licenses](docs/voice-integration.md)
 
 ## Tests
 

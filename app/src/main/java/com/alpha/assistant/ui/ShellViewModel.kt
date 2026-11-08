@@ -1493,7 +1493,10 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                                 provenance = replyProvenance)
                         } })
                 }
-                if(isActive(request) && voiceBelongsTo(null)) snapshot.conversations.find { it.id == conversationId }?.messages?.find { it.id == assistant.id }?.let { voice.reply(it.text) }
+                if (isActive(request) && voiceBelongsTo(null)) {
+                    snapshot.conversations.find { it.id == conversationId }?.messages
+                        ?.find { it.id == assistant.id }?.let { voice.replyCompleted() }
+                }
             } catch (_: CancellationException) {
                 // cancelRequest saves the terminal status. Restart handles a closed model.
             } catch (choice: ChooseRefinement) {
