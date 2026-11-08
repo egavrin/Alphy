@@ -92,10 +92,18 @@ internal class ToolGenerationSmoke(
                 event(JSONObject().put("type","timer").put("timerId",timer),"$.timers[$index]")
         }
         suspend fun surfaces() {
+            for ((index, surface) in spec.surfaces.values.withIndex()) {
+                if (surface.sizing == "viewport") event(GraphicsContract.viewport(surface), "$.surfaces[$index]")
+            }
+            val userStart = spec.hostControls.playback && ArtifactPlayback.primaryControl(playback.value) == "start"
+            for ((index, surface) in spec.surfaces.values.withIndex()) {
+                if (userStart || playback.automaticStart) {
+                    event(GraphicsContract.event("start", surfaceId = surface.id), "$.surfaces[$index]")
+                }
+            }
+            subscriptions()
             for((index,surface) in spec.surfaces.values.withIndex()) {
                 val path="$.surfaces[$index]"
-                if(surface.sizing=="viewport")event(GraphicsContract.viewport(surface),path)
-                event(GraphicsContract.event("start",surfaceId=surface.id),path);subscriptions()
                 if(surface.sizing=="viewport") {
                     val resized=surface.copy(width=640,height=360)
                     event(GraphicsContract.viewport(resized),path);subscriptions()
@@ -106,11 +114,21 @@ internal class ToolGenerationSmoke(
                     val y=if(phase=="move") surface.height.toDouble() else surface.height/2.0
                     event(GraphicsContract.event("pointer",x=x,y=y,phase=phase,pointer=pointer,surfaceId=surface.id),path)
                 }
-                for(direction in listOf("left","right")) event(GraphicsContract.event("control",direction=direction,surfaceId=surface.id),path)
-                event(GraphicsContract.event("pause",surfaceId=surface.id),path)
-                event(GraphicsContract.event("resume",surfaceId=surface.id),path);subscriptions()
-                event(GraphicsContract.event("restart",surfaceId=surface.id),path);subscriptions()
-                event(GraphicsContract.event("stop",surfaceId=surface.id),path)
+                if (surface.id in spec.hostControls.movement) {
+                    for (direction in listOf("left", "right")) {
+                        event(GraphicsContract.event("control", direction = direction, surfaceId = surface.id), path)
+                    }
+                }
+            }
+            if (spec.hostControls.playback) {
+                for (type in listOf("pause", "resume", "restart")) {
+                    if (type == "restart" || ArtifactPlayback.primaryControl(playback.value) == type) {
+                        for ((index, surface) in spec.surfaces.values.withIndex()) {
+                            event(GraphicsContract.event(type, surfaceId = surface.id), "$.surfaces[$index]")
+                        }
+                        subscriptions()
+                    }
+                }
             }
         }
     }
@@ -215,20 +233,29 @@ internal class ToolGenerationSmoke(
                     }
                     is Step.Surface -> {
                         val surface = surface(targetId(step.slot), step.slot)
-                        val event = when (step.event) {
+                        when (step.event) {
                             "viewport" -> {
                                 if (surface.sizing != "viewport") fail("viewport event unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
-                                GraphicsContract.viewport(surface)
+                                send(GraphicsContract.viewport(surface))
                             }
                             "pointer" -> {
                                 if (playback.value !in setOf("playing", "ready")) fail("pointer event unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
-                                GraphicsContract.event("pointer", x = checkNotNull(step.x)*surface.width,
-                                    y = checkNotNull(step.y)*surface.height, phase = checkNotNull(step.phase), surfaceId = surface.id)
+                                send(GraphicsContract.event("pointer", x = checkNotNull(step.x)*surface.width,
+                                    y = checkNotNull(step.y)*surface.height, phase = checkNotNull(step.phase), surfaceId = surface.id))
                             }
-                            "control" -> GraphicsContract.event("control", direction = checkNotNull(step.direction), surfaceId = surface.id)
-                            else -> GraphicsContract.event(step.event, surfaceId = surface.id)
+                            "control" -> {
+                                if (surface.id !in spec.hostControls.movement) {
+                                    fail("movement control unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
+                                }
+                                send(GraphicsContract.event("control", direction = checkNotNull(step.direction), surfaceId = surface.id))
+                            }
+                            else -> {
+                                if (!spec.hostControls.playback || step.event != "restart" && ArtifactPlayback.primaryControl(playback.value) != step.event) {
+                                    fail("playback control unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
+                                }
+                                for (id in effectiveSurfaces.keys) send(GraphicsContract.event(step.event, surfaceId = id))
+                            }
                         }
-                        send(event)
                         recordEvent("surface event", step.slot)
                     }
                     is Step.Advance -> {

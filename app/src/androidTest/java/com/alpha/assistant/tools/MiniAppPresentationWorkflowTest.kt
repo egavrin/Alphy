@@ -607,7 +607,10 @@ class MiniAppPresentationWorkflowTest {
         for(file in checkNotNull(assets.list("runtime-replay")).sorted()) {
             val raw=assets.open("runtime-replay/$file").bufferedReader().use {it.readText()}
             val definition=JSONObject(raw)
-            fixture(specJson=raw) {_,store,scenario ->
+            val ids=definition.getJSONArray("surfaces")
+            val movement=JSONArray().put(ids.getJSONObject(0).getString("id"))
+            definition.put("hostControls",JSONObject().put("playback",true).put("movement",movement))
+            fixture(specJson=definition.toString()) {_,store,scenario ->
                 diagnostics.state={"replay=$file state="+store.tool("lake")?.state}
                 fun state()=JSONObject(store.tool("lake")!!.state)
                 fun canvas(node: AccessibilityNodeInfo?=diagnostics.freshRoot()): AccessibilityNodeInfo? {
@@ -714,6 +717,96 @@ class MiniAppPresentationWorkflowTest {
             }
         }
     }
+    /** Regression: a duplicate board or an implicit host control must never be needed to play. */
+    @Test fun generatedBoardUsesDirectTouchAndOneGameStatus() {
+        val request = RequestGameplayExamples.TIC_TAC_TOE
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                val result = if (request.generationStage == CloudGenerationStage.PLAN) """
+                    {"wholeScreen":true,"behavior":{"status":"checkable","scenario":{
+                    "slots":{"board":{"kind":"surface"},"marks":{"kind":"geometry"}},"steps":[
+                    {"op":"capture","slot":"marks","as":"before"},
+                    {"op":"surface","slot":"board","event":"pointer","phase":"down","x":0.5,"y":0.5},
+                    {"op":"assert","slot":"marks","test":"changed","capture":"before"}]}}}
+                """.trimIndent() else JSONObject(RequestGameplayExamples.ticTacToeSpec()).put("behaviorBindings",
+                    JSONObject("""{"board":"board","marks":{"surface":"board","path":[]}}""")).toString()
+                emit(CloudEvent.Text(result))
+            }
+        }
+        val generated = kotlinx.coroutines.runBlocking {
+            ToolGenerationService(provider, com.alpha.assistant.sandbox.SandboxClient(instrumentation.targetContext))
+                .generate("offline", request, null, emptyList(), CloudSession(), "board-fixture")
+        }
+        fixture(specJson = generated.spec.json) { _, store, _ ->
+            fun canvases(node: AccessibilityNodeInfo?): List<AccessibilityNodeInfo> {
+                if (node == null) return emptyList()
+                if (node.contentDescription?.startsWith("Крестики-нолики.") == true) return listOf(node)
+                return (0 until node.childCount).flatMap { canvases(node.getChild(it)) }
+            }
+            fun board() = JSONObject(checkNotNull(store.tool("lake")).state).getJSONArray("board")
+            fun tap(column: Int, row: Int) {
+                val bounds = Rect().also { canvases(diagnostics.freshRoot()).single().getBoundsInScreen(it) }
+                val now = SystemClock.uptimeMillis()
+                for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
+                    val event = android.view.MotionEvent.obtain(now, SystemClock.uptimeMillis(), action,
+                        bounds.left + bounds.width() * (column + 0.5f) / 3,
+                        bounds.top + bounds.height() * (row + 0.5f) / 3, 0)
+                    event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                    try { assertTrue(injectTouch(event)) } finally { event.recycle() }
+                }
+            }
+            click("Открыть"); shown("Статус: Ваш ход")
+            waitUntil { canvases(diagnostics.freshRoot()).size == 1 }
+            for (label in listOf("Влево", "Вправо", "Игра идёт", "Пауза", "Начать заново")) {
+                assertNull("Unexpected host control: $label", find(label))
+            }
+            assertEquals(1, canvases(diagnostics.freshRoot()).size)
+            tap(1, 1)
+            waitUntil { board().getString(4) == "X" }
+            assertEquals("O", board().getString(0))
+            assertEquals(2, (0..8).count { board().getString(it).isNotEmpty() })
+            screenshot("direct-board-first-move")
+            val beforeOccupied = board().toString()
+            tap(0, 0)
+            tap(0, 1)
+            waitUntil { board().getString(3) == "X" }
+            assertEquals(JSONArray(beforeOccupied).getString(0), board().getString(0))
+            assertEquals(4, (0..8).count { board().getString(it).isNotEmpty() })
+            tap(2, 1); shown("Статус: Вы победили")
+            waitUntil { board().getString(5) == "X" }
+            val terminal = board().toString()
+            tap(2, 2)
+            SystemClock.sleep(350)
+            assertEquals(terminal, board().toString())
+            click("Новая партия"); shown("Статус: Ваш ход")
+            waitUntil { (0..8).all { board().getString(it).isEmpty() } }
+            println("DIRECT_BOARD request=$request firstTap=PASS occupied=PASS terminal=PASS restart=PASS")
+        }
+    }
+
+    @Test fun graphicsRetryWorksWithoutGameplayControls() {
+        val definition = JSONObject(RequestGameplayExamples.ticTacToeSpec())
+        definition.put("source", "if(input.event.type==='pointer')throw new Error('fixture');\n" + definition.getString("source"))
+        fixture(specJson = definition.toString()) { _, store, _ ->
+            click("Открыть"); shown("Статус: Ваш ход")
+            val canvas = shown("Крестики-нолики. ")
+            val bounds = Rect().also(canvas::getBoundsInScreen)
+            val original = checkNotNull(store.tool("lake")).state
+            val now = SystemClock.uptimeMillis()
+            for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
+                val event = android.view.MotionEvent.obtain(now, SystemClock.uptimeMillis(), action,
+                    bounds.exactCenterX(), bounds.exactCenterY(), 0)
+                event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                try { assertTrue(injectTouch(event)) } finally { event.recycle() }
+            }
+            click(instrumentation.targetContext.getString(R.string.retry))
+            waitUntil { find(instrumentation.targetContext.getString(R.string.retry)) == null }
+            shown("Крестики-нолики. ")
+            assertEquals(original, checkNotNull(store.tool("lake")).state)
+            assertNull(find("Начать заново"))
+        }
+    }
+
     /** Offline native graphics acceptance. No provider call or system capability is required. */
     @Test fun graphicsTouchCheckpointAndLifecyclePreserveSavedData() = fixture(specJson=ArkanoidFixture.spec()) {model,store,scenario ->
         fun surface(node: AccessibilityNodeInfo?=automation.rootInActiveWindow): AccessibilityNodeInfo? {
@@ -834,6 +927,7 @@ class MiniAppPresentationWorkflowTest {
             .put("initialState",JSONObject("""{"last":"none","phase":"none","x":0,"downs":0,"cancels":0,"ticks":0,"firstDt":0,"resumed":false}"""))
             .put("ui",JSONObject("""{"type":"text","text":"Last surface","bind":"last"}"""))
             .put("surfaces",JSONArray("""[{"id":"back","width":320,"height":240,"x":0,"y":0},{"id":"front","width":160,"height":120,"x":80,"y":60}]"""))
+            .put("hostControls", JSONObject("""{"playback":true,"movement":["front"]}"""))
             .put("source","""
                 const s=input.state,e=input.event;
                 if(e.type==='pointer') {
@@ -841,6 +935,7 @@ class MiniAppPresentationWorkflowTest {
                     if(e.phase==='down')s.downs++;
                     if(e.phase==='cancel')s.cancels++;
                 }
+                if(e.type==='control')s.last=e.surfaceId;
                 if(e.type==='resume')s.resumed=true;
                 if(e.type==='frame') {s.ticks++;if(s.resumed){s.firstDt=e.dt;s.resumed=false;}}
                 return {state:s,frames:['back'],surfaces:{
@@ -881,6 +976,7 @@ class MiniAppPresentationWorkflowTest {
             waitUntil {state().getInt("cancels")==1}
             touch(android.view.MotionEvent.ACTION_UP,10f,10f)
             shown("Игра на паузе");screenshot("positioned-surfaces-paused")
+            click("Влево");waitUntil { state().getString("last") == "front" }
             click("Продолжить");shown("Игра идёт")
             waitUntil {state().getInt("firstDt")==0 && !state().getBoolean("resumed")}
             waitUntil {com.alpha.assistant.sandbox.SurfaceFrameMetrics.snapshot()?.frameCommits?.let {it>0}==true}

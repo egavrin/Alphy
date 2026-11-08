@@ -236,7 +236,7 @@ internal class ToolComposition private constructor(private val layout: Layout, p
         private const val MAX_POSITIONS = 12
         private const val STANDALONE_SOURCE = "return {state:input.state};"
         private val fillRequired = setOf("stateSchema", "initialState", "ui", "source", "capabilities")
-        private val fillAuthority = setOf("capabilityResults", "collections", "surfaces", "presentation")
+        private val fillAuthority = setOf("capabilityResults", "collections", "surfaces", "presentation", "hostControls")
         private val fillOptional = setOf("title", "description") + fillAuthority
         internal val generatedFillFields = fillRequired + fillOptional
 

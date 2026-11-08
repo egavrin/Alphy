@@ -3,11 +3,12 @@ package com.alpha.assistant.tools
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** One executable example supplies the prompt and the offline workflow fixture. */
+/** Executable offline workflow fixture for continuous motion. */
 internal object GameGenerationExample {
     fun spec():String=JSONObject().put("formatVersion",3).put("title","Neon Arkanoid")
         .put("description","Break 30 bricks across five rows. Drag anywhere to move the paddle, or use the native Left and Right controls. Three lives, one board, no device access.")
         .put("capabilities",JSONArray()).put("presentation",JSONObject("""{"mode":"immersive"}"""))
+        .put("hostControls", JSONObject("""{"playback":true,"movement":["main"]}"""))
         .put("surfaces",JSONArray("""[{"id":"main","width":360,"height":640,"sizing":"viewport"}]"""))
         .put("stateSchema",JSONObject("""{"width":"number","height":"number","paddle":"number","x":"number","y":"number","vx":"number","vy":"number","score":"number","lives":"number","status":"string","message":"string","bricks":{"type":"array","maxItems":30,"items":"boolean"}}"""))
         .put("initialState",JSONObject().put("width",360).put("height",640).put("paddle",0.5).put("x",0.5).put("y",0.84)

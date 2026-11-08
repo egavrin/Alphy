@@ -549,13 +549,7 @@ class GenerationRouteWorkflowTest {
             when (turn.generationStage) {
                 CloudGenerationStage.PLAN -> {
                     assertTrue(turn.systemInstructions.contains("A scene is written by the code writer"))
-                    val example = turn.systemInstructions.lineSequence()
-                        .first { it.startsWith("""{"title":"Touch surface",""") }
-                    val plan = JSONObject(example)
-                    val behavior = plan.remove("behavior")
-                    val needs = NeedsPlan.parse(plan.toString()).needs
-                    assertEquals("scene", needs.single().id)
-                    assertTrue(GenerationBehavior.parse(behavior, setOf("scene")) is GenerationBehavior.Scenario)
+                    assertTrue(turn.systemInstructions.contains("Use a surface pointer step when the interaction depends on coordinates"))
                     planWithBehavior("$count,$scene", scenario)
                 }
                 CloudGenerationStage.SELECTOR -> answer(turn)
@@ -1253,7 +1247,7 @@ class GenerationRouteWorkflowTest {
             when (turn.generationStage) {
                 CloudGenerationStage.REFINE -> when (writerCalls++) {
                     0 -> """{"sourceEdits":[{"search":"fill_value += 3","replace":"fill_value += 4"},
-                        {"search":"fill_other += 1","replace":"fill_other += 2"}],"behaviorBindings":{"action":"fill_copy","value":[0]}}"""
+                        {"search":"fill_other += 1","replace":"fill_other += 2"}],"behaviorBindings":{"action":"fill_copy","value":[]}}"""
                     1 -> {
                         assertTrue(turn.turns.last().text.contains("observation_kind"))
                         assertTrue(turn.turns.any { it.text.contains("fill_value += 4") })

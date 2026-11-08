@@ -36,7 +36,8 @@ class ToolCompositionWorkflowTest {
           "stateSchema":{"fill_value":"number"},"initialState":{"fill_value":0},
           "ui":{"type":"column","children":[{"type":"button","text":"Другой раздел","action":"fill_add"}]},
           "source":"input.state.fill_value += 1; return {state:input.state};","capabilities":[],
-          "surfaces":[{"id":"fill_board","width":320,"height":240}]
+          "surfaces":[{"id":"fill_board","width":320,"height":240}],
+          "hostControls":{"playback":true,"movement":["fill_board"]}
         }
     """.trimIndent()
 
@@ -60,6 +61,10 @@ class ToolCompositionWorkflowTest {
         val stored = ToolSpec.parsePersisted(spec.json)
         assertEquals(spec.json, stored.json)
         assertEquals(setOf("fill_board"), stored.surfaces.keys)
+        assertTrue(stored.hostControls.playback)
+        assertEquals(setOf("fill_board"), stored.hostControls.movement)
+        assertEquals(JSONObject(fill).getJSONObject("hostControls").toString(),
+            JSONObject(stored.providerDefinition()).getJSONObject("hostControls").toString())
         val composition = checkNotNull(stored.composition)
         val full = stored.ui.getJSONArray("children")
         assertEquals(listOf(0, 1, 3, 4), base.parts.map { it.rootPath.substringAfterLast('[').dropLast(1).toInt() })
@@ -129,6 +134,7 @@ class ToolCompositionWorkflowTest {
         reject { composition.mergeFillUi(maliciousUi) }
         val replacement = JSONObject(fill).put("initialState", JSONObject().put("fill_value", 10))
         val refined = ToolComposition.refine(spec, replacement.toString())
+        assertEquals(spec.hostControls, refined.hostControls)
         assertEquals(7, JSONObject(ToolSpec.stateForRevision(spec, refined, next.toString())).getInt("fill_value"))
         reject { ToolSpec.stateForRevision(spec, base.preview, next.toString()) }
         val changed = JSONObject(spec.json)

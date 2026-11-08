@@ -291,15 +291,30 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
         }
     }
     val playbackControls: @Composable () -> Unit = {
-            val playback=snapshot?.playback
-            if(playback!="ended")TextButton(onClick={
-                val event=when(playback) {"ready" -> "start"; "paused" -> "resume"; else -> "pause"}
-                for(id in spec.surfaces.keys)enqueue(GraphicsContract.event(event,surfaceId=id))
-            },enabled=enabled && !covered && error==null && snapshot!=null,modifier=Modifier.heightIn(min=48.dp)) {
-                Text(stringResource(when(playback) {"ready" -> R.string.tool_game_start; "paused" -> R.string.tool_game_resume; else -> R.string.tool_game_pause}))
-            }
-            TextButton(onClick={if(error!=null) {attempt++;error=null}else for(id in spec.surfaces.keys)enqueue(GraphicsContract.event("restart",surfaceId=id))},enabled=enabled && !covered,modifier=Modifier.heightIn(min=48.dp)) {Text(stringResource(R.string.tool_game_restart))}
+        val event = ArtifactPlayback.primaryControl(snapshot?.playback)
+        if (event != null) TextButton(onClick = {
+            for (id in spec.surfaces.keys) enqueue(GraphicsContract.event(event, surfaceId = id))
+        }, enabled = enabled && !covered, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(when (event) {
+                "start" -> R.string.tool_game_start
+                "resume" -> R.string.tool_game_resume
+                else -> R.string.tool_game_pause
+            }))
+        }
+        TextButton(onClick = {
+            for (id in spec.surfaces.keys) enqueue(GraphicsContract.event("restart", surfaceId = id))
+        }, enabled = enabled && !covered && snapshot != null, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.tool_game_restart))
+        }
     }
+    val recovery: @Composable (Int) -> Unit = { failure ->
+        StatusLine(Glyph.Close, scheme.error, stringResource(failure))
+        TextButton(onClick = { attempt++; error = null }, enabled = enabled && !covered,
+            modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.retry))
+        }
+    }
+    val movementSurfaces = spec.surfaces.values.filter { it.id in spec.hostControls.movement }
     val movementControls: @Composable (Modifier,ToolSurface) -> Unit = {modifier,surface ->
         for(direction in listOf("left","right"))Button(onClick={enqueue(GraphicsContract.event("control",direction=direction,surfaceId=surface.id))},enabled=enabled && !covered && error==null,modifier=modifier.heightIn(min=48.dp),contentPadding=PaddingValues(horizontal=8.dp)) {Text(stringResource(if(direction == "left") R.string.tool_game_left else R.string.tool_game_right))}
     }
@@ -316,28 +331,31 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
             Column(Modifier.verticalScroll(rememberScrollState()).semantics {contentDescription=gameControls}) {
                 TextButton(onClick={controlsExpanded=false},modifier=Modifier.align(Alignment.End).heightIn(min=48.dp)) {Text(stringResource(R.string.tool_game_controls_close))}
                 topControls()
-                if(spec.surfaces.isNotEmpty())FlowRow(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(4.dp)) {
-                    for(surface in spec.surfaces.values)movementControls(Modifier.widthIn(min=48.dp),surface)
-                    playbackControls()
+                val failure = error
+                if (failure != null) recovery(failure)
+                else if (movementSurfaces.isNotEmpty() || spec.hostControls.playback) FlowRow(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(4.dp)) {
+                    for(surface in movementSurfaces)movementControls(Modifier.widthIn(min=48.dp),surface)
+                    if (spec.hostControls.playback) playbackControls()
                 }
-                error?.let {StatusLine(Glyph.Close, scheme.error, stringResource(it))}
             }
         }
     } else Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
         stage()
-        for(surface in spec.surfaces.values)Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {movementControls(Modifier.weight(1f),surface)}
         val failure = error
-        if(failure != null) StatusLine(Glyph.Close, scheme.error, stringResource(failure))
-        else if(spec.surfaces.isNotEmpty()) {
-            val (icon, label) = when(snapshot?.playback) {
-                "ready" -> Glyph.Check to R.string.tool_game_ready
-                "playing" -> Glyph.Arrow to R.string.tool_game_playing
-                "paused" -> Glyph.Stop to R.string.tool_game_paused
-                "ended" -> Glyph.Stop to R.string.tool_game_ended
-                else -> Glyph.History to R.string.tool_game_starting
+        if (failure != null) recovery(failure)
+        else {
+            for(surface in movementSurfaces)Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {movementControls(Modifier.weight(1f),surface)}
+            if (spec.hostControls.playback) {
+                val (icon, label) = when(snapshot?.playback) {
+                    "ready" -> Glyph.Check to R.string.tool_game_ready
+                    "playing" -> Glyph.Arrow to R.string.tool_game_playing
+                    "paused" -> Glyph.Stop to R.string.tool_game_paused
+                    "ended" -> Glyph.Stop to R.string.tool_game_ended
+                    else -> Glyph.History to R.string.tool_game_starting
+                }
+                StatusLine(icon, LocalContentColor.current, stringResource(label))
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {playbackControls()}
             }
-            StatusLine(icon, LocalContentColor.current, stringResource(label))
         }
-        if(spec.surfaces.isNotEmpty())Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {playbackControls()}
     }
 }

@@ -43,12 +43,16 @@ class GameGenerationWorkflowTest {
         val raw=GameGenerationExample.spec();val provider=Provider(raw)
         val result=ToolGenerationService(provider,SandboxClient(context)).generate("offline","A local game",null,emptyList(),CloudSession(),"fixture")
         assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE),provider.requests.map { it.generationStage })
-        assertTrue(provider.requests.last().turns.first().text.contains(raw))
+        val writer = provider.requests.last()
+        val writerPrompt = writer.systemInstructions + writer.turns.first().text
+        assertFalse(writerPrompt.contains("Neon Arkanoid"))
+        assertTrue(provider.requests.first().systemInstructions.contains("The original request defines the feature set."))
+        assertTrue(writerPrompt.contains("The original request defines the feature set."))
         assertEquals(ToolSpec.parse(raw).initialState,result.state)
         assertTrue(result.effects.isEmpty());assertEquals(0,result.records.length())
         assertTrue(result.surfaces!!.getJSONObject("main").getJSONArray("commands").length()>0)
         val widget=JSONObject(raw).apply {
-            remove("surfaces");remove("presentation");put("source","return {state:input.state};")
+            remove("surfaces");remove("presentation");remove("hostControls");put("source","return {state:input.state};")
             put("ui",JSONObject("""{"type":"text","text":"Status","bind":"status"}"""))
         }.toString()
         val nongame=ToolGenerationService(Provider(widget),SandboxClient(context)).generate("offline","A status widget",null,emptyList(),CloudSession(),"fixture")

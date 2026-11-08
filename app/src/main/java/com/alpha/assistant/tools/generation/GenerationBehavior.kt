@@ -36,14 +36,16 @@ internal sealed interface GenerationBehavior {
             return """
                 Add behaviorBindings to the top-level response beside the existing fields. Its keys must be exactly the IDs below.
                 An action binding uses the action ID string or a UI path to a control with its own action field.
-                Surface and timer bindings use their actual ID strings.
+                Bind a surface slot to the exact ID of a declared drawing surface. Implement the requested interaction on that surface.
+                Bind a timer slot to the exact ID of a declared timer.
                 A UI path is an array of zero-based children indices from the final assembled UI root. An empty path selects the root.
                 Use stable UI paths throughout the workflow, including after dynamic UI updates.
                 Value bindings select visible nodes of type ${behaviorScalarNodes.joinToString()}. The node must expose a bound string, number, or Boolean, or text when it has no bind.
                 Collection bindings select visible nodes of type ${behaviorCollectionNodes.joinToString()}. The checker observes their record count.
                 Each geometry binding is {"surface":"surface ID","path":[0]} where path indexes drawing commands, then group children.
                 Use a stable shape or group. A path of [] observes all drawing commands for that surface.
-                Keep bindings outside fill, ui, and source. Bindings describe existing targets, never tests or expected values.
+                Keep bindings outside fill, ui, and source. Bind the scenario to the visible controls or surfaces used in the primary workflow.
+                Use the result the user sees on that representation. Bindings describe existing targets, never tests or expected values.
                 Slots: $targets
             """.trimIndent() + if (actionTypes.length() == 0) "" else
                 "\nBind each action to a visible, enabled control that accepts its payload type. " +
@@ -78,21 +80,32 @@ internal sealed interface GenerationBehavior {
         private const val FIELD = "$.behavior"
         private const val BINDINGS = "$.behaviorBindings"
         const val MAX_EVENTS = 64
+        val workflowScopeGuidance = """
+            The original request defines the feature set. Use the supplied context to clarify the request.
+            Include only features the user requests or needs to complete the primary workflow.
+            Choose a practical default when the workflow can proceed without asking the user to choose.
+        """.trimIndent()
         val newAppPlanGuidance = """
             The behavior field is part of the new mini-app plan. Include it beside wholeScreen or beside the full needs plan fields.
             Return either exactly wholeScreen and behavior, or the seven full plan fields plus behavior.
+            Identify the shortest complete workflow that satisfies the request. Choose the familiar interaction when the request leaves it open.
+            Identify the visible target of the main action and the result the user should see. Use one primary representation.
             For example, a whole-screen passive display plan is:
             {"wholeScreen":true,"behavior":{"status":"checkable","scenario":{"slots":{"result":{"kind":"value"}},"steps":[{"op":"assert","slot":"result","test":"nonempty"}]}}}
             For an interactive request, replace the example scenario with an action and a check of the requested result.
             If the full plan asks a blocking question, omit behavior until the user answers.
-        """.trimIndent()
+        """.trimIndent() + "\n" + workflowScopeGuidance
         private val scenarioGuidance = """
             Include a top-level "behavior" field. Plan one bounded executable check of the primary user-visible outcome.
+            Exercise the visible control or surface that the user uses. Assert the result on that representation.
+            Use native action steps when users choose among visible items, including items arranged in a grid.
+            Use a surface pointer step when the interaction depends on coordinates or gestures on a drawing surface.
+            Observe the changed item or drawing. Use a value slot when a visible button label is the result.
             Use {"status":"checkable","scenario":{"slots":{...},"steps":[...]}}.
             Use short descriptive ASCII slot IDs such as amountInput, displayedTotal, or movingObject.
             Use 1 to 12 slots. Map each slot ID to {"kind":"action|surface|timer|value|collection|geometry"}.
             Use every declared slot in a step. End the interaction sequence with an assertion of its result.
-            A value comes from visible text, metric, badge, fact, timeline item, or progress. Use the bound scalar when present.
+            A value comes from visible text, a button label, a metric, a badge, a fact, a timeline item, or progress. Use the bound scalar when present.
             Collection assertions compare the number of records in a visible list, grid, or table.
             Use geometry for a drawing or part of a drawing. Do not equate a status change with motion.
             To edit a declared input, use {"kind":"action","part":"the input ID"}. Omit member for input edits.
@@ -105,10 +118,11 @@ internal sealed interface GenerationBehavior {
             Use at most 16 steps and 59 explicit events. Use these step forms:
             Each step is one flat object with exactly the fields in its form. Do not add descriptions or expected results to interaction steps.
             {"op":"action","slot":"action slot","value":7} (omit value for a button; use a scalar for input)
-            {"op":"surface","slot":"surface slot","event":"start|pause|resume|restart|stop|viewport"}
+            {"op":"surface","slot":"surface slot","event":"start|pause|resume|restart|viewport"}
             {"op":"surface","slot":"surface slot","event":"pointer","phase":"down|move|up|cancel","x":0.5,"y":0.5}
             {"op":"surface","slot":"surface slot","event":"control","direction":"left|right"}
             A pointer step uses fractions from 0 to 1. Use 1 to 24 frames or timer events in each advance step.
+            Use movement or playback actions only when the workflow needs the corresponding hostControls declaration.
             {"op":"frames","slot":"surface slot","count":4,"observe":"geometry slot","changes":3}
             {"op":"timers","slot":"timer slot","count":1}
             {"op":"capture","slot":"observation slot","as":"baseline"}
@@ -117,16 +131,13 @@ internal sealed interface GenerationBehavior {
             {"op":"assert","slot":"observation slot","test":"nonempty"}
             In an assertion, use value or capture, never both. For nonempty, omit both value and capture.
             Use nonempty only for nonblank text, a collection with records, or visible drawing ink.
+            After a pointer action, check a specific result or compare the visible output with a capture taken before the action.
             For a numeric or Boolean value, use a typed comparison such as equals with the expected number or Boolean.
             Keep assertions as separate steps. An action without an input value has only op and slot.
             Frames use positive elapsed time. Include observe and changes together to require at least two changes.
             At least one assertion must check the requested observable result. For passive UI, assert its requested content.
             Use {"status":"unchecked","reason":"external_outcome"} if the primary result depends on a native or external effect.
             Use {"status":"unchecked","reason":"unsupported_observation"} only when these steps cannot express the primary check.
-        """.trimIndent()
-        private val touchSceneExample = """
-            Here is a complete example of the shape for a touch-driven scene. Use the request's language and behavior.
-            {"title":"Touch surface","description":"Draw a visible mark after a touch.","language":"en","inputs":[],"constants":[],"needs":[{"id":"scene","type":"scene","label":"Touch surface","description":"Draw a mark where the user touches.","reads":[]}],"questions":[],"behavior":{"status":"checkable","scenario":{"slots":{"canvas":{"kind":"surface"},"drawing":{"kind":"geometry"}},"steps":[{"op":"surface","slot":"canvas","event":"pointer","phase":"down","x":0.5,"y":0.5},{"op":"surface","slot":"canvas","event":"pointer","phase":"up","x":0.5,"y":0.5},{"op":"assert","slot":"drawing","test":"nonempty"}]}}}
         """.trimIndent()
         private val scenarioLimits = """
             Use synthetic inputs and deterministic expectations. Do not depend on elapsed wall-clock time.
@@ -149,10 +160,10 @@ internal sealed interface GenerationBehavior {
             When the user supplies exact text, assert that text after the edit, not the saved text.
             Stop before controls become unavailable. For a terminal result, assert it immediately and end the check.
             Use only controls needed for the edit. Omit part and member. For a button press omit value. For input use a typed value.
-            A value observes a visible ${behaviorScalarNodes.joinToString()}. A button label is not a value.
+            A value observes a visible ${behaviorScalarNodes.joinToString()}.
             A collection observes the record count of a visible ${behaviorCollectionNodes.joinToString()}.
             For a game, use surface and geometry when a drawing or its motion is the requested result.
-            Surface steps send {"op":"surface","slot":"surface","event":"start|pause|resume|restart|stop|viewport"},
+            Surface steps send {"op":"surface","slot":"surface","event":"start|pause|resume|restart|viewport"},
             {"op":"surface","slot":"surface","event":"pointer","phase":"down|move|up|cancel","x":0.5,"y":0.5}, or
             {"op":"surface","slot":"surface","event":"control","direction":"left|right"}.
             Use {"op":"frames","slot":"surface","count":4,"observe":"geometry","changes":3} for motion or
@@ -161,7 +172,7 @@ internal sealed interface GenerationBehavior {
             Use {"status":"unchecked","reason":"unsupported_observation"} only if these checks cannot express the result.
         """.trimIndent() + "\n" + scenarioLimits
 
-        val newAppBehaviorGuidance = "$scenarioGuidance\n${NativeBehaviorCatalog.guidance}\n$touchSceneExample\n$scenarioLimits"
+        val newAppBehaviorGuidance = "$scenarioGuidance\n${NativeBehaviorCatalog.guidance}\n$scenarioLimits"
 
         fun parse(raw: Any?, needIds: Set<String>): GenerationBehavior = try {
             parseBehavior(raw, needIds)
@@ -265,7 +276,7 @@ internal sealed interface GenerationBehavior {
                         val extras = when (event) {
                             "pointer" -> setOf("phase", "x", "y")
                             "control" -> setOf("direction")
-                            "viewport", "start", "pause", "resume", "restart", "stop" -> emptySet()
+                            "viewport", "start", "pause", "resume", "restart" -> emptySet()
                             else -> throw PartsContractFailure(at, "a supported surface event")
                         }
                         row.requireKeys(at, setOf("op", "slot", "event") + extras)
@@ -323,6 +334,17 @@ internal sealed interface GenerationBehavior {
             requireParts(steps.withIndex().any { (index, step) ->
                 index >= finalInteraction && (step is Step.Assert || step is Step.Advance && step.observe != null)
             }, FIELD, "an assertion at or after the final interaction")
+            val firstPointer = steps.indexOfFirst { it is Step.Surface && it.event == "pointer" }
+            if (firstPointer >= 0) {
+                val before = steps.take(firstPointer).filterIsInstance<Step.Capture>().map { it.name }.toSet()
+                requireParts(steps.drop(firstPointer + 1).any { step ->
+                    when (step) {
+                        is Step.Assert -> step.value != null || step.test in setOf("changed", "greater", "less") && step.capture in before
+                        is Step.Advance -> step.observe != null
+                        else -> false
+                    }
+                }, FIELD, "an exact result or observed change after the pointer action")
+            }
             return Scenario(slots, steps)
         }
 
@@ -445,7 +467,7 @@ internal fun PartsAssembly.behaviorBindings(scenario: GenerationBehavior.Scenari
         }
     }
 
-private val behaviorScalarNodes = setOf("text", "metric", "badge", "fact", "timelineItem", "progress", "progressRing")
+private val behaviorScalarNodes = setOf("text", "button", "metric", "badge", "fact", "timelineItem", "progress", "progressRing")
 private val behaviorCollectionNodes = setOf("list", "table", "groupedList", "lazyList", "lazyGrid")
 
 private val nativeInputObservationNodes = setOf("input", "numberInput", "slider", "toggle")

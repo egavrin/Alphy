@@ -116,6 +116,7 @@ internal object ArkanoidFixture {
     """.trimIndent()
     fun spec()=JSONObject().put("formatVersion",3).put("title","Arkanoid").put("description","Move the paddle. Break the bricks.")
         .put("capabilities",JSONArray()).put("stateSchema",JSONObject("{\"score\":\"number\",\"lives\":\"number\"}"))
+        .put("hostControls", JSONObject("""{"playback":true,"movement":["main"]}"""))
         .put("initialState",JSONObject("{\"score\":0,\"lives\":3}"))
         .put("ui",JSONObject("{\"type\":\"text\",\"text\":\"Saved score\",\"bind\":\"score\"}"))
         .put("source","if(!globalThis.game)globalThis.game=(function(state){$source})(input.state); const frame=globalThis.game(input.event); const saved=globalThis.game({type:'checkpoint'}).checkpoint; if(input.event.type!=='preview' && input.event.type!=='render'){input.state.score=saved.score;input.state.lives=saved.lives;} return {state:input.state,surfaces:{main:{commands:frame.commands}},frames:['main']};")

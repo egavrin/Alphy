@@ -254,7 +254,7 @@ class GenerationBehaviorWorkflowTest {
         val cases = listOf(
             visible to null,
             """{type:'metric',text:'PRIVATE_LABEL',bind:'privateCount',visible:false}""" to "target_hidden",
-            """{type:'button',text:'PRIVATE_LABEL',action:'privateAction'}""" to "observation_kind",
+            """{type:'row',children:[{type:'button',text:'PRIVATE_LABEL',action:'privateAction'}]}""" to "observation_kind",
         )
         for ((resultNode, rule) in cases) {
             val definition = """{"formatVersion":3,"title":"Dynamic result","description":"","capabilities":[],
@@ -282,7 +282,7 @@ class GenerationBehaviorWorkflowTest {
                 assertEquals(2, report.getInt("slot"))
                 assertEquals("value", report.getString("slotKind"))
                 assertEquals(rule, report.getString("rule"))
-                if (rule == "observation_kind") assertEquals("button", report.getString("nodeKind"))
+                if (rule == "observation_kind") assertEquals("row", report.getString("nodeKind"))
                 for (secret in listOf("PRIVATE_LABEL", "privateCount", "privateResult", "privateAction")) {
                     assertFalse(secret, diagnostics.toString().contains(secret))
                     assertFalse(secret, provider.calls.last().turns.last().text.contains(secret))
@@ -329,6 +329,73 @@ class GenerationBehaviorWorkflowTest {
         val raw = movingDrawing("""[{type:'circle',x:s.x,y:24,radius:5,color:'accent'}]""")
         val result = generate(Provider(plan(automaticMotionPlan), raw))
         assertEquals(20, JSONObject(result.state).getInt("x"))
+    }
+
+    @Test fun aScenarioCannotUseAnUndeclaredRestartButton(): Unit = runBlocking {
+        val definition = JSONObject(GameGenerationExample.spec()).apply { remove("hostControls") }
+        val raw = candidate(definition.toString(), """{"screen":"main","object":{"surface":"main","path":[96]}}""")
+        val failure = runCatching { generate(Provider(plan(gamePlan), *rejectedAgain(raw))) }.exceptionOrNull()
+        assertEquals("widget_behavior", (failure as? CloudFailure)?.code)
+        assertTrue(failure?.message.orEmpty().contains("playback control unavailable"))
+    }
+
+    @Test fun aVisibleButtonCanBeTheActionAndItsObservableResult(): Unit = runBlocking {
+        val scenario = """{"slots":{"target":{"kind":"action"},"label":{"kind":"value"}},"steps":[
+            {"op":"action","slot":"target"},{"op":"assert","slot":"label","test":"equals","value":"On"}]}"""
+        val definition = JSONObject("""{"formatVersion":3,"title":"Switch","description":"","capabilities":[],
+            "stateSchema":{"on":"boolean"},"initialState":{"on":false},
+            "ui":{"type":"button","text":"Off","action":"switch"}}""").put("source", """
+            const s=input.state,e=input.event;
+            if(e.type==='action'&&e.actionId==='switch')s.on=!s.on;
+            return {state:s,ui:{type:'button',text:s.on?'On':'Off',action:'switch'}};
+        """.trimIndent())
+        val raw = candidate(definition.toString(), """{"target":"switch","label":[]}""")
+        val provider = Provider(plan(scenario), raw)
+        assertFalse(JSONObject(generate(provider).state).getBoolean("on"))
+        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE), provider.calls.map { it.generationStage })
+    }
+
+    @Test fun aPointerScenarioMustCheckMoreThanPreexistingInk(): Unit = runBlocking {
+        val scenario = """{"slots":{"screen":{"kind":"surface"},"drawing":{"kind":"geometry"}},"steps":[
+            {"op":"capture","slot":"drawing","as":"before"},
+            {"op":"surface","slot":"screen","event":"pointer","phase":"down","x":0.5,"y":0.5},
+            {"op":"assert","slot":"drawing","test":"nonempty"}]}"""
+        for (test in listOf("\"nonempty\"", "\"unchanged\",\"capture\":\"before\"", "\"equals\",\"capture\":\"before\"")) {
+            val provider = Provider(plan(scenario.replace("\"nonempty\"", test)))
+            assertTrue(runCatching { generate(provider) }.exceptionOrNull() is CloudFailure)
+            assertTrue(provider.calls.all { it.generationStage == CloudGenerationStage.PLAN })
+            val correction = provider.calls[1].turns.last().text + provider.calls[1].systemInstructions
+            assertTrue(correction.contains("after the pointer action"))
+        }
+    }
+
+    @Test fun smokeStartReachesEverySurfaceEvenAfterPlaybackChanges(): Unit = runBlocking {
+        val definition = JSONObject("""{"formatVersion":3,"title":"Two surfaces","description":"","capabilities":[],
+            "stateSchema":{"status":"string"},"initialState":{"status":"ready"},"ui":{"type":"text","text":"Ready"},
+            "surfaces":[{"id":"a","width":64,"height":64},{"id":"b","width":64,"height":64}],
+            "hostControls":{"playback":true}}""").put("source", """
+            const s = input.state, e = input.event;
+            if (e.type === 'start' && e.surfaceId === 'a') s.status = 'playing';
+            if (e.type === 'start' && e.surfaceId === 'b') throw Error('fixture');
+            return {state:s,playback:s.status};
+        """.trimIndent())
+        val raw = definition.toString()
+        val unchecked = """{"wholeScreen":true,"behavior":{"status":"unchecked","reason":"unsupported_observation"}}"""
+        val failure = runCatching { generate(Provider(unchecked, *rejectedAgain(raw))) }.exceptionOrNull()
+        assertEquals("widget_preview", (failure as? CloudFailure)?.code)
+    }
+
+    @Test fun artifactRejectsMalformedHostControlDeclarations() {
+        val declaration = JSONObject(GameGenerationExample.spec())
+        val valid = JSONObject("""{"playback":true,"movement":["main"]}""")
+        assertEquals(valid.toString(), JSONObject(ToolSpec.parse(declaration.put("hostControls", valid).toString())
+            .providerDefinition()).getJSONObject("hostControls").toString())
+        for (invalid in listOf(JSONObject.NULL, "true", JSONObject("""{"playback":"true"}"""),
+            JSONObject("""{"extra":true}"""), JSONObject("""{"movement":["main","main"]}"""),
+            JSONObject("""{"movement":["missing"]}"""), JSONObject("""{"movement":[1]}"""))) {
+            assertTrue(invalid.toString(), runCatching { ToolSpec.parse(declaration.put("hostControls", invalid).toString()) }
+                .exceptionOrNull() is ToolValidationFailure)
+        }
     }
 
     @Test fun motionRemainsObservableOverAnOpaqueBackground(): Unit = runBlocking {

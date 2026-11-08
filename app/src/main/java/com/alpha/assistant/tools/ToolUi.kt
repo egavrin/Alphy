@@ -611,7 +611,8 @@ catch (_: Exception) { null }
     immersive: Boolean, exitImmersive: () -> Unit, settings: () -> Unit, close: () -> Unit, hostCovered: Boolean, alignDetailStart: Boolean) {
     val spec=remember(tool?.spec) {tool?.let {ToolSpec.availablePersisted(it.spec)}}
     val graphicsHost = if (tool != null && spec != null && (spec.surfaces.isNotEmpty() || immersive)) {
-        remember(controller, tool.id, tool.revision) {
+        // The outgoing presentation can close after the incoming one has opened.
+        remember(controller, tool.id, tool.revision, immersive) {
             if (spec.surfaces.isEmpty()) controller.nonGraphicsLiveInputHost(tool) else controller.artifactHost(tool)
         }
     } else null

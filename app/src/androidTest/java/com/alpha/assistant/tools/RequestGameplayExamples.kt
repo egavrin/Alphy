@@ -5,6 +5,50 @@ import org.json.JSONObject
 
 /** Frozen requests and executable examples for local development workflows. */
 internal object RequestGameplayExamples {
+    const val TIC_TAC_TOE = "сделай пожалуйста приложение крестики нолики где я могу играть с ботом"
+
+    fun ticTacToeSpec(): String = JSONObject("""
+        {"formatVersion":3,"title":"Крестики-нолики","description":"","capabilities":[],
+        "stateSchema":{"board":{"type":"array","maxItems":9,"items":"string"},"status":"string","ended":"boolean"},
+        "initialState":{"board":["","","","","","","","",""],"status":"Ваш ход","ended":false},
+        "surfaces":[{"id":"board","width":300,"height":300}],
+        "ui":{"type":"column","children":[{"type":"text","text":"Статус","bind":"status"},
+        {"type":"button","text":"Новая партия","action":"reset"}]}}
+    """.trimIndent()).put("source", """
+        const s = input.state, e = input.event;
+        const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+        function finish(mark, label) {
+          if (lines.some(line => line.every(index => s.board[index] === mark))) {
+            s.status = label; s.ended = true;
+          } else if (!s.board.includes('')) {
+            s.status = 'Ничья'; s.ended = true;
+          }
+        }
+        if (e.type === 'action' && e.actionId === 'reset') {
+          s.board = Array(9).fill(''); s.status = 'Ваш ход'; s.ended = false;
+        }
+        if (e.type === 'pointer' && e.phase === 'down' && !s.ended) {
+          const column = Math.floor(e.x / 100), row = Math.floor(e.y / 100);
+          const index = row * 3 + column;
+          if (row < 3 && column < 3 && s.board[index] === '') {
+            s.board[index] = 'X'; finish('X', 'Вы победили');
+            if (!s.ended) { s.board[s.board.indexOf('')] = 'O'; finish('O', 'Бот победил'); }
+          }
+        }
+        const commands = [];
+        for (const edge of [100,200]) {
+          commands.push({type:'line',x:edge,y:0,x2:edge,y2:300,stroke:2,color:'muted'},
+            {type:'line',x:0,y:edge,x2:300,y2:edge,stroke:2,color:'muted'});
+        }
+        s.board.forEach((mark, index) => {
+          const x = index % 3 * 100 + 50, y = Math.floor(index / 3) * 100 + 50;
+          if (mark === 'X') commands.push({type:'line',x:x-18,y:y-18,x2:x+18,y2:y+18,stroke:4,color:'accent'},
+            {type:'line',x:x+18,y:y-18,x2:x-18,y2:y+18,stroke:4,color:'accent'});
+          if (mark === 'O') commands.push({type:'arc',x:x-18,y:y-18,width:36,height:36,start:0,sweep:360,stroke:4,color:'error'});
+        });
+        return {state:s,surfaces:{board:{commands}}};
+    """.trimIndent()).toString()
+
     const val starCatchRequest = "Сделай игру «Собери звёзды»: звёзды падают по трём дорожкам. " +
         "Лови их корзиной: касайся дорожки или двигайся влево и вправо. " +
         "За каждую пойманную звезду дай очко. Три очка — победа, два промаха — конец игры. " +
@@ -21,6 +65,7 @@ internal object RequestGameplayExamples {
         .put("description", "Поймай три звезды корзиной и не допусти двух промахов.")
         .put("capabilities", JSONArray())
         .put("presentation", JSONObject("""{"mode":"immersive"}"""))
+        .put("hostControls", JSONObject("""{"playback":true,"movement":["field"]}"""))
         .put("surfaces", JSONArray("""[{"id":"field","width":280,"height":228}]"""))
         .put("stateSchema", JSONObject("""{"status":"string","lane":"number","target":"number","elapsed":"number","score":"number","misses":"number"}"""))
         .put("initialState", JSONObject("""{"status":"ready","lane":1,"target":0,"elapsed":0,"score":0,"misses":0}"""))
@@ -73,6 +118,7 @@ internal object RequestGameplayExamples {
         .put("title", "Орбита Луны")
         .put("description", "Меняйте скорость Луны или выберите точку на орбите касанием.")
         .put("capabilities", JSONArray())
+        .put("hostControls", JSONObject("""{"playback":true}"""))
         .put("surfaces", JSONArray("""[{"id":"orbit","width":280,"height":200}]"""))
         .put("stateSchema", JSONObject("""{"status":"string","angle":"number","speed":"number"}"""))
         .put("initialState", JSONObject("""{"status":"ready","angle":0,"speed":1}"""))

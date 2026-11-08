@@ -8,7 +8,7 @@ import org.json.JSONObject
 
 internal enum class ToolValidationCategory(val id: String, val guidance: String) {
     JSON("tool_json", "Return one JSON object without Markdown. Keep the object within 65536 bytes and nesting depth 24."),
-    FIELDS("tool_fields", "Use exactly these fields: formatVersion, title, description, capabilities, stateSchema, initialState, ui, source. Optional surfaces declares identified native drawing surfaces. Optional presentation selects app or immersive mode. Optional capabilityResults and collections enable local typed results and private durable records. Remove other extra fields and include missing fields."),
+    FIELDS("tool_fields", "Use exactly these fields: formatVersion, title, description, capabilities, stateSchema, initialState, ui, source. Optional surfaces declares identified native drawing surfaces. Optional presentation selects app or immersive mode. Optional hostControls declares playback and movement for declared surfaces. Optional capabilityResults and collections enable local typed results and private durable records. Remove other extra fields and include missing fields."),
     VERSION("tool_version", "Set formatVersion to the integer 3. Incompatible saved artifacts remain unavailable with their data intact."),
     METADATA("tool_metadata", "Use a title string with 1 to 100 characters and a description string with at most 500 characters."),
     CAPABILITIES("tool_capabilities", "Use an array of unique capability IDs from the supplied catalog. For local counters, use an empty array."),
@@ -56,6 +56,7 @@ private fun <T> validateNativePresentation(block: () -> T): T =
 data class ToolSpec private constructor(val json: String, val title: String, val description: String, val source: String,
     val schema: JSONObject, val initialState: String, val ui: JSONObject, val capabilities: Set<String>, val capabilityResults: Boolean,
     val collections: JSONObject, val surfaces: Map<String,ToolSurface>, val presentation: String,
+    internal val hostControls: ArtifactHostControls,
     internal val composition: ToolComposition?, internal val nativePresentation: NativePresentation?,
     internal val appLanguage: String?) {
     internal val isSealedStandalone: Boolean get() = composition?.isSealedStandalone == true
@@ -164,7 +165,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
         internal fun parsePersisted(raw: String,observer: ((ToolUiDiagnostic)->Unit)? = null): ToolSpec = parse(raw,observer,true)
 
         private val requiredGeneratedFields = setOf("formatVersion", "title", "description", "capabilities", "stateSchema", "initialState", "ui", "source")
-        private val optionalGeneratedFields = setOf("capabilityResults", "collections", "surfaces", "presentation")
+        private val optionalGeneratedFields = setOf("capabilityResults", "collections", "surfaces", "presentation", "hostControls")
         internal val generatedFields = requiredGeneratedFields + optionalGeneratedFields
 
         private fun parse(raw: String,observer: ((ToolUiDiagnostic)->Unit)?,persisted: Boolean): ToolSpec {
@@ -203,6 +204,11 @@ data class ToolSpec private constructor(val json: String, val title: String, val
                     .also {require(it.map(ToolSurface::id).distinct().size == it.size)}.associateBy(ToolSurface::id)
             }
             validateTool(ToolValidationCategory.SOURCE) {require(surfaces.values.none {it.sizing=="viewport"} || surfaces.size==1 && surfaces.values.single().x==null) {"Viewport sizing requires one unpositioned surface."}}
+            val hostControls = validateTool(ToolValidationCategory.FIELDS,
+                ToolValidationDetails("host_controls", "$.hostControls", "Boolean playback and unique declared movement surface IDs", "invalid controls")) {
+                if (j.has("hostControls")) ArtifactHostControls.parse(j.getJSONObject("hostControls"), surfaces.keys)
+                else ArtifactHostControls()
+            }
             val presentation=validateTool(ToolValidationCategory.FIELDS) {
                 if(j.has("presentation")) j.getJSONObject("presentation").let {
                     require(it.keys().asSequence().toSet()==setOf("mode") && it.get("mode") in setOf("app","immersive"))
@@ -230,7 +236,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
                 }
             } else null
             return ToolSpec(j.toString(), j.getString("title"), j.getString("description"), source, schema,
-                initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surfaces,presentation,composition,nativePresentation,appLanguage).also {
+                initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surfaces,presentation,hostControls,composition,nativePresentation,appLanguage).also {
                 validateTool(ToolValidationCategory.INITIAL_STATE) { it.validateState(it.initialState) }
                 it.validateUi(it.ui,JSONObject(it.initialState),ToolUiValidationStage.DEFINITION,observer)
             }

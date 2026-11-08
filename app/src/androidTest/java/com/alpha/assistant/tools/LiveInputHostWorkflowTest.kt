@@ -239,6 +239,7 @@ class LiveInputHostWorkflowTest {
         if (graphics) json.put("surfaces", JSONArray("""[{"id":"board","width":64,"height":64}]"""))
         if (immersive) {
             json.put("presentation", JSONObject().put("mode", "immersive"))
+            json.put("hostControls", JSONObject("""{"movement":["board"]}"""))
             json.getJSONObject("stateSchema").put("movementNote", "string")
             json.getJSONObject("initialState").put("movementNote", "")
             json.put("source", "if(input.event.type==='control')input.state.movementNote=input.state.note;${json.getString("source")}")
