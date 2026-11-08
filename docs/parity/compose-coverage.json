@@ -5,7 +5,7 @@
   "scope": "Bounded native mappings, not complete Compose or reference parity. Device status requires the evidence record.",
   "source_sha256": {
     "app/src/main/java/com/alpha/assistant/tools/ToolUiCatalog.kt": "2eb9676ea1f3b070c512864cb5610479b88eaf4761cf8e58b57253e1ae3c74e9",
-    "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt": "48602fc1b05a3dbba0320c9b6b9e0c95389f92bbe2cc0215096312e4ec8d8e63",
+    "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt": "196c30473f05dc5f9b247660d8c7659768ecc4780d13934065f150aaa7600b33",
     "app/src/main/java/com/alpha/assistant/tools/ArtifactProtocol.kt": "4086e0e19179654e53bcb090540fae2a6edbd188e5612f21bea2e0ce76140a4a",
     "app/src/main/java/com/alpha/assistant/tools/GraphicsContract.kt": "1627bd924d96cf010c77fde6d33d026d3621e04d75a7b70e663a884bd11cd270",
     "app/src/main/java/com/alpha/assistant/capabilities/CapabilityContract.kt": "fd227f77e467c285741a3d047f64959a55b9a609b3b9ea11ca1f08b726d4d5e8",

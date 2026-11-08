@@ -2,6 +2,7 @@ package com.alpha.assistant.tools
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.widget.NumberPicker
 import androidx.core.view.allViews
@@ -1724,6 +1725,7 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
         val configuration = LocalConfiguration.current
         val shortWindow = configuration.screenHeightDp in 1..399
         val narrowWindow = configuration.screenWidthDp in 1..399
+        val largeText = LocalDensity.current.fontScale >= 2f
         val initialStart = LocalDate.parse(dates.getString(0)).toEpochDay() * 86400000
         val initialEnd = LocalDate.parse(dates.getString(1)).toEpochDay() * 86400000
         val dismiss = { open = false }
@@ -1746,7 +1748,7 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
                 modifier = Modifier.heightIn(min = 48.dp),
             ) { Text(miniAppEditorAction(R.string.tool_generated_apply, text)) }
         }
-        if (narrowWindow || shortWindow) {
+        if (narrowWindow || shortWindow || largeText) {
             val start = rememberDatePickerState(initialSelectedDateMillis = initialStart, yearRange = 1..9999, initialDisplayMode = DisplayMode.Input)
             val end = rememberDatePickerState(initialSelectedDateMillis = initialEnd, yearRange = 1..9999, initialDisplayMode = DisplayMode.Input)
             val startDate = start.selectedDateMillis
@@ -1766,7 +1768,7 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
                     Text(stringResource(R.string.tool_date_range_end), Modifier.padding(horizontal = 24.dp).semantics { heading() })
                     DatePicker(end, title = null, headline = null, showModeToggle = false, focusRequester = null)
                 }
-                if (narrowWindow) {
+                if (narrowWindow || largeText && configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
                     startInput()
                     endInput()
                     rangeError()

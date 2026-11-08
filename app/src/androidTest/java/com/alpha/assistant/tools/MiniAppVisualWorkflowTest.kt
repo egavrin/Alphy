@@ -42,6 +42,7 @@ import org.junit.Test
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
 
 class MiniAppVisualWorkflowTest {
     private val robot = ShellRobot("plan3-visual")
@@ -127,11 +128,13 @@ class MiniAppVisualWorkflowTest {
         assertEquals(ToolUiCatalog.components.keys, covered)
     }
 
-    @Test fun gallerySectionsFitCompactAndExpandedViewports() =
+    @Test fun gallerySectionsFitCompactAndExpandedViewports() = withDateRangeDisplay(compact = true) {
         captureGallery(listOf("fixed"), listOf(false), "plan3-gallery-section-smoke", collectFailures = true)
+    }
 
-    @Test fun galleryShowsReadableRolesAndNativeControls() =
+    @Test fun galleryShowsReadableRolesAndNativeControls() = withDateRangeDisplay(compact = true) {
         captureGallery(listOf("fixed", "device", "blue", "green"), listOf(false, true), "plan3-gallery-sections", collectFailures = true)
+    }
 
     @Test fun gallerySnackbarActionStaysSeparateAndReadable() =
         captureGallery(listOf("device"), listOf(true), "alpha3-gallery-snackbar", onlySections = listOf("presentation/snackbar"),
@@ -144,17 +147,54 @@ class MiniAppVisualWorkflowTest {
     @Test fun galleryGridShowsEveryCharacterAtDoubleFont() =
         captureGallery(listOf("blue"), listOf(false), "plan3-gallery-grid-visibility", onlySections = listOf("records/lazy-grid"), widths = listOf(false))
 
-    @Test fun galleryGridAndDateRangeAcrossSchemes() =
+    @Test fun galleryGridAndDateRangeAcrossSchemes() = withDateRangeDisplay(compact = true) {
         captureGallery(listOf("fixed", "device", "blue", "green"), listOf(false, true), "plan3-gallery-visibility-delta",
             onlySections = listOf("records/lazy-grid", "forms/date-range"))
+    }
 
-    @Test fun galleryDateRangeChangesAtDoubleFontInLandscape() =
+    @Test fun galleryDateRangeChangesAtDoubleFontInLandscape() = withDateRangeDisplay(compact = false) {
         captureGallery(listOf("green"), listOf(true), "plan3-gallery-date-range-system-font",
-            onlySections = listOf("forms/date-range"), widths = listOf(true), fonts = listOf(2f))
+            onlySections = listOf("forms/date-range"), widths = listOf(true), fonts = listOf(2f), compactDateRange = false)
+    }
 
-    @Test fun galleryDateRangeChangesAtDoubleFontInPortrait() =
+    @Test fun galleryDateRangeChangesAtDoubleFontInPortrait() = withDateRangeDisplay(compact = false) {
         captureGallery(listOf("green"), listOf(true), "plan3-gallery-date-range-portrait-system-font",
-            onlySections = listOf("forms/date-range"), widths = listOf(false), fonts = listOf(2f))
+            onlySections = listOf("forms/date-range"), widths = listOf(false), fonts = listOf(2f), compactDateRange = false)
+    }
+
+    private fun withDateRangeDisplay(compact: Boolean, block: () -> Unit) {
+        fun sizeOverride(size: String) = size.lineSequence()
+            .firstOrNull { it.startsWith("Override size: ") }?.substringAfter(": ")
+
+        val original = robot.shell("wm size")
+        val physical = original.lineSequence().first { it.startsWith("Physical size: ") }.substringAfter(": ")
+        val previous = sizeOverride(original)
+        val density = robot.shell("wm density").substringAfterLast(':').trim().toInt()
+        val width = if (compact) 960 else 1080
+        val height = if (compact) 2160 else 2400
+        val requested = "${(width * density / 420.0).roundToInt()}x${(height * density / 420.0).roundToInt()}"
+        try {
+            robot.shell("wm size $requested")
+            assertEquals("Date-range display size", requested, sizeOverride(robot.shell("wm size")) ?: physical)
+            println("DATE_RANGE_DISPLAY previous=$previous requested=$requested density=$density")
+            block()
+        } finally {
+            robot.shell("wm size ${previous ?: "reset"}")
+            val restored = sizeOverride(robot.shell("wm size"))
+            println("DATE_RANGE_DISPLAY restored=$restored")
+            assertEquals("Restored display override", previous, restored)
+        }
+    }
+
+    private fun assertDateRangeWindow(configuration: Configuration, compact: Boolean, landscape: Boolean) {
+        val width = configuration.screenWidthDp
+        val height = configuration.screenHeightDp
+        assertEquals("Date-range orientation", if (landscape) Configuration.ORIENTATION_LANDSCAPE
+            else Configuration.ORIENTATION_PORTRAIT, configuration.orientation)
+        val shortSide = minOf(width, height)
+        assertTrue("Date-range window ${width}x${height} dp, compact=$compact",
+            if (compact) shortSide in 1..399 else shortSide >= 400)
+    }
 
     @Test fun galleryDateRangeAcceptsSoftwareKeyboardAtSystemFont200() {
         val app = robot.instrumentation.targetContext
@@ -169,17 +209,26 @@ class MiniAppVisualWorkflowTest {
             robot.automation.serviceInfo = service
             robot.shell("settings put system font_scale 2.0")
             withoutAnimations {
-                for (landscape in listOf(false, true)) {
-                    val mode = if (landscape) "landscape" else "portrait"
-                    val states = JSONArray()
-                    report.put(JSONObject().put("orientation", mode).put("states", states))
-                    val intent = Intent(app, MiniAppGalleryActivity::class.java).putExtra("matrix", true)
-                        .putExtra("systemFont", true).putExtra("scheme", "green").putExtra("dark", true)
-                        .putExtra("page", "forms").putExtra("expanded", landscape)
-                    ActivityScenario.launch<MiniAppGalleryActivity>(intent).use { scenario ->
-                        robot.rotate(scenario, landscape)
-                        try { editDateRangeWithKeyboard(scenario, directory, states, mode) }
-                        catch (failure: AssertionError) { failures += "$mode: ${failure.message}" }
+                for (compact in listOf(true, false)) withDateRangeDisplay(compact) {
+                    for (landscape in listOf(false, true)) {
+                        val orientation = if (landscape) "landscape" else "portrait"
+                        val mode = "${if (compact) "compact" else "wide"}-$orientation"
+                        val states = JSONArray()
+                        val row = JSONObject().put("orientation", orientation).put("compact", compact).put("states", states)
+                        report.put(row)
+                        val intent = Intent(app, MiniAppGalleryActivity::class.java).putExtra("matrix", true)
+                            .putExtra("systemFont", true).putExtra("scheme", "green").putExtra("dark", true)
+                            .putExtra("page", "forms").putExtra("expanded", landscape)
+                        ActivityScenario.launch<MiniAppGalleryActivity>(intent).use { scenario ->
+                            robot.rotate(scenario, landscape)
+                            scenario.onActivity {
+                                val configuration = it.resources.configuration
+                                assertDateRangeWindow(configuration, compact, landscape)
+                                row.put("widthDp", configuration.screenWidthDp).put("heightDp", configuration.screenHeightDp)
+                            }
+                            try { editDateRangeWithKeyboard(scenario, directory, states, mode, landscape) }
+                            catch (failure: AssertionError) { failures += "$mode: ${failure.message}" }
+                        }
                     }
                 }
             }
@@ -197,7 +246,7 @@ class MiniAppVisualWorkflowTest {
     }
 
     private fun editDateRangeWithKeyboard(scenario: ActivityScenario<MiniAppGalleryActivity>, directory: File,
-        states: JSONArray, mode: String) {
+        states: JSONArray, mode: String, landscape: Boolean) {
         lateinit var safe: Rect
         lateinit var labels: List<String>
         lateinit var check: GalleryCaptureCheck
@@ -219,7 +268,7 @@ class MiniAppVisualWorkflowTest {
         fun captureDialog(state: String) {
             capture(states, directory, "$mode-$state",
                 check.copy(body = check.body + labels, unclipped = labels), safe, surface,
-                dateFields = reachableDateRangeFields(safe), dateInk = colors.onSurface.toArgb() to colors.onSurfaceVariant.toArgb(),
+                dateFields = reachableDateRangeFields(safe, landscape), dateInk = colors.onSurface.toArgb() to colors.onSurfaceVariant.toArgb(),
                 expectedFontScale = 2f)
         }
         fun type(field: AccessibilityNodeInfo, digits: String, state: String) {
@@ -227,6 +276,8 @@ class MiniAppVisualWorkflowTest {
         }
         tap(robot.assertTarget(original))
         captureDialog("open")
+        type(reachableDateRangeFields(safe).last(), "0106202", "incomplete-end-ime")
+        visible(apply, disabled = true)
         type(reachableDateRangeFields(safe).last(), "01062028", "invalid-end-ime")
         visible(apply, disabled = true)
         visible(invalidRange, textOnly = true)
@@ -241,6 +292,7 @@ class MiniAppVisualWorkflowTest {
         tap(robot.assertTarget(apply))
         capture(states, directory, "$mode-applied", GalleryCaptureCheck(targets = listOf(applied)), safe, surface, expectedFontScale = 2f)
         tap(robot.assertTarget(applied))
+        type(reachableDateRangeFields(safe).last(), "12062028", "cancelled-end-ime")
         tap(robot.assertTarget(cancel))
         robot.assertTarget(applied)
     }
@@ -332,7 +384,7 @@ class MiniAppVisualWorkflowTest {
         return applied
     }
 
-    private fun reachableDateRangeFields(safe: Rect): List<AccessibilityNodeInfo> {
+    private fun reachableDateRangeFields(safe: Rect, landscape: Boolean? = null): List<AccessibilityNodeInfo> {
         robot.waitUntil { dateRangeFields().size == 2 }
         val fields = dateRangeFields().sortedWith(compareBy({ it.screenBounds().top }, { it.screenBounds().left }))
         val minSize = (48 * robot.instrumentation.targetContext.resources.displayMetrics.density).toInt()
@@ -340,6 +392,11 @@ class MiniAppVisualWorkflowTest {
             val bounds = field.screenBounds()
             assertTrue("Reachable date field: $bounds", safe.contains(bounds) &&
                 bounds.height() >= minSize && bounds.width() >= minSize)
+        }
+        if (landscape != null) {
+            val (first, second) = fields.map { it.screenBounds() }
+            assertTrue("Date fields should fit ${if (landscape) "on one row" else "in one column"}: $first, $second",
+                if (landscape) first.right <= second.left || second.right <= first.left else first.bottom <= second.top)
         }
         return fields
     }
@@ -350,7 +407,7 @@ class MiniAppVisualWorkflowTest {
 
     private fun captureGallery(schemes: List<String>, modes: List<Boolean>, directoryName: String,
         collectFailures: Boolean = false, onlySections: List<String>? = null, widths: List<Boolean> = listOf(false, true),
-        fonts: List<Float> = listOf(1f, 2f), requireSheetExpansion: Boolean = false) {
+        fonts: List<Float> = listOf(1f, 2f), requireSheetExpansion: Boolean = false, compactDateRange: Boolean = true) {
         val app = robot.instrumentation.targetContext
         val gallery = Intent(app, MiniAppGalleryActivity::class.java).putExtra("matrix", true).putExtra("systemFont", true)
         val originalFont = robot.shell("settings get system font_scale")
@@ -377,9 +434,10 @@ class MiniAppVisualWorkflowTest {
                                     "accent" to colors.primaryContainer, "success" to colors.secondaryContainer,
                                     "warning" to colors.tertiaryContainer, "error" to colors.errorContainer).mapValues { it.value.toArgb() }
                                 val captures = JSONArray()
-                                report.put(JSONObject().put("scheme", scheme).put("dark", dark)
+                                val row = JSONObject().put("scheme", scheme).put("dark", dark)
                                     .put("fontScale", fontScale.toDouble()).put("expanded", expanded)
-                                    .put("animations", "disabled for capture").put("captures", captures))
+                                    .put("animations", "disabled for capture").put("captures", captures)
+                                report.put(row)
                                 ActivityScenario.launch<MiniAppGalleryActivity>(intent).use { scenario ->
                                     robot.rotate(scenario, landscape = expanded)
                                     robot.waitUntil {
@@ -400,6 +458,11 @@ class MiniAppVisualWorkflowTest {
                                     } + "canvas"
                                     assertEquals("Every section has a rendered-state check", sections.toSet(), checks.keys)
                                     val selected = onlySections ?: sections
+                                    if ("forms/date-range" in selected) scenario.onActivity {
+                                        val configuration = it.resources.configuration
+                                        assertDateRangeWindow(configuration, compactDateRange, expanded)
+                                        row.put("widthDp", configuration.screenWidthDp).put("heightDp", configuration.screenHeightDp)
+                                    }
                                     for (key in selected) {
                                         val page = key.substringBefore('/')
                                         val section = key.substringAfter('/', "").ifEmpty { null }
@@ -448,7 +511,7 @@ class MiniAppVisualWorkflowTest {
                                                 }
                                                 val expansion = if (step.expandSheet) expandSheet(checkNotNull(step.dismiss), safe, requireSheetExpansion) else null
                                                 val editDateRange = key == "forms/date-range"
-                                                val fields = if (editDateRange) reachableDateRangeFields(safe) else emptyList()
+                                                val fields = if (editDateRange) reachableDateRangeFields(safe, expanded) else emptyList()
                                                 val openedCheck = if (editDateRange) {
                                                     step.check.copy(body = step.check.body + dateLabels, unclipped = dateLabels)
                                                 } else step.check
