@@ -72,10 +72,10 @@ import com.alpha.assistant.data.Conversation
         HorizontalDivider()
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             // The name follows, so the initial is decorative for TalkBack.
-            Box(Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape).clearAndSetSemantics { hideFromAccessibility() }, contentAlignment = Alignment.Center) {
-                Text(profileName.firstOrNull(Char::isLetter)?.uppercase().orEmpty(), color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.titleMedium)
+            Box(Modifier.size(40.dp).background(MaterialTheme.colorScheme.primary, CircleShape).clearAndSetSemantics { hideFromAccessibility() }, contentAlignment = Alignment.Center) {
+                Text(profileName.firstOrNull(Char::isLetter)?.uppercase().orEmpty(), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.titleMedium)
             }
-            Text(profileName, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(profileName, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
             GlyphButton(Glyph.Settings, stringResource(R.string.settings)) { open(ShellDestination.Settings) }
         }
     }
