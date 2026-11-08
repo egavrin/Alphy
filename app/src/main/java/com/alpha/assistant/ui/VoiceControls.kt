@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.alpha.assistant.R
+import com.alpha.assistant.surfaces.AssistCapture
 import com.alpha.assistant.voice.VoiceSession
 
 @Composable fun VoiceVisibility(voice: VoiceSession) {
@@ -52,18 +53,20 @@ import com.alpha.assistant.voice.VoiceSession
     oneShot: Boolean,
     destination: CourseComposerState? = null,
     assistantInvocation: String? = null,
+    displayedCapture: AssistCapture? = null,
 ): () -> Unit {
     val context = LocalContext.current
     val owner = androidx.activity.compose.LocalActivity.current as? ComponentActivity
     var origin by remember(destination, assistantInvocation) { mutableStateOf<String?>(null) }
     var pending by remember(destination, assistantInvocation) { mutableStateOf(false) }
+    val visibleCapture by rememberUpdatedState(displayedCapture)
     fun startIfVisible() {
         val power = context.getSystemService(PowerManager::class.java)
         val keyguard = context.getSystemService(KeyguardManager::class.java)
         if (pending && power.isInteractive && !keyguard.isDeviceLocked && owner?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true) {
             pending = false
             if (origin != null && origin == model.composerContextKey(destination)) {
-                model.startComposerVoice(oneShot, destination, assistantInvocation)
+                model.startComposerVoice(oneShot, destination, assistantInvocation, visibleCapture)
             }
         }
     }

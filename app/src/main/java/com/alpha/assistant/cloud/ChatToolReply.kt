@@ -237,14 +237,14 @@ Choose course for a direct request to learn through lessons or a course, such as
     private const val SOURCE_LIMITATION = "Источники не заменяют независимую проверку."
 
     /** Attribution is exact. Numeric support is conservative and does not establish factual truth. */
-    fun grounded(decision: Decision, sources: List<Source>, providedText: String): Decision {
+    fun grounded(decision: Decision, sources: List<Source>, providedText: String, providedUrl: String? = null): Decision {
         val links = sources.distinctBy { it.url }
-        val allowed = links.map { it.url }.toSet()
+        val allowed = links.map { it.url }.toSet() + listOfNotNull(providedUrl)
         val output = decision.text + "\n" + decision.brief
         urls.findAll(output).forEach { match ->
             var candidate = match.value
             while(candidate !in allowed && candidate.isNotEmpty() && candidate.last() in ".,;:!?)]}") candidate = candidate.dropLast(1)
-            if(candidate !in allowed) throw CloudFailure("source_attribution","The reply cites a URL that search did not return. No sourced answer or app was accepted.")
+            if(candidate !in allowed) throw CloudFailure("source_attribution","The reply cites a URL that was not supplied for this answer. No sourced answer or app was accepted.")
         }
         brackets.findAll(output).forEach { match ->
             val label = match.groupValues[1]

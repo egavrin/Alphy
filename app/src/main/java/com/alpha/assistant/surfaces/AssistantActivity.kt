@@ -233,14 +233,16 @@ private fun CompactAssistant(
     val context = LocalContext.current
     val capture = AssistantCapture.current?.takeIf { it.id == invocation }
     val draft = model.snapshot.draft
-    val screenshot = capture?.screenshotFor(draft.id)
-    val screenText = capture?.text
+    val shown = capture?.forDraft(draft.id)
+    val screenshot = shown?.screenshot
+    val screen = shown?.screen?.withoutPage()?.nonempty()
+    val pageText = shown?.screen?.pageText
     LaunchedEffect(capture?.id, capture?.screenshot, draft.id, draft.attachments.size, model.loading, model.loadFailed) {
         if (capture != null && !model.loading && !model.loadFailed && canUseCapture(capture.id)) {
-            model.bindAssistantScreenshot(capture.id)
+            model.bindAssistantCapture(capture.id)
         }
     }
-    var reviewOrigin by rememberSaveable(invocation) { mutableStateOf<String?>(null) }
+    var review by rememberSaveable(invocation, draft.id) { mutableStateOf<ScreenReview?>(null) }
     var menu by rememberSaveable { mutableStateOf<AssistantMenu?>(null) }
     var historySearch by rememberSaveable { mutableStateOf("") }
     var settingsFailed by remember { mutableStateOf(false) }
@@ -273,18 +275,41 @@ private fun CompactAssistant(
                     model, model.snapshot.selected, tools = openTool,
                     settings = providerSettings, modifier = Modifier.weight(1f), openAutomation = openAutomation,
                 )
-                if (screenshot != null && capture != null) {
-                    AssistantScreenshot(screenshot, compact) { AssistantCapture.discardScreenshot(capture.id) }
-                } else if (screenText != null) {
-                    val preview = screenText.lineSequence().first().take(48)
-                    TextButton(onClick = { reviewOrigin = draft.id }) {
-                        Text(stringResource(R.string.assistant_screen_suggestion_text, preview), maxLines = 1)
+                if (shown != null) {
+                    Column(Modifier.fillMaxWidth().heightIn(max = if (compact) 108.dp else 180.dp)
+                        .verticalScroll(rememberScrollState())) {
+                        if (screen != null) {
+                            val source = screen.appLabel ?: screen.sourcePackage
+                            ContextRow(
+                                title = if (source == null) stringResource(R.string.assistant_screen_text)
+                                    else stringResource(R.string.assistant_screen_source, source),
+                                open = { review = ScreenReview.SCREEN },
+                                removeLabel = stringResource(R.string.assistant_discard_capture),
+                                remove = { AssistantCapture.discardScreen(shown.id) },
+                            )
+                        }
+                        val pageLabel = when (shown.pageStatus) {
+                            AssistPageStatus.LOADING -> R.string.assistant_page_loading
+                            AssistPageStatus.UNAVAILABLE -> R.string.assistant_page_unavailable
+                            else -> R.string.assistant_page_text.takeIf { pageText != null }
+                        }
+                        if (pageLabel != null) ContextRow(
+                            title = stringResource(pageLabel),
+                            open = if (pageText != null) ({ review = ScreenReview.PAGE }) else null,
+                            removeLabel = stringResource(R.string.assistant_page_remove),
+                            remove = { AssistantCapture.discardPage(shown.id) },
+                        )
+                        if (screenshot != null) {
+                            AssistantScreenshot(screenshot, compact, open = { review = ScreenReview.IMAGE }) {
+                                AssistantCapture.discardScreenshot(shown.id)
+                            }
+                        }
                     }
                 }
                 Composer(
                     model, context = { menu = AssistantMenu.Context }, modifier = Modifier.widthIn(max = 620.dp),
                     compact = compact, placeholder = R.string.assistant_ask,
-                    assistantInvocation = capture?.id, requiresQuestion = screenshot != null,
+                    assistantInvocation = capture?.id, requiresQuestion = screenshot != null, displayedCapture = shown,
                 )
             }
         }
@@ -304,23 +329,23 @@ private fun CompactAssistant(
         confirmButton = { TextButton(onClick = model::retrySave) { Text(stringResource(R.string.assistant_save_retry)) } },
     )
 
-    val origin = reviewOrigin
-    if (origin != null && capture != null && screenText != null) key(capture.id) {
-        val source = stringResource(R.string.assistant_screen_text)
-        ReviewScreenText(
-            text = screenText, enabled = !model.attachmentBusy,
-            attach = {
-                if (reviewOrigin == origin && canUseCapture(capture.id) && model.addReviewedText(screenText, source, origin)) {
-                    AssistantCapture.update(capture.id, text = null)
-                    reviewOrigin = null
-                }
-            },
-            done = { reviewOrigin = null },
-            discard = {
-                AssistantCapture.update(capture.id, text = null)
-                reviewOrigin = null
-            },
+    when (review) {
+        ScreenReview.SCREEN -> if (screen != null) {
+            val selection = screen.selection?.let { stringResource(R.string.assistant_selection_value, it) }
+            val content = (screen.screenDetails + listOfNotNull(selection, screen.visibleText)).joinToString("\n\n")
+            ContextReview(R.string.assistant_review_title, content, screen.truncated) { review = null }
+        }
+        ScreenReview.PAGE -> if (pageText != null) {
+            ContextReview(R.string.assistant_page_text, pageText, shown?.screen?.pageTruncated == true) { review = null }
+        }
+        ScreenReview.IMAGE -> if (screenshot != null) AlertDialog(
+            onDismissRequest = { review = null },
+            title = { Text(stringResource(R.string.assistant_screen_image)) },
+            text = { Image(screenshot.asImageBitmap(), stringResource(R.string.assistant_screen_image),
+                Modifier.fillMaxWidth().heightIn(max = 340.dp)) },
+            confirmButton = { TextButton(onClick = { review = null }) { Text(stringResource(R.string.assistant_review_done)) } },
         )
+        null -> Unit
     }
 
     if (menu == AssistantMenu.Context && !model.loading && !model.loadFailed) {
@@ -349,8 +374,8 @@ private fun CompactAssistant(
                         TextButton(onClick = { model.select(null); menu = null }) { Text(stringResource(R.string.new_chat)) }
                         TextButton(onClick = { menu = AssistantMenu.History }) { Text(stringResource(R.string.assistant_history)) }
                         TextButton(onClick = { menu = AssistantMenu.Context }) { Text(stringResource(R.string.composer_add_context)) }
-                        if (screenText != null && !model.loading && !model.loadFailed) {
-                            TextButton(onClick = { menu = null; reviewOrigin = draft.id }) {
+                        if (screen != null && !model.loading && !model.loadFailed) {
+                            TextButton(onClick = { menu = null; review = ScreenReview.SCREEN }) {
                                 Text(stringResource(R.string.assistant_review_title))
                             }
                         }
@@ -375,14 +400,14 @@ private fun CompactAssistant(
 }
 
 @Composable
-private fun AssistantScreenshot(screenshot: Bitmap, compact: Boolean, remove: () -> Unit) {
+private fun AssistantScreenshot(screenshot: Bitmap, compact: Boolean, open: () -> Unit, remove: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
         Surface(color = colors.surfaceContainerLow, shape = MaterialTheme.shapes.medium) {
             Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Image(
                     screenshot.asImageBitmap(), stringResource(R.string.assistant_screen_image),
-                    Modifier.size(if (compact) 48.dp else 64.dp).clip(MaterialTheme.shapes.small),
+                    Modifier.size(if (compact) 48.dp else 64.dp).clip(MaterialTheme.shapes.small).clickable(onClick = open),
                 )
                 Spacer(Modifier.width(12.dp))
                 AlphaIcon(Glyph.Check, accent = true)
@@ -403,21 +428,38 @@ private fun AssistantScreenshot(screenshot: Bitmap, compact: Boolean, remove: ()
     }
 }
 
+private enum class ScreenReview { SCREEN, PAGE, IMAGE }
+
 @Composable
-private fun ReviewScreenText(text: String, enabled: Boolean, attach: () -> Unit, done: () -> Unit, discard: () -> Unit) {
+private fun ContextRow(title: String, removeLabel: String, remove: () -> Unit, open: (() -> Unit)? = null) {
+    Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (open == null) {
+            Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+        } else {
+            TextButton(onClick = open, modifier = Modifier.weight(1f)) {
+                Text(title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
+        }
+        IconButton(onClick = remove, modifier = Modifier.semantics { contentDescription = removeLabel }) {
+            AlphaIcon(Glyph.Close)
+        }
+    }
+}
+
+@Composable
+private fun ContextReview(@androidx.annotation.StringRes title: Int, content: String, truncated: Boolean, done: () -> Unit) {
     AlertDialog(
         onDismissRequest = done,
-        title = { Text(stringResource(R.string.assistant_review_title)) },
+        title = { Text(stringResource(title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.assistant_review_detail))
+                if (truncated) Text(stringResource(R.string.assistant_context_truncated))
                 SelectionContainer {
-                    Text(text, Modifier.heightIn(max = 144.dp).verticalScroll(rememberScrollState()))
+                    Text(content, Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState()))
                 }
-                TextButton(enabled = enabled, onClick = attach) { Text(stringResource(R.string.assistant_attach_text)) }
             }
         },
         confirmButton = { TextButton(onClick = done) { Text(stringResource(R.string.assistant_review_done)) } },
-        dismissButton = { TextButton(onClick = discard) { Text(stringResource(R.string.assistant_discard_capture)) } },
     )
 }

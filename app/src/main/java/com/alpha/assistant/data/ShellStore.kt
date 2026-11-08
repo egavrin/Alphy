@@ -8,7 +8,8 @@ import com.alpha.assistant.chat.RefinementChoice
 import org.json.JSONArray
 import org.json.JSONObject
 
-data class Attachment(val uri: String, val name: String, val mime: String, val contextText: String? = null)
+data class Attachment(val uri: String, val name: String, val mime: String, val contextText: String? = null,
+    val automaticScreen: Boolean = false)
 data class Draft(val text: String = "", val attachments: List<Attachment> = emptyList(), val id: String = java.util.UUID.randomUUID().toString())
 data class Source(val title: String, val url: String, val summary: String = "", val siteName: String? = null, val siteIcon: String? = null,
     val publishedAt: String? = null)
@@ -23,7 +24,8 @@ data class Message(val id: String, val role: String, val text: String, val creat
     val queueOrder: Long? = null, val hostTargetId: String? = null, val requiresRefinement: Boolean = false,
     val refinementChoices: List<RefinementChoice> = emptyList(),
     val provenance: MessageProvenance = MessageProvenance.UNKNOWN,
-    val automationResult: Boolean = false)
+    val automationResult: Boolean = false,
+    val screenContext: ScreenContext? = null)
 data class Conversation(val id: String, val title: String, val createdAt: Long, val updatedAt: Long, val draft: Draft = Draft(), val messages: List<Message> = emptyList(),
     val refinementTargetId: String? = null, val refinementDraft: Draft? = null) {
     val cardIds: List<String> get() = messages.mapNotNull { it.toolId }.distinct()
@@ -182,8 +184,21 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
         } finally { writableDatabase.endTransaction() }
     }
 
-    private fun encodeAttachments(items: List<Attachment>) = JSONArray().apply { items.forEach { put(JSONObject().put("uri", it.uri).put("name", it.name).put("mime", it.mime).put("contextText",it.contextText ?: JSONObject.NULL)) } }
-    private fun decodeAttachments(array: JSONArray) = List(array.length()) { i -> array.getJSONObject(i).let { Attachment(it.getString("uri"), it.getString("name"), it.getString("mime"),if(it.isNull("contextText")) null else it.getString("contextText")) } }
+    private fun encodeAttachments(items: List<Attachment>) = JSONArray().apply {
+        items.forEach {
+            put(JSONObject().put("uri", it.uri).put("name", it.name).put("mime", it.mime)
+                .put("contextText", it.contextText ?: JSONObject.NULL).apply {
+                    if (it.automaticScreen) put("automaticScreen", true)
+                })
+        }
+    }
+
+    private fun decodeAttachments(array: JSONArray) = List(array.length()) { index ->
+        array.getJSONObject(index).let {
+            Attachment(it.getString("uri"), it.getString("name"), it.getString("mime"),
+                it.opt("contextText") as? String, it.optBoolean("automaticScreen"))
+        }
+    }
     private fun encodeDraft(draft: Draft) = JSONObject().put("id", draft.id).put("text", draft.text).put("attachments", encodeAttachments(draft.attachments))
     private fun decodeDraft(json: JSONObject): Draft {
         if (json.optString("id").isBlank()) json.put("id", java.util.UUID.randomUUID().toString())
@@ -192,7 +207,7 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
     private fun encodeConversation(c: Conversation) = JSONObject().put("id", c.id).put("title", c.title).put("createdAt", c.createdAt).put("updatedAt", c.updatedAt)
         .put("draft", encodeDraft(c.draft)).put("refinementTargetId",c.refinementTargetId)
         .put("refinementDraft",c.refinementDraft?.let(::encodeDraft)).put("messages", JSONArray().apply { c.messages.filterNot { it.automationResult }.forEach { m -> put(JSONObject().put("id", m.id).put("role", m.role).put("text", m.text).put("createdAt", m.createdAt).put("status", m.status).put("attachments", encodeAttachments(m.attachments)).put("replyTo", m.replyTo).put("search", m.search)
-            .put("provenance", m.provenance.name)
+            .put("provenance", m.provenance.name).put("screenContext", m.screenContext?.json())
             .put("toolId",m.toolId).put("toolRevision",m.toolRevision).put("toolOperationId",m.toolOperationId)
             .put("queueOrder",m.queueOrder).put("hostTargetId",m.hostTargetId).put("requiresRefinement",m.requiresRefinement)
             .put("refinementChoices",JSONArray().apply { m.refinementChoices.forEach { choice ->
@@ -211,7 +226,8 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
             }.orEmpty(),
             provenance = (it.opt("provenance") as? String)?.let { name ->
                 MessageProvenance.entries.firstOrNull { value -> value.name == name }
-            } ?: MessageProvenance.UNKNOWN) } } }, j.opt("refinementTargetId") as? String, j.optJSONObject("refinementDraft")?.let(::decodeDraft))
+            } ?: MessageProvenance.UNKNOWN,
+            screenContext = it.optJSONObject("screenContext")?.let(ScreenContext::fromJson)) } } }, j.opt("refinementTargetId") as? String, j.optJSONObject("refinementDraft")?.let(::decodeDraft))
 }
 
 internal fun Conversation.withAutomationMessages(messages: List<Message>): Conversation {

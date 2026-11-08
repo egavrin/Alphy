@@ -98,6 +98,14 @@ import com.alpha.assistant.data.Source
                         Text(body, semantics, fontSize = 15.sp, lineHeight = 23.sp)
                     }
                 }
+                message.screenContext?.let { screen ->
+                    if (screen.withoutPage().nonempty() != null) {
+                        Text(stringResource(R.string.assistant_screen_text), style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (screen.pageText != null) {
+                        Text(stringResource(R.string.assistant_page_text), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
                 message.attachments.forEach {
                     Text(stringResource(R.string.chat_attachment_history, it.name), style = MaterialTheme.typography.bodySmall)
                 }

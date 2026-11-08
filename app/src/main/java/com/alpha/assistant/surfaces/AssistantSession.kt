@@ -1,7 +1,6 @@
 package com.alpha.assistant.surfaces
 
 import android.app.Application
-import android.app.assist.AssistStructure
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -12,15 +11,18 @@ import android.service.voice.VoiceInteractionSession
 import android.service.voice.VoiceInteractionSessionService
 import android.speech.RecognitionService
 import android.speech.SpeechRecognizer
-import android.text.InputType
-import android.view.View
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
+import com.alpha.assistant.data.ScreenContext
 import com.alpha.assistant.ui.ShellViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import java.util.UUID
 
 /** One process owns each in-flight request across compact and full activities. */
@@ -41,35 +43,81 @@ internal const val ASSIST_INVOCATION = "assist_invocation"
 internal fun Context.assistantUnavailable(): Boolean =
     ToolWidgets.isLocked(this) || !getSystemService(PowerManager::class.java).isInteractive
 
+enum class AssistPageStatus { NONE, LOADING, AVAILABLE, UNAVAILABLE }
+
 data class AssistCapture(
     val id: String,
-    val text: String? = null,
+    val screen: ScreenContext? = null,
     val screenshot: Bitmap? = null,
-    val screenshotDraft: String? = null,
+    val draft: String? = null,
+    val pageStatus: AssistPageStatus = AssistPageStatus.NONE,
+    val screenDiscarded: Boolean = false,
+    val pageDiscarded: Boolean = false,
     val screenshotDiscarded: Boolean = false,
 ) {
-    fun screenshotFor(draft: String): Bitmap? = screenshot.takeIf { screenshotDraft == draft }
+    fun forDraft(draftId: String): AssistCapture? = takeIf { draft == draftId }
 }
 
 object AssistantCapture {
     var current by mutableStateOf<AssistCapture?>(null)
         private set
     private var owner: Pair<String, () -> Unit>? = null
+    private var pageRead: Job? = null
+    private val scope = CoroutineScope(Dispatchers.Main.immediate)
 
     fun begin(onClose: () -> Unit = {}): String = UUID.randomUUID().toString().also { id ->
+        cancelPage()
         owner = id to onClose
         current = AssistCapture(id)
     }
 
-    fun update(id: String, text: String? = current?.text, screenshot: Bitmap? = current?.screenshot) {
+    fun updateScreen(id: String, screen: ScreenContext) {
         val capture = current?.takeIf { it.id == id } ?: return
-        current = capture.copy(text = text, screenshot = screenshot.takeUnless { capture.screenshotDiscarded })
+        val source = if (capture.screenDiscarded) screen.onlyPage() else screen
+        val accepted = if (capture.pageDiscarded) source.withoutPage() else source
+        current = capture.copy(screen = accepted.nonempty())
     }
 
-    fun bindScreenshot(id: String, draft: String) {
+    fun updateScreenshot(id: String, screenshot: Bitmap?) {
         val capture = current?.takeIf { it.id == id && !it.screenshotDiscarded } ?: return
-        if (capture.screenshotDraft == null) current = capture.copy(screenshotDraft = draft)
-        else if (capture.screenshotDraft != draft) discardScreenshot(id)
+        current = capture.copy(screenshot = screenshot)
+    }
+
+    internal fun readPage(id: String, context: Context, reference: android.net.Uri) {
+        val capture = current?.takeIf { it.id == id && !it.pageDiscarded } ?: return
+        current = capture.copy(pageStatus = AssistPageStatus.LOADING)
+        pageRead = scope.launch {
+            val result = ScreenAssist.readChrome(context, reference)
+            val latest = current?.takeIf { it.id == id && !it.pageDiscarded } ?: return@launch
+            if (context.assistantUnavailable()) {
+                clear(id)
+                return@launch
+            }
+            current = latest.copy(
+                screen = (latest.screen ?: ScreenContext()).copy(
+                    pageText = result?.text, pageTruncated = result?.truncated == true,
+                ).nonempty(),
+                pageStatus = if (result == null) AssistPageStatus.UNAVAILABLE else AssistPageStatus.AVAILABLE,
+            )
+        }
+    }
+
+    fun bind(id: String, draft: String) {
+        val capture = current?.takeIf { it.id == id } ?: return
+        if (capture.draft == null) current = capture.copy(draft = draft)
+        else if (capture.draft != draft) discardAll(id)
+    }
+
+    fun discardScreen(id: String) {
+        val capture = current?.takeIf { it.id == id } ?: return
+        current = capture.copy(screen = capture.screen?.onlyPage()?.nonempty(), screenDiscarded = true)
+    }
+
+    fun discardPage(id: String) {
+        val capture = current?.takeIf { it.id == id } ?: return
+        cancelPage()
+        current = capture.copy(screen = capture.screen?.withoutPage()?.nonempty(),
+            pageStatus = AssistPageStatus.NONE, pageDiscarded = true)
     }
 
     fun discardScreenshot(id: String) {
@@ -77,8 +125,17 @@ object AssistantCapture {
         current = capture.copy(screenshot = null, screenshotDiscarded = true)
     }
 
+    fun discardAll(id: String) {
+        val capture = current?.takeIf { it.id == id } ?: return
+        cancelPage()
+        current = AssistCapture(id, draft = capture.draft,
+            screenDiscarded = true, pageDiscarded = true, screenshotDiscarded = true)
+    }
+
     fun clear(id: String) {
-        if (current?.id == id) current = null
+        if (current?.id != id) return
+        cancelPage()
+        current = null
     }
 
     fun close(id: String) {
@@ -91,6 +148,11 @@ object AssistantCapture {
     internal fun release(id: String) {
         if (owner?.first == id) owner = null
         clear(id)
+    }
+
+    private fun cancelPage() {
+        pageRead?.cancel()
+        pageRead = null
     }
 }
 
@@ -137,15 +199,18 @@ class AlphaVoiceSession(private val appContext: Context) : VoiceInteractionSessi
         val id = invocation ?: return
         if (!receiveText || !state.isFocused || appContext.assistantUnavailable() || AssistantCapture.current?.id != id) return
         receiveText = false
-        val text = state.assistStructure?.let { runCatching { visibleText(it) }.getOrNull() }
-        AssistantCapture.update(id, text = text)
+        val captured = runCatching {
+            ScreenAssist.capture(appContext, state.assistStructure, state.assistContent)
+        }.getOrNull() ?: return
+        AssistantCapture.updateScreen(id, captured.screen)
+        captured.pageReference?.let { AssistantCapture.readPage(id, appContext, it) }
     }
 
     override fun onHandleScreenshot(screenshot: Bitmap?) {
         val id = invocation ?: return
         if (!receiveScreenshot || appContext.assistantUnavailable() || AssistantCapture.current?.id != id) return
         receiveScreenshot = false
-        AssistantCapture.update(id, screenshot = screenshot)
+        AssistantCapture.updateScreenshot(id, screenshot)
     }
 
     override fun onHide() {
@@ -169,26 +234,6 @@ class AlphaVoiceSession(private val appContext: Context) : VoiceInteractionSessi
         finish()
     }
 
-    private fun visibleText(structure: AssistStructure): String? {
-        val text = StringBuilder()
-        var count = 0
-        fun visit(node: AssistStructure.ViewNode, depth: Int) {
-            if(++count > 2000 || depth > 20 || text.length >= 8000 || node.isAssistBlocked || node.visibility != View.VISIBLE) return
-            val kind = node.inputType and InputType.TYPE_MASK_CLASS
-            val variation = node.inputType and InputType.TYPE_MASK_VARIATION
-            val password = (kind == InputType.TYPE_CLASS_TEXT && variation in setOf(InputType.TYPE_TEXT_VARIATION_PASSWORD,InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)) ||
-                (kind == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD)
-            if (password) return
-            node.text?.toString()?.takeIf { it.isNotBlank() }?.let {
-                if (text.isNotEmpty()) text.append('\n')
-                val part = it.take(8000 - text.length)
-                text.append(if (part.lastOrNull()?.isHighSurrogate() == true) part.dropLast(1) else part)
-            }
-            repeat(minOf(node.childCount,2000-count)) { visit(node.getChildAt(it),depth+1) }
-        }
-        repeat(minOf(structure.windowNodeCount,20)) { visit(structure.getWindowNodeAt(it).rootViewNode,0) }
-        return text.toString().takeIf { it.isNotBlank() }
-    }
 }
 
 /** System metadata requires a recognition component. App voice remains an explicit in-app action. */

@@ -33,6 +33,7 @@ import com.alpha.assistant.courses.CourseTutorRequest
 import com.alpha.assistant.courses.encode
 import com.alpha.assistant.courses.kind
 import com.alpha.assistant.surfaces.AssistContext
+import com.alpha.assistant.surfaces.AssistCapture
 import com.alpha.assistant.surfaces.AssistantCapture
 import com.alpha.assistant.surfaces.assistantUnavailable
 import com.alpha.assistant.memory.MemoryPageState
@@ -95,6 +96,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         val draft: Draft,
         val conversationId: String?,
         val assistantInvocation: String?,
+        val screenCapture: AssistCapture? = null,
     )
     private var voiceOrigin: VoiceOrigin? = null
     private var voiceDestination by mutableStateOf<CourseComposerState?>(null)
@@ -113,9 +115,13 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         }
     }
 
-    internal fun sendComposer(destination: CourseComposerState?, assistantInvocation: String? = null) {
+    internal fun sendComposer(
+        destination: CourseComposerState?,
+        assistantInvocation: String? = null,
+        displayedCapture: AssistCapture? = null,
+    ) {
         if (destination == null) {
-            if (assistantInvocation == null) send() else sendAssistant(assistantInvocation)
+            if (assistantInvocation == null) send() else sendAssistant(assistantInvocation, displayedCapture)
         }
         else if (destination.active && !destination.busy && !attachmentBusy) {
             if (voiceBelongsTo(destination)) voice.submitted()
@@ -128,7 +134,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
 
     private fun validVoiceOrigin(): Boolean {
         val origin = voiceOrigin ?: return false
-        return voiceDestination?.active != false && origin == currentVoiceOrigin(voiceDestination, origin.assistantInvocation) &&
+        return voiceDestination?.active != false && origin.copy(screenCapture = null) == currentVoiceOrigin(voiceDestination, origin.assistantInvocation) &&
             (origin.assistantInvocation == null || AssistantCapture.current?.id == origin.assistantInvocation)
     }
 
@@ -140,13 +146,16 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
             }
             val destination = voiceDestination
             val draft = composerDraft(destination)
-            val submit = submitVoiceOnTranscript
-            val assistantInvocation = voiceOrigin?.assistantInvocation
+            val origin = checkNotNull(voiceOrigin)
+            val assistantInvocation = origin.assistantInvocation
+            val sameScreen = assistantInvocation == null ||
+                origin.screenCapture == AssistantCapture.current?.forDraft(draft.id)
+            val submit = submitVoiceOnTranscript && sameScreen
             submitVoiceOnTranscript = false
             voice.stop()
             val combined = listOf(draft.text, text.trim()).filter { it.isNotBlank() }.joinToString("\n")
             editComposerDraft(destination, draft.copy(text = combined))
-            if (submit) sendComposer(destination, assistantInvocation)
+            if (submit) sendComposer(destination, assistantInvocation, origin.screenCapture)
         } else if (snapshot.draft.text.isBlank() && snapshot.draft.attachments.isEmpty()) editDraft(snapshot.draft.copy(text = text))
         else voiceDraftConflict()
     }
@@ -154,13 +163,18 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     private fun voiceDraftConflict() { voice.stop(getApplication<Application>().getString(R.string.voice_draft_changed)) }
     fun startVoice(oneShot: Boolean = true) = startComposerVoice(oneShot, null)
 
-    internal fun startComposerVoice(oneShot: Boolean, destination: CourseComposerState?, assistantInvocation: String? = null) {
+    internal fun startComposerVoice(
+        oneShot: Boolean,
+        destination: CourseComposerState?,
+        assistantInvocation: String? = null,
+        displayedCapture: AssistCapture? = null,
+    ) {
         if (loading || loadFailed || attachmentBusy || voice.active || destination?.active == false) return
         if (assistantInvocation != null && AssistantCapture.current?.id != assistantInvocation) return
         submitVoiceOnTranscript = false
         voiceDestination = destination
         val origin = currentVoiceOrigin(destination, assistantInvocation)
-        voiceOrigin = origin
+        voiceOrigin = origin.copy(screenCapture = displayedCapture)
         voice.start(origin.draft.text.isBlank() && origin.draft.attachments.isEmpty(),
             destination?.busy ?: (activeConversationId != null), oneShot)
     }
@@ -888,11 +902,11 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     fun clearRequestError() { requestError = null }
     fun contextDraftKey(): String = snapshot.draft.id
 
-    internal fun bindAssistantScreenshot(invocation: String) {
+    internal fun bindAssistantCapture(invocation: String) {
         val draft = snapshot.draft
-        AssistantCapture.bindScreenshot(invocation, draft.id)
+        AssistantCapture.bind(invocation, draft.id)
         if (draft.attachments.size >= ImageInput.MAX_IMAGES &&
-            AssistantCapture.current?.takeIf { it.id == invocation }?.screenshotFor(draft.id) != null
+            AssistantCapture.current?.takeIf { it.id == invocation }?.forDraft(draft.id)?.screenshot != null
         ) {
             AssistantCapture.discardScreenshot(invocation)
             requestError = getApplication<Application>().getString(R.string.context_attachment_count_limit)
@@ -900,7 +914,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     }
 
     private fun composerAttachmentCount(destination: CourseComposerState?, draft: Draft): Int =
-        draft.attachments.size + if (destination == null && AssistantCapture.current?.screenshotFor(draft.id) != null) 1 else 0
+        draft.attachments.size + if (destination == null && AssistantCapture.current?.forDraft(draft.id)?.screenshot != null) 1 else 0
 
     internal fun composerContextKey(destination: CourseComposerState?): String? =
         composerDraft(destination).id.takeIf { destination?.active != false && destination?.busy != true }
@@ -1020,14 +1034,28 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         }
         return true
     }
-    private fun sendAssistant(invocation: String) {
+    private fun sendAssistant(invocation: String, displayed: AssistCapture?) {
         val application = getApplication<Application>()
-        val capture = AssistantCapture.current?.takeIf { it.id == invocation } ?: return
         if (application.assistantUnavailable()) return
         val draft = snapshot.draft
-        val bitmap = capture.screenshotFor(draft.id)
+        val shown = displayed?.takeIf { it.id == invocation }?.forDraft(draft.id)
+        val capture = AssistantCapture.current?.takeIf { it.id == invocation } ?: return
+
+        fun includedScreen(latest: AssistCapture): ScreenContext? {
+            val screen = shown?.screen ?: return null
+            return when {
+                latest.screenDiscarded && latest.pageDiscarded -> null
+                latest.screenDiscarded -> screen.onlyPage().nonempty()
+                latest.pageDiscarded -> screen.withoutPage().nonempty()
+                else -> screen
+            }
+        }
+
+        val bitmap = shown?.screenshot?.takeUnless { capture.screenshotDiscarded }
         if (bitmap == null) {
-            if (submitDraft(draft, search = true)) AssistantCapture.discardScreenshot(invocation)
+            if (submitDraft(draft, search = true, screenContext = includedScreen(capture))) {
+                AssistantCapture.discardAll(invocation)
+            }
             return
         }
         if (loading || loadFailed || attachmentBusy || draft.text.isBlank()) return
@@ -1035,9 +1063,11 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
             requestError = application.getString(R.string.context_attachment_count_limit)
             return
         }
-        fun stillCurrent(): Boolean = AssistantCapture.current?.let {
-            it.id == invocation && it.screenshotFor(draft.id) === bitmap
-        } == true && !application.assistantUnavailable()
+
+        fun currentScreenshot(): AssistCapture? = AssistantCapture.current?.takeIf {
+            it.id == invocation && it.forDraft(draft.id)?.screenshot === bitmap &&
+                !application.assistantUnavailable()
+        }
 
         attachmentBusy = true
         viewModelScope.launch {
@@ -1046,17 +1076,19 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
             try {
                 // Keep the screenshot in memory until Send. The message owns the file after submission.
                 withContext(Dispatchers.IO) { attachment = AssistContext.screenshot(application, bitmap) }
-                if (stillCurrent()) {
+                val latest = currentScreenshot()
+                if (latest != null) {
                     attachmentBusy = false
                     if (snapshot.draft == draft) {
-                        submitted = submitDraft(draft.copy(attachments = draft.attachments + checkNotNull(attachment)), search = true)
-                        if (submitted) AssistantCapture.discardScreenshot(invocation)
+                        submitted = submitDraft(draft.copy(attachments = draft.attachments + checkNotNull(attachment)),
+                            search = true, screenContext = includedScreen(latest))
+                        if (submitted) AssistantCapture.discardAll(invocation)
                     } else requestError = application.getString(R.string.context_draft_changed)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                if (stillCurrent()) requestError = application.getString(R.string.assistant_image_error)
+                if (currentScreenshot() != null) requestError = application.getString(R.string.assistant_image_error)
             } finally {
                 attachmentBusy = false
                 val rejected = attachment?.takeUnless { submitted }
@@ -1071,7 +1103,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         submitDraft(snapshot.draft, search)
     }
 
-    private fun submitDraft(draft: Draft, search: Boolean): Boolean {
+    private fun submitDraft(draft: Draft, search: Boolean, screenContext: ScreenContext? = null): Boolean {
         if (loading || loadFailed || attachmentBusy || (draft.text.isBlank() && draft.attachments.isEmpty())) return false
         if (draft.text.length > MAX_CHAT_INPUT) {
             requestError = "Сообщение превышает 16 000 символов. Сократите текст."
@@ -1082,7 +1114,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         requestError = null
         val now = System.currentTimeMillis()
         val user = Message(UUID.randomUUID().toString(), "user", draft.text.trim(), now, "pending", draft.attachments,
-            search = search, provenance = MessageProvenance.CLEAN)
+            search = search, provenance = MessageProvenance.CLEAN, screenContext = screenContext)
         val selected = snapshot.selected
         val explicitTarget = selected?.refinementTargetId
         val hostTarget = explicitTarget ?: selected?.let { cachedTarget(it, user.text) }
@@ -1196,9 +1228,11 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 if(!persist { store.updateConversation(pending) }.await())
                     throw CloudFailure("storage", "Запрос не отправлен: не удалось сохранить историю. Повторите сохранение.")
                 val key = withContext(Dispatchers.IO) { keys.cloudKey(getApplication()) }
-                val images = withContext(Dispatchers.IO) {
+                val (images, screenImages) = withContext(Dispatchers.IO) {
                     if (user.attachments.size > ImageInput.MAX_IMAGES) throw CloudFailure("image_count", "Можно отправить не более 4 изображений")
-                    user.attachments.filter { it.contextText == null }.map { ImageInput.dataUrl(getApplication<Application>().contentResolver, it) }
+                    val resolver = getApplication<Application>().contentResolver
+                    val (screen, manual) = user.attachments.filter { it.contextText == null }.partition { it.automaticScreen }
+                    manual.map { ImageInput.dataUrl(resolver, it) } to screen.map { ImageInput.dataUrl(resolver, it) }
                 }
                 val selectedText = try {
                     com.alpha.assistant.surfaces.AssistContext.requestText("",user.attachments)
@@ -1211,7 +1245,9 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 fun questionText(question: Message): String {
                     val omitted = if (question.attachments.any { it.mime.startsWith("image/") })
                         "[В предыдущем сообщении было изображение. Оно не передано повторно.]" else ""
-                    return listOf(question.text, omitted).filter { it.isNotBlank() }.joinToString("\n")
+                    val screenOmitted = if (question.screenContext == null) "" else
+                        "[Данные экрана из предыдущего сообщения не передаются повторно.]"
+                    return listOf(question.text, omitted, screenOmitted).filter { it.isNotBlank() }.joinToString("\n")
                         .ifBlank { "[Вложение из предыдущего сообщения не передаётся повторно.]" }
                 }
                 fun bounded(pairs: List<Pair<Message, Message>>): List<Pair<Message, Message>> {
@@ -1241,14 +1277,15 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 var terminal: CloudEvent.RoundComplete? = null
                 var fragmentProvenance = inputProvenance
                 val draftChat = conversationId.takeIf {
-                    !assistant.requiresRefinement && user.attachments.isEmpty() && selectedText.isEmpty() && knownTools != null
+                    !assistant.requiresRefinement && user.attachments.isEmpty() && user.screenContext == null &&
+                        selectedText.isEmpty() && knownTools != null
                 }
                 withContext(Dispatchers.IO) {
                     val cloudRequest = CloudRequest(turns(history) + originalTurn,assistant.search,toolInstructions,
                         chatDecision = true,selectedText = selectedText,weatherLocation = { resolveWeatherPlace(request,user.text) },
                         validateOperation = ::validateOperation, allowCourseDecision = courseHost != null,
                         decisionContext = ChatDecisionContext(originalTurn, turns(cleanHistory), toolInstructions, inputProvenance, memoryStore),
-                        automationDraftChatId = draftChat)
+                        automationDraftChatId = draftChat, screenContext = user.screenContext, screenImages = screenImages)
                     provider.respond(key, cloudRequest, request.session) { event ->
                         withContext(Dispatchers.Main) {
                             if (isActive(request)) {
@@ -1318,7 +1355,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 if (topic != null) {
                     val canOpen = courseHost != null && courseChatHost === courseHost && courseSetup == null &&
                         snapshot.selected?.takeIf { it.id == conversationId }?.messages?.lastOrNull { it.role == "user" }?.id == user.id
-                    if (canOpen) beginCourseSetup(topic, user, conversationId)
+                    if (canOpen) beginCourseSetup(topic, user.copy(attachments = user.attachments.filterNot { it.automaticScreen }, screenContext = null), conversationId)
                     val notice = if (canOpen) R.string.shell_course_setup_in_chat else R.string.shell_course_open_learning
                     updateMessage(request, assistant.id) {
                         it.copy(text = getApplication<Application>().getString(notice), status = "complete", error = "", errorCode = "",

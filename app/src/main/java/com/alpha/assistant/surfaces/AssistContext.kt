@@ -69,7 +69,7 @@ object AssistContext {
             check(file.length() in 1..ImageInput.MAX_BYTES)
         } catch(failure: Exception) { file.delete(); throw failure }
         finally { if(resized !== bitmap) resized.recycle() }
-        return Attachment(uri.toString(), context.getString(R.string.assistant_screen_image), "image/jpeg")
+        return Attachment(uri.toString(), context.getString(R.string.assistant_screen_image), "image/jpeg", automaticScreen = true)
     }
     fun mediaFile(context: Context, uri: Uri): File {
         require(uri.scheme == "content" && uri.authority == "${context.packageName}.assist-media")

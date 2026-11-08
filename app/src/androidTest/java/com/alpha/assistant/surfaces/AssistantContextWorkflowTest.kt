@@ -13,6 +13,27 @@ import java.util.UUID
  * screen data, missing/removable attachment, unsafe media path, and malformed text. */
 @RunWith(AndroidJUnit4::class)
 class AssistantContextWorkflowTest {
+    @Test fun submittedScreenContextSurvivesReopenWithoutChangingManualAttachments() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val name = "assist-snapshot-${UUID.randomUUID()}.db"
+        val screen = ScreenContext(
+            sourcePackage = "com.android.chrome", windowTitle = "Fixture article",
+            visibleText = "Visible", selection = "Selected", pageUrl = "https://example.org/article",
+            pageText = "Page excerpt", truncated = true,
+        )
+        val manual = AssistContext.textAttachment("Manual note")
+        val screenshot = Attachment("content://test/image", "Screenshot", "image/jpeg", automaticScreen = true)
+        val message = Message("message", "user", "Summarize this", 1, "pending",
+            attachments = listOf(manual, screenshot), screenContext = screen)
+        val conversation = Conversation("chat", "Test chat", 1, 1, messages = listOf(message))
+        try {
+            ShellStore(context, name).use { it.saveConversation(conversation) }
+            ShellStore(context, name).use { assertEquals(conversation, it.load().conversations.single()) }
+        } finally {
+            context.deleteDatabase(name)
+        }
+    }
+
     @Test fun reviewedContextPersistsWithUnsentDraftAndRemainsRemovable() {
         val base = InstrumentationRegistry.getInstrumentation().targetContext
         val root = java.io.File(base.cacheDir,"assist-test-${UUID.randomUUID()}").apply { mkdirs() }

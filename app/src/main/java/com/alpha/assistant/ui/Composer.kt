@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.roundToIntRect
 import androidx.compose.ui.unit.sp
 import com.alpha.assistant.R
+import com.alpha.assistant.surfaces.AssistCapture
 import com.alpha.assistant.data.Draft
 
 internal class CourseComposerState(
@@ -88,15 +89,17 @@ internal class CourseComposerState(
     @StringRes label: Int = R.string.composer_label,
     assistantInvocation: String? = null,
     requiresQuestion: Boolean = false,
+    displayedCapture: AssistCapture? = null,
 ) {
     val draft = model.composerDraft(destination)
     val busy = destination?.busy ?: (model.activeConversationId != null)
     val request = model.activeRequestMessageId.takeIf { model.activeConversationId == model.snapshot.selectedId }
     val cancel = if (destination != null) destination.cancel.takeIf { destination.busy && destination.cancellable }
         else request?.let { { model.cancelRequest(it) } }
-    val send = { model.sendComposer(destination, assistantInvocation) }
+    val send = { model.sendComposer(destination, assistantInvocation, displayedCapture) }
     val hasInput = draft.text.isNotBlank() || !requiresQuestion && draft.attachments.isNotEmpty()
-    val startVoice = rememberVoiceStart(model, oneShot = true, destination = destination, assistantInvocation = assistantInvocation)
+    val startVoice = rememberVoiceStart(model, oneShot = true, destination = destination, assistantInvocation = assistantInvocation,
+        displayedCapture = displayedCapture)
     val ownsVoice = model.voiceBelongsTo(destination)
     val editable = destination == null || destination.active && !destination.busy
     Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
