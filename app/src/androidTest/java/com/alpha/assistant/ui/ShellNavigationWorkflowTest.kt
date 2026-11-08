@@ -10,9 +10,11 @@ import androidx.test.core.app.ActivityScenario
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.MainActivity
 import com.alpha.assistant.R
+import com.alpha.assistant.automations.AutomationStore
 import com.alpha.assistant.surfaces.AssistantChat
 import com.alpha.assistant.surfaces.AssistantActivity
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -85,19 +87,10 @@ class ShellNavigationWorkflowTest {
     }
 
     // Failure case: a launch from Recents repeats the extras of the old «Настройки» entry.
-    @Test fun recentsLaunchAppliesNoEntry() {
-        val app = robot.instrumentation.targetContext.applicationContext as Application
-        // The fixture factory puts the fixture model into the process-wide store first, so MainActivity never gets the production store or key store.
-        val shared = ViewModelProvider(AssistantChat, object : ViewModelProvider.Factory {
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T = checkNotNull(CloudTestActivity.factory)(app) as T
-        })[ShellViewModel::class.java]
-        try {
-            assertSame("MainActivity gets the fixture model", fixture.model, shared)
-            val intent = Intent(app, MainActivity::class.java).setAction(Intent.ACTION_MAIN).putExtra("settings", true)
-                .addFlags(Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY)
-            ActivityScenario.launch<MainActivity>(intent).use(::assertNoEntryApplied)
-        } finally { if (shared === fixture.model) AssistantChat.viewModelStore.clear() }
+    @Test fun recentsLaunchAppliesNoEntry() = withSharedFixtureModel { app ->
+        val intent = Intent(app, MainActivity::class.java).setAction(Intent.ACTION_MAIN).putExtra("settings", true)
+            .addFlags(Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY)
+        ActivityScenario.launch<MainActivity>(intent).use(::assertNoEntryApplied)
     }
 
     @Test fun taskRestoreSurvivesAHistoryLoadRetry() {
@@ -170,31 +163,49 @@ class ShellNavigationWorkflowTest {
         }
     }
 
-    @Test fun compactAssistantShowsAutomationAndMemoryReview() {
+    @Test fun compactAssistantReviewsAnAutomationDraftWithoutEnablingIt() {
+        fixture.provider.automationDraft = """
+            {"name":"Полив","trigger":{"type":"schedule","repeat":"daily","time":"20:00","zone":"device","exact":true},
+            "conditions":{},"actions":[{"id":"task","capability":"agent.run","args":{"instruction":"Напомни полить растения."}}]}
+        """.trimIndent()
+        withCompactAssistant {
+            robot.edit(robot.text(R.string.composer_label), "Каждый вечер в 20:00 напоминай полить растения")
+            robot.click(robot.text(R.string.composer_send))
+            robot.waitFor(robot.text(R.string.automation_agent_proposal))
+            assertEquals(1, fixture.provider.calls)
+            AutomationStore(fixture.context, checkNotNull(fixture.model).tools.automationDatabase).use {
+                assertTrue(it.rules().isEmpty())
+            }
+            robot.reveal(robot.text(R.string.cancel), null)
+            robot.click(robot.text(R.string.cancel))
+            robot.waitGone(robot.text(R.string.automation_agent_proposal))
+        }
+    }
+
+    @Test fun compactAssistantReviewsAnExplicitMemoryFactLocally() = withCompactAssistant {
+        robot.edit(robot.text(R.string.composer_label), "Запомни: я предпочитаю краткие ответы")
+        robot.click(robot.text(R.string.composer_send))
+        robot.waitFor(robot.text(R.string.memory_text))
+        robot.click(robot.text(R.string.memory_cancel))
+        robot.click(robot.text(R.string.memory_discard))
+        robot.waitGone(robot.text(R.string.memory_text))
+        assertEquals(0, fixture.provider.calls)
+    }
+
+    private fun withCompactAssistant(test: () -> Unit) = withSharedFixtureModel { app ->
+        ActivityScenario.launch<AssistantActivity>(Intent(app, AssistantActivity::class.java)).use { test() }
+    }
+
+    private fun withSharedFixtureModel(test: (Application) -> Unit) {
         val app = fixture.context.applicationContext as Application
+        robot.instrumentation.runOnMainSync { AssistantChat.viewModelStore.clear() }
         val shared = ViewModelProvider(AssistantChat, object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = checkNotNull(CloudTestActivity.factory)(app) as T
         })[ShellViewModel::class.java]
         try {
             assertSame(fixture.model, shared)
-            ActivityScenario.launch<AssistantActivity>(Intent(app, AssistantActivity::class.java)).use {
-                val composer = robot.text(R.string.composer_label)
-                val send = robot.text(R.string.composer_send)
-                robot.edit(composer, "Создай сценарий")
-                robot.click(send)
-                robot.waitFor(robot.text(R.string.automation_editor_create))
-                robot.reveal(robot.text(R.string.cancel), null)
-                robot.click(robot.text(R.string.cancel))
-                robot.waitGone(robot.text(R.string.automation_editor_create))
-                robot.edit(composer, "Запомни: я предпочитаю краткие ответы")
-                robot.click(send)
-                robot.waitFor(robot.text(R.string.memory_text))
-                robot.click(robot.text(R.string.memory_cancel))
-                robot.click(robot.text(R.string.memory_discard))
-                robot.waitGone(robot.text(R.string.memory_text))
-                assertTrue(fixture.provider.calls == 0)
-            }
-        } finally { if (shared === fixture.model) AssistantChat.viewModelStore.clear() }
+            test(app)
+        } finally { robot.instrumentation.runOnMainSync { AssistantChat.viewModelStore.clear() } }
     }
 }

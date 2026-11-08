@@ -92,6 +92,10 @@ internal class CourseComposerState(
     displayedCapture: AssistCapture? = null,
 ) {
     val draft = model.composerDraft(destination)
+    fun updateDraft(update: (Draft) -> Draft) {
+        val current = model.composerDraft(destination)
+        if (current.id == draft.id) model.editComposerDraft(destination, update(current))
+    }
     val busy = destination?.busy ?: (model.activeConversationId != null)
     val request = model.activeRequestMessageId.takeIf { model.activeConversationId == model.snapshot.selectedId }
     val cancel = if (destination != null) destination.cancel.takeIf { destination.busy && destination.cancellable }
@@ -113,7 +117,9 @@ internal class CourseComposerState(
                 draft.attachments.forEach { attachment ->
                     ImagePreview(attachment)
                     val remove = stringResource(R.string.composer_remove_file, attachment.name)
-                    InputChip(selected = true, enabled = editable, onClick = { model.editComposerDraft(destination, draft.copy(attachments = draft.attachments - attachment)) }, label = { Text(attachment.name, maxLines = 1) }, leadingIcon = { AlphaIcon(Glyph.File) }, trailingIcon = { AlphaIcon(Glyph.Close) }, modifier = Modifier.semantics { contentDescription = remove })
+                    InputChip(selected = true, enabled = editable, onClick = { updateDraft { it.copy(attachments = it.attachments - attachment) } },
+                        label = { Text(attachment.name, maxLines = 1) }, leadingIcon = { AlphaIcon(Glyph.File) },
+                        trailingIcon = { AlphaIcon(Glyph.Close) }, modifier = Modifier.semantics { contentDescription = remove })
                 }
             }
             if (ownsVoice && model.voice.permissionRequired) MicrophonePermissionGuidance(model.voice, startVoice)
@@ -158,7 +164,7 @@ internal class CourseComposerState(
                             val composerLabel = stringResource(label)
                             // The vertical space is inside the decoration, so the field node keeps the 48 dp minimum height.
                             // In compact, the shell column above the keyboard limits the height, and the field scrolls inside it.
-                            BasicTextField(value = draft.text, enabled = editable, onValueChange = { model.editComposerDraft(destination, draft.copy(text = it)) }, modifier = Modifier.weight(1f).heightIn(max = 120.dp).padding(horizontal = 6.dp).semantics { contentDescription = composerLabel }, textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface), cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), decorationBox = { inner ->
+                            BasicTextField(value = draft.text, enabled = editable, onValueChange = { text -> updateDraft { it.copy(text = text) } }, modifier = Modifier.weight(1f).heightIn(max = 120.dp).padding(horizontal = 6.dp).semantics { contentDescription = composerLabel }, textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface), cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), decorationBox = { inner ->
                                 Box(Modifier.heightIn(min = 48.dp).padding(vertical = 4.dp), contentAlignment = Alignment.CenterStart) {
                                     if (draft.text.isEmpty()) Text(stringResource(placeholder), color = colors.onSurfaceVariant,
                                         fontSize = 16.sp, maxLines = if (singleRow) 1 else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis)

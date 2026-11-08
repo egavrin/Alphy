@@ -18,6 +18,8 @@ import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
+import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.KeyStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -66,7 +68,9 @@ class ShellCourseHostWorkflowTest {
             assertEquals(savedSlide, store.slide(saved.id, "current"))
             assertEquals(1, provider.calls.size)
 
-            robot.back()
+            click(R.string.course_exit)
+            robot.waitUntil { model.courseEntry == null }
+            robot.waitFor(robot.text(R.string.shell_course_continue))
             click(R.string.shell_course_continue)
             robot.waitFor(slideText)
             val plan = provider.calls.single { it.request.generationStage == CloudGenerationStage.PLAN }
@@ -108,7 +112,7 @@ class ShellCourseHostWorkflowTest {
     @Test fun chatOutlineCancelsSearchThenPreparesAndReopensTheAttributedSlide() {
         val provider = SearchingCourseProvider()
         val transport = BlockingTransport()
-        withShell(provider) { scenario, model, store, saved ->
+        withShell(provider, singleSlide = true) { scenario, model, store, saved ->
             val draft = Draft("Keep this unsent draft")
             scenario.onActivity { model.editDraft(draft) }
             click(R.string.shell_course_open_outline)
@@ -279,18 +283,20 @@ class ShellCourseHostWorkflowTest {
 
     @Test fun reachedSlideAndExplicitTutorUseOnlyThisCourseAndSavedSlideReopensOffline() {
         val provider = CourseProvider()
-        withShell(provider) { scenario, _, store, saved ->
+        withShell(provider) { scenario, model, store, saved ->
             openOutline(scenario)
             assertTrue(provider.calls.isEmpty())
             click(R.string.course_open)
             robot.waitFor(slideText)
             assertNotNull(store.slide(saved.id, "current"))
             assertNull(store.slide(saved.id, "future"))
+            robot.waitUntil { provider.calls.any { it.reachedSlideGoal() == "Explain the next fraction" } }
             val slideCalls = provider.calls.toList()
-            assertEquals(listOf(CloudGenerationStage.PLAN),
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.PLAN),
                 slideCalls.map { it.request.generationStage })
-            assertTrue(slideCalls.all { it.session === slideCalls.first().session })
-            assertTrue(slideCalls.first().request.turns.single().text.contains("Explain the current fraction"))
+            assertEquals("Explain the current fraction", slideCalls[0].reachedSlideGoal())
+            assertEquals("Explain the next fraction", slideCalls[1].reachedSlideGoal())
+            assertNotSame(slideCalls[0].session, slideCalls[1].session)
 
             openTutor("Why do the denominators match?")
             click(R.string.composer_add_context)
@@ -317,6 +323,8 @@ class ShellCourseHostWorkflowTest {
 
             click(R.string.course_tutor_close)
             robot.waitFor(slideText)
+            scenario.onActivity { model.clearKey() }
+            robot.waitUntil { model.keyStatus == KeyStatus.Missing }
             click(R.string.course_back_to_outline)
             robot.waitFor(robot.text(R.string.course_outline))
             click(R.string.course_open)
@@ -423,6 +431,7 @@ class ShellCourseHostWorkflowTest {
     private fun click(id: Int) = robot.click(robot.text(id))
 
     private fun withShell(provider: CourseProvider, saveSlide: Boolean = false, completeSlide: Boolean = false,
+        singleSlide: Boolean = false,
         test: (ActivityScenario<CloudTestActivity>, ShellViewModel, CourseStore, CourseSnapshot) -> Unit) {
         val shell = ShellFixture("course-host")
         val courseDb = "${shell.store.databaseName}-courses.db"
@@ -431,10 +440,11 @@ class ShellCourseHostWorkflowTest {
             shell.seedChat(conversationId, "PRIVATE-CHAT-TITLE", "PRIVATE-CHAT-MESSAGE", selected = true)
             MemoryStore(shell.context, memoryDb).use { it.saveExplicitFact("PRIVATE-MEMORY Compare fractions") }
             check(shell.keys.save(credential).isSuccess)
-            CloudTestActivity.factory = { app -> ShellViewModel(app, provider, shell.store, shell.keys).also { shell.model = it } }
+            CloudTestActivity.factory = { app -> ShellViewModel(app, provider, shell.store, shell.keys).openSeededChat(shell.store).also { shell.model = it } }
             CourseStore(shell.context, courseDb).use { store ->
                 store.create(CourseSetup("PRIVATE-OTHER-COURSE", "Beginner", "Unrelated goal"), outline)
-                val saved = store.create(CourseSetup(courseTitle, "Beginner", "Learn equivalent fractions", conversationId), outline)
+                val courseOutline = if (singleSlide) CourseOutline(outline.lessons.map { it.copy(slides = it.slides.take(1)) }) else outline
+                val saved = store.create(CourseSetup(courseTitle, "Beginner", "Learn equivalent fractions", conversationId), courseOutline)
                 if (saveSlide || completeSlide) {
                     val spec = ToolSpec.parse("""{"formatVersion":3,"title":"Fractions","description":"","capabilities":[],
                         "stateSchema":{"fixture":"boolean"},"initialState":{"fixture":false},"ui":{"type":"text","text":"$slideText"},
@@ -452,7 +462,14 @@ class ShellCourseHostWorkflowTest {
         }
     }
 
-    private data class Call(val request: CloudRequest, val session: CloudSession)
+    private data class Call(val request: CloudRequest, val session: CloudSession) {
+        fun reachedSlideGoal(): String? {
+            if (request.generationStage != CloudGenerationStage.PLAN) return null
+            val context = request.turns.single().text.substringAfter("\nCourse and reached slide:\n")
+                .substringBefore("\nEarlier answers in order, including errors:\n")
+            return JSONObject(context).getString("reachedSlideGoal")
+        }
+    }
 
     private open inner class CourseProvider(private val blockedStage: CloudGenerationStage? = null) : ChatProvider {
         val calls = CopyOnWriteArrayList<Call>()

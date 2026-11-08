@@ -75,7 +75,7 @@ private fun actionText(d: AutomationDefinition, tools: ToolController): String =
         else -> "${action.capability}: ${a}"
     }
 }
-private fun conditionText(d: AutomationDefinition): String = buildList {
+internal fun conditionText(d: AutomationDefinition): String = buildList {
     if(d.conditions.has("charging")) add(if(d.conditions.getBoolean("charging")) "Зарядка подключена" else "Зарядка отключена")
     if(d.conditions.has("fromMinute")) {
         fun time(key: String) = d.conditions.getInt(key).let { "%02d:%02d".format(it/60,it%60) }

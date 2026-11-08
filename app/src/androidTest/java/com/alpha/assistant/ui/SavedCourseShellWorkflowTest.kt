@@ -19,9 +19,9 @@ class SavedCourseShellWorkflowTest {
     private val robot = ShellRobot("saved-course-shell")
 
     @Test fun savedCourseRestoresPlayerAndReturnsToTheOriginalChat() = withFixture { fixture ->
-        seedCourse(fixture)
+        seedCourse(fixture, includeFutureSlide = false)
         fixture.seedChat("course-chat", "Original discussion", "Original discussion message", selected = true)
-        fixture.install()
+        fixture.install(saveKey = false)
 
         fixture.launch().use { scenario ->
             robot.waitFor("Original discussion message")
@@ -33,11 +33,11 @@ class SavedCourseShellWorkflowTest {
             robot.waitFor("Read a saved example")
             robot.click(robot.text(R.string.course_open))
             robot.waitFor(SLIDE_TEXT)
-            robot.waitFor(robot.text(R.string.course_slide_position, 1, 2))
+            robot.waitFor(robot.text(R.string.course_slide_position, 1, 1))
 
             scenario.recreate()
             robot.waitFor(SLIDE_TEXT)
-            robot.waitFor(robot.text(R.string.course_slide_position, 1, 2))
+            robot.waitFor(robot.text(R.string.course_slide_position, 1, 1))
             robot.waitGone(robot.text(R.string.menu))
             robot.diagnostics.capture("restored-player")
 
@@ -107,16 +107,17 @@ class SavedCourseShellWorkflowTest {
         const val COURSE_TITLE = "Saved course for the shell"
         const val SLIDE_TEXT = "Saved shell course slide"
 
-        fun seedCourse(fixture: ShellFixture) {
+        fun seedCourse(fixture: ShellFixture, includeFutureSlide: Boolean = true) {
             val ui = """{"type":"text","text":"$SLIDE_TEXT"}"""
             val definition = """{"formatVersion":3,"title":"Saved course fixture","description":"","capabilities":[],
                 "stateSchema":{"value":"string"},"initialState":{"value":""},"ui":$ui,"source":"return {state:input.state};"}"""
             CourseStore(fixture.context, databaseName(fixture)).use { store ->
+                val slides = buildList {
+                    add(CourseSlidePlan("example", CourseSlideKind.EXPLANATION, "Read a saved example"))
+                    if (includeFutureSlide) add(CourseSlidePlan("summary", CourseSlideKind.SUMMARY, "Review the example"))
+                }
                 val course = store.create(CourseSetup(COURSE_TITLE, "Beginner", "Practice saved examples"),
-                    CourseOutline(listOf(CourseLessonPlan("lesson", "Saved lesson", listOf(
-                        CourseSlidePlan("example", CourseSlideKind.EXPLANATION, "Read a saved example"),
-                        CourseSlidePlan("summary", CourseSlideKind.SUMMARY, "Review the example"),
-                    )))))
+                    CourseOutline(listOf(CourseLessonPlan("lesson", "Saved lesson", slides))))
                 val operation = store.beginGeneration(course.id, course.revision, "example")
                 store.commitGeneration(operation, CourseSlideContent(definition, ui, """{"value":""}"""))
             }

@@ -168,8 +168,9 @@ class DesktopCourseWorkflowTest {
             click(R.string.desktop_place_automation, automation.definition.name)
             click(R.string.desktop_add_course)
             click(R.string.desktop_place_course, course.setup.topic)
+            robot.waitUntil { layoutIds() == listOf("desktop-tool", automation.id, course.id) }
             val earlier = robot.text(R.string.desktop_move_earlier, course.setup.topic)
-            reveal(earlier)
+            if (robot.find(earlier) == null) robot.scrollForward(requireBoundsChange = false)
             robot.waitUntil { robot.find(earlier)?.isEnabled == true }
             robot.assertTarget(earlier)
             robot.click(earlier)
@@ -245,8 +246,10 @@ class DesktopCourseWorkflowTest {
     }
 
     private fun backToDesktop() {
-        click(R.string.course_back_to_outline)
-        click(R.string.course_back_to_library)
+        robot.waitFor(robot.text(R.string.course_back_to_outline))
+        robot.back()
+        robot.waitFor(robot.text(R.string.course_outline))
+        robot.back()
         click(R.string.course_exit)
         reveal(robot.text(R.string.desktop_grid_title))
     }

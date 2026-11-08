@@ -137,7 +137,7 @@ private fun SettingsLayout(
                             SettingsSection.Voice -> SettingsDetail(section) { SettingsPanel { VoiceControls(model, settingsDisclosure = true) } }
                             SettingsSection.Appearance -> SettingsDetail(section) { AppearanceSettings() }
                             SettingsSection.Access -> SettingsDetail(section) { AccessSettings(model.tools.networkAccessHost) }
-                            SettingsSection.Memory -> MemoryScreen(model.memoryPage, settingsPage = true)
+                            SettingsSection.Memory -> MemoryScreen(model.memoryPage, settingsPage = true, profile = { NameSettings(model) })
                             SettingsSection.Updates -> SettingsDetail(section) { SettingsPanel { UpdateSettings(model.updates, openUpdateInstaller) } }
                         }
                     }

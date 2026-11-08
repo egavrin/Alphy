@@ -52,6 +52,7 @@ internal fun MemoryScreen(
     onExit: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     settingsPage: Boolean = false,
+    profile: (@Composable () -> Unit)? = null,
 ) {
     LifecycleResumeEffect(state) {
         state.refresh()
@@ -114,6 +115,7 @@ internal fun MemoryScreen(
                         }
                     }
                 }
+                profile?.let { field -> item { SettingsPanel { field() } } }
             }
         }
     }

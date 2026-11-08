@@ -49,6 +49,8 @@ import com.alpha.assistant.tools.ToolStore
 import com.alpha.assistant.updates.AppUpdater
 import com.alpha.assistant.data.*
 import com.alpha.assistant.cloud.*
+import com.alpha.assistant.agent.AgentConversation
+import com.alpha.assistant.agent.AgentIntent
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CancellationException
@@ -555,6 +557,12 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         if (store.databaseName == "alpha.db") "alpha-memory.db" else "${store.databaseName}-memory.db",
     )
     internal val memoryPage = MemoryPageState(memoryStore, viewModelScope)
+    private val phoneAgent = lazy {
+        val database = if (store.databaseName == "alpha.db") "alpha-agent.db" else "${store.databaseName}-agent.db"
+        AgentConversation(application, viewModelScope, database, provider, memoryStore, ToolStore(application, toolsDatabase),
+            getKey = { keys.cloudKey(application) }, selectedChat = { snapshot.selectedId })
+    }
+    internal val agent get() = phoneAgent.value
     internal data class ChatAutomationSetup(val conversationId: String, val definition: String)
     internal var chatAutomationSetup by mutableStateOf<ChatAutomationSetup?>(null)
         private set
@@ -841,6 +849,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         if (snapshot.conversations.none { it.id == id }) return
         requests.removeAll { it.conversationId == id }
         if (activeConversationId == id) cancelRequest()
+        if (phoneAgent.isInitialized()) agent.forget(id)
         if (snapshot.selectedId == id) {
             leaveCourseChat()
             voice.stop()
@@ -855,6 +864,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     }
     fun clearHistory() {
         requests.clear()
+        if (phoneAgent.isInitialized()) snapshot.conversations.forEach { agent.forget(it.id) }
         cancelRequest()
         leaveCourseChat()
         voice.stop()
@@ -1263,6 +1273,17 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                     com.alpha.assistant.surfaces.AssistContext.requestText("",user.attachments)
                     user.attachments.singleOrNull { it.contextText != null }?.contextText.orEmpty()
                 } catch (_: Exception) { throw CloudFailure("context_text","Selected text must be one text attachment within 8,000 characters.") }
+                if (!assistant.requiresRefinement && AgentIntent.matches(user.text)) {
+                    updateMessage(request, user.id) { it.copy(status = "sent") }
+                    updateMessage(request, assistant.id) { it.copy(status = "streaming") }
+                    if (!agent.propose(conversationId, user.text, selectedText, images, key, request.session) { isActive(request) })
+                        throw CloudFailure("agent_plan", getApplication<Application>().getString(R.string.agent_plan_error))
+                    updateMessage(request, assistant.id) {
+                        it.copy(text = getApplication<Application>().getString(R.string.agent_plan_ready), status = "complete",
+                            provenance = MessageProvenance.CLEAN, error = "", errorCode = "")
+                    }
+                    return@launch
+                }
                 val before = conversation.messages.takeWhile { it.id != user.id }
                 val complete = before.filter { it.role == "assistant" && it.status == "complete" && it.refinementChoices.isEmpty() }.mapNotNull { answer ->
                     before.find { it.id == answer.replyTo && it.role == "user" }?.let { question -> question to answer }
@@ -1523,6 +1544,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     }
     override fun onCleared() {
         active?.session?.cancel()
+        if (phoneAgent.isInitialized()) agent.close()
         dismissCourseSetup()
         cancelCourseRequests()
         courseStore.beginClose()
@@ -1546,6 +1568,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         requests.toList().forEach { cancelRequest(it.assistantId) }
         cancelRequest()
         cancelCourseRequests()
+        if (phoneAgent.isInitialized()) agent.cancelRevision()
         tools.cancel()
         keyAction(R.string.key_delete_failed, keys::clear)
     }

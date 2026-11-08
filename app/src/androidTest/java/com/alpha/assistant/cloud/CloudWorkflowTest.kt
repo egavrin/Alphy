@@ -806,9 +806,9 @@ class CloudWorkflowTest {
         )) {
             assertThrows(CloudFailure::class.java) { ChatToolReply.decode(malformed, allowCourseDecision = true) }
         }
-        assertTrue(ChatToolReply.instructions(emptyList()).contains("Choose kind from answer, create, refine, clarify."))
+        assertTrue(ChatToolReply.instructions(emptyList()).contains("Choose kind from answer, create, refine, test_fix, clarify."))
         assertTrue(ChatToolReply.instructions(emptyList(), allowCourseDecision = true)
-            .contains("Choose kind from answer, create, refine, clarify, course."))
+            .contains("Choose kind from answer, create, refine, test_fix, clarify, course."))
     }
 
     @Test fun providerCourseIntentUsesOnlyTheLatestUserTurnAndSkipsGrounding() = kotlinx.coroutines.runBlocking {
@@ -865,7 +865,7 @@ class CloudWorkflowTest {
         val calls = java.util.concurrent.atomic.AtomicInteger()
         Server { request, output ->
             if (calls.getAndIncrement() == 0) {
-                assertEquals(setOf("answer", "create", "refine", "clarify", "automation", "course"), request.requireStrictDecision().kinds())
+                assertEquals(setOf("answer", "create", "refine", "test_fix", "clarify", "automation", "course"), request.requireStrictDecision().kinds())
                 output.classification(automationDecision())
             } else {
                 request.requireDraftTool()

@@ -35,7 +35,7 @@ class AgentAutomationWorkflowTest {
         val chat = "automation-test-${UUID.randomUUID()}"
         val database = "$chat.db"
         val keys = SecureKeyStore(context)
-        assertNull("Use a fresh owned Android test device", keys.read().getOrThrow())
+        assertTrue("Use a fresh owned Android test device", keys.read().getOrThrow() == null)
         val permission = Manifest.permission.POST_NOTIFICATIONS
         assertEquals("Grant notifications before running on the owned emulator",
             android.content.pm.PackageManager.PERMISSION_GRANTED, context.checkSelfPermission(permission))
@@ -197,7 +197,7 @@ class AgentAutomationWorkflowTest {
         assertTrue("Grant exact alarm access on the owned emulator", AutomationRuntime.exactAllowed(context))
         val chat = "exact-delivery-${UUID.randomUUID()}"
         val keys = SecureKeyStore(context)
-        assertNull("Use a fresh owned Android test device", keys.read().getOrThrow())
+        assertTrue("Use a fresh owned Android test device", keys.read().getOrThrow() == null)
         val now = System.currentTimeMillis()
         val due = ZonedDateTime.now(ZoneId.of("UTC")).plusSeconds(20).withNano(0)
         val target = due.toInstant().toEpochMilli()
@@ -230,7 +230,9 @@ class AgentAutomationWorkflowTest {
                         assertEquals("ready", store.agentRun(id)?.run?.status)
                         assertTrue(shell.automationMessages()[chat].isNullOrEmpty())
                         val end = SystemClock.uptimeMillis() + 35000
-                        while (SystemClock.uptimeMillis() < end && shell.automationMessages()[chat].isNullOrEmpty()) SystemClock.sleep(100)
+                        while (SystemClock.uptimeMillis() < end &&
+                            (shell.automationMessages()[chat].isNullOrEmpty() || store.agentRun(id)?.run?.status != "succeeded")
+                        ) SystemClock.sleep(100)
                         val result = shell.automationMessages()[chat]?.single() ?: error("The exact alarm delivered no message.")
                         assertEquals("The Moon orbits Earth.", result.text)
                         assertTrue(result.createdAt >= target && result.createdAt < target + 15000)

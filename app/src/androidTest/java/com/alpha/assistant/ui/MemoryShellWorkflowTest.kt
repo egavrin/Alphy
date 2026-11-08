@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ActivityScenario
@@ -133,13 +134,13 @@ class MemoryShellWorkflowTest {
                 val model = checkNotNull(fixture.model)
                 activity.setContent {
                     CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale = 1.5f)) {
-                        Box(Modifier.widthIn(max = 390.dp).fillMaxWidth().height(320.dp)) {
+                        Box(Modifier.widthIn(max = 390.dp).fillMaxWidth().height(320.dp).testTag("short-memory-shell")) {
                             AlphaTheme { AlphaShell(model) }
                         }
                     }
                 }
             }
-            robot.waitUntil { robot.composed(scenario, "desktop") }
+            robot.waitUntil { robot.composed(scenario, "short-memory-shell") && robot.composed(scenario, "desktop") }
             openMemory(scenario)
             val title = robot.text(R.string.memory_title)
             robot.waitUntil { robot.find(title)?.isHeading == true }

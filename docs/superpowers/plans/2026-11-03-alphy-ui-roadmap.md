@@ -25,6 +25,21 @@ The live functional comparison with the Deal Studio host runtime is deferred fro
 
 The [acceptance inventory](../../../evidence/alphy-ui/alpha3-roadmap-status/criteria.md) records the current checks by plan. The [Deal Studio pilot](../../../evidence/alphy-ui/alpha3-reference-tip-pilot/functional-proof.json) passed the tip-calculator interaction in the reference host runtime. The Alphy pilot still needs a successful generated app for that request.
 
+## Emulator acceptance on 2026-11-08
+
+Plans 6–9 are closed for Android 16 emulator acceptance. Physical-device verification is separate.
+
+| Plan | Verified behavior |
+| --- | --- |
+| 6. Automations | The live 07:00 request opens a review before activation. The exact alarm delivers a prepared result once while the emulator is offline. |
+| 7. Memory and local agent | The name can be edited in Memory. Phone actions show their effects before approval. The emulator checks calendar permissions, one recurring occurrence, stale targets, Stop, interrupted execution, and the Clock handoff. |
+| 8. Courses and lessons | The live Russian alphabet lesson completed all five slides. It preserved progress on reopen and graded the second quiz choice correctly. The final course change passed 76 course cases and five wide-window cases. |
+| 9. Assistant half sheet | The Android Assistant role and Quick Settings tile open the sheet. A fresh screenshot waits for Send. Reviewed text survives typing, and the full app can continue the same chat. |
+
+The broad run accounted for 1,040 cases, including 19 skips. Pinned `main` revision `75cb9b7` reproduced 21 of the 24 initial failures. The large gallery case hit the same date-range and canvas failures reproduced in its baseline subset. The two remaining desktop cases passed on the final build. The offline partition passed the exact alarm that requires an offline device.
+
+The final application source SHA-256 is `d5740fa3ed7ba35686fe38ebe964245233a5bc4dab6295ac889a58bbeff0049e`. The last code change affected only answer submission in the course player. The targeted course suite, wide-window suite, and live lesson ran after that change. Lint reported zero errors. The host suite passed 26 of 27 cases. Its catalog checksum failure also occurs on `75cb9b7`. Workspace evidence is in `alphy-plans-6-9-closure/acceptance-summary.json`.
+
 ## Plans
 
 | Plan | Scope | Spec | Starts after |
@@ -37,7 +52,7 @@ The [acceptance inventory](../../../evidence/alphy-ui/alpha3-roadmap-status/crit
 | 6. Automations | Editable automation card, «Включить», the DeepSeek step | 5.6 | 3, 5 |
 | 7. Memory and local agent | «Память» page and drawer row, memory facts, the name from «Память» in the greeting and the drawer profile, agent plan card and functions | 5.1 (name source), 5.7, 5.10 | 2, 6 |
 | 8. Courses and lessons | «Обучение» page and drawer row, course outline, lesson player, generated slides, lesson items in «Сейчас» | 5.5 | 3, 5 |
-| 9. Assistant half sheet | The assistant button sheet and the CompactAssistant texts, a debug-only model factory for `AssistantChat`, device tests of the half sheet and its `FLAG_SECURE` visual check | 5.8, 9 (half-sheet visual check) | 2, 3 |
+| 9. Assistant half sheet | Assistant and Quick Settings entry, fresh screenshot review with explicit Send, shared chat and full-app handoff, and device tests of the half sheet | 5.8, 9 (half-sheet visual check) | 2, 3 |
 | 10. Large screens and Fold | Two-pane layouts and Fold postures | 5.13 | 4 |
 | 11. Runtime capacity and interaction | Several active mini-apps, measured runtime and content limits, bitmap drawing, live input, live drawing preview, drag reorder, route stacks, more chart types | 3, 5.3, 6.6, 9 | 3, 5 |
 | 12. Network, files, and web | One revocable network grant per mini-app, public and local requests, redirects and subresources, file content and transfers, web content, URL images, Markdown, access page | 3, 5.3, 5.9, 5.11, 7–9 | 11 |

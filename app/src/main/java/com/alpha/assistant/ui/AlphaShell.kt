@@ -33,6 +33,9 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import android.graphics.BitmapFactory
+import com.alpha.assistant.agent.AgentChatHost
+import com.alpha.assistant.agent.AgentPlanCard
+import com.alpha.assistant.agent.AgentRunBar
 import com.alpha.assistant.cloud.ImageInput
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -546,6 +549,7 @@ import kotlinx.coroutines.launch
     settings: () -> Unit, modifier: Modifier = Modifier, actions: MiniAppActions? = null,
     openAutomation: (String) -> Unit, pairedToolId: String? = null, pairedDraftId: String? = null,
     showLivePreviews: Boolean = true, resumeCourse: ((String) -> Unit)? = null) {
+    AgentChatHost(model.agent, conversation?.id)
     val cardActions = actions ?: remember { MiniAppActions() }
     val scope = rememberCoroutineScope()
     var shareText by rememberSaveable { mutableStateOf<String?>(null) }
@@ -557,6 +561,7 @@ import kotlinx.coroutines.launch
         confirmButton = { TextButton(onClick = { linkError = false }) { Text(stringResource(R.string.understood)) } },
     )
     Column(modifier.fillMaxHeight().widthIn(max = 620.dp).fillMaxWidth()) {
+        AgentRunBar(model.agent)
         if (conversation != null) {
             val chat = conversation
             model.tools.error?.let { error ->
@@ -602,6 +607,9 @@ import kotlinx.coroutines.launch
                 LazyColumn(Modifier.fillMaxSize().semantics { contentDescription = chatMessages },
                     state = listState, reverseLayout = true, contentPadding = PaddingValues(24.dp),
                     verticalArrangement = Arrangement.spacedBy(15.dp)) {
+                    model.agent.plan?.takeIf { it.conversationId == chat.id }?.let { phonePlan ->
+                        item(key = "agent-plan-${phonePlan.id}") { AgentPlanCard(model.agent, phonePlan) }
+                    }
                     if (plan != null) item(key = "course-plan-${plan.id}") { CoursePlanCard(model, plan) }
                     items(chat.messages.asReversed(), key = { it.id }) { message ->
                         Column(Modifier.fillMaxWidth().padding(start = if (message.role == "user") 25.dp else 0.dp)) {

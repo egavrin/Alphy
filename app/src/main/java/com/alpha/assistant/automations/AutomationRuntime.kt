@@ -131,7 +131,9 @@ object AutomationRuntime {
         }
     }
 
-    internal suspend fun resumeApproved(store: AutomationStore,expected: AutomationRule,validate: (AutomationRule)->String?): AutomationResumeResult = mutex.withLock {
+    internal suspend fun resumeApproved(store: AutomationStore,expected: AutomationRule,active: suspend () -> Boolean = { true },
+        validate: (AutomationRule)->String?): AutomationResumeResult = mutex.withLock {
+        if (!active()) return@withLock AutomationResumeResult.REVIEW_REQUIRED
         val current=store.rule(expected.id) ?: return@withLock AutomationResumeResult.MISSING
         if(current.revision!=expected.revision || current.approvedRevision!=current.revision ||
             current.attention.isNotEmpty() || current.id in deleting) return@withLock AutomationResumeResult.REVIEW_REQUIRED
@@ -141,6 +143,7 @@ object AutomationRuntime {
             store.attention(current.id,current.revision,failure)
             return@withLock AutomationResumeResult.REVIEW_REQUIRED
         }
+        if (!active()) return@withLock AutomationResumeResult.REVIEW_REQUIRED
         if(store.resumeApproved(current.id,current.revision,token)) AutomationResumeResult.RESUMED
         else AutomationResumeResult.REVIEW_REQUIRED
     }
@@ -155,8 +158,9 @@ object AutomationRuntime {
         return true
     }
 
-    suspend fun resume(context: Context,store: AutomationStore,expected: AutomationRule): AutomationResumeResult {
-        val result=resumeApproved(store,expected) {accessFailure(context,store,it)}
+    suspend fun resume(context: Context,store: AutomationStore,expected: AutomationRule,
+        active: suspend () -> Boolean = { true }): AutomationResumeResult {
+        val result=resumeApproved(store,expected,active) {accessFailure(context,store,it)}
         notifyChanged(context)
         if(result==AutomationResumeResult.RESUMED) refreshDatabase(context,store.databaseName)
         return result
@@ -202,7 +206,7 @@ object AutomationRuntime {
         }
     }
 
-    private fun notifyChanged(context: Context) {
+    internal fun notifyChanged(context: Context) {
         context.sendBroadcast(Intent(CHANGED).setPackage(context.packageName))
     }
 

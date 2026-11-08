@@ -65,6 +65,7 @@ data class CloudRequest(
     val scheduledAgent: Boolean = false,
     val screenContext: ScreenContext? = null,
     val screenImages: List<String> = emptyList(),
+    val agentPlan: Boolean = false,
 )
 sealed interface CloudEvent {
     data class Text(val value: String) : CloudEvent
@@ -235,8 +236,12 @@ class DeepSeekProvider internal constructor(
                 body.put("tools",searchTool(request.scheduledAgent))
                 body.put("tool_choice", if (searches >= 2) "none" else "auto")
             }
-            val completion = stream(key, body, session, { if (!request.scheduledAgent) emit(CloudEvent.Text(it)) },
-                maxText = if (request.scheduledAgent) ChatToolReply.MAX_TEXT else 2 * 1024 * 1024,
+            val completion = stream(key, body, session, { if (!request.scheduledAgent && !request.agentPlan) emit(CloudEvent.Text(it)) },
+                maxText = when {
+                    request.agentPlan -> ChatToolReply.MAX_REPLY
+                    request.scheduledAgent -> ChatToolReply.MAX_TEXT
+                    else -> 2 * 1024 * 1024
+                }, allowTools = !request.agentPlan,
                 reportLength = request.generationStage != null,
                 stage = if (request.generationStage == null) CompletionStage.GENERAL else CompletionStage.GENERATION,
                 // Each reasoning fragment includes a full SSE envelope. The visible text has its own limit.

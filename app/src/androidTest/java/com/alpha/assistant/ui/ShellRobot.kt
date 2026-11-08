@@ -67,6 +67,7 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
     @Volatile var calls = 0
     @Volatile var lastRequest: CloudRequest? = null
     var automationDraft: String? = null
+    var agentProposal: String? = null
     @Volatile var failure: Exception? = null              // thrown after the count
     @Volatile var gate: CompletableDeferred<Unit>? = null // awaited before the answer
     override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
@@ -76,6 +77,10 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
         automationDraft?.let { arguments ->
             val definition = com.alpha.assistant.automations.AutomationDraftTool.bind(arguments, checkNotNull(request.automationDraftChatId))
             emit(CloudEvent.RoundComplete("", false, com.alpha.assistant.data.MessageProvenance.CLEAN, automationDraft = definition.json))
+            return
+        }
+        agentProposal?.takeIf { request.agentPlan }?.let {
+            emit(CloudEvent.RoundComplete(it, false))
             return
         }
         if (request.replyWithFixturePlan(emit)) return

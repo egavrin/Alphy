@@ -14,6 +14,7 @@ import com.alpha.assistant.data.Draft
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
+import com.alpha.assistant.ui.openSeededChat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -166,7 +167,7 @@ class ShellCourseCreationWorkflowTest {
             shell.seedChat(chatId, "Origin chat", "PRIVATE-EARLIER-TEXT", selected = true)
             shell.seedChat("other", "Other chat", "PRIVATE-OTHER-TEXT")
             check(shell.keys.save("PRIVATE-FIXTURE-KEY").isSuccess)
-            CloudTestActivity.factory = { app -> ShellViewModel(app, provider, shell.store, shell.keys).also { shell.model = it } }
+            CloudTestActivity.factory = { app -> ShellViewModel(app, provider, shell.store, shell.keys).openSeededChat(shell.store).also { shell.model = it } }
             CourseStore(shell.context, courseDb).use { store ->
                 shell.launch().use { scenario ->
                     waitFor(R.string.composer_label)

@@ -384,17 +384,17 @@ internal fun CourseLibraryScreen(
             is CoursePage.Slide -> key(current.course.id, current.step.slide.id) {
                 val slideId = current.step.slide.id
                 val savedAnswer = current.feedback?.answer
-                val text = if (draftSlideId == slideId) draftText else when (savedAnswer) {
+                fun currentText() = if (draftSlideId == slideId) draftText else when (savedAnswer) {
                     is CourseAnswer.Choice -> savedAnswer.optionId
                     is CourseAnswer.FillIn -> savedAnswer.text
                     else -> ""
                 }
-                val order = if (draftSlideId == slideId) draftOrder else (savedAnswer as? CourseAnswer.Order)?.optionIds.orEmpty()
+                fun currentOrder() = if (draftSlideId == slideId) draftOrder else (savedAnswer as? CourseAnswer.Order)?.optionIds.orEmpty()
                 CourseSlidePlayer(
                     slide = current,
                     busy = busy,
-                    text = text,
-                    order = order,
+                    text = currentText(),
+                    order = currentOrder(),
                     onText = {
                         draftSlideId = slideId
                         draftText = it
@@ -405,9 +405,12 @@ internal fun CourseLibraryScreen(
                         draftText = ""
                         draftOrder = ArrayList(it)
                     },
-                    onSubmit = { answer ->
-                        val requestId = UUID.randomUUID().toString()
-                        update(requestId) { presentation.submit(current, requestId, answer) }
+                    onSubmit = {
+                        // A selection can change before the button recomposes.
+                        if (page === current) current.prompt?.answerFor(currentText(), currentOrder())?.let { answer ->
+                            val requestId = UUID.randomUUID().toString()
+                            update(requestId) { presentation.submit(current, requestId, answer) }
+                        }
                     },
                     nextPreparation = nextPreparation,
                     onRetryNext = {
@@ -963,7 +966,7 @@ private fun CourseSlidePlayer(
     order: List<String>,
     onText: (String) -> Unit,
     onOrder: (List<String>) -> Unit,
-    onSubmit: (CourseAnswer) -> Unit,
+    onSubmit: () -> Unit,
     nextPreparation: CourseNextPreparation?,
     onRetryNext: () -> Unit,
     onNext: () -> Unit,
@@ -1048,10 +1051,10 @@ private fun CourseExerciseControls(
     order: List<String>,
     onText: (String) -> Unit,
     onOrder: (List<String>) -> Unit,
-    onSubmit: (CourseAnswer) -> Unit,
+    onSubmit: () -> Unit,
 ) {
     CourseHeading(prompt.question)
-    val answer = when (prompt.kind) {
+    when (prompt.kind) {
         CourseSlideKind.CHOICE -> {
             Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 prompt.options.forEach { option ->
@@ -1071,12 +1074,10 @@ private fun CourseExerciseControls(
                     }
                 }
             }
-            text.takeIf { value -> prompt.options.any { it.id == value } }?.let { CourseAnswer.Choice(it) }
         }
         CourseSlideKind.FILL_IN -> {
             OutlinedTextField(value = text, onValueChange = { onText(it.take(4096)) }, enabled = enabled,
                 label = { Text(stringResource(R.string.course_answer_label)) }, modifier = Modifier.fillMaxWidth(), maxLines = 4)
-            text.takeIf(String::isNotBlank)?.let { CourseAnswer.FillIn(it) }
         }
         CourseSlideKind.ORDER -> {
             Text(stringResource(R.string.course_order_instructions))
@@ -1091,13 +1092,20 @@ private fun CourseExerciseControls(
             if (selected.isNotEmpty()) {
                 TextButton(onClick = { onOrder(emptyList()) }, enabled = enabled) { Text(stringResource(R.string.course_order_reset)) }
             }
-            selected.takeIf { it.size == prompt.options.size }?.let { CourseAnswer.Order(it) }
         }
         else -> error("The slide does not accept an answer.")
     }
-    Button(onClick = { answer?.let(onSubmit) }, enabled = enabled && answer != null, modifier = Modifier.fillMaxWidth()) {
+    Button(onClick = onSubmit, enabled = enabled && prompt.answerFor(text, order) != null, modifier = Modifier.fillMaxWidth()) {
         Text(stringResource(R.string.course_check))
     }
+}
+
+private fun CourseExercisePrompt.answerFor(text: String, order: List<String>): CourseAnswer? = when (kind) {
+    CourseSlideKind.CHOICE -> text.takeIf { value -> options.any { it.id == value } }?.let { CourseAnswer.Choice(it) }
+    CourseSlideKind.FILL_IN -> text.takeIf(String::isNotBlank)?.let { CourseAnswer.FillIn(it) }
+    CourseSlideKind.ORDER -> order.filter { id -> options.any { it.id == id } }
+        .takeIf { it.size == options.size }?.let { CourseAnswer.Order(it) }
+    else -> error("The slide does not accept an answer.")
 }
 
 @Composable
