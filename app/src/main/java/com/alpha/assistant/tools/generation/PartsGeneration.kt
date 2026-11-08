@@ -42,6 +42,11 @@ internal data class PartsAssembly(
     val readPorts: Set<String> = emptySet(),
     val requiresHostRuntime: Boolean = requiresReadProjection,
 ) {
+    fun fillPositions(): List<Int> {
+        val fixed = parts.map(PartPlacement::position).toSet()
+        return (0 until parts.size + holes.size).filterNot(fixed::contains)
+    }
+
     fun requireComplete(): ToolSpec {
         requireParts(blockingQuestions.isEmpty(), "$.questions", "answers to the blocking questions")
         requireParts(holes.isEmpty(), "$.holes", "a completed screen")

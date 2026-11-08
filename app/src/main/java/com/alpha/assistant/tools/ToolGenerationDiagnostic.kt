@@ -4,7 +4,9 @@ import android.os.SystemClock
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.ResponseShape
+import com.alpha.assistant.tools.generation.GenerationBehavior.Kind
 import kotlinx.coroutines.CancellationException
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
@@ -20,6 +22,54 @@ internal enum class ToolGenerationDisposition(val id: String) {
     CONTINUE("continue"), CORRECT("correct"), FINISH("finish")
 }
 internal enum class ToolGenerationTraceOutcome { VALIDATED, FAILED, CANCELED }
+
+internal enum class ToolGenerationRoute(val id: String) {
+    NATIVE("native"), MIXED("mixed"), WHOLE_SCREEN("whole_screen")
+}
+
+internal enum class BehaviorFailureRule(val id: String) {
+    BINDING_SHAPE("binding_shape"), BINDING_MISSING("binding_missing"), TARGET_MISSING("target_missing"),
+    TARGET_HIDDEN("target_hidden"), OBSERVATION_KIND("observation_kind"), SCALAR_MISSING("scalar_missing"),
+    SCALAR_SHAPE("scalar_shape"), ACTION_UNAVAILABLE("action_unavailable"), SURFACE_UNAVAILABLE("surface_unavailable"),
+    DRAWING_UNAVAILABLE("drawing_unavailable"), SUBSCRIPTION_UNAVAILABLE("subscription_unavailable"),
+    ASSERTION_FAILED("assertion_failed"), EVENT_LIMIT("event_limit"), EXTERNAL_RESULT_REQUIRED("external_result_required")
+}
+
+internal enum class BehaviorValueShape(val id: String) {
+    MISSING("missing"), NULL("null"), STRING("string"), NUMBER("number"), BOOLEAN("boolean"), ARRAY("array"), OBJECT("object");
+
+    companion object {
+        fun of(value: Any?): BehaviorValueShape? = when {
+            value == null -> MISSING
+            value === JSONObject.NULL -> NULL
+            value is String -> STRING
+            value is Number -> NUMBER
+            value is Boolean -> BOOLEAN
+            value is JSONArray -> ARRAY
+            value is JSONObject -> OBJECT
+            else -> null
+        }
+    }
+}
+
+/** Step and slot numbers start at one. Both follow the validated scenario order. */
+internal data class BehaviorBindingDiagnostic(
+    val route: ToolGenerationRoute,
+    val rule: BehaviorFailureRule,
+    val step: Int? = null,
+    val slot: Int? = null,
+    val slotKind: Kind? = null,
+    val native: Boolean? = null,
+    val bindingKind: String? = null,
+    val nodeKind: String? = null,
+    val valueShape: BehaviorValueShape? = null,
+) {
+    fun report(): JSONObject = JSONObject().put("route", route.id).put("rule", rule.id)
+        .put("step", step).put("slot", slot).put("slotKind", slotKind?.wire)
+        .put("origin", native?.let { if (it) "native" else "writer" } ?: "unknown")
+        .put("bindingKind", bindingKind).put("nodeKind", ToolUiCatalog.components[nodeKind]?.type)
+        .put("valueShape", valueShape?.id)
+}
 
 /** Operation evidence contains no candidate data or diagnostic details from generated content. */
 internal sealed interface ToolGenerationTraceEvent {
@@ -52,6 +102,7 @@ internal sealed interface ToolGenerationTraceEvent {
         val planShape: ResponseShape?,
         val behavior: String?,
         val smoke: JSONObject?,
+        val behaviorBinding: BehaviorBindingDiagnostic? = null,
     ) : ToolGenerationTraceEvent
 
     /** VALIDATED marks the candidate boundary. The caller owns publication. */
@@ -62,6 +113,7 @@ internal sealed interface ToolGenerationTraceEvent {
         val outcome: ToolGenerationTraceOutcome,
         val failureCode: String,
         val partsOnly: Boolean?,
+        val route: ToolGenerationRoute? = null,
     ) : ToolGenerationTraceEvent
 }
 
@@ -78,6 +130,7 @@ internal class ToolGenerationTrace(
     inner class Run {
         private var lastAttempt = 1
         var partsOnly: Boolean? = null
+        var route: ToolGenerationRoute? = null
 
         fun stage(attempt: Int, stage: ToolGenerationStage, started: Boolean, selectorBatch: String?,
             providerStage: CloudGenerationStage?) {
@@ -92,7 +145,8 @@ internal class ToolGenerationTrace(
                 diagnostic.outcome, diagnostic.disposition, diagnostic.failureCode,
                 diagnostic.category, diagnostic.ui?.rule ?: diagnostic.safeSchemaRule,
                 safeSelectorBatch(diagnostic.selectorBatch), diagnostic.planPath?.takeIf(needsPlanPath::matches),
-                diagnostic.planShape?.takeIf { needsPlanPath.matches(it.path) }, diagnostic.behavior, diagnostic.safeSmoke()) }
+                diagnostic.planShape?.takeIf { needsPlanPath.matches(it.path) }, diagnostic.behavior, diagnostic.safeSmoke(),
+                diagnostic.behaviorBinding) }
         }
 
         fun finish(failure: Throwable? = null) {
@@ -107,7 +161,7 @@ internal class ToolGenerationTrace(
                 ToolGenerationTraceOutcome.CANCELED -> "cancelled"
                 ToolGenerationTraceOutcome.FAILED -> ToolGenerationAttemptDiagnostic.safeCode(cloudCode ?: "unknown")
             }
-            emit { ToolGenerationTraceEvent.Finished(operationId, lastAttempt, it, outcome, code, partsOnly) }
+            emit { ToolGenerationTraceEvent.Finished(operationId, lastAttempt, it, outcome, code, partsOnly, route) }
         }
     }
 }
@@ -151,7 +205,8 @@ internal data class ToolGenerationAttemptDiagnostic(
     val selectorBatch: String?=null,
     val planPath: String?=null,
     val planShape: ResponseShape?=null,
-    val behavior: String?=null
+    val behavior: String?=null,
+    val behaviorBinding: BehaviorBindingDiagnostic?=null,
 ) {
     internal val safeSchemaRule get() = schemaRule?.takeIf { it in schemaRules }
 
@@ -170,6 +225,7 @@ internal data class ToolGenerationAttemptDiagnostic(
                 .put("expected",diagnostic.expected).put("observed",diagnostic.observed).put("count",diagnostic.count ?: JSONObject.NULL))}
             safeSchemaRule?.let {put("schema",JSONObject().put("rule",it).put("path","unknown"))}
             behavior?.let { put("behavior", it) }
+            behaviorBinding?.let { put("behaviorBinding", it.report()) }
             safeSmoke()?.let { put("smoke", it) }
         }
     companion object {

@@ -177,6 +177,37 @@ class GenerationRouteWorkflowTest {
         }
     }
 
+    @Test fun numericNativeObservationRejectsNonemptyAtPlanAndCorrectsBeforeSelection(): Unit = runBlocking {
+        val scenario = """{"slots":{"add":{"kind":"action","part":"count"},
+            "count":{"kind":"value","part":"count","member":"value"}},
+            "steps":[{"op":"action","slot":"add"},{"op":"assert","slot":"count","test":"equals","value":1}]}"""
+        val invalid = scenario.replace(""""test":"equals","value":1""", """"test":"nonempty"""")
+        val provider = FixtureProvider { turn, _ ->
+            when (turn.generationStage) {
+                CloudGenerationStage.PLAN -> planWithBehavior(count, if (turn.turns.size == 1) invalid else scenario)
+                CloudGenerationStage.SELECTOR -> answer(turn)
+                else -> error("The native counter needs no writer.")
+            }
+        }
+        withEngine(provider) { _, engine, _ ->
+            val draft = engine.createDraft("Make a counter that adds one.", null)
+            val events = mutableListOf<ToolGenerationTraceEvent>()
+            val trace = ToolGenerationTrace(UUID.fromString(draft.id), onEvent = { events += it })
+            engine.generate(draft.id, "fixture", emptyList(), CloudSession(), progress = null,
+                previewObserver = null, trace = trace)
+            val rejected = events.filterIsInstance<ToolGenerationTraceEvent.Attempt>()
+                .single { it.failureCode == "widget_plan" }
+            assertEquals("$.behavior.scenario.steps[1]", rejected.planPath)
+            assertEquals("behavior.native_assertion_type", rejected.planShape?.rule)
+            assertEquals("number", rejected.planShape?.observedType)
+            assertTrue(provider.requests[1].systemInstructions.contains("instead of nonempty"))
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.PLAN,
+                CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR), provider.stages)
+            val saved = engine.accept(draft.id)
+            assertEquals(0, JSONObject(saved.state).getInt(counterState))
+        }
+    }
+
     @Test fun namedRowActionsUseTheNativeRowPayload(): Unit = runBlocking {
         val plan = """{"title":"Stops","description":"","language":"en","inputs":[],"questions":[],
             "constants":[{"id":"window","value":60}],
@@ -529,6 +560,7 @@ class GenerationRouteWorkflowTest {
                 }
                 CloudGenerationStage.REFINE -> {
                     val prompt = turn.turns.first().text
+                    assertTrue(prompt.contains("Fill child positions in the final UI root: [1]"))
                     assertFalse(prompt.contains("p5_count"))
                     assertFalse(prompt.contains("\"partInstanceId\":"))
                     assertFalse(prompt.contains("\"nativePresentation\""))
@@ -593,6 +625,45 @@ class GenerationRouteWorkflowTest {
             assertTrue(recipe.sameSelection(afterSpec.nativePresentation))
             assertEquals(beforeRoot.toString(), afterSpec.ui.getJSONArray("children").getJSONObject(0).toString())
             assertEquals("Move the dot", afterSpec.action(afterSpec.ui, "fill_copy")!!.getString("text"))
+        }
+    }
+
+    @Test fun mixedWriterExamplesUseCompatibleTargetsAtTheHostFillPositions(): Unit = runBlocking {
+        val first = """{"id":"first","type":"other","label":"Total","description":"Show a total","reads":[]}"""
+        val last = """{"id":"last","type":"other","label":"Rows","description":"Show a list","reads":[]}"""
+        val counter = count.replace("\"count\"", "\"second\"")
+        val scenario = """{"status":"checkable","scenario":{"slots":{"total":{"kind":"value"},"rows":{"kind":"collection"}},
+            "steps":[{"op":"assert","slot":"total","test":"equals","value":7},
+            {"op":"assert","slot":"rows","test":"equals","value":0}]}}"""
+        val fill = """{"holes":["first","last"],"fill":{"capabilities":[],
+            "stateSchema":{"fill_value":"number","fill_rows":{"type":"list","maxItems":4,"fields":{"id":"string","text":"string"}}},
+            "initialState":{"fill_value":7,"fill_rows":[]},
+            "ui":{"type":"column","children":[{"type":"metric","text":"Total","bind":"fill_value"},
+            {"type":"list","text":"Rows","bind":"fill_rows"}]},"source":"return {state:input.state};"},
+            "behaviorBindings":{"total":[1],"rows":[3]}}"""
+        val provider = FixtureProvider { turn, _ -> when (turn.generationStage) {
+            CloudGenerationStage.PLAN -> JSONObject(plan("$count,$first,$counter,$last")).put("behavior", JSONObject(scenario)).toString()
+            CloudGenerationStage.SELECTOR -> answer(turn)
+            CloudGenerationStage.COMPLETE -> fill
+            else -> error("Unexpected request stage.")
+        } }
+        withEngine(provider) { _, engine, _ ->
+            val draft = engine.createDraft(request, null)
+            engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+            val writer = provider.requests.last().turns.single().text
+            assertTrue(writer.contains("Fill child positions in the final UI root: [1,3]"))
+            val example = JSONObject(writer.substringAfter("Schema:\n").lineSequence().first())
+            val children = example.getJSONObject("fill").getJSONObject("ui").getJSONArray("children")
+            assertEquals(2, children.length())
+            val bindings = example.getJSONObject("behaviorBindings")
+            fun typeAt(slot: String): String {
+                val path = bindings.getJSONArray(slot)
+                var node = children.getJSONObject(listOf(1, 3).indexOf(path.getInt(0)))
+                for (i in 1 until path.length()) node = node.getJSONArray("children").getJSONObject(path.getInt(i))
+                return node.getString("type")
+            }
+            assertEquals("list", typeAt("rows"))
+            assertTrue(typeAt("total") in setOf("text", "metric"))
         }
     }
 

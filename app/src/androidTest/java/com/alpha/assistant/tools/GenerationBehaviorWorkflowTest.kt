@@ -107,6 +107,121 @@ class GenerationBehaviorWorkflowTest {
         }
     }
 
+    @Test fun malformedWriterBindingsIdentifyTheRejectedSlotAndKeepTheCorrectionLimit(): Unit = runBlocking {
+        val scenario = """{"slots":{"action":{"kind":"action"},"surface":{"kind":"surface"},
+            "timer":{"kind":"timer"},"privateGeometry":{"kind":"geometry"},"value":{"kind":"value"},
+            "collection":{"kind":"collection"}},"steps":[{"op":"action","slot":"action"},
+            {"op":"surface","slot":"surface","event":"restart"},{"op":"timers","slot":"timer","count":1},
+            {"op":"assert","slot":"privateGeometry","test":"nonempty"},
+            {"op":"assert","slot":"value","test":"nonempty"},{"op":"assert","slot":"collection","test":"equals","value":0}]}"""
+        val valid = """{"action":"apply","surface":"main","timer":"tick",
+            "privateGeometry":{"surface":"main","path":[0]},"value":[2],"collection":[4]}"""
+        data class Rejection(val slot: Int?, val kind: String?, val shape: String, val expected: String,
+            val invalidBindings: JSONObject.() -> Unit)
+        val cases = listOf(
+            Rejection(1, "action", "object", "action ID string") { put("action", JSONObject().put("privateData", 7)) },
+            Rejection(1, "action", "array", "integer") { put("action", org.json.JSONArray().put(0.5)) },
+            Rejection(2, "surface", "number", "surface ID string") { put("surface", 7) },
+            Rejection(3, "timer", "boolean", "timer ID string") { put("timer", false) },
+            Rejection(4, "geometry", "array", "geometry") { put("privateGeometry", org.json.JSONArray()) },
+            Rejection(4, "geometry", "object", "surface ID string") {
+                getJSONObject("privateGeometry").put("surface", JSONObject().put("privateData", true))
+            },
+            Rejection(4, "geometry", "string", "geometry path") {
+                getJSONObject("privateGeometry").put("path", "PRIVATE_LABEL")
+            },
+            Rejection(5, "value", "number", "index path") { put("value", 2) },
+            Rejection(6, "collection", "string", "index path") { put("collection", "PRIVATE_LABEL") },
+            Rejection(null, null, "object", "requested slot IDs") { remove("action"); put("privateData", "apply") },
+            Rejection(null, null, "missing", "object") {},
+        )
+        for (case in cases) {
+            val raw = JSONObject(app(true)).apply {
+                if (case.shape != "missing") put("behaviorBindings", JSONObject(valid).apply(case.invalidBindings))
+            }.toString()
+            val provider = Provider(plan(scenario), raw, raw)
+            val diagnostics = mutableListOf<JSONObject>()
+            val result = runCatching {
+                ToolGenerationService(provider, SandboxClient(context), observer = null,
+                    attemptObserver = { diagnostics += it.report() })
+                    .generate("offline", "Build the requested tool", null, emptyList(), CloudSession(), "behavior")
+            }
+            assertEquals("widget_behavior", (result.exceptionOrNull() as? CloudFailure)?.code)
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.COMPLETE),
+                provider.calls.map { it.generationStage })
+            val diagnostic = diagnostics.last().getJSONObject("behaviorBinding")
+            assertEquals(case.slot, diagnostic.opt("slot"))
+            assertEquals(case.kind, diagnostic.opt("slotKind"))
+            assertEquals(case.shape, diagnostic.getString("valueShape"))
+            assertEquals("binding_shape", diagnostic.getString("rule"))
+            val correction = provider.calls.last().turns.last().text
+            assertTrue(correction, correction.contains(case.expected))
+            for (private in listOf("privateGeometry", "privateData", "PRIVATE_LABEL")) {
+                assertFalse(diagnostics.toString().contains(private))
+                assertFalse(correction.contains(private))
+            }
+        }
+    }
+
+    @Test fun aCorrectedWriterBindingPassesTheSameBehaviorScenario(): Unit = runBlocking {
+        val malformed = JSONObject(appBindings).put("apply", JSONObject()).toString()
+        val provider = Provider(plan(appPlan), candidate(app(true), malformed), candidate(app(true), appBindings))
+        val result = generate(provider)
+        assertEquals(0, JSONObject(result.state).getInt("result"))
+        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.COMPLETE),
+            provider.calls.map { it.generationStage })
+        val correction = provider.calls.last().turns.last().text
+        assertTrue(correction, correction.contains("action ID string"))
+        assertTrue(correction, correction.contains("\"slot\":2"))
+        assertTrue(correction, correction.contains("\"valueShape\":\"object\""))
+    }
+
+    @Test fun writerResultDiagnosticsDescribeTheCurrentUiWithoutCandidateData(): Unit = runBlocking {
+        val scenario = """{"slots":{"press":{"kind":"action"},"privateResult":{"kind":"value"}},
+            "steps":[{"op":"action","slot":"press"},
+            {"op":"assert","slot":"privateResult","test":"equals","value":1}]}"""
+        val bindings = """{"press":"press","privateResult":[1]}"""
+        val visible = """{type:'metric',text:'PRIVATE_LABEL',bind:'privateCount'}"""
+        val cases = listOf(
+            visible to null,
+            """{type:'metric',text:'PRIVATE_LABEL',bind:'privateCount',visible:false}""" to "target_hidden",
+            """{type:'button',text:'PRIVATE_LABEL',action:'privateAction'}""" to "observation_kind",
+        )
+        for ((resultNode, rule) in cases) {
+            val definition = """{"formatVersion":3,"title":"Dynamic result","description":"","capabilities":[],
+                "stateSchema":{"privateCount":"number"},"initialState":{"privateCount":0},
+                "ui":{"type":"column","children":[{"type":"button","text":"Press","action":"press"},
+                {"type":"text","text":"Ready"}]},
+                "source":"const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='press')s.privateCount=1;
+                const children=[{type:'button',text:'Press',action:'press'},s.privateCount===1?$resultNode:{type:'text',text:'Ready'}];
+                return {state:s,ui:{type:'column',children}};"}""".replace("\n", " ")
+            val raw = candidate(definition, bindings)
+            val provider = Provider(plan(scenario), raw, raw)
+            val diagnostics = mutableListOf<JSONObject>()
+            val outcome = runCatching {
+                ToolGenerationService(provider, SandboxClient(context), observer = null, attemptObserver = { diagnostics += it.report() })
+                    .generate("offline", "Build the requested tool", null, emptyList(), CloudSession(), "behavior")
+            }
+            if (rule == null) {
+                assertEquals(0, JSONObject(outcome.getOrThrow().state).getInt("privateCount"))
+            } else {
+                assertEquals("widget_behavior", (outcome.exceptionOrNull() as? CloudFailure)?.code)
+                val report = diagnostics.last().getJSONObject("behaviorBinding")
+                assertEquals("whole_screen", report.getString("route"))
+                assertEquals("writer", report.getString("origin"))
+                assertEquals(2, report.getInt("step"))
+                assertEquals(2, report.getInt("slot"))
+                assertEquals("value", report.getString("slotKind"))
+                assertEquals(rule, report.getString("rule"))
+                if (rule == "observation_kind") assertEquals("button", report.getString("nodeKind"))
+                for (secret in listOf("PRIVATE_LABEL", "privateCount", "privateResult", "privateAction")) {
+                    assertFalse(secret, diagnostics.toString().contains(secret))
+                    assertFalse(secret, provider.calls.last().turns.last().text.contains(secret))
+                }
+            }
+        }
+    }
+
     @Test fun terminalBehaviorFailurePreservesTheSavedTool(): Unit = runBlocking {
         val raw = candidate(app(false), appBindings)
         val provider = Provider("""{"behavior":{"status":"checkable","scenario":$appPlan}}""", raw, raw)

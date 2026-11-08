@@ -81,6 +81,7 @@ internal class ToolComposition private constructor(private val layout: Layout, p
         fixed.part.fragment.handlers.values.any { it is PartHandler.Clocked }
     }
     val isSealedStandalone: Boolean get() = layout.fillPositions.isEmpty()
+    internal val fillPositions: List<Int> get() = layout.fillPositions
     val readPorts: Set<String> get() = layout.readPorts
     fun needsClockTicks(state: JSONObject, clock: PartClockSample): Boolean =
         layout.fixed.values.any { it.part.clockTicks?.invoke(state, clock) == true }
@@ -256,10 +257,8 @@ internal class ToolComposition private constructor(private val layout: Layout, p
         fun complete(assembly: PartsAssembly, rawFill: String, observer: ((ToolUiDiagnostic) -> Unit)? = null): ToolSpec {
             requireParts(assembly.parts.isNotEmpty() && assembly.holes.isNotEmpty() && assembly.blockingQuestions.isEmpty(),
                 "$.composition", "selected parts and unresolved fill positions")
-            val total = assembly.parts.size + assembly.holes.size
             val fixed = restoreParts(assembly)
-            val positions = fixed.map(FixedPart::position).toSet()
-            val layout = Layout(fixed, (0 until total).filterNot(positions::contains), assembly.readPorts)
+            val layout = Layout(fixed, assembly.fillPositions(), assembly.readPorts)
             return seal(layout, assembly.preview.title, assembly.preview.description, partsObject(rawFill, "$.fill"),
                 assembly.preview.nativePresentation, observer)
         }

@@ -48,11 +48,14 @@ class ComparisonChatCaptureTest {
         val slotId = input.getString("slot_id")
         val request = input.getString("request")
         val reviewSeconds = input.getInt("review_seconds")
-        val verifyTip = input.optBoolean("verify_tip")
+        val caseId = slotId.substringBeforeLast(":candidate:")
+        val verifyWorkflow = input.optBoolean("verify_workflow")
+        val verifyTip = input.optBoolean("verify_tip") || verifyWorkflow && caseId == "bench:tip"
         require(runId.matches(Regex("[a-f0-9]{32}")) && slotId.matches(Regex("[A-Za-z0-9:_-]{1,168}:candidate:[1-3]")))
         require(request.isNotBlank() && request.trim() == request && request.length <= MAX_CHAT_INPUT && '\u0000' !in request)
         require(reviewSeconds in 5..180)
-        require(!verifyTip || slotId.startsWith("bench:tip:candidate:"))
+        require(!verifyTip || caseId == "bench:tip")
+        require(!verifyWorkflow || caseId == "bench:tip" || caseId in Plan5WorkflowChecks.cases)
         val report = JSONObject().put("run_id", runId).put("slot_id", slotId)
         for (field in listOf("plan_sha256", "request_sha256", "execution_sha256", "revision", "source_sha256", "build_sha256")) {
             val value = input.getString(field)
@@ -82,6 +85,7 @@ class ComparisonChatCaptureTest {
         val providerInvocations = CopyOnWriteArrayList<String>()
         val httpDispatches = CopyOnWriteArrayList<JSONObject>()
         val decisionRejections = CopyOnWriteArrayList<JSONObject>()
+        val acceptedOperations = CopyOnWriteArrayList<JSONObject>()
         val generationEvents = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
         val providerHttpCalls = AtomicInteger()
         val name = "comparison-$runId"
@@ -114,13 +118,24 @@ class ComparisonChatCaptureTest {
                             .put("rule",event.shape.rule).put("path",event.shape.path)
                             .put("observed_type",event.shape.observedType).put("correcting",event.correcting)
                             .put("at_ns",SystemClock.elapsedRealtimeNanos())
+                            .apply {
+                                event.shape.decisionFields?.let {
+                                    put("missing_fields", JSONArray(it.missing)).put("extra_field_count", it.extraCount)
+                                        .put("kind_class", it.kind.name.lowercase(java.util.Locale.ROOT)).put("wrapped_decision", it.wrappedDecision)
+                                }
+                            }
                     }
                     val live = DeepSeekProvider("https://api.deepseek.com", onHttpCall = {
                         providerHttpCalls.incrementAndGet()
                         httpDispatches += JSONObject().put("stage", stage)
                             .put("at_ns", SystemClock.elapsedRealtimeNanos())
                     }) {}
-                    live.respond(credential, request, session, emit)
+                    val tracedRequest = if (request.chatDecision) request.copy(validateOperation = { decision ->
+                        request.validateOperation?.invoke(decision)
+                        acceptedOperations += JSONObject().put("kind", decision.kind).put("search", decision.search)
+                            .put("at_ns", SystemClock.elapsedRealtimeNanos())
+                    }) else request
+                    live.respond(credential, tracedRequest, session, emit)
                 }
             }
             keys.save(marker).getOrThrow()
@@ -233,6 +248,64 @@ class ComparisonChatCaptureTest {
             } else if (verifyTip) {
                 report.put("tip_interaction", JSONObject().put("status", "not-generated"))
             }
+            if (verifyWorkflow) {
+                failureAt = "workflow"
+                val proof = JSONObject().put("status", "not-generated")
+                report.put("workflow", proof)
+                if (artifact != null) {
+                    proof.put("status", "failed")
+                    check(report.optBoolean("open_card_action"))
+                    if (verifyTip) {
+                        check(report.getJSONObject("tip_interaction").getString("status") == "passed")
+                    } else {
+                        val toolDatabase = "$database-tools.db"
+                        fun savedTool() = onMain { vm.tools.tools.single { it.id == artifact } }
+                        fun reopen() {
+                            val before = savedTool()
+                            robot.back()
+                            robot.waitFor(robot.text(R.string.tool_search))
+                            robot.click(ToolSpec.parsePersisted(before.spec).title)
+                            robot.waitFor(robot.text(R.string.tool_refine))
+                            val after = savedTool()
+                            check(after.revision == before.revision)
+                        }
+                        var localCalls = providerHttpCalls.get()
+                        Plan5WorkflowChecks(robot, proof, ::savedTool, ::screenshot, toolDatabase).run(caseId, ::reopen) {
+                            check(providerHttpCalls.get() == localCalls)
+                            val before = savedTool()
+                            val messagesBefore = onMain { checkNotNull(vm.snapshot.selected).messages.size }
+                            val refine = robot.text(R.string.tool_refine)
+                            robot.reveal(refine, null)
+                            robot.click(refine)
+                            robot.edit(robot.text(R.string.composer_label), it)
+                            robot.click(robot.text(R.string.composer_send))
+                            await(240_000) {
+                                onMain {
+                                    !vm.tools.busy && vm.activeConversationId == null &&
+                                        vm.snapshot.selected?.messages?.let { messages ->
+                                            messages.size > messagesBefore && messages.lastOrNull()?.status in
+                                                setOf("complete", "error", "cancelled", "interrupted")
+                                        } == true
+                                }
+                            }
+                            val revised = savedTool()
+                            check(revised.revision == before.revision + 1) { "Refinement did not publish." }
+                            check(providerHttpCalls.get() > localCalls)
+                            localCalls = providerHttpCalls.get()
+                            val definition = JSONObject().put("artifact_id", revised.id).put("artifact_revision", revised.revision)
+                                .put("spec", JSONObject(revised.spec)).toString()
+                            File(directory, "refinement.json").writeText(definition)
+                            proof.put("refinement_sha256", sha256(definition))
+                            val open = robot.text(R.string.tool_open)
+                            robot.reveal(open, null)
+                            robot.click(open)
+                            robot.waitFor(robot.text(R.string.tool_refine))
+                        }
+                        check(providerHttpCalls.get() == localCalls)
+                    }
+                    proof.put("status", "passed")
+                }
+            }
             save("review")
             SystemClock.sleep(reviewSeconds * 1_000L)
             report.put("review_screen", screenshot("review"))
@@ -268,6 +341,7 @@ class ComparisonChatCaptureTest {
                 report.put("operation_trace", JSONObject().put("clock", "elapsed-realtime-ns")
                     .put("http_dispatches", JSONArray(httpDispatches.toList()))
                     .put("decision_rejections", JSONArray(decisionRejections.toList()))
+                    .put("accepted_operations", JSONArray(acceptedOperations.toList()))
                     .put("generation", JSONArray(generationEvents.map(::traceEvent))))
                 save(terminal)
             }
@@ -456,6 +530,7 @@ class ComparisonChatCaptureTest {
                     put("validation_category", event.validationCategory?.id)
                     put("validation_rule", event.validationRule)
                     put("behavior", event.behavior)
+                    put("behavior_binding", event.behaviorBinding?.report())
                     put("smoke", event.smoke)
                     put("selector_batch", event.selectorBatch).put("plan_path", event.planPath)
                     event.planShape?.let { put("plan_rule",it.rule).put("plan_observed_type",it.observedType) }
@@ -463,6 +538,7 @@ class ComparisonChatCaptureTest {
                 is ToolGenerationTraceEvent.Finished -> {
                     put("kind", "finished").put("outcome", event.outcome.name).put("failure_code", event.failureCode)
                     put("parts_only", event.partsOnly)
+                    put("route", event.route?.id)
                 }
             }
         }

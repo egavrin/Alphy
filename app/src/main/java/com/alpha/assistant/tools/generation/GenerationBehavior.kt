@@ -1,6 +1,8 @@
 package com.alpha.assistant.tools.generation
 
 import com.alpha.assistant.cloud.ResponseShape
+import com.alpha.assistant.tools.BehaviorFailureRule
+import com.alpha.assistant.tools.BehaviorValueShape
 import com.alpha.assistant.tools.ToolUiCatalog
 import com.alpha.assistant.tools.ToolValueSchema
 import org.json.JSONArray
@@ -36,7 +38,9 @@ internal sealed interface GenerationBehavior {
                 An action binding uses the action ID string or a UI path to a control with its own action field.
                 Surface and timer bindings use their actual ID strings.
                 A UI path is an array of zero-based children indices from the final assembled UI root. An empty path selects the root.
-                Use stable UI paths throughout the workflow. Value and collection bindings use UI paths to visible results.
+                Use stable UI paths throughout the workflow, including after dynamic UI updates.
+                Value bindings select visible nodes of type ${behaviorScalarNodes.joinToString()}. The node must expose a bound string, number, or Boolean, or text when it has no bind.
+                Collection bindings select visible nodes of type ${behaviorCollectionNodes.joinToString()}. The checker observes their record count.
                 Each geometry binding is {"surface":"surface ID","path":[0]} where path indexes drawing commands, then group children.
                 Use a stable shape or group. A path of [] observes all drawing commands for that surface.
                 Keep bindings outside fill, ui, and source. Bindings describe existing targets, never tests or expected values.
@@ -60,6 +64,9 @@ internal sealed interface GenerationBehavior {
         data class Capture(val slot: String, val name: String) : Step
         data class Assert(val slot: String, val test: String, val value: Any?, val capture: String?) : Step
     }
+
+    class BindingFailure(val slotId: String?, val slotKind: Kind?, val expected: String,
+        val valueShape: BehaviorValueShape?) : IllegalArgumentException()
 
     sealed interface Binding {
         data class Id(val value: String) : Binding
@@ -109,6 +116,8 @@ internal sealed interface GenerationBehavior {
             {"op":"assert","slot":"observation slot","test":"equals|changed|unchanged","capture":"baseline"}
             {"op":"assert","slot":"observation slot","test":"nonempty"}
             In an assertion, use value or capture, never both. For nonempty, omit both value and capture.
+            Use nonempty only for nonblank text, a collection with records, or visible drawing ink.
+            For a numeric or Boolean value, use a typed comparison such as equals with the expected number or Boolean.
             Keep assertions as separate steps. An action without an input value has only op and slot.
             Frames use positive elapsed time. Include observe and changes together to require at least two changes.
             At least one assertion must check the requested observable result. For passive UI, assert its requested content.
@@ -291,19 +300,34 @@ internal sealed interface GenerationBehavior {
         }
 
         fun bindings(raw: Any?, slots: Map<String, Slot>): Map<String, Binding> {
-            val objectValue = obj(raw, BINDINGS)
-            requireParts(ToolValueSchema.keys(objectValue) == slots.keys, BINDINGS, "exactly the requested slot IDs")
+            val objectValue = raw as? JSONObject
+                ?: throw BindingFailure(null, null, "an object", BehaviorValueShape.of(raw))
+            if (ToolValueSchema.keys(objectValue) != slots.keys)
+                throw BindingFailure(null, null, "exactly the requested slot IDs", BehaviorValueShape.OBJECT)
             return slots.mapValues { (id, slot) ->
                 val value = objectValue.opt(id)
+                fun <T> read(input: Any?, format: String, parse: () -> T): T = try {
+                    parse()
+                } catch (failure: PartsContractFailure) {
+                    throw BindingFailure(id, slot.kind, "$format (${failure.expected})", BehaviorValueShape.of(input))
+                }
                 when (slot.kind) {
-                    Kind.ACTION -> if (value is JSONArray) Binding.Ui(indices(value, BINDINGS))
-                        else Binding.Id(identifier(value, BINDINGS, 48))
-                    Kind.SURFACE, Kind.TIMER -> Binding.Id(identifier(value, BINDINGS, 48))
-                    Kind.VALUE, Kind.COLLECTION -> Binding.Ui(indices(value, BINDINGS))
+                    Kind.ACTION -> if (value is JSONArray) read(value, "a UI index path") { Binding.Ui(indices(value, BINDINGS)) }
+                        else read(value, "an action ID string or a UI index path") { Binding.Id(identifier(value, BINDINGS, 48)) }
+                    Kind.SURFACE, Kind.TIMER -> read(value, "a ${slot.kind.wire} ID string") {
+                        Binding.Id(identifier(value, BINDINGS, 48))
+                    }
+                    Kind.VALUE, Kind.COLLECTION -> read(value, "a UI index path") { Binding.Ui(indices(value, BINDINGS)) }
                     Kind.GEOMETRY -> {
-                        val drawing = obj(value, BINDINGS)
-                        drawing.requireKeys(BINDINGS, setOf("surface", "path"))
-                        Binding.Drawing(identifier(drawing.opt("surface"), BINDINGS, 48), indices(drawing.opt("path"), BINDINGS))
+                        val drawing = read(value, "a geometry object with surface and path") {
+                            obj(value, BINDINGS).also { it.requireKeys(BINDINGS, setOf("surface", "path")) }
+                        }
+                        val surface = drawing.opt("surface")
+                        val path = drawing.opt("path")
+                        Binding.Drawing(
+                            read(surface, "a geometry surface ID string") { identifier(surface, BINDINGS, 48) },
+                            read(path, "a geometry path of drawing indices") { indices(path, BINDINGS) },
+                        )
                     }
                 }
             }
@@ -344,11 +368,15 @@ internal sealed interface GenerationBehavior {
 
 internal fun GenerationBehavior.Scenario.validateNativeReferences(requests: List<PartRequest>) {
     val candidates = requests.associateBy(PartRequest::id)
-    for ((index, slot) in slots.values.withIndex()) {
+    for ((index, entry) in slots.entries.withIndex()) {
+        val (id, slot) = entry
         val request = candidates[slot.part] ?: continue
         if (request.candidates.isEmpty()) continue
         val path = "$.behavior.scenario.slots[$index]"
-        if (request.candidates.none { it.behaviorTargets(request.id).binding(slot) != null }) {
+        val targets = request.candidates.mapNotNull { part ->
+            part.behaviorTargets(request.id).binding(slot)?.let { part to it }
+        }
+        if (targets.isEmpty()) {
             val available = request.candidates.flatMap { part ->
                 val targets = part.behaviorTargets(request.id)
                 if (slot.kind == GenerationBehavior.Kind.ACTION) targets.actions.keys.toList()
@@ -357,6 +385,20 @@ internal fun GenerationBehavior.Scenario.validateNativeReferences(requests: List
             val expected = "an available native ${slot.kind.wire} member" +
                 if (available.isEmpty()) "" else " (${available.joinToString()})"
             throw PartsContractFailure(path, expected, ResponseShape("behavior.native_member", path, "unknown"))
+        }
+        if (slot.kind != GenerationBehavior.Kind.VALUE) continue
+        val invalidStep = steps.indexOfFirst { it is GenerationBehavior.Step.Assert && it.slot == id && it.test == "nonempty" }
+        if (invalidStep < 0) continue
+        val types = targets.map { (part, binding) ->
+            val ui = binding as GenerationBehavior.Binding.Ui
+            val node = ui.path.fold(part.fragment.full) { parent, child -> parent.getJSONArray("children").getJSONObject(child) }
+            part.fragment.schema.opt(node.optString("bind"))
+        }.toSet()
+        if (types.all { it == "number" || it == "boolean" }) {
+            val stepPath = "$.behavior.scenario.steps[$invalidStep]"
+            val type = types.singleOrNull() as? String ?: "scalar"
+            throw PartsContractFailure(stepPath, "a typed comparison with the expected number or Boolean instead of nonempty",
+                ResponseShape("behavior.native_assertion_type", stepPath, type))
         }
     }
 }
@@ -381,16 +423,28 @@ private val behaviorCollectionNodes = setOf("list", "table", "groupedList", "laz
 
 private val nativeInputObservationNodes = setOf("input", "numberInput", "slider", "toggle")
 
-internal fun behaviorUiObservation(node: JSONObject, state: JSONObject, kind: GenerationBehavior.Kind, native: Boolean = false): Any? {
+internal fun supportsBehaviorObservation(type: String, kind: GenerationBehavior.Kind, native: Boolean = false): Boolean = when (kind) {
+    GenerationBehavior.Kind.COLLECTION -> type in behaviorCollectionNodes
+    GenerationBehavior.Kind.VALUE -> type in behaviorScalarNodes || native && type in nativeInputObservationNodes
+    else -> false
+}
+
+internal fun behaviorUiObservation(node: JSONObject, state: JSONObject, kind: GenerationBehavior.Kind, native: Boolean = false,
+    rejected: ((BehaviorFailureRule, BehaviorValueShape?) -> Unit)? = null): Any? {
     val type = node.getString("type")
-    if (kind == GenerationBehavior.Kind.COLLECTION && type in behaviorCollectionNodes)
-        return ToolUiCatalog.records(node, state).length()
-    if (kind != GenerationBehavior.Kind.VALUE ||
-        (type !in behaviorScalarNodes && !(native && type in nativeInputObservationNodes))) return null
+    if (!supportsBehaviorObservation(type, kind, native)) {
+        rejected?.invoke(BehaviorFailureRule.OBSERVATION_KIND, null)
+        return null
+    }
+    if (kind == GenerationBehavior.Kind.COLLECTION) return ToolUiCatalog.records(node, state).length()
     val field = node.optString("bind")
     val value = if (field.isEmpty()) node.opt("text") else ToolUiCatalog.value(state, field)
     return when (value) {
         is String, is Number, is Boolean -> value
-        else -> null
+        else -> {
+            val shape = BehaviorValueShape.of(value)
+            rejected?.invoke(if (value == null) BehaviorFailureRule.SCALAR_MISSING else BehaviorFailureRule.SCALAR_SHAPE, shape)
+            null
+        }
     }
 }

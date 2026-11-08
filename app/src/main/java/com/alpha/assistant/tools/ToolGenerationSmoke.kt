@@ -21,8 +21,10 @@ internal class ToolSmokeFailure(val event: String,val path: String,cause: Except
     val correction get()="Smoke event: $event. Path: $path. Return valid state, UI, drawing, and subscriptions for this event."
 }
 
-internal class BehaviorCheckFailure(val step: Int?, val reason: String) : IllegalStateException() {
+internal class BehaviorCheckFailure(val step: Int?, val reason: String,
+    val bindingDiagnostic: BehaviorBindingDiagnostic? = null) : IllegalStateException() {
     val detail get() = if (step == null) reason else "step ${step + 1}: $reason"
+    val correction get() = bindingDiagnostic?.let { "$detail. Binding diagnostic: ${it.report()}" } ?: detail
 }
 
 /** No store, broker, launcher, permission, grant, scheduler, or native result producer is available here. */
@@ -115,41 +117,63 @@ internal class ToolGenerationSmoke(
         if(spec.isSealedStandalone) Branch({ _, _ -> error("A sealed standalone app has no executor.") },initialUi,seedState).block()
         else sandbox.disposable {execute -> Branch(execute,initialUi,seedState).block()}
 
-    suspend fun checkBehavior(scenario: GenerationBehavior.Scenario, bindings: Map<String, Binding>, preview: ToolPreview) {
+    suspend fun checkBehavior(scenario: GenerationBehavior.Scenario, bindings: Map<String, Binding>, preview: ToolPreview,
+        route: ToolGenerationRoute, nativeSlots: Set<String>) {
         val freshUi = if (initialState == spec.initialState) preview.ui else branch(seedState = spec.initialState) {
             event(JSONObject().put("type", "preview"), "$.ui").ui
         }
         branch(initialUi = freshUi, seedState = spec.initialState) {
             var stepIndex: Int? = null
             var sent = 0
-            fun fail(reason: String): Nothing = throw BehaviorCheckFailure(stepIndex, reason)
-            fun target(slot: String) = bindings[slot] ?: fail("missing binding")
+            fun fail(reason: String, rule: BehaviorFailureRule, slot: String? = null,
+                nodeKind: String? = null, valueShape: BehaviorValueShape? = null): Nothing {
+                val bindingKind = slot?.let {
+                    when (bindings[it]) {
+                        is Binding.Id -> "id"
+                        is Binding.Ui -> "ui"
+                        is Binding.Drawing -> "drawing"
+                        null -> "missing"
+                    }
+                }
+                throw BehaviorCheckFailure(stepIndex, reason, BehaviorBindingDiagnostic(route, rule, stepIndex?.plus(1),
+                    slot?.let { scenario.slots.keys.indexOf(it) + 1 }, scenario.slots[slot]?.kind,
+                    slot?.let { it in nativeSlots }, bindingKind, nodeKind, valueShape))
+            }
+            fun target(slot: String) = bindings[slot] ?: fail("missing binding", BehaviorFailureRule.BINDING_MISSING, slot)
             fun targetId(slot: String) = (target(slot) as Binding.Id).value
-            fun surface(id: String) = effectiveSurfaces[id] ?: fail("missing surface")
+            fun surface(id: String, slot: String) = effectiveSurfaces[id]
+                ?: fail("missing surface", BehaviorFailureRule.SURFACE_UNAVAILABLE, slot)
             suspend fun send(event: JSONObject) {
-                if (fenced) fail("native or record result required")
-                if (++sent > GenerationBehavior.MAX_EVENTS) fail("event limit reached")
+                if (fenced) fail("native or record result required", BehaviorFailureRule.EXTERNAL_RESULT_REQUIRED)
+                if (++sent > GenerationBehavior.MAX_EVENTS) fail("event limit reached", BehaviorFailureRule.EVENT_LIMIT)
                 val path = stepIndex?.let { "\$.behavior.scenario.steps[$it]" } ?: "\$.behavior"
                 this.event(event, path)
             }
             fun read(slot: String): Any {
-                if (fenced) fail("native or record result required")
+                if (fenced) fail("native or record result required", BehaviorFailureRule.EXTERNAL_RESULT_REQUIRED, slot)
                 val kind = scenario.slots.getValue(slot).kind
                 return when (val binding = target(slot)) {
                     is Binding.Ui -> {
                         val values = displayState()
-                        val node = visibleNode(JSONObject(ui), values, binding.path) ?: fail("visible output unavailable")
-                        behaviorUiObservation(node, values, kind, binding.native) ?: fail("compatible visible output unavailable")
+                        val node = visibleNode(JSONObject(ui), values, binding.path) { rule, type ->
+                            fail("visible output unavailable", rule, slot, type)
+                        }
+                        val type = node.getString("type")
+                        checkNotNull(behaviorUiObservation(node, values, kind, binding.native) { rule, shape ->
+                            fail("compatible visible output unavailable", rule, slot, type, shape)
+                        })
                     }
                     is Binding.Drawing -> {
                         val commands = surfaces.optJSONObject(binding.surface)?.optJSONArray("commands")
-                            ?: fail("drawing output unavailable")
-                        observeSurfaceGeometry(surface(binding.surface), commands, binding.path) ?: fail("drawing selection unavailable")
+                            ?: fail("drawing output unavailable", BehaviorFailureRule.DRAWING_UNAVAILABLE, slot)
+                        observeSurfaceGeometry(surface(binding.surface, slot), commands, binding.path)
+                            ?: fail("drawing selection unavailable", BehaviorFailureRule.DRAWING_UNAVAILABLE, slot)
                     }
-                    is Binding.Id -> fail("invalid observation binding")
+                    is Binding.Id -> fail("invalid observation binding", BehaviorFailureRule.BINDING_SHAPE, slot)
                 }
             }
-            fun numeric(value: Any?) = (value as? Number)?.toDouble() ?: fail("numeric output unavailable")
+            fun numeric(value: Any?, slot: String) = (value as? Number)?.toDouble()
+                ?: fail("numeric output unavailable", BehaviorFailureRule.SCALAR_SHAPE, slot, valueShape = BehaviorValueShape.of(value))
             val captures = mutableMapOf<String, Any>()
             send(JSONObject().put("type", "open"))
             for (surface in effectiveSurfaces.values) {
@@ -164,27 +188,33 @@ internal class ToolGenerationSmoke(
                         val root = JSONObject(ui)
                         val action = when (val binding = target(step.slot)) {
                             is Binding.Id -> binding.value
-                            is Binding.Ui -> visibleNode(root, displayState(), binding.path)?.optString("action")
-                                ?.takeIf(String::isNotEmpty) ?: fail("action binding path is unavailable")
-                            is Binding.Drawing -> fail("invalid action binding")
+                            is Binding.Ui -> {
+                                val node = visibleNode(root, displayState(), binding.path) { rule, type ->
+                                    fail("action binding path is unavailable", rule, step.slot, type)
+                                }
+                                node.optString("action").takeIf(String::isNotEmpty)
+                                    ?: fail("action binding path is unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE,
+                                        step.slot, node.getString("type"))
+                            }
+                            is Binding.Drawing -> fail("invalid action binding", BehaviorFailureRule.BINDING_SHAPE, step.slot)
                         }
                         val value = step.value.takeUnless { it == JSONObject.NULL }
                         val liveInput = ToolUiCatalog.action(root, action)?.let(ToolUiCatalog::isLiveInput) == true
                         val event = try {
                             controlEvent(root, JSONObject(state), action, value, liveInput)
-                        } catch (_: IllegalArgumentException) { fail("action or input unavailable") }
-                          catch (_: IllegalStateException) { fail("action or input unavailable") }
+                        } catch (_: IllegalArgumentException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot) }
+                          catch (_: IllegalStateException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot) }
                         send(event)
                     }
                     is Step.Surface -> {
-                        val surface = surface(targetId(step.slot))
+                        val surface = surface(targetId(step.slot), step.slot)
                         val event = when (step.event) {
                             "viewport" -> {
-                                if (surface.sizing != "viewport") fail("viewport event unavailable")
+                                if (surface.sizing != "viewport") fail("viewport event unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
                                 GraphicsContract.viewport(surface)
                             }
                             "pointer" -> {
-                                if (playback.value !in setOf("playing", "ready")) fail("pointer event unavailable")
+                                if (playback.value !in setOf("playing", "ready")) fail("pointer event unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
                                 GraphicsContract.event("pointer", x = checkNotNull(step.x)*surface.width,
                                     y = checkNotNull(step.y)*surface.height, phase = checkNotNull(step.phase), surfaceId = surface.id)
                             }
@@ -197,12 +227,12 @@ internal class ToolGenerationSmoke(
                         val id = targetId(step.slot)
                         val isFrame = scenario.slots.getValue(step.slot).kind == Kind.SURFACE
                         if (step.observe != null && (target(step.observe) as Binding.Drawing).surface != id)
-                            fail("frame and observation must use the same surface")
+                            fail("frame and observation must use the same surface", BehaviorFailureRule.BINDING_SHAPE, step.observe)
                         var previous = step.observe?.let { read(it) as SurfaceGeometry }
                         var changes = 0
                         repeat(step.count) {
                             if (playback.value != "playing" || (if (isFrame) id !in frames else id !in timers))
-                                fail("active subscription unavailable")
+                                fail("active subscription unavailable", BehaviorFailureRule.SUBSCRIPTION_UNAVAILABLE, step.slot)
                             send(if (isFrame) GraphicsContract.event("frame", dt = 16, surfaceId = id)
                                 else JSONObject().put("type", "timer").put("timerId", id))
                             step.observe?.let {
@@ -211,7 +241,7 @@ internal class ToolGenerationSmoke(
                                 previous = current
                             }
                         }
-                        if (changes < step.changes) fail("assertion failed, repeated geometry change required")
+                        if (changes < step.changes) fail("assertion failed, repeated geometry change required", BehaviorFailureRule.ASSERTION_FAILED, step.observe)
                     }
                     is Step.Capture -> captures[step.name] = read(step.slot)
                     is Step.Assert -> {
@@ -223,8 +253,8 @@ internal class ToolGenerationSmoke(
                         val passed = when (step.test) {
                             "equals", "unchanged" -> equal
                             "changed" -> !equal
-                            "greater" -> numeric(current) > numeric(expected)
-                            "less" -> numeric(current) < numeric(expected)
+                            "greater" -> numeric(current, step.slot) > numeric(expected, step.slot)
+                            "less" -> numeric(current, step.slot) < numeric(expected, step.slot)
                             else -> when (current) {
                                 is String -> current.isNotBlank()
                                 is SurfaceGeometry -> current.hasInk
@@ -232,7 +262,8 @@ internal class ToolGenerationSmoke(
                                 else -> false
                             }
                         }
-                        if (!passed) fail("assertion failed (${step.test})")
+                        if (!passed) fail("assertion failed (${step.test})", BehaviorFailureRule.ASSERTION_FAILED,
+                            step.slot, valueShape = BehaviorValueShape.of(current))
                     }
                 }
             }
@@ -240,26 +271,29 @@ internal class ToolGenerationSmoke(
 
     }
 
-    private fun visibleNode(root: JSONObject, state: JSONObject, path: List<Int>): JSONObject? {
+    private fun visibleNode(root: JSONObject, state: JSONObject, path: List<Int>,
+        unavailable: (BehaviorFailureRule, String?) -> Nothing): JSONObject {
         var node = root
+        fun hidden(): Nothing = unavailable(BehaviorFailureRule.TARGET_HIDDEN, node.getString("type"))
         for (index in path) {
-            if (!ToolUiCatalog.visible(node, state)) return null
+            if (!ToolUiCatalog.visible(node, state)) hidden()
             when (node.getString("type")) {
-                "transition" -> if (ToolUiCatalog.value(state, node.getString("bind")) != true) return null
-                "pager" -> if ((ToolUiCatalog.value(state, node.getString("bind")) as Number).toInt() != index) return null
+                "transition" -> if (ToolUiCatalog.value(state, node.getString("bind")) != true) hidden()
+                "pager" -> if ((ToolUiCatalog.value(state, node.getString("bind")) as Number).toInt() != index) hidden()
                 "transform" -> {
                     val pose = NativeLayerMath.target(node, state)
                     if (pose[7] == 0.0 || node.optBoolean("solid") && kotlin.math.cos(pose[0] * Math.PI / 180) *
-                        kotlin.math.cos(pose[1] * Math.PI / 180) < 0) return null
+                        kotlin.math.cos(pose[1] * Math.PI / 180) < 0) hidden()
                 }
                 "routeStack" -> {
                     val route = ToolUiCatalog.routeStack(node, state).last()
-                    if (node.getJSONArray("routes").optString(index) != route) return null
+                    if (node.getJSONArray("routes").optString(index) != route) hidden()
                 }
             }
-            node = node.optJSONArray("children")?.optJSONObject(index) ?: return null
+            node = node.optJSONArray("children")?.optJSONObject(index) ?: unavailable(BehaviorFailureRule.TARGET_MISSING, null)
         }
-        return node.takeIf { ToolUiCatalog.visible(it, state) }
+        if (!ToolUiCatalog.visible(node, state)) hidden()
+        return node
     }
 
     suspend fun run(): ToolPreview {

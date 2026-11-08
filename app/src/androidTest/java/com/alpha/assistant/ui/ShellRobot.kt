@@ -328,6 +328,8 @@ internal class ShellRobot(fixture: String) {
     fun scrollForward(requireBoundsChange: Boolean = true): Boolean =
         scroll(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD, requireBoundsChange)
 
+    fun scrollBackward(): Boolean = scroll(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+
     private fun scroll(action: Int, requireBoundsChange: Boolean = true): Boolean {
         fun containers(node: AccessibilityNodeInfo?, path: List<Int> = emptyList()): Sequence<List<Int>> = sequence {
             if (node == null || !node.isVisibleToUser) return@sequence

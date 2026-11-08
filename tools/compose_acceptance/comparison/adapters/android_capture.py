@@ -115,6 +115,9 @@ def capture(args):
             "Device identity or display configuration does not match the frozen values.")
     run_id = uuid.uuid4().hex
     payload = envelope(product, slot, case, args.plan_sha256, run_id, args.review_seconds)
+    verify_workflow = getattr(args, "verify_workflow", False)
+    if verify_workflow:
+        payload["verify_workflow"] = True
     if args.verify_tip:
         require(case["id"] == "bench:tip", "The tip interaction check requires the tip benchmark.")
         payload["verify_tip"] = True
@@ -151,7 +154,10 @@ def capture(args):
             manifest["failure"] = str(failure)
             raise
         process = spawn(command)
-        deadline = time.monotonic() + 300 + args.review_seconds
+        workflow_seconds = 0
+        if verify_workflow:
+            workflow_seconds = 420 if case["id"] == "extra:reference-points-ledger" else 180
+        deadline = time.monotonic() + 300 + args.review_seconds + workflow_seconds
         while process.poll() is None and time.monotonic() < deadline:
             report = read_report()
             phase = report.get("phase") if report else None
@@ -216,6 +222,7 @@ def main():
     live.add_argument("--output", type=Path, required=True)
     live.add_argument("--review-seconds", type=int, default=20)
     live.add_argument("--verify-tip", action="store_true", help="Verify the generated tip calculator on Android.")
+    live.add_argument("--verify-workflow", action="store_true", help="Run the supported frozen interaction checks on Android.")
     args = parser.parse_args()
     try:
         if args.command == "capture":
