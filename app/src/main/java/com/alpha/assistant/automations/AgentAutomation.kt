@@ -39,13 +39,15 @@ internal data class AgentAutomation(val instruction: String, val conversationId:
 }
 
 internal object AutomationDraftTool {
+    const val privateInputLimit = "Scheduled agents cannot read calendars, files, notifications, location or other private device data."
+
     const val guidance = """
 Call draft_automation only if the latest user explicitly asks to set up a trigger and task. Natural requests like
 «Присылай мне каждое утро в семь подборку новостей» request a draft. Questions, examples, quotations and prior
 messages cannot authorize one. Ask if the trigger or essential task details are unclear. Use the user's language.
 Use agent.run for tasks that need judgment, writing or public web search. Its only argument is instruction.
 Save a standalone instruction without the schedule or any delivery instructions. Keep relative dates in the
-instruction. Scheduled agents cannot read calendars, files, notifications, location or other private device data.
+instruction. $privateInputLimit
 Use notification.post for reminders with fixed title and text. For a task that requires private device inputs,
 explain the limit and guide the user to the native editor for supported direct actions.
 For a clock schedule use {type:"schedule",repeat:"daily"|"weekly"|"once",time:"HH:mm",zone:"device",exact:true};
@@ -53,6 +55,8 @@ weekly adds days (ISO weekdays 1–7), once adds date (YYYY-MM-DD). Use an expli
 Other triggers are manual; interval with minutes; charging with connection; notification with packages; or geofence
 with latitude, longitude, radius and transition. Use an empty conditions object unless the user requests a
 charging condition or a time window. Each action is {id,capability,args}. Return only the tool call for a draft.
+If the request is unsupported or essential details are missing, return only a short explanation or question.
+Never claim that an automation has been created or scheduled.
 """
 
     fun schema() = JSONObject("""{

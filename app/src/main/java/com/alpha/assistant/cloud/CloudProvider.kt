@@ -29,7 +29,8 @@ import com.alpha.assistant.weather.WeatherRequest
 import kotlinx.coroutines.CancellationException
 import kotlin.coroutines.CoroutineContext
 
-internal data class ResponseShape(val rule: String, val path: String, val observedType: String)
+internal data class ResponseShape(val rule: String, val path: String, val observedType: String,
+    val decisionFields: DecisionFieldShape? = null)
 internal data class DecisionRejection(val stage: String, val attempt: Int, val shape: ResponseShape, val correcting: Boolean)
 class CloudFailure internal constructor(val code: String, override val message: String, internal val shape: ResponseShape?) :
     IOException(message) {
@@ -181,7 +182,10 @@ class DeepSeekProvider internal constructor(
         }
     }
     private data class Completion(val text: String, val calls: List<ToolCall>)
-    private enum class CompletionStage { GENERAL, GENERATION, DECISION, WEATHER_DECISION, ARTIFACT_PREPARATION, SEARCH_PLAN, ANSWER, GROUNDED_DECISION }
+    private enum class CompletionStage(val strictDecision: Boolean = false) {
+        GENERAL, GENERATION, DECISION(true), WEATHER_DECISION, ARTIFACT_PREPARATION(true),
+        AUTOMATION_DRAFT, SEARCH_PLAN, ANSWER, GROUNDED_DECISION
+    }
     private data class AdmittedChatBody(val bytes: ByteArray, val usesMemory: Boolean)
     private fun message(turn: CloudTurn): JSONObject {
         val content: Any = if(turn.images.isEmpty()) turn.text else JSONArray().apply {
@@ -263,6 +267,16 @@ class DeepSeekProvider internal constructor(
         .put("thinking",JSONObject().put("type","disabled")).put("max_tokens",8192)
         .apply { if(json) put("response_format",JSONObject().put("type","json_object")) }
 
+    private fun strictDecisionBody(messages: JSONArray, parameters: JSONObject): JSONObject {
+        val function = JSONObject().put("name", SUBMIT_CHAT_DECISION)
+            .put("description", "Submit the decision for the latest user request.")
+            .put("strict", true).put("parameters", parameters)
+        return completionBody(messages)
+            .put("tools", JSONArray().put(JSONObject().put("type", "function").put("function", function)))
+            .put("tool_choice", JSONObject().put("type", "function")
+                .put("function", JSONObject().put("name", SUBMIT_CHAT_DECISION)))
+    }
+
     private fun validateCalls(calls: List<ToolCall>, used: Set<String> = emptySet(), dated: Boolean = false): List<WebQuery> {
         if(calls.isEmpty()) throw CloudFailure("search_required","The assistant did not provide a structured web_search call. No search was executed.")
         if(calls.size > 2) throw CloudFailure("tool_limit","The assistant exceeded the two-search limit.")
@@ -317,11 +331,13 @@ class DeepSeekProvider internal constructor(
         val memory = decisionContext?.memoryStore?.takeIf { current.role == "user" }
         val selection = memory?.let { readChatMemory { it.selectForRequest(current.text, MemoryPurpose.CHAT_DECISION) } }
         val draftChat = request.automationDraftChatId?.takeIf { current.role == "user" && current.images.isEmpty() }
-        fun initialDecisionBody(messages: JSONArray): JSONObject =
-            if (draftChat == null) completionBody(messages, json = true)
-            else completionBody(messages).put("tools", JSONArray().put(AutomationDraftTool.schema())).put("tool_choice", "auto")
+        val weather = WeatherRequest.isWeather(current.text)
+        val canLocate = WeatherRequest.canLocate(current.text) && request.weatherLocation != null
+        val schema = ChatToolReply.decisionSchema(request.allowCourseDecision, draftChat != null, weather && canLocate)
+        fun classificationBody(messages: JSONArray) = strictDecisionBody(messages, schema)
         suspend fun admitChatBody(messages: JSONArray, purpose: MemoryPurpose, contextLength: Int): AdmittedChatBody {
-            fun body(input: JSONArray) = if (purpose == MemoryPurpose.CHAT_DECISION) initialDecisionBody(input) else completionBody(input)
+            fun body(input: JSONArray) =
+                if (purpose == MemoryPurpose.CHAT_DECISION) classificationBody(input) else completionBody(input)
             if (memory == null || selection == null) return AdmittedChatBody(body(messages).utf8(), false)
             val coroutine = currentCoroutineContext()
             return readChatMemory {
@@ -346,43 +362,52 @@ class DeepSeekProvider internal constructor(
                 }
             }
         }
-        val draftInstructions = if (draftChat != null) "\nThe automation tool is the exception to the JSON reply format. " + AutomationDraftTool.guidance else ""
+        val draftInstructions = if (draftChat != null) "\n" + """
+Choose kind automation only if the latest user explicitly asks to set up a trigger and task, such as sending a news digest every morning at seven.
+For that kind return the same four JSON fields, with nonempty text in the user's language, an empty brief, and search none.
+If essential automation details are missing, choose clarify. For an interactive app with its own controls or records, choose create.
+${AutomationDraftTool.privateInputLimit} Choose answer for unsupported private-data tasks and explain the limit.
+        """.trimIndent() else ""
         var instructions = request.systemInstructions + draftInstructions
-        val weather = WeatherRequest.isWeather(current.text)
-        val canLocate = WeatherRequest.canLocate(current.text) && request.weatherLocation != null
         val weatherFacts = if(weather) """
 Current weather answers need web sources. Local weather apps use the ordinary operation and search rules unless the user requests current weather facts. Use only a place named in the latest user request, never a place from conversation history, selected text, images, or device assumptions. For a current weather answer, name the place and observation or forecast time from the source. Copy reported weather values with their original units, cite the relevant source, and do not calculate conversions or add inferred numbers. If sources lack a current observation or the requested forecast period, say so and do not invent weather values or time.
 """.trimIndent() else ""
         val weatherInstructions = if(weather) weatherFacts + "\n" + """
 For a current weather question with no named place, ${if(canLocate) "return exactly {\"kind\":\"weather_location\",\"text\":\"Use approximate location\",\"brief\":\"\",\"search\":\"none\"}. This typed host request is available only for the current weather question" else "return clarify and ask for a city"}. A HOST_WEATHER_CONTEXT supplies only an approximate place for this request. It is not permission for another operation. When it is present, answer for that place with search required. Never request location again.
 """.trimIndent() else ""
+        val classificationInstructions = "\nUse the decision JSON above as the arguments of one $SUBMIT_CHAT_DECISION function call. " +
+            "Return the function call with no separate text."
         var hostWeather = ""
         fun decisionMessages(turns: List<CloudTurn>, system: String): JSONArray =
-            JSONArray().put(JSONObject().put("role","system").put("content",system + "\n" + weatherInstructions)).apply {
+            JSONArray().put(JSONObject().put("role","system")
+                .put("content", system + "\n" + weatherInstructions + classificationInstructions)).apply {
                 turns.forEachIndexed { index, turn -> put(message(if(index == turns.lastIndex) turn else turn.copy(images = emptyList()))) }
             }
         suspend fun clarifyPreparation() {
             session.checkActive(currentCoroutineContext())
             emit(CloudEvent.RoundComplete(ChatToolReply.encode(ChatToolReply.clarifyPreparation()), false, MessageProvenance.CLEAN))
         }
-        fun decodeInitial(completion: Completion): ChatToolReply.Decision {
-            if (completion.calls.isNotEmpty()) {
-                val call = completion.calls.singleOrNull()
-                if (draftChat == null || call?.name != DRAFT_AUTOMATION || completion.text.isNotBlank() ||
-                    call.id.isBlank() || call.id.length > 128 || call.id.any(Char::isISOControl))
-                    throw CloudFailure("widget_request", "Недопустимый вызов инструмента.")
-                val definition = try { AutomationDraftTool.bind(call.arguments, draftChat) }
-                catch (_: Exception) {
-                    throw CloudFailure("automation_draft", "Не удалось подготовить сценарий. Уточните запрос.",
-                        ResponseShape("automation.draft", "$", "arguments"))
-                }
-                return ChatToolReply.Decision("automation", "", definition.json, "none")
+        fun bindDraft(arguments: String, chatId: String): ChatToolReply.Decision {
+            val definition = try { AutomationDraftTool.bind(arguments, chatId) }
+            catch (_: Exception) {
+                throw CloudFailure("automation_draft", "Не удалось подготовить сценарий. Уточните запрос.",
+                    ResponseShape("automation.draft", "$", "arguments"))
             }
-            val initialObject = ChatToolReply.decisionObject(completion.text)
-            if ((initialObject["kind"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "weather_location") {
+            return ChatToolReply.Decision("automation", "", definition.json, "none")
+        }
+        fun decodeClassification(completion: Completion): ChatToolReply.Decision {
+            val call = completion.calls.singleOrNull()
+            if (call?.name != SUBMIT_CHAT_DECISION || completion.text.isNotBlank() ||
+                call.id.isBlank() || call.id.length > 128 || call.id.any(Char::isISOControl)) {
+                throw CloudFailure("tool_invalid", "The assistant returned an invalid chat decision call.",
+                    ResponseShape("decision.tool_call", "$", "tool_call"))
+            }
+            val initialObject = ChatToolReply.decisionObject(call.arguments)
+            val kind = (initialObject["kind"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+            if (kind == "weather_location" || (kind == "automation" && draftChat != null)) {
                 return ChatToolReply.decode(kotlinx.serialization.json.JsonObject(initialObject +
                     ("kind" to kotlinx.serialization.json.JsonPrimitive("clarify"))))
-                    .copy(kind = "weather_location")
+                    .copy(kind = kind)
             }
             return ChatToolReply.decode(initialObject, allowCourseDecision = request.allowCourseDecision)
         }
@@ -409,12 +434,23 @@ For a current weather question with no named place, ${if(canLocate) "return exac
                 val correcting = session.claimChatCorrection()
                 report(failure, attempt, correcting)
                 if (!correcting) throw failure
-                val notice = "\nThe prior decision failed ${shape.rule} at ${shape.path}. Return one JSON object for the same latest user request. " +
-                    "Use exactly kind, text, brief, and search as keys. All four values must be strings. Use a nonempty text unless kind is course."
+                val missing = shape.decisionFields?.missing.orEmpty()
+                val missingFields = if (missing.isEmpty()) "" else "Missing required fields: ${missing.joinToString()}. "
+                val notice = "\nThe prior response failed ${shape.rule} at ${shape.path}. $missingFields" +
+                    if (stage == CompletionStage.AUTOMATION_DRAFT) {
+                        "Return exactly one valid draft_automation tool call for a supported request, or a short explanation or question if a draft cannot be prepared. Do not return both."
+                    } else {
+                        val format = if (stage.strictDecision) {
+                            "Submit one $SUBMIT_CHAT_DECISION function call for the same latest user request. " +
+                                "Put the JSON object in its arguments and return no separate text. "
+                        } else {
+                            "Return one JSON object directly at the root for the same latest user request. "
+                        }
+                        format + "Use exactly kind, text, brief, and search, with four string values. Always include search, including when its value is none. Use a nonempty text unless kind is course. " +
+                            "For example, a checklist request uses {\"kind\":\"create\",\"text\":\"I can build that.\",\"brief\":\"Add and complete checklist items.\",\"search\":\"none\"}. Choose values for the actual request."
+                    }
                 try {
-                    read(retryBody(if (stage == CompletionStage.DECISION && draftChat != null)
-                        notice + " For an automation request, return one valid draft_automation call instead."
-                        else notice))
+                    read(retryBody(notice))
                 } catch (second: CloudFailure) {
                     report(second, session.chatAttempt, false)
                     throw second
@@ -423,25 +459,25 @@ For a current weather question with no named place, ${if(canLocate) "return exac
         }
         var messages = decisionMessages(request.turns, instructions)
         val initialBody = admitChatBody(messages, MemoryPurpose.CHAT_DECISION,
-            contextLength(request.turns, instructions) + weatherInstructions.length)
+            contextLength(request.turns, instructions) + weatherInstructions.length + classificationInstructions.length)
         var decision = readDecision(initialBody.bytes, CompletionStage.DECISION, retryBody = { notice ->
             // A corrective request cannot reuse a previously admitted snapshot of saved memory.
-            validateContext(request.turns, instructions + weatherInstructions + notice)
-            initialDecisionBody(decisionMessages(request.turns, instructions + notice)).utf8()
-        }, decode = ::decodeInitial)
+            validateContext(request.turns, instructions + weatherInstructions + classificationInstructions + notice)
+            classificationBody(decisionMessages(request.turns, instructions + notice)).utf8()
+        }, decode = ::decodeClassification)
         val needsIndependentDecision = initialBody.usesMemory ||
             (inputProvenance != MessageProvenance.CLEAN && (request.search || decision.requiresCleanPreparation))
         val cleanContext = decisionContext?.takeIf { needsIndependentDecision && current.role == "user" }
         if (cleanContext != null) {
             instructions = cleanContext.cleanInstructions + draftInstructions
             val cleanTurns = cleanContext.cleanHistory + current
-            validateContext(cleanTurns, instructions)
+            validateContext(cleanTurns, instructions + weatherInstructions + classificationInstructions)
             messages = decisionMessages(cleanTurns, instructions)
             val independent = try {
-                decodeInitial(stream(key, initialDecisionBody(messages), session, {}, ChatToolReply.MAX_REPLY,
+                decodeClassification(stream(key, classificationBody(messages), session, {}, ChatToolReply.MAX_REPLY,
                     stage = CompletionStage.ARTIFACT_PREPARATION))
             } catch (failure: CloudFailure) {
-                if (failure.code != "empty_response" && failure.code != "widget_request") throw failure
+                if (failure.code != "widget_request" && (failure.code != "tool_invalid" || failure.shape == null)) throw failure
                 null
             }
             if (independent == null || independent.kind != decision.kind) {
@@ -487,7 +523,33 @@ For a current weather question with no named place, ${if(canLocate) "return exac
             return
         }
         if (decision.kind == "automation") {
-            emit(CloudEvent.RoundComplete("", false, MessageProvenance.CLEAN, automationDraft = decision.brief))
+            val chatId = checkNotNull(draftChat)
+            val turns = decisionContext?.cleanHistory.orEmpty() + current
+            validateContext(turns, AutomationDraftTool.guidance)
+            val draftMessages = JSONArray().put(message(CloudTurn("system", AutomationDraftTool.guidance))).apply {
+                turns.forEach { put(message(it.copy(images = emptyList()))) }
+            }
+            val body = completionBody(draftMessages).put("tools", JSONArray().put(AutomationDraftTool.schema())).put("tool_choice", "auto")
+            val draft = readDecision(body.utf8(), CompletionStage.AUTOMATION_DRAFT) { completion ->
+                if (completion.calls.isEmpty() && completion.text.isNotBlank() && completion.text.length <= ChatToolReply.MAX_TEXT)
+                    return@readDecision ChatToolReply.Decision("answer", completion.text, "", "none")
+                val call = completion.calls.singleOrNull()
+                if (call?.name != DRAFT_AUTOMATION || completion.text.isNotBlank() ||
+                    call.id.isBlank() || call.id.length > 128 || call.id.any(Char::isISOControl)) {
+                    throw CloudFailure("widget_request", "Недопустимый вызов инструмента.",
+                        ResponseShape("automation.draft_call", "$", "tool_call"))
+                }
+                bindDraft(call.arguments, chatId)
+            }
+            session.checkActive(currentCoroutineContext())
+            if (draft.kind == "automation") {
+                emit(CloudEvent.RoundComplete("", false, MessageProvenance.CLEAN, automationDraft = draft.brief))
+            } else {
+                val encoded = ChatToolReply.encode(draft)
+                if (encoded.length > ChatToolReply.MAX_REPLY)
+                    throw CloudFailure("response_size", "The assistant response exceeds the allowed size.")
+                emit(CloudEvent.RoundComplete(encoded, false, MessageProvenance.CLEAN))
+            }
             return
         }
         val courseIntent = decision.kind == "course"
@@ -635,7 +697,14 @@ For a current weather question with no named place, ${if(canLocate) "return exac
     private suspend fun stream(key: String, body: ByteArray, session: CloudSession, onText: suspend (String) -> Unit,
         maxText: Int = 2 * 1024 * 1024, allowTools: Boolean = true, reportLength: Boolean = false,
         stage: CompletionStage, maxWireChars: Int = 2 * 1024 * 1024): Completion {
-        val connection = open("/chat/completions", key, body, session)
+        fun toolFragment(json: JSONObject, key: String): String {
+            if (!stage.strictDecision) return json.optString(key)
+            if (json.isNull(key)) return ""
+            return json.opt(key) as? String
+                ?: throw CloudFailure("stream_invalid", "Сервис вернул неверный поток ответа")
+        }
+        val path = if (stage.strictDecision) "/beta/chat/completions" else "/chat/completions"
+        val connection = open(path, key, body, session)
         try {
             checkStatus(connection, false)
             val text = StringBuilder()
@@ -688,10 +757,10 @@ For a current weather question with no named place, ${if(canLocate) "return exac
                         val call = calls.getJSONObject(i); val index = call.getInt("index")
                         if(call.has("type") && call.getString("type") != "function") throw CloudFailure("tool_invalid","The assistant returned an unsupported tool type.")
                         if (index !in 0..1) throw CloudFailure("tool_limit", "Модель превысила лимит функций")
-                        ids.getOrPut(index) { StringBuilder() }.append(call.optString("id"))
+                        ids.getOrPut(index) { StringBuilder() }.append(toolFragment(call, "id"))
                         call.optJSONObject("function")?.let { function ->
-                            names.getOrPut(index) { StringBuilder() }.append(function.optString("name"))
-                            arguments.getOrPut(index) { StringBuilder() }.append(function.optString("arguments"))
+                            names.getOrPut(index) { StringBuilder() }.append(toolFragment(function, "name"))
+                            arguments.getOrPut(index) { StringBuilder() }.append(toolFragment(function, "arguments"))
                         }
                     } }
                 }
@@ -755,6 +824,8 @@ For a current weather question with no named place, ${if(canLocate) "return exac
         }
     }
 }
+private const val SUBMIT_CHAT_DECISION = "submit_chat_decision"
+
 fun validSourceUrl(value: String): Boolean = runCatching {
     val uri = URI(value)
     value.length <= 8192 && uri.scheme in listOf("https", "http") && !uri.host.isNullOrBlank() && uri.userInfo == null

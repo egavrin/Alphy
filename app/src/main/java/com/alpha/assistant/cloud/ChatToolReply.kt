@@ -11,12 +11,35 @@ import kotlinx.serialization.json.booleanOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 
+internal enum class DecisionKindShape { ORDINARY, COURSE, MISSING, NON_STRING, OTHER }
+
+/** Field names in this shape come from the host contract. Unexpected names and values stay private. */
+internal data class DecisionFieldShape(val missing: List<String>, val extraCount: Int,
+    val kind: DecisionKindShape, val wrappedDecision: Boolean)
+
 /** The host accepts one complete decision. Model prose cannot execute an operation. */
 object ChatToolReply {
     const val MAX_REPLY = 65536
     const val MAX_TEXT = 48000
     private const val MAX_BRIEF = 16384
     private const val MAX_COURSE_TOPIC = 256
+    private val decisionKeys = setOf("kind", "text", "brief", "search")
+    private val ordinaryKinds = setOf("answer", "create", "refine", "clarify")
+    private val searchPolicies = setOf("none", "optional", "required")
+
+    internal fun decisionSchema(allowCourse: Boolean, allowAutomation: Boolean, allowWeatherLocation: Boolean): JSONObject {
+        val kinds = ordinaryKinds.toMutableList()
+        if (allowCourse) kinds += "course"
+        if (allowAutomation) kinds += "automation"
+        if (allowWeatherLocation) kinds += "weather_location"
+        val properties = JSONObject()
+        decisionKeys.forEach { properties.put(it, JSONObject().put("type", "string")) }
+        properties.getJSONObject("kind").put("enum", JSONArray(kinds))
+        properties.getJSONObject("search").put("enum", JSONArray(searchPolicies))
+        return JSONObject().put("type", "object").put("properties", properties)
+            .put("required", JSONArray(decisionKeys)).put("additionalProperties", false)
+    }
+
     data class Decision(val kind: String, val text: String, val brief: String, val search: String) {
         val courseTopic: String? get() = brief.takeIf { kind == "course" }
         internal val requiresCleanPreparation: Boolean get() = kind != "answer" && kind != "clarify"
@@ -43,6 +66,7 @@ Mini-app titles in this chat: ${JSONArray(titles)}
 Automatic tools are ${if(available) "available" else "disabled because tool storage is unavailable; return an honest answer or clarification without promising creation"}.
 The host builds the app after a create or refine decision. Describe requested behavior in brief. Keep an explicit app interface language in the brief. The requested place, source language, and chat response language do not select the app interface language. Leave implementation, capability declarations, and UI schemas to generation. The host mediates supported foreground device effects through Android permissions and pickers. Generated JavaScript has no direct network, background timer, browser or arbitrary Android access. For a home screen widget, create the app first. The user then confirms placement with the Android launcher. Only local buttons and toggles run on the home screen. Other controls open in Alphy. Do not promise unsupported capabilities.
 Return kind, text, brief, and search as the only top-level keys, each with a string value.
+Always include search. Use "search":"none" for a local app that needs no web facts.
 """.trimIndent()
     }
 
@@ -83,7 +107,19 @@ Choose course for a direct request to learn through lessons or a course, such as
         decode(decisionObject(raw), allowCourseDecision)
 
     internal fun decode(json: JsonObject, allowCourseDecision: Boolean = false): Decision {
-        if (json.keys != setOf("kind","text","brief","search")) invalidDecision("decision.fields", "$", "object")
+        if (json.keys != decisionKeys) {
+            val value = json["kind"]
+            val kind = when {
+                value == null -> DecisionKindShape.MISSING
+                value !is JsonPrimitive || !value.isString -> DecisionKindShape.NON_STRING
+                value.content in ordinaryKinds -> DecisionKindShape.ORDINARY
+                value.content == "course" -> DecisionKindShape.COURSE
+                else -> DecisionKindShape.OTHER
+            }
+            val wrapped = (json.values.singleOrNull() as? JsonObject)?.keys == decisionKeys
+            invalidDecision("decision.fields", "$", "object",
+                DecisionFieldShape(decisionKeys.filterNot(json::containsKey), json.keys.count { it !in decisionKeys }, kind, wrapped))
+        }
         fun string(key: String): String {
             val value = json[key]
             return (value as? JsonPrimitive)?.takeIf { it.isString }?.content
@@ -93,7 +129,7 @@ Choose course for a direct request to learn through lessons or a course, such as
         val search = string("search")
         val text = string("text")
         val brief = string("brief")
-        if (search !in listOf("none","optional","required")) invalidDecision("decision.search", "$.search", "string")
+        if (search !in searchPolicies) invalidDecision("decision.search", "$.search", "string")
         if(kind == "course") {
             if (!allowCourseDecision) throw CloudFailure("widget_request","The assistant returned an invalid decision. Retry the request.")
             if (text.isNotEmpty() || search != "none") invalidDecision("decision.course_fields", "$", "object")
@@ -101,7 +137,7 @@ Choose course for a direct request to learn through lessons or a course, such as
                 brief.any(Char::isISOControl) || brief.none(Char::isLetterOrDigit))
                 invalidDecision("decision.course_topic", "$.brief", "string")
         } else {
-            if (kind !in listOf("answer","create","refine","clarify")) invalidDecision("decision.kind", "$.kind", "string")
+            if (kind !in ordinaryKinds) invalidDecision("decision.kind", "$.kind", "string")
             if (text.isBlank() || text.length > MAX_TEXT) invalidDecision("decision.text", "$.text", "string")
             if (brief.length > MAX_BRIEF || (if (kind == "create" || kind == "refine") brief.isBlank() else brief.isNotEmpty()))
                 invalidDecision("decision.brief", "$.brief", "string")
@@ -245,7 +281,7 @@ Choose course for a direct request to learn through lessons or a course, such as
             throw CloudFailure("response_size","The sourced decision and its verification limit exceed the reply size limit.")
         return result
     }
-    private fun invalidDecision(rule: String, path: String, observedType: String): Nothing =
+    private fun invalidDecision(rule: String, path: String, observedType: String, fields: DecisionFieldShape? = null): Nothing =
         throw CloudFailure("widget_request","The assistant returned an invalid decision. Retry the request.",
-            ResponseShape(rule, path, observedType))
+            ResponseShape(rule, path, observedType, fields))
 }

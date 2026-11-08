@@ -51,12 +51,18 @@ class CloudWorkflowTest {
     private fun OutputStream.answer(value: String) { headers(); event(textChunk(value)); event(end()); write("data: [DONE]\n\n".toByteArray()); flush() }
     private fun call(index: Int, id: String = "search-$index", name: String = "web_search", arguments: String = "{\"query\":\"Fact $index\"}") =
         JSONObject().put("index", index).put("id", id).put("function", JSONObject().put("name", name).put("arguments", arguments))
+    private fun toolDelta(vararg calls: JSONObject) =
+        JSONObject().put("choices", JSONArray().put(JSONObject().put("delta", JSONObject().put("tool_calls", JSONArray(calls.toList())))))
     private fun OutputStream.calls(vararg calls: JSONObject) {
         headers()
-        event(JSONObject().put("choices", JSONArray().put(JSONObject().put("delta", JSONObject().put("tool_calls", JSONArray(calls.toList()))))))
+        event(toolDelta(*calls))
         event(end("tool_calls")); write("data: [DONE]\n\n".toByteArray()); flush()
     }
+    private fun OutputStream.classification(arguments: String) =
+        calls(call(0, id = "decision-0", name = "submit_chat_decision", arguments = arguments))
+
     private data class Request(val path: String, val json: JSONObject) {
+        val classifying get() = path == "/beta/chat/completions"
         val searching get() = path == "/chat/completions" && json.opt("tool_choice") is JSONObject
         val answering get() = path == "/chat/completions" && !json.has("tools") && !json.has("response_format")
         val grounded get() = path == "/chat/completions" && json.getJSONArray("messages").getJSONObject(0).getString("content").contains("Ground the typed decision")
@@ -241,7 +247,7 @@ class CloudWorkflowTest {
         Server { request, output ->
             val response = mode.get()
             if (!request.answering && response != "decision") {
-                output.answer(decision("Fixture classification"))
+                output.classification(decision("Fixture classification"))
                 return@Server
             }
             output.headers()
@@ -292,6 +298,51 @@ class CloudWorkflowTest {
     private fun decision(text: String = "A sourced answer [1]", kind: String = "answer", search: String = "none", brief: String = "") =
         JSONObject().put("kind",kind).put("text",text).put("brief",brief).put("search",search).toString()
 
+    private fun Request.requireStrictDecision(): JSONObject {
+        assertEquals("/beta/chat/completions", path)
+        assertEquals("deepseek-flash", json.getString("model"))
+        assertTrue(json.getBoolean("stream"))
+        assertEquals("disabled", json.getJSONObject("thinking").getString("type"))
+        assertEquals(8192, json.getInt("max_tokens"))
+        assertFalse(json.has("response_format"))
+        val tools = json.getJSONArray("tools")
+        assertEquals(1, tools.length())
+        val tool = tools.getJSONObject(0)
+        assertEquals("function", tool.getString("type"))
+        val function = tool.getJSONObject("function")
+        assertEquals("submit_chat_decision", function.getString("name"))
+        assertTrue(function.getBoolean("strict"))
+        val choice = json.getJSONObject("tool_choice")
+        assertEquals("function", choice.getString("type"))
+        assertEquals("submit_chat_decision", choice.getJSONObject("function").getString("name"))
+        val parameters = function.getJSONObject("parameters")
+        assertEquals("object", parameters.getString("type"))
+        assertFalse(parameters.getBoolean("additionalProperties"))
+        val fields = setOf("kind", "text", "brief", "search")
+        val required = parameters.getJSONArray("required")
+        assertEquals(fields, (0 until required.length()).map(required::getString).toSet())
+        val properties = parameters.getJSONObject("properties")
+        assertEquals(fields, properties.keys().asSequence().toSet())
+        fields.forEach { assertEquals("string", properties.getJSONObject(it).getString("type")) }
+        val policies = properties.getJSONObject("search").getJSONArray("enum")
+        assertEquals(setOf("none", "optional", "required"), (0 until policies.length()).map(policies::getString).toSet())
+        return properties
+    }
+
+    private fun JSONObject.kinds(): Set<String> {
+        val kinds = getJSONObject("kind").getJSONArray("enum")
+        return (0 until kinds.length()).map(kinds::getString).toSet()
+    }
+
+    private fun Request.requireDraftTool() {
+        assertEquals("/chat/completions", path)
+        assertEquals("draft_automation", json.getJSONArray("tools").getJSONObject(0).getJSONObject("function").getString("name"))
+        assertEquals("auto", json.getString("tool_choice"))
+        assertFalse(json.has("response_format"))
+    }
+
+    private fun automationDecision() = decision("I can prepare that draft.", "automation")
+
     private fun cleanChatRequest(text: String, selectedText: String = "", weatherLocation: (suspend () -> com.alpha.assistant.weather.WeatherPlace)? = null): CloudRequest {
         val turn = CloudTurn("user", text)
         val instructions = ChatToolReply.instructions(emptyList())
@@ -314,7 +365,7 @@ class CloudWorkflowTest {
             assertFalse("PRIVATE_OLD" in content || "image_url" in content || "PRIVATE_OLD_TEXT" in content)
             assertFalse(request.searching)
             assertTrue("short follow-up" in messages.getJSONObject(0).getString("content"))
-            output.answer(if (request.answering) reply else decision("Это вопрос о предыдущем ответе."))
+            if (request.answering) output.answer(reply) else output.classification(decision("Это вопрос о предыдущем ответе."))
         }.use { server ->
             Fixture(DeepSeekProvider(server.url)) { shell ->
                 val pairs = (1..21).flatMap { index ->
@@ -374,14 +425,14 @@ class CloudWorkflowTest {
                     assertTrue(body.contains("UNCLASSIFIED_PAST_REPLY"))
                     assertFalse(body.contains("PRIVATE_PAST_REPLY"))
                     assertFalse(body.contains("AUTHORIZED_SELECTION"))
-                    output.answer(decision("PARAPHRASED_PRIVATE_REQUIREMENT", "create", "none", "PARAPHRASED_PRIVATE_REQUIREMENT"))
+                    output.classification(decision("PARAPHRASED_PRIVATE_REQUIREMENT", "create", "none", "PARAPHRASED_PRIVATE_REQUIREMENT"))
                 }
                 else -> {
                     assertTrue(excluded.none { it in body })
                     assertTrue(body.contains("CLEAN_CONTINUITY"))
                     assertTrue(body.contains(prompt))
                     assertFalse(body.contains("AUTHORIZED_SELECTION"))
-                    output.answer(decision("Продолжим.", "create", "required", "CLEAN_PREPARATION"))
+                    output.classification(decision("Продолжим.", "create", "required", "CLEAN_PREPARATION"))
                 }
             }
         }.use { server ->
@@ -435,14 +486,14 @@ class CloudWorkflowTest {
         val paraphrase = "PRIVATE_PROVISIONAL_TEXT"
         Server { request, output ->
             assertFalse(request.searching)
-            assertEquals("/chat/completions", request.path)
+            if (!request.answering) request.requireStrictDecision()
             val body = request.json.toString()
             assertFalse(body.contains(paraphrase))
             assertFalse(body.contains("UNRELATED_FACT"))
             when {
                 request.answering -> output.answer("Ответ о садоводстве")
-                body.contains("MATCHED_FACT_") -> output.answer(decision(paraphrase, search = "required"))
-                else -> output.answer(decision("Clean decision"))
+                body.contains("MATCHED_FACT_") -> output.classification(decision(paraphrase, search = "required"))
+                else -> output.classification(decision("Clean decision"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             val facts = (1..7).map { fixture.model.memoryStore.saveExplicitFact("садоводство MATCHED_FACT_$it") }
@@ -474,11 +525,11 @@ class CloudWorkflowTest {
             val cleanReceived = CountDownLatch(1)
             val resume = CountDownLatch(1)
             Server { request, output ->
-                if (request.json.toString().contains("STALE_MEMORY_MARKER")) output.answer(decision("Private provisional answer"))
+                if (request.json.toString().contains("STALE_MEMORY_MARKER")) output.classification(decision("Private provisional answer"))
                 else {
                     cleanReceived.countDown()
                     check(resume.await(10, TimeUnit.SECONDS))
-                    output.answer(decision("Clean decision"))
+                    output.classification(decision("Clean decision"))
                 }
             }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
                 val memory = fixture.model.memoryStore
@@ -512,13 +563,13 @@ class CloudWorkflowTest {
                         paused.countDown()
                         check(resume.await(10, TimeUnit.SECONDS))
                     }
-                    "MEMORY_FOR_ANSWER" in request.json.toString() -> output.answer(decision("Private provisional answer"))
+                    "MEMORY_FOR_ANSWER" in request.json.toString() -> output.classification(decision("Private provisional answer"))
                     else -> {
                         if (removeKey) {
                             paused.countDown()
                             check(resume.await(10, TimeUnit.SECONDS))
                         }
-                        runCatching { output.answer(decision("Clean decision")) }
+                        runCatching { output.classification(decision("Clean decision")) }
                     }
                 }
             }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
@@ -576,15 +627,15 @@ class CloudWorkflowTest {
         val instructions = ChatToolReply.instructions(emptyList())
         Server { request, output ->
             assertFalse(request.searching)
-            assertEquals("/chat/completions", request.path)
+            if (!request.answering) request.requireStrictDecision()
             val body = request.json.toString()
             when {
                 request.answering -> {
                     assertTrue(history.text in body)
                     output.answer("Ordinary answer")
                 }
-                history.text in body -> output.answer(decision("Unclassified provisional answer", search = "required"))
-                else -> output.answer(decision("Clean decision"))
+                history.text in body -> output.classification(decision("Unclassified provisional answer", search = "required"))
+                else -> output.classification(decision("Clean decision"))
             }
         }.use { server ->
             val provider = DeepSeekProvider(server.url)
@@ -629,16 +680,15 @@ class CloudWorkflowTest {
         val current = CloudTurn("user", "Create a counter")
         val cleanReply = AtomicReference(decision("A regular answer"))
         Server { request, output ->
-            assertEquals("/chat/completions", request.path)
-            assertFalse(request.json.has("tools"))
+            request.requireStrictDecision()
             assertFalse(request.json.toString().contains(paraphrase))
             val dirty = request.json.toString().contains(marker)
-            if (dirty) output.answer(decision(paraphrase, "create", "required", paraphrase))
+            if (dirty) output.classification(decision(paraphrase, "create", "required", paraphrase))
             else {
                 val messages = request.json.getJSONArray("messages")
                 assertEquals(current.text, messages.getJSONObject(messages.length() - 1).getString("content"))
                 assertFalse(request.json.toString().contains("UNAUTHORIZED_SYSTEM_CONTEXT"))
-                output.answer(cleanReply.get())
+                output.classification(cleanReply.get())
             }
         }.use { server ->
             val request = CloudRequest(
@@ -762,14 +812,16 @@ class CloudWorkflowTest {
         val course = decision("", "course", brief = "испанскому")
         val reply = AtomicReference(course)
         Server { request, output ->
-            assertEquals("/chat/completions", request.path)
-            assertFalse(request.json.has("tools"))
             if (request.grounded) {
+                assertFalse(request.json.has("tools"))
                 assertTrue(request.json.toString().contains("PRIVATE_SELECTED_TEXT"))
                 output.answer(course)
             } else {
+                val kinds = request.requireStrictDecision().kinds()
+                val system = request.json.getJSONArray("messages").getJSONObject(0).getString("content")
+                assertEquals(system.contains("clarify, course"), "course" in kinds)
                 assertFalse(request.json.toString().contains("PRIVATE_SELECTED_TEXT"))
-                output.answer(reply.get())
+                output.classification(reply.get())
             }
         }.use { server ->
             val provider = DeepSeekProvider(server.url)
@@ -807,10 +859,15 @@ class CloudWorkflowTest {
     @Test fun naturalLanguageAutomationUsesARealToolCallWithoutScheduling() {
         val draft = """{"name":"Новости","trigger":{"type":"schedule","repeat":"daily","time":"07:00","zone":"device","exact":true},
             "conditions":{},"actions":[{"id":"task","capability":"agent.run","args":{"instruction":"Подготовь новости за прошлый день."}}]}"""
+        val calls = java.util.concurrent.atomic.AtomicInteger()
         Server { request, output ->
-            assertEquals("draft_automation", request.json.getJSONArray("tools").getJSONObject(0).getJSONObject("function").getString("name"))
-            assertEquals("auto", request.json.getString("tool_choice"))
-            output.calls(call(0, id = "draft-1", name = "draft_automation", arguments = draft))
+            if (calls.getAndIncrement() == 0) {
+                assertEquals(setOf("answer", "create", "refine", "clarify", "automation", "course"), request.requireStrictDecision().kinds())
+                output.classification(automationDecision())
+            } else {
+                request.requireDraftTool()
+                output.calls(call(0, id = "draft-1", name = "draft_automation", arguments = draft))
+            }
         }.use { server ->
             Fixture(DeepSeekProvider(server.url)).use { fixture ->
                 fixture.submit("присылай мне каждое утро в семь утра подборку самых важных новостей за прошлый день")
@@ -824,7 +881,7 @@ class CloudWorkflowTest {
                 com.alpha.assistant.automations.AutomationStore(app, fixture.model.tools.automationDatabase).use { store ->
                     assertTrue(store.rules().isEmpty())
                 }
-                assertEquals(1, server.requests.size)
+                assertEquals(2, server.requests.size)
                 assertTrue(server.failures.toString(), server.failures.isEmpty())
             }
         }
@@ -918,8 +975,8 @@ class CloudWorkflowTest {
                     output.answer(if(mode == "downgrade") decision("I will create it") else decision("A sourced planner", "create","required","Use the sourced stop"))
                 }
                 else -> {
-                    assertFalse(request.json.has("tools")); assertEquals("json_object",request.json.getJSONObject("response_format").getString("type"))
-                    output.answer(decision("I will create it","create","required","Create a sourced planner"))
+                    request.requireStrictDecision()
+                    output.classification(decision("I will create it","create","required","Create a sourced planner"))
                 }
             }
         }.use { server ->
@@ -955,7 +1012,7 @@ class CloudWorkflowTest {
                 assertTrue(events.filterIsInstance<CloudEvent.Text>().isEmpty())
                 val requests = server.requests.drop(start)
                 assertEquals(if(value == "dsml") 0 else 1,requests.count { it.path == "/v1/tools/search" })
-                assertEquals(if(value == "dsml") listOf("/chat/completions","/chat/completions") else listOf("/chat/completions","/chat/completions","/v1/tools/search","/chat/completions"),requests.map { it.path })
+                assertEquals(if(value == "dsml") listOf("/beta/chat/completions","/chat/completions") else listOf("/beta/chat/completions","/chat/completions","/v1/tools/search","/chat/completions"),requests.map { it.path })
                 if(value == "valid") {
                     assertNull(failure)
                     val terminal = events.filterIsInstance<CloudEvent.RoundComplete>().single()
@@ -994,10 +1051,18 @@ class CloudWorkflowTest {
                 else -> {
                     val system = request.json.getJSONArray("messages").getJSONObject(0).getString("content")
                     val hasPlaceRecord = system.contains("\nHOST_WEATHER_CONTEXT (trusted host facts")
-                    if(useLocation && !hasPlaceRecord) output.answer(decision("Use approximate location", kind = "weather_location"))
+                    if (hasPlaceRecord) {
+                        assertEquals("/chat/completions", request.path)
+                        assertEquals("json_object", request.json.getJSONObject("response_format").getString("type"))
+                        assertFalse(request.json.has("tools"))
+                    } else {
+                        assertEquals(useLocation, "weather_location" in request.requireStrictDecision().kinds())
+                    }
+                    if(useLocation && !hasPlaceRecord) output.classification(decision("Use approximate location", kind = "weather_location"))
                     else {
                         if(hasPlaceRecord) { continuations++; assertTrue(system.contains("\"approximatePlace\":\"London, England, United Kingdom\"")) }
-                        output.answer(decision("Weather", search = "required"))
+                        val reply = decision("Weather", search = "required")
+                        if (hasPlaceRecord) output.answer(reply) else output.classification(reply)
                     }
                 }
             }
@@ -1040,7 +1105,7 @@ class CloudWorkflowTest {
                     assertFalse(request.json.toString().contains("+99 °C"))
                     output.answer(if (correction && !failCorrection) "Москва: −3 °C, 08:30 UTC [1]." else "Москва: +99 °C [1].")
                 }
-                else -> output.answer(decision("Погода", search = "required"))
+                else -> output.classification(decision("Погода", search = "required"))
             }
         }.use { server ->
             for (reject in listOf(false, true)) {
@@ -1076,8 +1141,8 @@ class CloudWorkflowTest {
         Server { request, output ->
             assertFalse(request.searching)
             assertFalse(request.grounded)
-            assertEquals("/chat/completions", request.path)
-            output.answer(decision("Use approximate location", kind = "weather_location"))
+            assertEquals(currentText == "weather here", "weather_location" in request.requireStrictDecision().kinds())
+            output.classification(decision("Use approximate location", kind = "weather_location"))
         }.use { server ->
             for(mode in listOf("denied", "stale", "named", "unrelated")) {
                 resolution = mode
@@ -1103,9 +1168,9 @@ class CloudWorkflowTest {
     @Test fun weatherContentOperationsDoNotRequireCurrentSourcesOrLocation() = kotlinx.coroutines.runBlocking {
         Server { request, output ->
             assertFalse(request.searching)
-            assertEquals("/chat/completions", request.path)
+            if (!request.answering) request.requireStrictDecision()
             val answer = "A local explanation or text transformation"
-            output.answer(if(request.answering) answer else decision(answer))
+            if (request.answering) output.answer(answer) else output.classification(decision(answer))
         }.use { server ->
             val cases = listOf(
                 "Explain the difference between weather and climate." to "",
@@ -1135,7 +1200,7 @@ class CloudWorkflowTest {
                 request.path == "/v1/tools/search" -> { output.headers(type = "application/json"); output.write("""{"results":[{"title":"Actual source","url":"https://example.com/real","summary":"The source states a duration of 30 minutes, distance 1200 meters, and temperature −3.5 °C."}]}""".toByteArray()) }
                 request.searching -> output.calls(call(0))
                 request.answering -> output.answer(result)
-                else -> output.answer(decision(search = "required"))
+                else -> output.classification(decision(search = "required"))
             }
         }.use { server ->
             listOf("A sourced statement [1](https://example.com/real)" to null,
@@ -1180,7 +1245,7 @@ class CloudWorkflowTest {
                 }
                 else -> {
                     assertFalse(request.json.toString().contains("SECRET_SELECTED"))
-                    output.answer(decision("A provisional answer",search = if(mode == "search") "required" else "none"))
+                    output.classification(decision("A provisional answer",search = if(mode == "search") "required" else "none"))
                 }
             }
         }.use { server ->
@@ -1190,7 +1255,7 @@ class CloudWorkflowTest {
                 if(value == "injected") { assertEquals("tool_invalid",(failure as? CloudFailure)?.code); assertTrue(events.filterIsInstance<CloudEvent.RoundComplete>().isEmpty()) }
                 else { assertNull(failure); assertTrue(ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text).text.contains("Selected dose 7")) }
                 assertEquals(if(value == "search") 1 else 0,server.requests.drop(start).count { it.path == "/v1/tools/search" })
-                assertTrue(server.requests.drop(start).count { it.path == "/chat/completions" } <= 3)
+                assertTrue(server.requests.drop(start).count { (it.classifying || it.path == "/chat/completions") } <= 3)
             }
             assertTrue(server.failures.toString(),server.failures.isEmpty())
         }
@@ -1198,7 +1263,10 @@ class CloudWorkflowTest {
 
     @Test fun typedDecisionRejectsInvalidJsonAndSearchDisabledRequirement() = kotlinx.coroutines.runBlocking {
         var answer = decision(search = "required")
-        Server { request, output -> assertFalse(request.json.has("tools")); output.answer(answer) }.use { server ->
+        Server { request, output ->
+            request.requireStrictDecision()
+            output.classification(answer)
+        }.use { server ->
             listOf(decision(search = "required") to "search_disabled", "A promise without JSON" to "widget_request",
                 "<｜｜DSML｜｜ calls>" to "widget_request", decision() + decision() to "widget_request",
                 decision().replace("\"kind\":", "\"kind\":\"answer\",\"kind\":") to "widget_request",
@@ -1221,11 +1289,15 @@ class CloudWorkflowTest {
         Server { request, output ->
             val messages = request.json.getJSONArray("messages")
             assertEquals(prompt, messages.getJSONObject(messages.length() - 1).getString("content"))
-            assertFalse(request.json.has("tools"))
+            val properties = request.requireStrictDecision()
+            assertEquals(setOf("answer", "create", "refine", "clarify"), properties.kinds())
             val reply = if (++calls == 1) """{"kind":"create","text":"Keep this private","brief":[]}"""
-                else decision("I can prepare that.", "create", "none", prompt)
+                else {
+                    assertTrue(messages.getJSONObject(0).getString("content").contains("Missing required fields: search."))
+                    decision("I can prepare that.", "create", "none", prompt)
+                }
             assertFalse(messages.toString().contains("Keep this private"))
-            output.answer(reply)
+            output.classification(reply)
         }.use { server ->
             val events = mutableListOf<CloudEvent>()
             val authorizations = mutableListOf<ChatToolReply.Decision>()
@@ -1241,13 +1313,93 @@ class CloudWorkflowTest {
             assertEquals(2,server.requests.size)
             assertEquals(2,session.chatAttempt)
             assertEquals(1,session.generationAttempt)
-            assertEquals(DecisionRejection("DECISION",1,ResponseShape("decision.fields","$","object"),true),
+            assertEquals(DecisionRejection("DECISION",1,ResponseShape("decision.fields","$","object",
+                DecisionFieldShape(listOf("search"), 0, DecisionKindShape.ORDINARY, false)),true),
                 rejections.single())
             assertTrue(server.failures.isEmpty())
         }
     }
 
-    @Test fun correctedChatDecisionStillLetsTheNativePlanCorrectOnce() {
+    @Test fun invalidStrictDecisionEnvelopesUseOnlyOneCorrection() = kotlinx.coroutines.runBlocking {
+        val prompt = "Build a tip calculator"
+        val result = decision("I can build it.", "create", "none", prompt)
+        for (mode in listOf("wrong-name", "multiple", "blank-id", "null-id", "long-id", "control-id", "text", "mixed", "invalid-enum")) {
+            val rejections = mutableListOf<DecisionRejection>()
+            val session = CloudSession().also { it.decisionRejectionObserver = { rejection -> rejections += rejection } }
+            Server { request, output ->
+                request.requireStrictDecision()
+                val valid = call(0, id = "decision-0", name = "submit_chat_decision", arguments = result)
+                when (mode) {
+                    "wrong-name" -> output.calls(call(0, name = "web_search", arguments = result))
+                    "multiple" -> output.calls(valid, call(1, id = "decision-1", name = "submit_chat_decision", arguments = result))
+                    "blank-id" -> output.calls(valid.put("id", " "))
+                    "null-id" -> output.calls(valid.put("id", JSONObject.NULL))
+                    "long-id" -> output.calls(valid.put("id", "d".repeat(129)))
+                    "control-id" -> output.calls(valid.put("id", "decision\n0"))
+                    "text" -> output.answer(result)
+                    "mixed" -> {
+                        output.headers()
+                        output.event(textChunk("Model prose"))
+                        output.event(toolDelta(valid))
+                        output.event(end("tool_calls"))
+                        output.write("data: [DONE]\n\n".toByteArray())
+                    }
+                    "invalid-enum" -> output.classification(result.replace("\"none\"", "\"sometimes\""))
+                    else -> error("Unknown fixture mode.")
+                }
+            }.use { server ->
+                val events = mutableListOf<CloudEvent>()
+                val request = cleanChatRequest(prompt).copy(validateOperation = { error("An invalid decision cannot authorize an operation.") })
+                val failure = runCatching { DeepSeekProvider(server.url).respond("alpha-test-only", request, session) { events += it } }.exceptionOrNull()
+                assertEquals(mode, if (mode == "invalid-enum") "widget_request" else "tool_invalid", (failure as? CloudFailure)?.code)
+                assertEquals(mode, listOf(true, false), rejections.map { it.correcting })
+                assertTrue(mode, rejections.all { it.stage == "DECISION" })
+                assertTrue(mode, events.isEmpty())
+                assertEquals(mode, 2, server.requests.size)
+                assertTrue(server.failures.toString(), server.failures.isEmpty())
+            }
+        }
+    }
+
+    @Test fun brokenStrictDecisionStreamsNeverRetry() = kotlinx.coroutines.runBlocking {
+        val prompt = "Build a tip calculator"
+        val result = decision("I can build it.", "create", "none", prompt)
+        for ((mode, code) in listOf(
+            "missing-done" to "incomplete", "wrong-finish" to "stream_invalid", "wrong-type" to "tool_invalid",
+            "numeric-id" to "stream_invalid", "object-arguments" to "stream_invalid",
+        )) {
+            val rejections = mutableListOf<DecisionRejection>()
+            val session = CloudSession().also { it.decisionRejectionObserver = { rejection -> rejections += rejection } }
+            Server { request, output ->
+                request.requireStrictDecision()
+                val valid = call(0, id = "decision-0", name = "submit_chat_decision", arguments = result)
+                when (mode) {
+                    "wrong-type" -> valid.put("type", "search")
+                    "numeric-id" -> valid.put("id", 42)
+                    "object-arguments" -> valid.getJSONObject("function").put("arguments", JSONObject(result))
+                }
+                output.headers()
+                output.event(toolDelta(valid))
+                output.event(end(if (mode == "wrong-finish") "stop" else "tool_calls"))
+                if (mode != "missing-done") output.write("data: [DONE]\n\n".toByteArray())
+            }.use { server ->
+                val events = mutableListOf<CloudEvent>()
+                val request = cleanChatRequest(prompt).copy(validateOperation = { error("An invalid decision cannot authorize an operation.") })
+                val failure = runCatching { DeepSeekProvider(server.url).respond("alpha-test-only", request, session) { events += it } }.exceptionOrNull()
+                assertEquals(mode, code, (failure as? CloudFailure)?.code)
+                assertEquals(mode, 1, server.requests.size)
+                assertTrue(mode, events.isEmpty())
+                assertTrue(mode, rejections.isEmpty())
+                assertTrue(server.failures.toString(), server.failures.isEmpty())
+            }
+        }
+    }
+
+    @Test fun correctedChatDecisionStillLetsTheNativePlanCorrectOnce() = recoverCounter(false)
+
+    @Test fun mistakenDraftRecoversToAnAppThroughStrictDecision() = recoverCounter(true)
+
+    private fun recoverCounter(malformedDraft: Boolean) {
         val prompt = "Build a counter that starts at zero and adds one."
         val plan = JSONObject("""{"title":"Counter","description":"Add one and reset","language":"en",
             "inputs":[],"constants":[],"questions":[],
@@ -1260,9 +1412,20 @@ class CloudWorkflowTest {
         val calls = java.util.concurrent.atomic.AtomicInteger()
         Server { request, output ->
             val messages = request.json.getJSONArray("messages")
-            val reply = when (calls.getAndIncrement()) {
+            val number = calls.getAndIncrement()
+            if (number <= 1) request.requireStrictDecision()
+            if (number == 0 && malformedDraft) {
+                output.calls(call(0, name = "draft_automation", arguments = """{"name":"PRIVATE_DRAFT"}"""))
+                return@Server
+            }
+            val reply = when (number) {
                 0 -> """{"kind":"create","text":"I can build that."}"""
-                1 -> decision("I can build that.", "create", "none", prompt)
+                1 -> {
+                    assertFalse(messages.toString().contains("PRIVATE_DRAFT"))
+                    assertEquals(prompt, messages.getJSONObject(messages.length() - 1).getString("content"))
+                    assertFalse(messages.getJSONObject(0).getString("content").contains("raw draft argument object"))
+                    decision("I can build that.", "create", "none", prompt)
+                }
                 2 -> rejected.toString()
                 3 -> {
                     assertTrue(messages.getJSONObject(0).getString("content").contains("constants referenced by a need"))
@@ -1271,7 +1434,7 @@ class CloudWorkflowTest {
                 4, 5 -> firstSelectorChoices(messages.getJSONObject(messages.length() - 1).getString("content"))
                 else -> error("Unexpected provider call after native generation.")
             }
-            output.answer(reply)
+            if (number <= 1) output.classification(reply) else output.answer(reply)
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             fixture.submit(prompt)
             fixture.idle()
@@ -1279,18 +1442,154 @@ class CloudWorkflowTest {
             assertNotNull("Generation ended with ${saved.errorCode}", saved.toolId)
             assertEquals(1, saved.toolRevision)
             assertEquals(saved.toolId, fixture.persisted().selected!!.messages.last().toolId)
+            main { assertNull(fixture.model.chatAutomationSetup) }
             assertEquals(6, server.requests.size)
             assertTrue(server.failures.toString(), server.failures.isEmpty())
         } }
     }
 
+    @Test fun malformedExplicitAutomationRecoversAValidatedDraftWithoutScheduling() {
+        val draft = """{"name":"Morning reminder","trigger":{"type":"schedule","repeat":"daily","time":"07:00","zone":"device","exact":true},
+            "conditions":{},"actions":[{"id":"notify","capability":"notification.post","args":{"title":"Morning","text":"Drink water"}}]}"""
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        Server { request, output ->
+            when (calls.getAndIncrement()) {
+                0 -> { request.requireStrictDecision(); output.classification(automationDecision()) }
+                1 -> { request.requireDraftTool(); output.calls(call(0, name = "draft_automation", arguments = "{}")) }
+                2 -> { request.requireDraftTool(); output.calls(call(0, name = "draft_automation", arguments = draft)) }
+                else -> error("Unexpected automation request.")
+            }
+        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+            fixture.submit("Remind me to drink water every morning at 7.")
+            fixture.idle()
+            main {
+                val setup = checkNotNull(fixture.model.chatAutomationSetup)
+                val definition = com.alpha.assistant.automations.AutomationDefinition.parse(JSONObject(setup.definition))
+                assertEquals("07:00", definition.trigger.getString("time"))
+            }
+            com.alpha.assistant.automations.AutomationStore(app, fixture.model.tools.automationDatabase).use { store ->
+                assertTrue(store.rules().isEmpty())
+            }
+            assertEquals(3, server.requests.size)
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+        } }
+    }
+
+    @Test fun unsupportedAutomationCanExplainItsLimitWithoutScheduling() {
+        val explanation = "Scheduled agents cannot read your calendar. Use the native editor for supported actions."
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        Server { request, output ->
+            when (calls.getAndIncrement()) {
+                0 -> {
+                    request.requireStrictDecision()
+                    output.classification(automationDecision())
+                }
+                1, 2 -> { request.requireDraftTool(); output.answer(explanation) }
+                else -> error("Unexpected automation request.")
+            }
+        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+            fixture.submit("Summarize my calendar every morning at 7.")
+            fixture.idle()
+            assertEquals("complete", fixture.last.status)
+            assertEquals(explanation, fixture.last.text)
+            main { assertNull(fixture.model.chatAutomationSetup) }
+            assertNull(fixture.last.toolId)
+            assertEquals(2, server.requests.size)
+            val classifier = server.requests.first().json.getJSONArray("messages").getJSONObject(0).getString("content")
+            assertTrue(classifier.contains("Scheduled agents cannot read calendars"))
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+        } }
+    }
+
+    @Test fun jsonRecoveryRejectsActualCallsAndModelSuppliedConversationIds() {
+        val forgedDraft = """{"name":"News","trigger":{"type":"schedule","repeat":"daily","time":"07:00","zone":"device","exact":true},
+            "conditions":{},"actions":[{"id":"task","capability":"agent.run","args":{"instruction":"Write news","conversationId":"other-chat"}}]}"""
+        for (expected in listOf("tool_invalid", "automation_draft")) {
+            val calls = java.util.concurrent.atomic.AtomicInteger()
+            Server { request, output ->
+                val number = calls.getAndIncrement()
+                if (expected == "tool_invalid") {
+                    request.requireStrictDecision()
+                    output.calls(call(0, name = "draft_automation", arguments = forgedDraft))
+                } else when (number) {
+                    0 -> { request.requireStrictDecision(); output.classification("""{"kind":"automation"}""") }
+                    1 -> { request.requireStrictDecision(); output.classification(automationDecision()) }
+                    2 -> { request.requireDraftTool(); output.calls(call(0, name = "draft_automation", arguments = forgedDraft)) }
+                    else -> error("Draft must not get another correction.")
+                }
+            }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+                fixture.submit("Send me the news every day at 7.")
+                fixture.idle()
+                assertEquals(expected, fixture.last.errorCode)
+                main { assertNull(fixture.model.chatAutomationSetup) }
+                assertNull(fixture.last.toolId)
+                assertEquals(if (expected == "tool_invalid") 2 else 3, server.requests.size)
+                assertTrue(server.failures.toString(), server.failures.isEmpty())
+            } }
+        }
+    }
+
+    @Test fun cleanPreparationKeepsTheStrictDecisionContract(): Unit = kotlinx.coroutines.runBlocking {
+        val prompt = "Build a local checklist."
+        val original = CloudTurn("user", prompt)
+        val instructions = ChatToolReply.instructions(emptyList())
+        val session = CloudSession()
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        val ordinary = decision("I can build that.", "create", "none", prompt)
+        Server { request, output ->
+            val messages = request.json.getJSONArray("messages")
+            val number = calls.getAndIncrement()
+            if (number < 3) assertFalse(messages.toString().contains("PRIVATE_SELECTION"))
+            if (number < 3) request.requireStrictDecision()
+            when (number) {
+                0 -> output.classification("""{"kind":"create"}""")
+                1, 2 -> {
+                    assertFalse(messages.getJSONObject(0).getString("content").contains("raw draft argument object"))
+                    if (number == 2) assertFalse(messages.toString().contains("PRIVATE_HISTORY"))
+                    output.classification(ordinary)
+                }
+                3 -> {
+                    assertTrue(request.grounded)
+                    assertTrue(messages.toString().contains("PRIVATE_SELECTION"))
+                    assertFalse(request.json.has("tools"))
+                    output.answer(ordinary)
+                }
+                else -> error("Unexpected decision request.")
+            }
+        }.use { server ->
+            val authorizations = mutableListOf<ChatToolReply.Decision>()
+            val events = mutableListOf<CloudEvent>()
+            val request = CloudRequest(listOf(CloudTurn("user", "PRIVATE_HISTORY"), original), false, instructions,
+                chatDecision = true, selectedText = "PRIVATE_SELECTION", validateOperation = { authorizations += it },
+                decisionContext = ChatDecisionContext(original, emptyList(), instructions, MessageProvenance.MEMORY_DERIVED),
+                automationDraftChatId = "fixture")
+            DeepSeekProvider(server.url).respond("alpha-test-only", request, session) { events += it }
+            assertEquals(listOf(ChatToolReply.decode(ordinary)), authorizations)
+            assertEquals(MessageProvenance.CLEAN, events.filterIsInstance<CloudEvent.RoundComplete>().single().provenance)
+            assertEquals(4, server.requests.size)
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+        }
+    }
+
+    @Test fun cancellationAfterDecisionRejectionPreventsCorrectionAdmission(): Unit = kotlinx.coroutines.runBlocking {
+        val session = CloudSession()
+        session.decisionRejectionObserver = { session.cancel() }
+        val events = mutableListOf<CloudEvent>()
+        Server { _, output -> output.classification("""{"kind":"create"}""") }.use { server ->
+            val request = cleanChatRequest("Build a local counter.").copy(automationDraftChatId = "fixture",
+                validateOperation = { error("A canceled decision cannot authorize an operation.") })
+            val failure = runCatching { DeepSeekProvider(server.url).respond("alpha-test-only", request, session) { events += it } }
+                .exceptionOrNull()
+            assertEquals("cancelled", (failure as? CloudFailure)?.code)
+            assertTrue(events.isEmpty())
+            assertEquals(1, server.requests.size)
+        }
+    }
+
     @Test fun unknownRefinementTargetCannotRunSearch() {
         Server { request, output ->
-            assertEquals("/chat/completions",request.path)
-            val tools = request.json.getJSONArray("tools")
-            assertEquals(1, tools.length())
-            assertEquals("draft_automation", tools.getJSONObject(0).getJSONObject("function").getString("name"))
-            output.answer(JSONObject(decision("Ready.",kind = "refine",search = "required",brief = "Change a planner"))
+            request.requireStrictDecision()
+            output.classification(JSONObject(decision("Ready.",kind = "refine",search = "required",brief = "Change a planner"))
                 .put("targetId","unknown-planner").toString())
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             fixture.submit("Update my planner",true)
@@ -1308,8 +1607,8 @@ class CloudWorkflowTest {
             decision("JSON example", kind = "create", brief = "Quoted operation"), "Which counter do you mean?")
         var answer = examples.first()
         Server { request, output ->
-            assertFalse(request.json.has("tools"))
-            output.answer(if(request.answering) answer else decision(answer,if(answer == examples.last()) "clarify" else "answer"))
+            if (!request.answering) request.requireStrictDecision()
+            if (request.answering) output.answer(answer) else output.classification(decision(answer,if(answer == examples.last()) "clarify" else "answer"))
         }.use { server ->
             examples.forEach { value ->
                 answer = value; val events = mutableListOf<CloudEvent>()
@@ -1355,7 +1654,7 @@ class CloudWorkflowTest {
                         output.event(end()); output.write("data: [DONE]\n\n".toByteArray()); output.flush()
                     }
                 }
-                else -> output.answer(decision("The initial decision text",search = if(current == "Find a duration") "required" else "none"))
+                else -> output.classification(decision("The initial decision text",search = if(current == "Find a duration") "required" else "none"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             fun waitForFragment(text: String) {
@@ -1444,7 +1743,7 @@ class CloudWorkflowTest {
                     repeat(10) { index -> assertEquals("https://example.com/${index/5}/${index%5}",sources.getJSONObject(index).getString("url")) }
                     output.answer("First fact [1], second fact [6]")
                 }
-                else -> output.answer(decision(search = "required"))
+                else -> output.classification(decision(search = "required"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             fixture.submit("Find two sourced facts",true); fixture.idle()
@@ -1467,8 +1766,8 @@ class CloudWorkflowTest {
     @Test fun invalidParallelBatchExecutesNoSearchAndCannotExceedTwoCalls() = kotlinx.coroutines.runBlocking {
         var batch = arrayOf(call(0),call(1,name = "delete_data"))
         Server { request, output ->
-            assertEquals("/chat/completions",request.path)
-            if(request.searching) output.calls(*batch) else output.answer(decision(search = "required"))
+            if (!request.searching) request.requireStrictDecision()
+            if(request.searching) output.calls(*batch) else output.classification(decision(search = "required"))
         }.use { server ->
             val batches = listOf(arrayOf(call(0),call(1,name = "delete_data")),arrayOf(call(0),call(1,id = "search-0")),
                 arrayOf(call(0,id = "")),arrayOf(call(0,arguments = "{\"query\":\"first\",\"query\":\"second\"}")),
@@ -1496,7 +1795,7 @@ class CloudWorkflowTest {
                     output.headers(if(mode == "quota") 402 else 200,"application/json"); output.write(body.toByteArray())
                 }
                 request.searching -> output.calls(call(0))
-                else -> output.answer(decision(search = "required"))
+                else -> output.classification(decision(search = "required"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             listOf("empty" to "search_empty","invalid" to "search_no_usable_results","malformed" to "search_response","quota" to "quota").forEach { (value,code) ->
@@ -1515,7 +1814,7 @@ class CloudWorkflowTest {
                 request.path == "/v1/tools/search" -> { output.headers(type = "application/json"); output.write("""{"results":[{"title":"Unsafe","url":"javascript:alert(1)"},null,{"title":"Verified","url":"https://example.com/verified","summary":"Fact"},{"title":"Credentials","url":"https://user:secret@example.com"}]}""".toByteArray()) }
                 request.searching -> output.calls(call(0))
                 request.answering -> output.answer(if(mode == "direct") "A local answer" else "Source fact [1]")
-                else -> output.answer(decision("A local answer",search = if(mode == "direct") "none" else "optional"))
+                else -> output.classification(decision("A local answer",search = if(mode == "direct") "none" else "optional"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             fixture.submit("Question about local counters",true); fixture.idle()
@@ -1531,7 +1830,7 @@ class CloudWorkflowTest {
             when {
                 request.path == "/v1/tools/search" -> { output.headers(if(request.json.getString("query") == "Fact 1") 503 else 200,"application/json"); output.write("""{"results":[{"title":"First","url":"https://example.com/first"}]}""".toByteArray()) }
                 request.searching -> output.calls(call(0),call(1))
-                else -> output.answer(decision(search = "required"))
+                else -> output.classification(decision(search = "required"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             fixture.submit("Find two sourced facts",true); fixture.idle()
@@ -1549,12 +1848,19 @@ class CloudWorkflowTest {
                 request.searching -> output.calls(call(0))
                 request.grounded -> {
                     val reply = decision("Ready.","create","required","A sourced planner")
-                    output.headers(); output.event(textChunk(reply.take(20))); entered.countDown(); release.await(10,TimeUnit.SECONDS)
-                    runCatching { output.event(textChunk(reply.drop(20))); output.event(end()); output.write("data: [DONE]\n\n".toByteArray()) }
+                    output.headers()
+                    output.event(toolDelta(call(0, id = "decision-0", name = "submit_chat_decision", arguments = reply.take(20))))
+                    entered.countDown()
+                    release.await(10,TimeUnit.SECONDS)
+                    runCatching {
+                        output.event(toolDelta(JSONObject().put("index", 0).put("function", JSONObject().put("arguments", reply.drop(20)))))
+                        output.event(end("tool_calls"))
+                        output.write("data: [DONE]\n\n".toByteArray())
+                    }
                 }
-                request.json.toString().contains("Create an itinerary") -> output.answer(decision("Ready.","create","required","A sourced planner"))
+                request.json.toString().contains("Create an itinerary") -> output.classification(decision("Ready.","create","required","A sourced planner"))
                 request.answering -> output.answer("New answer")
-                else -> output.answer(decision("New answer"))
+                else -> output.classification(decision("New answer"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             try {
@@ -1580,9 +1886,9 @@ class CloudWorkflowTest {
                 }
                 request.path == "/v1/tools/search" -> { output.headers(type = "application/json"); output.write("""{"results":[{"title":"First","url":"https://example.com/first"}]}""".toByteArray()) }
                 request.searching -> output.calls(call(0),call(1))
-                request.json.toString().contains("Two facts") -> output.answer(decision(search = "required"))
+                request.json.toString().contains("Two facts") -> output.classification(decision(search = "required"))
                 request.answering -> output.answer("New answer")
-                else -> output.answer(decision("New answer"))
+                else -> output.classification(decision("New answer"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             try {
@@ -1607,7 +1913,7 @@ class CloudWorkflowTest {
                 request.path == "/v1/tools/search" -> { output.headers(type = "application/json"); output.write("""{"results":[{"title":"Verified source","url":"https://example.com/alpha","summary":"Real fixture result"}]}""".toByteArray()) }
                 request.searching -> output.calls(call(0))
                 request.answering -> output.answer("Ответ по источнику [1]")
-                else -> output.answer(decision(search = "required"))
+                else -> output.classification(decision(search = "required"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             setText("Сообщение ассистенту","Найди Alpha test"); click("Отправить сообщение"); fixture.idle()
@@ -1634,7 +1940,7 @@ class CloudWorkflowTest {
     }
 
     @Test fun imageBytesAreOneTimeAndRevocationIsExplicit() {
-        Server { request, output -> output.answer(if(request.answering) "Изображение принято" else decision("Изображение принято")) }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        Server { request, output -> if (request.answering) output.answer("Изображение принято") else output.classification(decision("Изображение принято")) }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             val uri = app.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, "alpha-test.png"); put(MediaStore.Images.Media.MIME_TYPE, "image/png")
             })!!
@@ -1687,7 +1993,7 @@ class CloudWorkflowTest {
             when (text) {
                 "slow" -> { output.headers(); output.event(textChunk(decision("Сохранённая часть").take(20))); slowStarted.countDown(); releaseSlow.await(10, TimeUnit.SECONDS); runCatching { output.event(textChunk("Устаревший ответ")); output.event(end()); output.write("data: [DONE]\n\n".toByteArray()) } }
                 "reject" -> { output.headers(401, "application/json"); output.write("{}".toByteArray()) }
-                else -> output.answer(if(request.answering) "Новый ответ" else decision("Новый ответ"))
+                else -> if (request.answering) output.answer("Новый ответ") else output.classification(decision("Новый ответ"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             fixture.submit("slow"); assertTrue(slowStarted.await(10, TimeUnit.SECONDS))
@@ -1716,7 +2022,7 @@ class CloudWorkflowTest {
         var response = "empty"
         Server { request, output ->
             if(request.answering) { output.answer("Результаты не найдены"); return@Server }
-            if(request.path == "/chat/completions" && !request.searching) { output.answer(decision(search = "optional")); return@Server }
+            if(request.classifying) { output.classification(decision(search = "optional")); return@Server }
             if (request.path == "/v1/tools/search") {
                 if (response == "quota") { output.headers(402, "application/json"); output.write("{}".toByteArray()) }
                 else { output.headers(type = "application/json"); output.write("{\"results\":[]}".toByteArray()) }
