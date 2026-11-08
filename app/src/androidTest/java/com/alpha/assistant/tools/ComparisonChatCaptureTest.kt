@@ -535,6 +535,12 @@ class ComparisonChatCaptureTest {
                     put("selector_batch", event.selectorBatch).put("plan_path", event.planPath)
                     event.planShape?.let { put("plan_rule",it.rule).put("plan_observed_type",it.observedType) }
                 }
+                is ToolGenerationTraceEvent.Repair -> {
+                    put("kind", "repair").put("provider_stage", event.providerStage.name)
+                    put("repair_number", event.repairNumber).put("mode", event.mode.wire).put("result", event.result)
+                    put("response_bytes", event.responseBytes).put("candidate_bytes", event.candidateBytes)
+                    put("changes", event.changes).put("source_edits", event.sourceEdits).put("duration_ns", event.durationNanos)
+                }
                 is ToolGenerationTraceEvent.Finished -> {
                     put("kind", "finished").put("outcome", event.outcome.name).put("failure_code", event.failureCode)
                     put("parts_only", event.partsOnly)

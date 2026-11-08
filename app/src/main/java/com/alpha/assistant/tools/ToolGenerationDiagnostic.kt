@@ -8,6 +8,7 @@ import com.alpha.assistant.tools.generation.GenerationBehavior.Kind
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 import org.json.JSONObject
+import com.alpha.assistant.tools.generation.GenerationRepair
 import java.util.UUID
 
 internal enum class ToolGenerationStage(val id: String) {
@@ -105,6 +106,21 @@ internal sealed interface ToolGenerationTraceEvent {
         val behaviorBinding: BehaviorBindingDiagnostic? = null,
     ) : ToolGenerationTraceEvent
 
+    data class Repair(
+        override val operationId: UUID,
+        override val attempt: Int,
+        override val atNanos: Long,
+        val providerStage: CloudGenerationStage,
+        val repairNumber: Int,
+        val mode: GenerationRepair.Mode,
+        val result: String,
+        val responseBytes: Int?,
+        val candidateBytes: Int?,
+        val changes: Int?,
+        val sourceEdits: Int?,
+        val durationNanos: Long,
+    ) : ToolGenerationTraceEvent
+
     /** VALIDATED marks the candidate boundary. The caller owns publication. */
     data class Finished(
         override val operationId: UUID,
@@ -147,6 +163,13 @@ internal class ToolGenerationTrace(
                 safeSelectorBatch(diagnostic.selectorBatch), diagnostic.planPath?.takeIf(needsPlanPath::matches),
                 diagnostic.planShape?.takeIf { needsPlanPath.matches(it.path) }, diagnostic.behavior, diagnostic.safeSmoke(),
                 diagnostic.behaviorBinding) }
+        }
+
+        fun repair(attempt: Int, stage: CloudGenerationStage, repairNumber: Int, mode: GenerationRepair.Mode,
+            result: String, responseBytes: Int?, candidateBytes: Int?, changes: Int?, sourceEdits: Int?, durationNanos: Long) {
+            lastAttempt = maxOf(lastAttempt, attempt)
+            emit { ToolGenerationTraceEvent.Repair(operationId, attempt, it, stage, repairNumber, mode, result,
+                responseBytes, candidateBytes, changes, sourceEdits, durationNanos) }
         }
 
         fun finish(failure: Throwable? = null) {
@@ -232,7 +255,7 @@ internal data class ToolGenerationAttemptDiagnostic(
         private val codes=setOf("none","unknown","auth","cancelled","empty_response","incomplete","provider","quota","rate_limit",
             "response_length","response_size","stream_invalid","unavailable","tool_invalid","tool_limit","widget_generation","widget_response_size",
             "widget_request","widget_plan","widget_selector","widget_questions","widget_incomplete",
-            "widget_spec","widget_state","widget_behavior","widget_preview","widget_preview_state","widget_preview_effects",
+            "widget_spec","widget_state","widget_behavior","widget_patch","widget_preview","widget_preview_state","widget_preview_effects",
             "javascript_unavailable","javascript_busy","javascript_sandbox_died","javascript_closed","javascript_memory_limit",
             "javascript_script_error","javascript_timeout","javascript_invalid_request","javascript_invalid_result")
         private val schemaRules=setOf("schema.name","schema.nodes","schema.structuredNodes","schema.depth","schema.scalar",

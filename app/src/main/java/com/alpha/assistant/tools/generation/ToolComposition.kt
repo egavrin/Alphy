@@ -238,6 +238,7 @@ internal class ToolComposition private constructor(private val layout: Layout, p
         private val fillRequired = setOf("stateSchema", "initialState", "ui", "source", "capabilities")
         private val fillAuthority = setOf("capabilityResults", "collections", "surfaces", "presentation")
         private val fillOptional = setOf("title", "description") + fillAuthority
+        internal val generatedFillFields = fillRequired + fillOptional
 
         /** Create a standalone definition from restored host parts and revalidate the stored envelope. */
         fun sealStandalone(assembly: PartsAssembly, observer: ((ToolUiDiagnostic) -> Unit)? = null): ToolSpec {

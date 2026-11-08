@@ -161,7 +161,7 @@ class AutomaticToolWorkflowTest {
                             controls.getJSONObject(1).put("text", "Aggiungi una nuova operazione al conteggio")
                             JSONObject(spec()).put("source",
                                 "const ui=$italian; return {state:input.state,ui:ui};").toString()
-                        } else spec()
+                        } else writerFixturePatch(request.turns[1].text, spec())
                     }
                     else -> decision("Crea un contatore con un pulsante per aggiungere operazioni")
                 }
@@ -186,7 +186,8 @@ class AutomaticToolWorkflowTest {
                     CloudGenerationStage.PLAN -> """{"wholeScreen":true}""".withUncheckedBehavior()
                     CloudGenerationStage.COMPLETE -> {
                         completions += request
-                        JSONObject(spec("Trip expenses for Moscow")).apply {
+                        if (completions.size > 1) """{"fields":{"description":"Travel expense total ${completions.size}"}}"""
+                        else JSONObject(spec("Trip expenses for Moscow")).apply {
                             put("description", "Record your travel expenses and review the current total")
                             val controls = getJSONObject("ui").getJSONArray("children")
                             controls.getJSONObject(0).put("text", "Total expenses for this trip")
@@ -201,7 +202,7 @@ class AutomaticToolWorkflowTest {
         Fixture(provider).use { f ->
             f.send("Make an expense counter for Moscow. Use Russian for the interface.")
             f.idle()
-            assertEquals(2, completions.size)
+            assertEquals(4, completions.size)
             assertTrue(completions.all { it.systemInstructions.contains("Russian (ru)") })
             assertEquals("widget_language", f.last.errorCode)
             assertTrue(f.toolStore.tools().isEmpty())
@@ -367,7 +368,9 @@ class AutomaticToolWorkflowTest {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 emit(CloudEvent.Text(when (request.generationStage) {
                     CloudGenerationStage.PLAN -> """{"wholeScreen":true}""".withUncheckedBehavior()
-                    CloudGenerationStage.COMPLETE -> if (++completions == 1) large.toString() else spec()
+                    CloudGenerationStage.COMPLETE -> if (++completions == 1) large.toString() else
+                        JSONObject().put("sourceEdits", org.json.JSONArray().put(JSONObject()
+                            .put("search", prefix + "\"".repeat(32)).put("replace", prefix))).toString()
                     else -> decision()
                 }))
             }
@@ -536,6 +539,7 @@ class AutomaticToolWorkflowTest {
         val started = CountDownLatch(1); val release = CountDownLatch(1)
         var block = true
         var generated = spec()
+        var repairs = 0
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 if (request.replyWithFixturePlan(emit)) return
@@ -543,7 +547,12 @@ class AutomaticToolWorkflowTest {
                 else if(block) {
                     started.countDown(); release.await(10,TimeUnit.SECONDS)
                     withContext(NonCancellable) { emit(CloudEvent.Text(generated)) }
-                } else emit(CloudEvent.Text(generated))
+                } else {
+                    val output = if (request.turns.last().text.contains("Return one JSON patch object only")) {
+                        """{"fields":{"description":"Rejected repair ${++repairs}"}}"""
+                    } else generated
+                    emit(CloudEvent.Text(output))
+                }
             }
         }
         Fixture(provider).use { f ->
@@ -587,9 +596,13 @@ class AutomaticToolWorkflowTest {
                     }
                     CloudGenerationStage.COMPLETE -> {
                         candidates++
-                        val raw = JSONObject(spec()).put("behaviorBindings", JSONObject("""{"add":"add","count":[0]}"""))
-                        if (!repairWorks || candidates == 1) raw.put("source", "return {state:input.state};")
-                        emit(CloudEvent.Text(raw.toString()))
+                        val good = JSONObject(spec()).put("behaviorBindings", JSONObject("""{"add":"add","count":[0]}"""))
+                        val output = when {
+                            candidates == 1 -> good.put("source", "return {state:input.state};").toString()
+                            repairWorks -> writerFixturePatch(request.turns[1].text, good.toString())
+                            else -> """{"fields":{"description":"Rejected repair $candidates"}}"""
+                        }
+                        emit(CloudEvent.Text(output))
                     }
                     else -> error("Unexpected generation stage.")
                 }
@@ -598,7 +611,7 @@ class AutomaticToolWorkflowTest {
         Fixture(provider).use { f ->
             f.send(original); f.idle()
             assertEquals("widget_behavior", f.last.errorCode)
-            assertEquals(2, candidates)
+            assertEquals(4, candidates)
             assertTrue(f.toolStore.tools().isEmpty())
             assertTrue(f.toolStore.drafts().isEmpty())
             repairWorks = true
@@ -625,7 +638,12 @@ class AutomaticToolWorkflowTest {
                 if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
                 else {
                     requests += request; sessions += session
-                    emit(CloudEvent.Text(if(++attempts == 1) firstAnswer else spec()))
+                    val output = when {
+                        ++attempts == 1 -> firstAnswer
+                        firstAnswer.startsWith("{") -> writerFixturePatch(firstAnswer, spec())
+                        else -> spec()
+                    }
+                    emit(CloudEvent.Text(output))
                 }
             }
         }
@@ -651,9 +669,14 @@ class AutomaticToolWorkflowTest {
                 assertSame(sessions[0],sessions[1])
                 assertEquals(requests[0].turns.first(),requests[1].turns.first())
                 assertTrue(requests.all { !it.search && it.systemInstructions.isEmpty() })
-                assertEquals(listOf("user","assistant","user"),requests[1].turns.map { it.role })
-                assertEquals(answer,requests[1].turns[1].text)
-                assertTrue(requests[1].turns[1].images.isEmpty())
+                if (answer.startsWith("{")) {
+                    assertEquals(listOf("user","assistant","user"),requests[1].turns.map { it.role })
+                    assertEquals(answer,requests[1].turns[1].text)
+                    assertTrue(requests[1].turns[1].images.isEmpty())
+                } else {
+                    assertEquals(listOf("user", "user"), requests[1].turns.map { it.role })
+                    assertFalse(requests[1].turns.any { it.text.contains("REJECTED_OUTPUT_ONLY") })
+                }
                 assertFalse(requests[1].turns.last().text.contains("REJECTED_OUTPUT_ONLY"))
                 assertTrue(requests.all { it.jsonObject })
                 assertFalse(f.last.text.contains("REJECTED_OUTPUT_ONLY")); assertTrue(f.toolStore.drafts().isEmpty())
@@ -696,10 +719,18 @@ class AutomaticToolWorkflowTest {
                         assertTrue(feedback,feedback.contains("Validation category: $expectedCategory."))
                         assertFalse(feedback.contains("REJECTED_PRIVATE_VALUE"))
                         assertEquals(requests.first().turns.first(),request.turns.first())
-                        assertEquals(rejected,request.turns[1].text)
-                        assertEquals("assistant",request.turns[1].role)
+                        if (rejected.startsWith("{")) {
+                            assertEquals(rejected,request.turns[1].text)
+                            assertEquals("assistant",request.turns[1].role)
+                        }
                     }
-                    emit(CloudEvent.Text(if(attempt == 2 && repairSucceeds) spec() else rejected))
+                    val output = when {
+                        attempt == 1 -> rejected
+                        !rejected.startsWith("{") -> if (repairSucceeds) spec() else rejected
+                        repairSucceeds -> writerFixturePatch(rejected, spec())
+                        else -> """{"fields":{"description":"Rejected repair $attempt"}}"""
+                    }
+                    emit(CloudEvent.Text(output))
                 }
             }
         }
@@ -721,7 +752,7 @@ class AutomaticToolWorkflowTest {
                     rejected = candidate; expectedCategory = category; calls = 0; requests.clear()
                     val before = f.toolStore.tools()
                     f.send("Create a counter"); f.idle()
-                    assertEquals(category,2,calls)
+                    assertEquals(category, if (succeeds || !candidate.startsWith("{")) 2 else 4, calls)
                     if(succeeds) {
                         assertEquals("complete",f.last.status); assertEquals(before.size+1,f.toolStore.tools().size)
                         val accepted = f.toolStore.tool(f.last.toolId!!)!!
@@ -766,7 +797,9 @@ class AutomaticToolWorkflowTest {
                         assertEquals(boundedListSpec(200),request.turns[1].text)
                         assertEquals(requests.first().turns.first(),request.turns.first())
                     }
-                    emit(CloudEvent.Text(boundedListSpec(if(calls == 2 && repair) 100 else 200)))
+                    val output = if (calls == 2 && repair) writerFixturePatch(boundedListSpec(200), boundedListSpec(100))
+                        else boundedListSpec(200)
+                    emit(CloudEvent.Text(output))
                 }
             }
         }
@@ -805,7 +838,7 @@ class AutomaticToolWorkflowTest {
                         assertFalse(correction,correction.contains(privateNumber))
                         assertEquals(candidate,request.turns[1].text)
                     }
-                    emit(CloudEvent.Text(candidate))
+                    emit(CloudEvent.Text(if (calls == 1) candidate else """{"fields":{"description":"Repair $calls"}}"""))
                 }
             }
         }
@@ -817,7 +850,7 @@ class AutomaticToolWorkflowTest {
                     calls=0
                     candidate=JSONObject(spec()).put("stateSchema",JSONObject().put("count",node)).toString()
                     f.send("Create a counter"); f.idle()
-                    assertEquals(2,calls); assertEquals("error",f.last.status); assertEquals("widget_spec",f.last.errorCode)
+                    assertEquals(4,calls); assertEquals("error",f.last.status); assertEquals("widget_spec",f.last.errorCode)
                     assertTrue(f.last.error,f.last.error.contains("Observed: integer."))
                     assertFalse(f.last.error,f.last.error.contains(privateNumber))
                     val messageId=f.last.id

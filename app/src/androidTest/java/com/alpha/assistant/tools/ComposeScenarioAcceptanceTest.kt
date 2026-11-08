@@ -64,6 +64,8 @@ class ComposeScenarioAcceptanceTest {
         val routingStages=JSONArray()
         val attempts=JSONArray()
         var repaired=false
+        var planRequests=0
+        var selectorRequests=0
         val report=JSONObject().put("runId",runId).put("mode",mode).put("scenario",scenario).put("repetition",repetition)
             .put("revision",revision).put("sourceSha256",sourceHash).put("request",case.getString("request"))
             .put("generation","pending").put("responses",responses).put("routingStages",routingStages).put("generationAttempts",attempts).put("phase","generation")
@@ -108,12 +110,10 @@ class ComposeScenarioAcceptanceTest {
             override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
                 check(request.jsonObject && !request.search && request.turns.all {it.images.isEmpty()})
                 val stage=checkNotNull(request.generationStage)
-                if (stage != CloudGenerationStage.SELECTOR && request.turns.size > 1) {
-                    check(!repaired) {"Normal correction bound changed."}
-                    repaired=true
-                }
+                if (stage != CloudGenerationStage.SELECTOR && request.turns.size > 1) repaired=true
                 if (stage == CloudGenerationStage.PLAN || stage == CloudGenerationStage.SELECTOR) {
-                    check(routingStages.length() < 4) {"Normal routing bound changed."}
+                    if (stage == CloudGenerationStage.PLAN) check(++planRequests <= 4) {"PLAN repair limit exceeded."}
+                    else check(++selectorRequests <= 2) {"Selector request limit exceeded."}
                     routingStages.put(stage.name)
                     save()
                     if (liveProvider != null) liveProvider.respond(key,request,session,emit)
@@ -121,8 +121,8 @@ class ComposeScenarioAcceptanceTest {
                     return
                 }
                 check(stage == CloudGenerationStage.COMPLETE)
-                check(responses.length()<2) {"Normal correction bound changed."}
-                if(responses.length()>0) responses.getJSONObject(0).put("outcome","correctionRequested")
+                check(responses.length()<4) {"COMPLETE repair limit exceeded."}
+                if(responses.length()>0) responses.getJSONObject(responses.length()-1).put("outcome","correctionRequested")
                 val response=JSONObject().put("attempt",responses.length()+1).put("outcome","started").put("characters",0)
                 responses.put(response);save()
                 var characters=0

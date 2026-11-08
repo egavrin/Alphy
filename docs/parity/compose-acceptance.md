@@ -2,7 +2,7 @@
 
 The runner tests one exact original request per run.
 Each request needs three independent real generations. Each generation uses a fresh draft, artifact, session, and test database.
-The normal service permits at most one correction. The runner does not replace a failed generation with another run.
+New app generation permits up to three repairs each for PLAN and COMPLETE within the same run.
 Failed runs retain evidence and do not count as accepted artifacts.
 
 The canonical fixture contains the exact requests and observable interaction requirements.
@@ -116,7 +116,7 @@ The `generationAttempts` array records each terminal attempt with its number, ou
 Outcomes are `accepted`, `rejected`, `providerFailure`, `runtimeUnavailable`, or `canceled`.
 Stages are `availability`, `provider`, `definition`, `state`, or `smoke`.
 Attempt 1 also records an availability or saved-state failure before a provider request. Response counts distinguish those cases.
-Only rejected model output can request attempt 2. A generation never has more than one correction.
+Rejected model output can request a repair. PLAN and COMPLETE have separate limits of three repairs each.
 The observer cannot change validation, cancellation, or retries, including when the observer throws.
 
 UI failures retain the existing safe rule, structural path, expected type or limit, observed type, and count.

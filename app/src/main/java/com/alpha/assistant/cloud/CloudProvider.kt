@@ -23,6 +23,7 @@ import java.net.URI
 import java.net.URL
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import com.alpha.assistant.weather.WeatherPlace
 import com.alpha.assistant.weather.WeatherRequest
@@ -79,6 +80,8 @@ class CloudSession {
     private val canceled = AtomicBoolean(false)
     private val chatCorrectionUsed = AtomicBoolean(false)
     private val generationCorrectionUsed = AtomicBoolean(false)
+    private val planRepairs = AtomicInteger()
+    private val completeRepairs = AtomicInteger()
     private val connection = AtomicReference<HttpURLConnection?>(null)
     internal val chatAttempt: Int get() = if (chatCorrectionUsed.get()) 2 else 1
     internal val generationAttempt: Int get() = if (generationCorrectionUsed.get()) 2 else 1
@@ -86,6 +89,17 @@ class CloudSession {
     internal var decisionRejectionObserver: ((DecisionRejection) -> Unit)? = null
     internal fun claimChatCorrection(): Boolean = claimCorrection(chatCorrectionUsed)
     internal fun claimGenerationCorrection(): Boolean = claimCorrection(generationCorrectionUsed)
+
+    internal fun claimGenerationRepair(stage: CloudGenerationStage): Int? {
+        check()
+        val counter = when (stage) {
+            CloudGenerationStage.PLAN -> planRepairs
+            CloudGenerationStage.COMPLETE -> completeRepairs
+            else -> error("This stage does not use patch repair.")
+        }
+        val used = counter.getAndUpdate { minOf(it + 1, 3) }
+        return (used + 1).takeIf { it <= 3 }
+    }
 
     private fun claimCorrection(used: AtomicBoolean): Boolean {
         check()

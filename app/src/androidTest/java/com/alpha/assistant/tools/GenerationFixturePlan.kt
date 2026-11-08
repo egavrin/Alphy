@@ -42,3 +42,27 @@ internal suspend fun CloudRequest.replyWithFixturePlan(emit: suspend (CloudEvent
     emit(CloudEvent.Text(needs.withUncheckedBehavior()))
     return true
 }
+
+/** Adapt an existing full-output fixture to the writer repair wire format. */
+internal fun writerFixturePatch(before: String, after: String): String {
+    val original = JSONObject(before)
+    val corrected = JSONObject(after)
+    val fields = JSONObject()
+    val removals = JSONArray()
+    val patch = JSONObject()
+    original.keys().forEach { key -> if (!corrected.has(key)) removals.put(key) }
+    corrected.keys().forEach { key ->
+        val value = corrected.get(key)
+        if (original.opt(key)?.toString() != value.toString()) {
+            when (key) {
+                "behaviorBindings" -> patch.put(key, value)
+                "source" -> patch.put("sourceEdits", JSONArray().put(JSONObject()
+                    .put("search", original.getString(key)).put("replace", value)))
+                else -> fields.put(key, value)
+            }
+        }
+    }
+    if (fields.length() > 0) patch.put("fields", fields)
+    if (removals.length() > 0) patch.put("removeFields", removals)
+    return patch.toString()
+}

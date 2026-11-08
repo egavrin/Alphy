@@ -80,7 +80,17 @@ class HarnessBoundaries(unittest.TestCase):
         auth = record("provider", "providerFailure", "auth", "finish")
         too_long = record("provider", "providerFailure", "response_length", "correct")
         validated = record("smoke", "validated", "none", "finish")
+        plan_repairs = [{**invalid_plan, "attempt": number} for number in range(1, 4)]
+        writer = record("behavior", "rejected", "widget_behavior", "correct")
+        writer_repairs = [{**writer, "attempt": number} for number in range(4, 7)]
+        both_budgets = plan_repairs + [{**planned, "attempt": 4}] + writer_repairs
+        bad_patch = record("provider", "rejected", "widget_patch", "correct", attempt=4)
         cases = [
+            (True, both_budgets + [{**writer, "attempt": 7, "disposition": "finish"}], "CloudFailure"),
+            (True, plan_repairs + [{**planned, "attempt": 4}, bad_patch, {**auth, "attempt": 5}], "CloudFailure"),
+            (False, plan_repairs + [{**invalid_plan, "attempt": 4}, {**planned, "attempt": 5},
+                                    {**auth, "attempt": 5}], "CloudFailure"),
+            (False, both_budgets + [{**writer, "attempt": 7}, {**auth, "attempt": 8}], "CloudFailure"),
             (True, [record("plan", "providerFailure", "auth", "finish")], "CloudFailure"),
             (True, [invalid_plan, {**invalid_plan, "attempt": 2, "disposition": "finish"}], "CloudFailure"),
             (True, [invalid_plan, {**planned, "attempt": 2}, {**auth, "attempt": 2}], "CloudFailure"),

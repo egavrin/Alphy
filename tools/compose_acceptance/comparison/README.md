@@ -235,7 +235,7 @@ attestation. It does not remove labels from capture files.
 Run each planned slot with the exact request and fresh draft, session, and
 store. Use a distinct generation ID. Keep all terminal records, including
 failures. A correction stays within the same slot and generation ID.
-Each slot permits one initial attempt and at most one correction.
+For an Alphy slot, PLAN and COMPLETE each permit one initial request and up to three repairs.
 
 Append one JSON object per line to `records.jsonl`. Preserve the original log.
 The audit rejects a second record for the same slot.

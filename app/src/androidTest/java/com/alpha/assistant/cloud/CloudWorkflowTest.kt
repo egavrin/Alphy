@@ -1428,8 +1428,8 @@ class CloudWorkflowTest {
                 }
                 2 -> rejected.toString()
                 3 -> {
-                    assertTrue(messages.getJSONObject(0).getString("content").contains("constants referenced by a need"))
-                    plan.toString()
+                    assertTrue(messages.getJSONObject(messages.length() - 1).getString("content").contains("constants referenced by a need"))
+                    JSONObject().put("fields", JSONObject().put("constants", plan.getJSONArray("constants"))).toString()
                 }
                 4, 5 -> firstSelectorChoices(messages.getJSONObject(messages.length() - 1).getString("content"))
                 else -> error("Unexpected provider call after native generation.")

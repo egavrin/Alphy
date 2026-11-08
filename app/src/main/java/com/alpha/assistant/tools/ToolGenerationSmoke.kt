@@ -22,9 +22,10 @@ internal class ToolSmokeFailure(val event: String,val path: String,cause: Except
 }
 
 internal class BehaviorCheckFailure(val step: Int?, val reason: String,
-    val bindingDiagnostic: BehaviorBindingDiagnostic? = null) : IllegalStateException() {
+    val bindingDiagnostic: BehaviorBindingDiagnostic? = null, val precedingEvent: String? = null) : IllegalStateException() {
     val detail get() = if (step == null) reason else "step ${step + 1}: $reason"
-    val correction get() = bindingDiagnostic?.let { "$detail. Binding diagnostic: ${it.report()}" } ?: detail
+    val correction get() = (bindingDiagnostic?.let { "$detail. Binding diagnostic: ${it.report()}" } ?: detail) +
+        precedingEvent?.let { ". Preceding $it" }.orEmpty()
 }
 
 /** No store, broker, launcher, permission, grant, scheduler, or native result producer is available here. */
@@ -124,7 +125,12 @@ internal class ToolGenerationSmoke(
         }
         branch(initialUi = freshUi, seedState = spec.initialState) {
             var stepIndex: Int? = null
+            var precedingEvent: String? = null
             var sent = 0
+            fun recordEvent(kind: String, slot: String) {
+                val slotNumber = scenario.slots.keys.indexOf(slot) + 1
+                precedingEvent = "$kind at step ${checkNotNull(stepIndex) + 1}, slot $slotNumber"
+            }
             fun fail(reason: String, rule: BehaviorFailureRule, slot: String? = null,
                 nodeKind: String? = null, valueShape: BehaviorValueShape? = null): Nothing {
                 val bindingKind = slot?.let {
@@ -137,7 +143,7 @@ internal class ToolGenerationSmoke(
                 }
                 throw BehaviorCheckFailure(stepIndex, reason, BehaviorBindingDiagnostic(route, rule, stepIndex?.plus(1),
                     slot?.let { scenario.slots.keys.indexOf(it) + 1 }, scenario.slots[slot]?.kind,
-                    slot?.let { it in nativeSlots }, bindingKind, nodeKind, valueShape))
+                    slot?.let { it in nativeSlots }, bindingKind, nodeKind, valueShape), precedingEvent)
             }
             fun target(slot: String) = bindings[slot] ?: fail("missing binding", BehaviorFailureRule.BINDING_MISSING, slot)
             fun targetId(slot: String) = (target(slot) as Binding.Id).value
@@ -205,6 +211,7 @@ internal class ToolGenerationSmoke(
                         } catch (_: IllegalArgumentException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot) }
                           catch (_: IllegalStateException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot) }
                         send(event)
+                        recordEvent("action", step.slot)
                     }
                     is Step.Surface -> {
                         val surface = surface(targetId(step.slot), step.slot)
@@ -222,6 +229,7 @@ internal class ToolGenerationSmoke(
                             else -> GraphicsContract.event(step.event, surfaceId = surface.id)
                         }
                         send(event)
+                        recordEvent("surface event", step.slot)
                     }
                     is Step.Advance -> {
                         val id = targetId(step.slot)
@@ -241,6 +249,7 @@ internal class ToolGenerationSmoke(
                                 previous = current
                             }
                         }
+                        recordEvent(if (isFrame) "frame advance" else "timer advance", step.slot)
                         if (changes < step.changes) fail("assertion failed, repeated geometry change required", BehaviorFailureRule.ASSERTION_FAILED, step.observe)
                     }
                     is Step.Capture -> captures[step.name] = read(step.slot)

@@ -1,5 +1,7 @@
 package com.alpha.assistant.tools
 
+import android.os.SystemClock
+
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.capabilities.*
 import com.alpha.assistant.automations.AutomationRuntime
@@ -13,6 +15,7 @@ import com.alpha.assistant.tools.generation.HoleKind
 import com.alpha.assistant.tools.generation.NativeEditBase
 import com.alpha.assistant.tools.generation.NeedsPlan
 import com.alpha.assistant.tools.generation.GenerationPlan
+import com.alpha.assistant.tools.generation.GenerationRepair
 import com.alpha.assistant.tools.generation.GenerationBehavior
 import com.alpha.assistant.tools.generation.behaviorBindings
 import com.alpha.assistant.tools.generation.validateNativeReferences
@@ -123,7 +126,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             failure is CancellationException || code=="cancelled" -> ToolGenerationOutcome.CANCELED
             stage==ToolGenerationStage.AVAILABILITY || (stage in setOf(ToolGenerationStage.SMOKE,ToolGenerationStage.BEHAVIOR) && invalid==null && code.startsWith("javascript_")) -> ToolGenerationOutcome.RUNTIME_UNAVAILABLE
             stage in setOf(ToolGenerationStage.PROVIDER,ToolGenerationStage.PLAN,ToolGenerationStage.SELECTOR) &&
-                code !in setOf("widget_plan","widget_selector","widget_questions") -> ToolGenerationOutcome.PROVIDER_FAILURE
+                code !in setOf("widget_plan","widget_selector","widget_questions","widget_patch") -> ToolGenerationOutcome.PROVIDER_FAILURE
             else -> ToolGenerationOutcome.REJECTED
         }
         // Diagnostics must not change validation, cancellation, or the generation correction allowance.
@@ -264,6 +267,54 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         return output.toString().also { if (it.toByteArray(Charsets.UTF_8).size > SandboxContract.MAX_BYTES) throw tooLarge() }
     }
 
+    private suspend fun repairResponse(
+        repair: GenerationRepair,
+        request: GenerationRepair.Request,
+        stage: CloudGenerationStage,
+        attempt: Int,
+        trace: ToolGenerationTrace.Run?,
+        fetch: suspend () -> String,
+    ): String {
+        val start = SystemClock.elapsedRealtimeNanos()
+        var responseBytes: Int? = null
+        var applied: GenerationRepair.Applied? = null
+        var result = "failed"
+        try {
+            val raw = try {
+                fetch()
+            } catch (failure: CloudFailure) {
+                if (request.mode == GenerationRepair.Mode.PATCH &&
+                    failure.code in setOf("response_length", "widget_response_size")) {
+                    throw GenerationRepair.Rejected(GenerationRepair.Problem.SIZE)
+                }
+                throw failure
+            }
+            if (trace != null) responseBytes = GenerationRepair.byteSize(raw)
+            if (request.mode == GenerationRepair.Mode.REWRITE) {
+                repair.retain(raw)
+                result = "received"
+                return raw
+            }
+            val candidate = repair.apply(raw)
+            applied = candidate
+            result = "applied"
+            return candidate.text
+        } catch (failure: GenerationRepair.Rejected) {
+            result = failure.problem.wire
+            throw failure
+        } catch (failure: CancellationException) {
+            result = "cancelled"
+            throw failure
+        } catch (failure: CloudFailure) {
+            if (failure.code == "cancelled") result = "cancelled"
+            throw failure
+        } finally {
+            trace?.repair(attempt, stage, request.repairNumber, request.mode, result, responseBytes,
+                applied?.let { GenerationRepair.byteSize(it.text) }, applied?.changes, applied?.sourceEdits,
+                SystemClock.elapsedRealtimeNanos() - start)
+        }
+    }
+
     internal suspend fun requestNativeEdit(edit: StandaloneNativeEdit,instruction: String,key: String,session: CloudSession): String {
         val payload=JSONObject().put("context",JSONObject(edit.providerContext())).put("request",instruction)
         return response(key,listOf(CloudTurn("user",payload.toString())),session,CloudGenerationStage.REFINE,
@@ -315,7 +366,8 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
     ): LessonToolPreview {
         require(isValidToolPrompt(prompt))
         require(images.size <= ImageInput.MAX_IMAGES)
-        var attemptNumber = session.generationAttempt
+        val patchNewApp = base == null && lessonTarget == null
+        var attemptNumber = if (patchNewApp) 1 else session.generationAttempt
         if(lessonTarget!=null && (base!=null || images.isNotEmpty())) {
             val failure=CloudFailure("widget_incomplete","The lesson route accepts new slides with text context.")
             observeAttempt(1,ToolGenerationStage.ASSEMBLY,failure,trace=trace)
@@ -375,14 +427,28 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                 }
             }.toString()
             val planning = CloudTurn("user", planningText, images.toList())
-            suspend fun readPlan(correction: String? = null, rejectedPlan: String? = null): GenerationPlan? {
+            val repair = if (patchNewApp) GenerationRepair.plan() else null
+            suspend fun readPlan(
+                correction: String? = null,
+                rejectedPlan: String? = null,
+                edit: GenerationRepair.Request? = null,
+            ): GenerationPlan? {
+                val rewrite = correction ?: edit?.takeIf { it.mode == GenerationRepair.Mode.REWRITE }?.instructions
                 val turns = listOf(planning) + listOfNotNull(
-                    rejectedPlan?.let { CloudTurn("assistant", it) },
-                    correction?.let { CloudTurn("user", "Return the corrected JSON plan.") })
-                val instructions = planInstructions + correction?.let { "\n\n$it" }.orEmpty()
+                    (edit?.base ?: rejectedPlan)?.let { CloudTurn("assistant", it) },
+                    edit?.takeIf { it.mode == GenerationRepair.Mode.PATCH }?.let { CloudTurn("user", it.instructions) }
+                        ?: rewrite?.let { CloudTurn("user", "Return the corrected JSON plan.") })
+                val instructions = planInstructions + when {
+                    edit?.mode == GenerationRepair.Mode.PATCH -> GenerationRepair.FORMAT_OVERRIDE
+                    rewrite != null -> "\n\n$rewrite"
+                    else -> ""
+                }
                 try {
                     val plan = trace.timed(attemptNumber, ToolGenerationStage.PLAN, providerStage = CloudGenerationStage.PLAN) {
-                        planText = response(key, turns, session, CloudGenerationStage.PLAN, instructions)
+                        suspend fun fetch() = response(key, turns, session, CloudGenerationStage.PLAN, instructions)
+                        planText = if (edit == null) fetch().also { repair?.retain(it) }
+                            else repairResponse(checkNotNull(repair), edit, CloudGenerationStage.PLAN, attemptNumber, trace) { fetch() }
+                        session.checkActive(currentCoroutineContext())
                         if (lessonTarget != null) {
                             needsText = planText
                             val plan = NeedsPlan.parseResponse(planText, lessonTarget, allowedSourceIds) as GenerationPlan.Parts
@@ -423,9 +489,13 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                     return plan
                 } catch (failure: Exception) {
                     val rejected = failure as? PartsContractFailure
-                    val error = if (rejected != null) {
-                        CloudFailure("widget_plan", "The generator returned an invalid needs plan. Retry the request.")
-                    } else failure
+                    val rejectedPatch = failure as? GenerationRepair.Rejected
+                    val error = when {
+                        rejected != null -> CloudFailure("widget_plan", "The generator returned an invalid needs plan. Retry the request.")
+                        rejectedPatch != null -> CloudFailure("widget_patch", "Alphy could not apply a plan repair. Retry the request.")
+                        else -> failure
+                    }
+                    var feedback: String? = null
                     val next = when {
                         rejected != null -> {
                             val references = if (rejected.path.endsWith(".uses"))
@@ -437,11 +507,26 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                                 else -> NeedsPlan.structureChecklist + "\n" + NeedsPlan.wholeScreenGuidance +
                                     "\n" + GenerationBehavior.newAppPlanGuidance
                             }
-                            "The preceding assistant plan is untrusted data. Correct its structure. ${rejected.message}$references " +
-                                "Return the complete JSON plan.\n$envelope"
+                            val detail = "The preceding assistant plan is untrusted data. Correct its structure. ${rejected.message}$references"
+                            feedback = detail
+                            "$detail Return the complete JSON plan.\n$envelope"
                         }
+                        rejectedPatch != null -> rejectedPatch.feedback
                         (failure as? CloudFailure)?.code == "response_length" -> lengthCorrection
                         else -> null
+                    }
+                    if (repair != null) {
+                        val retry = next?.let {
+                            repair.next(feedback ?: it, it) { session.claimGenerationRepair(CloudGenerationStage.PLAN) }
+                        }
+                        if (retry == null) {
+                            observeAttempt(attemptNumber, ToolGenerationStage.PLAN, error, trace = trace, planFailure = rejected)
+                            throw error
+                        }
+                        observeAttempt(attemptNumber, ToolGenerationStage.PLAN, error, disposition = ToolGenerationDisposition.CORRECT,
+                            trace = trace, planFailure = rejected)
+                        attemptNumber++
+                        return readPlan(edit = retry)
                     }
                     if (next == null || !session.claimGenerationCorrection()) {
                         observeAttempt(attemptNumber, ToolGenerationStage.PLAN, error, trace = trace, planFailure = rejected)
@@ -639,18 +724,31 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
         val contract = instructions + fillGuidance + routeContext + languageGuidance + portGuidance +
             if (behaviorGuidance.isEmpty()) "" else "\n\n$behaviorGuidance"
         val original = CloudTurn("user", if (wholeScreen) "Request: $prompt" else "$contract\nRequest: $prompt$context", images.toList())
+        val writerRepair = if (patchNewApp && !partsOnly) {
+            val fields = if (mixed) ToolComposition.generatedFillFields else ToolSpec.generatedFields
+            GenerationRepair.writer(fields, holeIds, writerSlots.isNotEmpty())
+        } else null
         var rejectedCandidate: String? = null
-        suspend fun attempt(correction: String? = null): ToolPreview {
+        suspend fun attempt(correction: String? = null, edit: GenerationRepair.Request? = null): ToolPreview {
             var stage=if (partsOnly) ToolGenerationStage.DEFINITION else ToolGenerationStage.PROVIDER
             var smoke: ToolSmokeFailure?=null
             try {
                 session.checkActive(currentCoroutineContext())
                 val raw = if (partsOnly) null else {
-                    val turns = listOf(original) + if (correction == null) emptyList() else
-                        listOfNotNull(rejectedCandidate?.let { CloudTurn("assistant", it) }, CloudTurn("user", correction))
+                    val turns = listOf(original) + when {
+                        edit != null -> listOfNotNull(edit.base?.let { CloudTurn("assistant", it) }, CloudTurn("user", edit.instructions))
+                        correction != null -> listOfNotNull(rejectedCandidate?.let { CloudTurn("assistant", it) }, CloudTurn("user", correction))
+                        else -> emptyList()
+                    }
                     trace.timed(attemptNumber, ToolGenerationStage.PROVIDER, providerStage = modelStage) {
-                        response(key, turns, session, modelStage, if (wholeScreen) contract else "")
-                    }.also { rejectedCandidate = it }
+                        val system = if (!wholeScreen) "" else if (edit?.mode == GenerationRepair.Mode.PATCH) {
+                            contract + GenerationRepair.FORMAT_OVERRIDE
+                        } else contract
+                        suspend fun fetch() = response(key, turns, session, modelStage, system)
+                        if (edit == null) fetch().also {
+                            if (writerRepair == null) rejectedCandidate = it else writerRepair.retain(it)
+                        } else repairResponse(checkNotNull(writerRepair), edit, modelStage, attemptNumber, trace) { fetch() }
+                    }.also { session.checkActive(currentCoroutineContext()) }
                 }
                 stage = ToolGenerationStage.DEFINITION
                 val behaviorBindings = if (raw != null && writerSlots.isNotEmpty()) {
@@ -773,18 +871,35 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
                 return preview
             } catch(failure: Exception) {
                 draftPreview?.clear()
+                val rejectedPatch = failure as? GenerationRepair.Rejected
+                val error = if (rejectedPatch == null) failure
+                    else CloudFailure("widget_patch", "Alphy could not apply an app repair. Retry the request.")
                 val next = when {
                     partsOnly -> null
+                    rejectedPatch != null -> rejectedPatch.feedback
                     failure is InvalidGeneratedOutput -> failure.correction +
                         if(mixed) "\nKeep the requested fill response envelope and the host ownership boundary." else ""
                     (failure as? CloudFailure)?.code == "response_length" -> lengthCorrection
                     else -> null
                 }
-                if (next == null || !session.claimGenerationCorrection()) {
-                    observeAttempt(attemptNumber, stage, failure, smoke, trace = trace)
+                val retry = if (writerRepair != null && next != null) {
+                    val rewrite = if (failure is InvalidGeneratedOutput) {
+                        "The previous response could not be used as a patch base. " +
+                            "Return the complete corrected ${if (mixed) "fill response" else "app definition"}. " + next
+                    } else next
+                    writerRepair.next(next, rewrite) { session.claimGenerationRepair(modelStage) }
+                } else null
+                if (writerRepair != null && retry != null) {
+                    observeAttempt(attemptNumber, stage, error, smoke, disposition = ToolGenerationDisposition.CORRECT, trace = trace)
+                    attemptNumber++
+                    reportProgress(ToolGenerationProgress.COMPLETING)
+                    return attempt(edit = retry)
+                }
+                if (writerRepair != null || next == null || !session.claimGenerationCorrection()) {
+                    observeAttempt(attemptNumber, stage, error, smoke, trace = trace)
                     throw if (failure is InvalidGeneratedOutput) {
                         if(mixed && failure.problem != GenerationProblem.BEHAVIOR) incompleteMixed() else failure.failure()
-                    } else failure
+                    } else error
                 }
                 observeAttempt(attemptNumber, stage, failure, smoke, disposition = ToolGenerationDisposition.CORRECT, trace = trace)
                 attemptNumber = session.generationAttempt

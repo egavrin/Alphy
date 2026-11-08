@@ -163,14 +163,17 @@ data class ToolSpec private constructor(val json: String, val title: String, val
         /** Parse host-created artifacts from app-owned storage or a host builder. */
         internal fun parsePersisted(raw: String,observer: ((ToolUiDiagnostic)->Unit)? = null): ToolSpec = parse(raw,observer,true)
 
+        private val requiredGeneratedFields = setOf("formatVersion", "title", "description", "capabilities", "stateSchema", "initialState", "ui", "source")
+        private val optionalGeneratedFields = setOf("capabilityResults", "collections", "surfaces", "presentation")
+        internal val generatedFields = requiredGeneratedFields + optionalGeneratedFields
+
         private fun parse(raw: String,observer: ((ToolUiDiagnostic)->Unit)?,persisted: Boolean): ToolSpec {
             val j = validateTool(ToolValidationCategory.JSON) { SandboxContract.objectFrom(raw) }
             validateTool(ToolValidationCategory.FIELDS) {
-                val required = setOf("formatVersion", "title", "description", "capabilities", "stateSchema", "initialState", "ui", "source")
                 val fields = j.keys().asSequence().toSet()
-                val optional = setOf("capabilityResults","collections","surfaces","presentation") +
+                val optional = optionalGeneratedFields +
                     (if (persisted) setOf("composition",NativePresentation.FIELD,APP_LANGUAGE_FIELD) else emptySet())
-                require(fields.containsAll(required) && fields.all { it in required || it in optional })
+                require(fields.containsAll(requiredGeneratedFields) && fields.all { it in requiredGeneratedFields || it in optional })
                 require(!j.has("capabilityResults") || j.get("capabilityResults") is Boolean) { "Неверные поля инструмента" }
             }
             validateTool(ToolValidationCategory.VERSION) { require(j.get("formatVersion") is Int && j.getInt("formatVersion") == 3) }

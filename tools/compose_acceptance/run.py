@@ -334,7 +334,7 @@ def verify(directory):
 
 def validate_failed_generation(attempts, failure_type):
     failure_outcomes = {"rejected", "providerFailure", "runtimeUnavailable", "canceled"}
-    candidate_stages = {"provider", "definition", "state", "smoke"}
+    candidate_stages = {"provider", "definition", "state", "smoke", "behavior"}
     if not isinstance(attempts, list) or not attempts or any(
         not isinstance(row, dict) or type(row.get("attempt")) is not int or any(
             not isinstance(row.get(key), str) or not row[key]
@@ -356,6 +356,8 @@ def validate_failed_generation(attempts, failure_type):
         return
 
     number = 1
+    plan_repairs = 0
+    writer_repairs = 0
     phase = "plan"
     next_batch = "sections"
     parts_completed = False
@@ -373,15 +375,19 @@ def validate_failed_generation(attempts, failure_type):
         if stage == "availability":
             valid = valid and index == 0 and disposition == "finish" and outcome in ("runtimeUnavailable", "canceled")
         elif stage == "plan":
-            correctable = (outcome, code) in (("rejected", "widget_plan"), ("providerFailure", "response_length"))
+            correctable = (outcome, code) in (
+                ("rejected", "widget_plan"), ("rejected", "widget_patch"), ("providerFailure", "response_length")
+            )
             valid = valid and phase == "plan" and (
                 (outcome == "completed" and disposition == "continue")
-                or (correctable and number == 1 and disposition == "correct")
+                or (correctable and plan_repairs < 3 and disposition == "correct")
                 or (disposition == "finish" and (outcome in ("providerFailure", "canceled") or correctable)
-                    and (not correctable or number == 2))
+                    and (not correctable or plan_repairs > 0))
             )
             if disposition == "continue":
                 phase = "selector"
+            elif disposition == "correct":
+                plan_repairs += 1
         elif stage == "selector":
             valid = valid and phase == "selector"
             if batch is not None:
@@ -408,13 +414,17 @@ def validate_failed_generation(attempts, failure_type):
             valid = valid and phase in ("selector", "candidate") and (not transport_failed or fallback)
             phase = "candidate"
             if disposition == "correct":
-                valid = valid and number == 1 and (
+                valid = valid and writer_repairs < 3 and (
                     (stage != "provider" and outcome == "rejected")
-                    or (stage == "provider" and (outcome, code) == ("providerFailure", "response_length"))
+                    or (stage == "provider" and (outcome, code) in (
+                        ("providerFailure", "response_length"), ("rejected", "widget_patch")
+                    ))
                 )
+                writer_repairs += 1
             elif outcome == "validated":
                 # Candidate validation can finish before preview or artifact publication fails.
-                valid = valid and disposition == "finish" and stage == "smoke" and isinstance(failure_type, str) and bool(failure_type)
+                valid = (valid and disposition == "finish" and stage in {"smoke", "behavior"}
+                         and isinstance(failure_type, str) and bool(failure_type))
             else:
                 valid = valid and disposition == "finish" and outcome in failure_outcomes
         else:
@@ -631,7 +641,7 @@ def main():
     execute = commands.add_parser("run")
     execute.add_argument("--scenario", type=int, choices=range(1, 7), required=True)
     execute.add_argument("--repetition", type=int, choices=range(1, 4), required=True)
-    execute.add_argument("--live", action="store_true", help="Authorize one real normal generation, with at most one correction.")
+    execute.add_argument("--live", action="store_true", help="Authorize one real generation with up to three PLAN and three COMPLETE repairs.")
     execute.add_argument("--credential-check", action="store_true", help="Transfer a synthetic sentinel without a provider call or artifact generation.")
     execute.add_argument("--seconds", type=int, choices=range(1, 181), default=30)
     execute.add_argument("--adb", default=ADB)
