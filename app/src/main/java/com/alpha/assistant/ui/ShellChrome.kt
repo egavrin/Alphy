@@ -167,8 +167,8 @@ internal fun drawerSelectionMark(dark: Boolean): Color = if (dark) Color(0xFFFFA
     BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
         val fontScale = LocalDensity.current.fontScale
         val separateRows = maxWidth <= 280.dp && fontScale >= 1.8f
-        val showProfile = maxWidth > 260.dp && fontScale < 1.3f
-        val stackIcons = !separateRows && !showProfile
+        val stackIcons = !separateRows && (maxWidth <= 260.dp || fontScale >= 1.3f)
+        val showProfile = maxWidth >= 320.dp && !stackIcons
         @Composable fun Actions(action: Modifier) {
             Button(newChat, action, shape = shape, contentPadding = padding) {
                 DrawerActionContent(stackIcons, icon = { AlphaIcon(Glyph.NewChat, color = LocalContentColor.current) }) {
@@ -177,15 +177,17 @@ internal fun drawerSelectionMark(dark: Boolean): Color = if (dark) Color(0xFFFFA
             }
             OutlinedButton(settings, action.semantics { contentDescription = settingsLabel }, shape = shape, contentPadding = padding) {
                 DrawerActionContent(stackIcons, icon = {
-                    Box(
-                        Modifier.size(if (showProfile) 28.dp else 24.dp)
-                            .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
-                            .clearAndSetSemantics { hideFromAccessibility() },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(profileName.firstOrNull(Char::isLetter)?.uppercase().orEmpty(),
-                            color = MaterialTheme.colorScheme.onSecondaryContainer, style = MaterialTheme.typography.labelSmall)
-                    }
+                    if (showProfile) {
+                        Box(
+                            Modifier.size(28.dp)
+                                .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
+                                .clearAndSetSemantics { hideFromAccessibility() },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(profileName.firstOrNull(Char::isLetter)?.uppercase().orEmpty(),
+                                color = MaterialTheme.colorScheme.onSecondaryContainer, style = MaterialTheme.typography.labelSmall)
+                        }
+                    } else AlphaIcon(Glyph.Settings, color = LocalContentColor.current)
                 }) {
                     if (!showProfile) Text(settingsLabel)
                     else Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {

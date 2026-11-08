@@ -87,15 +87,21 @@ class ShellScreenshotTest {
                         robot.assertTarget(robot.text(R.string.search))
                         val newChat = robot.assertTarget(robot.text(R.string.new_chat))
                         val settings = robot.assertTarget(robot.text(R.string.settings))
+                        var widthDp = 0f
                         scenario.onActivity { activity ->
                             val width = activity.window.decorView.width
                             val density = activity.resources.displayMetrics.density
+                            widthDp = width / density
                             val expected = (width * 0.75f).coerceIn(360 * density, 560 * density)
                                 .coerceAtMost(width - 56 * density)
                             assertTrue("Drawer width for $width px is $expected px", abs(robot.drawerRight(activity) - expected) <= 2f)
                             if (width <= 320 * density && size == "2.0") {
                                 assertTrue("Large labels have separate rows at 320 dp", newChat.bottom <= settings.top)
                             }
+                        }
+                        if (size == "1.0") {
+                            assertEquals("Drawer profile name is reserved for widths of at least 400 dp",
+                                widthDp >= 400f, robot.composedText(scenario, "Евгений"))
                         }
                         val drawer = screen(directory, "drawer")
                         try {
