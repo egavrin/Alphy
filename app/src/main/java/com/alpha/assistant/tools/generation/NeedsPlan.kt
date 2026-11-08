@@ -157,7 +157,7 @@ internal data class NumberControl(val min: Double?, val max: Double?, val step: 
 }
 
 internal data class PlanInput(val id: String, val label: String, val initial: PlanValue, val control: NumberControl? = null)
-internal data class PlanFigure(val expression: NumberExpression, val unit: String, val example: JSONObject)
+internal data class PlanFigure(val expression: NumberExpression, val unit: String)
 internal data class PlanRecordField(val id: String, val label: String, val numeric: Boolean) {
     fun json() = JSONObject().put("id", id).put("label", label).put("type", if (numeric) "number" else "text")
     companion object {
@@ -343,15 +343,14 @@ internal class NeedsPlan private constructor(
             In this example, step is a role and increment is the declared constant ID. The literal value 2 stays in constants.
             The type rules below name roles inside uses. Declare their values separately in constants or inputs.
             Omit uses for a need without named part parameters. A figure expression declares its own dependencies.
-            A calculated result is a figure with expression, optional unit, and example. Example need:
+            A calculated result is a figure with expression and optional unit:
             {"id":"double","type":"figure","label":"Double","description":"Twice the amount",
-             "expression":{"op":"multiply","args":[{"ref":"amount"},{"number":2}]},
-             "example":{"inputs":{"amount":7},"result":14}}
+             "expression":{"op":"multiply","args":[{"ref":"amount"},{"number":2}]}}
             Each expression node is exactly {"ref":"id"}, {"number":2}, or {"op":"add","args":[...]}. Refer to numeric inputs, numeric constants, and other figures. There must be no cycle.
             Binary operations are add, subtract, multiply, divide, min, max, power, less, greater, and equal. Comparisons return 1 or 0. Unary operations are sqrt, abs, floor, ceil, and round. The if operation takes condition, true result, and false result.
-            Express unit conversions in the formula. Use unit only for the requested display label. Example inputs override initial values. An example must give a finite result.
+            Express unit conversions in the formula. Use unit only for the requested display label.
             Entries can declare fields:[{"id":"name","label":"Item","type":"text"},{"id":"amount","label":"Amount","type":"number"}]. Use 1 to 4 text or number fields. The host provides add and remove controls. Field IDs are unique and cannot be id.
-            A numeric expression can be {"aggregate":"count","need":"entries ID"} or {"aggregate":"sum","need":"entries ID","field":"numeric field ID"}. Record aggregates start at zero in worked examples.
+            A numeric expression can be {"aggregate":"count","need":"entries ID"} or {"aggregate":"sum","need":"entries ID","field":"numeric field ID"}. Record aggregates start at zero.
             An other or scene need can declare reads as an array of up to 8 numeric input or figure IDs. Use [] for a custom section independent of native parts. Omit reads when it needs to write native state or depends on unsupported data.
             Describe all requested behavior, including unsupported or unusual behavior.
             Use these need types:
@@ -390,7 +389,7 @@ internal class NeedsPlan private constructor(
 
         val wholeScreenGuidance = """
             Choose one JSON response format.
-            Use the full plan for calculations and conversions expressible with numeric inputs and figures. Use {"wholeScreen":true} for custom behavior that supported parts and expressions cannot provide. Supply the behavior field as directed below.
+            Use the full plan for calculations and conversions expressible with numeric inputs and figures. Use {"wholeScreen":true} for custom behavior that supported parts and expressions cannot provide.
             Use the whole-screen marker when native parts cannot provide the requested completion alert or timer transitions.
             Use a full plan for supported parts or a blocking clarification question. Its field rules apply only to the full plan.
         """.trimIndent()
@@ -500,7 +499,7 @@ internal class NeedsPlan private constructor(
                 }
                 if (!row.has("description"))
                     planShapeFailure(path, "the declared fields", "plan.description.missing", null)
-                val figureFields = if (row.opt("type") == NeedType.FIGURE.wire) setOf("expression", "unit", "example") else emptySet()
+                val figureFields = if (row.opt("type") == NeedType.FIGURE.wire) setOf("expression", "unit") else emptySet()
                 val readFields = if (row.opt("type") in setOf(NeedType.OTHER.wire, NeedType.SCENE.wire)) setOf("reads") else emptySet()
                 val recordKeys = if (row.opt("type") == NeedType.ENTRIES.wire) setOf("fields") else emptySet()
                 row.requireKeys(path, required, optionalNeedFields + figureFields + readFields + recordKeys)
@@ -534,11 +533,9 @@ internal class NeedsPlan private constructor(
                 val bands = if (readingStatus) row.readReadingBands(path) else emptyList()
                 val deadlines = if (dueItems) row.readDueItems(path, allowOffsets = true) else emptyList()
                 val ideas = if (ideaDeck) row.readDeckIdeas(path) else emptyList()
-                val figure = if (figureFields.any(row::has)) {
-                    val example = row.optJSONObject("example") ?: throw PartsContractFailure("$path.example", "a worked example")
-                    example.requireKeys("$path.example", setOf("inputs", "result"))
+                val figure = if (figureFields.isNotEmpty()) {
                     PlanFigure(NumberExpression.parse(row.opt("expression"), "$path.expression"),
-                        if (row.has("unit")) planText(row.opt("unit"), "$path.unit", 20, allowEmpty = true) else "", example)
+                        if (row.has("unit")) planText(row.opt("unit"), "$path.unit", 20, allowEmpty = true) else "")
                 } else null
                 val reads = if (row.has("reads")) {
                     val names = row.items("reads", 0..8, "$path.reads").map { planId(it, "$path.reads") }
@@ -555,7 +552,7 @@ internal class NeedsPlan private constructor(
             val figures = needs.mapNotNull { need -> need.figure?.let { need.id to it } }.toMap()
             val aggregates = needs.filter { it.recordFields.isNotEmpty() }.flatMap { need ->
                 listOf("${need.id}:count") + need.recordFields.filter { it.numeric }.map { "${need.id}:sum:${it.id}" }
-            }.associateWith { 0.0 }
+            }.toSet()
             validateFigures(inputs, constants, figures, aggregates)
             val numericIds = inputs.filter { it.initial is PlanValue.Numeric }.map(PlanInput::id).toSet() + figures.keys
             requireParts(needs.all { need -> numericIds.containsAll(need.reads.orEmpty()) }, "$.needs.reads", "declared numeric input or figure IDs")
@@ -578,31 +575,21 @@ internal class NeedsPlan private constructor(
             }
         }
 
-        private fun validateFigures(inputs: List<PlanInput>, constants: Map<String, PlanValue>, figures: Map<String, PlanFigure>, aggregates: Map<String, Double>) {
+        private fun validateFigures(inputs: List<PlanInput>, constants: Map<String, PlanValue>, figures: Map<String, PlanFigure>, aggregates: Set<String>) {
             if (figures.isEmpty()) return
-            val numericInputs = inputs.filter { it.initial is PlanValue.Numeric }.associateBy(PlanInput::id)
-            val numbers = (numericInputs.mapValues { it.value.initial } + constants)
-                .mapNotNull { (id, value) -> (value as? PlanValue.Numeric)?.let { id to it.raw.toDouble() } }.toMap() + aggregates
+            val known = constants.mapNotNull { (id, value) ->
+                (value as? PlanValue.Numeric)?.let { id to it.raw.toDouble() }
+            }.toMap().toMutableMap()
+            val available = inputs.filter { it.initial is PlanValue.Numeric }.map(PlanInput::id).toSet() + known.keys + aggregates + figures.keys
             val dependencies = figures.mapValues { it.value.expression.references }
-            requireParts(dependencies.values.all { refs -> refs.all { it in numbers || it in figures } },
-                "$.needs.expression", "declared numeric inputs, constants, or figures")
-            val order = dependencyOrder(dependencies, "$.needs.expression")
-            for ((id, figure) in figures) {
-                val path = "$.needs.example"
-                val example = figure.example.optJSONObject("inputs") ?: throw PartsContractFailure(path, "numeric example inputs")
-                val values = numbers.toMutableMap<String, Double?>()
-                for (name in example.keys()) {
-                    val input = numericInputs[name] ?: throw PartsContractFailure(path, "declared numeric example inputs")
-                    val value = planNumber(example.opt(name), path)
-                    val control = input.control
-                    requireParts(control == null || value in control.range, path, "example inputs within their bounds")
-                    values[name] = value
+            requireParts(dependencies.values.all(available::containsAll), "$.needs.expression", "declared numeric inputs, constants, or figures")
+            for (id in dependencyOrder(dependencies, "$.needs.expression")) {
+                val expression = figures.getValue(id).expression
+                if (known.keys.containsAll(expression.references)) {
+                    val value = expression.value(known::get)
+                        ?: throw PartsContractFailure("$.needs.expression", "a finite constant calculation")
+                    known[id] = value
                 }
-                for (name in order) values[name] = figures.getValue(name).expression.value(values::get)
-                val expected = planNumber(figure.example.opt("result"), path)
-                val actual = values[id]
-                requireParts(actual != null && abs(actual - expected) <= maxOf(0.005, abs(expected) * 0.000001),
-                    path, "a worked example that matches the calculation")
             }
         }
     }

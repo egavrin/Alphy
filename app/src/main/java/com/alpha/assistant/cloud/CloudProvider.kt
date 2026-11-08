@@ -622,6 +622,8 @@ For a current weather question with no named place, ${if(canLocate) "return exac
         }
         val courseIntent = decision.kind == "course"
         if(courseIntent) decision = ChatToolReply.authorizeCourse(decision, current.text.takeIf { current.role == "user" }.orEmpty())
+        val testFixIntent = decision.kind == "test_fix"
+        if (testFixIntent) decision = ChatToolReply.authorizeTestFix(decision, current.text)
         if(decision.requiresCleanPreparation) {
             try {
                 request.validateOperation?.invoke(decision)
@@ -631,7 +633,7 @@ For a current weather question with no named place, ${if(canLocate) "return exac
                 return
             }
         }
-        if(courseIntent) {
+        if(courseIntent || testFixIntent) {
             session.checkActive(currentCoroutineContext())
             emit(CloudEvent.RoundComplete(ChatToolReply.encode(decision),false,provenance))
             return

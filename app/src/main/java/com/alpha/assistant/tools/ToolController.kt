@@ -343,6 +343,46 @@ class ToolController(private val app: Application, private val scope: CoroutineS
             } finally { busy = false; automaticJob = null }
         }
     }
+    internal suspend fun testAndFix(request: String, target: ToolRecord, conversationId: String, operationId: String,
+        key: String, call: CloudSession, cancelRequest: () -> Unit, prepared: suspend () -> Unit, canCommit: () -> Boolean,
+        completed: (TestFixResult, ToolRecord?) -> Unit) {
+        if (busy || closing) throw CloudFailure("widget_busy", "Another tool operation is active. Retry after it completes.")
+        busy = true
+        automaticCancel = cancelRequest
+        automaticJob = currentCoroutineContext()[Job]
+        var saved: ToolRecord? = null
+        try {
+            prepared()
+            val result = withContext(Dispatchers.IO) {
+                generationService.testAndFix(key, request, target, store.privateResults(target.id), call)
+            }
+            call.checkActive(currentCoroutineContext())
+            val candidate = result.candidate
+            if (candidate == null) {
+                completed(result, null)
+                return
+            }
+            try {
+                saved = engine.acceptTestFix(operationId, conversationId, target, request, candidate, canCommit)
+            } catch (failure: TestFixNotSaved) {
+                completed(result.copy(detail = result.detail + " " + failure.message), null)
+                return
+            }
+            completed(result, saved)
+            if (store.primaryLibrary) AutomationRuntime.refresh(app)
+        } finally {
+            automaticCancel = null
+            try {
+                withContext(NonCancellable) {
+                    if (saved != null) refresh()
+                }
+            } finally {
+                busy = false
+                automaticJob = null
+            }
+        }
+    }
+
     private var automaticCancel: (() -> Unit)? = null
     private var automaticJob: Job? = null
     fun retry(id: String) { run {

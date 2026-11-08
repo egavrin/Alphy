@@ -16,8 +16,7 @@ class NativeBehaviorCatalogWorkflowTest {
                 "needs":[$needs],"constants":$constants,"questions":[]}""")
         val plans = listOf(
             plan("""{"id":"figure","type":"figure","label":"Double","description":"Double the number",
-                    "expression":{"op":"multiply","args":[{"ref":"amount"},{"number":2}]},
-                    "example":{"inputs":{"amount":2},"result":4}},
+                    "expression":{"op":"multiply","args":[{"ref":"amount"},{"number":2}]}},
                 {"id":"counter","type":"counter","label":"Counter","description":"Count"},
                 {"id":"up","type":"stopwatch","label":"Stopwatch","description":"Measure elapsed time"},
                 {"id":"down","type":"countdown","label":"Countdown","description":"Count down","uses":{"length":"seconds"}}""",

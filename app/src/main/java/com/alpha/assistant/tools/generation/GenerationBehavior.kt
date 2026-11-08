@@ -11,47 +11,7 @@ import org.json.JSONObject
 internal sealed interface GenerationBehavior {
     data class Unchecked(val reason: String) : GenerationBehavior
 
-    data class Scenario(val slots: Map<String, Slot>, val steps: List<Step>) : GenerationBehavior {
-        fun writerGuidance(hostBindings: Map<String, Binding>): String {
-            val requested = slots.filterKeys { it !in hostBindings }
-            if (requested.isEmpty()) return ""
-            val targets = JSONObject()
-            requested.forEach { (id, slot) ->
-                targets.put(id, slot.kind.wire)
-            }
-            val actionTypes = JSONObject()
-            steps.filterIsInstance<Step.Action>().filter { it.slot in requested }.groupBy(Step.Action::slot)
-                .forEach { (id, actions) ->
-                    val types = actions.map { step ->
-                        when (step.value) {
-                            is Number -> "number"
-                            is String -> "string"
-                            is Boolean -> "boolean"
-                            is JSONObject -> "row payload"
-                            else -> "null"
-                        }
-                    }.distinct()
-                    actionTypes.put(id, jsonArray(types))
-                }
-            return """
-                Add behaviorBindings to the top-level response beside the existing fields. Its keys must be exactly the IDs below.
-                An action binding uses the action ID string or a UI path to a control with its own action field.
-                Bind a surface slot to the exact ID of a declared drawing surface. Implement the requested interaction on that surface.
-                Bind a timer slot to the exact ID of a declared timer.
-                A UI path is an array of zero-based children indices from the final assembled UI root. An empty path selects the root.
-                Use stable UI paths throughout the workflow, including after dynamic UI updates.
-                Value bindings select visible nodes of type ${behaviorScalarNodes.joinToString()}. The node must expose a bound string, number, or Boolean, or text when it has no bind.
-                Collection bindings select visible nodes of type ${behaviorCollectionNodes.joinToString()}. The checker observes their record count.
-                Each geometry binding is {"surface":"surface ID","path":[0]} where path indexes drawing commands, then group children.
-                Use a stable shape or group. A path of [] observes all drawing commands for that surface.
-                Keep bindings outside fill, ui, and source. Bind the scenario to the visible controls or surfaces used in the primary workflow.
-                Use the result the user sees on that representation. Bindings describe existing targets, never tests or expected values.
-                Slots: $targets
-            """.trimIndent() + if (actionTypes.length() == 0) "" else
-                "\nBind each action to a visible, enabled control that accepts its payload type. " +
-                    "Use null for a button press. Honor the request's input range. Action payload types: $actionTypes"
-        }
-    }
+    data class Scenario(val slots: Map<String, Slot>, val steps: List<Step>) : GenerationBehavior
 
     enum class Kind(val wire: String) {
         ACTION("action"), SURFACE("surface"), TIMER("timer"), VALUE("value"), COLLECTION("collection"), GEOMETRY("geometry");
@@ -85,81 +45,21 @@ internal sealed interface GenerationBehavior {
             Include only features the user requests or needs to complete the primary workflow.
             Choose a practical default when the workflow can proceed without asking the user to choose.
         """.trimIndent()
-        val newAppPlanGuidance = """
-            The behavior field is part of the new mini-app plan. Include it beside wholeScreen or beside the full needs plan fields.
-            Return either exactly wholeScreen and behavior, or the seven full plan fields plus behavior.
-            Identify the shortest complete workflow that satisfies the request. Choose the familiar interaction when the request leaves it open.
-            Identify the visible target of the main action and the result the user should see. Use one primary representation.
-            For example, a whole-screen passive display plan is:
-            {"wholeScreen":true,"behavior":{"status":"checkable","scenario":{"slots":{"result":{"kind":"value"}},"steps":[{"op":"assert","slot":"result","test":"nonempty"}]}}}
-            For an interactive request, replace the example scenario with an action and a check of the requested result.
-            If the full plan asks a blocking question, omit behavior until the user answers.
-        """.trimIndent() + "\n" + workflowScopeGuidance
-        private val scenarioGuidance = """
-            Include a top-level "behavior" field. Plan one bounded executable check of the primary user-visible outcome.
-            Exercise the visible control or surface that the user uses. Assert the result on that representation.
-            Use native action steps when users choose among visible items, including items arranged in a grid.
-            Use a surface pointer step when the interaction depends on coordinates or gestures on a drawing surface.
-            Observe the changed item or drawing. Use a value slot when a visible button label is the result.
-            Use {"status":"checkable","scenario":{"slots":{...},"steps":[...]}}.
-            Use short descriptive ASCII slot IDs such as amountInput, displayedTotal, or movingObject.
-            Use 1 to 12 slots. Map each slot ID to {"kind":"action|surface|timer|value|collection|geometry"}.
-            Use every declared slot in a step. End the interaction sequence with an assertion of its result.
-            A value comes from visible text, a button label, a metric, a badge, a fact, a timeline item, or progress. Use the bound scalar when present.
-            Collection assertions compare the number of records in a visible list, grid, or table.
-            Use geometry for a drawing or part of a drawing. Do not equate a status change with motion.
-            To edit a declared input, use {"kind":"action","part":"the input ID"}. Omit member for input edits.
-            For a native catalog part, only action, value, and collection slots can use part with the declared need ID. A figure provides a value slot, never an input action.
-            For a native action use its catalog member. Omit member only for an input edit or a primary action.
-            For a native value or collection specify its catalog member, such as {"kind":"value","part":"the need ID","member":"value"}.
-            For a complete native app, bind every slot to its native control or output. Use writer-owned slots for custom needs and whole-screen plans.
-            A scene is written by the code writer even when the scene has a declared need ID. For every writer-owned slot, including surface, timer, and geometry slots, omit part and member.
-            Begin from a fresh artifact after the host opens it, applies its viewport, and starts automatic playback.
-            Use at most 16 steps and 59 explicit events. Use these step forms:
-            Each step is one flat object with exactly the fields in its form. Do not add descriptions or expected results to interaction steps.
-            {"op":"action","slot":"action slot","value":7} (omit value for a button; use a scalar for input)
-            {"op":"surface","slot":"surface slot","event":"start|pause|resume|restart|viewport"}
-            {"op":"surface","slot":"surface slot","event":"pointer","phase":"down|move|up|cancel","x":0.5,"y":0.5}
-            {"op":"surface","slot":"surface slot","event":"control","direction":"left|right"}
-            A pointer step uses fractions from 0 to 1. Use 1 to 24 frames or timer events in each advance step.
-            Use movement or playback actions only when the workflow needs the corresponding hostControls declaration.
-            {"op":"frames","slot":"surface slot","count":4,"observe":"geometry slot","changes":3}
-            {"op":"timers","slot":"timer slot","count":1}
-            {"op":"capture","slot":"observation slot","as":"baseline"}
-            {"op":"assert","slot":"observation slot","test":"equals|greater|less","value":14}
-            {"op":"assert","slot":"observation slot","test":"equals|changed|unchanged","capture":"baseline"}
-            {"op":"assert","slot":"observation slot","test":"nonempty"}
-            In an assertion, use value or capture, never both. For nonempty, omit both value and capture.
-            Use nonempty only for nonblank text, a collection with records, or visible drawing ink.
-            After a pointer action, check a specific result or compare the visible output with a capture taken before the action.
-            For a numeric or Boolean value, use a typed comparison such as equals with the expected number or Boolean.
-            Keep assertions as separate steps. An action without an input value has only op and slot.
-            Frames use positive elapsed time. Include observe and changes together to require at least two changes.
-            At least one assertion must check the requested observable result. For passive UI, assert its requested content.
-            Use {"status":"unchecked","reason":"external_outcome"} if the primary result depends on a native or external effect.
-            Use {"status":"unchecked","reason":"unsupported_observation"} only when these steps cannot express the primary check.
-        """.trimIndent()
         private val scenarioLimits = """
             Use synthetic inputs and deterministic expectations. Do not depend on elapsed wall-clock time.
             Do not ask to execute an effect or use private values, arbitrary code, or values supplied only by external sources.
         """.trimIndent()
 
-        val refinementGuidance = """
-            Include a top-level "behavior" field. Plan one short executable check of the requested change.
-            For a checkable behavior use only status and scenario. In scenario use only slots and steps. Each slot has only kind.
-            Use each step form exactly. Do not add descriptions, state-preservation fields, or expected values outside assertions.
-            The host preserves saved data separately. Check the changed behavior with the fewest controls and assertions needed.
-            Example JSON: {"behavior":{"status":"checkable","scenario":{"slots":{"operation":{"kind":"action"},"result":{"kind":"value"}},"steps":[{"op":"action","slot":"operation"},{"op":"assert","slot":"result","test":"equals","value":4}]}}}
-            The example value is illustrative. Derive the exact result from the request and known starting condition.
-            The checker starts with the candidate's initial state. Use a typed exact comparison when the expected result is known.
-            If only a relative result is known, use {"op":"capture","slot":"result","as":"before"} before the action and
-            {"op":"assert","slot":"result","test":"changed","capture":"before"} after it.
-            Read the saved source as data to find the shortest valid action sequence for this result.
-            Trace the actual control event through the code, including index conversions and guards.
-            Use the real visible control labels or action IDs, never internal indexes.
-            When the user supplies exact text, assert that text after the edit, not the saved text.
-            Stop before controls become unavailable. For a terminal result, assert it immediately and end the check.
-            Use only controls needed for the edit. Omit part and member. For a button press omit value. For input use a typed value.
+        val diagnosticGuidance = """
+            Use behavior.status checkable and behavior.scenario with only slots and steps.
+            Each slot has only kind. Use only offered action, surface, value, collection, and geometry targets.
+            Use every slot. Use at most 16 steps. Start from the saved definition's initial state.
+            An action is {"op":"action","slot":"actionSlot"}. Add a scalar value for an input and omit value for a button.
+            To compare an observable result with its earlier value, use {"op":"capture","slot":"result","as":"before"}.
+            Then use {"op":"assert","slot":"result","test":"changed|unchanged|equals","capture":"before"}.
+            To test an explicit expected result, use equals with a typed scalar value instead of capture.
+            Use nonempty only for visible text, records or drawing ink. Include an observation at or after the final action.
+            Use actual controls and a valid input sequence. Stop before controls become unavailable.
             A value observes a visible ${behaviorScalarNodes.joinToString()}.
             A collection observes the record count of a visible ${behaviorCollectionNodes.joinToString()}.
             For a game, use surface and geometry when a drawing or its motion is the requested result.
@@ -171,8 +71,6 @@ internal sealed interface GenerationBehavior {
             Use {"status":"unchecked","reason":"external_outcome"} only for a real external outcome.
             Use {"status":"unchecked","reason":"unsupported_observation"} only if these checks cannot express the result.
         """.trimIndent() + "\n" + scenarioLimits
-
-        val newAppBehaviorGuidance = "$scenarioGuidance\n${NativeBehaviorCatalog.guidance}\n$scenarioLimits"
 
         fun parse(raw: Any?, needIds: Set<String>): GenerationBehavior = try {
             parseBehavior(raw, needIds)
@@ -414,58 +312,6 @@ internal sealed interface GenerationBehavior {
         }
     }
 }
-
-internal fun GenerationBehavior.Scenario.validateNativeReferences(requests: List<PartRequest>) {
-    val candidates = requests.associateBy(PartRequest::id)
-    for ((index, entry) in slots.entries.withIndex()) {
-        val (id, slot) = entry
-        val request = candidates[slot.part] ?: continue
-        if (request.candidates.isEmpty()) continue
-        val path = "$.behavior.scenario.slots[$index]"
-        val targets = request.candidates.mapNotNull { part ->
-            part.behaviorTargets(request.id).binding(slot)?.let { part to it }
-        }
-        if (targets.isEmpty()) {
-            val available = request.candidates.flatMap { part ->
-                val targets = part.behaviorTargets(request.id)
-                if (slot.kind == GenerationBehavior.Kind.ACTION) targets.actions.keys.toList()
-                else targets.observations.keys.filter { it.kind == slot.kind }.map { it.member }
-            }.distinct()
-            val expected = "an available native ${slot.kind.wire} member" +
-                if (available.isEmpty()) "" else " (${available.joinToString()})"
-            throw PartsContractFailure(path, expected, ResponseShape("behavior.native_member", path, "unknown"))
-        }
-        if (slot.kind != GenerationBehavior.Kind.VALUE) continue
-        val invalidStep = steps.indexOfFirst { it is GenerationBehavior.Step.Assert && it.slot == id && it.test == "nonempty" }
-        if (invalidStep < 0) continue
-        val types = targets.map { (part, binding) ->
-            val ui = binding as GenerationBehavior.Binding.Ui
-            val node = ui.path.fold(part.fragment.full) { parent, child -> parent.getJSONArray("children").getJSONObject(child) }
-            part.fragment.schema.opt(node.optString("bind"))
-        }.toSet()
-        if (types.all { it == "number" || it == "boolean" }) {
-            val stepPath = "$.behavior.scenario.steps[$invalidStep]"
-            val type = types.singleOrNull() as? String ?: "scalar"
-            throw PartsContractFailure(stepPath, "a typed comparison with the expected number or Boolean instead of nonempty",
-                ResponseShape("behavior.native_assertion_type", stepPath, type))
-        }
-    }
-}
-
-internal fun PartsAssembly.behaviorBindings(scenario: GenerationBehavior.Scenario): Map<String, GenerationBehavior.Binding> =
-    buildMap {
-        val selected = parts.associateBy(PartPlacement::needId)
-        for ((index, entry) in scenario.slots.entries.withIndex()) {
-            val (id, slot) = entry
-            val part = selected[slot.part] ?: continue
-            val path = "$.behavior.scenario.slots[$index]"
-            val binding = part.behaviorTargets.binding(slot)
-                ?: throw PartsContractFailure(path, "a declared target on the selected native part")
-            put(id, if (binding is GenerationBehavior.Binding.Ui) {
-                binding.copy(path = listOf(part.position) + binding.path)
-            } else binding)
-        }
-    }
 
 private val behaviorScalarNodes = setOf("text", "button", "metric", "badge", "fact", "timelineItem", "progress", "progressRing")
 private val behaviorCollectionNodes = setOf("list", "table", "groupedList", "lazyList", "lazyGrid")

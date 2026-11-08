@@ -4,13 +4,12 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
-import com.alpha.assistant.cloud.CloudFailure
-import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.tools.generation.GenerationBehavior
+import com.alpha.assistant.tools.generation.PartsContractFailure
 import kotlinx.coroutines.runBlocking
-import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -34,31 +33,31 @@ class GenerationBehaviorWorkflowTest {
         {"op":"surface","slot":"screen","event":"restart"},{"op":"assert","slot":"object","test":"equals","capture":"initial"}]}
     """.trimIndent()
 
-    private class Provider(private val plan: String, private vararg val candidates: String) : ChatProvider {
-        val calls = mutableListOf<CloudRequest>()
-        private var next = 0
+    private val offline = object : ChatProvider {
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-            calls += request
-            emit(CloudEvent.Text(if (request.generationStage == CloudGenerationStage.PLAN) plan else candidates[next++]))
+            error("Authored checks do not call the provider.")
         }
     }
 
-    private fun plan(scenario: String) = """{"wholeScreen":true,"behavior":{"status":"checkable","scenario":$scenario}}"""
+    private fun plan(scenario: String) = """{"status":"checkable","scenario":$scenario}"""
     private fun candidate(definition: String, bindings: String) =
         JSONObject(definition).put("behaviorBindings", JSONObject(bindings)).toString()
 
-    private fun sourcePatch(vararg edits: Pair<String, String>): String = JSONObject().put("sourceEdits",
-        JSONArray(edits.map { (search, replacement) -> JSONObject().put("search", search).put("replace", replacement) })).toString()
-
-    private fun bindingPatch(bindings: String): String =
-        JSONObject().put("behaviorBindings", JSONObject(bindings)).toString()
-
-    private fun rejectedAgain(raw: String): Array<String> =
-        arrayOf(raw, *Array(3) { index -> """{"fields":{"description":"Revision ${index + 1}"}}""" })
-
-    private suspend fun generate(provider: Provider): ToolPreview =
-        ToolGenerationService(provider, SandboxClient(context))
-            .generate("offline", "Build the requested tool", null, emptyList(), CloudSession(), "behavior")
+    private suspend fun check(scenario: String?, raw: String): ToolPreview {
+        val json = JSONObject(raw)
+        val bindings = json.remove("behaviorBindings")
+        val sandbox = SandboxClient(context)
+        val generation = ToolGenerationService(offline, sandbox)
+        val spec = ToolSpec.parse(json.toString())
+        val checker = ToolGenerationSmoke(sandbox, spec, "behavior", 1, spec.initialState, {}, generation)
+        val preview = checker.run()
+        if (scenario != null) {
+            val check = GenerationBehavior.parse(JSONObject(plan(scenario)), emptySet()) as GenerationBehavior.Scenario
+            checker.checkBehavior(check, GenerationBehavior.bindings(bindings, check.slots), preview,
+                ToolGenerationRoute.WHOLE_SCREEN, emptySet())
+        }
+        return preview
+    }
 
     private fun app(working: Boolean) = """
         {"formatVersion":3,"title":"Double","description":"","capabilities":[],
@@ -69,274 +68,52 @@ class GenerationBehaviorWorkflowTest {
         "source":"const {state:s,event:e}=input;if(e.type==='action'){if(e.actionId==='amount')s.amount=e.value;if(e.actionId==='apply')s.result=${if (working) "s.amount*2" else "s.amount"};if(e.actionId==='reset'){s.amount=0;s.result=0;}}return {state:s};"}
     """.trimIndent()
 
-    @Test fun repairsTheDeclaredVisibleOutcomeAndDoesNotExposeTheTestInput(): Unit = runBlocking {
-        val raw = candidate(app(false), appBindings)
-        val patch = sourcePatch("s.result=s.amount;" to "s.result=s.amount*2;", "s.amount=0;" to "s.amount=0; /* reset */")
-        val provider = Provider(plan(appPlan), raw, patch)
-        val result = generate(provider)
-        assertEquals(0, JSONObject(result.state).getInt("result"))
-        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.COMPLETE),
-            provider.calls.map { it.generationStage })
-        val writer = provider.calls[1]
-        assertTrue(writer.systemInstructions.contains("behaviorBindings"))
-        val example = JSONObject(writer.systemInstructions.substringAfter("Schema:\n").lineSequence().first())
-            .getJSONObject("behaviorBindings")
-        assertEquals(JSONObject(appBindings).keys().asSequence().toSet(), example.keys().asSequence().toSet())
-        assertTrue(example.get("enter") is String)
-        assertEquals(0, example.getJSONArray("result").getInt(0))
-        assertTrue(writer.systemInstructions.contains("\"enter\":[\"number\"]"))
-        assertTrue(writer.systemInstructions.contains("\"apply\":[\"null\"]"))
-        assertFalse(writer.systemInstructions.contains("\"value\":7"))
-        assertFalse(writer.systemInstructions.contains("\"value\":14"))
-        assertFalse(writer.turns.first().text.contains("\"value\":7"))
-        val repair = provider.calls.last().turns.last().text
-        assertTrue(repair.contains("assertion"))
-        assertTrue(repair.contains("action at step 3, slot 2"))
-        assertTrue(repair.contains("sourceEdits"))
-        assertTrue(provider.calls.last().systemInstructions.contains("It replaces the complete output schema above."))
-        assertFalse(repair.contains("14"))
-        assertTrue(result.spec.source.contains("/* reset */"))
-        assertTrue(patch.toByteArray().size < candidate(app(true), appBindings).toByteArray().size)
+    @Test fun authoredCheckDistinguishesExactArithmeticFromAWorkingControl(): Unit = runBlocking {
+        val working = check(appPlan, candidate(app(true), appBindings))
+        assertEquals(0, JSONObject(working.state).getInt("result"))
+        val failure = runCatching { check(appPlan, candidate(app(false), appBindings)) }.exceptionOrNull()
+        assertTrue(failure is BehaviorCheckFailure)
+        assertTrue((failure as BehaviorCheckFailure).detail.contains("assertion failed"))
     }
 
     @Test fun capturedTipWriterActionPathsPassTheBehaviorCheck(): Unit = runBlocking {
         val fixture = InstrumentationRegistry.getInstrumentation().context.assets
             .open("behavior-replay/tip-action-paths.json").bufferedReader().use { JSONObject(it.readText()) }
-        val raw = fixture.getJSONObject("candidate").toString()
-        val provider = Provider(plan(fixture.getJSONObject("scenario").toString()), raw, raw)
-        generate(provider)
-        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE), provider.calls.map { it.generationStage })
+        check(fixture.getJSONObject("scenario").toString(), fixture.getJSONObject("candidate").toString())
     }
 
-    @Test fun unavailableActionPathsStillRejectTheCandidate(): Unit = runBlocking {
-        val ordinary = app(true)
-        val hidden = JSONObject(ordinary).apply {
-            getJSONObject("ui").getJSONArray("children").getJSONObject(0).put("visible", false)
-        }.toString()
-        for ((definition, path) in listOf(ordinary to "[]", ordinary to "[2]", ordinary to "[8]",
-            ordinary to "[0.5]", ordinary to "[1]", hidden to "[0]")) {
-            val bindings = JSONObject(appBindings).put("enter", org.json.JSONArray(path))
-            val raw = candidate(definition, bindings.toString())
-            val provider = Provider(plan(appPlan), *rejectedAgain(raw))
-            val failure = runCatching { generate(provider) }.exceptionOrNull() as? CloudFailure
-            assertEquals(path, "widget_behavior", failure?.code)
-            assertEquals(path, 5, provider.calls.size)
-        }
-    }
-
-    @Test fun malformedWriterBindingsIdentifyTheRejectedSlotAndKeepTheCorrectionLimit(): Unit = runBlocking {
-        val scenario = """{"slots":{"action":{"kind":"action"},"surface":{"kind":"surface"},
-            "timer":{"kind":"timer"},"privateGeometry":{"kind":"geometry"},"value":{"kind":"value"},
-            "collection":{"kind":"collection"}},"steps":[{"op":"action","slot":"action"},
-            {"op":"surface","slot":"surface","event":"restart"},{"op":"timers","slot":"timer","count":1},
-            {"op":"assert","slot":"privateGeometry","test":"nonempty"},
-            {"op":"assert","slot":"value","test":"nonempty"},{"op":"assert","slot":"collection","test":"equals","value":0}]}"""
-        val valid = """{"action":"apply","surface":"main","timer":"tick",
-            "privateGeometry":{"surface":"main","path":[0]},"value":[2],"collection":[4]}"""
-        data class Rejection(val slot: Int?, val kind: String?, val shape: String, val expected: String,
-            val invalidBindings: JSONObject.() -> Unit)
-        val cases = listOf(
-            Rejection(1, "action", "object", "action ID string") { put("action", JSONObject().put("privateData", 7)) },
-            Rejection(1, "action", "array", "integer") { put("action", org.json.JSONArray().put(0.5)) },
-            Rejection(2, "surface", "number", "surface ID string") { put("surface", 7) },
-            Rejection(3, "timer", "boolean", "timer ID string") { put("timer", false) },
-            Rejection(4, "geometry", "array", "geometry") { put("privateGeometry", org.json.JSONArray()) },
-            Rejection(4, "geometry", "object", "surface ID string") {
-                getJSONObject("privateGeometry").put("surface", JSONObject().put("privateData", true))
-            },
-            Rejection(4, "geometry", "string", "geometry path") {
-                getJSONObject("privateGeometry").put("path", "PRIVATE_LABEL")
-            },
-            Rejection(5, "value", "number", "index path") { put("value", 2) },
-            Rejection(6, "collection", "string", "index path") { put("collection", "PRIVATE_LABEL") },
-            Rejection(null, null, "object", "requested slot IDs") { remove("action"); put("privateData", "apply") },
-            Rejection(null, null, "missing", "object") {},
-        )
-        for (case in cases) {
-            val raw = JSONObject(app(true)).apply {
-                if (case.shape != "missing") put("behaviorBindings", JSONObject(valid).apply(case.invalidBindings))
-            }.toString()
-            val provider = Provider(plan(scenario), *rejectedAgain(raw))
-            val diagnostics = mutableListOf<JSONObject>()
-            val result = runCatching {
-                ToolGenerationService(provider, SandboxClient(context), observer = null,
-                    attemptObserver = { diagnostics += it.report() })
-                    .generate("offline", "Build the requested tool", null, emptyList(), CloudSession(), "behavior")
-            }
-            assertEquals("widget_behavior", (result.exceptionOrNull() as? CloudFailure)?.code)
-            assertEquals(listOf(CloudGenerationStage.PLAN) + List(4) { CloudGenerationStage.COMPLETE },
-                provider.calls.map { it.generationStage })
-            val diagnostic = diagnostics.last().getJSONObject("behaviorBinding")
-            assertEquals(case.slot, diagnostic.opt("slot"))
-            assertEquals(case.kind, diagnostic.opt("slotKind"))
-            assertEquals(case.shape, diagnostic.getString("valueShape"))
-            assertEquals("binding_shape", diagnostic.getString("rule"))
-            val correction = provider.calls.last().turns.last().text
-            assertTrue(correction, correction.contains(case.expected))
-            for (private in listOf("privateGeometry", "privateData", "PRIVATE_LABEL")) {
-                assertFalse(diagnostics.toString().contains(private))
-                assertFalse(correction.contains(private))
-            }
-        }
-    }
-
-    @Test fun aCorrectedWriterBindingPassesTheSameBehaviorScenario(): Unit = runBlocking {
-        val malformed = JSONObject(appBindings).put("apply", JSONObject()).toString()
-        val provider = Provider(plan(appPlan), candidate(app(true), malformed), bindingPatch(appBindings))
-        val result = generate(provider)
-        assertEquals(0, JSONObject(result.state).getInt("result"))
-        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.COMPLETE),
-            provider.calls.map { it.generationStage })
-        val correction = provider.calls.last().turns.last().text
-        assertTrue(correction, correction.contains("action ID string"))
-        assertTrue(correction, correction.contains("\"slot\":2"))
-        assertTrue(correction, correction.contains("\"valueShape\":\"object\""))
-    }
-
-    @Test fun removesUnexpectedBindingsWhenThePlanHasNoWriterSlots(): Unit = runBlocking {
-        val unchecked = """{"wholeScreen":true,"behavior":{"status":"unchecked","reason":"unsupported_observation"}}"""
-        val raw = candidate(app(true), "{}")
-        val provider = Provider(unchecked, raw, """{"removeFields":["behaviorBindings"]}""")
-        assertEquals("Double", generate(provider).spec.title)
-        assertEquals(3, provider.calls.size)
-        assertEquals(raw, provider.calls.last().turns[1].text)
-    }
-
-    @Test fun invalidMultiEditKeepsTheLastCandidateAndCanBeRepaired(): Unit = runBlocking {
-        val raw = candidate(app(false), appBindings)
-        val missing = sourcePatch("s.result=s.amount;" to "s.result=s.amount*2;", "missing source" to "")
-        val overlapping = sourcePatch("s.result=s.amount;" to "s.result=s.amount*2;", "s.amount;" to "0;")
-        val valid = sourcePatch("s.result=s.amount;" to "s.result=s.amount*2;")
-        val provider = Provider(plan(appPlan), raw, missing, overlapping, valid)
-        val result = generate(provider)
-        assertTrue(result.spec.source.contains("s.result=s.amount*2;"))
-        assertEquals(listOf(CloudGenerationStage.PLAN) + List(4) { CloudGenerationStage.COMPLETE },
-            provider.calls.map { it.generationStage })
-        val repairs = provider.calls.drop(2)
-        assertTrue(repairs.all { it.turns[1].text == raw })
-        assertTrue(repairs[1].turns.last().text.contains("missing_match"))
-        assertTrue(repairs[2].turns.last().text.contains("overlap"))
-    }
-
-    @Test fun repeatedOrMalformedPatchesStopAtTheWriterLimit(): Unit = runBlocking {
-        val raw = candidate(app(false), appBindings)
-        val ambiguous = sourcePatch("s." to "other.")
-        val noChange = """{"fields":{"description":""}}"""
-        val provider = Provider(plan(appPlan), raw, ambiguous, noChange, raw)
-        val failure = runCatching { generate(provider) }.exceptionOrNull() as? CloudFailure
-        assertEquals("widget_patch", failure?.code)
-        assertEquals(listOf(CloudGenerationStage.PLAN) + List(4) { CloudGenerationStage.COMPLETE },
-            provider.calls.map { it.generationStage })
-        assertTrue(provider.calls[3].turns.last().text.contains("ambiguous_match"))
-        assertTrue(provider.calls[4].turns.last().text.contains("no_change"))
-    }
-
-    @Test fun oversizedAndCyclicPatchesKeepTheLatestAppliedBase(): Unit = runBlocking {
-        val raw = candidate(app(false), appBindings)
-        val changed = """{"fields":{"description":"First repair"}}"""
-        val cycle = """{"fields":{"description":""}}"""
-        val oversized = JSONObject().put("fields", JSONObject().put("description", "a".repeat(65_536))).toString()
-        val provider = Provider(plan(appPlan), raw, changed, cycle, oversized)
-        val failure = runCatching { generate(provider) }.exceptionOrNull() as? CloudFailure
-        assertEquals("widget_patch", failure?.code)
-        assertEquals(5, provider.calls.size)
-        assertEquals("First repair", JSONObject(provider.calls[3].turns[1].text).getString("description"))
-        assertEquals(provider.calls[3].turns[1].text, provider.calls[4].turns[1].text)
-        assertTrue(provider.calls[4].turns.last().text.contains("repeated_candidate"))
-    }
-
-    @Test fun writerResultDiagnosticsDescribeTheCurrentUiWithoutCandidateData(): Unit = runBlocking {
-        val scenario = """{"slots":{"press":{"kind":"action"},"privateResult":{"kind":"value"}},
-            "steps":[{"op":"action","slot":"press"},
-            {"op":"assert","slot":"privateResult","test":"equals","value":1}]}"""
-        val bindings = """{"press":"press","privateResult":[1]}"""
-        val visible = """{type:'metric',text:'PRIVATE_LABEL',bind:'privateCount'}"""
-        val cases = listOf(
-            visible to null,
-            """{type:'metric',text:'PRIVATE_LABEL',bind:'privateCount',visible:false}""" to "target_hidden",
-            """{type:'row',children:[{type:'button',text:'PRIVATE_LABEL',action:'privateAction'}]}""" to "observation_kind",
-        )
-        for ((resultNode, rule) in cases) {
-            val definition = """{"formatVersion":3,"title":"Dynamic result","description":"","capabilities":[],
-                "stateSchema":{"privateCount":"number"},"initialState":{"privateCount":0},
-                "ui":{"type":"column","children":[{"type":"button","text":"Press","action":"press"},
-                {"type":"text","text":"Ready"}]},
-                "source":"const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='press')s.privateCount=1;
-                const children=[{type:'button',text:'Press',action:'press'},s.privateCount===1?$resultNode:{type:'text',text:'Ready'}];
-                return {state:s,ui:{type:'column',children}};"}""".replace("\n", " ")
-            val raw = candidate(definition, bindings)
-            val provider = Provider(plan(scenario), *rejectedAgain(raw))
-            val diagnostics = mutableListOf<JSONObject>()
-            val outcome = runCatching {
-                ToolGenerationService(provider, SandboxClient(context), observer = null, attemptObserver = { diagnostics += it.report() })
-                    .generate("offline", "Build the requested tool", null, emptyList(), CloudSession(), "behavior")
-            }
-            if (rule == null) {
-                assertEquals(0, JSONObject(outcome.getOrThrow().state).getInt("privateCount"))
-            } else {
-                assertEquals("widget_behavior", (outcome.exceptionOrNull() as? CloudFailure)?.code)
-                val report = diagnostics.last().getJSONObject("behaviorBinding")
-                assertEquals("whole_screen", report.getString("route"))
-                assertEquals("writer", report.getString("origin"))
-                assertEquals(2, report.getInt("step"))
-                assertEquals(2, report.getInt("slot"))
-                assertEquals("value", report.getString("slotKind"))
-                assertEquals(rule, report.getString("rule"))
-                if (rule == "observation_kind") assertEquals("row", report.getString("nodeKind"))
-                for (secret in listOf("PRIVATE_LABEL", "privateCount", "privateResult", "privateAction")) {
-                    assertFalse(secret, diagnostics.toString().contains(secret))
-                    assertFalse(secret, provider.calls.last().turns.last().text.contains(secret))
-                }
-            }
-        }
-    }
-
-    @Test fun terminalBehaviorFailurePreservesTheSavedTool(): Unit = runBlocking {
-        val raw = candidate(app(false), appBindings)
-        val provider = Provider("""{"behavior":{"status":"checkable","scenario":$appPlan}}""", raw, raw)
-        val name = "behavior-${java.util.UUID.randomUUID()}.db"
-        ToolStore(context, name).use { store ->
-            val spec = ToolSpec.parse(app(true))
-            val old = ToolRecord("behavior", 1, 1, spec.json, spec.initialState, spec.ui.toString(), null, true)
-            store.saveTool(old, true)
-            val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context)))
-            val draft = engine.createDraft("Keep the calculator working", old.id)
-            val failure = runCatching { engine.generate(draft.id, "offline", emptyList(), CloudSession()) }.exceptionOrNull()
-            assertEquals("widget_behavior", (failure as? CloudFailure)?.code)
-            assertTrue(provider.calls.first().systemInstructions.contains("English (en)"))
-            assertNull(store.draft(draft.id)?.candidate)
-            assertEquals(old, store.tool(old.id))
-        }
-        context.deleteDatabase(name)
+    @Test fun malformedBindingsAndUnavailableControlsFailIndependently(): Unit = runBlocking {
+        val wrongType = JSONObject(appBindings).put("apply", true).toString()
+        val missing = JSONObject(appBindings).put("apply", "missing").toString()
+        assertTrue(runCatching { check(appPlan, candidate(app(true), wrongType)) }.exceptionOrNull() is GenerationBehavior.BindingFailure)
+        assertTrue(runCatching { check(appPlan, candidate(app(true), missing)) }.exceptionOrNull() is BehaviorCheckFailure)
     }
 
     @Test fun gameRequiresRepeatedGeometryChangeAndReset(): Unit = runBlocking {
         val game = GameGenerationExample.spec()
         val bindings = """{"screen":"main","object":{"surface":"main","path":[96]}}"""
         val raw = candidate(game, bindings)
-        val result = generate(Provider(plan(gamePlan), raw))
+        val result = check(gamePlan, raw)
         assertTrue(result.spec.surfaces.containsKey("main"))
         val stationary = JSONObject(game).apply {
             put("source", getString("source").replace("if(e.type==='frame'&&s.status==='playing')", "if(false)"))
         }.toString()
         val broken = candidate(stationary, bindings)
-        val repaired = generate(Provider(plan(gamePlan), broken,
-            sourcePatch("if(false)" to "if(e.type==='frame'&&s.status==='playing')")))
-        assertEquals(result.spec.source, repaired.spec.source)
+        assertTrue(runCatching { check(gamePlan, broken) }.exceptionOrNull() is BehaviorCheckFailure)
     }
 
     @Test fun gameReceivesViewportAndAutomaticStartBeforeTheScenario(): Unit = runBlocking {
         val raw = movingDrawing("""[{type:'circle',x:s.x,y:24,radius:5,color:'accent'}]""")
-        val result = generate(Provider(plan(automaticMotionPlan), raw))
+        val result = check(automaticMotionPlan, raw)
         assertEquals(20, JSONObject(result.state).getInt("x"))
     }
 
     @Test fun aScenarioCannotUseAnUndeclaredRestartButton(): Unit = runBlocking {
         val definition = JSONObject(GameGenerationExample.spec()).apply { remove("hostControls") }
         val raw = candidate(definition.toString(), """{"screen":"main","object":{"surface":"main","path":[96]}}""")
-        val failure = runCatching { generate(Provider(plan(gamePlan), *rejectedAgain(raw))) }.exceptionOrNull()
-        assertEquals("widget_behavior", (failure as? CloudFailure)?.code)
-        assertTrue(failure?.message.orEmpty().contains("playback control unavailable"))
+        val failure = runCatching { check(gamePlan, raw) }.exceptionOrNull()
+        assertTrue(failure is BehaviorCheckFailure)
+        assertTrue((failure as? BehaviorCheckFailure)?.detail.orEmpty().contains("playback control unavailable"))
     }
 
     @Test fun aVisibleButtonCanBeTheActionAndItsObservableResult(): Unit = runBlocking {
@@ -350,9 +127,7 @@ class GenerationBehaviorWorkflowTest {
             return {state:s,ui:{type:'button',text:s.on?'On':'Off',action:'switch'}};
         """.trimIndent())
         val raw = candidate(definition.toString(), """{"target":"switch","label":[]}""")
-        val provider = Provider(plan(scenario), raw)
-        assertFalse(JSONObject(generate(provider).state).getBoolean("on"))
-        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE), provider.calls.map { it.generationStage })
+        assertFalse(JSONObject(check(scenario, raw).state).getBoolean("on"))
     }
 
     @Test fun aPointerScenarioMustCheckMoreThanPreexistingInk(): Unit = runBlocking {
@@ -361,11 +136,11 @@ class GenerationBehaviorWorkflowTest {
             {"op":"surface","slot":"screen","event":"pointer","phase":"down","x":0.5,"y":0.5},
             {"op":"assert","slot":"drawing","test":"nonempty"}]}"""
         for (test in listOf("\"nonempty\"", "\"unchanged\",\"capture\":\"before\"", "\"equals\",\"capture\":\"before\"")) {
-            val provider = Provider(plan(scenario.replace("\"nonempty\"", test)))
-            assertTrue(runCatching { generate(provider) }.exceptionOrNull() is CloudFailure)
-            assertTrue(provider.calls.all { it.generationStage == CloudGenerationStage.PLAN })
-            val correction = provider.calls[1].turns.last().text + provider.calls[1].systemInstructions
-            assertTrue(correction.contains("after the pointer action"))
+            val failure = runCatching {
+                GenerationBehavior.parse(JSONObject(plan(scenario.replace("\"nonempty\"", test))), emptySet())
+            }.exceptionOrNull()
+            assertTrue(failure is PartsContractFailure)
+            assertTrue(failure?.message.orEmpty().contains("after the pointer action"))
         }
     }
 
@@ -380,9 +155,7 @@ class GenerationBehaviorWorkflowTest {
             return {state:s,playback:s.status};
         """.trimIndent())
         val raw = definition.toString()
-        val unchecked = """{"wholeScreen":true,"behavior":{"status":"unchecked","reason":"unsupported_observation"}}"""
-        val failure = runCatching { generate(Provider(unchecked, *rejectedAgain(raw))) }.exceptionOrNull()
-        assertEquals("widget_preview", (failure as? CloudFailure)?.code)
+        assertTrue(runCatching { check(null, raw) }.exceptionOrNull() is ToolSmokeFailure)
     }
 
     @Test fun artifactRejectsMalformedHostControlDeclarations() {
@@ -402,7 +175,7 @@ class GenerationBehaviorWorkflowTest {
         val drawing = """[{type:'rect',x:0,y:0,width:64,height:64,color:'#000000'},
             {type:'circle',x:s.x,y:24,radius:5,color:'#FFFFFF'}]"""
         val raw = movingDrawing(drawing, path = "[]")
-        assertNotNull(generate(Provider(plan(automaticMotionPlan), raw)).surfaces)
+        assertNotNull(check(automaticMotionPlan, raw).surfaces)
     }
 
     @Test fun anObjectThatMatchesItsBackgroundCannotSatisfyMotion(): Unit = runBlocking {
@@ -412,11 +185,8 @@ class GenerationBehaviorWorkflowTest {
     }
 
     @Test fun checkedCandidateStillRejectsNonIntegerProtocolVersion(): Unit = runBlocking {
-        val raw = candidate(app(true), appBindings).replace("\"formatVersion\":3", "\"formatVersion\":3.0")
-        val failure = runCatching { generate(Provider(plan(appPlan), *rejectedAgain(raw))) }.exceptionOrNull()
-        assertEquals("widget_spec", (failure as? CloudFailure)?.code)
-        val repaired = generate(Provider(plan(appPlan), raw, """{"fields":{"formatVersion":3}}"""))
-        assertEquals(3, JSONObject(repaired.spec.json).getInt("formatVersion"))
+        val raw = app(true).replace("\"formatVersion\":3", "\"formatVersion\":3.0")
+        assertTrue(runCatching { ToolSpec.parse(raw) }.exceptionOrNull() is ToolValidationFailure)
     }
 
     @Test fun invisibleOrStationaryRenderedGeometryCannotSatisfyMotion(): Unit = runBlocking {
@@ -432,9 +202,9 @@ class GenerationBehaviorWorkflowTest {
 
     private suspend fun assertMotionRejected(drawing: String, path: String = "[0]") {
         val raw = movingDrawing(drawing, path)
-        val failure = runCatching { generate(Provider(plan(automaticMotionPlan), *rejectedAgain(raw))) }.exceptionOrNull()
-        assertEquals(drawing, "widget_behavior", (failure as? CloudFailure)?.code)
-        assertTrue(failure?.message.orEmpty().contains("repeated geometry change"))
+        val failure = runCatching { check(automaticMotionPlan, raw) }.exceptionOrNull()
+        assertTrue(drawing, failure is BehaviorCheckFailure)
+        assertTrue((failure as? BehaviorCheckFailure)?.detail.orEmpty().contains("repeated geometry change"))
     }
 
     private val automaticMotionPlan = """
@@ -466,8 +236,8 @@ class GenerationBehaviorWorkflowTest {
                 put("source", source + "return {state:input.state};")
             }.toString()
             val raw = candidate(game, bindings)
-            val failure = runCatching { generate(Provider(plan(gamePlan), *rejectedAgain(raw))) }.exceptionOrNull()
-            assertEquals("widget_behavior", (failure as? CloudFailure)?.code)
+            val failure = runCatching { check(gamePlan, raw) }.exceptionOrNull()
+            assertTrue(failure is BehaviorCheckFailure)
         }
     }
 }

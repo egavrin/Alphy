@@ -30,10 +30,7 @@ class ClockPartsWorkflowTest {
                 val output = when (request.generationStage) {
                     CloudGenerationStage.PLAN -> """{"title":"Stopwatch","description":"","language":"en","inputs":[],
                         "constants":[],"needs":[{"id":"clock","type":"stopwatch","label":"Elapsed","description":"Start, pause, and reset"}],
-                        "questions":[],"behavior":{"status":"checkable","scenario":{"slots":{
-                        "reset":{"kind":"action","part":"clock","member":"reset"},
-                        "elapsed":{"kind":"value","part":"clock","member":"value"}},"steps":[
-                        {"op":"action","slot":"reset"},{"op":"assert","slot":"elapsed","test":"equals","value":0}]}}}"""
+                        "questions":[]}"""
                     CloudGenerationStage.SELECTOR -> {
                         val body = JSONObject(request.turns.single().text)
                         batches += body.getString("stage")
@@ -43,7 +40,7 @@ class ClockPartsWorkflowTest {
                         "capabilities":[],"stateSchema":{"value":"number"},"initialState":{"value":0},
                         "ui":{"type":"column","children":[{"type":"metric","text":"Elapsed","bind":"value"},
                         {"type":"button","text":"Reset","action":"reset"}]},
-                        "source":"return {state:input.state};","behaviorBindings":{"reset":"reset","elapsed":[0]}}"""
+                        "source":"return {state:input.state};"}"""
                     else -> error("Unexpected stopwatch stage.")
                 }
                 emit(CloudEvent.Text(output))
@@ -110,8 +107,7 @@ class ClockPartsWorkflowTest {
                     CloudGenerationStage.PLAN -> """{"title":"Clocks","description":"","language":"en","inputs":[],
                         "constants":[{"id":"seconds","value":10}],"needs":[
                         {"id":"down","type":"countdown","label":"Countdown","description":"Ten seconds","uses":{"length":"seconds"}},
-                        {"id":"up","type":"stopwatch","label":"Stopwatch","description":"Measure elapsed seconds"}],"questions":[],
-                        "behavior":{"status":"unchecked","reason":"external_outcome"}}"""
+                        {"id":"up","type":"stopwatch","label":"Stopwatch","description":"Measure elapsed seconds"}],"questions":[]}"""
                     CloudGenerationStage.SELECTOR -> selectorAnswer(JSONObject(request.turns.single().text))
                     else -> error("Native clocks must not call the writer.")
                 }

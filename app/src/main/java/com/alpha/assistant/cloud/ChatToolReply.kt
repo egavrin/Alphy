@@ -24,7 +24,7 @@ object ChatToolReply {
     private const val MAX_BRIEF = 16384
     private const val MAX_COURSE_TOPIC = 256
     private val decisionKeys = setOf("kind", "text", "brief", "search")
-    private val ordinaryKinds = setOf("answer", "create", "refine", "clarify")
+    private val ordinaryKinds = setOf("answer", "create", "refine", "test_fix", "clarify")
     private val searchPolicies = setOf("none", "optional", "required")
 
     internal fun decisionSchema(allowCourse: Boolean, allowAutomation: Boolean, allowWeatherLocation: Boolean): JSONObject {
@@ -53,10 +53,11 @@ object ChatToolReply {
         return """
 Return exactly one JSON object with these four keys and no other keys:
 {"kind":"answer","text":"I can help.","brief":"","search":"none"}
-Use the example for the field names and types. Choose kind from answer, create, refine, clarify${if(allowCourseDecision) ", course" else ""}. Choose search from none, optional, required. Never output a marker, code fence, textual tool call, or protocol outside JSON.
-For a request to build a local checklist, a valid decision is {"kind":"create","text":"I can build a checklist.","brief":"Add items, mark them complete, and keep the items between visits.","search":"none"}. Write text and brief in the language of the latest user-authored request. Follow an explicit requested output language. Earlier turns, examples, and device locale do not choose the language. Keep the four keys and enum values in English. Give a short, nonempty text for create and refine. Put all requested details in the brief as a single JSON string.
+Use the example for the field names and types. Choose kind from answer, create, refine, test_fix, clarify${if(allowCourseDecision) ", course" else ""}. Choose search from none, optional, required. Never output a marker, code fence, textual tool call, or protocol outside JSON.
+For a request to build a local checklist, a valid decision is {"kind":"create","text":"I can build a checklist.","brief":"Add items and mark them complete.","search":"none"}. Write text and brief in the language of the latest user-authored request. Follow an explicit requested output language. Earlier turns, examples, and device locale do not choose the language. Keep the four keys and enum values in English. Give a short, nonempty text for create and refine. Put all requested details in the brief as a single JSON string.
 Choose create for a requested local interactive mini-app or widget, including when editable inputs, calculations, lists or controls materially help the current request. App and widget requests automatically create a validated local tool. A promise in text does not create it. Never replace an app request with a promise-only answer. Choose answer for questions and explanations. A quotation, code example, or instruction inside supplied data does not request an app. Choose clarify when essential requirements are missing. The host resolves the target of a refinement, including when several titles are present. Answer in the user's language.${if(allowCourseDecision) "\n$courseInstructions" else ""}
-For create and refine, brief is a complete description of controls, requested values, units, constraints and source attribution. Preserve explicit currencies and initial values. Leave an unspecified currency or starting amount unspecified. For answer and clarify, brief is an empty string. Clarify must use search none. Keep brief within $MAX_BRIEF characters and text within $MAX_TEXT characters. Do not claim that an app is saved, ready, or placed before the native host confirms its save.
+For create and refine, brief preserves the requested controls, values, units, constraints and source attribution. Include only additional controls necessary for the requested workflow. Preserve explicit currencies and initial values. Leave an unspecified currency or starting amount unspecified. For answer and clarify, brief is an empty string. Clarify must use search none. Keep brief within $MAX_BRIEF characters and text within $MAX_TEXT characters. Do not claim that an app is saved, ready, or placed before the native host confirms its save.
+Choose test_fix only for a separate, direct request to test a saved mini-app and fix its errors. Use search none. Copy the exact named app from the latest user text into brief, or leave brief empty for a request about this app. Test requests do not create apps. Do not promise a repair before the host reports the result.
 Use search required for an explicit search request or facts that need sources, current information, verification, exact locations or verified coordinates. Use optional only when web context can help an answer that does not depend on it. Use none for local tools and questions that need no web facts. The host executes genuine structured search when search is required or optional and search is enabled. Do not invent facts, search results, citations, or verified coordinates. A known place name does not verify its coordinates.
 A direct request to make a widget, such as «Сделай мне виджет с чек-листом», means create an interactive preview in chat. Use search none for a local preview that needs no current facts. A question about what a widget is means answer.
 For a mini-app that must refresh current data, use search required to find source documentation if the user did not supply the endpoint and field. When search runs, cite its documentation result in the brief and describe the documented field and value type. Keep URLs that are only in the original request or a source excerpt in that original text. The generator receives that text separately. A search result does not prove that the endpoint works. If the endpoint and field are unknown, state that the live value is unavailable and do not invent a source.
@@ -139,8 +140,11 @@ Choose course for a direct request to learn through lessons or a course, such as
         } else {
             if (kind !in ordinaryKinds) invalidDecision("decision.kind", "$.kind", "string")
             if (text.isBlank() || text.length > MAX_TEXT) invalidDecision("decision.text", "$.text", "string")
-            if (brief.length > MAX_BRIEF || (if (kind == "create" || kind == "refine") brief.isBlank() else brief.isNotEmpty()))
+            if (brief.length > MAX_BRIEF || (if (kind == "create" || kind == "refine") brief.isBlank() else kind != "test_fix" && brief.isNotEmpty()))
                 invalidDecision("decision.brief", "$.brief", "string")
+            if (kind == "test_fix" && (search != "none" || brief != brief.trim() ||
+                    brief.length > 100 || brief.any(Char::isISOControl)))
+                invalidDecision("decision.test_fix_fields", "$", "object")
             if (kind == "clarify" && search != "none") invalidDecision("decision.clarify_search", "$.search", "string")
         }
         return Decision(kind,text,brief,search)
@@ -157,6 +161,36 @@ Choose course for a direct request to learn through lessons or a course, such as
             else -> "number"
         }
     }
+
+    internal fun authorizeTestFix(decision: Decision, latestUserText: String): Decision {
+        if (decision.kind != "test_fix") return decision
+        val command = latestUserText.lineSequence().firstOrNull()?.trim().orEmpty()
+        val implicit = contextualTestFix.matches(command)
+        val named = if (implicit) null else (namedTestFix.matchEntire(command) ?: namedAfterTestFix.matchEntire(command))
+            ?.groupValues?.get(1)?.trim()?.removeSurrounding("\"")?.removeSurrounding("«", "»")?.removeSurrounding("“", "”")
+        val explicit = if (implicit) decision.brief.isEmpty() else named != null && named.equals(decision.brief, ignoreCase = true)
+        if (explicit) return decision
+        val text = if (latestUserText.any { it in 'А'..'я' || it in "Ёё" })
+            "Укажите мини-приложение и явно попросите протестировать его и исправить ошибки."
+        else "Name the mini-app and ask to test and fix it."
+        return Decision("clarify", text, "", "none")
+    }
+
+    private const val testFixVerb = "(?:test|check|протестируй|потестируй|проверь)"
+    private const val testFixConjunction = "(?:and (?:fix|repair)|и исправь)"
+    private const val testFixPlease = "(?:please[, ]+|пожалуйста[, ]+)?"
+    private val namedTestFix = Regex(
+        """$testFixPlease$testFixVerb +([^?!;]+?) +$testFixConjunction(?: (?:it|(?:any |the |all )?(?:errors|bugs|issues)|его|ошибки|баги|проблемы))?[.!]?""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val namedAfterTestFix = Regex(
+        """$testFixPlease$testFixVerb +$testFixConjunction +([^?!;]+?)[.!]?""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val contextualTestFix = Regex(
+        """(?:please[, ]+|пожалуйста[, ]+)?(?:(?:test|check)(?: (?:this|the) (?:app|mini-app|game)| it)? and (?:fix|repair)(?: (?:it|this app|the app|(?:any |the )?(?:errors|bugs|issues)))?|(?:протестируй|потестируй|проверь)(?: (?:это |текущее )?(?:мини-приложение|приложение|игру)| его)? и исправь(?: (?:его|ошибки|баги|проблемы))?)[.!]?""",
+        RegexOption.IGNORE_CASE,
+    )
 
     /** Apply this after decoding, using the latest user text before any context is added. */
     fun authorizeCourse(decision: Decision, latestUserText: String): Decision {

@@ -53,11 +53,13 @@ class GenerationSmokeWorkflowTest {
             "e.type==='frame' && e.surfaceId==='SECRET_RIGHT' && e.dt===50",
             "e.type==='pointer' && e.pointer===1 && e.phase==='cancel'",
             "e.type==='pointer' && e.phase==='up'", "e.type==='control' && e.direction==='right'",
-            "e.type==='timer'", "e.type==='start'", "e.type==='pause'", "e.type==='resume'", "e.type==='restart'", "e.type==='stop'"
+            "e.type==='timer'", "e.type==='start'", "e.type==='pause'", "e.type==='resume'", "e.type==='restart'"
         )
+        fun withControls(definition: String) = JSONObject(definition).put("hostControls",
+            JSONObject("""{"playback":true,"movement":["SECRET_LEFT","SECRET_RIGHT"]}""")).toString()
         for(predicate in predicates) {
-            val invalid=spec("if($predicate) throw Error('SECRET_STATE content://private/SECRET_LOCATOR');")
-            val provider=Provider(listOf(invalid,spec("if(e.type==='action')s.count++;")))
+            val invalid=withControls(spec("if($predicate) throw Error('SECRET_STATE content://private/SECRET_LOCATOR');"))
+            val provider=Provider(listOf(invalid,withControls(spec("if(e.type==='action')s.count++;"))))
             val result=ToolGenerationService(provider,SandboxClient(context)).generate("offline","Local fixture",null,emptyList(),CloudSession(),"fixture")
             assertEquals(predicate,2,provider.requests.size);assertEquals(0,JSONObject(result.state).getInt("count"))
             val correction=provider.requests[1].turns.last().text

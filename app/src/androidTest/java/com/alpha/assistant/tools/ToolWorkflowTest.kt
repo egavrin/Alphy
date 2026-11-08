@@ -75,7 +75,7 @@ class ToolWorkflowTest {
                 val rejected = engine.createDraft("Invalid refinement",second.id)
                 val failure = runCatching { engine.generate(rejected.id,"fixture",emptyList(),CloudSession()) }.exceptionOrNull()
                 assertTrue(invalid.take(100),failure is CloudFailure)
-                assertEquals(listOf(CloudGenerationStage.PLAN) + List(4) { CloudGenerationStage.REFINE },
+                assertEquals(List(4) { CloudGenerationStage.REFINE },
                     requests.map { it.generationStage })
                 assertTrue(requests.last().turns.last().text.contains("complete corrected app definition"))
                 assertEquals(second,store.tool(first.id)); assertNull(store.draft(rejected.id)!!.candidate)
@@ -186,8 +186,8 @@ class ToolWorkflowTest {
                 assertEquals(1, JSONObject(rolled.state).getInt("count"))
                 assertTrue(runCatching { engine.rollback(second.id, second.revision, second.stateVersion, 1) }.isFailure)
             } finally { reopened.close() }
-            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.PLAN, CloudGenerationStage.REFINE,
-                CloudGenerationStage.PLAN, CloudGenerationStage.REFINE), requests.map { it.generationStage })
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.REFINE,
+                CloudGenerationStage.REFINE), requests.map { it.generationStage })
             requests.take(2).forEach { request ->
                 assertArrayEquals(imageBytes,android.util.Base64.decode(request.turns.single().images.single().substringAfter(','),android.util.Base64.DEFAULT))
             }

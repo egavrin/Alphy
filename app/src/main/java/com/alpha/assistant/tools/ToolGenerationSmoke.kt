@@ -17,7 +17,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Only event kinds and structural indices can leave this local workflow. */
-internal class ToolSmokeFailure(val event: String,val path: String,cause: Exception): Exception(null,cause) {
+internal class ToolSmokeFailure(val event: String, val path: String, cause: Exception,
+    val replay: List<String>? = null) : Exception(null, cause) {
     val correction get()="Smoke event: $event. Path: $path. Return valid state, UI, drawing, and subscriptions for this event."
 }
 
@@ -40,6 +41,8 @@ internal class ToolGenerationSmoke(
     private val policy: ToolExecutionPolicy? = null,
     private val onInitialPreview: (suspend (ToolPreview) -> Unit)? = null,
     private val checkUi: (suspend (String) -> Unit)? = null,
+    private val clockSample: com.alpha.assistant.tools.generation.PartClockSample? = null,
+    private val observeReplay: ((List<String>) -> Unit)? = null,
 ) {
     private data class Control(val event: JSONObject,val path: String)
     private inner class Branch(private val execute: suspend (String,String)->SandboxResult,initialUi: String, seedState: String) {
@@ -51,10 +54,12 @@ internal class ToolGenerationSmoke(
         var frames=emptySet<String>()
         var timers=emptyMap<String,Int>()
         var fenced=false
-        private var clock = generation.partClockFor(spec)
+        private var clock = clockSample ?: generation.partClockFor(spec)
+        private val replay = observeReplay?.let { mutableListOf<String>() }
         fun displayState(): JSONObject = projectToolState(spec, JSONObject(state), clock)
         suspend fun event(event: JSONObject,path: String): ToolPreview {
             checkActive()
+            replay?.add(event.toString())
             try {
                 val type=event.getString("type")
                 if(type !in setOf("preview","render","open","action",SandboxContract.LIVE_INPUT_EVENT)) {
@@ -62,7 +67,7 @@ internal class ToolGenerationSmoke(
                     if(type=="frame") require(event.getString("surfaceId") in frames)
                     if(type=="timer") require(event.getString("timerId") in timers)
                 }
-                clock = generation.partClockFor(spec)
+                clock = clockSample ?: generation.partClockFor(spec)
                 val result=generation.executeEvent(spec,id,revision,state,event,ui,policy,clock) { source,input ->
                     execute(source,input.toString())
                 }
@@ -78,9 +83,10 @@ internal class ToolGenerationSmoke(
                 frames=result.frames ?: frames;timers=result.timers ?: timers
                 playback.update(result.playback,type)
                 fenced=result.effects.isNotEmpty() || result.records.length()>0
+                replay?.let { observeReplay?.invoke(it) }
                 return result
             } catch(cancel: CancellationException) {throw cancel}
-              catch(failure: Exception) {throw ToolSmokeFailure(event.getString("type"),path,failure)}
+              catch(failure: Exception) {throw ToolSmokeFailure(event.getString("type"),path,failure,replay?.toList())}
         }
         suspend fun subscriptions() {
             if(fenced || playback.value!="playing")return
@@ -137,7 +143,8 @@ internal class ToolGenerationSmoke(
         else sandbox.disposable {execute -> Branch(execute,initialUi,seedState).block()}
 
     suspend fun checkBehavior(scenario: GenerationBehavior.Scenario, bindings: Map<String, Binding>, preview: ToolPreview,
-        route: ToolGenerationRoute, nativeSlots: Set<String>) {
+        route: ToolGenerationRoute, nativeSlots: Set<String>,
+        allowAssertionFailure: (Int) -> Boolean = { false }) {
         val freshUi = if (initialState == spec.initialState) preview.ui else branch(seedState = spec.initialState) {
             event(JSONObject().put("type", "preview"), "$.ui").ui
         }
@@ -298,7 +305,7 @@ internal class ToolGenerationSmoke(
                                 else -> false
                             }
                         }
-                        if (!passed) fail("assertion failed (${step.test})", BehaviorFailureRule.ASSERTION_FAILED,
+                        if (!passed && !allowAssertionFailure(index)) fail("assertion failed (${step.test})", BehaviorFailureRule.ASSERTION_FAILED,
                             step.slot, valueShape = BehaviorValueShape.of(current))
                     }
                 }

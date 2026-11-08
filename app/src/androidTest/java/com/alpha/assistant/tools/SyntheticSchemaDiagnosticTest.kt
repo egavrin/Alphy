@@ -252,7 +252,6 @@ class SyntheticSchemaDiagnosticTest {
         override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
             check(request.jsonObject && !request.search && request.selectedText.isEmpty())
             check(request.turns.all {it.images.isEmpty()})
-            if (request.isFixtureRevisionPlan && request.replyWithFixturePlan(emit)) return
             if (routing.isRouteRequest(request,operation.prompt)) {
                 check(operation.base == null)
                 delegate.respond(key,request,session,emit)

@@ -431,4 +431,12 @@
     <string name="chat_jump_latest">К последнему сообщению</string>
     <string name="chat_request_queued">В очереди</string>
     <string name="chat_cancel_queued">Отменить запрос в очереди</string>
+    <string name="chat_app_test_progress">Тестирую мини-приложение и исправляю подтверждённые ошибки…</string>
+    <string name="chat_app_test_choose">Какое мини-приложение протестировать и исправить? Укажите точное название: %1$s.</string>
+    <string name="chat_app_test_no_target">Откройте чат с карточкой сохранённого мини-приложения и повторите запрос.</string>
+    <string name="chat_app_test_saved">Версия %1$d проверена. Исправление сохранено как версия %2$d.</string>
+    <string name="chat_app_test_passed">Проверки версии %1$d прошли.</string>
+    <string name="chat_app_test_unverified">Проверка версии %1$d не подтвердила ошибку.</string>
+    <string name="chat_app_test_unrepaired">Исправление для версии %1$d не прошло проверку.</string>
+    <string name="chat_app_test_unsaved">Исправление для версии %1$d проверено и не сохранено.</string>
 </resources>

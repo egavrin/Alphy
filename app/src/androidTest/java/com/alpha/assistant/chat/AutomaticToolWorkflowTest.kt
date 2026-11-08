@@ -67,7 +67,6 @@ class AutomaticToolWorkflowTest {
     }
     private abstract class SingleRoundProvider : ChatProvider {
         final override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-            if (request.isFixtureRevisionPlan && request.replyWithFixturePlan(emit)) return
             val text = StringBuilder()
             answer(key,request,session) { event ->
                 if(event is CloudEvent.Text) text.append(event.value)
@@ -156,7 +155,7 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 val result = when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}""".withUncheckedBehavior()
+                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}"""
                     CloudGenerationStage.COMPLETE -> {
                         completions += request
                         if (completions.size == 1) {
@@ -188,7 +187,7 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 val result = when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}""".withUncheckedBehavior()
+                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}"""
                     CloudGenerationStage.COMPLETE -> {
                         completions += request
                         if (completions.size > 1) """{"fields":{"description":"Travel expense total ${completions.size}"}}"""
@@ -221,7 +220,7 @@ class AutomaticToolWorkflowTest {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
                 val result = when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}""".withUncheckedBehavior()
+                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}"""
                     CloudGenerationStage.COMPLETE -> spec("Moscow expenses")
                     else -> decision("Счётчик расходов в Москве")
                 }
@@ -245,7 +244,7 @@ class AutomaticToolWorkflowTest {
                 val result = when (request.generationStage) {
                     CloudGenerationStage.PLAN -> {
                         plans += request
-                        """{"wholeScreen":true}""".withUncheckedBehavior()
+                        """{"wholeScreen":true}"""
                     }
                     CloudGenerationStage.COMPLETE -> candidate
                     else -> decision()
@@ -325,7 +324,7 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 emit(CloudEvent.Text(when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}""".withUncheckedBehavior()
+                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}"""
                     CloudGenerationStage.COMPLETE -> definition
                     else -> decision("Build a bill calculator with two fields")
                 }))
@@ -373,7 +372,7 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 emit(CloudEvent.Text(when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}""".withUncheckedBehavior()
+                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}"""
                     CloudGenerationStage.COMPLETE -> if (++completions == 1) large.toString() else
                         JSONObject().put("sourceEdits", org.json.JSONArray().put(JSONObject()
                             .put("search", prefix + "\"".repeat(32)).put("replace", prefix))).toString()
@@ -581,53 +580,108 @@ class AutomaticToolWorkflowTest {
             assertEquals("widget_spec",f.last.errorCode); assertTrue(f.toolStore.tools().isEmpty())
         }
     }
-    @Test fun chatAcceptsOnlyAnAppThatPassesThePlannedBehavior() {
-        var repairWorks = false
-        var candidates = 0
+    @Test fun ordinaryCreationPlansOnlyTheApp() {
         val original = "Create a counter that adds one."
-        val behavior = """{"title":"Counter","description":"","language":"en","inputs":[],"constants":[],
-            "needs":[{"id":"custom","type":"other","label":"Counter","description":"Build a counter"}],"questions":[],
-            "behavior":{"status":"checkable","scenario":{"slots":{"add":{"kind":"action"},
-            "count":{"kind":"value"}},"steps":[{"op":"action","slot":"add"},
-            {"op":"assert","slot":"count","test":"equals","value":1}]}}}"""
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                assertFalse(request.systemInstructions.contains("behaviorBindings"))
+                assertFalse(request.systemInstructions.contains("executable check"))
                 when (request.generationStage) {
                     null -> emit(CloudEvent.Text(decision(brief = "Create an editable local counter")))
                     CloudGenerationStage.PLAN -> {
                         val input = JSONObject(request.turns.first().text)
                         assertEquals(original, input.getString("request"))
                         assertTrue(input.getString("context").contains("Widget brief:"))
-                        emit(CloudEvent.Text(behavior))
+                        emit(CloudEvent.Text("""{"wholeScreen":true}"""))
                     }
-                    CloudGenerationStage.COMPLETE -> {
-                        candidates++
-                        val good = JSONObject(spec()).put("behaviorBindings", JSONObject("""{"add":"add","count":[0]}"""))
-                        val output = when {
-                            candidates == 1 -> good.put("source", "return {state:input.state};").toString()
-                            repairWorks -> writerFixturePatch(request.turns[1].text, good.toString())
-                            else -> """{"fields":{"description":"Rejected repair $candidates"}}"""
-                        }
-                        emit(CloudEvent.Text(output))
-                    }
+                    CloudGenerationStage.COMPLETE -> emit(CloudEvent.Text(spec()))
                     else -> error("Unexpected generation stage.")
                 }
             }
         }
         Fixture(provider).use { f ->
             f.send(original); f.idle()
-            assertEquals("widget_behavior", f.last.errorCode)
-            assertEquals(4, candidates)
-            assertTrue(f.toolStore.tools().isEmpty())
-            assertTrue(f.toolStore.drafts().isEmpty())
-            repairWorks = true
-            candidates = 0
-            f.send(original); f.idle()
             assertEquals("complete", f.last.status)
-            assertEquals(2, candidates)
-            val saved = f.toolStore.tools().single()
-            assertEquals(f.last.toolId, saved.id)
+            assertEquals(f.last.toolId, f.toolStore.tools().single().id)
+        }
+    }
+
+    @Test fun testAndFixRunsSeparatelyAndSavesExactlyOneVerifiedRevision() {
+        val calls = CopyOnWriteArrayList<CloudRequest>()
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                calls += request
+                val response = when {
+                    request.chatDecision -> decision(kind = "test_fix")
+                    request.generationStage == CloudGenerationStage.REFINE -> """{"sourceEdits":[
+                        {"search":"return {state:input.state};","replace":"if(input.event.type==='action')input.state.count++;return {state:input.state};"}
+                    ]}"""
+                    else -> """{"behavior":{"status":"checkable","scenario":{"slots":{"add":{"kind":"action"},
+                        "count":{"kind":"value"}},"steps":[{"op":"action","slot":"add"},
+                        {"op":"assert","slot":"count","test":"equals","value":1}]}},
+                        "targets":{"add":"action2","count":"value1"}}"""
+                }
+                emit(CloudEvent.Text(response))
+            }
+        }
+        Fixture(provider) { shell, tools ->
+            val broken = ToolSpec.parse(JSONObject(spec()).put("source", "return {state:input.state};").toString())
+            tools.saveTool(ToolRecord("counter",1,1,broken.json,broken.initialState,broken.ui.toString(),"chat",true),true)
+            seedChat(shell,"counter")
+        }.use { f ->
+            f.send("Test and fix this app.\nExpected Count = 1")
+            f.idle()
+            val saved = checkNotNull(f.toolStore.tool("counter"))
+            assertEquals(f.last.error, "complete", f.last.status)
+            assertEquals("${f.last.text} · ${calls.map { it.generationStage }}", 2, saved.revision)
             assertEquals(0, JSONObject(saved.state).getInt("count"))
+            assertEquals(2, f.toolStore.revisions("counter").size)
+            assertEquals(2, f.last.toolRevision)
+            assertEquals(listOf(null, null, CloudGenerationStage.REFINE), calls.map { it.generationStage })
+            assertTrue(calls.first().chatDecision)
+            assertFalse(calls[1].chatDecision)
+        }
+    }
+
+    @Test fun aQuotedOrMismatchedTestRequestCannotChangeTheSoleApp() {
+        var diagnosticCalls = 0
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (!request.chatDecision) diagnosticCalls++
+                emit(CloudEvent.Text(decision(kind = "test_fix")))
+            }
+        }
+        Fixture(provider) { shell, tools ->
+            seedTool(tools, "counter", "Counter")
+            seedChat(shell, "counter")
+        }.use { f ->
+            f.send("Test Weather and fix it.")
+            f.idle()
+            f.send("Explain the phrase \"Test and fix this app.\"")
+            f.idle()
+            assertEquals(0, diagnosticCalls)
+            assertEquals(1, f.toolStore.tool("counter")?.revision)
+        }
+    }
+
+    @Test fun aTitleSubstringCannotAuthorizeTestingAnotherSavedApp() {
+        var diagnosticCalls = 0
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (!request.chatDecision) diagnosticCalls++
+                emit(CloudEvent.Text(JSONObject(decision(kind = "test_fix")).put("brief", "Clock").toString()))
+            }
+        }
+        Fixture(provider) { shell, tools ->
+            seedTool(tools, "short", "Clock")
+            seedTool(tools, "long", "World Clock")
+            seedChat(shell, "short", "long")
+        }.use { f ->
+            f.send("Test World Clock and fix it.")
+            f.idle()
+            assertEquals(0, diagnosticCalls)
+            assertEquals(1, f.toolStore.tool("short")?.revision)
+            assertEquals(1, f.toolStore.tool("long")?.revision)
         }
     }
 

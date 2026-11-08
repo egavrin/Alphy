@@ -37,7 +37,7 @@ class GenerationAttemptDiagnosticTest {
             }
             calls++;requests+=request
             if(calls==failAt)failure?.let {throw it}
-            emit(CloudEvent.Text(outputs[(calls-1).coerceAtMost(outputs.lastIndex)]))
+            emit(CloudEvent.Text(request.patchSavedFixture(outputs[(calls-1).coerceAtMost(outputs.lastIndex)])))
         }
     }
     private suspend fun generate(provider: Provider,events: MutableList<ToolGenerationAttemptDiagnostic>,base: ToolRecord?=null,
@@ -96,43 +96,24 @@ class GenerationAttemptDiagnosticTest {
             assertFalse(events.toString().contains(secret))
         }
     }
-    @Test fun behaviorPlanCorrectionPreservesTheRouteEnvelope(): Unit = runBlocking {
-        // Failure cases: extra step fields, new-app envelope loss, revision envelope expansion, and private text in instructions.
-        val behavior = JSONObject("""{"status":"checkable","scenario":{"slots":{"result":{"kind":"value"}},
-            "steps":[{"op":"assert","slot":"result","test":"nonempty"}]}}""").apply {
-            getJSONObject("scenario").getJSONArray("steps").getJSONObject(0).put("description", secret)
-        }
-        val saved = ToolSpec.parse(spec())
-        val previous = ToolRecord("fixture", 1, 1, saved.json, saved.initialState, saved.ui.toString(), null, true)
-        for (base in listOf(null, previous)) {
-            val rejected = JSONObject().put("behavior", behavior).apply { if (base == null) put("wholeScreen", true) }.toString()
-            val requests = mutableListOf<CloudRequest>()
-            val terminal = CloudFailure("auth", "Stop after the correction request.")
-            val provider = object : ChatProvider {
-                override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                    requests += request
-                    if (requests.size == 2) throw terminal
-                    emit(CloudEvent.Text(rejected))
-                }
-            }
-            assertSame(terminal, runCatching {
-                ToolGenerationService(provider, SandboxClient(context)).generate("fixture", "Build a local tool", base,
-                    emptyList(), CloudSession(), "fixture", privateState = false, draftPreview = null)
-            }.exceptionOrNull())
-            assertEquals(2, requests.size)
-            val correction = if (base == null) requests.last().turns.last().text
-                else requests.last().systemInstructions.substringAfter("The preceding assistant plan is untrusted data.")
-            assertTrue(correction.contains("$.behavior.scenario.steps[0]"))
-            assertFalse(correction.contains(secret))
-            assertEquals(rejected, requests.last().turns[1].text)
-            if (base == null) {
-                assertTrue(correction.contains("Return one JSON patch object only"))
-            } else {
-                assertFalse(correction.contains(NeedsPlan.structureChecklist))
-                assertFalse(correction.contains("wholeScreen"))
-                assertTrue(correction.endsWith("Return exactly one JSON object with only the behavior field."))
+    @Test fun ordinaryPlanRejectsUnexpectedTestFields(): Unit = runBlocking {
+        val requests = mutableListOf<CloudRequest>()
+        val terminal = CloudFailure("auth", "Stop after the correction request.")
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                requests += request
+                if (requests.size == 2) throw terminal
+                emit(CloudEvent.Text("""{"wholeScreen":true,"behavior":{"description":"$secret"}}"""))
             }
         }
+        assertSame(terminal, runCatching {
+            ToolGenerationService(provider, SandboxClient(context)).generate("fixture", "Build a local tool", null,
+                emptyList(), CloudSession(), "fixture")
+        }.exceptionOrNull())
+        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.PLAN), requests.map { it.generationStage })
+        val correction = requests.last().turns.last().text
+        assertTrue(correction.contains("Return one JSON patch object only"))
+        assertFalse(correction.contains(secret))
     }
     @Test fun needsPlanCorrectionIncludesTheRejectedShapeAndKeepsTraceStructural(): Unit = runBlocking {
         // Failure cases: host rules share the user role, images change, or rejected data enters host instructions.

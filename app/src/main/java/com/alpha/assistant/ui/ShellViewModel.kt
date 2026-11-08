@@ -39,6 +39,7 @@ import com.alpha.assistant.surfaces.assistantUnavailable
 import com.alpha.assistant.memory.MemoryPageState
 import com.alpha.assistant.memory.MemoryStore
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.tools.TestFixStatus
 import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
@@ -1237,6 +1238,8 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                         if(decision.kind == "create" && assistant.requiresRefinement)
                             throw CloudFailure("decision_changed", "Этот запрос относится к изменению выбранного мини-приложения.")
                     }
+                    if (decision.kind == "test_fix" && assistant.requiresRefinement)
+                        throw CloudFailure("decision_changed", "Send a separate request to test and fix the saved app.")
                     if(decision.kind == "refine" && target == null) {
                         if(targetId != null || choices.isEmpty()) unavailableTool()
                         throw ChooseRefinement(choices)
@@ -1357,7 +1360,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                     return@launch
                 }
                 val decision = ChatToolReply.decode(completed.text, allowCourseDecision = courseHost != null)
-                val decoded = ChatToolReply.authorizeCourse(decision, user.text)
+                val decoded = ChatToolReply.authorizeTestFix(ChatToolReply.authorizeCourse(decision, user.text), user.text)
                 if(answerFragment.isNotEmpty() && decoded.kind != "answer")
                     throw CloudFailure("decision_changed","The assistant changed the requested operation after streaming an answer.")
                 val reported = completed.provenance ?: inputProvenance
@@ -1373,6 +1376,21 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 val sources = snapshot.conversations.find { it.id == conversationId }?.messages?.find { it.id == assistant.id }?.sources.orEmpty()
                 if(decoded.search == "required" && !assistant.search) throw CloudFailure("search_disabled","This request requires web search, but search is disabled.")
                 if(decoded.search == "required" && sources.isEmpty()) throw CloudFailure("search_required","No validated search sources were returned. The requested facts could not be verified.")
+                val operationId = assistant.toolOperationId ?: assistant.id
+                suspend fun prepareToolOperation(progress: Int) {
+                    updateMessage(request, assistant.id, persist = false) {
+                        it.copy(text = getApplication<Application>().getString(progress), status = "generating",
+                            toolOperationId = operationId, provenance = replyProvenance)
+                    }
+                    val pending = snapshot.conversations.find { it.id == conversationId } ?: throw CancellationException()
+                    if (!persist { store.updateConversation(pending) }.await())
+                        throw CloudFailure("storage", "The app request could not be saved.")
+                }
+                val canCommit = {
+                    isActive(request) && snapshot.conversations.any { c ->
+                        c.id == conversationId && c.messages.any { it.id == assistant.id && it.status == "generating" }
+                    }
+                }
                 val topic = decoded.courseTopic
                 if (topic != null) {
                     val canOpen = courseHost != null && courseChatHost === courseHost && courseSetup == null &&
@@ -1383,24 +1401,46 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                         it.copy(text = getApplication<Application>().getString(notice), status = "complete", error = "", errorCode = "",
                             provenance = replyProvenance)
                     }
+                } else if (decoded.kind == "test_fix") {
+                    val app = getApplication<Application>()
+                    val testTarget = if (decoded.brief.isEmpty()) knownTools?.singleOrNull()
+                    else knownTools?.singleOrNull { ToolSpec.storedTitle(it.spec).equals(decoded.brief, ignoreCase = true) }
+                    if (testTarget == null) {
+                        val titles = choices.take(20).joinToString(", ") { it.title }
+                        val text = if (titles.isEmpty()) app.getString(R.string.chat_app_test_no_target)
+                        else app.getString(R.string.chat_app_test_choose, titles)
+                        updateMessage(request, assistant.id) { it.copy(text = text, status = "complete", provenance = replyProvenance) }
+                    } else {
+                        tools.testAndFix(user.text, testTarget, conversationId, operationId, key, request.session,
+                            cancelRequest = ::cancelRequest,
+                            prepared = { prepareToolOperation(R.string.chat_app_test_progress) },
+                            canCommit = canCommit,
+                            completed = { result, saved ->
+                                val headline = if (saved != null) app.getString(R.string.chat_app_test_saved, testTarget.revision, saved.revision)
+                                else app.getString(when (result.status) {
+                                    TestFixStatus.PASSED -> R.string.chat_app_test_passed
+                                    TestFixStatus.UNVERIFIED -> R.string.chat_app_test_unverified
+                                    TestFixStatus.UNREPAIRED -> R.string.chat_app_test_unrepaired
+                                    TestFixStatus.VERIFIED -> R.string.chat_app_test_unsaved
+                                }, testTarget.revision)
+                                updateMessage(request, assistant.id) {
+                                    it.copy(text = "$headline\n${result.detail}", status = "complete",
+                                        toolId = saved?.id, toolRevision = saved?.revision, provenance = replyProvenance)
+                                }
+                            })
+                    }
                 } else if(decoded.kind != "create" && decoded.kind != "refine")
                     updateMessage(request, assistant.id) { it.copy(text = decoded.text,status = "complete",provenance = replyProvenance) }
                 else {
                     val prompt = ChatToolReply.generationPrompt(
                         user.text,decoded.brief,decoded.text,sources,selectedText)
-                    val operationId = assistant.toolOperationId ?: assistant.id
                     tools.generateAutomatic(prompt,target.takeIf { decoded.kind == "refine" },conversationId,operationId,key,images,request.session,
                         cancelRequest = ::cancelRequest, originalRequest = user.text,
                         prepared = {
                             val progress = if (decoded.kind == "refine") R.string.chat_app_update_progress else R.string.chat_app_create_progress
-                            updateMessage(request, assistant.id, persist = false) {
-                                it.copy(text = getApplication<Application>().getString(progress), status = "generating",
-                                    toolOperationId = operationId, provenance = replyProvenance)
-                            }
-                            val pending = snapshot.conversations.find { it.id == conversationId } ?: throw CancellationException()
-                            if(!persist { store.updateConversation(pending) }.await()) throw CloudFailure("storage","The widget was not created because its request could not be saved.")
+                            prepareToolOperation(progress)
                         },
-                        canCommit = { isActive(request) && snapshot.conversations.any { c -> c.id == conversationId && c.messages.any { it.id == assistant.id && it.status == "generating" } } },
+                        canCommit = canCommit,
                         committed = { tool -> updateMessage(request,assistant.id) {
                             it.copy(text = decoded.text,status = "complete",toolId = tool.id,toolRevision = tool.revision,
                                 provenance = replyProvenance)

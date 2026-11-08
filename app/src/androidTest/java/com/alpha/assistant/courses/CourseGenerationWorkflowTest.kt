@@ -3,7 +3,6 @@ package com.alpha.assistant.courses
 import android.content.Context
 import androidx.javascriptengine.IsolateStartupParameters
 import androidx.javascriptengine.JavaScriptIsolate
-import com.alpha.assistant.tools.withUncheckedBehavior
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.ChatProvider
@@ -610,7 +609,7 @@ class CourseGenerationWorkflowTest {
                     {"title":"Course fixture","description":"","language":"en","inputs":[],"constants":[],"needs":[
                       {"id":"course","type":"other","label":"Course exercise","description":"Show the course exercise"}
                     ],"questions":[]}
-                """.trimIndent().withUncheckedBehavior()
+                """.trimIndent()
                 CloudGenerationStage.COMPLETE -> definition
                 else -> error("Unexpected provider call.")
             }))

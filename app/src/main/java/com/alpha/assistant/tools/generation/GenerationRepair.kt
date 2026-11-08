@@ -13,7 +13,6 @@ internal class GenerationRepair private constructor(
     private val targetField: String?,
     private val expectedHoles: List<String>?,
     private val writer: Boolean,
-    private val bindingsExpected: Boolean,
     private val refinement: Boolean = false,
 ) {
     enum class Mode(val wire: String) { PATCH("patch"), REWRITE("rewrite") }
@@ -37,11 +36,6 @@ internal class GenerationRepair private constructor(
     private data class Candidate(val text: String, val json: JsonObject)
     private data class SourceEdit(val start: Int, val end: Int, val replacement: String)
 
-    private val protectedRemovals = when {
-        !writer -> emptySet()
-        targetField == null && bindingsExpected -> protectedFields
-        else -> setOf("source")
-    }
     private var base: Candidate? = null
     private val seen = mutableListOf<JsonObject>()
     private var rewritten = false
@@ -52,7 +46,6 @@ internal class GenerationRepair private constructor(
         if (writer) {
             if (targetField == null && ("fill" in json || "holes" in json)) return
             if (targetField != null && (json.keys.any { it !in mixedKeys } ||
-                    (!bindingsExpected && "behaviorBindings" in json) ||
                     json["holes"] != expectedHoles?.let { JsonArray(it.map(::JsonPrimitive)) })) return
             val definition = if (targetField == null) json else json[targetField] as? JsonObject ?: return
             if (string(definition["source"]).isNullOrBlank()) return
@@ -62,6 +55,8 @@ internal class GenerationRepair private constructor(
     }
 
     fun firstRefinement(): Request = patch(0, "Apply the requested edit to the current saved definition.", checkNotNull(base))
+
+    fun testPatch(number: Int, feedback: String): Request? = base?.let { patch(number, feedback, it) }
 
     fun next(feedback: String, rewriteInstructions: String, claim: () -> Int?): Request? {
         val candidate = base
@@ -78,44 +73,36 @@ internal class GenerationRepair private constructor(
         val structure = "Use fields, a JSON object, to set named fields in ${targetField ?: "the candidate root"}. " +
             "Allowed fields: ${editableFields.joinToString()}. " +
             "Use removeFields, an array of strings, to delete existing fields. Do not set and remove the same field."
-        val bindings = when {
-            bindingsExpected && refinement -> " Include behaviorBindings at the patch root with every requested slot. " +
-                "Use an action ID string for an action, or an array of integer UI indices where a path is required. " +
-                "Do not wrap a binding in an object unless the slot is geometry. Include the complete map even when the UI is unchanged."
-            bindingsExpected -> " Use behaviorBindings, a JSON object, to replace the complete writer binding map."
-            else -> ""
-        }
         val source = if (writer) {
             " Use sourceEdits, an array of objects, for JavaScript. Each object has exactly search and replace strings. " +
                 "Copy a short, unique search fragment exactly from the decoded source. Use nonoverlapping edits. " +
-                "Keep source outside fields and removeFields. Set behaviorBindings only in its own section. " +
-                "Preserve native ownership and hole order." +
-                if ("behaviorBindings" !in protectedRemovals) " Use removeFields to delete an unexpected binding map in the editable object." else ""
+                "Keep source outside fields and removeFields. " +
+                "Preserve native ownership and hole order."
         } else ""
         return Request(Mode.PATCH, number,
             "$feedback\nReturn one JSON patch object only. This replaces the earlier full-output instruction. " +
-                "$structure$bindings$source Make at least one change. Do not return the complete candidate.",
+                "$structure$source Make at least one change. Do not return the complete candidate.",
             candidate.text)
     }
 
-    fun apply(raw: String): Applied {
+    fun apply(raw: String, restrictRemovals: Boolean = false): Applied {
         if (byteSize(raw) > SandboxContract.MAX_BYTES) reject(Problem.SIZE)
         val patch = strictObject(raw) ?: reject()
         val sections = buildSet {
             addAll(planPatchKeys)
             if (writer) add("sourceEdits")
-            if (bindingsExpected) add("behaviorBindings")
         }
         if (patch.keys.any { it !in sections }) reject()
         val fields = patch["fields"]?.let { it as? JsonObject ?: reject() }.orEmpty()
         val removals = patch["removeFields"]?.let { value ->
             (value as? JsonArray ?: reject()).map { string(it) ?: reject() }
         }.orEmpty()
-        val bindings = patch["behaviorBindings"]?.let { it as? JsonObject ?: reject() }
         val edits = patch["sourceEdits"]?.let { it as? JsonArray ?: reject() }.orEmpty()
-        val changes = fields.size + removals.size + edits.size + if (bindings == null) 0 else 1
+        val changes = fields.size + removals.size + edits.size
         if (changes !in 1..32 || edits.size > 16 || fields.keys.any { it !in editableFields } ||
-            removals.toSet().size != removals.size || removals.any { it in fields || it in protectedRemovals }) reject()
+            removals.toSet().size != removals.size || removals.any {
+                it in fields || writer && it == "source" || restrictRemovals && it !in editableFields
+            }) reject()
 
         val previous = checkNotNull(base).json
         val original = if (targetField == null) previous else previous.getValue(targetField) as JsonObject
@@ -127,7 +114,6 @@ internal class GenerationRepair private constructor(
         val result = if (targetField == null) definition else previous.toMutableMap().apply {
             put(targetField, JsonObject(definition))
         }
-        if (bindings != null) result["behaviorBindings"] = bindings
         val json = JsonObject(result)
         val text = json.toString()
         if (byteSize(text) > SandboxContract.MAX_BYTES) reject(Problem.SIZE)
@@ -160,18 +146,18 @@ internal class GenerationRepair private constructor(
             "It replaces the complete output schema above. Keep the original task and ownership rules."
 
         private val planPatchKeys = setOf("fields", "removeFields")
-        private val protectedFields = setOf("source", "behaviorBindings")
+        private val protectedFields = setOf("source")
         private val sourceEditKeys = setOf("search", "replace")
-        private val mixedKeys = setOf("holes", "fill", "behaviorBindings")
-        private val planFields = setOf("wholeScreen", "title", "description", "language", "inputs", "constants", "needs", "questions", "behavior")
+        private val mixedKeys = setOf("holes", "fill")
+        private val planFields = setOf("wholeScreen", "title", "description", "language", "inputs", "constants", "needs", "questions")
 
-        fun plan() = GenerationRepair(planFields, null, null, false, false)
+        fun plan() = GenerationRepair(planFields, null, null, false)
 
-        fun writer(fields: Set<String>, holes: List<String>?, bindingsExpected: Boolean) =
-            GenerationRepair(fields - protectedFields, "fill".takeIf { holes != null }, holes, true, bindingsExpected)
+        fun writer(fields: Set<String>, holes: List<String>?) =
+            GenerationRepair(fields - protectedFields, "fill".takeIf { holes != null }, holes, true)
 
-        fun refinement(fields: Set<String>, mixed: Boolean, bindingsExpected: Boolean, saved: String) =
-            GenerationRepair(fields - protectedFields, "fill".takeIf { mixed }, null, true, bindingsExpected, refinement = true)
+        fun refinement(fields: Set<String>, mixed: Boolean, saved: String) =
+            GenerationRepair(fields - protectedFields, "fill".takeIf { mixed }, null, true, refinement = true)
                 .apply { retain(saved) }
 
         fun byteSize(text: String) = text.toByteArray(Charsets.UTF_8).size

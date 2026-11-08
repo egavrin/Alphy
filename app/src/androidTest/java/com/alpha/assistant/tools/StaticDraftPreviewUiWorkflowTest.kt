@@ -352,7 +352,7 @@ class StaticDraftPreviewUiWorkflowTest {
             val response = when (request.generationStage) {
                 CloudGenerationStage.PLAN -> """{"title":"Mixed","description":"","language":"en","inputs":[],"constants":[],"questions":[],"needs":[
                     {"id":"count","type":"counter","label":"Count","description":"Increase and reset"},
-                    {"id":"scene","type":"scene","label":"Dot","description":"Draw a dot"}]}""".withUncheckedBehavior()
+                    {"id":"scene","type":"scene","label":"Dot","description":"Draw a dot"}]}"""
                 CloudGenerationStage.SELECTOR -> {
                     val questions = JSONObject(request.turns.single().text).getJSONArray("questions")
                     val answers = JSONArray()

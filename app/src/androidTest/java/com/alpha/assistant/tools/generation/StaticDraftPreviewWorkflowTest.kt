@@ -1,6 +1,5 @@
 package com.alpha.assistant.tools.generation
 
-import com.alpha.assistant.tools.withUncheckedBehavior
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.ChatProvider
@@ -17,6 +16,7 @@ import com.alpha.assistant.tools.ToolEngine
 import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
+import com.alpha.assistant.tools.writerFixturePatch
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -48,7 +48,7 @@ class StaticDraftPreviewWorkflowTest {
 
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
             val response = when (request.generationStage) {
-                CloudGenerationStage.PLAN -> plan(mixed).withUncheckedBehavior()
+                CloudGenerationStage.PLAN -> plan(mixed)
                 CloudGenerationStage.SELECTOR -> {
                     val questions = JSONObject(request.turns.single().text).getJSONArray("questions")
                     val answers = JSONArray()
@@ -63,7 +63,15 @@ class StaticDraftPreviewWorkflowTest {
                 }
                 CloudGenerationStage.COMPLETE -> {
                     order += "request ${codeCalls + 1}"
-                    replies[codeCalls++]
+                    val output = replies.getOrNull(codeCalls++) ?: throw CloudFailure("auth", "The fixture has no further candidate.")
+                    if (!request.turns.last().text.contains("Return one JSON patch object only")) output else {
+                        val previous = JSONObject(request.turns[1].text)
+                        val next = JSONObject(output)
+                        val before = if (mixed) previous.getJSONObject("fill") else previous
+                        val after = if (mixed) next.getJSONObject("fill") else next
+                        if (before.toString() == after.toString()) after.put("description", "Retry $codeCalls")
+                        writerFixturePatch(before.toString(), after.toString())
+                    }
                 }
                 else -> error("Unexpected generation stage.")
             }

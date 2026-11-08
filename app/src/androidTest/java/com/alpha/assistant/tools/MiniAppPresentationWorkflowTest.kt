@@ -724,14 +724,8 @@ class MiniAppPresentationWorkflowTest {
         val request = RequestGameplayExamples.TIC_TAC_TOE
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                val result = if (request.generationStage == CloudGenerationStage.PLAN) """
-                    {"wholeScreen":true,"behavior":{"status":"checkable","scenario":{
-                    "slots":{"board":{"kind":"surface"},"marks":{"kind":"geometry"}},"steps":[
-                    {"op":"capture","slot":"marks","as":"before"},
-                    {"op":"surface","slot":"board","event":"pointer","phase":"down","x":0.5,"y":0.5},
-                    {"op":"assert","slot":"marks","test":"changed","capture":"before"}]}}}
-                """.trimIndent() else JSONObject(RequestGameplayExamples.ticTacToeSpec()).put("behaviorBindings",
-                    JSONObject("""{"board":"board","marks":{"surface":"board","path":[]}}""")).toString()
+                val result = if (request.generationStage == CloudGenerationStage.PLAN) """{"wholeScreen":true}"""
+                else RequestGameplayExamples.ticTacToeSpec()
                 emit(CloudEvent.Text(result))
             }
         }

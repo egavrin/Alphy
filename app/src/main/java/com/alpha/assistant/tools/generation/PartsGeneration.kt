@@ -29,7 +29,6 @@ internal data class PartPlacement(
     val config: JSONObject,
     val primaryActionId: String?,
     val secondaryActionIds: Set<String>,
-    val behaviorTargets: NativeBehaviorTargets,
 )
 
 internal data class PartsAssembly(
@@ -229,7 +228,7 @@ internal object PartsGeneration {
             val compact = ToolUiCatalog.validate(part.fragment.compact, preview.schema, state)
             PartPlacement(request.id, part.id, partInstanceId(request.id), "$.ui.children[$position]", part.fragment.full, compact,
                 ToolUiCatalog.widgetNodes(compact, state), identifiers[index], position, part.config,
-                part.primaryActionId, part.secondaryActionIds, part.behaviorTargets(request.id))
+                part.primaryActionId, part.secondaryActionIds)
         }
         val requiresReadProjection = pending.any { (_, part) -> part.fragment.readProjection != null }
         val readPorts = if (selected.isEmpty()) emptySet() else plan.needs.filter { it.id !in selected }

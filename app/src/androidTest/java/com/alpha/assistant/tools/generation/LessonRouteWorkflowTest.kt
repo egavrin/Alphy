@@ -1,6 +1,5 @@
 package com.alpha.assistant.tools.generation
 
-import com.alpha.assistant.tools.withUncheckedBehavior
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.ChatProvider
@@ -62,7 +61,7 @@ class LessonRouteWorkflowTest {
                     onPlan(session)
                     val json = if (request.turns.size > 1) correctedPlan ?: plan else plan
                     json.toString().let {
-                        if (request.systemInstructions.contains("top-level \"behavior\"")) it.withUncheckedBehavior() else it
+                        it
                     }
                 }
                 CloudGenerationStage.SELECTOR -> {
