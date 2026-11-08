@@ -11,6 +11,7 @@ import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.data.Attachment
 import com.alpha.assistant.data.Draft
+import com.alpha.assistant.data.MessageProvenance
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
@@ -35,6 +36,28 @@ class ShellCourseCreationWorkflowTest {
     private val kept = Draft("Kept composer topic", listOf(
         Attachment("content://fixture/attachment", "Fixture attachment", "text/plain", "PRIVATE-ATTACHMENT-TEXT"),
     ))
+
+    @Test fun onlyTypedCoursePreparationOpensReviewWithTheModelTopic() {
+        val request = "хочу научиться считать проценты"
+        val modelTopic = "Расчёт процентов"
+        for (typed in listOf(false, true)) {
+            val provider = CourseProvider(modelTopic, typed)
+            withShell(provider) { _, model, store ->
+                robot.edit(robot.text(R.string.composer_label), request)
+                click(R.string.composer_send)
+                if (typed) {
+                    waitFor(R.string.shell_course_start)
+                    robot.waitFor(modelTopic)
+                    assertEquals(listOf(true, false), provider.calls.map { it.request.chatDecision })
+                } else {
+                    robot.waitUntil { provider.calls.isNotEmpty() && model.activeConversationId == null }
+                    assertEquals(1, provider.calls.size)
+                    assertNull(robot.find(robot.text(R.string.shell_course_review)))
+                }
+                assertTrue(store.courses().isEmpty())
+            }
+        }
+    }
 
     @Test fun authorizedChatReviewsThenStartsOneCourseAndReturnsToTheSameDraft() {
         val provider = CourseProvider()
@@ -146,9 +169,11 @@ class ShellCourseCreationWorkflowTest {
                 assertTrue(store.courses().isEmpty())
                 scenario.onActivity { assertEquals(kept, model.snapshot.conversations.single { it.id == chatId }.draft) }
 
+                provider.rejectAsGeneric = true
                 robot.edit(robot.text(R.string.composer_label), "What time is it?")
                 click(R.string.composer_send)
-                robot.waitFor("Please confirm whether you want a course and name its topic.")
+                robot.waitUntil { provider.calls.size == 3 && model.activeConversationId == null }
+                assertNull(robot.find(robot.text(R.string.shell_course_review)))
                 assertEquals(3, provider.calls.size)
                 assertTrue(store.courses().isEmpty())
             } finally { release.complete(Unit) }
@@ -183,16 +208,18 @@ class ShellCourseCreationWorkflowTest {
 
     private data class Call(val request: CloudRequest, val session: CloudSession)
 
-    private inner class CourseProvider : ChatProvider {
+    private inner class CourseProvider(private val proposedTopic: String = topic, private val typed: Boolean = true) : ChatProvider {
         val calls = CopyOnWriteArrayList<Call>()
         @Volatile var invalidOutline = false
+        @Volatile var rejectAsGeneric = false
         @Volatile var outlineGate: CompletableDeferred<Unit>? = null
 
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
             check(key == "PRIVATE-FIXTURE-KEY")
             calls += Call(request, session)
             if (request.chatDecision) {
-                emit(CloudEvent.RoundComplete("""{"kind":"course","text":"","brief":"$topic","search":"none"}""", false))
+                if (typed && !rejectAsGeneric) emit(CloudEvent.RoundComplete("", false, MessageProvenance.CLEAN, courseTopic = proposedTopic))
+                else emit(CloudEvent.RoundComplete("""{"kind":"course","text":"","brief":"$proposedTopic","search":"none"}""", false))
                 return
             }
             when (request.generationStage) {

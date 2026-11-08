@@ -309,15 +309,19 @@ class CloudWorkflowTest {
         assertEquals(8192, json.getInt("max_tokens"))
         assertFalse(json.has("response_format"))
         val tools = json.getJSONArray("tools")
-        assertEquals(1, tools.length())
+        assertTrue(tools.length() in 1..4)
         val tool = tools.getJSONObject(0)
         assertEquals("function", tool.getString("type"))
         val function = tool.getJSONObject("function")
         assertEquals("submit_chat_decision", function.getString("name"))
         assertTrue(function.getBoolean("strict"))
-        val choice = json.getJSONObject("tool_choice")
-        assertEquals("function", choice.getString("type"))
-        assertEquals("submit_chat_decision", choice.getJSONObject("function").getString("name"))
+        if (tools.length() == 1) {
+            val choice = json.getJSONObject("tool_choice")
+            assertEquals("function", choice.getString("type"))
+            assertEquals("submit_chat_decision", choice.getJSONObject("function").getString("name"))
+        } else {
+            assertEquals("required", json.getString("tool_choice"))
+        }
         val parameters = function.getJSONObject("parameters")
         assertEquals("object", parameters.getString("type"))
         assertFalse(parameters.getBoolean("additionalProperties"))
@@ -364,11 +368,13 @@ class CloudWorkflowTest {
         Server { request, output ->
             val messages = request.json.getJSONArray("messages")
             val content = messages.toString()
-            assertTrue(weather in content && attached in content && description in content && omitted in content)
+            val historical = listOf(weather, attached, description, omitted)
+            assertTrue(historical.all { (it in content) == request.answering })
+            if (!request.answering) assertTrue("earlier chat turns" in messages.getJSONObject(0).getString("content"))
             assertFalse("PRIVATE_OLD" in content || "image_url" in content || "PRIVATE_OLD_TEXT" in content)
             assertFalse(request.searching)
             assertTrue("short follow-up" in messages.getJSONObject(0).getString("content"))
-            if (request.answering) output.answer(reply) else output.classification(decision("Это вопрос о предыдущем ответе."))
+            if (request.answering) output.answer(reply) else output.classification(decision("К чему относится этот вопрос?", kind = "clarify"))
         }.use { server ->
             Fixture(DeepSeekProvider(server.url)) { shell ->
                 val pairs = (1..21).flatMap { index ->
@@ -424,15 +430,9 @@ class CloudWorkflowTest {
                     assertTrue(body.contains("AUTHORIZED_SELECTION"))
                     output.answer(decision("Готово.", "create", "required", "CLEAN_GROUNDED"))
                 }
-                body.contains("PRIVATE_MEMORY_FACT") -> {
-                    assertTrue(body.contains("UNCLASSIFIED_PAST_REPLY"))
-                    assertFalse(body.contains("PRIVATE_PAST_REPLY"))
-                    assertFalse(body.contains("AUTHORIZED_SELECTION"))
-                    output.classification(decision("PARAPHRASED_PRIVATE_REQUIREMENT", "create", "none", "PARAPHRASED_PRIVATE_REQUIREMENT"))
-                }
                 else -> {
                     assertTrue(excluded.none { it in body })
-                    assertTrue(body.contains("CLEAN_CONTINUITY"))
+                    assertFalse(body.contains("CLEAN_CONTINUITY"))
                     assertTrue(body.contains(prompt))
                     assertFalse(body.contains("AUTHORIZED_SELECTION"))
                     output.classification(decision("Продолжим.", "create", "required", "CLEAN_PREPARATION"))
@@ -470,7 +470,7 @@ class CloudWorkflowTest {
                 }
                 fixture.idle()
                 assertTrue(server.failures.toString(), server.failures.isEmpty())
-                assertEquals(5, server.requests.size)
+                assertEquals(4, server.requests.size)
                 assertNotNull(fixture.last.toolId)
                 assertEquals(MessageProvenance.CLEAN, fixture.persisted().selected!!.messages.last().provenance)
                 assertEquals("PRIVATE_PAST_REPLY", fixture.model.snapshot.selected!!.messages.single { it.id == "private-answer" }.text)
@@ -484,19 +484,17 @@ class CloudWorkflowTest {
         }
     }
 
-    @Test fun chatSendsAtMostFiveMatchedFactsAndOnlyTheCleanDecisionAuthorizesSearch() {
+    @Test fun chatSendsAtMostFiveMatchedFactsOnlyForTheAnswer() {
         val prompt = "Расскажи про садоводство"
-        val paraphrase = "PRIVATE_PROVISIONAL_TEXT"
         Server { request, output ->
             assertFalse(request.searching)
             if (!request.answering) request.requireStrictDecision()
             val body = request.json.toString()
-            assertFalse(body.contains(paraphrase))
             assertFalse(body.contains("UNRELATED_FACT"))
-            when {
-                request.answering -> output.answer("Ответ о садоводстве")
-                body.contains("MATCHED_FACT_") -> output.classification(decision(paraphrase, search = "required"))
-                else -> output.classification(decision("Clean decision"))
+            if (request.answering) output.answer("Ответ о садоводстве")
+            else {
+                assertFalse(body.contains("MATCHED_FACT_"))
+                output.classification(decision("Clean decision"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             val facts = (1..7).map { fixture.model.memoryStore.saveExplicitFact("садоводство MATCHED_FACT_$it") }
@@ -506,19 +504,18 @@ class CloudWorkflowTest {
             assertTrue(server.failures.toString(), server.failures.isEmpty())
             assertEquals("Ответ о садоводстве", fixture.last.text)
             assertEquals(MessageProvenance.MEMORY_DERIVED, fixture.persisted().selected!!.messages.last().provenance)
-            assertEquals(3, server.requests.size)
+            assertEquals(2, server.requests.size)
             val bodies = server.requests.map { it.json.toString() }
-            val matched = facts.filter { it.text in bodies[0] }
+            val matched = facts.filter { it.text in bodies[1] }
             assertEquals(5, matched.size)
-            assertEquals(matched, facts.filter { it.text in bodies[2] })
-            assertTrue(facts.none { it.text in bodies[1] })
+            assertTrue(facts.none { it.text in bodies[0] })
             assertTrue(bodies.all { body -> (facts + unrelated).none { it.id in body } })
             assertTrue(bodies.all { prompt in it })
 
             fixture.submit("Другая тема")
             fixture.idle()
-            assertEquals(5, server.requests.size)
-            assertTrue(server.requests.drop(3).none { "Ответ о садоводстве" in it.json.toString() })
+            assertEquals(4, server.requests.size)
+            assertTrue(server.requests.drop(2).none { "Ответ о садоводстве" in it.json.toString() })
             assertTrue(fixture.model.snapshot.selected!!.messages.any { it.text == "Ответ о садоводстве" })
         } }
     }
@@ -528,12 +525,11 @@ class CloudWorkflowTest {
             val cleanReceived = CountDownLatch(1)
             val resume = CountDownLatch(1)
             Server { request, output ->
-                if (request.json.toString().contains("STALE_MEMORY_MARKER")) output.classification(decision("Private provisional answer"))
-                else {
-                    cleanReceived.countDown()
-                    check(resume.await(10, TimeUnit.SECONDS))
-                    output.classification(decision("Clean decision"))
-                }
+                request.requireStrictDecision()
+                assertFalse("STALE_MEMORY_MARKER" in request.json.toString())
+                cleanReceived.countDown()
+                check(resume.await(10, TimeUnit.SECONDS))
+                output.classification(decision("Clean decision"))
             }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
                 val memory = fixture.model.memoryStore
                 val fact = memory.saveExplicitFact("садоводство STALE_MEMORY_MARKER")
@@ -545,7 +541,7 @@ class CloudWorkflowTest {
                 } finally { resume.countDown() }
                 fixture.idle()
                 assertTrue(server.failures.toString(), server.failures.isEmpty())
-                assertEquals(2, server.requests.size)
+                assertEquals(1, server.requests.size)
                 assertEquals("error", fixture.last.status)
                 assertEquals("memory_changed", fixture.last.errorCode)
                 assertEquals(prompt, fixture.persisted().selected!!.messages.first { it.role == "user" }.text)
@@ -566,8 +562,8 @@ class CloudWorkflowTest {
                         paused.countDown()
                         check(resume.await(10, TimeUnit.SECONDS))
                     }
-                    "MEMORY_FOR_ANSWER" in request.json.toString() -> output.classification(decision("Private provisional answer"))
                     else -> {
+                        assertFalse("MEMORY_FOR_ANSWER" in request.json.toString())
                         if (removeKey) {
                             paused.countDown()
                             check(resume.await(10, TimeUnit.SECONDS))
@@ -594,20 +590,24 @@ class CloudWorkflowTest {
                 assertEquals("cancelled", saved.last().status)
                 if (removeKey) {
                     waitUntil { fixture.keys.read().getOrNull() == null }
-                    assertEquals(2, server.requests.size)
+                    assertEquals(1, server.requests.size)
                 } else {
                     assertEquals("Часть ответа из памяти", saved.last().text)
                     assertEquals(MessageProvenance.MEMORY_DERIVED, saved.last().provenance)
-                    assertEquals(3, server.requests.size)
+                    assertEquals(2, server.requests.size)
                 }
                 assertTrue(server.failures.toString(), server.failures.isEmpty())
             } }
         }
     }
 
-    @Test fun unavailableOrOverBudgetMemoryFailsBeforeSendingAndPreservesUserInput() {
+    @Test fun unavailableOrOverBudgetMemoryNeverSendsFactsAndPreservesUserInput() {
         for (unavailable in listOf(false, true)) {
-            Server { _, _ -> fail("The request must stop before HTTP admission") }.use { server ->
+            Server { request, output ->
+                request.requireStrictDecision()
+                assertFalse(request.json.toString().contains("localMemory"))
+                output.classification(decision("Clean decision"))
+            }.use { server ->
                 Fixture(DeepSeekProvider(server.url)).use { fixture ->
                     val memory = fixture.model.memoryStore
                     if (unavailable) memory.beginClose()
@@ -615,7 +615,8 @@ class CloudWorkflowTest {
                     val prompt = "Расскажи про садоводство"
                     fixture.submit(prompt)
                     fixture.idle()
-                    assertTrue(server.requests.isEmpty())
+                    assertEquals(if (unavailable) 0 else 1, server.requests.size)
+                    assertTrue(server.failures.toString(), server.failures.isEmpty())
                     assertEquals("error", fixture.last.status)
                     assertEquals(if (unavailable) "memory_unavailable" else "memory_budget", fixture.last.errorCode)
                     assertEquals(prompt, fixture.persisted().selected!!.messages.first { it.role == "user" }.text)
@@ -624,7 +625,7 @@ class CloudWorkflowTest {
         }
     }
 
-    @Test fun legacyHistoryCannotAuthorizeSearchWithoutCleanContext() = kotlinx.coroutines.runBlocking {
+    @Test fun legacyHistoryIsAvailableOnlyToContextualAnswers() = kotlinx.coroutines.runBlocking {
         val turn = CloudTurn("user", "Explain this question")
         val history = CloudTurn("assistant", "LEGACY_UNCLASSIFIED_TEXT")
         val instructions = ChatToolReply.instructions(emptyList())
@@ -637,23 +638,20 @@ class CloudWorkflowTest {
                     assertTrue(history.text in body)
                     output.answer("Ordinary answer")
                 }
-                history.text in body -> output.classification(decision("Unclassified provisional answer", search = "required"))
-                else -> output.classification(decision("Clean decision"))
+                else -> {
+                    assertFalse(history.text in body)
+                    output.classification(decision("Clean decision"))
+                }
             }
         }.use { server ->
             val provider = DeepSeekProvider(server.url)
             val request = CloudRequest(listOf(history, turn), true, instructions, chatDecision = true)
-            val failure = runCatching { provider.respond("alpha-test-only", request, CloudSession()) {} }.exceptionOrNull()
-            assertEquals("search_context", (failure as? CloudFailure)?.code)
-            assertEquals(1, server.requests.size)
-
             val events = mutableListOf<CloudEvent>()
-            provider.respond("alpha-test-only", request.copy(decisionContext =
-                ChatDecisionContext(turn, emptyList(), instructions, MessageProvenance.UNKNOWN)), CloudSession()) { events += it }
+            provider.respond("alpha-test-only", request, CloudSession()) { events += it }
             val completed = events.filterIsInstance<CloudEvent.RoundComplete>().single()
             assertEquals("Ordinary answer", ChatToolReply.decode(completed.text).text)
             assertEquals(MessageProvenance.UNKNOWN, completed.provenance)
-            assertEquals(4, server.requests.size)
+            assertEquals(2, server.requests.size)
             assertTrue(server.failures.toString(), server.failures.isEmpty())
         }
     }
@@ -677,38 +675,26 @@ class CloudWorkflowTest {
         }
     }
 
-    @Test fun changedOperationFromCleanPreparationAsksBeforeSearchOrGrounding() = kotlinx.coroutines.runBlocking {
-        val marker = "SYNTHETIC_DIRECT_MEMORY"
-        val paraphrase = "SYNTHETIC_REWORDED_MEMORY"
+    @Test fun decisionUsesOriginalUserTextAndHostInstructionsOnly() = kotlinx.coroutines.runBlocking {
         val current = CloudTurn("user", "Create a counter")
-        val cleanReply = AtomicReference(decision("A regular answer"))
         Server { request, output ->
             request.requireStrictDecision()
-            assertFalse(request.json.toString().contains(paraphrase))
-            val dirty = request.json.toString().contains(marker)
-            if (dirty) output.classification(decision(paraphrase, "create", "required", paraphrase))
-            else {
-                val messages = request.json.getJSONArray("messages")
-                assertEquals(current.text, messages.getJSONObject(messages.length() - 1).getString("content"))
-                assertFalse(request.json.toString().contains("UNAUTHORIZED_SYSTEM_CONTEXT"))
-                output.classification(cleanReply.get())
-            }
+            val body = request.json.toString()
+            assertFalse("SYNTHETIC_DIRECT_MEMORY" in body || "UNAUTHORIZED_SYSTEM_CONTEXT" in body)
+            assertEquals(current.text, request.json.getJSONArray("messages").getJSONObject(1).getString("content"))
+            output.classification(decision("Which behavior should it have?", kind = "clarify"))
         }.use { server ->
             val request = CloudRequest(
-                listOf(current.copy(text = current.text + " " + marker)), search = false,
+                listOf(current.copy(text = current.text + " SYNTHETIC_DIRECT_MEMORY")), search = false,
                 systemInstructions = "UNAUTHORIZED_SYSTEM_CONTEXT", chatDecision = true,
                 decisionContext = ChatDecisionContext(current, emptyList(), ChatToolReply.instructions(emptyList()), MessageProvenance.UNKNOWN),
             )
-            for (reply in listOf(decision("A regular answer"), "")) {
-                cleanReply.set(reply)
-                val events = mutableListOf<CloudEvent>()
-                DeepSeekProvider(server.url).respond("alpha-test-only", request, CloudSession()) { events += it }
-                val completed = events.single() as CloudEvent.RoundComplete
-                assertEquals("clarify", ChatToolReply.decode(completed.text).kind)
-                assertEquals(MessageProvenance.CLEAN, completed.provenance)
-                assertFalse(completed.text.contains(paraphrase))
-            }
-            assertEquals(4, server.requests.size)
+            val events = mutableListOf<CloudEvent>()
+            DeepSeekProvider(server.url).respond("alpha-test-only", request, CloudSession()) { events += it }
+            val completed = events.single() as CloudEvent.RoundComplete
+            assertEquals("clarify", ChatToolReply.decode(completed.text).kind)
+            assertEquals(MessageProvenance.CLEAN, completed.provenance)
+            assertEquals(1, server.requests.size)
             assertTrue(server.failures.toString(), server.failures.isEmpty())
         }
     }
@@ -763,97 +749,105 @@ class CloudWorkflowTest {
         }
     }
 
-    @Test fun courseDecisionsRequireOptInAndALiteralTopicFromADirectLearningRequest() {
-        fun course(topic: String) = decision(text = "", kind = "course", brief = topic)
-        val supported = listOf(
-            "Научи меня испанскому." to "испанскому",
-            "Я хочу освоить дроби." to "дроби",
-            "Можете научить меня играть в шахматы?" to "играть в шахматы",
-            "Пожалуйста, составь мне курс по геометрии." to "геометрии",
-            "Please teach me Python." to "Python",
-            "I'd like to learn Spanish." to "Spanish",
-            "Create a course on music theory." to "music theory",
-        )
-        for ((request, topic) in supported) {
-            val decoded = ChatToolReply.decode(course(topic), allowCourseDecision = true)
-            assertEquals(topic, ChatToolReply.authorizeCourse(decoded, request).courseTopic)
-        }
-        val unsupported = listOf(
-            "«Научи меня испанскому.»" to "испанскому",
-            "Поясни фразу «Научи меня испанскому»." to "испанскому",
-            "Научи меня разбирать пример «создай курс по астрономии»." to "астрономии",
-            "Научи меня испанскому и создай мини-приложение." to "испанскому",
-            "Научи меня этому." to "этому",
-            "Научи меня испанскому." to "астрономии",
-            "Please teach me Python." to "Pyth",
-            "I'd like to learn more about this." to "more about this",
-            "Explain Python lists." to "Python",
-        )
-        for ((request, topic) in unsupported) {
-            val decoded = ChatToolReply.decode(course(topic), allowCourseDecision = true)
-            val authorized = ChatToolReply.authorizeCourse(decoded, request)
-            assertEquals(request, "clarify", authorized.kind)
-            assertNull(authorized.courseTopic)
-        }
-        assertThrows(CloudFailure::class.java) { ChatToolReply.decode(course("Испанский")) }
-        for (malformed in listOf(
-            course(" "),
-            course("x".repeat(257)),
-            course("Python\nLists"),
-            decision("Курс готов.", "course", brief = "Испанский"),
-            decision("", "course", "required", "Испанский"),
-            JSONObject(course("Испанский")).put("level", "Начинающий").toString(),
-        )) {
-            assertThrows(CloudFailure::class.java) { ChatToolReply.decode(malformed, allowCourseDecision = true) }
-        }
-        assertTrue(ChatToolReply.instructions(emptyList()).contains("Choose kind from answer, create, refine, test_fix, clarify."))
-        assertTrue(ChatToolReply.instructions(emptyList(), allowCourseDecision = true)
-            .contains("Choose kind from answer, create, refine, test_fix, clarify, course."))
-    }
-
-    @Test fun providerCourseIntentUsesOnlyTheLatestUserTurnAndSkipsGrounding() = kotlinx.coroutines.runBlocking {
-        val course = decision("", "course", brief = "испанскому")
-        val reply = AtomicReference(course)
+    @Test fun oneStrictDecisionCanAuthorizeACourseRepairOrDevicePlan() = kotlinx.coroutines.runBlocking {
+        val latest = "Latest user request"
+        var candidate = "course"
+        var mode = "accepted"
         Server { request, output ->
-            if (request.grounded) {
-                assertFalse(request.json.has("tools"))
-                assertTrue(request.json.toString().contains("PRIVATE_SELECTED_TEXT"))
-                output.answer(course)
+            val parameters = request.requireStrictDecision()
+            assertFalse("course" in parameters.kinds() || "test_fix" in parameters.kinds())
+            val messages = request.json.getJSONArray("messages")
+            assertEquals(2, messages.length())
+            assertEquals(latest, messages.getJSONObject(1).getString("content"))
+            for (excluded in listOf("PRIVATE_HISTORY", "PRIVATE_SELECTED", "PRIVATE_IMAGE")) {
+                assertFalse(request.json.toString().contains(excluded))
+            }
+            val tools = request.json.getJSONArray("tools")
+            val functions = (0 until tools.length()).map { tools.getJSONObject(it).getJSONObject("function") }
+            val (name, field) = when (candidate) {
+                "course" -> "prepare_course" to "topic"
+                "device_plan" -> "prepare_device_plan" to "commands"
+                else -> "test_and_fix_app" to "target"
+            }
+            val function = functions.singleOrNull { it.getString("name") == name }
+            if (mode == "disabled" || mode == "non_user") {
+                assertNull(function)
             } else {
-                val kinds = request.requireStrictDecision().kinds()
-                val system = request.json.getJSONArray("messages").getJSONObject(0).getString("content")
-                assertEquals(system.contains("clarify, course"), "course" in kinds)
-                assertFalse(request.json.toString().contains("PRIVATE_SELECTED_TEXT"))
-                output.classification(reply.get())
+                checkNotNull(function)
+                assertTrue(function.getBoolean("strict"))
+                val schema = function.getJSONObject("parameters")
+                assertFalse(schema.getBoolean("additionalProperties"))
+                assertEquals(field, schema.getJSONArray("required").getString(0))
+            }
+            val arguments = when (candidate) {
+                "course" -> """{"topic":"Calculated percentages"}"""
+                "device_plan" -> """{"commands":["memory.write"]}"""
+                else -> """{"target":"1"}"""
+            }
+            when (mode) {
+                "declined", "non_user" -> output.classification(decision("Please clarify the request.", kind = "clarify"))
+                "generic" -> output.classification(decision("Legacy decision", kind = candidate))
+                "malformed" -> output.calls(call(0, name = name, arguments = """{"topic":"Bad","extra":1}"""))
+                "wrong_name" -> output.calls(call(0, name = "unknown", arguments = arguments))
+                "wrong_command" -> output.calls(call(0, name = name, arguments = """{"commands":["calendar"]}"""))
+                "wrong_target" -> output.calls(call(0, name = name, arguments = """{"target":"outside"}"""))
+                "invalid_id" -> output.calls(call(0, id = "", name = name, arguments = arguments))
+                "multiple" -> output.calls(call(0, name = name, arguments = arguments), call(1, name = name, arguments = arguments))
+                "mixed" -> {
+                    output.headers()
+                    output.event(textChunk("Unexpected text"))
+                    output.event(toolDelta(call(0, name = name, arguments = arguments)))
+                    output.event(end("tool_calls"))
+                    output.write("data: [DONE]\n\n".toByteArray())
+                }
+                "interrupted" -> { output.headers(); output.event(toolDelta(call(0, name = name, arguments = arguments))) }
+                else -> output.calls(call(0, name = name, arguments = arguments))
             }
         }.use { server ->
             val provider = DeepSeekProvider(server.url)
-            suspend fun request(vararg turns: CloudTurn, allowed: Boolean = true): ChatToolReply.Decision {
+            suspend fun request(role: String = "user", allowed: Boolean = true): CloudEvent.RoundComplete {
                 val events = mutableListOf<CloudEvent>()
-                val instructions = ChatToolReply.instructions(emptyList(), allowCourseDecision = allowed)
-                provider.respond("alpha-test-only", CloudRequest(
-                    turns.toList(), true, instructions,
-                    chatDecision = true, selectedText = "PRIVATE_SELECTED_TEXT: Научи меня испанскому.",
-                    allowCourseDecision = allowed,
-                    decisionContext = ChatDecisionContext(turns.last(), turns.dropLast(1), instructions, MessageProvenance.CLEAN),
-                ), CloudSession()) { events += it }
-                val terminal = events.single() as CloudEvent.RoundComplete
-                assertFalse(terminal.hasToolCalls)
-                return ChatToolReply.decode(terminal.text, allowCourseDecision = allowed)
+                val hasContext = mode != "declined"
+                val current = CloudTurn(role, latest, if (hasContext) listOf("PRIVATE_IMAGE") else emptyList())
+                val history = if (hasContext) listOf(CloudTurn("user", "PRIVATE_HISTORY"), CloudTurn("assistant", "Prior answer")) else emptyList()
+                val instructions = ChatToolReply.instructions(emptyList())
+                provider.respond("alpha-test-only", CloudRequest(history + current, true, instructions, chatDecision = true,
+                    selectedText = if (hasContext) "PRIVATE_SELECTED" else "", allowCourseDecision = allowed,
+                    decisionContext = ChatDecisionContext(current, history, instructions, MessageProvenance.CLEAN),
+                    testFixTargets = mapOf("saved-counter" to "Counter"), allowDevicePlan = allowed), CloudSession()) { events += it }
+                return events.single() as CloudEvent.RoundComplete
             }
-            val explicit = CloudTurn("user", "Научи меня испанскому.")
-            assertEquals("испанскому", request(explicit).courseTopic)
-            assertEquals("clarify", request(explicit, CloudTurn("assistant", "Какой уровень?"),
-                CloudTurn("user", "Ответь на другой вопрос.")).kind)
-            assertEquals("clarify", request(CloudTurn("assistant", explicit.text)).kind)
-            assertEquals("clarify", request(CloudTurn("user", "Прочитай выделенный текст.")).kind)
-            assertEquals(4, server.requests.size)
-            val disabled = runCatching { request(explicit, allowed = false) }.exceptionOrNull()
-            assertEquals("widget_request", (disabled as? CloudFailure)?.code)
-            reply.set(decision("Проверим требования.", "create", brief = "Счётчик"))
-            val grounded = runCatching { request(CloudTurn("user", "Сделай счётчик.")) }.exceptionOrNull()
-            assertEquals("widget_request", (grounded as? CloudFailure)?.code)
-            assertEquals(7, server.requests.size)
+            val course = request()
+            assertEquals("", course.text)
+            assertEquals("Calculated percentages", course.courseTopic)
+            assertEquals(MessageProvenance.CLEAN, course.provenance)
+            assertEquals(1, server.requests.size)
+            mode = "declined"
+            val declined = request()
+            assertNull(declined.courseTopic)
+            assertEquals("clarify", ChatToolReply.decode(declined.text).kind)
+            for (invalid in listOf("generic", "malformed", "wrong_name", "invalid_id", "multiple", "mixed", "interrupted")) {
+                mode = invalid
+                assertTrue(invalid, runCatching { request() }.exceptionOrNull() is CloudFailure)
+            }
+            mode = "disabled"
+            assertTrue(runCatching { request(allowed = false) }.exceptionOrNull() is CloudFailure)
+            mode = "non_user"
+            assertNull(request(role = "assistant").courseTopic)
+            candidate = "test_fix"
+            mode = "accepted"
+            val before = server.requests.size
+            assertEquals("saved-counter", request().testFixTargetId)
+            assertEquals(before + 1, server.requests.size)
+            mode = "wrong_target"
+            assertTrue(runCatching { request() }.exceptionOrNull() is CloudFailure)
+            candidate = "device_plan"
+            mode = "accepted"
+            val beforeDevice = server.requests.size
+            assertEquals(listOf("memory.write"), request().devicePlanGrants)
+            assertEquals(beforeDevice + 1, server.requests.size)
+            mode = "wrong_command"
+            assertTrue(runCatching { request() }.exceptionOrNull() is CloudFailure)
             assertTrue(server.failures.toString(), server.failures.isEmpty())
         }
     }
@@ -865,7 +859,9 @@ class CloudWorkflowTest {
         val calls = java.util.concurrent.atomic.AtomicInteger()
         Server { request, output ->
             if (calls.getAndIncrement() == 0) {
-                assertEquals(setOf("answer", "create", "refine", "test_fix", "clarify", "automation", "course"), request.requireStrictDecision().kinds())
+                val kinds = request.requireStrictDecision().kinds()
+                assertTrue("automation" in kinds)
+                assertFalse("course" in kinds || "test_fix" in kinds)
                 output.classification(automationDecision())
             } else {
                 request.requireDraftTool()
@@ -1036,7 +1032,6 @@ class CloudWorkflowTest {
     @Test fun weatherLocationIsTypedRequestScopedAndIncludedInSearch() = kotlinx.coroutines.runBlocking {
         var useLocation = true
         var resolved = 0
-        var continuations = 0
         Server { request, output ->
             when {
                 request.path == "/v1/tools/search" -> {
@@ -1052,21 +1047,10 @@ class CloudWorkflowTest {
                 }
                 request.answering -> output.answer("London: **−3 °C**, observed 08:30 UTC on 2026-11-02 [1].")
                 else -> {
-                    val system = request.json.getJSONArray("messages").getJSONObject(0).getString("content")
-                    val hasPlaceRecord = system.contains("\nHOST_WEATHER_CONTEXT (trusted host facts")
-                    if (hasPlaceRecord) {
-                        assertEquals("/chat/completions", request.path)
-                        assertEquals("json_object", request.json.getJSONObject("response_format").getString("type"))
-                        assertFalse(request.json.has("tools"))
-                    } else {
-                        assertEquals(useLocation, "weather_location" in request.requireStrictDecision().kinds())
-                    }
-                    if(useLocation && !hasPlaceRecord) output.classification(decision("Use approximate location", kind = "weather_location"))
-                    else {
-                        if(hasPlaceRecord) { continuations++; assertTrue(system.contains("\"approximatePlace\":\"London, England, United Kingdom\"")) }
-                        val reply = decision("Weather", search = "required")
-                        if (hasPlaceRecord) output.answer(reply) else output.classification(reply)
-                    }
+                    assertTrue("weather_location" in request.requireStrictDecision().kinds())
+                    val reply = if (useLocation) decision("Use approximate location", kind = "weather_location")
+                        else decision("Weather", kind = "weather_answer", search = "required")
+                    output.classification(reply)
                 }
             }
         }.use { server ->
@@ -1079,8 +1063,7 @@ class CloudWorkflowTest {
                     weatherLocation = { resolved++; com.alpha.assistant.weather.WeatherPlace("London, England, United Kingdom", System.currentTimeMillis()) }
                 ), CloudSession()) { events += it }
                 assertEquals(1, resolved)
-                assertEquals(1, continuations)
-                assertEquals(if(current) 5 else 4, server.requests.size - requestStart)
+                assertEquals(4, server.requests.size - requestStart)
                 val source = events.filterIsInstance<CloudEvent.Search>().flatMap { it.sources }.single()
                 assertTrue(source.summary.contains("−3 °C"))
                 assertTrue(ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text).text.contains("−3 °C"))
@@ -1108,7 +1091,7 @@ class CloudWorkflowTest {
                     assertFalse(request.json.toString().contains("+99 °C"))
                     output.answer(if (correction && !failCorrection) "Москва: −3 °C, 08:30 UTC [1]." else "Москва: +99 °C [1].")
                 }
-                else -> output.classification(decision("Погода", search = "required"))
+                else -> output.classification(decision("Погода", kind = "weather_answer", search = "required"))
             }
         }.use { server ->
             for (reject in listOf(false, true)) {
@@ -1144,25 +1127,25 @@ class CloudWorkflowTest {
         Server { request, output ->
             assertFalse(request.searching)
             assertFalse(request.grounded)
-            assertEquals(currentText == "weather here", "weather_location" in request.requireStrictDecision().kinds())
-            output.classification(decision("Use approximate location", kind = "weather_location"))
+            val available = "weather_location" in request.requireStrictDecision().kinds()
+            output.classification(decision("Use approximate location", kind = if (available) "weather_location" else "clarify"))
         }.use { server ->
-            for(mode in listOf("denied", "stale", "named", "unrelated")) {
+            for(mode in listOf("denied", "stale", "search_disabled")) {
                 resolution = mode
-                currentText = when(mode) { "named" -> "weather in Moscow"; "unrelated" -> "Create a counter"; else -> "weather here" }
+                currentText = "weather here"
                 val events = mutableListOf<CloudEvent>()
                 DeepSeekProvider(server.url).respond("alpha-test-only", cleanChatRequest(currentText, weatherLocation = {
                         resolutions++
                         if(resolution == "denied") throw CloudFailure("weather_location", "Доступ к геопозиции запрещён. Укажите город.")
                         com.alpha.assistant.weather.WeatherPlace("London", System.currentTimeMillis() - 600000)
-                    }), CloudSession()) { events += it }
+                    }).copy(search = mode != "search_disabled"), CloudSession()) { events += it }
                 val final = ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text)
                 assertEquals("clarify", final.kind)
-                assertTrue(final.text.contains("город", ignoreCase = true))
+                if (mode != "search_disabled") assertTrue(final.text.contains("город", ignoreCase = true))
                 assertEquals("none", final.search)
             }
             assertEquals(2, resolutions)
-            assertEquals(4, server.requests.size)
+            assertEquals(3, server.requests.size)
             assertTrue(server.failures.toString(), server.failures.isEmpty())
         }
     }
@@ -1328,6 +1311,7 @@ class CloudWorkflowTest {
                 }
                 else -> {
                     assertFalse(request.json.toString().contains("SECRET_SELECTED"))
+                    assertTrue("reviewed text" in request.json.getJSONArray("messages").getJSONObject(0).getString("content"))
                     output.classification(decision("A provisional answer",search = if(mode == "search") "required" else "none"))
                 }
             }
@@ -1373,7 +1357,7 @@ class CloudWorkflowTest {
             val messages = request.json.getJSONArray("messages")
             assertEquals(prompt, messages.getJSONObject(messages.length() - 1).getString("content"))
             val properties = request.requireStrictDecision()
-            assertEquals(setOf("answer", "create", "refine", "clarify"), properties.kinds())
+            assertEquals(setOf("answer", "create", "refine", "clarify", "weather_answer"), properties.kinds())
             val reply = if (++calls == 1) """{"kind":"create","text":"Keep this private","brief":[]}"""
                 else {
                     assertTrue(messages.getJSONObject(0).getString("content").contains("Missing required fields: search."))
@@ -1612,7 +1596,7 @@ class CloudWorkflowTest {
         }
     }
 
-    @Test fun cleanPreparationKeepsTheStrictDecisionContract(): Unit = kotlinx.coroutines.runBlocking {
+    @Test fun decisionCorrectionKeepsContextOutOfAuthorization(): Unit = kotlinx.coroutines.runBlocking {
         val prompt = "Build a local checklist."
         val original = CloudTurn("user", prompt)
         val instructions = ChatToolReply.instructions(emptyList())
@@ -1622,16 +1606,16 @@ class CloudWorkflowTest {
         Server { request, output ->
             val messages = request.json.getJSONArray("messages")
             val number = calls.getAndIncrement()
-            if (number < 3) assertFalse(messages.toString().contains("PRIVATE_SELECTION"))
-            if (number < 3) request.requireStrictDecision()
+            if (number < 2) assertFalse(messages.toString().contains("PRIVATE_SELECTION"))
+            if (number < 2) request.requireStrictDecision()
             when (number) {
                 0 -> output.classification("""{"kind":"create"}""")
-                1, 2 -> {
+                1 -> {
                     assertFalse(messages.getJSONObject(0).getString("content").contains("raw draft argument object"))
-                    if (number == 2) assertFalse(messages.toString().contains("PRIVATE_HISTORY"))
+                    assertFalse(messages.toString().contains("PRIVATE_HISTORY"))
                     output.classification(ordinary)
                 }
-                3 -> {
+                2 -> {
                     assertTrue(request.grounded)
                     assertTrue(messages.toString().contains("PRIVATE_SELECTION"))
                     assertFalse(request.json.has("tools"))
@@ -1649,7 +1633,7 @@ class CloudWorkflowTest {
             DeepSeekProvider(server.url).respond("alpha-test-only", request, session) { events += it }
             assertEquals(listOf(ChatToolReply.decode(ordinary)), authorizations)
             assertEquals(MessageProvenance.CLEAN, events.filterIsInstance<CloudEvent.RoundComplete>().single().provenance)
-            assertEquals(4, server.requests.size)
+            assertEquals(3, server.requests.size)
             assertTrue(server.failures.toString(), server.failures.isEmpty())
         }
     }
@@ -2024,7 +2008,14 @@ class CloudWorkflowTest {
     }
 
     @Test fun imageBytesAreOneTimeAndRevocationIsExplicit() {
-        Server { request, output -> if (request.answering) output.answer("Изображение принято") else output.classification(decision("Изображение принято")) }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        Server { request, output ->
+            if (request.answering) output.answer("Изображение принято")
+            else {
+                val current = request.json.getJSONArray("messages").getJSONObject(1).getString("content")
+                output.classification(if (current.isEmpty()) decision("Что нужно описать?", kind = "clarify")
+                    else decision("Изображение принято"))
+            }
+        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
             val uri = app.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, "alpha-test.png"); put(MediaStore.Images.Media.MIME_TYPE, "image/png")
             })!!
@@ -2046,9 +2037,14 @@ class CloudWorkflowTest {
                 main { fixture.model.addAttachment(attachment) }
                 waitUntil { !fixture.model.attachmentBusy }
                 waitFor("Предпросмотр alpha-test.png")
-                fixture.submit("Что на изображении?")
+                fixture.submit("")
                 fixture.idle(); assertEquals("complete", fixture.last.status)
-                val content = server.requests[0].json.getJSONArray("messages").getJSONObject(1).getJSONArray("content")
+                val classification = server.requests[0].json.getJSONArray("messages")
+                assertEquals("", classification.getJSONObject(1).getString("content"))
+                assertTrue("an attached image" in classification.getJSONObject(0).getString("content"))
+                assertFalse(server.requests[0].json.toString().contains("image_url"))
+                val messages = server.requests[1].json.getJSONArray("messages")
+                val content = messages.getJSONObject(messages.length() - 1).getJSONArray("content")
                 val data = content.getJSONObject(1).getJSONObject("image_url").getString("url")
                 assertArrayEquals(bytes, android.util.Base64.decode(data.substringAfter(','), android.util.Base64.DEFAULT))
                 fixture.submit("Следующий вопрос")

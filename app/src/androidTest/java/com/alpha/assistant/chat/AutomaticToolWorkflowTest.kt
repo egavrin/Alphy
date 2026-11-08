@@ -68,11 +68,13 @@ class AutomaticToolWorkflowTest {
     private abstract class SingleRoundProvider : ChatProvider {
         final override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
             val text = StringBuilder()
+            var completed = false
             answer(key,request,session) { event ->
                 if(event is CloudEvent.Text) text.append(event.value)
+                if(event is CloudEvent.RoundComplete) completed = true
                 emit(event)
             }
-            emit(CloudEvent.RoundComplete(text.toString(),false))
+            if (!completed) emit(CloudEvent.RoundComplete(text.toString(),false))
         }
         abstract suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit)
     }
@@ -611,8 +613,11 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 calls += request
+                if (request.chatDecision) {
+                    emit(CloudEvent.RoundComplete("", false, MessageProvenance.CLEAN, testFixTargetId = "counter"))
+                    return
+                }
                 val response = when {
-                    request.chatDecision -> decision(kind = "test_fix")
                     request.generationStage == CloudGenerationStage.REFINE -> """{"sourceEdits":[
                         {"search":"return {state:input.state};","replace":"if(input.event.type==='action')input.state.count++;return {state:input.state};"}
                     ]}"""
@@ -643,7 +648,7 @@ class AutomaticToolWorkflowTest {
         }
     }
 
-    @Test fun aQuotedOrMismatchedTestRequestCannotChangeTheSoleApp() {
+    @Test fun aGenericTestDecisionCannotChangeTheSoleApp() {
         var diagnosticCalls = 0
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
@@ -664,12 +669,12 @@ class AutomaticToolWorkflowTest {
         }
     }
 
-    @Test fun aTitleSubstringCannotAuthorizeTestingAnotherSavedApp() {
+    @Test fun anUnknownPreparedTargetCannotChangeASavedApp() {
         var diagnosticCalls = 0
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 if (!request.chatDecision) diagnosticCalls++
-                emit(CloudEvent.Text(JSONObject(decision(kind = "test_fix")).put("brief", "Clock").toString()))
+                emit(CloudEvent.RoundComplete("", false, MessageProvenance.CLEAN, testFixTargetId = "outside"))
             }
         }
         Fixture(provider) { shell, tools ->
@@ -1277,7 +1282,7 @@ class AutomaticToolWorkflowTest {
             assertEquals(listOf(null, null, CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE),requests.map { it.generationStage })
         }
     }
-    @Test fun chatReferencesSelectByTitleAndKeepDuplicateChoicesDistinct() {
+    @Test fun chatReferencesUseThePickerAndKeepDuplicateChoicesDistinct() {
         val requests = CopyOnWriteArrayList<CloudRequest>()
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
@@ -1295,6 +1300,9 @@ class AutomaticToolWorkflowTest {
             seedChat(shell,"a-host-id","b-host-id","c-host-id")
         }.use { f ->
             f.send("Change the Water tracker"); f.idle()
+            assertEquals(listOf("Counter", "Counter", "Water tracker"), f.last.refinementChoices.map { it.title })
+            assertEquals(1, f.toolStore.tool("c-host-id")!!.revision)
+            main { f.model.chooseRefinementTarget(f.last.id, "c-host-id") }; f.idle()
             assertEquals("c-host-id",f.last.toolId)
             assertEquals(2,f.toolStore.tool("c-host-id")!!.revision)
             assertFalse(requests.first().systemInstructions.contains("host-id"))

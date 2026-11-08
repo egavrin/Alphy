@@ -29,26 +29,6 @@ data class WeatherPlace(val place: String, val acquiredAt: Long) {
 
 object WeatherRequest {
     const val MANUAL_CITY = "Укажите город для прогноза погоды. Не удалось определить текущее примерное местоположение."
-    private val weather = Regex("(?iu)(?<![\\p{L}])(?:weather|погод[\\p{L}]*)(?![\\p{L}])")
-    private val namedTemperature = Regex("(?iu)^(?:(?:what(?:'s| is)|какая)\\s+)?(?:the\\s+)?(?:temperature|forecast|температура|прогноз)\\s+(?:in|for|в|во|для)\\s+[^?]+[?.!]*$")
-    private val contentOperation = Regex("(?iu)(?<![\\p{L}])(?:explain|describe|define|translate|translation|summari[sz]e|summary|paraphrase|rewrite|difference|definition|meaning|объясн[\\p{L}]*|перев[\\p{L}]*|изложи|перескажи|суммируй|резюмируй|разниц[\\p{L}]*)(?![\\p{L}])")
-    private val forecastTime = Regex("(?iu)(?<![\\p{L}])(?:today|tomorrow|now|currently|tonight|сегодня|завтра|сейчас|вечером|утром)(?![\\p{L}])")
-    private val weatherPlace = Regex("(?iu)(?:weather|погод[\\p{L}]*)(?:\\s+like)?\\s+(?:in|for|at|в|во|для)\\s+[\\p{L}]")
-    fun isWeather(text: String): Boolean {
-        if(contentOperation.containsMatchIn(text)) return false
-        return canLocate(text) || namedTemperature.matches(text.trim()) ||
-            (weather.containsMatchIn(text) && (forecastTime.containsMatchIn(text) || weatherPlace.containsMatchIn(text)))
-    }
-    // Unknown words require a city clarification. This prevents a model from treating a named place as permission.
-    private val noPlace = listOf(
-        Regex("(?i)(?:(?:what(?:'s| is)?|how is|show me|tell me|please)\\s+)?(?:the\\s+)?(?:weather|forecast|temperature)(?:\\s+(?:like|today|tomorrow|now|currently|here|please|near me|at my location|in my city|in my area|this morning|this evening))*"),
-        Regex("(?iu)(?:(?:какая|какой|покажи|скажи|подскажи)\\s+)?(?:(?:сегодня|завтра|сейчас)\\s+)?(?:погода|прогноз(?: погоды)?|температура)(?:\\s+(?:сегодня|завтра|сейчас|здесь|тут|пожалуйста|утром|вечером|у меня|рядом со мной|в моем городе|в моём городе|в моей местности|на сегодня|на завтра))*")
-    )
-    fun canLocate(text: String): Boolean {
-        val normalized = text.trim().trimEnd('?', '!', '.').replace('’', '\'').replace(Regex("\\s+"), " ")
-        if(normalized.equals("What is weather", ignoreCase = true)) return false
-        return noPlace.any { it.matches(normalized) }
-    }
 }
 
 interface WeatherLocator {

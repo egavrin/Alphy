@@ -5,11 +5,12 @@ import com.alpha.assistant.cloud.ChatToolReply
 import kotlinx.serialization.json.JsonArray
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.Locale
 
 internal data class AgentCommand(val function: String, val arguments: String) {
     fun args() = JSONObject(arguments)
     fun json() = JSONObject().put("function", function).put("args", args())
+    val grant: String get() = if (function == "calendar.createOwned" && args().optBoolean("repeatDaily"))
+        "calendar.createOwned.daily" else function
 
     companion object {
         private val nativeFunctions = listOf("notification.post", "calendar.create", "maps.open", "link.open", "app.open",
@@ -33,6 +34,10 @@ internal data class AgentCommand(val function: String, val arguments: String) {
             "automation.pause" to "name of the existing automation.",
             "automation.resume" to "name of the existing automation.",
         )
+
+        val grantNames = nativeFunctions + customFunctions.keys + "calendar.createOwned.daily"
+
+        fun validGrants(grants: List<String>) = grants.size in 1..8 && grants.all { it in grantNames }
 
         fun isNative(function: String) = function in nativeFunctions
 
@@ -126,51 +131,6 @@ private fun JSONObject.number(key: String, range: LongRange): Long {
     val value = get(key)
     require(value is Int || value is Long)
     return (value as Number).toLong().also { require(it in range) }
-}
-
-/** Only a direct request in the newest authored text can enter planning. Approval is always separate. */
-internal object AgentIntent {
-    private val direct = Regex("^(?:пожалуйста[, ]+|please\\s+)?(?:перенеси|передвинь|измени|поменяй|поставь|установи|открой|включи|выключи|покажи|прочитай|отправь|приостанови|возобнови|останови|создай|удали|найди|построй|вызови|move|change|edit|set|start|open|turn|show|read|send|post|notify|pause|resume|create|delete|find|navigate)\\b", RegexOption.IGNORE_CASE)
-    private val domain = mapOf(
-        "calendar" to "календар|встреч|событи|calendar|meeting|event",
-        "clock" to "будильник|таймер|alarm|timer",
-        "flashlight" to "фонарик|flashlight|torch",
-        "vibration" to "вибрац|vibrat",
-        "app" to "настройк|браузер|календар|settings|browser|calendar",
-        "link" to "ссылк|https://|link",
-        "maps" to "карт[аеыу]|маршрут|map|route|directions",
-        "notification" to "уведомлени|напомни|notification|remind|notify",
-        "memory" to "памят|memor|preference",
-        "artifact" to "мини-приложен|mini-app",
-        "automation" to "сценари|автоматизац|automation",
-    ).mapValues { (_, expression) -> Regex(expression, RegexOption.IGNORE_CASE) }
-    private val ordinary = Regex("^(?:пожалуйста[, ]+|please\\s+)?(?:создай|сделай|create|build)\\s+(?:мне\\s+)?(?:a\\s+)?(?:мини-приложен\\p{L}*|приложен\\p{L}*|виджет\\p{L}*|курс\\p{L}*|сценари\\p{L}*|автоматизац\\p{L}*|mini-app|app|widget|course|automation)\\b", RegexOption.IGNORE_CASE)
-    private val recurring = Regex("кажд(?:ый|ое|ую|ые)|ежеднев|еженедел|every\\s+|daily\\b|weekly\\b", RegexOption.IGNORE_CASE)
-    private val daily = Regex("каждый\\s+день|ежеднев|every\\s+day|daily", RegexOption.IGNORE_CASE)
-    private val createEvent = Regex("созда|добав|запланир|постав|create|add|schedule", RegexOption.IGNORE_CASE)
-    private val moveEvent = Regex("перенес|передвин|измени|поменя|move|change|reschedul|update", RegexOption.IGNORE_CASE)
-    private val deleteEvent = Regex("удали|delete|remove", RegexOption.IGNORE_CASE)
-    private val allEvents = Regex("(?:все|всё|all|every)\\b", RegexOption.IGNORE_CASE)
-
-    fun matches(raw: String): Boolean {
-        val text = raw.trim().lowercase(Locale.ROOT)
-        return text.length in 1..16000 && !text.endsWith('?') && direct.containsMatchIn(text) &&
-            domain.values.any { it.containsMatchIn(text) } && !ordinary.containsMatchIn(text) &&
-            (!recurring.containsMatchIn(text) || (domain.getValue("calendar").containsMatchIn(text) && createEvent.containsMatchIn(text)))
-    }
-
-    fun permits(text: String, command: AgentCommand): Boolean {
-        if (domain[command.function.substringBefore('.')]?.containsMatchIn(text) != true) return false
-        return when (command.function) {
-            "calendar.createOwned" -> createEvent.containsMatchIn(text) &&
-                (!command.args().optBoolean("repeatDaily") || daily.containsMatchIn(text))
-            "calendar.create" -> createEvent.containsMatchIn(text)
-            "calendar.updateEvent" -> moveEvent.containsMatchIn(text)
-            "calendar.deleteOwned" -> deleteEvent.containsMatchIn(text)
-            "calendar.deleteAllOwned" -> deleteEvent.containsMatchIn(text) && allEvents.containsMatchIn(text)
-            else -> true
-        }
-    }
 }
 
 internal enum class AgentPhase { NEEDS_PERMISSION, NEEDS_SELECTION, UNAVAILABLE, REVIEW, RUNNING, COMPLETED, FAILED, STOPPED, INTERRUPTED }

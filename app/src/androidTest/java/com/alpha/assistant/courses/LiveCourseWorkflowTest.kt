@@ -87,7 +87,9 @@ class LiveCourseWorkflowTest {
                         live.respond(credential, request, session) { response ->
                             when (response) {
                                 is CloudEvent.Text -> fragments.append(response.value)
-                                is CloudEvent.RoundComplete -> completed = response.text
+                                is CloudEvent.RoundComplete -> completed = response.courseTopic?.let {
+                                    JSONObject().put("tool", "prepare_course").put("topic", it).toString()
+                                } ?: response.text
                                 else -> Unit
                             }
                             emit(response)
@@ -118,13 +120,16 @@ class LiveCourseWorkflowTest {
                     synchronized(report) {
                         val decision = (0 until events.length()).map { events.getJSONObject(it) }
                             .firstOrNull { it.optString("stage") == "DECISION" }
-                        val kind = decision?.optString("response")?.let { runCatching { JSONObject(it).optString("kind") }.getOrNull() }
-                        check(kind == null || kind == "course") { "Chat did not authorize a course: $kind" }
+                        val outcome = decision?.optString("response")?.let { runCatching { JSONObject(it) }.getOrNull() }
+                        check(outcome == null || outcome.optString("tool") == "prepare_course") {
+                            "Chat did not authorize a course: ${outcome?.optString("kind")}"
+                        }
                     }
                     robot.find(robot.text(R.string.shell_course_start)) != null ||
                         robot.find(robot.text(R.string.shell_course_plan_failed)) != null
                 }
                 check(robot.find(robot.text(R.string.shell_course_start)) != null) { "Outline unavailable" }
+                check(store.courses().isEmpty()) { "The course was saved before Start." }
                 screenshot("outline")
                 val started = SystemClock.elapsedRealtime()
                 checkpoint = "start"

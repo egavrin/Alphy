@@ -37,6 +37,7 @@ class AgentChatWorkflowTest {
         try {
             MemoryStore(fixture.context, memoryName).use { memory ->
                 memory.saveExplicitFact("Favorite color is blue")
+                fixture.provider.devicePlanGrants = listOf("memory.write")
                 fixture.provider.agentProposal = """
                     {"steps":[{"function":"memory.write","args":{"match":"Favorite color","text":"Favorite color is green"}}]}
                 """.trimIndent()
@@ -47,13 +48,13 @@ class AgentChatWorkflowTest {
                     robot.waitFor(robot.text(R.string.agent_plan_title))
                     robot.reveal(robot.text(R.string.agent_execute))
                     assertEquals("Favorite color is blue", memory.list().single().text)
-                    assertEquals(1, fixture.provider.calls)
+                    assertEquals(2, fixture.provider.calls)
                     val outbound = checkNotNull(fixture.provider.lastRequest).turns.single().text
                     assertFalse(outbound.contains(memory.list().single().id))
                     robot.click(robot.text(R.string.agent_execute))
                     robot.reveal(robot.text(R.string.agent_completed))
                     assertEquals("Favorite color is green", memory.list().single().text)
-                    assertEquals(1, fixture.provider.calls)
+                    assertEquals(2, fixture.provider.calls)
                 }
             }
         } finally {
@@ -67,6 +68,7 @@ class AgentChatWorkflowTest {
         val fixture = ShellFixture("agent-unrequested-action")
         val robot = ShellRobot("agent-unrequested-action")
         try {
+            fixture.provider.devicePlanGrants = listOf("memory.write")
             fixture.provider.agentProposal = """
                 {"steps":[{"function":"memory.write","args":{"text":"Unrequested fact"}},
                 {"function":"clock.setAlarm","args":{"hour":7,"minute":0}}]}
@@ -76,7 +78,7 @@ class AgentChatWorkflowTest {
                 robot.edit(robot.text(R.string.composer_label), "Change my memory of my favorite color to green")
                 robot.click(robot.text(R.string.composer_send))
                 robot.waitFor(robot.text(R.string.agent_plan_error))
-                assertEquals(2, fixture.provider.calls)
+                assertEquals(3, fixture.provider.calls)
                 assertNull(robot.find(robot.text(R.string.agent_execute)))
             }
         } finally {
@@ -90,6 +92,7 @@ class AgentChatWorkflowTest {
         val fixture = ShellFixture("agent-unrequested-repeat")
         val robot = ShellRobot("agent-unrequested-repeat")
         try {
+            fixture.provider.devicePlanGrants = listOf("calendar.createOwned")
             fixture.provider.agentProposal = """
                 {"steps":[{"function":"calendar.createOwned","args":{"calendar":"Work","title":"Visit",
                 "start":1893485700000,"end":1893487500000,"timeZone":"UTC","reminderMinutes":15,"repeatDaily":true}}]}
@@ -99,7 +102,7 @@ class AgentChatWorkflowTest {
                 robot.edit(robot.text(R.string.composer_label), "Create a calendar event for a single visit")
                 robot.click(robot.text(R.string.composer_send))
                 robot.waitFor(robot.text(R.string.agent_plan_error))
-                assertEquals(2, fixture.provider.calls)
+                assertEquals(3, fixture.provider.calls)
                 assertNull(robot.find(robot.text(R.string.agent_execute)))
             }
         } finally {

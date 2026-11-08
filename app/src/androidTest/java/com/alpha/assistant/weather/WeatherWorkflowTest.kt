@@ -17,26 +17,6 @@ import java.util.UUID
 /** Failure cases: city names trigger location, temporal words become cities, a late result
  * submits after cancellation, a draft edit or conversation switch, or a place survives retry. */
 class WeatherWorkflowTest {
-    @Test fun onlyRecognizedWeatherWithoutNamedPlaceCanRequestLocation() {
-        listOf("какая сегодня погода", "погода завтра", "weather here", "What's the weather today?",
-            "What is the weather like near me?", "погода в моем городе").forEach { assertTrue(it, WeatherRequest.canLocate(it)) }
-        listOf("weather in London", "какая сегодня погода в Москве", "погода завтра в Казани",
-            "weather in Reading", "Create a weather app", "Search my calendar", "weather SECRET_CITY",
-            "weather in Today").forEach { assertFalse(it, WeatherRequest.canLocate(it)) }
-    }
-
-    @Test fun genericConvertersAndForecastsDoNotBecomeCurrentWeather() {
-        listOf("Create a temperature converter", "Forecast sales revenue", "Explain temperature scales",
-            "Explain the difference between weather and climate.", "What is the difference between weather and climate?",
-            "Translate weather today into Russian", "Summarize this weather report", "Переведи текст о погоде",
-            "Кратко изложи прогноз погоды", "How does weather affect climate?", "What is weather?").forEach {
-            assertFalse(it, WeatherRequest.isWeather(it))
-        }
-        listOf("weather in London", "какая погода в Москве", "temperature in London", "forecast tomorrow").forEach {
-            assertTrue(it, WeatherRequest.isWeather(it))
-        }
-    }
-
     @Test fun cancellationDraftSwitchAndRetryCannotReuseLocation() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val app = instrumentation.targetContext
