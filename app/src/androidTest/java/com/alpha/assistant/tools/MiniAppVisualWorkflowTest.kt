@@ -370,7 +370,7 @@ class MiniAppVisualWorkflowTest {
                                     .putExtra("expanded", expanded)
                                 val colors = when (scheme) {
                                     "fixed" -> if (dark) AlphaDarkColors else AlphaLightColors
-                                    "device" -> alphaColorScheme(app, dark)
+                                    "device" -> alphaColorScheme(dark)
                                     else -> galleryWallpaperColors(scheme, dark)
                                 }
                                 val backgrounds = mapOf("default" to colors.surfaceContainer, "muted" to colors.surfaceVariant,
@@ -845,22 +845,24 @@ class MiniAppVisualWorkflowTest {
 
     @Test fun galleryCanvasDrawsRoleHexAndGradientOnShellSurface() {
         val app = robot.instrumentation.targetContext
-        val intent = Intent().setClassName(app, "com.alpha.assistant.MiniAppGalleryActivity")
-            .putExtra("scheme", "fixed").putExtra("page", "canvas")
-        ActivityScenario.launch<android.app.Activity>(intent).use {
-            val canvas = robot.waitFor("Проверка холста. Графика. ")
-            val bounds = Rect().also { canvas.getBoundsInScreen(it) }
-            val screenshot = checkNotNull(robot.automation.takeScreenshot())
-            try {
-                fun sample(x: Int, y: Int) = screenshot.getPixel(bounds.left + bounds.width() * x / 100, bounds.top + bounds.height() * y / 100)
-                assertEquals(0xFFFDF7FF.toInt(), sample(90, 90))
-                assertEquals(0xFF63568F.toInt(), sample(10, 20))
-                assertEquals(0xFF123456.toInt(), sample(40, 20))
-                assertEquals(0xFFBA1A1A.toInt(), sample(65, 20))
-                assertEquals(0xFF1C1B20.toInt(), sample(95, 20))
-                val directory = File(app.getExternalFilesDir(null), "plan3-gallery").apply { mkdirs() }
-                screenshot.save(File(directory, "canvas.png"))
-            } finally { screenshot.recycle() }
+        for ((scheme, colors) in listOf("fixed" to alphaColorScheme(false), "blue" to galleryWallpaperColors("blue", false))) {
+            val intent = Intent().setClassName(app, "com.alpha.assistant.MiniAppGalleryActivity")
+                .putExtra("scheme", scheme).putExtra("page", "canvas")
+            ActivityScenario.launch<android.app.Activity>(intent).use {
+                val canvas = robot.waitFor("Проверка холста. Графика. ")
+                val bounds = Rect().also { canvas.getBoundsInScreen(it) }
+                val screenshot = checkNotNull(robot.automation.takeScreenshot())
+                try {
+                    fun sample(x: Int, y: Int) = screenshot.getPixel(bounds.left + bounds.width() * x / 100, bounds.top + bounds.height() * y / 100)
+                    assertEquals(colors.surface.toArgb(), sample(90, 90))
+                    assertEquals(colors.primary.toArgb(), sample(10, 20))
+                    assertEquals(0xFF123456.toInt(), sample(40, 20))
+                    assertEquals(colors.error.toArgb(), sample(65, 20))
+                    assertEquals(colors.onSurface.toArgb(), sample(95, 20))
+                    val directory = File(app.getExternalFilesDir(null), "plan3-gallery").apply { mkdirs() }
+                    screenshot.save(File(directory, "canvas-$scheme.png"))
+                } finally { screenshot.recycle() }
+            }
         }
     }
 

@@ -97,7 +97,12 @@ class ShellScreenshotTest {
                                 assertTrue("Large labels have separate rows at 320 dp", newChat.bottom <= settings.top)
                             }
                         }
-                        screen(directory, "drawer").recycle()
+                        val drawer = screen(directory, "drawer")
+                        try {
+                            val expectedSurface = if (mode == "yes") 0xFF1D1D1D.toInt() else Color.WHITE
+                            val inset = (4 * fixture.context.resources.displayMetrics.density).roundToInt()
+                            assertEquals("Graphite drawer surface", expectedSurface, drawer.getPixel(inset, drawer.height / 2))
+                        } finally { drawer.recycle() }
                     }
                 }
             }
@@ -111,7 +116,7 @@ class ShellScreenshotTest {
         val desktop = screen(directory, "desktop")
         assertNotEquals("Desktop center pixel", Color.BLACK, center(desktop))
         // The Desktop draws no background, so its side padding shows colorScheme.background, the color of the shell Surface (AlphaShell).
-        val expected = alphaColorScheme(fixture.context, dark).background.toArgb()
+        val expected = alphaColorScheme(dark).background.toArgb()
         val gutter = desktop.getPixel((12 * fixture.context.resources.displayMetrics.density).roundToInt(), desktop.height / 2)
         assertEquals("Desktop background pixel", Integer.toHexString(expected), Integer.toHexString(gutter))
         robot.openDrawer(scenario)
@@ -159,7 +164,7 @@ class ShellScreenshotTest {
                 val dir = File(root, mode).apply { mkdirs() }
                 fixture.launch().use { scenario ->
                     scenario.onActivity { assertEquals(bits, it.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) }
-                    val colors = alphaColorScheme(fixture.context, mode == "yes")
+                    val colors = alphaColorScheme(mode == "yes")
                     fun capture(name: String, vararg roles: Pair<String, Int>, bounds: Rect? = null) {
                         val image = screen(dir, name)
                         try { checkColors(image, "$mode/$name", roles, failures, bounds) } finally { image.recycle() }

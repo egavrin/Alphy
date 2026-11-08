@@ -4,6 +4,7 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -25,10 +26,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.DrawerState
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -44,7 +43,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -87,22 +89,29 @@ import com.alpha.assistant.data.Conversation
     }
 }
 
+internal fun drawerSelectionMark(dark: Boolean): Color = if (dark) Color(0xFFFFAE77) else Color(0xFFA34418)
+
 @Composable internal fun ShellDrawerSheet(drawerState: DrawerState, conversations: List<Conversation>, selectedId: String?,
     destination: ShellDestination?, profileName: String, open: (ShellDestination) -> Unit, openChat: (String) -> Unit, newChat: () -> Unit) {
     BoxWithConstraints {
         // Leave room for the scrim's tap target and accessibility action.
         val sheetWidth = (maxWidth * 0.75f).coerceIn(360.dp, 560.dp)
             .coerceAtMost((maxWidth - 56.dp).coerceAtLeast(0.dp))
-        ModalDrawerSheet(drawerState, Modifier.width(sheetWidth)) {
+        val dark = isSystemInDarkTheme()
+        val colors = MaterialTheme.colorScheme
+        val historyLabel = stringResource(R.string.chat_history)
+        ModalDrawerSheet(drawerState, Modifier.width(sheetWidth),
+            drawerContainerColor = if (dark) Color(0xFF1D1D1D) else Color.White,
+            drawerContentColor = colors.onSurface,
+        ) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 10.dp, top = 4.dp, bottom = 4.dp)
-                .heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
+                .heightIn(min = 52.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Image(painterResource(R.drawable.alphy_drawer_mark), contentDescription = null,
+                    modifier = Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)))
                 Text(stringResource(R.string.app_name), Modifier.weight(1f).semantics { heading() },
                     style = MaterialTheme.typography.headlineSmall)
-                val searchLabel = stringResource(R.string.search)
-                FilledTonalIconButton(
-                    onClick = { open(ShellDestination.Search) },
-                    modifier = Modifier.size(48.dp).semantics { contentDescription = searchLabel },
-                ) { AlphaIcon(Glyph.Search, color = LocalContentColor.current) }
+                GlyphButton(Glyph.Search, stringResource(R.string.search)) { open(ShellDestination.Search) }
             }
             @Composable fun Destination(target: ShellDestination, glyph: Glyph) {
                 NavigationDrawerItem(
@@ -117,18 +126,31 @@ import com.alpha.assistant.data.Conversation
                 item { Destination(ShellDestination.MiniApps, Glyph.Grid) }
                 item { Destination(ShellDestination.Automations, Glyph.Repeat) }
                 item { Destination(ShellDestination.Courses, Glyph.File) }
-                item {
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                    Text(stringResource(R.string.recent), Modifier.padding(start = 16.dp, bottom = 4.dp).semantics { heading() },
-                        style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (conversations.isNotEmpty()) {
+                    item {
+                        Column(Modifier.padding(horizontal = 16.dp).semantics {
+                            contentDescription = historyLabel
+                            heading()
+                        }) {
+                            HorizontalDivider(Modifier.padding(top = 8.dp))
+                            Spacer(Modifier.height(18.dp))
+                        }
+                    }
                 }
                 items(conversations, key = { it.id }) { chat ->
+                    val selected = destination == null && chat.id == selectedId
                     NavigationDrawerItem(
                         label = { Text(chat.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge) },
-                        selected = destination == null && chat.id == selectedId,
+                        selected = selected,
                         onClick = { openChat(chat.id) },
                         modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+                        badge = if (selected) {
+                            { AlphaIcon(Glyph.Check, Modifier.size(18.dp), color = drawerSelectionMark(dark)) }
+                        } else null,
                         shape = RoundedCornerShape(12.dp),
+                        colors = NavigationDrawerItemDefaults.colors(
+                            selectedContainerColor = colors.primaryContainer, selectedTextColor = colors.onPrimaryContainer,
+                        ),
                     )
                 }
             }
@@ -142,20 +164,13 @@ import com.alpha.assistant.data.Conversation
     val shape = RoundedCornerShape(13.dp)
     val padding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
     val settingsLabel = stringResource(R.string.settings)
-    val accent = if (isSystemInDarkTheme()) AlphaDarkColors else AlphaLightColors
     BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
         val fontScale = LocalDensity.current.fontScale
         val separateRows = maxWidth <= 280.dp && fontScale >= 1.8f
         val showProfile = maxWidth > 260.dp && fontScale < 1.3f
         val stackIcons = !separateRows && !showProfile
         @Composable fun Actions(action: Modifier) {
-            FilledTonalButton(
-                newChat, action, shape = shape, contentPadding = padding,
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = accent.primaryContainer,
-                    contentColor = accent.onPrimaryContainer,
-                ),
-            ) {
+            Button(newChat, action, shape = shape, contentPadding = padding) {
                 DrawerActionContent(stackIcons, icon = { AlphaIcon(Glyph.NewChat, color = LocalContentColor.current) }) {
                     Text(stringResource(R.string.new_chat))
                 }

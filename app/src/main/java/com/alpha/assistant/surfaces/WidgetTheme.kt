@@ -1,6 +1,5 @@
 package com.alpha.assistant.surfaces
 
-import android.content.Context
 import android.os.Build
 import androidx.compose.ui.unit.dp
 import androidx.glance.GlanceModifier
@@ -21,9 +20,9 @@ internal data class WidgetColors(
     val onSecondaryContainer: ColorProvider,
 )
 
-internal fun widgetColors(context: Context): WidgetColors {
-    val light = alphaColorScheme(context,false)
-    val dark = alphaColorScheme(context,true)
+internal fun widgetColors(): WidgetColors {
+    val light = alphaColorScheme(false)
+    val dark = alphaColorScheme(true)
     return WidgetColors(
         ColorProvider(light.surface,dark.surface),
         ColorProvider(light.onSurface,dark.onSurface),

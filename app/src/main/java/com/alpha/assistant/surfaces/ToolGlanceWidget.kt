@@ -164,7 +164,7 @@ private fun WidgetInput.project(context: Context): WidgetProjection? {
 private fun WidgetContent(input: WidgetInput, widgetId: Int?) {
     val context = LocalContext.current
     val size = LocalSize.current
-    val colors = widgetColors(context)
+    val colors = widgetColors()
     val projection = input.project(context)
     val fontScale = context.resources.configuration.fontScale
     val rowHeight = maxOf(48,ceil(22 * fontScale + 12).toInt())

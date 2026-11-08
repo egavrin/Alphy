@@ -45,7 +45,7 @@ class MiniAppGalleryActivity : AlphyActivity() {
             val colors = when (theme) {
                 "fixed" -> if (dark) AlphaDarkColors else AlphaLightColors
                 "blue", "green" -> galleryWallpaperColors(theme, dark)
-                else -> alphaColorScheme(this, dark)
+                else -> alphaColorScheme(dark)
             }
             val fontScale = if (large) 2f else 1f
             val density = LocalDensity.current.density

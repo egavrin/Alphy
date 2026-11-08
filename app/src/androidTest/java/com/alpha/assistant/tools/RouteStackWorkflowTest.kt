@@ -47,7 +47,7 @@ class RouteStackWorkflowTest {
                     robot.openDrawer(scenario)
                     robot.rotate(scenario, landscape = true)
                     robot.awaitDrawerOpen(scenario)
-                    assertTrue(robot.reveal(robot.text(R.string.recent)).isVisibleToUser)
+                    assertTrue(robot.reveal("Маршрут").isVisibleToUser)
                     robot.back()
                     robot.awaitDrawerClosed(scenario)
                     awaitStack("home", "detail")

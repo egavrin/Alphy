@@ -32,8 +32,15 @@ class DrawerWorkflowTest {
         fixture.launch().use { scenario ->
             robot.waitFor("Alpha message")
             robot.openDrawer(scenario)
-            val rows = listOf(R.string.search, R.string.mini_apps, R.string.automations, R.string.course_learning, R.string.recent)
-                .map { robot.text(it) } + "Beta chat"
+            val historyLabel = robot.text(R.string.chat_history)
+            val history = robot.waitFor(historyLabel)
+            assertTrue("History is an accessibility heading", history.isHeading)
+            assertTrue("The history heading has no visible text", history.text.isNullOrEmpty())
+            assertEquals("The drawer exposes one history heading", 1, robot.texts().count { it == historyLabel })
+            val currentChatNodes = generateSequence(robot.waitFor("Alpha chat")) { it.parent }
+            assertTrue("The current chat row exposes selection", currentChatNodes.any { it.isSelected })
+            val rows = listOf(R.string.search, R.string.mini_apps, R.string.automations, R.string.course_learning)
+                .map { robot.text(it) } + listOf(historyLabel, "Beta chat")
             for ((upper, lower) in rows.zipWithNext()) assertTrue("$upper ends above $lower", robot.bounds(upper).bottom <= robot.bounds(lower).top)
             robot.assertTarget(robot.text(R.string.search))
             val newChat = robot.assertTarget(robot.text(R.string.new_chat))
@@ -80,6 +87,7 @@ class DrawerWorkflowTest {
     @Test fun entryClosesOpenDrawer() {
         fixture.launch().use { scenario ->
             robot.openDrawer(scenario)
+            assertFalse("An empty drawer has no history heading", robot.find(robot.text(R.string.chat_history))?.isVisibleToUser == true)
             robot.click(robot.text(R.string.settings))
             robot.awaitDrawerClosed(scenario)
             robot.waitUntil { robot.composed(scenario, "settings-pane") }

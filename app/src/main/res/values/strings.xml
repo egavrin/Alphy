@@ -7,7 +7,7 @@
     <string name="search">Поиск по чатам</string>
     <string name="mini_apps">Мини-приложения</string>
     <string name="automations">Автоматизации</string>
-    <string name="recent">Недавние</string>
+    <string name="chat_history">История чатов</string>
     <string name="access">Доступ и функции</string>
     <string name="profile">Профиль</string>
     <string name="load_failed">Не удалось открыть данные</string>
