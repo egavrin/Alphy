@@ -40,7 +40,7 @@ class ChatPresentationWorkflowTest {
             Message("history-$index", "assistant", "Earlier answer $index", index.toLong(), "complete")
         }
         fixture.store.saveConversation(Conversation("history", "History", 1, 24, messages = history))
-        fixture.store.saveSetting("selected", "history")
+        fixture.store.seedOpenChat("history")
         val courses = "${fixture.store.databaseName}-courses.db"
         CourseStore(fixture.context, courses).use { store ->
             repeat(4) { index ->
@@ -128,7 +128,7 @@ class ChatPresentationWorkflowTest {
                 complete.await()
                 emit(CloudEvent.RoundComplete("""{"kind":"answer","text":${JSONObject.quote("**$answer**")},"brief":"","search":"none"}""", false))
             }
-        }, fixture.store, fixture.keys) }
+        }, fixture.store, fixture.keys).openSeededChat(fixture.store) }
         try {
             fixture.launch().use { scenario ->
                 robot.edit(robot.text(R.string.composer_label), "Проверка ответа")
@@ -174,7 +174,7 @@ class ChatPresentationWorkflowTest {
                 attachments = listOf(Attachment("content://fixture/image", "карта.png", "image/png"))),
             Message("answer", "assistant", "Ответ по источнику [1]. Код `[1]`, неизвестный [3], недопустимый [2].",
                 1, "complete", searchStatus = "found", sources = sources))))
-        fixture.store.saveSetting("selected", "chat")
+        fixture.store.seedOpenChat("chat")
         fixture.install()
         val launchedIntent = AtomicReference<Intent>()
         val monitor = object : Instrumentation.ActivityMonitor() {
@@ -224,7 +224,7 @@ class ChatPresentationWorkflowTest {
             Message("answer", "assistant", "", 1, "error", replyTo = "question", errorCode = "source_support",
                 error = rawError, sources = listOf(Source("Прогноз", "https://example.com/moscow"))),
         )))
-        fixture.store.saveSetting("selected", "weather")
+        fixture.store.seedOpenChat("weather")
         fixture.install()
         try {
             fixture.launch().use {
@@ -247,7 +247,7 @@ class ChatPresentationWorkflowTest {
         val latest = Message("latest", "assistant", "Последний фрагмент", 1, "error",
             replyTo = user.id, error = "Добавьте ключ.", errorCode = "auth")
         fixture.store.saveConversation(Conversation("chat", "Восстановление", 1, 1, messages = listOf(user, old, latest)))
-        fixture.store.saveSetting("selected", "chat")
+        fixture.store.seedOpenChat("chat")
         fixture.install()
         val fontScale = robot.shell("settings get system font_scale")
         try {

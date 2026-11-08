@@ -1,5 +1,7 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.seedOpenChat
 import android.os.Bundle
 import android.widget.TextView
 import androidx.compose.ui.unit.DpSize
@@ -419,7 +421,7 @@ class LibraryManagementWorkflowTest {
                 tools.commitTool(counter("second","Покупки"),null,true)
                 AutomationStore(app,rulesName).use { rules -> val dependency=rules.save(null,rule(first));rules.approve(dependency.id,dependency.revision) }
             }
-            CloudTestActivity.factory={ application -> ShellViewModel(application,offline,shell,keys).also {
+            CloudTestActivity.factory={ application -> ShellViewModel(application,offline,shell,keys).openSeededChat(shell).also {
                 model=it
                 diagnostics.state={"loading=${model.loading} busy=${model.tools.busy} selected=${model.tools.selectedId} tools=${model.tools.tools.map {item -> item.id to item.archived}}"}
             } }
@@ -488,9 +490,9 @@ class LibraryManagementWorkflowTest {
                 }
                 shell.saveConversation(Conversation("chat","Обсуждение счётчика",1,1,messages=listOf(
                     Message("card","assistant","Готово.",1,"complete",toolId=current.id,toolRevision=1))))
-                shell.saveSetting("selected","chat")
+                shell.seedOpenChat("chat")
             }
-            CloudTestActivity.factory={ ShellViewModel(it,offline,shell,keys).also { model=it } }
+            CloudTestActivity.factory={ ShellViewModel(it,offline,shell,keys).openSeededChat(shell).also { model=it } }
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitUntil {!model.loading && !model.tools.busy}
                 waitFor("Счёт: 7")
@@ -563,7 +565,7 @@ class LibraryManagementWorkflowTest {
         val font=command("settings get system font_scale")
         lateinit var model: ShellViewModel
         try {
-            CloudTestActivity.factory={ ShellViewModel(it,offline,shell,keys).also { model=it } }
+            CloudTestActivity.factory={ ShellViewModel(it,offline,shell,keys).openSeededChat(shell).also { model=it } }
             command("settings put system font_scale 2.0")
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitUntil {!model.loading && !model.tools.busy}

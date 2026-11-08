@@ -1,5 +1,7 @@
 package com.alpha.assistant.chat
 
+import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.seedOpenChat
 import android.app.Application
 import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
@@ -61,7 +63,7 @@ class AutomaticToolWorkflowTest {
     }
     private fun seedChat(store: ShellStore, vararg refs: String) {
         store.saveConversation(Conversation("chat","Chat",1,1,messages = refs.map(::card)))
-        store.saveSetting("selected","chat")
+        store.seedOpenChat("chat")
     }
     private abstract class SingleRoundProvider : ChatProvider {
         final override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
@@ -85,7 +87,7 @@ class AutomaticToolWorkflowTest {
         init {
             seed(store,toolStore)
             keys.save("isolated-auto-test").getOrThrow()
-            CloudTestActivity.factory = { ShellViewModel(it,provider,store,keys).also { created -> model = created } }
+            CloudTestActivity.factory = { ShellViewModel(it,provider,store,keys).openSeededChat(store).also { created -> model = created } }
             scenario = ActivityScenario.launch(CloudTestActivity::class.java)
             waitUntil { !model.loading && !model.tools.busy }
         }
@@ -94,9 +96,10 @@ class AutomaticToolWorkflowTest {
         val last get() = model.snapshot.selected!!.messages.last()
         fun restart() {
             val previous = model
+            val selected = previous.snapshot.selectedId
             scenario.close(); store.close()
-            store = ShellStore(app,"$name.db")
-            CloudTestActivity.factory = { ShellViewModel(it,provider,store,keys).also { created -> model = created } }
+            store = ShellStore(app,"$name.db").also { it.seedOpenChat(selected) }
+            CloudTestActivity.factory = { ShellViewModel(it,provider,store,keys).openSeededChat(store).also { created -> model = created } }
             scenario = ActivityScenario.launch(CloudTestActivity::class.java)
             waitUntil { model !== previous && !model.loading && !model.tools.busy }
         }
@@ -485,7 +488,7 @@ class AutomaticToolWorkflowTest {
             assertEquals(2,f.toolStore.revisions(first.id).size)
             assertTrue(f.model.tools.drafts.isEmpty()); assertTrue(f.toolStore.drafts().isEmpty())
             assertTrue(requests.first().search); assertTrue(requests.drop(1).all { !it.search }); assertTrue(requests.all { it.turns.all { turn -> turn.images.isEmpty() } })
-            waitUntil { f.store.load().selected!!.messages.last().toolRevision == 2 }
+            waitUntil { f.store.load().conversations.single { it.id == f.model.snapshot.selectedId }.messages.last().toolRevision == 2 }
             val calls = requests.size; f.restart(); assertEquals(calls,requests.size)
             assertEquals(first.id,f.last.toolId); assertEquals(2,f.last.toolRevision); assertFalse(f.last.search)
         }
@@ -865,8 +868,8 @@ class AutomaticToolWorkflowTest {
                     assertTrue(f.last.error,f.last.error.contains("Observed: integer."))
                     assertFalse(f.last.error,f.last.error.contains(privateNumber))
                     val messageId=f.last.id
-                    waitUntil {f.store.load().selected!!.messages.last().let {it.id == messageId && it.errorCode == "widget_spec"}}
-                    val persisted=f.store.load().selected!!.messages.last()
+                    waitUntil {f.store.load().conversations.single { it.id == f.model.snapshot.selectedId }.messages.last().let {it.id == messageId && it.errorCode == "widget_spec"}}
+                    val persisted=f.store.load().conversations.single { it.id == f.model.snapshot.selectedId }.messages.last()
                     assertEquals(f.last.error,persisted.error)
                     assertFalse(persisted.error,persisted.error.contains(privateNumber))
                     assertTrue(f.toolStore.tools().isEmpty()); assertTrue(f.toolStore.drafts().isEmpty())
@@ -940,7 +943,7 @@ class AutomaticToolWorkflowTest {
             runBlocking { assertEquals("succeeded",CapabilityBroker(app,tools).execute(executedKey) {
                 nativeExecutions++; CapabilityResult("succeeded","Fixture action completed")
             }.status) }
-            shell.saveConversation(Conversation("recovery","Recovery",1,1,messages = listOf(card("existing")))); shell.saveSetting("selected","recovery")
+            shell.saveConversation(Conversation("recovery","Recovery",1,1,messages = listOf(card("existing")))); shell.seedOpenChat("recovery")
         }.use { f ->
             for(source in listOf("while(true){}; // REJECTED_OUTPUT_ONLY", "throw new Error('REJECTED_OUTPUT_ONLY');")) {
                 recoveredTitle = if (source.startsWith("while")) "Recovered after timeout" else "Recovered after exception"
@@ -1023,7 +1026,7 @@ class AutomaticToolWorkflowTest {
             Fixture(provider) { shell, tools ->
                 val parsed = ToolSpec.parse(spec())
                 tools.saveTool(ToolRecord("existing",1,1,parsed.json,"{\"count\":4}",parsed.ui.toString(),"recovery",true),true)
-                shell.saveConversation(Conversation("recovery","Recovery",1,1,messages = listOf(card("existing")))); shell.saveSetting("selected","recovery")
+                shell.saveConversation(Conversation("recovery","Recovery",1,1,messages = listOf(card("existing")))); shell.seedOpenChat("recovery")
             }.use { f ->
                 try {
                     val before = f.toolStore.tool("existing")!!
@@ -1148,7 +1151,7 @@ class AutomaticToolWorkflowTest {
             shell.saveConversation(Conversation("unavailable","Storage unavailable",1,1,messages = listOf(
                 Message("pending-user","user","Create a counter",1,"sent"),
                 Message("pending-tool","assistant","Ready.",1,"generating",replyTo = "pending-user",toolOperationId = "pending-operation"))))
-            shell.saveSetting("selected","unavailable")
+            shell.seedOpenChat("unavailable")
         }.use { f ->
             assertFalse(f.model.loadFailed)
             assertEquals("tool_storage",f.last.errorCode)
@@ -1368,7 +1371,7 @@ class AutomaticToolWorkflowTest {
             assertEquals(32,chat.messages.count { it.replyTo != null })
             main { f.model.cancelRequest(canceled.id); f.model.cancelRequest(active.id) }
             assertTrue(blockRestart.await(10,TimeUnit.SECONDS))
-            waitUntil { f.store.load().selected!!.messages.count { it.status == "queued" } == 28 }
+            waitUntil { f.store.load().conversations.single { it.id == f.model.snapshot.selectedId }.messages.count { it.status == "queued" } == 28 }
             val calls = requests.size
             f.restart()
             assertEquals(calls,requests.size)
@@ -1538,7 +1541,7 @@ class AutomaticToolWorkflowTest {
             shell.saveConversation(Conversation("conversation","Recovered",1,1,messages = listOf(
                 Message("user","user","Create counter",1,"sent"),
                 Message("assistant","assistant","Ready.",1,"generating",replyTo = "user",toolOperationId = "operation"))))
-            shell.saveSetting("selected","conversation")
+            shell.seedOpenChat("conversation")
         }.use { f ->
             assertEquals("complete",f.last.status); assertEquals("operation",f.last.toolId); assertEquals(1,f.last.toolRevision)
             assertEquals(0,calls); assertTrue(f.model.tools.drafts.isEmpty())

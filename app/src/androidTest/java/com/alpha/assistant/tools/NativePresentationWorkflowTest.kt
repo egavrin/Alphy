@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.ui.seedOpenChat
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
@@ -464,7 +465,7 @@ class NativePresentationWorkflowTest {
                 fixture.store.saveConversation(Conversation("chat", "Галерея", 1, 1, messages = listOf(
                     Message("artifact", "assistant", "", 1, "complete", toolId = "presentation", toolRevision = 1),
                 )))
-                fixture.store.saveSetting("selected", "chat")
+                fixture.store.seedOpenChat("chat")
                 fixture.install()
                 fixture.launch().use { scenario ->
                     robot.rotate(scenario, landscape = false)

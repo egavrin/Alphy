@@ -1,5 +1,6 @@
 package com.alpha.assistant.timer
 
+import com.alpha.assistant.ui.seedOpenChat
 import android.app.Notification
 import android.app.NotificationManager
 import android.os.SystemClock
@@ -57,7 +58,7 @@ class ForegroundTimerWorkflowTest {
                 fixture.store.saveConversation(Conversation("chat", "Timer chat", 1, 1, messages = listOf(
                     Message("artifact", "assistant", "", 1, "complete", toolId = record.id, toolRevision = 1),
                 )))
-                fixture.store.saveSetting("selected", "chat")
+                fixture.store.seedOpenChat("chat")
                 fixture.install(saveKey = false)
                 fixture.launch().use { scenario ->
                     robot.waitFor(robot.text(R.string.tool_open))

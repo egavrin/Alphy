@@ -45,8 +45,6 @@ class ShellScreenshotTest {
                 setNight(mode, bits)
                 for (size in listOf("1.0", "2.0")) {
                     setScale(size)
-                    // The Chat capture selects the chat, and a launch restores the selected chat.
-                    fixture.store.saveSetting("selected", "")
                     fixture.launch().use { scenario ->
                         scenario.onActivity {
                             assertEquals(size.toFloat(), it.resources.configuration.fontScale)

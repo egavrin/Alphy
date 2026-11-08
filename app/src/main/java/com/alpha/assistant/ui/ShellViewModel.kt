@@ -562,6 +562,11 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
 
     internal suspend fun testAutomation(definition: com.alpha.assistant.automations.AutomationDefinition, target: Long, session: CloudSession): JSONObject =
         com.alpha.assistant.automations.testAgentResult(getApplication(), keys, provider, definition, target, session)
+    internal val taskModelId = UUID.randomUUID().toString()
+    private data class ChatEntry(val id: String, val fromNotification: Boolean)
+    private var pendingChatEntry: ChatEntry? = null
+    internal val taskChatId: String? get() = pendingChatEntry?.id ?: snapshot.selectedId
+
     var surfaceSequence by mutableStateOf(0); private set
     internal var surfaceDestination by mutableStateOf<ShellDestination?>(null); private set
     internal var surfaceAutomationRuleId by mutableStateOf<String?>(null); private set
@@ -590,6 +595,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         queueSurface(ShellDestination.Automations, automationRuleId = id)
     }
     private fun queueSurface(destination: ShellDestination?, automationRuleId: String? = null) {
+        pendingChatEntry = null
         if (destination != ShellDestination.Courses && courseEntry?.inChat == false) courseEntry = null
         surfaceDestination = destination
         surfaceAutomationRuleId = automationRuleId
@@ -700,17 +706,30 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         }
         load()
     }
-    private var automationConversationOnLoad: String? = null
+    internal fun startDesktopTask() {
+        consumeSurface()
+        select(null)
+    }
 
-    internal fun openAutomationConversation(id: String) {
-        if (loading) {
-            automationConversationOnLoad = id
+    internal fun restoreTaskChat(id: String) = openChatEntry(ChatEntry(id, fromNotification = false))
+
+    internal fun openAutomationConversation(id: String) = openChatEntry(ChatEntry(id, fromNotification = true))
+
+    private fun openChatEntry(entry: ChatEntry) {
+        if (loading || loadFailed) {
+            pendingChatEntry = entry
             return
         }
-        if (snapshot.conversations.none { it.id == id }) return
-        queueSurface(null)
-        select(id)
-        refreshAutomationMessages()
+        if (snapshot.conversations.none { it.id == entry.id }) {
+            if (!entry.fromNotification) {
+                select(null)
+                queueSurface(null)
+            }
+            return
+        }
+        if (entry.fromNotification) queueSurface(null)
+        select(entry.id)
+        if (entry.fromNotification) refreshAutomationMessages()
     }
 
     internal fun refreshAutomationMessages() {
@@ -754,8 +773,11 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
             }
             loadFailed = result.isFailure
             loading = false
-            automationConversationOnLoad?.let(::openAutomationConversation)
-            automationConversationOnLoad = null
+            if (result.isSuccess) {
+                val entry = pendingChatEntry
+                pendingChatEntry = null
+                entry?.let(::openChatEntry)
+            }
             refreshAutomationMessages()
             refreshKey()
         }
@@ -771,7 +793,6 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                     if (clearHistory) store.retryHistoryClear(current.conversations.map { it.id }.toSet()) else deletedIds.forEach(store::deleteConversation)
                     current.conversations.forEach(store::saveConversation)
                     store.saveNewDraft(current.newDraft)
-                    store.saveSetting("selected", current.selectedId.orEmpty())
                     store.saveSetting("userName", current.userName)
                     store.writableDatabase.setTransactionSuccessful()
                 } finally { store.writableDatabase.endTransaction() }
@@ -780,6 +801,8 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         saveFailed = false
     }
     fun select(id: String?) {
+        if (id != null && snapshot.conversations.none { it.id == id }) return
+        pendingChatEntry = null
         if (id != snapshot.selectedId) {
             dismissAutomationSetup()
             leaveCourseChat()
@@ -787,7 +810,6 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         }
         voice.stop()
         snapshot = snapshot.copy(selectedId = id)
-        writes.trySend { store.saveSetting("selected", id.orEmpty()) }
     }
     fun setUserName(value: String) {
         // A cut between the two halves of a surrogate pair would save half of an emoji.

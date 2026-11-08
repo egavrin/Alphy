@@ -1,5 +1,7 @@
 package com.alpha.assistant.surfaces
 
+import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.seedOpenChat
 import android.content.ContextWrapper
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
@@ -69,9 +71,9 @@ class WidgetLayoutWorkflowTest {
                 fixture.store.saveConversation(Conversation("chat", "Widget chat", 1, 1, messages = listOf(
                     Message("artifact", "assistant", "", 1, "complete", toolId = record.id, toolRevision = 1),
                 )))
-                fixture.store.saveSetting("selected", "chat")
+                fixture.store.seedOpenChat("chat")
                 fixture.keys.save("alpha-test-only").getOrThrow()
-                CloudTestActivity.factory = { app -> ShellViewModel(app, provider, fixture.store, fixture.keys).also { fixture.model = it } }
+                CloudTestActivity.factory = { app -> ShellViewModel(app, provider, fixture.store, fixture.keys).openSeededChat(fixture.store).also { fixture.model = it } }
 
                 fun draft(label: String) {
                     val edit = robot.text(R.string.widget_layout_edit)

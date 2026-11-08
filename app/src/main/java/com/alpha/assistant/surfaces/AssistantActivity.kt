@@ -179,11 +179,9 @@ class AssistantActivity : AlphyActivity() {
 
     private fun openApp(toolId: String? = null, providerSettings: Boolean = false, preserveDestination: Boolean = false) {
         if (!assistantUnavailable()) {
-            val entry = SurfaceEntry.chatIntent(this)
-            if (preserveDestination) entry.action = null
-            if (toolId != null) entry.putExtra("tool_id", toolId)
-            if (providerSettings) entry.putExtra("settings", true)
-            startActivity(entry)
+            // Queue the handoff before Android can restore an older MainActivity task.
+            if (!preserveDestination) AssistantChat.model(application).openSurface(toolId, providerSettings)
+            startActivity(SurfaceEntry.chatIntent(this))
         }
         finish()
     }

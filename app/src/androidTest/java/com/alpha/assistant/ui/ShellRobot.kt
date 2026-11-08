@@ -65,11 +65,12 @@ internal typealias VoiceFactory = (Application, CoroutineScope, (String) -> Unit
 
 internal class FixtureProvider(private val reply: String = "Fixture response") : ChatProvider {
     @Volatile var calls = 0
+    @Volatile var lastRequest: CloudRequest? = null
     var automationDraft: String? = null
     @Volatile var failure: Exception? = null              // thrown after the count
     @Volatile var gate: CompletableDeferred<Unit>? = null // awaited before the answer
     override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-        synchronized(this) { calls++ }
+        synchronized(this) { calls++; lastRequest = request }
         failure?.let { throw it }
         gate?.await()
         automationDraft?.let { arguments ->
@@ -86,6 +87,19 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
     }
 }
 
+// A fixture opts into an open chat without writing navigation state to SQLite.
+private val seededChats = java.util.WeakHashMap<ShellStore, String>()
+
+internal fun ShellStore.seedOpenChat(id: String?) {
+    synchronized(seededChats) {
+        if (id == null) seededChats.remove(this) else seededChats[this] = id
+    }
+}
+
+internal fun ShellViewModel.openSeededChat(store: ShellStore): ShellViewModel = apply {
+    synchronized(seededChats) { seededChats[store] }?.let(::restoreTaskChat)
+}
+
 /** An isolated shell database, key, and provider for one test. */
 internal class ShellFixture(prefix: String) {
     val context: Context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -97,11 +111,11 @@ internal class ShellFixture(prefix: String) {
 
     fun install(saveKey: Boolean = true, voice: VoiceFactory? = null) {
         if (saveKey) check(keys.save("alpha-test-only").isSuccess)
-        CloudTestActivity.factory = { app -> ShellViewModel(app, provider, store, keys, voiceFactory = voice).also { model = it } }
+        CloudTestActivity.factory = { app -> ShellViewModel(app, provider, store, keys, voiceFactory = voice).openSeededChat(store).also { model = it } }
     }
     fun seedChat(id: String, title: String, message: String, selected: Boolean = false, updatedAt: Long = 1L) {
         store.saveConversation(Conversation(id, title, updatedAt, updatedAt, messages = listOf(Message("$id-u", "user", message, updatedAt, "sent"))))
-        if (selected) store.saveSetting("selected", id)
+        if (selected) store.seedOpenChat(id)
     }
     fun launch(): ActivityScenario<CloudTestActivity> = ActivityScenario.launch(CloudTestActivity::class.java)
     fun remove() {

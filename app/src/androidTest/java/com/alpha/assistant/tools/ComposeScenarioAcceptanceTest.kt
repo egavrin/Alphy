@@ -1,5 +1,7 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.seedOpenChat
 import android.graphics.Bitmap
 import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
@@ -158,10 +160,10 @@ class ComposeScenarioAcceptanceTest {
             engine.closeArtifacts()
             shell.saveConversation(Conversation("review","Scenario review",1,1,messages=listOf(
                 Message("artifact","assistant","Acceptance review",1,"complete",toolId=tool.id,toolRevision=tool.revision))))
-            shell.saveSetting("selected","review")
+            shell.seedOpenChat("review")
             uiKeys.save("review-ui-fixture-only").getOrThrow()
             lateinit var model: ShellViewModel
-            CloudTestActivity.factory={ShellViewModel(it,offline,shell,uiKeys).also {created -> model=created}}
+            CloudTestActivity.factory={ShellViewModel(it,offline,shell,uiKeys).openSeededChat(shell).also {created -> model=created}}
             activity=ActivityScenario.launch(CloudTestActivity::class.java)
             val deadline=SystemClock.uptimeMillis()+15000
             while((model.loading || model.tools.busy) && SystemClock.uptimeMillis()<deadline)SystemClock.sleep(40)

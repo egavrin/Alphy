@@ -45,7 +45,7 @@ class StandaloneRefinementShellWorkflowTest {
             fixture.store.saveConversation(selected)
             fixture.store.saveConversation(linked)
             fixture.store.saveNewDraft(Draft("Keep the new-chat draft"))
-            fixture.store.saveSetting("selected", selected.id)
+            fixture.store.seedOpenChat(selected.id)
             val storedChat = fixture.store.load()
             val sealed = sealedWorkshop()
             assertTrue(sealed.isSealedStandalone)
@@ -83,7 +83,7 @@ class StandaloneRefinementShellWorkflowTest {
                 }
                 fixture.install()
                 CloudTestActivity.factory = { app ->
-                    ShellViewModel(app, provider, fixture.store, fixture.keys).also { fixture.model = it }
+                    ShellViewModel(app, provider, fixture.store, fixture.keys).openSeededChat(fixture.store).also { fixture.model = it }
                 }
                 fixture.launch().use { scenario ->
                     val model = checkNotNull(fixture.model)

@@ -1,5 +1,7 @@
 package com.alpha.assistant.surfaces
 
+import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.seedOpenChat
 import android.app.KeyguardManager
 import android.content.Intent
 import android.content.res.Resources
@@ -54,7 +56,7 @@ class AssistantSheetWorkflowTest {
             ),
         )
         fixture.store.saveConversation(oldChat)
-        fixture.store.saveSetting("selected", oldChat.id)
+        fixture.store.seedOpenChat(oldChat.id)
 
         launch(capture("First external screen")).use { scenario ->
             val attached = robot.text(R.string.assistant_image_attached)
@@ -331,7 +333,7 @@ class AssistantSheetWorkflowTest {
     @Test fun screenOffClosesTheSheetAndLockedLaunchHidesTheDraft() = withFixture { fixture, provider ->
         val chat = Conversation("lock-chat", "Private history", 1, 1, Draft("Private draft to keep"))
         fixture.store.saveConversation(chat)
-        fixture.store.saveSetting("selected", chat.id)
+        fixture.store.seedOpenChat(chat.id)
         val previousLock = robot.shell("locksettings get-disabled")
         val keyguard = app.getSystemService(KeyguardManager::class.java)
         val power = app.getSystemService(PowerManager::class.java)
@@ -422,7 +424,7 @@ class AssistantSheetWorkflowTest {
                     { application, scope, onTranscript ->
                         VoiceSession(application, scope, onTranscript, prepareModels = {}, captureAudio = { result.await() })
                     }
-                })
+                }).openSeededChat(fixture.store)
             }
         }
         try {

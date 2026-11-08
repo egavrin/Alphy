@@ -59,7 +59,7 @@ class ReviewedContextUiWorkflowTest {
                 fun rejectFile(uri: Uri) {
                     pick("Файл", Intent.ACTION_OPEN_DOCUMENT, uri)
                     waitFor(supported)
-                    assertEquals(original, fixture.store.load().draft)
+                    assertEquals(original, fixture.store.load().newDraft)
                 }
                 fun cancelPick(label: String, action: String) {
                     pick(label, action)
@@ -71,7 +71,7 @@ class ReviewedContextUiWorkflowTest {
                         source?.isEnabled == true && source.isVisibleToUser &&
                             AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK in source.actionList
                     }
-                    assertEquals(original, fixture.store.load().draft)
+                    assertEquals(original, fixture.store.load().newDraft)
                 }
                 click("Добавить контекст")
                 click("Камера")
@@ -90,16 +90,16 @@ class ReviewedContextUiWorkflowTest {
                 val valid = document("txt", "text/plain", limit.toByteArray())
                 pick("Файл", Intent.ACTION_OPEN_DOCUMENT, valid) { fixture.model!!.editDraft(other) }
                 waitFor("Черновик изменился. Откройте добавление контекста в нужном чате ещё раз.")
-                waitUntil { fixture.store.load().draft == other }
+                waitUntil { fixture.store.load().newDraft == other }
                 click("Отмена")
                 scenario.onActivity { fixture.model!!.editDraft(original) }
 
                 click("Добавить контекст")
                 pick("Файл", Intent.ACTION_OPEN_DOCUMENT, valid)
                 assertEquals(limit, field("Выбранный текст · до 8000 символов").text.toString())
-                assertEquals(original, fixture.store.load().draft)
+                assertEquals(original, fixture.store.load().newDraft)
                 click("Отмена")
-                assertEquals(original, fixture.store.load().draft)
+                assertEquals(original, fixture.store.load().newDraft)
 
                 click("Добавить контекст")
                 pick("Файл", Intent.ACTION_OPEN_DOCUMENT, valid)
@@ -107,8 +107,8 @@ class ReviewedContextUiWorkflowTest {
                 edit("Выбранный текст · до 8000 символов", excerpt)
                 waitFor("${excerpt.length} / 8000 · проверьте и при необходимости сократите текст")
                 click("Прикрепить проверенный текст")
-                waitUntil { fixture.store.load().draft.attachments.size == 1 }
-                val reviewed = fixture.store.load().draft
+                waitUntil { fixture.store.load().newDraft.attachments.size == 1 }
+                val reviewed = fixture.store.load().newDraft
                 assertEquals(original, reviewed.copy(attachments = emptyList()))
                 assertEquals(excerpt, reviewed.attachments.single().contextText)
 
@@ -117,7 +117,7 @@ class ReviewedContextUiWorkflowTest {
                 assertNull(find(diagnostics.freshRoot(), robot.text(R.string.context_mini_app)))
                 assertNull(find(diagnostics.freshRoot(), robot.text(R.string.context_automation)))
                 click(robot.text(R.string.cancel))
-                assertEquals(reviewed, fixture.store.load().draft)
+                assertEquals(reviewed, fixture.store.load().newDraft)
                 assertEquals(0, fixture.provider.calls)
             }
         } finally {
@@ -159,11 +159,11 @@ class ReviewedContextUiWorkflowTest {
         val original = Draft("Preserve my question", listOf(AssistContext.validatedCapture(context, uri)))
         val chat = Conversation("context-fixture", "Context fixture", 1, 1, original,
             listOf(Message("user", "user", "Text selected for my note", 1, "complete")))
-        store.saveConversation(chat); store.saveSetting("selected", chat.id)
+        store.saveConversation(chat); store.seedOpenChat(chat.id)
         var sends = 0
         CloudTestActivity.factory = { app -> ShellViewModel(app, object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) { sends++ }
-        }, store, keys) }
+        }, store, keys).openSeededChat(store) }
         try {
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 val menu = Rect().also { waitFor("Меню").getBoundsInScreen(it) }
@@ -175,24 +175,24 @@ class ReviewedContextUiWorkflowTest {
                 scenario.recreate()
                 assertEquals("Explicitly selected note content", field("Выбранный текст · до 8000 символов").text.toString())
                 click("Прикрепить проверенный текст")
-                waitUntil { store.load().draft.attachments.size == 2 }
-                val reviewed = store.load().draft
+                waitUntil { store.load().conversations.single { it.id == chat.id }.draft.attachments.size == 2 }
+                val reviewed = store.load().conversations.single { it.id == chat.id }.draft
                 assertEquals(original.id, reviewed.id)
                 assertEquals(original.text, reviewed.text)
                 assertEquals(original.attachments.single(), reviewed.attachments.first())
                 assertEquals("Explicitly selected note content", reviewed.attachments.last().contextText)
                 click("Добавить контекст"); click("Отмена")
-                assertEquals(reviewed, store.load().draft)
+                assertEquals(reviewed, store.load().conversations.single { it.id == chat.id }.draft)
                 val note = "Text selected for my note"
                 val message = robot.find(note)?.takeIf { it.isVisibleToUser } ?: robot.reveal(note)
                 val actions = generateSequence(message) { it.parent }.first { it.isLongClickable }
                 assertTrue(actions.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK))
                 click("Выбрать текст для заметки"); waitFor("Передать выбранный текст в заметки"); click("Закрыть")
-                assertEquals(reviewed, store.load().draft)
+                assertEquals(reviewed, store.load().conversations.single { it.id == chat.id }.draft)
                 robot.openDrawer(scenario); robot.click(robot.text(R.string.settings)); robot.awaitDrawerClosed(scenario)
                 robot.reveal(robot.text(R.string.access)); robot.click(robot.text(R.string.access))
                 robot.reveal(robot.text(R.string.access_calendar))
-                assertEquals(reviewed, store.load().draft)
+                assertEquals(reviewed, store.load().conversations.single { it.id == chat.id }.draft)
                 assertEquals(0, sends)
                 val evidence = File(context.getExternalFilesDir(null), "reviewed-context-evidence").apply { mkdirs() }
                 checkNotNull(automation.takeScreenshot()).let { screenshot ->

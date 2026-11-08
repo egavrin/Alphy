@@ -43,12 +43,12 @@ class DrawerWorkflowTest {
             robot.click("Beta chat")
             robot.awaitDrawerClosed(scenario)
             robot.waitFor("Beta message")
-            robot.waitUntil { fixture.store.load().selectedId == "beta" }
+            robot.waitUntil { fixture.model?.snapshot?.selectedId == "beta" }
             robot.openDrawer(scenario)
             robot.click(robot.text(R.string.new_chat))
             robot.awaitDrawerClosed(scenario)
             robot.waitGone("Beta message")
-            robot.waitUntil { fixture.store.load().selectedId == null }
+            robot.waitUntil { fixture.model?.snapshot?.selectedId == null }
         }
     }
 
@@ -115,7 +115,7 @@ class DrawerWorkflowTest {
             assertTrue("The top bar title is a heading", robot.waitFor(robot.text(R.string.app_name)).isHeading)
             robot.click(robot.text(R.string.new_chat))
             robot.waitGone("Alpha message")
-            robot.waitUntil { fixture.store.load().selectedId == null }
+            robot.waitUntil { fixture.model?.snapshot?.selectedId == null }
             robot.openDrawer(scenario)
             robot.back()
             robot.awaitDrawerClosed(scenario)

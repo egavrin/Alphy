@@ -1,5 +1,7 @@
 package com.alpha.assistant.cloud
 
+import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.seedOpenChat
 import android.app.Application
 import android.app.Instrumentation
 import android.content.ContentValues
@@ -111,7 +113,7 @@ class CloudWorkflowTest {
         init {
             seed(store)
             check(keys.save("alpha-test-only").isSuccess)
-            CloudTestActivity.factory = { application -> ShellViewModel(application, provider, store, keys).also { model = it } }
+            CloudTestActivity.factory = { application -> ShellViewModel(application, provider, store, keys).openSeededChat(store).also { model = it } }
             scenario = ActivityScenario.launch(CloudTestActivity::class.java)
             waitUntil { !model.loading }
         }
@@ -119,13 +121,14 @@ class CloudWorkflowTest {
         fun idle() { waitUntil { model.activeConversationId == null } }
         fun restart() {
             val previous = model
+            store.seedOpenChat(previous.snapshot.selectedId)
             scenario!!.close()
             scenario = ActivityScenario.launch(CloudTestActivity::class.java)
             waitUntil { model !== previous && !model.loading }
             assertNotSame("Restart must create a fresh ShellViewModel", previous, model)
         }
         val last: Message get() { var message: Message? = null; main { message = model.snapshot.selected?.messages?.lastOrNull() }; return checkNotNull(message) }
-        fun persisted(): ShellSnapshot { var result: ShellSnapshot? = null; waitUntil { result = store.load(); result!!.selected?.messages?.lastOrNull()?.status == last.status }; return result!! }
+        fun persisted(): ShellSnapshot { var result: ShellSnapshot? = null; waitUntil { result = store.load().copy(selectedId = model.snapshot.selectedId); result!!.selected?.messages?.lastOrNull()?.status == last.status }; return result!! }
         override fun close() {
             main { model.cancelRequest() }
             scenario?.close(); CloudTestActivity.factory = null
@@ -153,7 +156,7 @@ class CloudWorkflowTest {
         Fixture(provider) { store ->
             store.saveSetting("searchEnabled", "false")
             store.saveConversation(Conversation("old-chat", "Historical chat", 1, 1, messages = listOf(historical, failed)))
-            store.saveSetting("selected", "old-chat")
+            store.seedOpenChat("old-chat")
         }.use { fixture ->
             fixture.restart()
             main { fixture.model.retry(failed.id) }; fixture.idle()
@@ -379,7 +382,7 @@ class CloudWorkflowTest {
                     Message("description", "assistant", description, 25, "complete", replyTo = "image", provenance = MessageProvenance.CLEAN),
                 )
                 shell.saveConversation(Conversation("chat", "Weather", 1, 25, messages = history))
-                shell.saveSetting("selected", "chat")
+                shell.seedOpenChat("chat")
             }.use { fixture ->
                 fixture.submit(followUp, search = true)
                 fixture.idle()
@@ -458,7 +461,7 @@ class CloudWorkflowTest {
                     Message("private-answer","assistant","PRIVATE_PAST_REPLY",6,"complete",replyTo = "private-user",provenance = MessageProvenance.MEMORY_DERIVED),
                 )
                 shell.saveConversation(Conversation("chat","Chat",1,6,messages = messages))
-                shell.saveSetting("selected","chat")
+                shell.seedOpenChat("chat")
             }.use { fixture ->
                 fixture.model.memoryStore.saveExplicitFact("садоводство PRIVATE_MEMORY_FACT")
                 main {
@@ -734,7 +737,7 @@ class CloudWorkflowTest {
                 Message("old-answer","assistant","Unknown visible history",2,"complete",replyTo = "old-user"),
             )
             shell.saveConversation(Conversation("chat","Chat",1,2,messages = history))
-            shell.saveSetting("selected","chat")
+            shell.seedOpenChat("chat")
         }.use { fixture ->
             fixture.submit("Ordinary follow-up"); fixture.idle()
             assertEquals("Local visible reply", fixture.last.text)
@@ -1752,7 +1755,8 @@ class CloudWorkflowTest {
                 fixture.submit("Stop this answer")
                 waitForFragment(cancelledText)
                 main { fixture.model.editDraft(fixture.model.snapshot.draft.copy(text = "My next draft")) }
-                waitUntil { fixture.store.load().draft.text == "My next draft" }
+                val conversationId = checkNotNull(fixture.model.snapshot.selectedId)
+                waitUntil { fixture.store.load().conversations.single { it.id == conversationId }.draft.text == "My next draft" }
                 assertEquals("",fixture.persisted().selected!!.messages.last().text)
                 main { fixture.model.cancelRequest() }
                 assertEquals(cancelledText,fixture.last.text)
@@ -2117,7 +2121,7 @@ class CloudWorkflowTest {
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url), seed = { store ->
             store.saveConversation(Conversation("restart", "Interrupted", 1, 1, messages = listOf(Message("u", "user", "test", 1, "sent"), Message("a", "assistant", "partial", 1, "streaming", replyTo = "u"))))
-            store.saveSetting("selected", "restart")
+            store.seedOpenChat("restart")
         }).use { fixture ->
             assertEquals("interrupted", fixture.last.status); assertEquals("partial", fixture.last.text)
             assertEquals("interrupted", fixture.persisted().selected!!.messages.last().status)

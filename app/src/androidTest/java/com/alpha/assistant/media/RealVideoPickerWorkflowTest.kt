@@ -1,5 +1,6 @@
 package com.alpha.assistant.media
 
+import com.alpha.assistant.ui.seedOpenChat
 import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Bitmap
@@ -173,7 +174,7 @@ class RealVideoPickerWorkflowTest {
         fixture.store.saveConversation(Conversation("video-chat", "Проверка видео", 1, 1, messages = listOf(
             Message("video-artifact", "assistant", "", 1, "complete", toolId = TOOL, toolRevision = 1),
         )))
-        fixture.store.saveSetting("selected", "video-chat")
+        fixture.store.seedOpenChat("video-chat")
     }
 
     private fun openSavedTool() {

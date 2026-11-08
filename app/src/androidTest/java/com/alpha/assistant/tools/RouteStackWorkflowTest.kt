@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.ui.seedOpenChat
 import com.alpha.assistant.R
 import com.alpha.assistant.data.Conversation
 import com.alpha.assistant.data.Message
@@ -29,7 +30,7 @@ class RouteStackWorkflowTest {
                 fixture.store.saveConversation(Conversation("chat", "Маршрут", 1, 1, messages = listOf(
                     Message("artifact", "assistant", "", 1, "complete", toolId = "route", toolRevision = 1),
                 )))
-                fixture.store.saveSetting("selected", "chat")
+                fixture.store.seedOpenChat("chat")
                 fixture.install()
                 fun saved() = checkNotNull(tools.tool("route"))
                 fun state() = JSONObject(saved().state)

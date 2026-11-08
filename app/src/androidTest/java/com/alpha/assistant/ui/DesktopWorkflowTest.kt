@@ -4,6 +4,8 @@ import android.content.res.Resources
 import android.util.Log
 import androidx.test.core.app.ActivityScenario
 import com.alpha.assistant.R
+import com.alpha.assistant.data.Attachment
+import com.alpha.assistant.data.Draft
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -54,6 +56,52 @@ class DesktopWorkflowTest {
             robot.back()
             robot.waitGone("Fixture response")
             robot.waitFor(robot.text(R.string.desktop_prompt))
+        }
+    }
+
+    @Test fun sendingFromNewChatStartsAnIndependentConversation() {
+        fixture.install()
+        val composer = robot.text(R.string.composer_label)
+        fixture.launch().use { scenario ->
+            robot.waitFor(robot.text(R.string.desktop_prompt))
+            robot.edit(composer, "First independent question")
+            robot.click(robot.text(R.string.composer_send))
+            robot.waitFor("Fixture response")
+            robot.openDrawer(scenario)
+            robot.click(robot.text(R.string.new_chat))
+            robot.awaitDrawerClosed(scenario)
+            robot.waitFor(robot.text(R.string.desktop_prompt))
+            robot.edit(composer, "Second independent question")
+            robot.click(robot.text(R.string.composer_send))
+            robot.waitFor("Fixture response")
+            val saved = fixture.store.load().conversations
+            assertEquals(2, saved.map { it.id }.distinct().size)
+            assertEquals(listOf("Second independent question"),
+                fixture.provider.lastRequest?.turns?.filter { it.role == "user" }?.map { it.text })
+            robot.openDrawer(scenario)
+            robot.click("First independent question")
+            robot.waitFor("First independent question")
+            robot.waitGone("Second independent question")
+        }
+    }
+
+    @Test fun failedFirstSaveKeepsTheDesktopDraftOnDisk() {
+        fixture.install()
+        val draft = Draft("Keep this unsent question")
+        fixture.store.saveNewDraft(draft)
+        val database = fixture.store.writableDatabase
+        database.execSQL("CREATE TRIGGER reject_first_send BEFORE INSERT ON conversations BEGIN SELECT RAISE(ABORT, 'fixture'); END")
+        try {
+            fixture.launch().use {
+                robot.waitFor(robot.text(R.string.desktop_prompt))
+                robot.click(robot.text(R.string.composer_send))
+                robot.waitFor(robot.text(R.string.save_failed))
+                assertEquals(draft, fixture.store.load().newDraft)
+                assertEquals(emptyList<String>(), fixture.store.load().conversations.map { it.id })
+                assertEquals(0, fixture.provider.calls)
+            }
+        } finally {
+            database.execSQL("DROP TRIGGER reject_first_send")
         }
     }
 
@@ -110,13 +158,22 @@ class DesktopWorkflowTest {
     @Test fun newChatAndSettingsKeepTheirSeparatePurpose() {
         fixture.install(saveKey = false)
         fixture.store.saveSetting("userName", "Евгений")
+        val draft = Draft("Unsent desktop draft", listOf(
+            Attachment("content://fixture/desktop", "desktop.txt", "text/plain")))
+        fixture.store.saveNewDraft(draft)
+        fixture.seedChat("previous", "Previous conversation", "Previous conversation text", selected = true)
         fixture.launch().use { scenario ->
+            robot.waitFor("Previous conversation text")
             robot.openDrawer(scenario)
             assertNull(robot.find(robot.text(R.string.access)))
             robot.click(robot.text(R.string.new_chat))
             robot.awaitDrawerClosed(scenario)
             robot.waitUntil { greetings("Евгений").any { robot.find(it) != null } }
-            robot.waitGone(robot.text(R.string.desktop_grid_title))
+            robot.waitFor(robot.text(R.string.desktop_prompt))
+            robot.reveal(robot.text(R.string.desktop_grid_title))
+            robot.waitGone("Previous conversation text")
+            assertEquals(draft.text, robot.field(robot.text(R.string.composer_label)).text.toString())
+            robot.waitFor(robot.text(R.string.composer_remove_file, "desktop.txt"))
             robot.assertTarget(robot.text(R.string.composer_label))
             robot.openDrawer(scenario)
             robot.click(robot.text(R.string.settings))

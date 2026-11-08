@@ -28,9 +28,14 @@ class MainActivity : AlphyActivity() {
             Thread { runCatching { ToolWidgets.updateAll(context) } }.start()
         }
     }
+    private fun Intent.isPlainLauncher() = action == Intent.ACTION_MAIN &&
+        getStringExtra("tool_id") == null && !getBooleanExtra("settings", false)
+
+    private fun Intent.isFromRecents() = flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+
     private fun receiveEntry(intent: Intent) {
-        // A launch from Recents repeats the extras of the old entry.
-        if(intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
+        // Recents repeats the old intent. A launcher tap on a live task keeps its current screen.
+        if (intent.isFromRecents() || intent.isPlainLauncher()) return
         if (intent.action == Intent.ACTION_VIEW && intent.data?.scheme == "alpha" && intent.data?.authority == "automation-chat") {
             intent.data?.pathSegments?.singleOrNull()?.let(model::openAutomationConversation)
             return
@@ -49,6 +54,11 @@ class MainActivity : AlphyActivity() {
         }
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); receiveEntry(intent) }
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString("taskChatId", model.taskChatId)
+        outState.putString("taskModelId", model.taskModelId)
+    }
     override fun onResume() { super.onResume(); model.tools.reload(); model.refreshAutomationMessages(); com.alpha.assistant.automations.AutomationRuntime.refresh(this) }
     override fun onDestroy() { unregisterReceiver(surfaceUpdates); super.onDestroy() }
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -57,7 +67,14 @@ class MainActivity : AlphyActivity() {
         model = com.alpha.assistant.surfaces.AssistantChat.model(application)
         val filter = IntentFilter(SurfaceEntry.TOOLS_CHANGED).apply { addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_USER_PRESENT); addAction(ShellStore.AUTOMATION_RESULT_CHANGED) }
         androidx.core.content.ContextCompat.registerReceiver(this,surfaceUpdates,filter,androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
-        if(savedInstanceState == null) receiveEntry(intent)
+        if (savedInstanceState == null) {
+            if (intent.isPlainLauncher() || intent.isFromRecents() || (intent.action == null && !model.surfacePending)) {
+                model.startDesktopTask()
+            }
+            receiveEntry(intent)
+        } else if (savedInstanceState.getString("taskModelId") != model.taskModelId && !model.surfacePending) {
+            savedInstanceState.getString("taskChatId")?.let(model::restoreTaskChat)
+        }
         setContent { AlphaTheme { AlphaShell(model) } }
     }
 }

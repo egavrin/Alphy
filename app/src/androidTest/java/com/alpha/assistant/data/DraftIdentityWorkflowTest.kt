@@ -30,7 +30,7 @@ class DraftIdentityWorkflowTest {
                 val conversation = Conversation("fixture", "Fixture", 1, 1, Draft())
                 store.createFromNewDraft(conversation, next)
                 assertEquals(next, store.load().newDraft)
-                assertEquals(conversation, store.load().selected)
+                assertEquals(conversation, store.load().conversations.single())
                 assertNotEquals(before.id, store.load().newDraft.id)
                 ShellStore(context, name).use { assertEquals(next.id, it.load().newDraft.id) }
             }

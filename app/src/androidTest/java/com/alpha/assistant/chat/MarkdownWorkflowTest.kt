@@ -1,5 +1,7 @@
 package com.alpha.assistant.chat
 
+import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.seedOpenChat
 import android.app.Application
 import android.os.SystemClock
 import android.text.Spanned
@@ -30,12 +32,12 @@ class MarkdownWorkflowTest {
         val keys = SecureKeyStore(app,name,name)
         val markdown = "# Heading\n\n**Bold** and *italic* with `code`.\n\n- First\n- Second\n\n> A quote\n\n```kotlin\nval count = 1\n```\n\n[Source](https://example.com/facts) [Unsafe](javascript:alert(1))\n\n![Remote image](https://example.com/image.png)"
         store.saveConversation(Conversation("chat","Markdown",1,1,messages = listOf(Message("m","assistant",markdown,1,"complete"))))
-        store.saveSetting("selected","chat")
+        store.seedOpenChat("chat")
         lateinit var model: ShellViewModel
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) = error("No request expected")
         }
-        CloudTestActivity.factory = { ShellViewModel(it,provider,store,keys).also { created -> model = created } }
+        CloudTestActivity.factory = { ShellViewModel(it,provider,store,keys).openSeededChat(store).also { created -> model = created } }
         val scenario = ActivityScenario.launch(CloudTestActivity::class.java)
         fun collect(node: android.view.accessibility.AccessibilityNodeInfo?): String {
             if(node == null) return ""
@@ -77,7 +79,7 @@ class MarkdownWorkflowTest {
         """.trimIndent() + "\n\n" + malformed
         fixture.store.saveConversation(Conversation("chat", "Markdown table", 1, 1,
             messages = listOf(Message("m", "assistant", markdown, 1, "complete"))))
-        fixture.store.saveSetting("selected", "chat")
+        fixture.store.seedOpenChat("chat")
         fixture.install(saveKey = false)
         try {
             fixture.launch().use {

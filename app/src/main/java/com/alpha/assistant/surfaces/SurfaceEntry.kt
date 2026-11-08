@@ -19,7 +19,6 @@ import java.util.UUID
 object SurfaceEntry {
     const val TOOLS_CHANGED = "com.alpha.assistant.TOOLS_CHANGED"
     fun chatIntent(context: Context) = Intent(context,MainActivity::class.java).apply {
-        action = Intent.ACTION_ASSIST
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     }
     private fun statusPreferences(context: Context) = context.getSharedPreferences(

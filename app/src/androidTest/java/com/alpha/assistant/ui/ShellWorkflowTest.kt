@@ -41,7 +41,7 @@ class ShellWorkflowTest {
         check(keys.save("alpha-test-only").isSuccess)
         CloudTestActivity.factory = { app -> ShellViewModel(app, object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) { emit(CloudEvent.RoundComplete("""{"kind":"answer","text":"Navigation fixture response","brief":"","search":"none"}""",false)) }
-        }, store, keys) }
+        }, store, keys).openSeededChat(store) }
     }
     @After fun removeFixture() {
         CloudTestActivity.factory = null
@@ -205,7 +205,7 @@ class ShellWorkflowTest {
     @Test fun landscapeKeyboardKeepsComposerUsable() {
         val robot = ShellRobot("shell")
         store.saveConversation(Conversation("landscape", "Landscape chat", 1L, 1L, messages = listOf(Message("landscape-u", "user", "Landscape message", 1L, "sent"))))
-        store.saveSetting("selected", "landscape")
+        store.seedOpenChat("landscape")
         ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
             try {
                 robot.waitFor("Landscape message")

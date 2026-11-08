@@ -209,7 +209,7 @@ class SettingsConsentWorkflowTest {
         fixture.store.saveConversation(Conversation("network", "Network chat", 1L, 2L, messages = listOf(
             Message("network-u", "user", "Network question", 1L, "sent"),
             Message("network-a", "assistant", "", 2L, "error", error = "Fixture network failure", errorCode = "network"))))
-        fixture.store.saveSetting("selected", "network")
+        fixture.store.seedOpenChat("network")
         fixture.launch().use { scenario ->
             robot.waitFor("Fixture network failure")
             assertFalse(robot.composedText(scenario, robot.text(R.string.open_settings)))

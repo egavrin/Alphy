@@ -31,7 +31,8 @@ class ShellStorageTest {
             assertEquals("new text", restored.newDraft.text)
             assertEquals("new.txt", restored.newDraft.attachments.single().name)
             assertEquals(chat, restored.conversations.single())
-            assertEquals("chat-a", restored.selectedId)
+            assertNull(restored.selectedId)
+            assertEquals(1L, DatabaseUtils.queryNumEntries(store.readableDatabase, "settings", "name = 'selected'"))
             store.saveNewDraft(Draft("changed"))
             assertEquals(chat, store.load().conversations.single())
         } finally {

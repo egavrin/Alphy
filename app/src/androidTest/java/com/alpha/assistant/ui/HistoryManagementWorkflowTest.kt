@@ -40,13 +40,13 @@ class HistoryManagementWorkflowTest {
         val second = Conversation("second", "Second fixture", 1, 1, Draft("second draft"))
         val newDraft = Draft("independent new draft")
         try {
-            store.saveConversation(first); store.saveConversation(second); store.saveNewDraft(newDraft); store.saveSetting("selected", first.id)
+            store.saveConversation(first); store.saveConversation(second); store.saveNewDraft(newDraft); store.seedOpenChat(first.id)
             keys.save("history-test-only").getOrThrow()
             val tool = AutomationTools.createDayTool(tools)
             val rule = rules.save(null, JSONObject("""{"name":"History fixture","trigger":{"type":"manual"},"conditions":{},"actions":[{"id":"notice","capability":"notification.post","args":{"title":"Fixture","text":"Fixture"}}]}"""))
             CloudTestActivity.factory = { app -> ShellViewModel(app, object : ChatProvider {
                 override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) { error("History actions must not call a provider") }
-            }, store, keys) }
+            }, store, keys).openSeededChat(store) }
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitFor("Сообщение ассистенту")
                 openSearch(scenario)
@@ -65,7 +65,6 @@ class HistoryManagementWorkflowTest {
                 assertEquals(2, store.load().conversations.size)
                 click("Действия разговора Renamed fixture"); click("Удалить разговор"); click("Удалить")
                 waitUntil { store.load().conversations.size == 1 }
-                assertNull(store.load().selectedId)
                 assertEquals(second, store.load().conversations.single())
                 openNewChatFromSearch(scenario); assertEquals(newDraft.text, field("Сообщение ассистенту").text.toString())
                 openSearch(scenario); openClearHistory(); click("Отмена")
@@ -107,7 +106,7 @@ class HistoryManagementWorkflowTest {
                     entered.complete(Unit)
                     withContext(NonCancellable) { release.await(); emit(CloudEvent.Text("Late deleted response")); delivered.complete(Unit) }
                 }
-            }, store, keys) }
+            }, store, keys).openSeededChat(store) }
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 edit("Сообщение ассистенту", "Running fixture")
                 click("Отправить сообщение")

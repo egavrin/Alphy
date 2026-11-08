@@ -90,7 +90,6 @@ import kotlinx.coroutines.launch
     val updateHandoff = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         model.updates.handoffReturned()
     }
-    var newChatPage by rememberSaveable { mutableStateOf(false) }
     var contextSheet by rememberSaveable { mutableStateOf(false) }
     var contextAnchor by remember { mutableStateOf<ContextMenuAnchor?>(null) }
     var contextPaneTop by remember { mutableFloatStateOf(0f) }
@@ -184,7 +183,6 @@ import kotlinx.coroutines.launch
     fun newChat() {
         model.select(null)
         model.dismissAutomationSetup()
-        newChatPage = true
         navigate(null)
     }
     fun openAutomation(id: String) {
@@ -209,7 +207,6 @@ import kotlinx.coroutines.launch
             focusedMiniApp -> model.tools.select(null)
             destination == ShellDestination.Settings && settingsFromMenu && settingsSection != null -> selectSettings(null)
             destination != null -> navigate(null)
-            snapshot.selectedId == null && newChatPage -> newChatPage = false
             else -> model.select(null)
         }
     }
@@ -227,7 +224,7 @@ import kotlinx.coroutines.launch
     val libraryVisible = destination == ShellDestination.MiniApps && !model.tools.storageUnavailable
     val libraryRoute = ShellRoute.MiniAppLibrary.takeIf { libraryVisible && (!focusedMiniApp || libraryOrigin) }
     val chatRoute = snapshot.selected?.let { ShellRoute.Chat(it.id) }
-        ?: ShellRoute.NewChat.takeIf { (focusedMiniApp && !libraryOrigin) || newChatPage }
+        ?: ShellRoute.NewChat.takeIf { focusedMiniApp && !libraryOrigin }
     val detailRoute = destination.takeUnless { libraryVisible && !focusedMiniApp }
     val backStack = listOfNotNull(ShellRoute.Desktop, chatRoute, libraryRoute, detailRoute)
     val systemInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
@@ -253,7 +250,7 @@ import kotlinx.coroutines.launch
                     {
                         if (it == ShellDestination.MiniApps) model.tools.select(null)
                         navigate(it); closeDrawer()
-                    }, { model.select(it); newChatPage = false; navigate(null); closeDrawer() }) { newChat(); closeDrawer() }
+                    }, { model.select(it); navigate(null); closeDrawer() }) { newChat(); closeDrawer() }
             }, drawerState = drawerState, gesturesEnabled = drawerState.isOpen || destination == null) {
                 val drawingInsets = when {
                     immersive -> Modifier
@@ -326,7 +323,7 @@ import kotlinx.coroutines.launch
                         val liveUncovered by rememberUpdatedState(deviceUnlocked && !drawerTargetsOpen && !drawerState.isOpen &&
                             !contextSheet && model.requestError == null && model.nativeRefinementTarget == null &&
                             miniAppActions.request == null && miniAppActions.restore == null && model.chatAutomationSetup == null)
-                        val desktopVisible by rememberUpdatedState(courseChatVisible && snapshot.selectedId == null && !newChatPage &&
+                        val desktopVisible by rememberUpdatedState(courseChatVisible && snapshot.selectedId == null &&
                             model.courseEntry == null && liveUncovered && shellState == Lifecycle.State.RESUMED)
                         // Each entry<…> needs clazzContentKey = { it.toString() }, or it stays CREATED.
                         val keepShellLifecycle = remember(shellLifecycle, dispatcherOwner) { NavEntryDecorator<ShellRoute> { entry ->
@@ -369,13 +366,7 @@ import kotlinx.coroutines.launch
                                 ChatEntry(currentSnapshot.conversations.find { it.id == route.id })
                             }
                             entry<ShellRoute.NewChat>(clazzContentKey = { it.toString() }, metadata = SupportingPaneSceneStrategy.mainPane()) {
-                                if (destination != null) ChatEntry(null)
-                                else Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                                    val greeting = stringResource(greetingRes(java.time.LocalTime.now().hour))
-                                    val name = currentSnapshot.userName.trim()
-                                    Text(if (name.isEmpty()) greeting else stringResource(R.string.greeting_named, greeting, name),
-                                        style = MaterialTheme.typography.headlineSmall)
-                                }
+                                ChatEntry(null)
                             }
                             entry<ShellRoute.MiniAppLibrary>(clazzContentKey = { it.toString() },
                                 metadata = ListDetailSceneStrategy.listPane() +

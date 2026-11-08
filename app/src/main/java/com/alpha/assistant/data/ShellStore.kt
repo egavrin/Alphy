@@ -119,7 +119,7 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
         }
         val results = automationMessages()
         val withResults = conversations.map { it.withAutomationMessages(results[it.id].orEmpty()) }.sortedByDescending { it.updatedAt }
-        return ShellSnapshot(withResults, settings["selected"]?.takeIf { id -> conversations.any { it.id == id } }, newDraft, settings["userName"] ?: "")
+        return ShellSnapshot(conversations = withResults, newDraft = newDraft, userName = settings["userName"] ?: "")
     }
     fun saveConversation(conversation: Conversation) {
         writableDatabase.insertWithOnConflict("conversations", null, ContentValues().apply {
@@ -141,7 +141,6 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
         try {
             saveConversation(conversation)
             saveNewDraft(nextDraft)
-            saveSetting("selected", conversation.id)
             writableDatabase.setTransactionSuccessful()
         } finally { writableDatabase.endTransaction() }
     }
@@ -162,7 +161,6 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
         try {
             writableDatabase.delete("automation_messages", "conversation_id=?", arrayOf(id))
             writableDatabase.delete("conversations", "id=?", arrayOf(id))
-            writableDatabase.delete("settings", "name=? AND value=?", arrayOf("selected", id))
             writableDatabase.setTransactionSuccessful()
         } finally { writableDatabase.endTransaction() }
     }
@@ -179,7 +177,6 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
         try {
             writableDatabase.delete("automation_messages", null, null)
             writableDatabase.delete("conversations", null, null)
-            writableDatabase.delete("settings", "name=?", arrayOf("selected"))
             writableDatabase.setTransactionSuccessful()
         } finally { writableDatabase.endTransaction() }
     }

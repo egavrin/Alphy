@@ -1,5 +1,7 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.seedOpenChat
 import android.app.Activity
 import android.app.Instrumentation
 import android.content.Intent
@@ -192,7 +194,7 @@ class MiniAppPresentationWorkflowTest {
         shell.saveConversation(Conversation("chat","Plan discussion",1,1,messages=cards))
         if(secondReference) shell.saveConversation(Conversation("other","Second discussion",2,2,
             messages=listOf(Message("second-artifact","assistant","Second card.",2,"complete",toolId=tool.id,toolRevision=1))))
-        if(showChat) shell.saveSetting("selected","chat")
+        if(showChat) shell.seedOpenChat("chat")
         keys.save("presentation-fixture-only").getOrThrow()
         lateinit var model: ShellViewModel
         val responder=provider ?: object: ChatProvider {
@@ -201,7 +203,7 @@ class MiniAppPresentationWorkflowTest {
                 emit(CloudEvent.Text(ItineraryFixture.spec("Revised lake day")))
             }
         }
-        CloudTestActivity.factory={ShellViewModel(it,responder,shell,keys).also {created -> model=created}}
+        CloudTestActivity.factory={ShellViewModel(it,responder,shell,keys).openSeededChat(shell).also {created -> model=created}}
         try {
             ActivityScenario.launch(CloudTestActivity::class.java).use {scenario ->
                 waitUntil {!model.loading && !model.tools.busy}

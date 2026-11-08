@@ -54,7 +54,7 @@ class MessageProvenanceWorkflowTest {
 
         ShellStore(context, name).use { store ->
             val restored = store.load()
-            assertEquals(conversation, restored.selected)
+            assertEquals(conversation, restored.conversations.single())
             assertEquals(newDraft, restored.newDraft)
         }
     }

@@ -411,7 +411,7 @@ class AdaptiveShellWorkflowTest {
             tools.saveTool(ToolRecord(TOOL_ID, 1, 1, spec.json, spec.initialState, spec.ui.toString(), "chat", true), true)
             fixture.store.saveConversation(Conversation("chat", "Adaptive discussion", 1, 1,
                 messages = listOf(Message("app", "assistant", "A mini-app for this discussion.", 1, "complete", toolId = TOOL_ID, toolRevision = 1))))
-            if (selectedChat) fixture.store.saveSetting("selected", "chat")
+            if (selectedChat) fixture.store.seedOpenChat("chat")
             fixture.install()
             fixture.launch().use { scenario ->
                 robot.waitUntil { fixture.model?.let { !it.loading && !it.tools.busy } == true }

@@ -136,7 +136,7 @@ class ExplicitChatMemoryWorkflowTest {
         robot.waitUntil { page.facts?.size == 2 && !page.busy }
         assertEquals(other, model.snapshot.draft)
         assertEquals(original, model.snapshot.conversations.single { it.id == "first" }.draft)
-        robot.waitUntil { fixture.store.load().draft == other }
+        robot.waitUntil { fixture.store.load().conversations.single { it.id == "second" }.draft == other }
         assertEquals(original, fixture.store.load().conversations.single { it.id == "first" }.draft)
         assertEquals(0, provider.calls)
     }

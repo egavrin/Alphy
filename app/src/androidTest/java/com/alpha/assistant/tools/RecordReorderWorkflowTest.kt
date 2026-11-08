@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.ui.seedOpenChat
 import android.graphics.Rect
 import android.os.SystemClock
 import android.view.InputDevice
@@ -161,7 +162,7 @@ class RecordReorderWorkflowTest {
                 fixture.store.saveConversation(Conversation("chat", "Список", 1, 1, messages = listOf(
                     Message("artifact", "assistant", "", 1, "complete", toolId = "order", toolRevision = 1),
                 )))
-                fixture.store.saveSetting("selected", "chat")
+                fixture.store.seedOpenChat("chat")
                 fixture.install()
                 fixture.launch().use {
                     robot.click(robot.text(R.string.tool_open))

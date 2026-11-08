@@ -1,5 +1,7 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.seedOpenChat
 import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
@@ -127,10 +129,10 @@ class NativeMaterialWorkflowTest {
             val all=getJSONArray("children");put("children",JSONArray().apply {repeat(all.length()){val child=all.getJSONObject(it);if(child.getString("type") in setOf("segmented","button","dialog","pager"))put(child)}})
         });tools.saveTool(ToolRecord("material",1,1,selected.json,selected.initialState,selected.ui.toString(),"chat",true),true)
         shell.saveConversation(Conversation("chat","Native Material",1,1,messages=listOf(Message("artifact","assistant","Native controls are ready.",1,"complete",toolId="material",toolRevision=1))))
-        shell.saveSetting("selected","chat");keys.save("offline-fixture-only").getOrThrow()
+        shell.seedOpenChat("chat");keys.save("offline-fixture-only").getOrThrow()
         lateinit var model:ShellViewModel
         val provider=object:ChatProvider {override suspend fun respond(key:String,request:CloudRequest,session:CloudSession,emit:suspend(CloudEvent)->Unit) {error("Offline workflow must not call a provider")}}
-        CloudTestActivity.factory={ShellViewModel(it,provider,shell,keys).also {created->model=created}}
+        CloudTestActivity.factory={ShellViewModel(it,provider,shell,keys).openSeededChat(shell).also {created->model=created}}
         val diagnostics=UiFailureDiagnostics("material-presentation").apply {state={"state="+tools.tool("material")?.state}}
         fun find(label:String,node:AccessibilityNodeInfo?=diagnostics.freshRoot()):AccessibilityNodeInfo? {if(node==null)return null;if(node.text?.toString()==label||node.contentDescription?.toString()==label)return node;repeat(node.childCount){find(label,node.getChild(it))?.let{return it}};return null}
         fun await(message:String,condition:()->Boolean) {val end=SystemClock.uptimeMillis()+15000;while(SystemClock.uptimeMillis()<end){if(condition())return;SystemClock.sleep(50)};diagnostics.capture("wait-timeout");fail(message)}

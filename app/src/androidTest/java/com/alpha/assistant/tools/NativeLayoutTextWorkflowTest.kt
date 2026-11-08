@@ -1,5 +1,7 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.seedOpenChat
 import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.verticalScroll
@@ -115,10 +117,10 @@ class NativeLayoutTextWorkflowTest {
         val keys=SecureKeyStore(app,name,name); val selected=spec()
         tools.saveTool(ToolRecord("layout",1,1,selected.json,selected.initialState,selected.ui.toString(),"chat",true),true)
         shell.saveConversation(Conversation("chat","Native layout",1,1,messages=listOf(Message("artifact","assistant","Native layout is ready.",1,"complete",toolId="layout",toolRevision=1))))
-        shell.saveSetting("selected","chat"); keys.save("offline-fixture-only").getOrThrow()
+        shell.seedOpenChat("chat"); keys.save("offline-fixture-only").getOrThrow()
         lateinit var model: ShellViewModel
         val provider=object: ChatProvider {override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {error("Offline workflow must not call a provider")}}
-        CloudTestActivity.factory={ShellViewModel(it,provider,shell,keys).also {created -> model=created}}
+        CloudTestActivity.factory={ShellViewModel(it,provider,shell,keys).openSeededChat(shell).also {created -> model=created}}
         val diagnostics=UiFailureDiagnostics("layout-presentation").apply {state={"state="+tools.tool("layout")?.state}}
         fun find(label: String,node: AccessibilityNodeInfo?=diagnostics.freshRoot()): AccessibilityNodeInfo? {
             if(node==null)return null

@@ -51,7 +51,7 @@ class ShellNavigationWorkflowTest {
             robot.waitUntil { !robot.composed(scenario, "settings-pane") }
             robot.back()
             robot.waitGone("Nav fixture message")
-            robot.waitUntil { fixture.store.load().selectedId == null }
+            robot.waitUntil { fixture.model?.snapshot?.selectedId == null }
             robot.back()
             robot.waitUntil { scenario.state == Lifecycle.State.DESTROYED }
         }
@@ -98,6 +98,45 @@ class ShellNavigationWorkflowTest {
                 .addFlags(Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY)
             ActivityScenario.launch<MainActivity>(intent).use(::assertNoEntryApplied)
         } finally { if (shared === fixture.model) AssistantChat.viewModelStore.clear() }
+    }
+
+    @Test fun taskRestoreSurvivesAHistoryLoadRetry() {
+        fixture.seedChat("resume", "Saved task", "Resume this task")
+        fixture.store.seedOpenChat("resume")
+        val db = fixture.store.writableDatabase
+        db.execSQL("ALTER TABLE conversations RENAME TO fixture_unavailable")
+        fixture.launch().use {
+            robot.waitFor(robot.text(R.string.load_failed))
+            db.execSQL("ALTER TABLE fixture_unavailable RENAME TO conversations")
+            robot.click(robot.text(R.string.retry))
+            robot.waitFor("Resume this task")
+        }
+    }
+
+    @Test fun notificationWinsOverThePendingTaskRestore() {
+        fixture.seedChat("resume", "Saved task", "Saved task message", selected = true)
+        fixture.seedChat("notice", "Notification target", "Notification message")
+        val createModel = checkNotNull(CloudTestActivity.factory)
+        CloudTestActivity.factory = { app -> createModel(app).also {
+            check(it.loading)
+            it.openAutomationConversation("notice")
+        } }
+        fixture.launch().use {
+            robot.waitFor("Notification message")
+            robot.waitGone("Saved task message")
+        }
+    }
+
+    @Test fun notificationRefreshesTheTargetChatWhileTheTaskIsAlive() {
+        fixture.seedChat("notice", "Notification target", "Original notification chat message")
+        fixture.launch().use { scenario ->
+            robot.waitFor(robot.text(R.string.desktop_prompt))
+            assertTrue(fixture.store.appendAutomationMessage("notice", "result", 2,
+                org.json.JSONObject().put("text", "New automation result").put("sources", org.json.JSONArray())))
+            scenario.onActivity { checkNotNull(fixture.model).openAutomationConversation("notice") }
+            robot.waitFor("Original notification chat message")
+            robot.waitFor("New automation result")
+        }
     }
 
     @Test fun selectingSettingsAfterDirectEntryReturnsToTheMenu() {

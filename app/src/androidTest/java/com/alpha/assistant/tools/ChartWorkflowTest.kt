@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.ui.seedOpenChat
 import android.graphics.Bitmap
 import android.graphics.Rect
 import com.alpha.assistant.R
@@ -151,7 +152,7 @@ class ChartWorkflowTest {
                 fixture.store.saveConversation(Conversation("chat", "Графики", 1, 1, messages = listOf(
                     Message("artifact", "assistant", "", 1, "complete", toolId = "chart", toolRevision = 1),
                 )))
-                fixture.store.saveSetting("selected", "chat")
+                fixture.store.seedOpenChat("chat")
                 fixture.install()
                 fixture.launch().use {
                     robot.click(robot.text(R.string.tool_open))

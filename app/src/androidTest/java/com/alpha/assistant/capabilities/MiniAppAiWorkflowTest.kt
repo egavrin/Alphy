@@ -1,5 +1,7 @@
 package com.alpha.assistant.capabilities
 
+import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.seedOpenChat
 import android.app.AlertDialog
 import androidx.lifecycle.Lifecycle
 import com.alpha.assistant.CloudTestActivity
@@ -55,9 +57,9 @@ class MiniAppAiWorkflowTest {
                 fixture.store.saveConversation(Conversation("chat", "AI chat", 1, 1, messages = listOf(
                     Message("artifact", "assistant", "", 1, "complete", toolId = record.id, toolRevision = 1),
                 )))
-                fixture.store.saveSetting("selected", "chat")
+                fixture.store.seedOpenChat("chat")
                 CloudTestActivity.factory = { app ->
-                    ShellViewModel(app, provider, fixture.store, fixture.keys).also { fixture.model = it }
+                    ShellViewModel(app, provider, fixture.store, fixture.keys).openSeededChat(fixture.store).also { fixture.model = it }
                 }
                 fun edit(prompt: String) {
                     robot.reveal("Prompt", forward = null)

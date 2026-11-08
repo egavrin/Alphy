@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.ui.seedOpenChat
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.animation.ValueAnimator
 import android.app.Activity
@@ -70,7 +71,7 @@ class MiniAppVisualWorkflowTest {
                 fixture.store.saveConversation(Conversation("chat", "Fixtures", 1, 1, messages = records.map {
                     Message(it.id, "assistant", "", 1, "complete", toolId = it.id, toolRevision = 1)
                 }))
-                fixture.store.saveSetting("selected", "chat")
+                fixture.store.seedOpenChat("chat")
                 fixture.install()
                 fixture.launch().use { scenario ->
                     robot.waitFor(robot.text(R.string.tool_closed_format))
