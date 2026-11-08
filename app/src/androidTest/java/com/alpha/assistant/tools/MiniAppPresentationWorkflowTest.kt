@@ -724,7 +724,7 @@ class MiniAppPresentationWorkflowTest {
         val request = RequestGameplayExamples.TIC_TAC_TOE
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                val result = if (request.generationStage == CloudGenerationStage.PLAN) """{"wholeScreen":true}"""
+                val result = if (request.generationStage == CloudGenerationStage.PLAN) """{"wholeScreen":true,"language":"en"}"""
                 else RequestGameplayExamples.ticTacToeSpec()
                 emit(CloudEvent.Text(result))
             }

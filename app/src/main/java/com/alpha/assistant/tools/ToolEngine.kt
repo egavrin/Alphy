@@ -305,10 +305,10 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
     internal suspend fun generate(key: String, prompt: String, base: ToolRecord?, images: List<String>, session: CloudSession, artifactId: String,
         privateState: Boolean, policy: ToolExecutionPolicy? = null, lessonTarget: CourseSlideKind? = null,
         progress: ((ToolGenerationProgress) -> Unit)? = null,
-        draftPreview: ToolDraftPreviewPublisher?, trace: ToolGenerationTrace? = null, appLanguage: AppLanguage? = null,
+        draftPreview: ToolDraftPreviewPublisher?, trace: ToolGenerationTrace? = null,
         originalRequest: String = prompt): ToolPreview =
         generateCandidate(key, prompt, base, images, session, artifactId, privateState, policy, lessonTarget,
-            progress, draftPreview, allowedSourceIds = emptySet(), trace, appLanguage, originalRequest).preview
+            progress, draftPreview, allowedSourceIds = emptySet(), trace, originalRequest).preview
 
     internal suspend fun generateLesson(
         key: String, prompt: String, session: CloudSession, artifactId: String, kind: CourseSlideKind,
@@ -322,12 +322,12 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         key: String, prompt: String, base: ToolRecord?, images: List<String>, session: CloudSession, artifactId: String,
         privateState: Boolean, policy: ToolExecutionPolicy?, lessonTarget: CourseSlideKind?,
         progress: ((ToolGenerationProgress) -> Unit)?, draftPreview: ToolDraftPreviewPublisher?, allowedSourceIds: Set<String>,
-        trace: ToolGenerationTrace? = null, appLanguage: AppLanguage? = null, originalRequest: String = prompt,
+        trace: ToolGenerationTrace? = null, originalRequest: String = prompt,
     ): LessonToolPreview {
         val run = trace?.Run()
         return try {
             buildCandidate(key, prompt, base, images, session, artifactId, privateState, policy, lessonTarget,
-                progress, draftPreview, allowedSourceIds, run, appLanguage, originalRequest).also { run?.finish() }
+                progress, draftPreview, allowedSourceIds, run, originalRequest).also { run?.finish() }
         } catch (failure: Throwable) {
             run?.finish(failure)
             throw failure
@@ -338,7 +338,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         key: String, prompt: String, base: ToolRecord?, images: List<String>, session: CloudSession, artifactId: String,
         privateState: Boolean, policy: ToolExecutionPolicy?, lessonTarget: CourseSlideKind?,
         progress: ((ToolGenerationProgress) -> Unit)?, draftPreview: ToolDraftPreviewPublisher?, allowedSourceIds: Set<String>,
-        trace: ToolGenerationTrace.Run?, appLanguage: AppLanguage?, originalRequest: String,
+        trace: ToolGenerationTrace.Run?, originalRequest: String,
     ): LessonToolPreview {
         require(isValidToolPrompt(prompt))
         require(images.size <= ImageInput.MAX_IMAGES)
@@ -373,9 +373,24 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             try { progress?.invoke(stage) } catch (_: Exception) {}
         }
         val lengthCorrection = "The previous response reached the output limit. Return a shorter complete JSON object that keeps the required behavior."
-        val appTag = appLanguage?.tag
-        val languageGuidance = appTag?.let { "\n\n" + GenerationLanguage.guidance(it) }.orEmpty()
-        val requiresWholeScreen = appTag != null && appTag !in setOf("en", "ru")
+        var appLanguage: AppLanguage? = null
+        fun languageGuidance() = appLanguage?.tag?.let { "\n\n" + GenerationLanguage.guidance(it) }.orEmpty()
+        val localeContext = JSONObject()
+            .put("appLocales", sandbox.context.resources.configuration.locales.toLanguageTags())
+            .put("deviceLocales", android.content.res.Resources.getSystem().configuration.locales.toLanguageTags())
+        val refinementLanguageContext = if (previous == null) null else JSONObject()
+            .put("request", originalRequest)
+            .put("locales", localeContext)
+            .put("savedLanguage", previous.appLanguage ?: JSONObject.NULL)
+        val languageRules = """
+            Choose the interface language from the original user request and the language context.
+            Follow an explicit instruction about the interface language. Otherwise use the request language for new apps.
+            Keep the saved interface language during refinement. If none is saved, infer it from available authored interface text.
+            Use the locales as defaults when the request and saved interface give no language evidence.
+            A topic, example, quoted text, source, currency, or assistant brief does not choose the interface language.
+            If the request gives conflicting language instructions, ask which one to use.
+            When supplied, literals is an array of exact user-request excerpts to keep in their original wording.
+        """.trimIndent()
         var planText = ""
         var needsText = ""
         var preparedParts: List<PartRequest>? = null
@@ -383,13 +398,13 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             reportProgress(ToolGenerationProgress.PLANNING)
             val planInstructions = when {
                 lessonTarget != null -> NeedsPlan.promptFor(lessonTarget, allowedSourceIds)
-                else -> NeedsPlan.prompt + languageGuidance + when {
-                    requiresWholeScreen -> "\nNative parts supply English or Russian labels. Use the whole-screen marker."
-                    appTag != null -> "\nFor a parts plan set language to $appTag."
-                    else -> ""
-                } + "\n\n" + GenerationBehavior.workflowScopeGuidance
+                else -> NeedsPlan.prompt + "\n\n" + languageRules + """
+                    Use language for the selected tag. Native parts supply English or Russian labels.
+                    If the selected language is neither en nor ru, use wholeScreen.
+                """.trimIndent().let { "\n$it" } + "\n\n" + GenerationBehavior.workflowScopeGuidance
             }
             val planningText = if (lessonTarget != null) prompt else JSONObject().put("request", originalRequest).apply {
+                put("languageContext", localeContext)
                 if (prompt != originalRequest) put("context", prompt)
             }.toString()
             val planning = CloudTurn("user", planningText, images.toList())
@@ -418,15 +433,15 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                         needsText = planText
                         val generation = NeedsPlan.parseResponse(planText, lessonTarget, allowedSourceIds)
                         val needs = (generation as? GenerationPlan.Parts)?.needs
-                        if (lessonTarget == null && needs != null && appTag != null) {
-                            requireParts(!requiresWholeScreen, "$.wholeScreen", "true for this interface language")
-                            requireParts(needs.russian == (appTag == "ru"), "$.language", appTag)
-                        }
                         preparedParts = needs?.let {
                             if (lessonTarget == null) ToolParts.requests(it, clock = samplePartClock())
                             else ToolParts.requests(it, lessonTarget).also { parts ->
                                 parts.firstNotNullOfOrNull(PartRequest::slotFailure)?.let { throw it }
                             }
+                        }
+                        if (lessonTarget == null) {
+                            val language = JSONObject(planText)
+                            appLanguage = GenerationLanguage.parse(language.opt("language"), language.opt("literals"), originalRequest)
                         }
                         generation
                     }
@@ -585,7 +600,7 @@ $responseExample
 """
         val instructions = """Use the original request for currencies, units, and initial values. Leave monetary amounts currency-neutral when the user specifies no currency. Do not infer currency from the request language, location, example, or brief. Preserve values and units the user requested. With no starting amount, use zero where allowed or a neutral valid minimum where zero is invalid. Keep calculated values as numbers in state. Put units and formatting in the display. Recalculate dependent results after an accepted input change.
 Put initial values and initial derived results in initialState. Preview and render must return input.state unchanged. Use local variables for display calculations. Do not initialize or recalculate saved fields during preview or render.
-Write every visible title, label, and explanation in the language of the original user-authored request. In a message with User request and Widget brief, use User request to choose the language. Follow an explicit requested output language. The brief, reply, examples, sources, and device locale do not choose the language.
+Write every visible title, label, and explanation in the selected interface language.
 ${GenerationBehavior.workflowScopeGuidance}
 Make the primary workflow usable in the first viewport when its inputs are available. Give it one clear representation. Attach an action on a visible item to that item or place its control beside it. Use accessible native controls when they fit the interaction. Put requested secondary controls below the primary workflow. Derive visible feedback from the state the action changes. Use short labels. The host displays the tool title. For a keypad of short labels, use a grid with columns:4 and minCellWidth:48 so the keys fit together on a phone.
 ${ToolUiCatalog.modelGuidance()} State limits: 40 fields, strings 2048 characters, state 48 KiB. Scalar schema types are exactly the strings "number", "string", and "boolean". There are no integer, float, date, datetime, bool, text, or null scalar types. Represent dates as strings and timestamps as numbers with explicit application meaning. Use object, list, and array only as the structured constructors below. Do not use scalar schema objects or JSON Schema keywords such as properties, required, enum, default, or nullable.
@@ -650,7 +665,7 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
         val ports = mixedAssembly?.readPorts ?: previous?.composition?.readPorts.orEmpty()
         val portGuidance = if (ports.isEmpty()) "" else "\nRead only these numeric values from input.ports: ${jsonArray(ports.sorted())}. " +
             "A value is null when unavailable. Use the snapshot in render and never copy it into saved state or use it as authority."
-        val sharedRules = fillGuidance + routeContext + languageGuidance + portGuidance
+        val sharedRules = fillGuidance + routeContext + portGuidance
         val contract = "$task $definitionFormat$instructions$sharedRules"
         val patchContract = """
             $task Follow the JSON patch format in the final request.
@@ -659,7 +674,7 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
             Preview and render must return state unchanged and must not request effects or records.
             Preserve every existing state field, type, collection definition, and record ID.
         """.trimIndent() + sharedRules
-        val original = CloudTurn("user", if (wholeScreen) "Request: $prompt" else "$contract\nRequest: $prompt", images.toList())
+        val original = CloudTurn("user", if (wholeScreen) "Request: $prompt" else "$contract${languageGuidance()}\nRequest: $prompt", images.toList())
         val fields = if (mixed) ToolComposition.generatedFillFields else ToolSpec.generatedFields
         val writerRepair = when {
             savedEnvelope != null -> GenerationRepair.refinement(fields, mixed, savedEnvelope)
@@ -673,11 +688,19 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
             try {
                 session.checkActive(currentCoroutineContext())
                 val raw = if (partsOnly) null else {
+                    val selectLanguage = savedEnvelope != null && appLanguage == null
+                    val refinementLanguageRules = if (selectLanguage) "\n\n$languageRules" else languageGuidance()
+                    val languageFields = if (selectLanguage) "\n" + """
+                        Include appLanguage at the top level of this response alongside the requested patch or definition fields.
+                        Set appLanguage to the selected tag. Add languageChange only for an explicit translation request.
+                        Copy languageChange as an exact excerpt that requests the change. Include literals if needed.
+                    """.trimIndent() else ""
                     val turns = when {
                         savedEnvelope != null -> listOf(
                             original.copy(text = (if (edit?.mode == GenerationRepair.Mode.PATCH) patchContract else contract) +
-                                "\nRequest: $prompt" + savedContext(edit?.base ?: savedEnvelope)),
-                            CloudTurn("user", checkNotNull(edit).instructions),
+                                refinementLanguageRules + "\nRequest: $prompt" +
+                                "\nInterface language context: $refinementLanguageContext" + savedContext(edit?.base ?: savedEnvelope)),
+                            CloudTurn("user", checkNotNull(edit).instructions + languageFields),
                         )
                         edit != null -> listOfNotNull(original, edit.base?.let { CloudTurn("assistant", it) }, CloudTurn("user", edit.instructions))
                         correction != null -> listOfNotNull(original, rejectedCandidate?.let { CloudTurn("assistant", it) }, CloudTurn("user", correction))
@@ -686,10 +709,37 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
                     trace.timed(attemptNumber, ToolGenerationStage.PROVIDER, providerStage = modelStage) {
                         val system = when {
                             !wholeScreen -> ""
-                            edit?.mode == GenerationRepair.Mode.PATCH -> contract + GenerationRepair.FORMAT_OVERRIDE
-                            else -> contract
+                            edit?.mode == GenerationRepair.Mode.PATCH -> contract + languageGuidance() + GenerationRepair.FORMAT_OVERRIDE
+                            else -> contract + languageGuidance()
                         }
-                        suspend fun fetch() = response(key, turns, session, modelStage, system)
+                        suspend fun fetch(): String {
+                            val output = response(key, turns, session, modelStage, system)
+                            if (!selectLanguage) return output
+                            val candidate = try {
+                                generatedObject(output)
+                            } catch (failure: ToolValidationFailure) {
+                                if (edit?.mode == GenerationRepair.Mode.PATCH)
+                                    throw GenerationRepair.Rejected(GenerationRepair.Problem.SHAPE)
+                                throw InvalidGeneratedOutput(GenerationProblem.SPEC, failure)
+                            }
+                            val languageFields = setOf("appLanguage", "languageChange", "literals")
+                            val metadata = JSONObject(JsonObject(candidate.filterKeys(languageFields::contains)).toString())
+                            val change = metadata.opt("languageChange")
+                            val language = generatedOutput(GenerationProblem.LANGUAGE) {
+                                val selected = GenerationLanguage.parse(metadata.opt("appLanguage"), metadata.opt("literals"), originalRequest)
+                                require(change == null || change is String && change.isNotBlank() && change in originalRequest)
+                                require(previous.appLanguage == null || previous.appLanguage == selected.tag || change != null)
+                                selected
+                            }
+                            if (previous.composition != null && (language.tag !in setOf("en", "ru") ||
+                                    previous.appLanguage?.let { it != language.tag } == true ||
+                                    previous.appLanguage == null && change != null)) {
+                                throw CloudFailure("widget_language_native",
+                                    "This mini-app has native controls that cannot be translated by an app revision.")
+                            }
+                            appLanguage = language
+                            return JsonObject(candidate - languageFields).toString()
+                        }
                         if (edit == null) fetch().also {
                             if (writerRepair == null) rejectedCandidate = it else writerRepair.retain(it)
                         } else repairResponse(checkNotNull(writerRepair), edit, modelStage, attemptNumber, trace) { fetch() }
@@ -956,25 +1006,20 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
     private val sessionOwner=Any()
     @Volatile private var artifactsClosed=false
     private val mutex = Mutex()
-    suspend fun createDraft(prompt: String, toolId: String?, conversationId: String? = null, operationId: String? = null, expected: ToolRecord? = null, originalRequest: String = prompt): ToolDraft = mutex.withLock {
+    suspend fun createDraft(prompt: String, toolId: String?, conversationId: String? = null, operationId: String? = null, expected: ToolRecord? = null): ToolDraft = mutex.withLock {
         require(isValidToolPrompt(prompt))
         val id=operationId ?: UUID.randomUUID().toString()
-        var existingLanguage: String? = null
         ArtifactCoordinator.get(store,toolId ?: id).ordered {
             val base=toolId?.let {
                 val current=current(store,it)
                 if(expected!=null)check(current==expected) {"The mini-app changed. Request the change again."}
-                ToolSpec.parsePersisted(current.spec).also { spec ->
-                    spec.requireGeneratedRefinement()
-                    existingLanguage = spec.appLanguage
-                }
+                ToolSpec.parsePersisted(current.spec).requireGeneratedRefinement()
                 flush(store)
                 checkNotNull(store.tool(it))
             }
             check(store.draft(id)==null) {"This operation already exists."}
-            val appLanguage = GenerationLanguage.resolve(originalRequest, base?.ui, existingLanguage)
             ToolDraft(id,toolId,base?.revision ?: 0,base?.stateVersion ?: 0,prompt,null,null,null,
-                conversationId ?: base?.lastConversationId, appLanguage).also(store::saveDraft)
+                conversationId ?: base?.lastConversationId).also(store::saveDraft)
         }
     }
     suspend fun generate(draftId: String, key: String, images: List<String>, session: CloudSession,
@@ -994,7 +1039,7 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
         try {
             val preview = generation.generate(key, draft.prompt, base, images, session, draft.toolId ?: draft.id,
                 privateState = base?.let { store.privateResults(it.id) } == true, progress = progress, draftPreview = draftPreview,
-                trace = trace?.takeIf { it.operationId.toString() == draftId }, appLanguage = draft.appLanguage,
+                trace = trace?.takeIf { it.operationId.toString() == draftId },
                 originalRequest = originalRequest ?: draft.prompt)
             session.checkActive(currentCoroutineContext())
             return mutex.withLock {

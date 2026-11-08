@@ -149,7 +149,7 @@ internal class GenerationRepair private constructor(
         private val protectedFields = setOf("source")
         private val sourceEditKeys = setOf("search", "replace")
         private val mixedKeys = setOf("holes", "fill")
-        private val planFields = setOf("wholeScreen", "title", "description", "language", "inputs", "constants", "needs", "questions")
+        private val planFields = setOf("wholeScreen", "title", "description", "language", "inputs", "constants", "needs", "questions", "literals")
 
         fun plan() = GenerationRepair(planFields, null, null, false)
 

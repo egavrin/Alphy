@@ -182,14 +182,15 @@ class ShellNavigationWorkflowTest {
         }
     }
 
-    @Test fun compactAssistantReviewsAnExplicitMemoryFactLocally() = withCompactAssistant {
+    @Test fun compactAssistantReviewsAModelSelectedMemoryFact() = withCompactAssistant {
+        fixture.provider.memoryFact = "я предпочитаю краткие ответы"
         robot.edit(robot.text(R.string.composer_label), "Запомни: я предпочитаю краткие ответы")
         robot.click(robot.text(R.string.composer_send))
         robot.waitFor(robot.text(R.string.memory_text))
         robot.click(robot.text(R.string.memory_cancel))
         robot.click(robot.text(R.string.memory_discard))
         robot.waitGone(robot.text(R.string.memory_text))
-        assertEquals(0, fixture.provider.calls)
+        assertEquals(1, fixture.provider.calls)
     }
 
     private fun withCompactAssistant(test: () -> Unit) = withSharedFixtureModel { app ->

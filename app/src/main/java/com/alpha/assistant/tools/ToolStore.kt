@@ -37,8 +37,7 @@ data class ToolDeletionSnapshot internal constructor(
     internal val automationVersions: Map<String,Int>
 )
 data class ToolDraft(val id: String, val toolId: String?, val baseRevision: Int, val baseStateVersion: Int,
-    val prompt: String, val candidate: String?, val previewState: String?, val previewUi: String?, val conversationId: String?,
-    val appLanguage: AppLanguage? = null) {
+    val prompt: String, val candidate: String?, val previewState: String?, val previewUi: String?, val conversationId: String?) {
     // Automatic chat receipts use a negative base revision and never appear as editable drafts.
     val acceptedRevision: Int? get() = baseRevision.takeIf { it < 0 }?.let { -it }
 }
@@ -135,8 +134,7 @@ class ToolStore private constructor(internal val context: Context, internal val 
             WidgetLayoutStore.createTable(db)
             SourceRefresh.createTables(db)
             RecurringSearch.createTables(db)
-            db.execSQL("CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY, tool_id TEXT, base_revision INTEGER NOT NULL, base_state_version INTEGER NOT NULL, prompt TEXT NOT NULL, candidate TEXT, preview_state TEXT, preview_ui TEXT, conversation_id TEXT, app_language TEXT)")
-            addColumn(db, "drafts", "app_language", "TEXT")
+            db.execSQL("CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY, tool_id TEXT, base_revision INTEGER NOT NULL, base_state_version INTEGER NOT NULL, prompt TEXT NOT NULL, candidate TEXT, preview_state TEXT, preview_ui TEXT, conversation_id TEXT)")
             if (addColumn(db, "tools", "last_conversation_id", "TEXT")) {
                 db.execSQL("UPDATE tools SET last_conversation_id=conversation_id")
             }
@@ -155,7 +153,7 @@ class ToolStore private constructor(internal val context: Context, internal val 
         columns(db, "tools").containsAll(TOOL_COLUMNS.split(',')) &&
         columns(db, "revisions").containsAll(listOf("tool_id", "revision", "spec", "state", "ui", "label", "created_at", "stopped_automations")) &&
         columns(db, "capability_effects").containsAll(listOf("phase", "session")) &&
-        "write_token" in columns(db, "live_sources") && "app_language" in columns(db, "drafts")
+        "write_token" in columns(db, "live_sources")
 
     private fun tables(db: SQLiteDatabase): Set<String> = db.rawQuery(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name!='android_metadata'", null
@@ -220,8 +218,7 @@ class ToolStore private constructor(internal val context: Context, internal val 
         if(it.moveToFirst()) it.toolRecord() else null
     }
     private fun android.database.Cursor.toolDraft() = ToolDraft(getString(0), getString(1), getInt(2),
-        getInt(3), getString(4), getString(5), getString(6), getString(7), getString(8),
-        getString(getColumnIndexOrThrow("app_language"))?.let { AppLanguage.decode(it) })
+        getInt(3), getString(4), getString(5), getString(6), getString(7), getString(8))
     fun drafts(): List<ToolDraft> = readableDatabase.rawQuery("SELECT * FROM drafts WHERE base_revision>=0 ORDER BY rowid DESC", null).use { c ->
         buildList { while(c.moveToNext()) add(c.toolDraft()) }
     }
@@ -240,7 +237,6 @@ class ToolStore private constructor(internal val context: Context, internal val 
         put("drafts", ContentValues().apply {
             put("id", d.id); put("tool_id", d.toolId); put("base_revision", d.baseRevision); put("base_state_version", d.baseStateVersion)
             put("prompt", d.prompt); put("candidate", d.candidate); put("preview_state", d.previewState); put("preview_ui", d.previewUi); put("conversation_id", d.conversationId)
-            put("app_language", d.appLanguage?.encode())
         })
     }
     fun deleteDraft(id: String) = transaction { writableDatabase.delete("drafts","id=?",arrayOf(id)) }

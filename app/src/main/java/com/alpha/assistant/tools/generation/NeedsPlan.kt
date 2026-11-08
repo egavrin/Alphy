@@ -389,7 +389,7 @@ internal class NeedsPlan private constructor(
 
         val wholeScreenGuidance = """
             Choose one JSON response format.
-            Use the full plan for calculations and conversions expressible with numeric inputs and figures. Use {"wholeScreen":true} for custom behavior that supported parts and expressions cannot provide.
+            Use the full plan for calculations and conversions expressible with numeric inputs and figures. Use {"wholeScreen":true,"language":"en"} with the selected language for custom behavior that supported parts and expressions cannot provide.
             Use the whole-screen marker when native parts cannot provide the requested completion alert or timer transitions.
             Use a full plan for supported parts or a blocking clarification question. Its field rules apply only to the full plan.
         """.trimIndent()
@@ -433,7 +433,9 @@ internal class NeedsPlan private constructor(
             val root = partsObject(raw, "$")
             if (root.has("wholeScreen")) {
                 requireParts(lessonTarget == null, "$.wholeScreen", "a new non-lesson app")
-                root.requireKeys("$", setOf("wholeScreen"))
+                root.requireKeys("$", setOf("wholeScreen", "language"), setOf("literals"))
+                requireParts(root.opt("language").let { it is String && com.alpha.assistant.tools.validAppLanguageTag(it) },
+                    "$.language", "a lowercase two- or three-letter language tag")
                 requireParts(root.opt("wholeScreen") == true, "$.wholeScreen", "the Boolean true")
                 return GenerationPlan.WholeScreen
             }
@@ -446,7 +448,8 @@ internal class NeedsPlan private constructor(
         }
 
         private fun parse(root: JSONObject, lessonTarget: CourseSlideKind?, allowedSourceIds: Set<String>): NeedsPlan {
-            root.requireKeys("$", setOf("title", "description", "language", "inputs", "constants", "needs", "questions"))
+            root.requireKeys("$", setOf("title", "description", "language", "inputs", "constants", "needs", "questions"),
+                if (lessonTarget == null) setOf("literals") else emptySet())
             val title = planText(root.opt("title"), "$.title", 100)
             val description = planText(root.opt("description"), "$.description", 500, allowEmpty = true)
             val language = root.opt("language")

@@ -431,6 +431,8 @@
     <string name="chat_app_test_progress">Тестирую мини-приложение и исправляю подтверждённые ошибки…</string>
     <string name="chat_app_test_choose">Какое мини-приложение протестировать и исправить? Укажите точное название: %1$s.</string>
     <string name="chat_app_test_no_target">Откройте чат с карточкой сохранённого мини-приложения и повторите запрос.</string>
+    <string name="chat_memory_ready">Проверьте запись и нажмите «Сохранить».</string>
+    <string name="chat_memory_unavailable">Не удалось открыть запись для проверки. Повторите запрос в этом чате, когда редактор памяти будет свободен.</string>
     <string name="chat_app_test_saved">Версия %1$d проверена. Исправление сохранено как версия %2$d.</string>
     <string name="chat_app_test_passed">Проверки версии %1$d прошли.</string>
     <string name="chat_app_test_unverified">Проверка версии %1$d не подтвердила ошибку.</string>

@@ -37,7 +37,11 @@ class ToolWorkflowTest {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request; assertTrue(request.jsonObject); assertFalse(request.search)
                 if (request.replyWithFixturePlan(emit)) return
-                emit(CloudEvent.Text(if (rawInvalid) answer else request.patchSavedFixture(answer)))
+                val output = if (!rawInvalid) request.patchSavedFixture(answer)
+                else if (answer.startsWith("{") && request.turns.last().text.contains("Include appLanguage at the top level"))
+                    """{"appLanguage":"en",${answer.drop(1)}"""
+                else answer
+                emit(CloudEvent.Text(output))
             }
         }
         val engine = ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))
@@ -203,7 +207,7 @@ class ToolWorkflowTest {
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 if (request.replyWithFixturePlan(emit)) return
-                emit(CloudEvent.Text(answer))
+                emit(CloudEvent.Text(request.patchSavedFixture(answer)))
             }
         }
         val store = ToolStore(context, name)

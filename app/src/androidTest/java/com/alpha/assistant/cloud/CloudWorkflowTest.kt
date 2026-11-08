@@ -309,7 +309,7 @@ class CloudWorkflowTest {
         assertEquals(8192, json.getInt("max_tokens"))
         assertFalse(json.has("response_format"))
         val tools = json.getJSONArray("tools")
-        assertTrue(tools.length() in 1..4)
+        assertTrue(tools.length() in 1..5)
         val tool = tools.getJSONObject(0)
         assertEquals("function", tool.getString("type"))
         val function = tool.getJSONObject("function")
@@ -749,7 +749,7 @@ class CloudWorkflowTest {
         }
     }
 
-    @Test fun oneStrictDecisionCanAuthorizeACourseRepairOrDevicePlan() = kotlinx.coroutines.runBlocking {
+    @Test fun oneStrictDecisionCanAuthorizeACourseRepairMemoryOrDevicePlan() = kotlinx.coroutines.runBlocking {
         val latest = "Latest user request"
         var candidate = "course"
         var mode = "accepted"
@@ -767,6 +767,7 @@ class CloudWorkflowTest {
             val (name, field) = when (candidate) {
                 "course" -> "prepare_course" to "topic"
                 "device_plan" -> "prepare_device_plan" to "commands"
+                "memory_fact" -> "prepare_memory_fact" to "fact"
                 else -> "test_and_fix_app" to "target"
             }
             val function = functions.singleOrNull { it.getString("name") == name }
@@ -782,6 +783,7 @@ class CloudWorkflowTest {
             val arguments = when (candidate) {
                 "course" -> """{"topic":"Calculated percentages"}"""
                 "device_plan" -> """{"commands":["memory.write"]}"""
+                "memory_fact" -> """{"fact":"Latest user request"}"""
                 else -> """{"target":"1"}"""
             }
             when (mode) {
@@ -790,6 +792,7 @@ class CloudWorkflowTest {
                 "malformed" -> output.calls(call(0, name = name, arguments = """{"topic":"Bad","extra":1}"""))
                 "wrong_name" -> output.calls(call(0, name = "unknown", arguments = arguments))
                 "wrong_command" -> output.calls(call(0, name = name, arguments = """{"commands":["calendar"]}"""))
+                "wrong_fact" -> output.calls(call(0, name = name, arguments = """{"fact":""}"""))
                 "wrong_target" -> output.calls(call(0, name = name, arguments = """{"target":"outside"}"""))
                 "invalid_id" -> output.calls(call(0, id = "", name = name, arguments = arguments))
                 "multiple" -> output.calls(call(0, name = name, arguments = arguments), call(1, name = name, arguments = arguments))
@@ -814,7 +817,7 @@ class CloudWorkflowTest {
                 provider.respond("alpha-test-only", CloudRequest(history + current, true, instructions, chatDecision = true,
                     selectedText = if (hasContext) "PRIVATE_SELECTED" else "", allowCourseDecision = allowed,
                     decisionContext = ChatDecisionContext(current, history, instructions, MessageProvenance.CLEAN),
-                    testFixTargets = mapOf("saved-counter" to "Counter"), allowDevicePlan = allowed), CloudSession()) { events += it }
+                    testFixTargets = mapOf("saved-counter" to "Counter"), allowDevicePlan = allowed, allowMemoryFact = allowed), CloudSession()) { events += it }
                 return events.single() as CloudEvent.RoundComplete
             }
             val course = request()
@@ -848,6 +851,15 @@ class CloudWorkflowTest {
             assertEquals(beforeDevice + 1, server.requests.size)
             mode = "wrong_command"
             assertTrue(runCatching { request() }.exceptionOrNull() is CloudFailure)
+            candidate = "memory_fact"
+            mode = "accepted"
+            val beforeMemory = server.requests.size
+            assertEquals(latest, request().memoryFact)
+            assertEquals(beforeMemory + 1, server.requests.size)
+            mode = "wrong_fact"
+            assertTrue(runCatching { request() }.exceptionOrNull() is CloudFailure)
+            mode = "non_user"
+            assertNull(request(role = "assistant").memoryFact)
             assertTrue(server.failures.toString(), server.failures.isEmpty())
         }
     }

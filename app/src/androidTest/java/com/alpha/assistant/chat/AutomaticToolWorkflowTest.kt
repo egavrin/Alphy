@@ -157,7 +157,7 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 val result = when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}"""
+                    CloudGenerationStage.PLAN -> """{"wholeScreen":true,"language":"en"}"""
                     CloudGenerationStage.COMPLETE -> {
                         completions += request
                         if (completions.size == 1) {
@@ -189,7 +189,7 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 val result = when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}"""
+                    CloudGenerationStage.PLAN -> """{"wholeScreen":true,"language":"ru"}"""
                     CloudGenerationStage.COMPLETE -> {
                         completions += request
                         if (completions.size > 1) """{"fields":{"description":"Travel expense total ${completions.size}"}}"""
@@ -222,7 +222,7 @@ class AutomaticToolWorkflowTest {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
                 val result = when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}"""
+                    CloudGenerationStage.PLAN -> """{"wholeScreen":true,"language":"en","literals":["Use French for the interface."]}"""
                     CloudGenerationStage.COMPLETE -> spec("Moscow expenses")
                     else -> decision("Счётчик расходов в Москве")
                 }
@@ -232,7 +232,9 @@ class AutomaticToolWorkflowTest {
         Fixture(provider).use { f ->
             f.send("Create a counter for a trip to Moscow. Use Russian rubles. Label the note «Use French for the interface.»")
             f.idle()
-            assertTrue(requests.single { it.generationStage == CloudGenerationStage.PLAN }.systemInstructions.contains("English (en)"))
+            val planInput = JSONObject(requests.single { it.generationStage == CloudGenerationStage.PLAN }.turns.single().text)
+            assertTrue(planInput.getString("request").contains("Use Russian rubles."))
+            assertTrue(planInput.getJSONObject("languageContext").has("deviceLocales"))
             assertTrue(requests.single { it.generationStage == CloudGenerationStage.COMPLETE }.systemInstructions.contains("English (en)"))
             assertEquals("Moscow expenses", ToolSpec.parsePersisted(f.toolStore.tools().single().spec).title)
         }
@@ -241,12 +243,13 @@ class AutomaticToolWorkflowTest {
     @Test fun languageTopicAndNegationDoNotOverrideInterfaceButExplicitInstructionDoes() {
         val plans = CopyOnWriteArrayList<CloudRequest>()
         var candidate = spec()
+        var language = "en"
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 val result = when (request.generationStage) {
                     CloudGenerationStage.PLAN -> {
                         plans += request
-                        """{"wholeScreen":true}"""
+                        """{"wholeScreen":true,"language":"$language"}"""
                     }
                     CloudGenerationStage.COMPLETE -> candidate
                     else -> decision()
@@ -257,11 +260,11 @@ class AutomaticToolWorkflowTest {
         Fixture(provider).use { f ->
             f.send("Create an app to teach English speakers how to order coffee in Italian.")
             f.idle()
-            assertTrue(plans.last().systemInstructions.contains("English (en)"))
+            assertEquals("en", ToolSpec.parsePersisted(f.toolStore.tools().first().spec).appLanguage)
             assertEquals("complete", f.last.status)
             f.send("Create a counter. Do not make the interface in Russian.")
             f.idle()
-            assertTrue(plans.last().systemInstructions.contains("English (en)"))
+            assertEquals("en", ToolSpec.parsePersisted(f.toolStore.tools().first().spec).appLanguage)
             assertEquals("complete", f.last.status)
             candidate = JSONObject(spec("Conteggio delle ordinazioni")).apply {
                 put("description", "Conserva il conteggio delle ordinazioni in questo dispositivo")
@@ -269,10 +272,11 @@ class AutomaticToolWorkflowTest {
                 controls.getJSONObject(0).put("text", "Conteggio totale delle ordinazioni")
                 controls.getJSONObject(1).put("text", "Aggiungi una nuova ordinazione")
             }.toString()
+            language = "it"
             f.send("Create a counter app in Italian.")
             f.idle()
-            assertTrue(plans.last().systemInstructions.contains("Italian (it)"))
-            assertTrue(plans.last().systemInstructions.contains("Native parts supply English or Russian labels."))
+            assertEquals("it", ToolSpec.parsePersisted(f.toolStore.tools().first().spec).appLanguage)
+            assertEquals(3, plans.size)
             assertEquals("complete", f.last.status)
         }
     }
@@ -291,7 +295,9 @@ class AutomaticToolWorkflowTest {
                     CloudGenerationStage.REFINE -> {
                         refinements += request
                         request.patchSavedFixture(if (refinements.size == 1)
-                            JSONObject(russian).put("description", "Обновлённый счётчик выполненных задач").toString() else spec())
+                            JSONObject(russian).put("description", "Обновлённый счётчик выполненных задач").toString() else spec(),
+                            language = if (refinements.size == 1) "ru" else "en",
+                            languageChange = "use English for the interface".takeIf { refinements.size > 1 })
                     }
                     else -> decision("Refine the existing counter", kind = "refine")
                 }
@@ -299,17 +305,19 @@ class AutomaticToolWorkflowTest {
             }
         }
         Fixture(provider) { shell, tools ->
-            val parsed = ToolSpec.parse(russian)
+            val parsed = ToolSpec.parse(russian).withAppLanguage("ru")
             tools.saveTool(ToolRecord("counter", 1, 1, parsed.json, """{"count":7}""", parsed.ui.toString(), "chat", true), true)
             seedChat(shell, "counter")
         }.use { f ->
             f.send("Update the counter so the current total is more prominent.")
             f.idle()
-            assertTrue(refinements.last().turns.first().text.contains("Russian (ru)"))
+            assertTrue(refinements.last().turns.first().text.contains("\"savedLanguage\":\"ru\""))
+            assertEquals("ru", ToolSpec.parsePersisted(f.toolStore.tools().single().spec).appLanguage)
             assertEquals("complete", f.last.status)
             f.send("Do not change the layout and use English for the interface.")
             f.idle()
-            assertTrue(refinements.last().turns.first().text.contains("English (en)"))
+            assertTrue(refinements.last().turns.first().text.contains("use English for the interface"))
+            assertEquals("en", ToolSpec.parsePersisted(f.toolStore.tools().single().spec).appLanguage)
             assertEquals("complete", f.last.status)
             assertEquals(7, JSONObject(f.toolStore.tools().single().state).getInt("count"))
         }
@@ -326,7 +334,7 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 emit(CloudEvent.Text(when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}"""
+                    CloudGenerationStage.PLAN -> """{"wholeScreen":true,"language":"en"}"""
                     CloudGenerationStage.COMPLETE -> definition
                     else -> decision("Build a bill calculator with two fields")
                 }))
@@ -374,7 +382,7 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 emit(CloudEvent.Text(when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"wholeScreen":true}"""
+                    CloudGenerationStage.PLAN -> """{"wholeScreen":true,"language":"en"}"""
                     CloudGenerationStage.COMPLETE -> if (++completions == 1) large.toString() else
                         JSONObject().put("sourceEdits", org.json.JSONArray().put(JSONObject()
                             .put("search", prefix + "\"".repeat(32)).put("replace", prefix))).toString()
@@ -594,7 +602,7 @@ class AutomaticToolWorkflowTest {
                         val input = JSONObject(request.turns.first().text)
                         assertEquals(original, input.getString("request"))
                         assertTrue(input.getString("context").contains("Widget brief:"))
-                        emit(CloudEvent.Text("""{"wholeScreen":true}"""))
+                        emit(CloudEvent.Text("""{"wholeScreen":true,"language":"en"}"""))
                     }
                     CloudGenerationStage.COMPLETE -> emit(CloudEvent.Text(spec()))
                     else -> error("Unexpected generation stage.")
@@ -624,7 +632,9 @@ class AutomaticToolWorkflowTest {
                     else -> """{"behavior":{"status":"checkable","scenario":{"slots":{"add":{"kind":"action"},
                         "count":{"kind":"value"}},"steps":[{"op":"action","slot":"add"},
                         {"op":"assert","slot":"count","test":"equals","value":1}]}},
-                        "targets":{"add":"action2","count":"value1"}}"""
+                        "targets":{"add":"action2","count":"value1"},
+                        "authoredReproduction":[{"text":"Tap Add","target":"action2"},
+                        {"text":"Count should be 1","target":"value1","value":"1"}]}"""
                 }
                 emit(CloudEvent.Text(response))
             }
@@ -634,7 +644,7 @@ class AutomaticToolWorkflowTest {
             tools.saveTool(ToolRecord("counter",1,1,broken.json,broken.initialState,broken.ui.toString(),"chat",true),true)
             seedChat(shell,"counter")
         }.use { f ->
-            f.send("Test and fix this app.\nExpected Count = 1")
+            f.send("Test and fix this app. Tap Add and check that Count should be 1.")
             f.idle()
             val saved = checkNotNull(f.toolStore.tool("counter"))
             assertEquals(f.last.error, "complete", f.last.status)
@@ -1588,7 +1598,8 @@ class AutomaticToolWorkflowTest {
             val generation = object : SingleRoundProvider() {
                 override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                     if (request.replyWithFixturePlan(emit)) return
-                    emit(CloudEvent.Text(spec()))
+                    val definition = if (request.generationStage == CloudGenerationStage.REFINE) spec("Updated counter") else spec()
+                    emit(CloudEvent.Text(request.patchSavedFixture(definition)))
                 }
             }
             val engine = ToolEngine(tools,ToolGenerationService(generation,com.alpha.assistant.sandbox.SandboxClient(app)))

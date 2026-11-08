@@ -21,7 +21,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(AndroidJUnit4::class)
 class MemoryUiWorkflowTest {
@@ -188,31 +187,27 @@ class MemoryUiWorkflowTest {
         }
     }
 
-    @Test fun prefillPreservesExactTextAndNotifiesOnceAfterExplicitSaveAcrossRecreation() = workflow { scenario ->
+    @Test fun prefillPreservesExactTextAndSavesAcrossRecreation() = workflow { scenario ->
         val original = "  Первая строка\nВторая строка  "
-        val approvals = AtomicInteger()
         waitFor(R.string.memory_empty)
-        withPage(scenario) { assertTrue(it.tryOpenPrefilledEditor(original) { approvals.incrementAndGet() }) }
+        withPage(scenario) { assertTrue(it.tryOpenPrefilledEditor(original)) }
         assertDraft(original)
-        assertEquals(0, approvals.get())
         assertTrue(store.list().isEmpty())
 
         rejectWrites()
         click(R.string.memory_save)
         waitFor(R.string.memory_save_failed)
         assertDraft(original)
-        assertEquals(0, approvals.get())
         assertTrue(store.list().isEmpty())
 
         scenario.recreate()
         mount(scenario)
         assertDraft(original)
-        assertEquals(0, approvals.get())
         database().use { it.execSQL("DROP TRIGGER fixture_reject_write") }
         click(R.string.memory_save)
         robot.waitUntil { original in robot.texts() }
         assertEquals(original, store.list().single().text)
-        assertEquals(1, approvals.get())
+        withPage(scenario) { assertFalse(it.reviewingChatFact) }
 
         scenario.recreate()
         mount(scenario)
@@ -221,7 +216,6 @@ class MemoryUiWorkflowTest {
         edit("Another fact")
         click(R.string.memory_save)
         robot.waitFor("Another fact")
-        assertEquals(1, approvals.get())
     }
 
     @Test fun prefillDeclinesBusyPageAndPreservesNewFactAndEditDrafts() {
@@ -230,12 +224,12 @@ class MemoryUiWorkflowTest {
             robot.waitFor(fact.text)
             withPage(scenario) {
                 it.refresh()
-                assertFalse(it.tryOpenPrefilledEditor("Chat text") { error("The offer was declined.") })
+                assertFalse(it.tryOpenPrefilledEditor("Chat text"))
             }
             click(R.string.memory_add)
             edit("New fact draft")
             withPage(scenario) {
-                assertFalse(it.tryOpenPrefilledEditor("Chat text") { error("The offer was declined.") })
+                assertFalse(it.tryOpenPrefilledEditor("Chat text"))
             }
             assertDraft("New fact draft")
             click(R.string.memory_cancel)
@@ -244,27 +238,25 @@ class MemoryUiWorkflowTest {
             click(R.string.memory_edit_fact, 1)
             edit("Edited fact draft")
             withPage(scenario) {
-                assertFalse(it.tryOpenPrefilledEditor("Chat text") { error("The offer was declined.") })
+                assertFalse(it.tryOpenPrefilledEditor("Chat text"))
             }
             assertDraft("Edited fact draft")
             assertEquals(fact, store.list().single())
         }
     }
 
-    @Test fun discardedPrefillDoesNotNotifyOnALaterSave() = workflow { scenario ->
-        val approvals = AtomicInteger()
+    @Test fun discardedPrefillDoesNotAffectALaterSave() = workflow { scenario ->
         waitFor(R.string.memory_empty)
-        withPage(scenario) { assertTrue(it.tryOpenPrefilledEditor("Chat text") { approvals.incrementAndGet() }) }
+        withPage(scenario) { assertTrue(it.tryOpenPrefilledEditor("Chat text")) }
         click(R.string.memory_cancel)
         click(R.string.memory_discard)
         waitFor(R.string.memory_empty)
-        assertEquals(0, approvals.get())
         click(R.string.memory_add)
         edit("A local fact")
         click(R.string.memory_save)
         robot.waitFor("A local fact")
         assertEquals("A local fact", store.list().single().text)
-        assertEquals(0, approvals.get())
+        withPage(scenario) { assertFalse(it.reviewingChatFact) }
     }
 
     private fun workflow(block: (ActivityScenario<CloudTestActivity>) -> Unit) {

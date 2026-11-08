@@ -1,6 +1,7 @@
 package com.alpha.assistant.tools.generation
 
 import com.alpha.assistant.tools.patchSavedFixture
+import com.alpha.assistant.tools.withFixtureLanguage
 import com.alpha.assistant.tools.ToolRecord
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -114,9 +115,8 @@ class GenerationRouteWorkflowTest {
             assertFalse(request.search)
             requests += request
             val output = fixture(request, session)
-            emit(CloudEvent.Text(if (request.generationStage == CloudGenerationStage.PLAN && output.startsWith("{") &&
-                !request.turns.last().text.contains("Return one JSON patch object only"))
-                runCatching { output }.getOrDefault(output) else output))
+            emit(CloudEvent.Text(if (output.startsWith("{") && output.endsWith("}"))
+                request.withFixtureLanguage(output) else output))
         }
     }
 
@@ -370,6 +370,7 @@ class GenerationRouteWorkflowTest {
 
     @Test fun mixedSceneSurvivesSaveReopenAndFillOnlyRefinement(): Unit = runBlocking {
         var rejectRefinement = false
+        var translate = false
         var attemptedOwnershipEdit = false
         val provider = FixtureProvider { turn, _ ->
             when (turn.generationStage) {
@@ -408,7 +409,9 @@ class GenerationRouteWorkflowTest {
                     val fill = sceneFill()
                     fill.getJSONObject("ui").getJSONArray("children").getJSONObject(0).put("text", "Move the dot")
                     if (rejectRefinement) fill.put("composition", JSONObject())
-                    turn.patchSavedFixture(JSONObject().put("fill", fill).toString())
+                    turn.patchSavedFixture(JSONObject().put("fill", fill).toString(),
+                        language = "it".takeIf { translate },
+                        languageChange = "Translate the interface to Italian".takeIf { translate })
                 }
                 else -> error("Unexpected request stage.")
             }
@@ -464,6 +467,15 @@ class GenerationRouteWorkflowTest {
             val afterSpec = ToolSpec.parsePersisted(next.spec)
             assertTrue(recipe.sameSelection(afterSpec.nativePresentation))
             assertEquals(beforeRoot.toString(), afterSpec.ui.getJSONArray("children").getJSONObject(0).toString())
+
+            rejectRefinement = false
+            translate = true
+            provider.requests.clear()
+            val translation = engine.createDraft("Translate the interface to Italian", next.id)
+            failure("widget_language_native") { engine.generate(translation.id, "fixture", emptyList(), CloudSession()) }
+            assertEquals(listOf(CloudGenerationStage.REFINE), provider.stages)
+            assertEquals(next, store.tool(next.id))
+            assertNull(store.draft(translation.id)?.candidate)
             assertEquals("Move the dot", afterSpec.action(afterSpec.ui, "fill_copy")!!.getString("text"))
         }
     }
@@ -564,12 +576,12 @@ class GenerationRouteWorkflowTest {
     }
 
     @Test fun explicitWholeScreenPlanUsesTheOriginalRequestAndSkipsSelectors(): Unit = runBlocking {
-        val marker = """{"wholeScreen":true}"""
+        val marker = """{"wholeScreen":true,"language":"en"}"""
         for (first in listOf(marker, """{"wholeScreen":"true"}""")) {
             var plans = 0
             val provider = FixtureProvider { turn, _ ->
                 when (turn.generationStage) {
-                    CloudGenerationStage.PLAN -> if (plans++ == 0) first else """{"fields":{"wholeScreen":true}}"""
+                    CloudGenerationStage.PLAN -> if (plans++ == 0) first else """{"fields":{"wholeScreen":true,"language":"en"}}"""
                     CloudGenerationStage.COMPLETE -> {
                         val message = turn.turns.single()
                         assertEquals("Request: $request", message.text)
@@ -830,7 +842,7 @@ class GenerationRouteWorkflowTest {
                     1 -> """{"wholeScreen":false}"""
                     2 -> """{"fields":{"wholeScreen":1}}"""
                     3 -> """{"fields":{"wholeScreen":"true"}}"""
-                    4 -> """{"fields":{"wholeScreen":true}}"""
+                    4 -> """{"fields":{"wholeScreen":true,"language":"en"}}"""
                     else -> error("A fourth PLAN repair dispatched.")
                 }
                 CloudGenerationStage.COMPLETE -> when (++writerCalls) {

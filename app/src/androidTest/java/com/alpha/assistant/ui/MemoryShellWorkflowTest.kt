@@ -110,19 +110,21 @@ class MemoryShellWorkflowTest {
 
     @Test fun explicitMemoryReviewStaysInTheCurrentChat() = withFixture { fixture ->
         fixture.seedChat("memory-chat", "Memory discussion", "Original memory discussion", selected = true)
-        fixture.install(saveKey = false)
+        fixture.install()
         fixture.launch().use { scenario ->
             robot.waitFor("Original memory discussion")
             val fact = "Мне подходят короткие ответы"
+            fixture.provider.memoryFact = fact
             robot.edit(robot.text(R.string.composer_label), "Запомни: $fact")
             robot.click(robot.text(R.string.composer_send))
+            robot.waitFor(robot.text(R.string.memory_text))
             assertEquals(fact, robot.field(robot.text(R.string.memory_text)).text.toString())
             assertTrue(robot.composed(scenario, "chat"))
             robot.click(robot.text(R.string.memory_save))
             robot.waitFor("Original memory discussion")
             assertEquals("memory-chat", fixture.model?.snapshot?.selectedId)
             robot.waitUntil { fixture.model?.snapshot?.draft?.text == "" }
-            assertEquals(0, fixture.provider.calls)
+            assertEquals(1, fixture.provider.calls)
             MemoryStore(fixture.context, databaseName(fixture)).use { assertEquals(listOf(fact), it.list().map { row -> row.text }) }
         }
     }

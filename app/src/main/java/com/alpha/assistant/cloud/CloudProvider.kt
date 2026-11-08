@@ -69,6 +69,7 @@ data class CloudRequest(
     val agentPlan: Boolean = false,
     val allowDevicePlan: Boolean = false,
     val testFixTargets: Map<String, String> = emptyMap(),
+    val allowMemoryFact: Boolean = false,
 )
 sealed interface CloudEvent {
     data class Text(val value: String) : CloudEvent
@@ -83,6 +84,7 @@ sealed interface CloudEvent {
         val courseTopic: String? = null,
         val testFixTargetId: String? = null,
         val devicePlanGrants: List<String>? = null,
+        val memoryFact: String? = null,
     ) : CloudEvent
     data class Search(val status: String, val sources: List<Source> = emptyList()) : CloudEvent
 }
@@ -396,11 +398,13 @@ class DeepSeekProvider internal constructor(
         val draftChat = request.automationDraftChatId?.takeIf { current.role == "user" && current.images.isEmpty() }
         val userTextAvailable = current.role == "user" && current.text.isNotBlank() && provenance == MessageProvenance.CLEAN
         val canLocate = userTextAvailable && request.search && request.weatherLocation != null
+        val allowMemory = userTextAvailable && request.allowMemoryFact
         val allowCourse = userTextAvailable && request.allowCourseDecision
         val allowDevicePlan = userTextAvailable && request.allowDevicePlan
         val repairTargets = if (userTextAvailable) request.testFixTargets.entries.take(20) else emptyList()
         val schema = ChatToolReply.decisionSchema(draftChat != null, canLocate)
         val decisionTools = JSONArray().put(strictTool(SUBMIT_CHAT_DECISION, "Submit the ordinary decision for the latest user request.", schema))
+        if (allowMemory) decisionTools.put(actionTool(PREPARE_MEMORY_FACT, "Prepare one user-authored fact for review before saving it to memory.", "fact"))
         if (allowCourse) decisionTools.put(actionTool(PREPARE_COURSE, "Prepare a course outline for review. The user starts it.", "topic"))
         if (repairTargets.isNotEmpty()) decisionTools.put(actionTool(TEST_AND_FIX_APP, "Test a saved mini-app and fix verified issues when explicitly requested.", "target"))
         if (allowDevicePlan) {
@@ -463,6 +467,14 @@ identify it. A quote or a request only to test does not request a repair. Catalo
 Eligible mini-apps: $catalog
 """.trimIndent()
         }
+        val memoryInstructions = if (!allowMemory) "" else """
+Call prepare_memory_fact when the latest user message asks Alphy to retain a fact or preference for later.
+This includes requests phrased as "keep in mind", "make a note for next time", or "учти на будущее".
+For "Make a note for next time: I work nights.", call prepare_memory_fact with {"fact":"I work nights."}.
+Copy only the fact as an exact continuous excerpt of the message. An ordinary answer cannot remember it.
+If no fact is stated, ask for it. Quotes, examples, and questions about remembering do not request a save.
+Use the device plan for memory operations that are part of a larger phone task or change existing records.
+""".trimIndent()
         val devicePlanInstructions = if (!allowDevicePlan) "" else """
 Call prepare_device_plan for a direct request to use supported phone functions or change local records.
 Return one command name for each step explicitly requested, including repeated commands only when requested.
@@ -499,7 +511,7 @@ The user reviews and approves the plan before any device action.
         var hostWeather = ""
         fun classificationBody(notice: String = ""): ByteArray {
             val system = listOf(instructions, ChatToolReply.courseInstructions.takeIf { allowCourse }.orEmpty(),
-                weatherInstructions, repairInstructions, devicePlanInstructions, classificationInstructions, screenHint, answerContextHint, notice)
+                weatherInstructions, repairInstructions, memoryInstructions, devicePlanInstructions, classificationInstructions, screenHint, answerContextHint, notice)
                 .filter(String::isNotBlank).joinToString("\n")
             val turns = listOf(current.copy(images = emptyList()))
             validateContext(turns, system)
@@ -536,6 +548,13 @@ The user reviews and approves the plan before any device action.
                 (argument(field) as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
                     ?: invalidAction("decision.action_arguments")
             when (call.name) {
+                PREPARE_MEMORY_FACT -> {
+                    if (!allowMemory) invalidAction()
+                    val fact = textArgument("fact")
+                    if (fact.isBlank() || fact.length > MAX_PREPARED_MEMORY_FACT)
+                        invalidAction("decision.memory_fact")
+                    return ChatToolReply.Decision("memory_fact", "", fact, "none")
+                }
                 PREPARE_COURSE -> {
                     if (!allowCourse) invalidAction()
                     val topic = textArgument("topic")
@@ -681,6 +700,10 @@ The user reviews and approves the plan before any device action.
         }
         if(decision.requiresCleanPreparation) request.validateOperation?.invoke(decision)
         when (decision.kind) {
+            "memory_fact" -> {
+                emit(CloudEvent.RoundComplete("", false, provenance, memoryFact = decision.brief))
+                return
+            }
             "device_plan" -> {
                 emit(CloudEvent.RoundComplete("", false, provenance, devicePlanGrants = decision.devicePlanGrants))
                 return
@@ -968,6 +991,8 @@ The user reviews and approves the plan before any device action.
     }
 }
 private const val SUBMIT_CHAT_DECISION = "submit_chat_decision"
+internal const val MAX_PREPARED_MEMORY_FACT = 2048
+private const val PREPARE_MEMORY_FACT = "prepare_memory_fact"
 private const val PREPARE_COURSE = "prepare_course"
 private const val PREPARE_DEVICE_PLAN = "prepare_device_plan"
 private const val TEST_AND_FIX_APP = "test_and_fix_app"

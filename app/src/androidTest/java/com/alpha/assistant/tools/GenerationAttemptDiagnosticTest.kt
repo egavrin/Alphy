@@ -19,6 +19,10 @@ import java.util.UUID
  */
 class GenerationAttemptDiagnosticTest {
     private val context get()=InstrumentationRegistry.getInstrumentation().targetContext
+    private fun planInput(request: String, images: List<String>) = CloudTurn("user",
+        JSONObject().put("request", request).put("languageContext", JSONObject()
+            .put("appLocales", context.resources.configuration.locales.toLanguageTags())
+            .put("deviceLocales", android.content.res.Resources.getSystem().configuration.locales.toLanguageTags())).toString(), images)
     private val secret="SECRET_PRIVATE_content://private/credential"
     private fun spec(source: String="return {state:input.state};")=JSONObject()
         .put("formatVersion",3).put("title",secret).put("description",secret).put("capabilities",JSONArray())
@@ -103,7 +107,7 @@ class GenerationAttemptDiagnosticTest {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
                 if (requests.size == 2) throw terminal
-                emit(CloudEvent.Text("""{"wholeScreen":true,"behavior":{"description":"$secret"}}"""))
+                emit(CloudEvent.Text("""{"wholeScreen":true,"language":"en","behavior":{"description":"$secret"}}"""))
             }
         }
         assertSame(terminal, runCatching {
@@ -144,7 +148,7 @@ class GenerationAttemptDiagnosticTest {
         assertTrue(requests.first().systemInstructions.startsWith(NeedsPlan.prompt + "\n\n"))
         requests.forEach { request ->
             assertTrue(request.systemInstructions.startsWith(NeedsPlan.prompt))
-            assertEquals(CloudTurn("user",JSONObject().put("request", original).toString(),images),request.turns.first())
+            assertEquals(planInput(original, images),request.turns.first())
             assertTrue(request.jsonObject)
             assertFalse(request.search)
             assertFalse(request.systemInstructions.contains(original))
@@ -254,7 +258,7 @@ class GenerationAttemptDiagnosticTest {
         assertEquals("response_length",failure.code)
         assertEquals(2,requests.size)
         assertTrue(requests.first().systemInstructions.startsWith(NeedsPlan.prompt + "\n\n"))
-        assertEquals(listOf(CloudTurn("user",JSONObject().put("request", original).toString(),images),CloudTurn("user","Return the corrected JSON plan.")),
+        assertEquals(listOf(planInput(original, images),CloudTurn("user","Return the corrected JSON plan.")),
             requests.last().turns)
         val hostCorrection = requests.last().systemInstructions.removePrefix(NeedsPlan.prompt)
         assertTrue(hostCorrection.contains("output limit"))

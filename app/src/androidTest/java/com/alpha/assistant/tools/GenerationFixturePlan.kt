@@ -25,12 +25,7 @@ internal suspend fun CloudRequest.replyWithFixturePlan(emit: suspend (CloudEvent
     if (generationStage == CloudGenerationStage.SELECTOR) error("The fixture plan must not require part selection")
     if (generationStage != CloudGenerationStage.PLAN) return false
     check(jsonObject && !search && !systemInstructions.contains("top-level \"behavior\"") && selectedText.isEmpty())
-    val needs = fixtureNeeds.let {
-        if ("For a parts plan set language to ru." in systemInstructions) {
-            JSONObject(it).put("language", "ru").toString()
-        } else it
-    }
-    emit(CloudEvent.Text(needs))
+    emit(CloudEvent.Text(fixtureNeeds))
     return true
 }
 
@@ -61,10 +56,23 @@ internal val CloudRequest.expectsSavedPatch: Boolean
     get() = generationStage == CloudGenerationStage.REFINE &&
         turns.last().text.contains("Return one JSON patch object only")
 
-internal fun CloudRequest.patchSavedFixture(definition: String): String {
-    if (!expectsSavedPatch) return definition
+internal fun CloudRequest.withFixtureLanguage(patch: String, language: String? = null, languageChange: String? = null): String {
+    val input = turns.first().text
+    if (!turns.last().text.contains("Include appLanguage at the top level")) return patch
+    val context = JSONObject(input.substringAfter("\nInterface language context: ")
+        .substringBefore("\nCurrent tool definition (data): "))
+    val selected = language ?: context.optString("savedLanguage", "en").takeUnless { it == "null" } ?: "en"
+    return JSONObject(patch).apply {
+        if (!has("appLanguage") || language != null) put("appLanguage", selected)
+        languageChange?.let { put("languageChange", it) }
+    }.toString()
+}
+
+internal fun CloudRequest.patchSavedFixture(definition: String, language: String? = null, languageChange: String? = null): String {
+    if (!expectsSavedPatch) return withFixtureLanguage(definition, language, languageChange)
     val current = JSONObject(turns.first().text.substringAfter("\nCurrent tool definition (data): "))
     val revised = JSONObject(definition)
-    return if (current.has("fill")) writerFixturePatch(current.getJSONObject("fill").toString(),
+    val patch = if (current.has("fill")) writerFixturePatch(current.getJSONObject("fill").toString(),
         revised.getJSONObject("fill").toString()) else writerFixturePatch(current.toString(), definition)
+    return withFixtureLanguage(patch, language, languageChange)
 }

@@ -51,6 +51,8 @@ private fun <T> validateComposition(block: () -> T): T =
 private fun <T> validateNativePresentation(block: () -> T): T =
     validateHostMetadata(ToolValidationCategory.NATIVE_PRESENTATION,"nativePresentation",block)
 
+internal fun validAppLanguageTag(tag: String) = tag.length in 2..3 && tag.all { it in 'a'..'z' }
+
 /** Generated data describes native controls. Generated code never runs in the host process. */
 @ConsistentCopyVisibility
 data class ToolSpec private constructor(val json: String, val title: String, val description: String, val source: String,
@@ -92,7 +94,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
 
     internal fun withAppLanguage(tag: String?): ToolSpec {
         if (tag == null || tag == appLanguage) return this
-        require(appLanguageTag.matches(tag))
+        require(validAppLanguageTag(tag))
         val encoded = JSONObject(json).put(APP_LANGUAGE_FIELD, tag).toString()
         validateTool(ToolValidationCategory.JSON, ToolValidationDetails("definition_size", "$",
             "at most 65536 bytes including native presentation metadata", "oversized definition")) {
@@ -111,7 +113,6 @@ data class ToolSpec private constructor(val json: String, val title: String, val
 
     companion object {
         private const val APP_LANGUAGE_FIELD = "appLanguage"
-        private val appLanguageTag = Regex("[a-z]{2,3}")
 
         fun available(raw: String): ToolSpec? = try {parse(raw)} catch(_: IllegalArgumentException) {null} catch(_: IllegalStateException) {null} catch(_: org.json.JSONException) {null}
         /** Only app-owned records may contain a host composition manifest. */
@@ -217,7 +218,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
             }
             val appLanguage = validateTool(ToolValidationCategory.METADATA) {
                 if (j.has(APP_LANGUAGE_FIELD)) (j.get(APP_LANGUAGE_FIELD) as String).also {
-                    require(appLanguageTag.matches(it))
+                    require(validAppLanguageTag(it))
                 } else null
             }
             val initialState = validateTool(ToolValidationCategory.INITIAL_STATE) { j.getJSONObject("initialState").toString() }

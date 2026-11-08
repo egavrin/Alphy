@@ -30,7 +30,14 @@ class TestFixWorkflowTest {
         {"behavior":{"status":"checkable","scenario":{"slots":{"enter":{"kind":"action"},"apply":{"kind":"action"},
         "result":{"kind":"value"}},"steps":[{"op":"action","slot":"enter","value":7},
         {"op":"action","slot":"apply"},{"op":"assert","slot":"result","test":"equals","value":$expected}]}},
-        "targets":{"enter":"action1","apply":"action2","result":"value4"}}
+        "targets":{"enter":"action1","apply":"action2","result":"value4"},"authoredReproduction":null}
+    """.trimIndent()
+
+    private val naturalRequest = "Test and fix the app. Put 7 in Amount, tap Double, and check that Result is 14."
+    private val authoredReproduction = """
+        [{"text":"Put 7 in Amount","target":"action1","value":"7"},
+        {"text":"tap Double","target":"action2"},
+        {"text":"Result is 14","target":"value4","value":"14"}]
     """.trimIndent()
 
     private fun patch() = JSONObject().put("sourceEdits", JSONArray()
@@ -85,17 +92,38 @@ class TestFixWorkflowTest {
         assertEquals(4, provider.calls.size)
     }
 
+    @Test fun confirmsAndRepairsAnAssertionFromNaturalLanguage(): Unit = runBlocking {
+        val proposal = JSONObject(scenario(14)).put("authoredReproduction", JSONArray(authoredReproduction))
+        val provider = Provider(proposal.toString(), patch())
+        val workingWithoutCrash = definition.replace("if(s.amount===7)throw Error('bad');", "")
+        val assertionPatch = """{"sourceEdits":[{"search":"s.result=s.amount;","replace":"s.result=s.amount*2;"}]}"""
+        val repairProvider = Provider(proposal.toString(), assertionPatch)
+        val result = ToolGenerationService(repairProvider, SandboxClient(context)).testAndFix(
+            "fixture", naturalRequest, tool(workingWithoutCrash), false, CloudSession())
+        assertEquals(TestFixStatus.VERIFIED, result.status)
+        assertEquals(2, repairProvider.calls.size)
+        assertNotNull(result.candidate)
+
+        val alteredRequest = naturalRequest.replace("Result is 14", "Result is 140")
+        val unverified = ToolGenerationService(provider, SandboxClient(context)).testAndFix(
+            "fixture", alteredRequest, tool(workingWithoutCrash), false, CloudSession())
+        assertEquals(TestFixStatus.UNVERIFIED, unverified.status)
+        assertEquals(1, provider.calls.size)
+        assertNull(unverified.candidate)
+    }
+
     @Test fun omittedInputCannotTurnAnAuthoredExpectationIntoPermissionToPatch(): Unit = runBlocking {
         val proposal = JSONObject(scenario(14)).apply {
             val scenario = getJSONObject("behavior").getJSONObject("scenario")
             scenario.getJSONObject("slots").remove("enter")
             scenario.getJSONArray("steps").remove(0)
             getJSONObject("targets").remove("enter")
+            put("authoredReproduction", JSONArray(authoredReproduction))
         }.toString()
         val provider = Provider(proposal)
         val working = definition.replace("if(s.amount===7)throw Error('bad');s.result=s.amount;", "s.result=s.amount*2;")
         val result = ToolGenerationService(provider, SandboxClient(context)).testAndFix(
-            "fixture", "Test and fix this app.\nInput Amount = 7\nExpected Result = 14", tool(working), false, CloudSession())
+            "fixture", naturalRequest, tool(working), false, CloudSession())
         assertEquals(TestFixStatus.UNVERIFIED, result.status)
         assertEquals(1, provider.calls.size)
         assertNull(result.candidate)
@@ -120,7 +148,9 @@ class TestFixWorkflowTest {
                 {"behavior":{"status":"checkable","scenario":{"slots":{"reset":{"kind":"action"},
                 "board":{"kind":"surface"},"result":{"kind":"value"}},
                 "steps":[{"op":"action","slot":"reset"},$event,{"op":"assert","slot":"result","test":"equals","value":0}]}},
-                "targets":{"reset":"action2","board":"surface5","result":"value4"}}
+                "targets":{"reset":"action2","board":"surface5","result":"value4"},
+                "authoredReproduction":[{"text":"Press Reset","target":"action2"},
+                {"text":"Expected Result = 0","target":"value4","value":"0"}]}
             """.trimIndent()
             val provider = Provider(proposal)
             val result = ToolGenerationService(provider, SandboxClient(context)).testAndFix(

@@ -316,7 +316,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                     check(it.conversationId == conversationId && it.acceptedRevision == null)
                     engine.reject(operationId)
                 }
-                engine.createDraft(prompt,target?.id,conversationId,operationId,target,originalRequest)
+                engine.createDraft(prompt,target?.id,conversationId,operationId,target)
                 created = true
             }
             withContext(Dispatchers.IO) { generateWithPreview(operationId,key,images,call,originalRequest) }

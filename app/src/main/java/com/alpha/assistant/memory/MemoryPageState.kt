@@ -33,7 +33,7 @@ internal class MemoryPageState(private val store: MemoryStore, private val scope
     var saveFailed by mutableStateOf(false)
         private set
     private var editRejection by mutableStateOf<MemoryRejection?>(null)
-    private var onPrefillSaved: (() -> Unit)? = null
+    private var chatFact by mutableStateOf(false)
 
     private val canOpenEditor: Boolean get() = !busy && draft == null && deleteTarget == null
 
@@ -55,13 +55,13 @@ internal class MemoryPageState(private val store: MemoryStore, private val scope
         draft = MemoryDraft(fact)
     }
 
-    internal val reviewingChatFact get() = draft != null && onPrefillSaved != null
+    internal val reviewingChatFact get() = draft != null && chatFact
 
-    /** Open the exact user-authored text for review. Notify the retained host after a successful save. */
-    fun tryOpenPrefilledEditor(text: String, onSaved: () -> Unit): Boolean {
+    /** Open the exact user-authored text for review. */
+    fun tryOpenPrefilledEditor(text: String): Boolean {
         if (!canOpenEditor || text.isBlank()) return false
         notice = null
-        onPrefillSaved = onSaved
+        chatFact = true
         draft = MemoryDraft(text = text)
         return true
     }
@@ -84,7 +84,7 @@ internal class MemoryPageState(private val store: MemoryStore, private val scope
         discardDraft = false
         editRejection = null
         saveFailed = false
-        onPrefillSaved = null
+        chatFact = false
     }
 
     fun useCurrentRevision() {
@@ -113,11 +113,7 @@ internal class MemoryPageState(private val store: MemoryStore, private val scope
                 else store.edit(original.id, original.revision, editing.text)
             }
             when (val error = result.exceptionOrNull()) {
-                null -> {
-                    val onSaved = onPrefillSaved
-                    closeEditor()
-                    onSaved?.invoke()
-                }
+                null -> closeEditor()
                 is MemoryStoreException -> editRejection = error.reason
                 else -> {
                     saveFailed = true
