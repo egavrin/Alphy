@@ -32,10 +32,15 @@ class DrawerWorkflowTest {
         fixture.launch().use { scenario ->
             robot.waitFor("Alpha message")
             robot.openDrawer(scenario)
-            val rows = listOf(R.string.search, R.string.new_chat, R.string.mini_apps, R.string.automations, R.string.recent)
-                .map { robot.text(it) } + "Beta chat" + robot.text(R.string.profile)
+            val rows = listOf(R.string.search, R.string.mini_apps, R.string.automations, R.string.course_learning, R.string.recent)
+                .map { robot.text(it) } + "Beta chat"
             for ((upper, lower) in rows.zipWithNext()) assertTrue("$upper ends above $lower", robot.bounds(upper).bottom <= robot.bounds(lower).top)
-            robot.assertTarget(robot.text(R.string.settings))
+            robot.assertTarget(robot.text(R.string.search))
+            val newChat = robot.assertTarget(robot.text(R.string.new_chat))
+            val settings = robot.assertTarget(robot.text(R.string.settings))
+            assertTrue("Footer sits below history", robot.bounds("Beta chat").bottom <= newChat.top)
+            assertEquals("Both footer actions share a row", newChat.top, settings.top)
+            assertTrue("New Chat is left of Settings", newChat.right <= settings.left)
             robot.back()
             robot.awaitDrawerClosed(scenario)
             robot.waitFor("Alpha message")
@@ -49,6 +54,26 @@ class DrawerWorkflowTest {
             robot.awaitDrawerClosed(scenario)
             robot.waitGone("Beta message")
             robot.waitUntil { fixture.model?.snapshot?.selectedId == null }
+        }
+    }
+
+    @Test fun footerStaysReachableWhileHistoryScrolls() {
+        fixture.seedChat("alpha", "Alpha chat", "Alpha message", selected = true)
+        repeat(30) { index ->
+            fixture.seedChat("chat-$index", "Recent conversation $index", "Sample message", updatedAt = index + 2L)
+        }
+        fixture.launch().use { scenario ->
+            robot.waitFor("Alpha message")
+            robot.openDrawer(scenario)
+            val actions = listOf(R.string.search, R.string.new_chat, R.string.settings).map { robot.text(it) }
+            val before = actions.map(robot::assertTarget)
+            assertTrue("The drawer scrolls through recent chats", robot.scrollForward())
+            assertEquals("Header and footer stay visible and in place", before, actions.map(robot::assertTarget))
+
+            robot.click(robot.closeDrawerLabel(scenario))
+            robot.awaitDrawerClosed(scenario)
+            robot.waitFor("Alpha message")
+            assertEquals("alpha", selectedId(scenario))
         }
     }
 
@@ -130,7 +155,7 @@ class DrawerWorkflowTest {
             robot.waitFor("Alpha message")
             robot.openDrawer(scenario)
             var settledRight = 0f
-            scenario.onActivity { settledRight = robot.drawerRowRight(it) }
+            scenario.onActivity { settledRight = robot.drawerRight(it) }
             assertTrue("Open drawer has a visible row", settledRight > 0)
             robot.back()
             robot.awaitDrawerClosed(scenario)
@@ -150,6 +175,9 @@ class DrawerWorkflowTest {
                 // The Compose observer can retain the old scale while no window is subscribed.
                 robot.shell("settings put global animator_duration_scale 0")
                 awaitComposeScale(0f)
+                robot.openDrawer(scenario)
+                robot.back()
+                robot.awaitDrawerClosed(scenario)
                 robot.shell("settings put global animator_duration_scale 1")
                 awaitComposeScale(1f)
                 robot.withBackInput(scenario) { input ->
@@ -159,7 +187,7 @@ class DrawerWorkflowTest {
                     lateinit var frame: Choreographer.FrameCallback
                     scenario.onActivity { activity ->
                         frame = Choreographer.FrameCallback {
-                            val right = robot.drawerRowRight(activity)
+                            val right = robot.drawerRight(activity)
                             if (right > 0 && right < settledRight) {
                                 input.complete()
                                 backSent.countDown()
@@ -176,7 +204,7 @@ class DrawerWorkflowTest {
                     var open = false
                     robot.waitUntil {
                         var settled = false
-                        scenario.onActivity { open = robot.scrimLabeled(it); settled = open || robot.drawerRowRight(it) == 0f }
+                        scenario.onActivity { open = robot.scrimLabeled(it); settled = open || robot.drawerRight(it) == 0f }
                         settled
                     }
                     assertFalse("Back during the open animation closes the drawer", open)

@@ -22,6 +22,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** Saves system screenshots and the node list for each screen. */
@@ -57,6 +58,51 @@ class ShellScreenshotTest {
         } finally {
             try { setNight(night, nightBits) } finally { setScale(scale) }
             assertEquals(scale, robot.shell("settings get system font_scale"))
+        }
+    }
+
+    @Test fun captureDrawerAndChatIcons() {
+        val night = checkNotNull(Regex("""Night mode: (\S+)""").find(robot.shell("cmd uimode night"))).groupValues[1]
+        val nightBits = Resources.getSystem().configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        val scale = robot.shell("settings get system font_scale")
+        val root = checkNotNull(fixture.context.getExternalFilesDir("alphy-drawer-screens"))
+        fixture.install()
+        fixture.store.saveSetting("userName", "Евгений")
+        fixture.seedChat("trip", title, message, selected = true)
+        listOf("Возможности Android", "Приложение для расчета процентов", "Идеи для автоматизаций",
+            "Погода в Москве", "График индекса Мосбиржи", "План на выходные").forEachIndexed { index, recent ->
+            fixture.seedChat("recent-$index", recent, "Пример разговора", updatedAt = index + 2L)
+        }
+        try {
+            for ((mode, bits) in listOf("no" to Configuration.UI_MODE_NIGHT_NO, "yes" to Configuration.UI_MODE_NIGHT_YES)) {
+                setNight(mode, bits)
+                for (size in listOf("1.0", "2.0")) {
+                    setScale(size)
+                    fixture.launch().use { scenario ->
+                        val directory = File(root, "$mode-$size").apply { mkdirs() }
+                        robot.waitFor(message)
+                        robot.assertTarget(robot.text(R.string.new_chat))
+                        screen(directory, "chat").recycle()
+                        robot.openDrawer(scenario)
+                        robot.assertTarget(robot.text(R.string.search))
+                        val newChat = robot.assertTarget(robot.text(R.string.new_chat))
+                        val settings = robot.assertTarget(robot.text(R.string.settings))
+                        scenario.onActivity { activity ->
+                            val width = activity.window.decorView.width
+                            val density = activity.resources.displayMetrics.density
+                            val expected = (width * 0.75f).coerceIn(360 * density, 560 * density)
+                                .coerceAtMost(width - 56 * density)
+                            assertTrue("Drawer width for $width px is $expected px", abs(robot.drawerRight(activity) - expected) <= 2f)
+                            if (width <= 320 * density && size == "2.0") {
+                                assertTrue("Large labels have separate rows at 320 dp", newChat.bottom <= settings.top)
+                            }
+                        }
+                        screen(directory, "drawer").recycle()
+                    }
+                }
+            }
+        } finally {
+            try { setNight(night, nightBits) } finally { setScale(scale) }
         }
     }
 

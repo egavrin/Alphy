@@ -245,7 +245,7 @@ import kotlinx.coroutines.launch
             pairSettings = destination == ShellDestination.Settings,
         ) { paneLayout ->
             val sceneStrategies = shellSceneStrategies(paneLayout)
-            ModalNavigationDrawer({
+            ShellModalDrawer({
                 ShellDrawerSheet(drawerState, snapshot.conversations, snapshot.selectedId, destination, snapshot.userName.ifBlank { stringResource(R.string.profile) },
                     {
                         if (it == ShellDestination.MiniApps) model.tools.select(null)

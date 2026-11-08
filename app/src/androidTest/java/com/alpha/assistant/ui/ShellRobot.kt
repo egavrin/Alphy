@@ -299,11 +299,13 @@ internal class ShellRobot(fixture: String) {
         }
         assertTrue("$count frames did not pass within 10 seconds", frames.await(10, TimeUnit.SECONDS))
     }
-    /** The visible right edge of the Search row. Read on the main thread. */
-    fun drawerRowRight(activity: Activity): Float = nodes(activity, merged = true).firstOrNull { node ->
-        node.config.getOrNull(SemanticsProperties.Text)?.any { it.text.trimEnd() == text(R.string.search) } == true &&
-            SemanticsActions.OnClick in node.config && node.boundsInRoot.width > 0f
-    }?.boundsInRoot?.right ?: 0f
+    /** The visible right edge of the modal drawer. Read on the main thread. */
+    fun drawerRight(activity: Activity): Float {
+        val title = activity.getString(androidx.compose.ui.R.string.navigation_menu)
+        return nodes(activity).firstOrNull { node ->
+            node.config.getOrNull(SemanticsProperties.PaneTitle) == title && node.boundsInRoot.width > 0f
+        }?.boundsInRoot?.right ?: 0f
+    }
     /** Main thread only. The scrim has its label only while the drawer is settled open. */
     fun scrimLabeled(activity: Activity): Boolean = activity.getString(androidx.compose.ui.R.string.close_drawer).let { label ->
         nodes(activity).any { it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(label) == true }
@@ -427,7 +429,7 @@ internal class ShellRobot(fixture: String) {
         }
     }
     // A library label comes from the activity resources, which have the Russian app locale.
-    private fun closeDrawerLabel(scenario: ActivityScenario<*>): String {
+    fun closeDrawerLabel(scenario: ActivityScenario<*>): String {
         var label = ""
         scenario.onActivity { label = it.getString(androidx.compose.ui.R.string.close_drawer) }
         return label
