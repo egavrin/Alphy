@@ -41,9 +41,12 @@ import androidx.core.content.ContextCompat
 import com.alpha.assistant.R
 import com.alpha.assistant.ui.*
 
+private const val NEW_CHAT_PENDING = "new_chat_pending"
+
 /** The compact and full activities share chat, drafts, and active requests. */
 class AssistantActivity : AlphyActivity() {
     private var invocation by mutableStateOf<String?>(null)
+    private var newChatPending by mutableStateOf(false)
     private var lockedLaunch by mutableStateOf(false)
     private val screenOff = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -55,7 +58,8 @@ class AssistantActivity : AlphyActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
-        receiveInvocation(intent)
+        newChatPending = savedInstanceState?.getBoolean(NEW_CHAT_PENDING) == true
+        receiveInvocation(intent, newEntry = savedInstanceState == null)
         ContextCompat.registerReceiver(this, screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF), ContextCompat.RECEIVER_NOT_EXPORTED)
         setContent {
             AlphaTheme {
@@ -72,35 +76,50 @@ class AssistantActivity : AlphyActivity() {
                             }
                         } else {
                             val model = remember { AssistantChat.model(application) }
-                            val chat = model.snapshot.selected
-                            val latest = chat?.messages?.lastOrNull { it.role == "assistant" }
-                            val answer = latest?.let { model.activeAnswer(it.id) ?: it.text }.orEmpty()
-                            val longAnswer = answer.length >= (520 / density.fontScale).toInt() || answer.count { it == '\n' } >= 9
-                            val expanded = longAnswer || keyboard || maxHeight < 420.dp ||
-                                model.snapshot.draft.attachments.isNotEmpty()
-                            Surface(panel.height(if (expanded) maxHeight else compactHeight), shape = MaterialTheme.shapes.extraLarge) {
-                                CompactAssistant(
-                                    model = model,
-                                    invocation = invocation,
-                                    canUseCapture = ::canUseCapture,
-                                    compact = maxHeight < 360.dp,
-                                    full = { openApp() },
-                                    openTool = {
-                                        val id = model.tools.selectedId
-                                        if (id == null) {
-                                            model.openCreationSurface(ShellDestination.MiniApps, "")
+                            if (newChatPending && !model.loadFailed) {
+                                // Select the new chat before the composer can bind the screenshot.
+                                LaunchedEffect(model.loading) {
+                                    if (newChatPending && !model.loading && !lockedLaunch && !isFinishing) {
+                                        model.select(null)
+                                        newChatPending = false
+                                    }
+                                }
+                                Surface(panel.height(compactHeight), shape = MaterialTheme.shapes.extraLarge) {
+                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator()
+                                    }
+                                }
+                            } else {
+                                val chat = model.snapshot.selected
+                                val latest = chat?.messages?.lastOrNull { it.role == "assistant" }
+                                val answer = latest?.let { model.activeAnswer(it.id) ?: it.text }.orEmpty()
+                                val longAnswer = answer.length >= (520 / density.fontScale).toInt() || answer.count { it == '\n' } >= 9
+                                val expanded = longAnswer || keyboard || maxHeight < 420.dp ||
+                                    model.snapshot.draft.attachments.isNotEmpty()
+                                Surface(panel.height(if (expanded) maxHeight else compactHeight), shape = MaterialTheme.shapes.extraLarge) {
+                                    CompactAssistant(
+                                        model = model,
+                                        invocation = invocation,
+                                        canUseCapture = ::canUseCapture,
+                                        compact = maxHeight < 360.dp,
+                                        full = { openApp() },
+                                        openTool = {
+                                            val id = model.tools.selectedId
+                                            if (id == null) {
+                                                model.openCreationSurface(ShellDestination.MiniApps, "")
+                                                openApp(preserveDestination = true)
+                                            } else {
+                                                openApp(toolId = id)
+                                            }
+                                        },
+                                        providerSettings = { openApp(providerSettings = true) },
+                                        openAutomation = { id ->
+                                            model.openAutomationSurface(id)
                                             openApp(preserveDestination = true)
-                                        } else {
-                                            openApp(toolId = id)
-                                        }
-                                    },
-                                    providerSettings = { openApp(providerSettings = true) },
-                                    openAutomation = { id ->
-                                        model.openAutomationSurface(id)
-                                        openApp(preserveDestination = true)
-                                    },
-                                    dismiss = ::finish,
-                                )
+                                        },
+                                        dismiss = ::finish,
+                                    )
+                                }
                             }
                         }
                     }
@@ -115,8 +134,17 @@ class AssistantActivity : AlphyActivity() {
         receiveInvocation(intent)
     }
 
-    private fun receiveInvocation(intent: Intent) {
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(NEW_CHAT_PENDING, newChatPending)
+    }
+
+    private fun receiveInvocation(intent: Intent, newEntry: Boolean = true) {
         val incoming = intent.getStringExtra(ASSIST_INVOCATION)
+        if (newEntry && (incoming == null || incoming != invocation)) {
+            newChatPending = intent.action == Intent.ACTION_ASSIST ||
+                (incoming != null && incoming == AssistantCapture.current?.id)
+        }
         invocation?.takeIf { it != incoming }?.let(AssistantCapture::close)
         invocation = incoming
         lockedLaunch = assistantUnavailable()

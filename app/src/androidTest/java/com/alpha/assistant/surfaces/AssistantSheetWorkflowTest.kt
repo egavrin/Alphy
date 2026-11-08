@@ -22,6 +22,7 @@ import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.data.Conversation
 import com.alpha.assistant.data.Draft
+import com.alpha.assistant.data.Message
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
@@ -41,6 +42,60 @@ class AssistantSheetWorkflowTest {
     private val app = robot.instrumentation.targetContext.applicationContext as AssistantFixtureApplication
     private val composer get() = robot.text(R.string.composer_label)
     private val review get() = robot.text(R.string.assistant_review_title)
+
+    @Test fun systemInvocationStartsNewChatBeforeAttachingScreenshot() = withFixture { fixture, provider ->
+        val oldAnswer = "Answer from the previously selected chat"
+        val oldChat = Conversation(
+            "old-chat", "Previous chat", 1, 2, Draft("Unsent text in the previous chat"),
+            messages = listOf(
+                Message("old-question", "user", "Question from the previous chat", 1, "complete"),
+                Message("old-answer", "assistant", oldAnswer, 2, "complete", replyTo = "old-question"),
+            ),
+        )
+        fixture.store.saveConversation(oldChat)
+        fixture.store.saveSetting("selected", oldChat.id)
+
+        launch(capture("First external screen")).use { scenario ->
+            val attached = robot.text(R.string.assistant_image_attached)
+            robot.waitFor(attached)
+            assertNull("The sheet must not show the previous answer", robot.find(oldAnswer))
+            assertNull(robot.find(oldChat.draft.text))
+            assertTrue(provider.requests.isEmpty())
+
+            val question = "What is on this new screen?"
+            robot.edit(composer, question)
+            robot.click(robot.text(R.string.composer_send))
+            robot.waitUntil { provider.requests.size == 1 }
+            val turn = provider.requests.single().turns.single()
+            assertEquals(question, turn.text)
+            assertEquals(1, turn.images.size)
+            provider.complete.complete(Unit)
+            robot.waitFor(provider.reply)
+
+            scenario.recreate()
+            robot.waitFor(provider.reply)
+            app.startActivity(intent(capture("Second external screen")))
+            robot.waitFor(attached)
+            assertNull(robot.find(provider.reply))
+            assertEquals(1, provider.requests.size)
+
+            robot.click(robot.text(R.string.menu))
+            robot.click(robot.text(R.string.assistant_history))
+            robot.click(oldChat.title)
+            robot.waitFor(oldAnswer)
+        }
+
+        ActivityScenario.launch<AssistantActivity>(intent(null).setAction(Intent.ACTION_ASSIST)).use {
+            robot.waitFor(composer)
+            assertNull(robot.find(oldAnswer))
+            assertNull(robot.find(oldChat.draft.text))
+        }
+
+        val saved = fixture.store.load().conversations
+        assertEquals(oldChat, saved.single { it.id == oldChat.id })
+        val image = saved.single { it.id != oldChat.id }.messages.flatMap { it.attachments }.single()
+        assertTrue(AssistContext.mediaFile(app, android.net.Uri.parse(image.uri)).delete())
+    }
 
     @Test fun reviewDiscardAndReplacementStayLocalUntilSend() = withFixture { fixture, provider ->
         val discarded = capture("Discard this screen", withImage = false)
@@ -243,7 +298,7 @@ class AssistantSheetWorkflowTest {
             val active = capture("Private screen capture")
             launch(active).use { scenario ->
                 robot.waitFor(robot.text(R.string.assistant_image_attached))
-                robot.waitFor("Private draft to keep")
+                assertNull(robot.find(chat.draft.text))
                 robot.shell("input keyevent KEYCODE_SLEEP")
                 robot.waitUntil { !power.isInteractive && scenario.state == Lifecycle.State.DESTROYED }
                 assertNull(AssistantCapture.current)
@@ -261,7 +316,13 @@ class AssistantSheetWorkflowTest {
             }
             robot.shell("wm dismiss-keyguard")
             robot.waitUntil { !keyguard.isKeyguardLocked }
-            launch().use { robot.waitFor("Private draft to keep") }
+            launch().use {
+                robot.waitFor(composer)
+                robot.click(robot.text(R.string.menu))
+                robot.click(robot.text(R.string.assistant_history))
+                robot.click(chat.title)
+                robot.waitFor(chat.draft.text)
+            }
             assertTrue(provider.requests.isEmpty())
         } finally {
             robot.shell("input keyevent KEYCODE_WAKEUP")
