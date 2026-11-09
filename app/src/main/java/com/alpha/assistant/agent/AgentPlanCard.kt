@@ -130,7 +130,7 @@ private fun AgentStatus(plan: AgentPlan) {
         AgentPhase.UNAVAILABLE -> stringResource(R.string.agent_unavailable)
         AgentPhase.RUNNING -> stringResource(R.string.agent_running, (plan.results.size + 1).coerceAtMost(plan.steps.size), plan.steps.size)
         AgentPhase.WAITING_FOR_CAMERA -> stringResource(R.string.agent_waiting_for_camera)
-        AgentPhase.COMPLETED -> stringResource(R.string.agent_completed)
+        AgentPhase.COMPLETED -> stringResource(if (plan.alarmSequence()) R.string.agent_alarms_sent else R.string.agent_completed)
         AgentPhase.FAILED -> stringResource(R.string.agent_failed)
         AgentPhase.STOPPED -> stringResource(R.string.agent_stopped)
         AgentPhase.INTERRUPTED -> stringResource(R.string.agent_interrupted)

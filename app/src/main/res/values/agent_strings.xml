@@ -38,6 +38,9 @@
     <string name="agent_unavailable">Действие недоступно. Проверьте разрешения, владельца или уточните запрос.</string>
     <string name="agent_no_handler">Нет приложения для этого системного действия.</string>
     <string name="agent_launched">Системное приложение открыто. Завершение действия не подтверждено.</string>
+    <string name="agent_alarm_sent">Запрос передан в «Часы». Создание будильника не подтверждено.</string>
+    <string name="agent_alarms_sent">Запросы на будильники переданы в «Часы».</string>
+    <string name="agent_alarm_no_handler">Выберите приложение «Часы» по умолчанию или установите совместимое приложение.</string>
     <string name="agent_launch">Открыть системное приложение</string>
     <string name="agent_calendar_read_only">Только чтение: другой организатор или нет доступа на изменение.</string>
     <string name="agent_calendar_all_day">Изменение времени доступно только для событий с точным временем.</string>

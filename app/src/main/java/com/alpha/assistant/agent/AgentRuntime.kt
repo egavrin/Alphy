@@ -1,11 +1,13 @@
 package com.alpha.assistant.agent
 
+import android.content.ActivityNotFoundException
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.graphics.Bitmap
+import android.provider.AlarmClock
 import com.alpha.assistant.R
 import com.alpha.assistant.capabilities.CapabilityResult
 import com.alpha.assistant.capabilities.PHOTO_CAPTURE
@@ -120,8 +122,13 @@ internal class AgentRuntime(
 
     suspend fun execute(run: AgentPlan, active: suspend () -> Boolean, launch: suspend (Intent) -> Unit,
         capture: suspend (PhotoLens) -> Pair<String, Bitmap?> = { "unavailable" to null },
+        launchAlarm: (suspend (Intent) -> Unit)? = null,
         onUpdate: suspend (AgentPlan) -> Unit = {}): AgentPlan {
         require(run.phase == AgentPhase.RUNNING)
+        val launchStep: suspend (Intent) -> Unit = if (run.alarmSequence()) { intent ->
+            val dispatch = launchAlarm ?: throw ActivityNotFoundException("Alarm return handler is unavailable")
+            dispatch(intent.putExtra(AlarmClock.EXTRA_SKIP_UI, true))
+        } else launch
         var interrupted = false
         try {
             for (index in run.results.size until run.steps.size) {
@@ -163,7 +170,7 @@ internal class AgentRuntime(
                             "denied" -> R.string.capability_permission_required
                             else -> R.string.camera_unavailable
                         }))
-                    } else actions.execute(step.command, target, run.conversationId, ::mayStart, launch)
+                    } else actions.execute(step.command, target, run.conversationId, ::mayStart, launchStep)
                 } catch (cancel: CancellationException) { throw cancel }
                 catch (_: SecurityException) {
                     com.alpha.assistant.capabilities.CapabilityResult("denied", context.getString(R.string.capability_permission_required))
@@ -196,18 +203,25 @@ internal class AgentRuntime(
             } catch (_: Exception) {
                 CapabilityResult("failed", context.getString(R.string.camera_unavailable))
             }
+            val alarmSequence = run.alarmSequence()
+            val returnedAlarm = alarmSequence && outcome.status == "launched"
             val recorded = journal.update(run.id) {
                 check(it.claimed == index)
                 val phase = when {
                     it.stopRequested -> AgentPhase.STOPPED
-                    outcome.status == "succeeded" && index < run.steps.lastIndex -> AgentPhase.RUNNING
+                    (outcome.status == "succeeded" || returnedAlarm) && index < run.steps.lastIndex -> AgentPhase.RUNNING
                     outcome.status in setOf("succeeded", "launched") && index == run.steps.lastIndex -> AgentPhase.COMPLETED
                     outcome.status == "launched" && index == 0 && run.timerThenPhoto() -> AgentPhase.WAITING_FOR_CAMERA
                     outcome.status == "launched" || (outcome.status == "cancelled" && run.steps[index].command.function == PHOTO_CAPTURE) -> AgentPhase.STOPPED
                     else -> AgentPhase.FAILED
                 }
                 val keep = file != null && outcome.status == "succeeded" && !it.stopRequested
-                val message = if (file != null && it.stopRequested) context.getString(R.string.camera_cancelled) else outcome.message
+                val message = when {
+                    file != null && it.stopRequested -> context.getString(R.string.camera_cancelled)
+                    returnedAlarm -> context.getString(R.string.agent_alarm_sent)
+                    alarmSequence && outcome.status == "unavailable" -> context.getString(R.string.agent_alarm_no_handler)
+                    else -> outcome.message
+                }
                 it.copy(claimed = null, phase = phase, results = it.results + message,
                     keptPhotos = if (keep) it.keptPhotos + index else it.keptPhotos)
             }

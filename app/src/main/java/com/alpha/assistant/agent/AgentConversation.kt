@@ -2,6 +2,7 @@ package com.alpha.assistant.agent
 
 import android.app.Application
 import android.app.KeyguardManager
+import android.content.Intent
 import android.graphics.Bitmap
 import android.os.PowerManager
 import androidx.activity.ComponentActivity
@@ -58,6 +59,7 @@ internal class AgentConversation(private val app: Application, private val scope
     private data class ClockReturn(val planId: String, val revision: Int, val activity: ComponentActivity,
         val departed: Boolean = false, val returned: Boolean = false)
     private var clockReturn by mutableStateOf<ClockReturn?>(null)
+    private var alarmSequence: ClockAlarmSequence? = null
     private var captureHost: ComponentActivity? = null
     private var photoCapture by mutableStateOf<PhotoCapture?>(null)
     private var photoChat by mutableStateOf<String?>(null)
@@ -76,10 +78,12 @@ internal class AgentConversation(private val app: Application, private val scope
         if (!attached) {
             hosts.remove(activity)?.let(activity.lifecycle::removeObserver)
             if (captureHost === activity) photoCapture?.finish("cancelled")
+            alarmSequence?.takeIf { it.activity === activity }?.let(::stopAlarms)
             return
         }
         if (activity in hosts) return
         val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_DESTROY) alarmSequence?.takeIf { it.activity === activity }?.let(::stopAlarms)
             val handoff = clockReturn?.takeIf { it.activity === activity } ?: return@LifecycleEventObserver
             when (event) {
                 Lifecycle.Event.ON_PAUSE -> clockReturn = handoff.copy(departed = true, returned = false)
@@ -184,6 +188,7 @@ internal class AgentConversation(private val app: Application, private val scope
     }
 
     fun chatChanged(conversation: String?) {
+        alarmSequence?.takeIf { it.plan.conversationId != conversation }?.let(::stopAlarms)
         plan?.takeIf { it.conversationId != conversation }?.let { previous ->
             photoCapture?.finish("cancelled")
             if (clockReturn?.planId == previous.id) {
@@ -273,9 +278,12 @@ internal class AgentConversation(private val app: Application, private val scope
         clockReturn?.let { it.planId == expected.id && it.revision == expected.revision && it.returned } == true
 
     fun execute(expected: AgentPlan) {
-        if (busy || running?.isActive == true || expected != plan || selectedChat() != expected.conversationId || foreground() == null) return
+        if (busy || running?.isActive == true || expected != plan || selectedChat() != expected.conversationId) return
+        val origin = foreground() ?: return
         val continuing = expected.phase == AgentPhase.WAITING_FOR_CAMERA
         if (continuing && !canContinue(expected)) return
+        val alarms = if (expected.alarmSequence()) ClockAlarmSequence(expected, origin) else null
+        alarmSequence = alarms
         busy = true
         error = false
         running = scope.launch {
@@ -287,7 +295,7 @@ internal class AgentConversation(private val app: Application, private val scope
                         plan = approved
                         busy = false
                     }
-                    val finished = runtime.execute(approved, active = { awaitForeground(approved.conversationId) }, launch = { intent ->
+                    val finished = runtime.execute(approved, active = { awaitForeground(approved.conversationId, alarms) }, launch = { intent ->
                         withContext(Dispatchers.Main) {
                             val activity = foreground()?.takeIf { selectedChat() == approved.conversationId }
                                 ?: throw SecurityException("Foreground approval expired")
@@ -296,15 +304,31 @@ internal class AgentConversation(private val app: Application, private val scope
                             catch (failure: Exception) { clockReturn = null; throw failure }
                         }
                     }, capture = { lens -> withContext(Dispatchers.Main.immediate) { capturePhoto(approved, lens) } },
+                        launchAlarm = alarms?.let { sequence -> { intent -> dispatchAlarm(sequence, intent) } },
                         onUpdate = { state -> withContext(Dispatchers.Main) { showRun(state) } })
                     withContext(Dispatchers.Main) { showRun(finished) }
                 }
             } catch (cancel: CancellationException) { throw cancel }
             catch (_: Exception) { error = true }
             finally {
+                alarmSequence = null
                 busy = false
                 selectedChat()?.takeIf { it != expected.conversationId }?.let(::load)
             }
+        }
+    }
+
+    private suspend fun dispatchAlarm(alarms: ClockAlarmSequence, intent: Intent): Unit = withContext(Dispatchers.Main) {
+        try {
+            val expected = alarms.plan
+            val step = plan?.takeIf { it.id == expected.id && it.revision == expected.revision }?.claimed
+            if (step == null || alarms.stopping || selectedChat() != expected.conversationId || foreground() !== alarms.activity) {
+                throw SecurityException("Foreground alarm approval expired")
+            }
+            check(alarms.dispatch(intent, step) && awaitForeground(expected.conversationId, alarms))
+        } finally {
+            // Clock can return while Stop is still being recorded on IO.
+            alarms.awaitStopRecorded()
         }
     }
 
@@ -326,13 +350,17 @@ internal class AgentConversation(private val app: Application, private val scope
         }
     }
 
-    private suspend fun awaitForeground(conversation: String): Boolean = withContext(Dispatchers.Main) {
-        // The compact panel can pause before the full chat resumes during a handoff.
-        withTimeoutOrNull(750) {
-            while (selectedChat() == conversation && foreground() == null) delay(25)
-            selectedChat() == conversation && foreground() != null
-        } ?: false
-    }
+    private suspend fun awaitForeground(conversation: String, alarms: ClockAlarmSequence? = null): Boolean =
+        withContext(Dispatchers.Main) {
+            // The compact panel can pause before the full chat resumes during a handoff.
+            fun active() = selectedChat() == conversation && alarms?.stopping != true
+            val ready = withTimeoutOrNull(750) {
+                while (active() && foreground() == null) delay(25)
+                active() && foreground()?.let { alarms == null || it === alarms.activity } == true
+            } == true
+            alarms?.awaitStopRecorded()
+            ready && alarms?.stopping != true
+        }
 
     private suspend fun showRun(state: AgentPlan) {
         val previous = plan?.takeIf { it.id == state.id } ?: return
@@ -341,7 +369,19 @@ internal class AgentConversation(private val app: Application, private val scope
         if (previous.keptPhotos != state.keptPhotos) refreshPhotos(state.conversationId)
     }
 
+    private fun stopAlarms(alarms: ClockAlarmSequence) {
+        if (!alarms.requestStop()) return
+        scope.launch {
+            try { withContext(Dispatchers.IO) { runtime.stop(alarms.plan.id) } }
+            finally { alarms.releaseWait() }
+        }
+    }
+
     fun stop(plan: AgentPlan) {
+        alarmSequence?.takeIf { it.plan.id == plan.id }?.let {
+            stopAlarms(it)
+            return
+        }
         if (clockReturn?.planId == plan.id) clockReturn = null
         if (this.plan?.id == plan.id) photoCapture?.finish("cancelled")
         scope.launch {
@@ -368,6 +408,8 @@ internal class AgentConversation(private val app: Application, private val scope
     }
 
     fun forget(conversation: String) {
+        val alarms = alarmSequence?.takeIf { it.plan.conversationId == conversation }
+        alarms?.let(::stopAlarms)
         if (plan?.conversationId == conversation) {
             cancelRevision()
             clockReturn = null
@@ -375,7 +417,7 @@ internal class AgentConversation(private val app: Application, private val scope
         }
         val run = running.takeIf { plan?.conversationId == conversation }
         scope.launch(Dispatchers.IO) {
-            runtime.latest(conversation)?.takeIf { it.phase == AgentPhase.RUNNING }?.let { runtime.stop(it.id) }
+            if (alarms == null) runtime.latest(conversation)?.takeIf { it.phase == AgentPhase.RUNNING }?.let { runtime.stop(it.id) }
             run?.join()
             runtime.forget(conversation)
         }

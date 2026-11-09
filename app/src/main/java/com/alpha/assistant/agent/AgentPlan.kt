@@ -109,6 +109,8 @@ internal data class AgentPlan(val id: String, val conversationId: String, val in
     val steps: List<AgentStep>, val permissions: List<String> = emptyList(), val phase: AgentPhase,
     val claimed: Int? = null, val results: List<String> = emptyList(), val stopRequested: Boolean = false,
     val keptPhotos: Set<Int> = emptySet()) {
+    fun alarmSequence() = steps.size > 1 && steps.all { it.command.function == "clock.setAlarm" }
+
     fun timerThenPhoto() = steps.size == 2 && steps[0].command.function == "clock.setTimer" &&
         steps[1].command.function == com.alpha.assistant.capabilities.PHOTO_CAPTURE
 }
