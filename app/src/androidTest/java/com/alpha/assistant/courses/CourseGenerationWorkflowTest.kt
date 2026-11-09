@@ -298,6 +298,54 @@ class CourseGenerationWorkflowTest {
         }
     }
 
+    @Test fun localizedChoiceSlidesGenerateOnceAndKeepGradesAfterReopen(): Unit = runBlocking {
+        val questions = mapOf(
+            "en" to "Which number is even?",
+            "ru" to "Какое число чётное?",
+            "it" to "Quale numero è pari?",
+        )
+        for ((language, question) in questions) withDatabase { context, name ->
+            val provider = LessonProvider().apply {
+                plan = lessonPlan(CourseSlideKind.CHOICE).put("language", language).put("title", question)
+                plan.getJSONArray("needs").getJSONObject(0).put("label", question).put("description", question)
+                plan.getJSONArray("constants").getJSONObject(0).put("value", "3")
+                plan.getJSONArray("constants").getJSONObject(1).put("value", "4")
+            }
+            val tools = ToolGenerationService(provider, SandboxClient(context))
+            val step = CourseSlidePlan("choice", CourseSlideKind.CHOICE, question)
+            val outline = CourseOutline(listOf(CourseLessonPlan("lesson", question, listOf(step))))
+            val courseId = CourseStore(context, name).use { store ->
+                val course = store.create(setup.copy(topic = question, goal = question), outline)
+                val controller = CourseController(store, tools)
+                controller.generate(course.id, course.revision, step.id, key, CloudSession())
+                val player = CoursePresentation(store, controller)
+                val slide = player.player(course.id) as CoursePage.Slide
+                val exercise = checkNotNull(slide.prompt)
+                assertEquals(question, exercise.question)
+                assertEquals(listOf("3", "4"), exercise.options.map { it.label })
+                val wrong = player.submit(slide, "wrong", CourseAnswer.Choice(exercise.options.first().id))
+                assertEquals(false, ((wrong as CoursePlayerUpdate.Open).page as CoursePage.Slide).feedback?.correct)
+                course.id
+            }
+            CourseStore(context, name).use { store ->
+                val player = CoursePresentation(store, CourseController(store, tools))
+                val slide = player.player(courseId) as CoursePage.Slide
+                val right = checkNotNull(slide.prompt).options.single { it.label == "4" }
+                assertEquals(false, slide.feedback?.correct)
+                val result = player.submit(slide, "right", CourseAnswer.Choice(right.id))
+                assertEquals(true, ((result as CoursePlayerUpdate.Open).page as CoursePage.Slide).feedback?.correct)
+            }
+            CourseStore(context, name).use { store ->
+                val player = CoursePresentation(store, CourseController(store, tools))
+                assertTrue(player.player(courseId) is CoursePage.Complete)
+                val slide = player.player(courseId, completedAnswerId = "right") as CoursePage.Slide
+                assertEquals(true, slide.feedback?.correct)
+                assertEquals(listOf(false, true), store.answers(courseId).map { it.correct })
+            }
+            assertEquals(language, lessonStages, provider.requests.map { it.generationStage })
+        }
+    }
+
     @Test fun keepsCompletedWorkWhenTheLessonRouteRejectsOrCancelsTheNextSlide(): Unit = runBlocking {
         withDatabase { context, name ->
             val provider = LessonProvider()
