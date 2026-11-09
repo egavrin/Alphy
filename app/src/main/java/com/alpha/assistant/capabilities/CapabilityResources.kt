@@ -1,12 +1,18 @@
 package com.alpha.assistant.capabilities
 
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.res.AssetFileDescriptor
 import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.CancellationSignal
+import android.os.ParcelFileDescriptor
+import android.provider.MediaStore
 import android.provider.OpenableColumns
+import androidx.core.content.FileProvider
+import com.alpha.assistant.media.MAX_CLIP_MILLIS
 import com.alpha.assistant.media.MAX_MEDIA_BYTES
 import com.alpha.assistant.tools.ToolStore
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -22,7 +28,8 @@ class CapabilityResources(private val context: Context, private val store: ToolS
         private val lock = Any()
         private val random = SecureRandom()
         private val selectionCapabilities = mapOf("photo" to "photo.pick", "document" to "file.pick",
-            "cameraPhoto" to "camera.capture", AudioContract.RESOURCE_KIND to AudioContract.PICK, VideoContract.RESOURCE_KIND to VideoContract.PICK)
+            "cameraPhoto" to "camera.capture", AudioContract.RESOURCE_KIND to AudioContract.PICK, VideoContract.RESOURCE_KIND to VideoContract.PICK,
+            VideoContract.CAPTURE_KIND to VideoContract.CAPTURE)
         internal fun resourceKind(capability: String) = selectionCapabilities.entries.firstOrNull { it.value == capability }?.key
     }
     data class Acquired(val result: CapabilityResult, val resource: CapabilityResource?)
@@ -33,6 +40,56 @@ class CapabilityResources(private val context: Context, private val store: ToolS
         require(name.matches(Regex("capture-[0-9a-fA-F-]{36}\\.jpg")))
         return File(context.filesDir,name).canonicalFile.also { require(it.parentFile == context.filesDir.canonicalFile) }
     }
+    private fun videoFile(name: String): File {
+        require(name.matches(Regex("capture-[0-9a-f-]{36}\\.mp4")))
+        val directory = File(context.filesDir, "capability-video").canonicalFile
+        return File(directory, name).canonicalFile.also { require(it.parentFile == directory) }
+    }
+
+    private fun videoFile(launch: CapabilitySelectionLaunch): File = videoFile("capture-${launch.token}.mp4")
+    private fun videoUri(file: File): Uri = FileProvider.getUriForFile(context, "${context.packageName}.chat-camera", file)
+    private val cameraUriFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+
+    internal fun prepareVideoCapture(launch: CapabilitySelectionLaunch, owner: String, intent: Intent): Intent = synchronized(lock) {
+        require(launch.capability == VideoContract.CAPTURE && launch.library == store.artifactIdentity &&
+            launch.session == ToolStore.processSession)
+        val file = videoFile(launch)
+        check(file.parentFile!!.isDirectory || file.parentFile!!.mkdirs())
+        store.journalResource(resource(owner, VideoContract.CAPTURE_KIND, file.path, false))
+        val uri = videoUri(file)
+        intent.putExtra(MediaStore.EXTRA_OUTPUT, uri)
+            .putExtra(MediaStore.EXTRA_DURATION_LIMIT, MAX_CLIP_MILLIS / 1000)
+            .putExtra(MediaStore.EXTRA_SIZE_LIMIT, MAX_MEDIA_BYTES)
+            .apply {
+                clipData = ClipData.newRawUri("Alphy capture", uri)
+                addFlags(cameraUriFlags)
+            }
+    }
+
+    internal fun videoCaptureResult(launch: CapabilitySelectionLaunch): CapabilityResult {
+        val file = videoFile(launch)
+        return try {
+            context.revokeUriPermission(videoUri(file), cameraUriFlags)
+            require(file.isFile && file.length() in 1..MAX_MEDIA_BYTES)
+            MediaMetadataRetriever().use { metadata ->
+                metadata.setDataSource(file.path)
+                require(metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE) == "video/mp4")
+                require(metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO) == "yes")
+                require(metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() in 1L..MAX_CLIP_MILLIS.toLong())
+            }
+            CapabilityResult("succeeded", "Video recorded.", org.json.JSONObject().put("localVideo", file.name))
+        } catch (_: Exception) {
+            CapabilityResult("failed", "Android did not return a supported video within the capture limits.")
+        }
+    }
+
+    internal fun discardVideoCapture(launch: CapabilitySelectionLaunch) = synchronized(lock) {
+        val file = videoFile(launch)
+        runCatching { context.revokeUriPermission(videoUri(file), cameraUriFlags) }
+        store.acquisitions().firstOrNull { it.kind == VideoContract.CAPTURE_KIND && it.locator == file.path }
+            ?.let(::cleanupAcquisition)
+    }
+
     /** Journal the private copy before the first write, so an interrupted review cannot leave an untracked file. */
     fun saveCameraPreview(key: String, bitmap: Bitmap): CapabilityResult = synchronized(lock) {
         val effect=store.effect(key) ?: return@synchronized CapabilityResult("unavailable","The camera request is unavailable.")
@@ -42,14 +99,14 @@ class CapabilityResources(private val context: Context, private val store: ToolS
         val file=cameraFile("capture-${java.util.UUID.randomUUID()}.jpg")
         val journal=resource(effect.owner,"cameraPhoto",file.path,false)
         try {
-            require(bitmap.width in 1..2048 && bitmap.height in 1..2048)
+            require(bitmap.width in 1..MAX_PHOTO_SIDE && bitmap.height in 1..MAX_PHOTO_SIDE)
             store.journalResource(journal)
             file.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.JPEG,90,it)) }
-            require(file.length() in 1..MAX_FILE_BYTES)
-            CapabilityResult("succeeded","The reviewed camera thumbnail is saved privately.",org.json.JSONObject().put("localPhoto",file.name))
+            require(file.length() in 1..MAX_PHOTO_BYTES)
+            CapabilityResult("succeeded","The reviewed photo is saved privately.",org.json.JSONObject().put("localPhoto",file.name))
         } catch(_: Exception) {
             cleanupAcquisition(journal)
-            CapabilityResult("failed","The reviewed camera thumbnail could not be saved.")
+            CapabilityResult("failed","The reviewed photo could not be saved.")
         }
     }
     fun acquire(owner: String, capability: String, result: CapabilityResult): Acquired {
@@ -69,6 +126,12 @@ class CapabilityResources(private val context: Context, private val store: ToolS
                 locator=file.path; mime="image/jpeg"; size=file.length(); persistent=true; ownsGrant=false
                 journal=store.acquisitions().find { it.owner == owner && it.kind == kind && it.locator == locator && it.session == ToolStore.processSession }
                     ?: resource(owner,kind,locator,false).also(store::journalResource)
+            } else if (kind == VideoContract.CAPTURE_KIND) {
+                val file = videoFile(result.data.getString("localVideo"))
+                require(file.isFile)
+                locator = file.path; mime = "video/mp4"; size = file.length(); persistent = false; ownsGrant = false
+                journal = store.acquisitions().single { it.owner == owner && it.kind == kind &&
+                    it.locator == locator && it.session == ToolStore.processSession }
             } else {
                 val uri=Uri.parse(result.data.getString("uri"))
                 require(uri.scheme == "content" && !uri.authority.isNullOrBlank() && uri.toString().length <= 4096)
@@ -88,7 +151,7 @@ class CapabilityResources(private val context: Context, private val store: ToolS
             require(mime.length <= 100 && mime.matches(Regex("[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+")))
             when(kind) {
                 AudioContract.RESOURCE_KIND -> require(AudioContract.isAudioMime(mime) && size in 1..MAX_MEDIA_BYTES)
-                VideoContract.RESOURCE_KIND -> require(VideoContract.isVideoMime(mime) && size in 1..MAX_MEDIA_BYTES)
+                VideoContract.RESOURCE_KIND, VideoContract.CAPTURE_KIND -> require(VideoContract.isVideoMime(mime) && size in 1..MAX_MEDIA_BYTES)
                 else -> require(size in 0..MAX_FILE_BYTES)
             }
             val selected=checkNotNull(journal).copy(mimeType=mime,sizeBytes=size,persistent=persistent,ownsGrant=ownsGrant)
@@ -142,7 +205,7 @@ class CapabilityResources(private val context: Context, private val store: ToolS
     }
 
     internal fun resolveVideo(owner: String, id: String): CapabilityResource = resolve(owner,id).also { selected ->
-        check((selected.kind == VideoContract.RESOURCE_KIND || selected.kind == "document") &&
+        check((selected.kind in setOf(VideoContract.RESOURCE_KIND, VideoContract.CAPTURE_KIND, "document")) &&
             VideoContract.isVideoMime(selected.mimeType) && selected.sizeBytes in 1..MAX_MEDIA_BYTES) { "Video resource unavailable" }
     }
 
@@ -151,7 +214,11 @@ class CapabilityResources(private val context: Context, private val store: ToolS
         val signal = CancellationSignal()
         continuation.invokeOnCancellation { signal.cancel() }
         try {
-            val descriptor = context.contentResolver.openAssetFileDescriptor(Uri.parse(selected.locator), "r", signal)
+            val descriptor = if (selected.kind == VideoContract.CAPTURE_KIND) {
+                val file = videoFile(File(selected.locator).name)
+                require(file.path == selected.locator && file.length() == selected.sizeBytes)
+                AssetFileDescriptor(ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY), 0, selected.sizeBytes)
+            } else context.contentResolver.openAssetFileDescriptor(Uri.parse(selected.locator), "r", signal)
             continuation.resume(descriptor) { _, returned, _ -> runCatching { returned?.close() } }
         } catch (failure: Exception) { continuation.resumeWith(Result.failure(failure)) }
     }
@@ -161,7 +228,10 @@ class CapabilityResources(private val context: Context, private val store: ToolS
         if(selected.expiresAt <= System.currentTimeMillis() || (!selected.persistent && selected.session != ToolStore.processSession)) return@runCatching false
         val capability=selectionCapabilities[selected.kind] ?: return@runCatching false
         if(!permissionCheck(capability)) return@runCatching false
-        if(selected.kind == "cameraPhoto") true else {
+        if (selected.kind == VideoContract.CAPTURE_KIND) {
+            val file = videoFile(File(selected.locator).name)
+            file.path == selected.locator && file.isFile && file.length() == selected.sizeBytes
+        } else if(selected.kind == "cameraPhoto") true else {
             val uri=Uri.parse(selected.locator)
             uri.scheme == "content" && context.checkUriPermission(uri,android.os.Process.myPid(),android.os.Process.myUid(),Intent.FLAG_GRANT_READ_URI_PERMISSION) == android.content.pm.PackageManager.PERMISSION_GRANTED &&
                 (!selected.persistent || context.contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission })
@@ -208,6 +278,11 @@ class CapabilityResources(private val context: Context, private val store: ToolS
                 val file=runCatching { cameraFile(File(journal.locator).name).takeIf { it.path == journal.locator } }.getOrNull()
                 if(file != null && file.exists() && !file.delete()) return
             }
+        } else if (journal.kind == VideoContract.CAPTURE_KIND) {
+            val file = videoFile(File(journal.locator).name)
+            require(file.path == journal.locator)
+            runCatching { context.revokeUriPermission(videoUri(file), cameraUriFlags) }
+            if (siblings.isEmpty() && file.exists() && !file.delete()) return
         } else if(journal.ownsGrant) {
             if(siblings.isEmpty()) {
                 val uri=Uri.parse(journal.locator)

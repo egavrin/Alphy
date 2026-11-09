@@ -44,7 +44,13 @@ class RealVideoPickerWorkflowTest {
     private val resolver = context.contentResolver
     private val robot = ShellRobot("real-video-picker")
 
-    @Test fun selectedVideoDecodesAndDoesNotReplayAfterSurfaceLoss() {
+    @Test fun selectedVideoDecodesAndDoesNotReplayAfterSurfaceLoss() = verifySelectedVideo("video.pick")
+
+    @Test fun selectedFileReachesOnlyItsOwningMiniApp() = verifySelectedVideo("file.pick")
+
+    private fun verifySelectedVideo(picker: String) {
+        assertFalse(com.alpha.assistant.capabilities.CapabilityCatalog.phoneGrants.contains("file.pick"))
+
         val fixture = ShellFixture("real-video-picker")
         val displayName = "${fixture.name}.mp4"
         val clip = instrumentation.context.assets.open("media/video-e2e-rgb.mp4").use { it.readBytes() }
@@ -74,7 +80,7 @@ class RealVideoPickerWorkflowTest {
 
             ToolStore(context, "${fixture.name}.db-tools.db").use { tools ->
                 try {
-                    seed(fixture, tools)
+                    seed(fixture, tools, picker)
                     fixture.install(saveKey = false)
                     fixture.launch().use { scenario ->
                         robot.rotate(scenario, landscape = false)
@@ -84,14 +90,14 @@ class RealVideoPickerWorkflowTest {
                         report.put("pickerPackage", chooseDocument(displayName))
                         robot.waitUntil { tools.resources(TOOL).size == 1 }
                         val selection = tools.resources(TOOL).single()
-                        assertEquals("video", selection.kind)
+                        assertEquals(if (picker == "file.pick") "document" else "video", selection.kind)
                         assertEquals("video/mp4", selection.mimeType)
                         assertEquals(clip.size.toLong(), selection.sizeBytes)
                         val selectedUri = Uri.parse(selection.locator)
                         val selectedName = resolver.query(selectedUri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                             ?.use { if (it.moveToFirst()) it.getString(0) else null }
                         assertEquals(displayName, selectedName)
-                        assertEquals("succeeded", tools.effects(TOOL).single { it.request.capability == "video.pick" }.result.status)
+                        assertEquals("succeeded", tools.effects(TOOL).single { it.request.capability == picker }.result.status)
                         robot.waitUntil { tools.tool(TOOL)?.let { JSONObject(it.state).optString("clip") == selection.id } == true }
                         report.put("pickedExactFixture", true)
 
@@ -149,23 +155,23 @@ class RealVideoPickerWorkflowTest {
         }
     }
 
-    private fun seed(fixture: ShellFixture, tools: ToolStore) {
+    private fun seed(fixture: ShellFixture, tools: ToolStore, picker: String) {
         val source = """
             const event = input.event;
             if (event.type === 'action' && event.actionId === 'pick') {
-                return {state:input.state,effects:[{id:'pickClip',capability:'video.pick',args:{}}]};
+                return {state:input.state,effects:[{id:'pickClip',capability:'$picker',args:${if (picker == "file.pick") "{mime:'video/*'}" else "{}"}}]};
             }
             if (event.type === 'action' && event.actionId === 'play' && event.video) {
                 return {state:input.state,effects:[{id:'playClip',capability:'video.play',args:event.video}]};
             }
             if (event.type === 'capabilityResults') {
-                const selected = event.entries.find(entry => entry.capability === 'video.pick' && entry.status === 'succeeded');
+                const selected = event.entries.find(entry => entry.capability === '$picker' && entry.status === 'succeeded');
                 if (selected) return {state:{clip:selected.data.resourceId}};
             }
             return {state:input.state};
         """.trimIndent()
         val spec = ToolSpec.parse(JSONObject("""
-            {"formatVersion":3,"title":"Проверка видео","description":"","capabilities":["video.pick","video.play"],
+            {"formatVersion":3,"title":"Проверка видео","description":"","capabilities":["$picker","video.play"],
              "capabilityResults":true,"stateSchema":{"clip":"string"},"initialState":{"clip":""},
              "ui":{"type":"column","children":[{"type":"button","text":"$PICK","action":"pick"},
                      {"type":"video","text":"$CLIP","bind":"clip","action":"play"}]}}

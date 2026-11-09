@@ -15,6 +15,7 @@ import com.alpha.assistant.capabilities.CapabilityRequest
 import com.alpha.assistant.capabilities.CapabilityResource
 import com.alpha.assistant.capabilities.CapabilityResources
 import com.alpha.assistant.capabilities.CapabilityResult
+import com.alpha.assistant.capabilities.VideoContract
 import com.alpha.assistant.capabilities.CapabilityResultEvent
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
@@ -72,6 +73,56 @@ class ToolVideoPlaybackWorkflowTest {
             assertEquals(setOf("resourceId","kind","mimeType","sizeBytes"),CapabilityResultEvent.data("video.pick",CapabilityResult("succeeded","Fixture",data)).keys().asSequence().toSet())
             data.put("uri",FIRST_URI.toString())
             assertTrue(runCatching {CapabilityResultEvent.data("video.pick",CapabilityResult("succeeded","Fixture",data))}.isFailure)
+        }
+    }
+
+    @Test fun captureRequiresAValidPrivateOutput(): Unit = runBlocking {
+        withFixture { fixture ->
+            val launch = com.alpha.assistant.capabilities.CapabilitySelectionLaunch(
+                UUID.randomUUID().toString(), "capture", VideoContract.CAPTURE, ToolStore.processSession, fixture.store.artifactIdentity)
+            val resources = CapabilityResources(fixture.context, fixture.store)
+            val intent = resources.prepareVideoCapture(launch, fixture.tool.id, Intent(android.provider.MediaStore.ACTION_VIDEO_CAPTURE))
+            assertTrue(intent.hasExtra(android.provider.MediaStore.EXTRA_OUTPUT))
+            assertTrue(intent.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0)
+            assertEquals("failed", resources.videoCaptureResult(launch).status)
+            resources.discardVideoCapture(launch)
+            assertTrue(fixture.store.acquisitions().isEmpty())
+        }
+    }
+
+    @Test fun privateCameraClipCanBeResolvedAndOpenedForPlayback(): Unit = runBlocking {
+        withFixture { fixture ->
+            val base = fixture.save(capture = true)
+            val tool = base.copy(stateVersion = base.stateVersion + 1)
+            fixture.store.commitTool(tool, base, false, effects = listOf(CapabilityRequest("capture", VideoContract.CAPTURE, JSONObject())))
+            val key = fixture.store.effects(tool.id).single().key
+            val launch = com.alpha.assistant.capabilities.CapabilitySelectionLaunch(
+                UUID.randomUUID().toString(), key, VideoContract.CAPTURE, ToolStore.processSession, fixture.store.artifactIdentity)
+            val resources = CapabilityResources(fixture.context, fixture.store)
+            val launched = CapabilityBroker(fixture.context, fixture.store).executeNative(key, { true }) { _, intent ->
+                resources.prepareVideoCapture(launch, tool.id, intent)
+            }
+            assertEquals("awaitingUser", launched.status)
+            try {
+                // The controlled receiver writes only the specific file delegated to the camera.
+                val acquisition = fixture.store.acquisitions().first { it.locator.contains(launch.token) }
+                val sample = InstrumentationRegistry.getInstrumentation().context.assets.open("media/video-e2e-rgb.mp4")
+                sample.use { input -> File(acquisition.locator).outputStream().use { input.copyTo(it) } }
+                val accepted = resources.videoCaptureResult(launch)
+                assertEquals("succeeded", accepted.status)
+                assertTrue(resources.finishSelection(key, accepted))
+                val stored = fixture.store.resources(tool.id).single()
+                val delivered = fixture.store.effect(key)!!.result.data
+                assertEquals(stored.id, delivered.getString("resourceId"))
+                assertFalse(delivered.has("uri") || delivered.has("path") || delivered.has("localVideo"))
+                val resolved = resources.resolveVideo(tool.id, stored.id)
+                resources.openMedia(resolved)!!.use { assertEquals(stored.sizeBytes, it.length) }
+                resources.release(stored)
+                assertFalse(File(stored.locator).exists())
+            } finally {
+                resources.discardVideoCapture(launch)
+                resources.recoverAcquisitions(force = true)
+            }
         }
     }
 
@@ -252,11 +303,11 @@ class ToolVideoPlaybackWorkflowTest {
         val tool=save()
         val displayed=AtomicReference(tool)
 
-        fun save(mismatchedEffect: Boolean=false): ToolRecord {
+        fun save(mismatchedEffect: Boolean=false, capture: Boolean=false): ToolRecord {
             val output=if(mismatchedEffect) "'$SECOND'" else "(e.video ? e.video.resourceId : '$FIRST')"
             val source="""const e=input.event;if(e.type==='action')return {state:input.state,effects:[{id:'play',capability:'video.play',args:{resourceId:$output}}]};return {state:input.state};"""
             val spec=ToolSpec.parse(JSONObject().put("formatVersion",3).put("title","Video fixture").put("description","")
-                .put("capabilities",org.json.JSONArray(listOf("video.pick","video.play"))).put("capabilityResults",true)
+                .put("capabilities",org.json.JSONArray(listOf("video.pick","video.play") + if (capture) listOf(VideoContract.CAPTURE) else emptyList())).put("capabilityResults",true)
                 .put("stateSchema",JSONObject("""{"first":"string","second":"string"}"""))
                 .put("initialState",JSONObject().put("first",FIRST).put("second",SECOND))
                 .put("ui",JSONObject("""{"type":"column","children":[{"type":"video","text":"First","bind":"first","action":"first"},{"type":"video","text":"Second","bind":"second","action":"second"},{"type":"button","text":"Forged","action":"forged"}]}"""))

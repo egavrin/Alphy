@@ -962,7 +962,7 @@ private fun hasLiveControl(node: JSONObject): Boolean {
     } else null
     var inWindow by remember { mutableStateOf(false) }
     val visible = inWindow && !tool.archived && liveAllowed && LocalMiniAppLiveAllowed.current
-    val deviceHost = if (visible && spec?.capabilities?.any { it in ForegroundCapabilityEffects.deliveryIds } == true)
+    val deviceHost = if (visible && spec?.capabilities?.any { it in ForegroundCapabilityEffects.deliveryIds || it == "share.text" } == true)
         remember(controller,tool.id,tool.revision) { DeviceReadHost(tool.id,tool.revision) } else null
     if (deviceHost != null) {
         DisposableEffect(controller,navigationLifecycle,deviceHost) {
@@ -981,7 +981,9 @@ private fun hasLiveControl(node: JSONObject): Boolean {
                 controller.updateDeviceReadHost(deviceHost,null)
             }
         }
-        if (com.alpha.assistant.capabilities.MiniAppAi.ID in spec?.capabilities.orEmpty()) {
+        if (spec?.capabilities.orEmpty().any {
+                it == com.alpha.assistant.capabilities.MiniAppAi.ID || it == com.alpha.assistant.capabilities.TiltContract.ID
+            }) {
             val view = LocalView.current
             DisposableEffect(controller, deviceHost, view) {
                 fun refresh() = controller.updateDeviceReadFocus(deviceHost, view.hasWindowFocus())
@@ -1033,7 +1035,7 @@ private fun hasLiveControl(node: JSONObject): Boolean {
     }
     Box(Modifier.fillMaxWidth().onGloballyPositioned { inWindow = !it.boundsInWindow().isEmpty }) {
         if (projected?.isFailure == true) Text(stringResource(R.string.tool_closed_format))
-        else ToolContent(current.ui,projected?.getOrNull() ?: current.state,enabled && (!needsProjection || projected != null),
+        else ToolContent(current.ui,projected?.getOrNull() ?: current.state,enabled && !controller.settlingPhoto && (!needsProjection || projected != null),
             heading=heading,calendarHost=calendarHost,embedded=embedded,
             background=if(embedded) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
             imageVersion=(tool.id to current.revision),imageLoader={controller.nativeImage(tool.id,it)},imageAvailable={controller.nativeImageAvailable(tool.id,it)},
@@ -1042,6 +1044,11 @@ private fun hasLiveControl(node: JSONObject): Boolean {
             if (value == null && visibleUi?.let { ToolUiCatalog.action(it, id)?.optString("type") } == "button") {
                 controller.queueLocalButton(current, id, buttonHost) { buttonHost.get() && currentVisibility && navigationForeground() }
             } else controller.interact(current,id,value,deviceHost,navigationForeground) {intent ->check(navigationForeground());navigationContext.startActivity(intent)}
+        }
+        if (deviceHost != null && controller.tiltOwner == tool.id) {
+            TextButton(onClick = controller::stopTilt, modifier = Modifier.align(Alignment.TopEnd)) {
+                Text(stringResource(R.string.tool_stop_tilt))
+            }
         }
     }
 }

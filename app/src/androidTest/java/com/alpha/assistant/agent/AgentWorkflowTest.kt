@@ -26,6 +26,86 @@ class AgentWorkflowTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private val initialTime = 1893485700000L
 
+    @Test fun notificationPostsOnceForEachAuthorizedCaller() = verifyNotificationCallers(true)
+
+    @Test fun revokedNotificationPermissionBlocksBothCallers() = verifyNotificationCallers(false)
+
+    private fun verifyNotificationCallers(allowed: Boolean) = runBlocking {
+        val manager = context.getSystemService(android.app.NotificationManager::class.java)
+        val titles = listOf("Alphy phone fixture ${UUID.randomUUID()}", "Alphy mini-app fixture ${UUID.randomUUID()}")
+        fun posted() = manager.activeNotifications.filter {
+            it.notification.extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString() in titles
+        }
+        fun request(title: String) = com.alpha.assistant.capabilities.CapabilityRequest("notify", "notification.post",
+            org.json.JSONObject().put("title", title).put("text", "Android acceptance"))
+        try {
+            withAgent { agent, _, tools ->
+                val adapter = com.alpha.assistant.capabilities.AndroidCapabilities(context)
+                assertEquals(if (allowed) "available" else "permissionRequired", adapter.availability("notification.post").getString("state"))
+                val plan = agent.prepare("chat", "Post the fixture notification", """
+                    {"steps":[{"function":"notification.post","args":${request(titles[0]).args}}]}
+                """.trimIndent())
+                assertTrue(posted().isEmpty())
+                if (allowed) {
+                    val run = checkNotNull(agent.approve(plan.id, plan.revision))
+                    assertEquals(AgentPhase.COMPLETED, agent.execute(run, { true }, {}).phase)
+                    assertEquals(1, posted().size)
+                } else {
+                    assertEquals(AgentPhase.NEEDS_PERMISSION, plan.phase)
+                    assertNull(agent.approve(plan.id, plan.revision))
+                }
+                val spec = com.alpha.assistant.tools.ToolSpec.parse("""
+                    {"formatVersion":3,"title":"Notifier","description":"","capabilities":["notification.post"],
+                    "capabilityResults":true,"stateSchema":{"ready":"boolean"},"initialState":{"ready":true},
+                    "ui":{"type":"button","text":"Notify","action":"notify"},"source":"return {state:input.state};"}
+                """.trimIndent())
+                val tool = com.alpha.assistant.tools.ToolRecord("notification-owner", 1, 1, spec.json,
+                    spec.initialState, spec.ui.toString(), null, true)
+                tools.commitTool(tool, null, true, effects = listOf(request(titles[1])))
+                val key = tools.effects(tool.id).single().key
+                val broker = com.alpha.assistant.capabilities.CapabilityBroker(context, tools)
+                val expected = if (allowed) "succeeded" else "denied"
+                assertEquals(expected, broker.executeNative(key, { true }) { _, _ -> error("Unexpected launch") }.status)
+                assertEquals(expected, broker.executeNative(key, { true }) { _, _ -> error("Duplicate launch") }.status)
+                assertEquals(if (allowed) 2 else 0, posted().size)
+            }
+        } finally {
+            posted().forEach { manager.cancel(it.id) }
+        }
+    }
+
+    @Test fun approvedPhoneHandoffsCarryOnlyTheirReviewedArguments(): Unit = runBlocking {
+        val semantic = com.alpha.assistant.semantic.SemanticRuntime.get(context)
+        val cases = listOf(
+            Triple("Open the camera.", "app.open", org.json.JSONObject().put("app", "camera")),
+            Triple("Play the song Blue Train.", "music.playSearch", org.json.JSONObject().put("query", "Blue Train")),
+            Triple("Dial +12025550101.", "phone.dial", org.json.JSONObject().put("number", "+12025550101")))
+        withAgent { agent, _, _ ->
+            for ((index, case) in cases.withIndex()) {
+                val (instruction, function, args) = case
+                assertTrue("Ranker missed $function", function in AgentCommand.shortlist(instruction, semantic))
+                val raw = """{"steps":[{"function":"$function","args":$args}]}"""
+                val plan = agent.prepare("handoff-$index", instruction, raw)
+                val intents = mutableListOf<android.content.Intent>()
+                assertEquals(AgentPhase.REVIEW, plan.phase)
+                val run = checkNotNull(agent.approve(plan.id, plan.revision))
+                assertEquals(AgentPhase.COMPLETED, agent.execute(run, { true }, { intents += it }).phase)
+                val intent = intents.single()
+                when (function) {
+                    "app.open" -> assertEquals(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA, intent.action)
+                    "music.playSearch" -> {
+                        assertEquals(android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH, intent.action)
+                        assertEquals("Blue Train", intent.getStringExtra(android.app.SearchManager.QUERY))
+                    }
+                    "phone.dial" -> {
+                        assertEquals(android.content.Intent.ACTION_DIAL, intent.action)
+                        assertEquals("+12025550101", intent.data?.schemeSpecificPart)
+                    }
+                }
+            }
+        }
+    }
+
     @Test fun oneApprovalMovesOnlyTheSelectedOccurrenceAndAddsItsAlert(): Unit = runBlocking {
         SyntheticOwnedCalendar(context).use { calendar ->
             val resolver = context.contentResolver

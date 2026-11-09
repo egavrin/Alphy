@@ -68,7 +68,7 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
     @Volatile var lastRequest: CloudRequest? = null
     var automationDraft: String? = null
     @Volatile var memoryFact: String? = null
-    var devicePlanNeeds: List<String>? = null
+    var devicePlanSteps: List<com.alpha.assistant.agent.PhoneActionEvidence>? = null
     var agentProposal: String? = null
     @Volatile var failure: Exception? = null              // thrown after the count
     @Volatile var gate: CompletableDeferred<Unit>? = null // awaited before the answer
@@ -85,8 +85,8 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
             emit(CloudEvent.RoundComplete("", false, com.alpha.assistant.data.MessageProvenance.CLEAN, memoryFact = it))
             return
         }
-        devicePlanNeeds?.takeIf { request.chatDecision && request.allowDevicePlan }?.let {
-            emit(CloudEvent.RoundComplete("", false, com.alpha.assistant.data.MessageProvenance.CLEAN, devicePlanNeeds = it))
+        devicePlanSteps?.takeIf { request.chatDecision && request.allowDevicePlan }?.let {
+            emit(CloudEvent.RoundComplete("", false, com.alpha.assistant.data.MessageProvenance.CLEAN, devicePlanSteps = it))
             return
         }
         agentProposal?.takeIf { request.agentPlan }?.let {
@@ -217,6 +217,34 @@ internal class ShellRobot(fixture: String) {
         assertTrue(diagnostics.click(label,node))
         automation.waitForIdle(100, 3000)
     }
+    fun cameraEvidence(name: String, facing: Int? = null) {
+        val context = instrumentation.targetContext
+        val directory = java.io.File(checkNotNull(context.getExternalFilesDir(null)), "camera-facing-qa")
+        check(directory.isDirectory || directory.mkdirs())
+        if (facing != null) {
+            val manager = context.getSystemService(android.hardware.camera2.CameraManager::class.java)
+            val facingKey = android.hardware.camera2.CameraCharacteristics.LENS_FACING
+            var actual: Pair<String, Int?>? = null
+            waitUntil {
+                val clients = shell("dumpsys media.camera").substringAfter("Active Camera Clients:")
+                    .substringBefore("Allowed user IDs:")
+                val id = Regex("Camera ID: ([^,]+),[^\\n]*Client Package Name: com.alpha.assistant")
+                    .find(clients)?.groupValues?.get(1)
+                actual = id?.let { it to manager.getCameraCharacteristics(it).get(facingKey) }
+                actual?.second == facing
+            }
+            java.io.File(directory, "$name.txt").writeText("Camera ID and lens facing = $actual\n")
+        }
+        val screenshot = checkNotNull(automation.takeScreenshot())
+        try {
+            java.io.File(directory, "$name.png").outputStream().use {
+                check(screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+            }
+        } finally {
+            screenshot.recycle()
+        }
+    }
+
     fun back() {
         assertTrue(automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK))
         automation.waitForIdle(100, 3000)

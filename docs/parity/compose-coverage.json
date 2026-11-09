@@ -7,10 +7,10 @@
     "app/src/main/java/com/alpha/assistant/tools/ToolUiCatalog.kt": "54f17764a90f9ea40d8f090d6b7ae34057138ec94bf4542f4749fe9b464500e8",
     "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt": "e1add8165ccdf84440a3c8cce832273c24ad8c6771d2efc43cc0490526fa24fc",
     "app/src/main/java/com/alpha/assistant/tools/ArtifactProtocol.kt": "9c88be98357dab974da6c501ad9b33ad76ee68030e95bc0a2041d25810827dac",
-    "app/src/main/java/com/alpha/assistant/tools/GraphicsContract.kt": "1627bd924d96cf010c77fde6d33d026d3621e04d75a7b70e663a884bd11cd270",
-    "app/src/main/java/com/alpha/assistant/capabilities/CapabilityContract.kt": "25bc54b8a5ef98fec4925b5ccbcea8be92c67d38a177f0b6245f566a3fac7c0b",
+    "app/src/main/java/com/alpha/assistant/tools/GraphicsContract.kt": "6b48a481b5a0c2de076a851b0dec279b419fce5e0c9c606c4c42abe8dc989b28",
+    "app/src/main/java/com/alpha/assistant/capabilities/CapabilityContract.kt": "bbafa668ced99f0edf3b0ed203834a44848e83fc0a1c80a54868e45d58b2214c",
     "app/src/main/java/com/alpha/assistant/capabilities/MedicineCapabilities.kt": "89a148d2f00bc46270d0d4a459b75da7d7449edc4a53e5273970aab24662ec52",
-    "app/build.gradle.kts": "8f7be0b6919d0da4a9994b7a7b26df4b97fd6a808421a765f2dd67f84fe6f626"
+    "app/build.gradle.kts": "79b417f35739a6da3f5026343a0a97e9d1aea05348dae9ba5b14b14fb430b205"
   },
   "catalog_types": [
     "actionChip",

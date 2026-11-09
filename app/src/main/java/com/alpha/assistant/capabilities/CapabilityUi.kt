@@ -9,13 +9,13 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -77,27 +77,24 @@ import kotlinx.coroutines.CancellationException
                 onResult = controller::receivePickerResult,
                 onFailure = { controller.receivePickerResult(it, null) })
         }
+        is CapabilityPrompt.Share -> AlertDialog(
+            onDismissRequest = { controller.finishShare(prompt, false) },
+            title = { Text(stringResource(R.string.tool_share_review_title)) },
+            text = { Text(prompt.text, Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) },
+            confirmButton = { TextButton(onClick = { controller.finishShare(prompt, true) }, enabled = !controller.busy) {
+                Text(stringResource(R.string.tool_share_confirm))
+            } },
+            dismissButton = { TextButton(onClick = { controller.finishShare(prompt, false) }, enabled = !controller.busy) {
+                Text(stringResource(R.string.cancel))
+            } },
+        )
         is CapabilityPrompt.Calendar -> key(controller, prompt.effectKey) {
             CalendarSelection(controller, prompt.effectKey, foreground)
         }
         is CapabilityPrompt.LocationPermission -> key(controller, prompt.token) {
             RequestLocationPermission(controller, prompt, foreground)
         }
-        is CapabilityPrompt.Camera -> AlertDialog(
-            onDismissRequest = { controller.finishCameraPreview(prompt, keep = false) },
-            title = { Text(stringResource(R.string.tool_camera_review_title)) },
-            text = {
-                Column {
-                    Image(prompt.bitmap.asImageBitmap(), stringResource(R.string.tool_camera_review_image),
-                        Modifier.fillMaxWidth().heightIn(max = 240.dp))
-                    Text(stringResource(R.string.tool_camera_review_details))
-                }
-            },
-            confirmButton = { TextButton(onClick = { controller.finishCameraPreview(prompt, keep = true) },
-                enabled = !controller.busy) { Text(stringResource(R.string.tool_camera_keep)) } },
-            dismissButton = { TextButton(onClick = { controller.finishCameraPreview(prompt, keep = false) },
-                enabled = !controller.busy) { Text(stringResource(R.string.delete)) } },
-        )
+        is CapabilityPrompt.Camera -> PhotoCaptureDialog(prompt.capture)
         is CapabilityPrompt.Reading, null -> Unit
     }
     controller.devicePermissionIssue?.takeIf { controller.capabilityPrompt==null }?.let { message ->
@@ -229,7 +226,7 @@ private fun actionDetails(request: CapabilityRequest): String {
         VideoContract.PLAY -> "Воспроизвести выбранное видео"
         NetworkEffectContract.ID -> "Метод запроса: ${args.getString("method")}"
         "photo.pick" -> "Выбрать одну фотографию в системном окне"
-        "camera.capture" -> "Открыть камеру и просмотреть уменьшенный снимок"
+        PHOTO_CAPTURE -> "Сделать и сохранить снимок на устройстве"
         else -> "Функция недоступна"
     }
 }

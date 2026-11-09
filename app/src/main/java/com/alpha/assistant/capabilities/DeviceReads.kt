@@ -17,7 +17,8 @@ internal object DeviceReadContract {
     const val STATUS = "device.context"
     const val LOCATION = "location.once"
     const val SENSOR = "sensor.sample"
-    val ids = setOf(STATUS, LOCATION, SENSOR)
+    const val FORMAT = "device.formatPreferences.read"
+    val ids = setOf(STATUS, LOCATION, SENSOR, FORMAT)
     val statuses = setOf("succeeded", "denied", "unavailable", "failed", "cancelled")
     private const val MAX_EXACT_INTEGER = 9_007_199_254_740_991L
     val sensors = mapOf("accelerometer" to DeviceSensor.ACCELEROMETER, "gyroscope" to DeviceSensor.GYROSCOPE,
@@ -32,6 +33,9 @@ internal object DeviceReadContract {
         ConnectivityStatus.UNAVAILABLE to "unavailable",
     )
     val definitions = listOf(
+        CapabilityDefinition(FORMAT, "Local date and time format", CapabilityAction.DEVICE_READ, emptyMap(),
+            "Read the Android 12 or 24-hour setting and the effective locale first weekday.", "succeeded",
+            "Returns is24Hour and localeFirstDayOfWeekIso from Monday 1 to Sunday 7.", foreground = true),
         CapabilityDefinition(STATUS, "Состояние устройства", CapabilityAction.DEVICE_READ, emptyMap(),
             "Read current time, battery, power, primary locale and Android default-network visibility from an explicit foreground action.",
             "succeeded", "Capture time uses epoch milliseconds. Unknown battery level, power or locale is null. Unknown battery status is unknown. Locale contains only language, script and region when available. Connectivity reports Android default-network visibility or unavailable. Presence gives no information about internet reachability or local-network access.",
@@ -52,6 +56,8 @@ internal object DeviceReadContract {
             context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     fun resultSchema(id: String): JSONObject = when (id) {
+        FORMAT -> closed("is24Hour" to JSONObject().put("type", "boolean"),
+            "localeFirstDayOfWeekIso" to number("integer", 1, 7))
         STATUS -> closed(
             "capturedAtEpochMillis" to number("integer", 0, MAX_EXACT_INTEGER),
             "batteryLevelPercent" to number("integer", 0, 100, nullable = true),
@@ -88,6 +94,11 @@ internal object DeviceReadContract {
             require(value is Number && value.toDouble() in min..max && (!integer || value.toLong().toDouble() == value.toDouble()))
         }
         when (id) {
+            FORMAT -> {
+                keys("is24Hour", "localeFirstDayOfWeekIso")
+                require(data.get("is24Hour") is Boolean)
+                bounded("localeFirstDayOfWeekIso", 1.0, 7.0, integer = true)
+            }
             STATUS -> {
                 keys("capturedAtEpochMillis", "batteryLevelPercent", "batteryStatus", "externalPowerConnected", "localeTag", "connectivityStatus")
                 bounded("capturedAtEpochMillis", 0.0, MAX_EXACT_INTEGER.toDouble(), integer = true)
@@ -143,6 +154,12 @@ internal class DeviceReadAdapter(
     private val source = AndroidDeviceStatusSource()
 
     suspend fun read(request: CapabilityRequest): CapabilityResult = when (request.capability) {
+        DeviceReadContract.FORMAT -> validatedSuccess(request.capability) {
+            val locale = context.resources.configuration.locales[0]
+            val first = android.icu.util.Calendar.getInstance(locale).firstDayOfWeek
+            JSONObject().put("is24Hour", android.text.format.DateFormat.is24HourFormat(context))
+                .put("localeFirstDayOfWeekIso", (first + 5) % 7 + 1)
+        }
         DeviceReadContract.STATUS -> validatedSuccess(request.capability) { DeviceReadContract.snapshot(capture?.invoke() ?: source.capture(context)) }
         DeviceReadContract.LOCATION -> (location?.invoke() ?: source.currentLocation(context)).toCapabilityResult(request.capability) { value ->
             JSONObject().put("latitudeDegrees", value.latitudeDegrees).put("longitudeDegrees", value.longitudeDegrees)

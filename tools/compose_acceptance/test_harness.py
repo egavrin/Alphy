@@ -2,6 +2,7 @@
 import importlib.util
 import contextlib
 import io
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -293,11 +294,12 @@ class HarnessBoundaries(unittest.TestCase):
 
     def test_coverage_preserves_pinned_reference_and_current_sources(self):
         coverage = json.loads((harness.ROOT / "docs/parity/compose-coverage.json").read_text())
-        inventory = json.loads((harness.ROOT / "docs/parity/inventory.json").read_text())
-        reference = {row["key"] for row in inventory["entries"] if row["kind"] == "ui"}
-        self.assertEqual(62, len(reference))
-        self.assertEqual(reference, {row["reference"] for row in coverage["reference_ui"]})
-        self.assertEqual(inventory["reference_commit"], coverage["reference_commit"])
+        keys = sorted(row["reference"] for row in coverage["reference_ui"])
+        self.assertEqual(62, len(keys))
+        self.assertEqual(len(keys), len(set(keys)))
+        fingerprint = hashlib.sha256(json.dumps(keys, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        self.assertEqual("d0847fb9440e832b9c2babbf641a3bde2d5acb1bf2f39060d9db4197fb1d67c0", fingerprint)
+        self.assertEqual("7ee06af1941729b00a110493ad9d1d9b5b127d17", coverage["reference_commit"])
         self.assertEqual(72, len(coverage["catalog_types"]))
         self.assertEqual(72, len(set(coverage["catalog_types"])))
         for path, expected in coverage["source_sha256"].items():

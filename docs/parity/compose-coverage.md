@@ -2,7 +2,7 @@
 
 This record describes protocol 3 above baseline `62179af217478075a1d7a10960c949440dcc4ad8`.
 The pinned reference is `deal-studio-ohos@7ee06af1941729b00a110493ad9d1d9b5b127d17`.
-The reference working tree is not an input. [Extracted source provenance](inventory.json)
+The reference working tree is not an input. [Reproduce the pinned source inventory](README.md#files-and-reproduction)
 
 The machine record contains all 62 pinned reference UI entries and all 72 current native catalog types.
 It also records current source hashes. [Coverage data](compose-coverage.json)

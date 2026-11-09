@@ -7,10 +7,10 @@ import org.json.JSONObject
 import java.net.URI
 
 /** Exhaustive native bindings keep validators and executors aligned. */
-enum class CapabilityAction { NOTIFICATION_POST, CALENDAR_READ, CALENDAR_CREATE, CALENDAR_OWNED, MEDICINE, LINK_OPEN, APP_OPEN, MAPS_OPEN, MAPS_MARK_REACHED, MAPS_ROUTE, VIBRATION_PLAY, FLASHLIGHT_SET, PHOTO_PICK, FILE_PICK, CAMERA_CAPTURE, DEVICE_READ, AUDIO_PICK, AUDIO_PLAYBACK, NETWORK_REQUEST, VIDEO_PICK, VIDEO_PLAYBACK, AI_ASK }
+enum class CapabilityAction { NOTIFICATION_POST, CALENDAR_READ, CALENDAR_CREATE, CALENDAR_OWNED, MEDICINE, LINK_OPEN, APP_OPEN, MAPS_OPEN, MAPS_MARK_REACHED, MAPS_ROUTE, VIBRATION_PLAY, FLASHLIGHT_SET, PHOTO_PICK, FILE_PICK, CAMERA_CAPTURE, DEVICE_READ, AUDIO_PICK, AUDIO_PLAYBACK, NETWORK_REQUEST, VIDEO_PICK, VIDEO_CAPTURE, VIDEO_PLAYBACK, AI_ASK, PHONE_DIAL, SHARE_TEXT, TILT_STREAM }
 data class CapabilityArgument(val type: String, val optional: Boolean = false, val maxLength: Int = 500,
     val minimum: Long = 0, val maximum: Long = 4102444800000L, val choices: Set<String> = emptySet(), val format: String? = null, val allowEmpty: Boolean = false) {
-    fun schema() = JSONObject().put("type",type).apply {
+    fun schema() = JSONObject().put("type",if (type == "scalar") JSONArray(listOf("string", "number", "boolean")) else type).apply {
         if(type == "string") { put("minLength",if(allowEmpty)0 else 1); put("maxLength",maxLength); put("nonBlank",!allowEmpty); put("noNul",true) }
         if(type == "integer") { put("minimum",minimum); put("maximum",maximum) }
         if(choices.isNotEmpty()) put("enum",JSONArray(choices.toList()))
@@ -23,6 +23,8 @@ data class CapabilityArgument(val type: String, val optional: Boolean = false, v
                 require(choices.isEmpty() || value in choices)
                 if(format == "stop-id") require(value.matches(Regex("[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}")))
                 if(format == "reached-ref" || format == "opaque-owner-handle") require(value.matches(Regex("[0-9a-f]{64}")))
+                if(format == "control-free") require(value.none(Char::isISOControl))
+                if(format == "dial-number") require(value.matches(Regex("[+]?[0-9]{3,15}")))
                 if(format == "mime") require(value.matches(Regex("[a-zA-Z0-9.+*-]+/[a-zA-Z0-9.+*-]+")))
                 if(format == "public-https") {
                     val uri = URI(value); val host = uri.host?.lowercase().orEmpty()
@@ -33,21 +35,37 @@ data class CapabilityArgument(val type: String, val optional: Boolean = false, v
             }
             "integer" -> require(value is Number && value.toDouble().isFinite() && value.toDouble() == value.toLong().toDouble() && value.toLong() in minimum..maximum)
             "boolean" -> require(value is Boolean)
+            "object" -> require(value is JSONObject)
+            "scalar" -> require(value is String || value is Number || value is Boolean)
             else -> error("Unknown catalog argument type")
         }
     }
 }
+internal fun capabilityArgumentSchema(parameters: Map<String, CapabilityArgument>) =
+    JSONObject().put("type", "object").put("additionalProperties", false)
+        .put("required", JSONArray(parameters.filterValues { !it.optional }.keys.toList()))
+        .put("properties", JSONObject().apply { parameters.forEach { (name, argument) -> put(name, argument.schema()) } })
+
+internal fun validateCapabilityArguments(parameters: Map<String, CapabilityArgument>, args: JSONObject) {
+    val keys = args.keys().asSequence().toSet()
+    require(keys.containsAll(parameters.filterValues { !it.optional }.keys) && keys.all { it in parameters }) {
+        "Неверные параметры системной функции"
+    }
+    keys.forEach { parameters.getValue(it).validate(args.get(it)) }
+}
+
+internal enum class CapabilityCaller(val wireName: String) { PHONE("phone"), MINI_APP("miniApp") }
+
 data class CapabilityDefinition(val id: String, val title: String, val action: CapabilityAction,
     val parameters: Map<String,CapabilityArgument>, val explanation: String, val resultStatus: String,
     val resultDescription: String, val permission: String? = null, val feature: String? = null,
     val foreground: Boolean = false, val selection: Boolean = false, val minApi: Int = 29,
-    val resultData: String = "{}") {
-    val argumentSchema get() = if(id==NetworkEffectContract.ID) NetworkEffectContract.argumentSchema() else JSONObject().put("type","object").put("additionalProperties",false)
-        .put("required",JSONArray(parameters.filterValues { !it.optional }.keys.toList()))
-        .put("properties",JSONObject().apply { parameters.forEach { (name,argument) -> put(name,argument.schema()) } })
+    val resultData: String = "{}", val phone: Boolean = false) {
+    val argumentSchema get() = if (id == NetworkEffectContract.ID) NetworkEffectContract.argumentSchema()
+        else capabilityArgumentSchema(parameters)
     fun json() = JSONObject().put("id",id).put("title",title).put("implementation","implemented").put("callable",true)
         .put("argumentSchema",argumentSchema).put("description",explanation).put("minApi",minApi)
-        .put("access",JSONObject().put("toolGrant",id==NetworkEffectContract.ID).put("confirmation",false).put("androidPermission",permission ?: JSONObject.NULL)
+        .put("access",JSONObject().put("toolGrant",id==NetworkEffectContract.ID).put("confirmation",id=="share.text" || id==PHOTO_CAPTURE).put("androidPermission",permission ?: JSONObject.NULL)
             .put("manifestPermissions",JSONArray(when {
                 id == DeviceReadContract.STATUS -> listOf(Manifest.permission.ACCESS_NETWORK_STATE)
                 id == NetworkEffectContract.ID -> listOf(Manifest.permission.INTERNET,Manifest.permission.ACCESS_LOCAL_NETWORK)
@@ -80,9 +98,7 @@ data class CapabilityDefinition(val id: String, val title: String, val action: C
     fun validate(args: JSONObject) {
         if(action==CapabilityAction.NETWORK_REQUEST) {NetworkEffectContract.request(args);return}
         if(id==TorchSequence.ID) {TorchSequence.parse(args);return}
-        val keys = args.keys().asSequence().toSet()
-        require(keys.containsAll(parameters.filterValues { !it.optional }.keys) && keys.all { it in parameters }) { "Неверные параметры системной функции" }
-        keys.forEach { parameters.getValue(it).validate(args.get(it)) }
+        validateCapabilityArguments(parameters, args)
         when(action) {
             CapabilityAction.MAPS_MARK_REACHED, CapabilityAction.MAPS_ROUTE -> require(args.getLong("version") == 1L)
             CapabilityAction.CALENDAR_READ -> require(args.getLong("to") - args.getLong("from") in 1..2678400000L)
@@ -93,7 +109,8 @@ data class CapabilityDefinition(val id: String, val title: String, val action: C
             CapabilityAction.MAPS_OPEN, CapabilityAction.VIBRATION_PLAY, CapabilityAction.FLASHLIGHT_SET,
             CapabilityAction.PHOTO_PICK, CapabilityAction.FILE_PICK, CapabilityAction.CAMERA_CAPTURE, CapabilityAction.DEVICE_READ,
             CapabilityAction.AUDIO_PICK, CapabilityAction.AUDIO_PLAYBACK, CapabilityAction.NETWORK_REQUEST,
-            CapabilityAction.VIDEO_PICK, CapabilityAction.VIDEO_PLAYBACK, CapabilityAction.AI_ASK -> Unit
+            CapabilityAction.VIDEO_PICK, CapabilityAction.VIDEO_CAPTURE, CapabilityAction.VIDEO_PLAYBACK, CapabilityAction.AI_ASK,
+            CapabilityAction.PHONE_DIAL, CapabilityAction.SHARE_TEXT, CapabilityAction.TILT_STREAM -> Unit
         }
     }
 }
@@ -124,7 +141,7 @@ object CapabilityCatalog {
         CapabilityDefinition("notification.post","Уведомления Alphy",CapabilityAction.NOTIFICATION_POST,
             mapOf("title" to text(100),"text" to text(1000)),"Post an Alphy notification in its own channel.","succeeded",
             "Success confirms an active notification, not display or reading. An accepted but unverified request returns unknownOutcome.",
-            if(Build.VERSION.SDK_INT >= 33) Manifest.permission.POST_NOTIFICATIONS else null),
+            if(Build.VERSION.SDK_INT >= 33) Manifest.permission.POST_NOTIFICATIONS else null, phone = true),
         CapabilityDefinition("calendar.read","Чтение выбранного календаря",CapabilityAction.CALENDAR_READ,
             mapOf("calendarId" to integer(),"from" to integer(),"to" to integer()),"Read one explicitly selected calendar. Use epoch milliseconds, at most 31 days and 50 event instances.","succeeded",
             "Only local event instances in the selected range. No automatic model upload.",Manifest.permission.READ_CALENDAR,
@@ -132,7 +149,7 @@ object CapabilityCatalog {
         CapabilityDefinition("calendar.create","Открытие формы события",CapabilityAction.CALENDAR_CREATE,
             mapOf("title" to text(200),"start" to integer(),"end" to integer(),"location" to text(300,true)),
             "Open the calendar event form. Use epoch milliseconds and a duration from 1 millisecond to 31 days.","launched",
-            "The user saves the event in the calendar app. No saved event ID or write confirmation.",foreground = true),
+            "The user saves the event in the calendar app. No saved event ID or write confirmation.",foreground = true, phone = true),
         CapabilityDefinition("calendar.select","Select writable calendar",CapabilityAction.CALENDAR_OWNED,OwnedCalendarContract.version,
             "Version 1. Select one writable calendar through the native picker. Both Android calendar permissions are required. Provider IDs and accounts remain native.","succeeded",
             "Returns only an opaque app-scoped calendarRef. Display names and accounts remain native.",Manifest.permission.READ_CALENDAR,foreground=true,resultData=OwnedCalendarContract.resultSchema),
@@ -152,12 +169,12 @@ object CapabilityCatalog {
             "Version 1. Open the installed calendar app from an explicit foreground native calendar control.","launched",
             "Only calendar app launch is confirmed. No event save or reminder delivery is claimed.",Manifest.permission.READ_CALENDAR,foreground=true),
         CapabilityDefinition("link.open","Открытие ссылки HTTPS",CapabilityAction.LINK_OPEN,mapOf("url" to text(2048,format = "public-https")),
-            "Open a public HTTPS URL. Credentials, local hosts, literal IP addresses and nonstandard ports are rejected.","launched","Only activity launch is confirmed.",foreground = true),
+            "Open a public HTTPS URL. Credentials, local hosts, literal IP addresses and nonstandard ports are rejected.","launched","Only activity launch is confirmed.",foreground = true, phone = true),
         CapabilityDefinition("app.open","Открытие приложения",CapabilityAction.APP_OPEN,
             mapOf("app" to CapabilityArgument("string",choices = setOf("settings","browser","calendar","camera"))),
-            "Open settings, browser, calendar or camera through a public Android action.","launched","Only activity launch is confirmed.",foreground = true),
+            "Open settings, browser, calendar or camera through a public Android action.","launched","Only activity launch is confirmed.",foreground = true, phone = true),
         CapabilityDefinition("maps.open","Поиск на карте",CapabilityAction.MAPS_OPEN,mapOf("query" to text(300)),
-            "Search an explicit place in a map app. No device location, coordinates or navigation origin are read.","launched","Only map activity launch is confirmed.",foreground = true),
+            "Search an explicit place in a map app. No device location, coordinates or navigation origin are read.","launched","Only map activity launch is confirmed.",foreground = true, phone = true),
         CapabilityDefinition("maps.markReached","Mark a stop reached",CapabilityAction.MAPS_MARK_REACHED,
             navigationStopArguments(),"Version 1 only. Record the stop that the user explicitly marks reached with the native foreground control. Never infer arrival or mark skipped stops.","succeeded",
             "Returns an opaque reachedRef for the latest native owner/revision-scoped marker. New markers, archiving and revision changes invalidate older references. No location access.",foreground = true,
@@ -169,10 +186,10 @@ object CapabilityCatalog {
             "Launch confirms only the installed map activity opened with explicit origin and destination. routeVerified is always false. Google Maps accepts WGS84, AMap accepts GCJ-02. Mixed systems and missing handlers are unavailable.",foreground = true,
             resultData = NavigationContract.routeResultSchema),
         CapabilityDefinition("vibration.play","Вибрация",CapabilityAction.VIBRATION_PLAY,mapOf("milliseconds" to integer(1,2000)),
-            "Make the phone vibrate or buzz for 1 to 2000 milliseconds. Requires the manifest VIBRATE permission and vibrator hardware.","unknownOutcome","Android accepted the request. Physical vibration is unverified."),
+            "Make the phone vibrate or buzz for 1 to 2000 milliseconds. Requires the manifest VIBRATE permission and vibrator hardware.","unknownOutcome","Android accepted the request. Physical vibration is unverified.", phone = true),
         CapabilityDefinition("flashlight.set","Фонарик",CapabilityAction.FLASHLIGHT_SET,mapOf("enabled" to CapabilityArgument("boolean")),
             "Request the flashlight state. Camera permission and an available flash are required.","unknownOutcome","Android accepted the request. Physical state is unverified. Busy hardware returns unavailable.",
-            Manifest.permission.CAMERA,android.content.pm.PackageManager.FEATURE_CAMERA_FLASH),
+            Manifest.permission.CAMERA,android.content.pm.PackageManager.FEATURE_CAMERA_FLASH, phone = true),
         CapabilityDefinition("photo.pick","Выбор фотографии",CapabilityAction.PHOTO_PICK,emptyMap(),
             "Open the system photo picker on API 33+, or the document picker on API 29–32. Only selected content is accessible.","awaitingUser",
             "Launch awaits a result. A selected item returns an owner-scoped resource handle when bounded metadata and access are available. Cancellation returns cancelled.",foreground = true,selection = true,
@@ -185,12 +202,19 @@ object CapabilityCatalog {
             "Send only the supplied text to DeepSeek from an explicit foreground action. Uses the host's existing key consent independently of the mini-app network grant. Set capabilityResults to true. No search or additional context.","succeeded",
             "A bounded plain-text answer. Missing consent or key returns denied. Results cannot request another call.",foreground = true,
             resultData = """{"text":{"type":"string","maxLength":${MiniAppAi.MAX_ANSWER}}}"""),
-        CapabilityDefinition("camera.capture","Снимок с камеры",CapabilityAction.CAMERA_CAPTURE,emptyMap(),
-            "Open the system camera for a thumbnail. The user reviews it before private storage. No full-resolution capture.","awaitingUser",
-            "Launch awaits a result. Success confirms a reviewed thumbnail through an owner-scoped resource handle, not a full-resolution photo.",Manifest.permission.CAMERA,
-            android.content.pm.PackageManager.FEATURE_CAMERA_ANY,foreground = true,selection = true,
-            resultData = """{"resourceId":{"type":"string","format":"opaque-owner-handle"},"kind":{"type":"string"},"mimeType":{"type":"string"},"sizeBytes":{"type":"integer","maximum":10485760}}""")
-    ) + MedicineContract.definitions + DeviceReadContract.definitions + AudioContract.definitions + NetworkEffectContract.definition + VideoContract.definitions
+        CapabilityDefinition(PHOTO_CAPTURE,"Снимок с камеры",CapabilityAction.CAMERA_CAPTURE,
+            mapOf("lens" to CapabilityArgument("string", optional = true, choices = PhotoLens.entries.map { it.wireName }.toSet())),
+            "Take a still photo with the rear, back, or main camera, or take a selfie with the front camera. Use lens front or rear. Default rear. The user uses a visible shutter and confirms the photo.","awaitingUser",
+            "Success confirms a reviewed private photo. Mini-apps receive an owner-scoped resource handle.",Manifest.permission.CAMERA,
+            foreground = true,selection = true,phone = true,
+            resultData = """{"resourceId":{"type":"string","format":"opaque-owner-handle"},"kind":{"type":"string"},"mimeType":{"type":"string"},"sizeBytes":{"type":"integer","maximum":10485760}}"""),
+        CapabilityDefinition("phone.dial", "Открыть набор номера", CapabilityAction.PHONE_DIAL,
+            mapOf("number" to text(16, format = "dial-number")), "Open the dialer for the explicitly supplied phone number.",
+            "launched", "Only the dialer opened. The user places the call.", foreground = true, phone = true),
+        CapabilityDefinition("share.text", "Поделиться текстом", CapabilityAction.SHARE_TEXT,
+            mapOf("text" to text(1000)), "Review exact plain text and open the Android Sharesheet.",
+            "launched", "Only the Sharesheet opened. The user selects a destination.", foreground = true, phone = true)
+    ) + MedicineContract.definitions + DeviceReadContract.definitions + AudioContract.definitions + NetworkEffectContract.definition + VideoContract.definitions + TiltContract.definition
     val ids = definitions.map { it.id }.toSet()
     val planned = listOf(
         PlannedCapability("source.searchFetch","Source search and fetch","Require a native network boundary, source attribution, size limits and untrusted-content handling. Chat search is not a generated-app API."),
@@ -205,11 +229,45 @@ object CapabilityCatalog {
         "calendar.write" to "Use calendar.createOwned and calendar.deleteOwned for app-owned events. Arbitrary calendar writes remain unavailable."
     ) + planned.associate { it.id to it.constraint }
     fun definition(id: String) = definitions.single { it.id == id }
-    fun discovery() = JSONObject().put("platform","Android").put("catalog","Alphy")
-        .put("implemented",JSONArray().apply { definitions.forEach { put(it.json()) } })
-        .put("planned",JSONArray().apply { planned.forEach { put(it.json()) } })
-        .put("unavailable",JSONObject(unavailable.filterKeys { key -> planned.none { it.id == key } }))
-        .put("resultStatuses",JSONArray(CapabilityResult.statuses.toList()))
+    internal val phoneGrants get() = definitions.filter(CapabilityDefinition::phone).map(CapabilityDefinition::id) +
+        PhoneCapabilities.definitions.keys + "calendar.createOwned.daily"
+
+    internal fun sharedPhone(id: String): CapabilityDefinition? = definitions.firstOrNull { it.id == id && it.phone }
+    internal fun phoneContract(id: String): PhoneCapability =
+        requireNotNull(PhoneCapabilities.definitions[id]) { "Unknown phone command" }
+    internal fun phoneDescription(id: String): String = when (id) {
+        "calendar.createOwned.daily" -> "Schedule a daily recurring calendar event that repeats every day with a reminder."
+        else -> sharedPhone(id)?.let { "${it.title} (${it.id}). ${it.explanation}" }
+            ?: phoneContract(id).description.substringBefore(" Use ")
+    }
+
+    internal fun discovery(caller: CapabilityCaller): JSONObject = JSONObject().put("platform", "Android").put("catalog", "Alphy")
+        .put("caller", caller.wireName).put("schemaVersion", 1)
+        .put("implemented", JSONArray().apply {
+            for (id in ids + PhoneCapabilities.definitions.keys) {
+                val mini = definitions.firstOrNull { it.id == id }
+                val phone = PhoneCapabilities.definitions[id]
+                val phoneEligible = phone != null || mini?.phone == true
+                val allowed = if (caller == CapabilityCaller.PHONE) phoneEligible else mini != null
+                val row = if (allowed) {
+                    if (caller == CapabilityCaller.PHONE && phone != null) phone.json() else checkNotNull(mini).json()
+                } else JSONObject().put("id", id).put("title", mini?.title ?: id).put("implementation", "implemented")
+                if (allowed && caller == CapabilityCaller.PHONE) {
+                    row.getJSONObject("access").put("confirmation", true).put("foreground", true)
+                }
+                put(row.put("callable", allowed).put("callers", JSONArray().apply {
+                    if (phoneEligible) put(CapabilityCaller.PHONE.wireName)
+                    if (mini != null) put(CapabilityCaller.MINI_APP.wireName)
+                }))
+            }
+        })
+        .put("planned", JSONArray().apply { planned.forEach { put(it.json()) } })
+        .put("unavailable", JSONObject(unavailable.filterKeys { key -> planned.none { it.id == key } }))
+        .put("resultStatuses", JSONArray(CapabilityResult.statuses.toList()))
+        .put("userInterface", JSONObject().put("contacts", "Open the contact entry in chat attachments.")
+            .put("voiceDictation", "Use the microphone control in the chat composer.")
+            .put("healthConnect", "Open Health in Settings."))
+
     fun modelGuidance(allowed: Set<String>): String = "Alphy Android callable shortlist (device availability is checked at execution): " +
         JSONArray().apply { definitions.filter { it.id in allowed }.forEach { put(it.json()) } }.toString() +
         ". Declare only these implemented IDs. Planned or unavailable IDs are not executable: " + unavailable.keys.joinToString() +
@@ -231,7 +289,7 @@ object CapabilityCatalog {
         val ids = mutableSetOf<String>()
         return (0 until json.length()).map { request(json.getJSONObject(it)).also { r ->
             require(r.capability in declared) { "Инструмент не объявил эту системную функцию" }
-            require(r.capability !in setOf(NetworkEffectContract.ID, MiniAppAi.ID, TorchSequence.ID) || json.length()==1) { "Запрос должен быть единственным эффектом действия." }
+            require(r.capability !in setOf(NetworkEffectContract.ID, MiniAppAi.ID, TorchSequence.ID, "share.text", VideoContract.CAPTURE, TiltContract.ID) || json.length()==1) { "Запрос должен быть единственным эффектом действия." }
             require(ids.add(r.id)) { "Повторяется идентификатор системной операции" }
         } }
     }

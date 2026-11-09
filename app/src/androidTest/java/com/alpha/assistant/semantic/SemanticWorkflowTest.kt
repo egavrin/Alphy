@@ -87,7 +87,7 @@ class SemanticWorkflowTest {
             "Delete all my personal calendar appointments",
         )
         for (step in steps) {
-            val top = runtime.rank(step, AgentCommand.grantNames, AgentCommand::description, cache = true).take(5)
+            val top = runtime.rank(step, com.alpha.assistant.capabilities.CapabilityCatalog.phoneGrants, com.alpha.assistant.capabilities.CapabilityCatalog::phoneDescription, cache = true).take(5)
             Log.i("AlphySemanticTest", "agent query=$step scores=$top")
         }
         val facts = listOf(

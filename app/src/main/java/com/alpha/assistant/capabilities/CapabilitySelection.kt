@@ -1,7 +1,6 @@
 package com.alpha.assistant.capabilities
 
 import android.content.Intent
-import android.graphics.Bitmap
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -16,7 +15,9 @@ data class CapabilitySelectionLaunch(
 internal sealed interface CapabilityPrompt {
     data class Picker(val launch: CapabilitySelectionLaunch, val intent: Intent, val origin: DeviceReadHost? = null) : CapabilityPrompt
     data class Reading(val launch: CapabilitySelectionLaunch, val origin: DeviceReadHost?) : CapabilityPrompt
-    data class Camera(val launch: CapabilitySelectionLaunch, val bitmap: Bitmap, val origin: DeviceReadHost?) : CapabilityPrompt
+    data class Camera(val launch: CapabilitySelectionLaunch, val capture: PhotoCapture, val origin: DeviceReadHost) : CapabilityPrompt
+    data class Share(val effectKey: String, val text: String, val origin: DeviceReadHost,
+        val launch: (Intent) -> Unit) : CapabilityPrompt
     data class Calendar(val effectKey: String) : CapabilityPrompt
     data class LocationPermission(val token: String, val effectKey: String, val host: DeviceReadHost) : CapabilityPrompt
 }

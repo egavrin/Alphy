@@ -438,4 +438,7 @@
     <string name="chat_app_test_unverified">Проверка версии %1$d не подтвердила ошибку.</string>
     <string name="chat_app_test_unrepaired">Исправление для версии %1$d не прошло проверку.</string>
     <string name="chat_app_test_unsaved">Исправление для версии %1$d проверено и не сохранено.</string>
+    <string name="tool_share_review_title">Проверьте текст перед отправкой</string>
+    <string name="tool_share_confirm">Поделиться</string>
+    <string name="tool_stop_tilt">Остановить наклон</string>
 </resources>

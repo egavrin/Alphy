@@ -224,14 +224,14 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
     }
 
     internal suspend fun response(key: String, turns: List<CloudTurn>, session: CloudSession, stage: CloudGenerationStage?,
-        instructions: String = "", expandedWriterOutput: Boolean = false): String {
+        instructions: String = "", expandedWriterOutput: Boolean = false, capabilityDiscovery: (() -> JSONObject)? = null): String {
         val maxBytes = if (expandedWriterOutput) ToolSpec.MAX_DEFINITION_BYTES else SandboxContract.MAX_BYTES
         val output = StringBuilder()
         fun tooLarge() = CloudFailure("widget_response_size", "The generator response exceeds the allowed size. Request a smaller tool.")
         session.checkActive(currentCoroutineContext())
         try {
             provider.respond(key, CloudRequest(turns, false, systemInstructions = instructions, jsonObject = true,
-                generationStage = stage, expandedWriterOutput = expandedWriterOutput), session) { event ->
+                generationStage = stage, expandedWriterOutput = expandedWriterOutput, capabilityDiscovery = capabilityDiscovery), session) { event ->
                 if (event is CloudEvent.Text) {
                     if (event.value.length > maxBytes - output.length) throw tooLarge()
                     output.append(event.value)
@@ -743,7 +743,11 @@ ${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by
                             else -> contract + languageGuidance()
                         }
                         suspend fun fetch(): String {
-                            val output = response(key, turns, session, modelStage, system, expandedWriterOutput = lessonTarget == null)
+                            val output = response(key, turns, session, modelStage, system, expandedWriterOutput = lessonTarget == null,
+                                capabilityDiscovery = if (lessonTarget != null || partsOnly) null else ({
+                                    AndroidCapabilities(sandbox.context).discover(CapabilityCaller.MINI_APP)
+                                        .put("eligible", JSONArray(allowedCapabilities.toList()))
+                                }))
                             if (!selectLanguage) return output
                             val candidate = try {
                                 generatedObject(output)
@@ -1452,6 +1456,10 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
                 check(it==input.copy(stateVersion=flushedVersion)) {"Saved data changed during widget evaluation. Reopen the mini-app."}
             }
         }
+        if (result.effects.any { it.capability == TiltContract.ID } && spec.surfaces.isEmpty())
+            throw CloudFailure("tilt_surface_required", "Tilt input requires a drawing surface.")
+        if (result.effects.any { it.capability == VideoContract.CAPTURE } && !spec.capabilityResults)
+            throw CloudFailure("video_result_required", "Video capture requires capability results.")
         val next=old.copy(stateVersion=old.stateVersion+1,state=result.state,ui=result.ui)
         if(video!=null && !video.active()) {
             invalidate()

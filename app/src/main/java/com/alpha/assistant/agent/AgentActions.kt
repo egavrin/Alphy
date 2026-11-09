@@ -1,6 +1,7 @@
 package com.alpha.assistant.agent
 
-import android.Manifest
+import android.app.SearchManager
+import android.provider.MediaStore
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -39,12 +40,9 @@ internal class AgentActions(private val context: Context, name: String, private 
     private val android = AndroidCapabilities(context)
     private val calendar = AgentCalendar(context, name)
 
-    fun permissions(command: AgentCommand): List<String> = when (command.function) {
-        "calendar.read", "calendar.readOwned" -> listOf(Manifest.permission.READ_CALENDAR)
-        "calendar.updateEvent", "calendar.select", "calendar.createOwned", "calendar.deleteOwned", "calendar.deleteAllOwned" ->
-            listOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
-        else -> if (AgentCommand.isNative(command.function)) listOfNotNull(android.permission(command.function)) else emptyList()
-    }
+    fun permissions(command: AgentCommand): List<String> =
+        if (AgentCommand.isNative(command.function)) listOfNotNull(android.permission(command.function))
+        else CapabilityCatalog.phoneContract(command.function).permissions
 
     fun hasPermission(name: String) = context.checkSelfPermission(name) == PackageManager.PERMISSION_GRANTED
 
@@ -56,12 +54,19 @@ internal class AgentActions(private val context: Context, name: String, private 
             if (android.availability(id).getString("state") != "available") return emptyList()
             val definition = CapabilityCatalog.definition(id)
             val after = when (id) {
+                com.alpha.assistant.capabilities.PHOTO_CAPTURE -> {
+                    val lens = com.alpha.assistant.capabilities.PhotoLens.requested(args)
+                    if (com.alpha.assistant.capabilities.PhotoLens.present(context)?.contains(lens) == false) return emptyList()
+                    text(lens.label)
+                }
                 "notification.post" -> args.getString("title") + "\n" + args.getString("text")
                 "calendar.create" -> "${args.getString("title")} · ${time(args.getLong("start"))} – ${time(args.getLong("end"))}\n${args.optString("location")}"
                 "flashlight.set" -> text(if (args.getBoolean("enabled")) R.string.agent_enabled else R.string.agent_disabled)
                 "vibration.play" -> context.getString(R.string.agent_vibration, args.getInt("milliseconds"))
                 "link.open" -> args.getString("url")
                 "maps.open" -> args.getString("query")
+                "phone.dial" -> args.getString("number")
+                "share.text" -> args.getString("text")
                 else -> args.getString("app")
             }
             return listOf(AgentTarget(definition.title, if (id == "flashlight.set") text(R.string.agent_unknown_state) else "", after, command.arguments))
@@ -74,6 +79,7 @@ internal class AgentActions(private val context: Context, name: String, private 
                 args.getInt("hour"), args.getInt("minute"), args.optString("label")).trim())
             "clock.setTimer" -> single(R.string.agent_timer, context.getString(R.string.agent_seconds, args.getInt("seconds")) +
                 " " + args.optString("label"))
+            "music.playSearch" -> listOf(AgentTarget("Music search", "", args.getString("query"), command.arguments))
             "maps.route" -> single(R.string.agent_route, "${args.getString("from")} → ${args.getString("to")}")
             "memory.read" -> {
                 val facts = memory.search(args.getString("match"), 0.75f, 50)
@@ -125,6 +131,9 @@ internal class AgentActions(private val context: Context, name: String, private 
                 .putExtra(AlarmClock.EXTRA_MINUTES, args.getInt("minute")).putExtra(AlarmClock.EXTRA_MESSAGE, args.optString("label")), launch)
             "clock.setTimer" -> open(Intent(AlarmClock.ACTION_SET_TIMER).putExtra(AlarmClock.EXTRA_LENGTH, args.getInt("seconds"))
                 .putExtra(AlarmClock.EXTRA_MESSAGE, args.optString("label")), launch)
+            "music.playSearch" -> open(Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+                .putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
+                .putExtra(SearchManager.QUERY, args.getString("query")), launch)
             "maps.route" -> open(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps/dir/").buildUpon()
                 .appendQueryParameter("api", "1").appendQueryParameter("origin", args.getString("from"))
                 .appendQueryParameter("destination", args.getString("to")).build()).addCategory(Intent.CATEGORY_BROWSABLE), launch)

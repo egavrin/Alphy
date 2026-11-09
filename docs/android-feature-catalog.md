@@ -1,18 +1,34 @@
 # Alphy Android feature catalog
 
-This inventory defines Alphy features for generated Android apps. It does not claim access to every Android API.
+The catalog describes the implemented Alphy phone commands and generated Android mini-app effects.
 `CapabilityCatalog` is the authoritative native catalog. Reference platform inventories do not establish Android implementation or device availability.
 
 Chat guidance, generator guidance, the argument validator, and executor bindings consume this catalog.
-`CapabilityCatalog.discovery()` returns static metadata. `AndroidCapabilities.discover()` adds current permission, API, notification, and hardware availability.
+`CapabilityCatalog` provides caller-specific metadata. `AndroidCapabilities.discover()` adds current permission, API, notification, and hardware availability for the read-only `discover_capabilities` tool.
 Discovery never launches activities, requests permission, posts notifications, or reads calendar events or selected content.
-An available entry still requires its tool grant and an explicit user action. Navigation grants permit direct foreground buttons without another confirmation dialog. An activity handler is checked during execution.
+The phone agent requires approval of the current plan. Mini-apps require a declared capability and the appropriate native foreground action. The native host checks Android permissions, activity handlers, ownership, and any capability-specific grant at execution.
 Planned entries have no executable argument schema and cannot appear in a tool's capability declaration.
+
+## Selected Android SDK mappings
+
+The catalog records bounded Alphy operations. The parity audit keeps reference provenance and does not determine caller authority.
+
+| Alphy operation | Public Android API | Scope |
+| --- | --- | --- |
+| `calendar.read`, `calendar.create` | `CalendarContract.Instances`, `ACTION_INSERT` | Query the approved range and calendar or open an event form. |
+| `maps.open`, `maps.route` | `ACTION_VIEW` | Hand off to a maps handler. The mini-app contract uses its approved reached stop. |
+| `flashlight.set`, `audio.tone` | `CameraManager.setTorchMode`, `ToneGenerator.startTone` | Submit a bounded native operation. |
+| `device.context` | `ConnectivityManager.activeNetwork` | Report default-network visibility without a reachability test. |
+| `device.formatPreferences.read` | `DateFormat.is24HourFormat`, `Calendar.getFirstDayOfWeek` | Report the Android time setting and locale-derived first weekday. |
+| `music.playSearch`, `video.capture` | `INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH`, `ACTION_VIDEO_CAPTURE` | Hand off to an installed player or capture one foreground clip into a private file. |
+| `sensor.accelerometer.stream` | `SensorManager`, `TYPE_ACCELEROMETER` | Deliver bounded input while the declaring mini-app has foreground focus. |
+
+The reference mappings came from the [pinned Android dispositions](parity/android-dispositions.json).
+Use the [parity reproduction instructions](parity/README.md#files-and-reproduction) to inspect the reference inventory.
 
 ## Implemented actions
 
-All actions require a declared capability, a current artifact revision, a tool grant, and an explicit user action.
-Navigation uses a clear scoped grant. Other actions retain their per-effect confirmation.
+Mini-app effects use a declared capability and the current artifact revision. The native navigation control authorizes only the displayed operation. Network requests require the mini-app grant, and text sharing requires a native preview.
 Android permissions remain separate. External activities require an unlocked, resumed Alphy UI.
 The minimum supported app version is Android API 29. Permission and hardware checks repeat during execution.
 
@@ -30,11 +46,19 @@ The minimum supported app version is Android API 29. Permission and hardware che
 | `flashlight.set` | Boolean state. `CAMERA` permission and flash hardware. | `unknownOutcome` means Android accepted the request. Busy or missing hardware returns `unavailable`. |
 | `photo.pick` | No arguments. System photo picker on API 33+, document picker on API 29–32. | `awaitingUser` after launch. `succeeded` requires a selected content URI. Only selected content is accessible. |
 | `file.pick` | One MIME type. System document picker. | `awaitingUser` after launch. `succeeded` requires a selected content URI. Persistent read access depends on the provider. |
-| `camera.capture` | No arguments. `CAMERA` permission and camera hardware. System thumbnail capture. | `awaitingUser` after launch. `succeeded` requires user review and private thumbnail storage. No full-resolution photo. |
+| `camera.capture` | Phone agent or mini-app. Optional `lens` is `front` or `rear`. The default is `rear`. Android camera permission applies. | The native preview shows the lens and waits for shutter and Keep. A kept photo stays private. Mini-apps receive an owner-scoped handle. Phone photos appear in the originating chat. |
+| `video.capture` | Mini-app. `CAMERA` permission and camera hardware. One foreground recording up to 30 seconds and 32 MiB. | After user acceptance, the requesting app receives a private handle for its native `video.play` control. |
+| `sensor.accelerometer.stream` | Mini-app. Explicit foreground action and accelerometer hardware. | Delivers display-aligned samples while the host is active. Native Stop ends delivery. |
+| `device.context`, `device.formatPreferences.read` | Mini-app. Bounded status and format reads from an explicit foreground action. | Returns battery, locale and default-network visibility, or the 12/24-hour setting and locale first weekday. |
+| `location.once`, `sensor.sample` | Mini-app. One foreground location fix or sensor sample. Location requires Android permission. | Returns a bounded measurement when available. |
+| `phone.dial`, `share.text` | Phone agent or mini-app. Explicit number or reviewed text. | Opens the dialer or Sharesheet. The user places the call or chooses the share destination. |
+| `music.playSearch` | Phone agent. Explicit song, artist, or album query and a compatible player. | Android receives the search handoff. Playback remains unverified. |
 
 Picker cancellation returns `cancelled`. Missing or unverifiable results return `unknownOutcome`.
 Revocation or a stale artifact token prevents a returned picker result from changing current app data.
 Results remain in native effect history. Generated JavaScript does not receive Android APIs, credentials, or implicit permission.
+
+For a phone plan with a timer followed by a photo, Alphy opens Clock first. After returning, the user taps Continue to open the selected camera. The handoff confirms that Clock opened.
 
 ## Explicit-origin navigation
 
@@ -92,8 +116,6 @@ These groups are unavailable to generated apps. Their IDs describe future scope 
 | `source.searchFetch` | Return bounded source text with source attribution and honest network failures. | Native network boundary. Treat fetched content as untrusted data. Chat search is separate. | Verify URL validation, redirects, size limits, offline failures, and malicious source text. |
 | `document.readShare` | Read selected documents and share explicit content. | Selected URI grants, MIME checks, size limits, and share confirmation. | Verify revocation, process restart, provider failures, bounded reads, and cancelled sharing. |
 | `media.control` | Operate explicitly selected media with honest playback state. | Selected content access, lifecycle controls, and explicit external actions. | Verify pause/resume, cancellation, absent handlers, and lost URI grants. |
-| `location.once` | Return location with timestamp, accuracy, and an explicit freshness limit. | Foreground permission and cancellation. Background access requires separate approval. | Verify denial, disabled service, stale fixes, timeout, and cancellation. |
-| `device.context` | Return bounded battery, connectivity, and locale snapshots with timestamps. | Native read-only snapshots. Connectivity does not prove internet access. | Verify unavailable services, locale changes, offline state, and snapshot freshness. |
 | `artifact.data` | Access declared local artifact data through explicit contracts and revision checks. | Explicit access, local ownership, and stale-token rejection. | Verify isolation, schema mismatch, revocation, revision changes, and restart recovery. |
 
 Other unavailable actions include arbitrary app control, generated-app screen capture, notification reads, and direct calendar writes.

@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import android.graphics.BitmapFactory
 import com.alpha.assistant.agent.AgentChatHost
 import com.alpha.assistant.agent.AgentPlanCard
+import com.alpha.assistant.agent.AgentPhotoCard
 import com.alpha.assistant.agent.AgentRunBar
 import com.alpha.assistant.cloud.ImageInput
 import kotlinx.coroutines.Dispatchers
@@ -577,6 +578,7 @@ import kotlinx.coroutines.launch
         AgentRunBar(model.agent)
         if (conversation != null) {
             val chat = conversation
+            val phonePhotos = model.agent.keptPhotos(chat.id)
             model.tools.error?.let { error ->
                 Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
                     Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -619,7 +621,7 @@ import kotlinx.coroutines.launch
                 if (target?.conversationId == chat.id && !target.draft) {
                     val index = chat.messages.asReversed().indexOfFirst { it.id == target.messageId }
                     if (index >= 0) {
-                        val before = listOfNotNull(plan, model.agent.plan?.takeIf { it.conversationId == chat.id }).size
+                        val before = listOfNotNull(plan, model.agent.plan?.takeIf { it.conversationId == chat.id }).size + phonePhotos.size
                         listState.scrollToItem(index + before)
                     }
                     model.consumeHistoryTarget(target)
@@ -634,6 +636,9 @@ import kotlinx.coroutines.launch
                         item(key = "agent-plan-${phonePlan.id}") { AgentPlanCard(model.agent, phonePlan) }
                     }
                     if (plan != null) item(key = "course-plan-${plan.id}") { CoursePlanCard(model, plan) }
+                    items(phonePhotos, key = { "agent-photo-${it.planId}-${it.step}" }) { photo ->
+                        AgentPhotoCard(model.agent, chat.id, photo)
+                    }
                     items(chat.messages.asReversed(), key = { it.id }) { message ->
                         Column(Modifier.fillMaxWidth().padding(start = if (message.role == "user") 25.dp else 0.dp)) {
                             val assistant = message.role == "assistant"

@@ -1,5 +1,6 @@
 package com.alpha.assistant.cloud
 
+import com.alpha.assistant.agent.PhoneActionEvidence
 import com.alpha.assistant.data.Source
 import com.alpha.assistant.tools.MAX_TOOL_PROMPT_LENGTH
 import kotlinx.serialization.json.Json
@@ -40,7 +41,7 @@ object ChatToolReply {
     }
 
     data class Decision(val kind: String, val text: String, val brief: String, val search: String,
-        internal val devicePlanNeeds: List<String>? = null) {
+        internal val devicePlanSteps: List<PhoneActionEvidence>? = null) {
         internal val requiresCleanPreparation: Boolean get() = kind != "answer" && kind != "clarify"
         internal val isMiniApp: Boolean get() = kind == "create" || kind == "refine"
     }

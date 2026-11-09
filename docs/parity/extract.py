@@ -346,18 +346,20 @@ def extract(repo):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('reference_root', type=Path)
-    parser.add_argument('--check', action='store_true', help='Compare extraction with inventory.json without writes')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--check', action='store_true', help='Verify the pinned extraction digest without writes')
+    mode.add_argument('--output', type=Path, help='Write an optional inventory to this path')
     parser.add_argument('--android-sdk', type=Path, help='Also verify saved public signatures against the recorded Android SDK')
     args = parser.parse_args()
     output = extract(args.reference_root)
     rendered = json.dumps(output, ensure_ascii=False, indent=2) + '\n'
-    target = HERE / 'inventory.json'
-    if args.check:
-        require(target.read_text() == rendered, 'inventory.json differs; regenerate and review the change')
-    else:
-        target.write_text(rendered)
+    if args.output is None or args.check:
+        pinned = json.loads((HERE / 'verification.json').read_text())['artifacts']['inventory.json']
+        require(digest(rendered) == pinned, 'Extracted inventory differs from the pinned digest')
+    if args.output is not None:
+        args.output.write_text(rendered)
     verified_members = check_android_sdk(args.android_sdk) if args.android_sdk else None
-    print(json.dumps({'result': 'PASS', 'mode': 'check' if args.check else 'write',
+    print(json.dumps({'result': 'PASS', 'mode': 'write' if args.output is not None else 'check',
                       'reference_commit': PIN, 'counts': output['counts'],
                       'sdk_registry_rows': output['sdk_registry_rows'],
                       'sdk_index_without_adapter': output['sdk_index_without_adapter'],

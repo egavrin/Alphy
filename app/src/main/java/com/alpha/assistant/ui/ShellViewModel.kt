@@ -52,7 +52,7 @@ import com.alpha.assistant.updates.AppUpdater
 import com.alpha.assistant.data.*
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.agent.AgentConversation
-import com.alpha.assistant.agent.AgentCommand
+import com.alpha.assistant.agent.PhoneActionEvidence
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CancellationException
@@ -888,6 +888,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         }
         voice.stop()
         snapshot = snapshot.copy(selectedId = id)
+        if (phoneAgent.isInitialized()) agent.chatChanged(id)
     }
     fun setUserName(value: String) {
         // A cut between the two halves of a surrogate pair would save half of an emoji.
@@ -918,7 +919,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         if (snapshot.conversations.none { it.id == id }) return
         requests.removeAll { it.conversationId == id }
         if (activeConversationId == id) cancelRequest()
-        if (phoneAgent.isInitialized()) agent.forget(id)
+        agent.forget(id)
         if (snapshot.selectedId == id) {
             leaveCourseChat()
             voice.stop()
@@ -933,7 +934,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     }
     fun clearHistory() {
         requests.clear()
-        if (phoneAgent.isInitialized()) snapshot.conversations.forEach { agent.forget(it.id) }
+        snapshot.conversations.forEach { agent.forget(it.id) }
         cancelRequest()
         leaveCourseChat()
         voice.stop()
@@ -1496,7 +1497,11 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                         decisionContext = ChatDecisionContext(originalTurn, turns(cleanHistory), toolInstructions, inputProvenance, memoryStore),
                         automationDraftChatId = draftChat, screenContext = user.screenContext, screenImages = screenImages,
                         allowDevicePlan = !assistant.requiresRefinement, allowMemoryFact = !assistant.requiresRefinement,
-                        allowTestFix = !assistant.requiresRefinement && choices.isNotEmpty())
+                        allowTestFix = !assistant.requiresRefinement && choices.isNotEmpty(),
+                        capabilityDiscovery = if (assistant.requiresRefinement) null else ({
+                            com.alpha.assistant.capabilities.AndroidCapabilities(getApplication<Application>())
+                                .discover(com.alpha.assistant.capabilities.CapabilityCaller.PHONE)
+                        }))
                     provider.respond(key, cloudRequest, request.session) { event ->
                         withContext(Dispatchers.Main) {
                             if (isActive(request)) {
@@ -1534,9 +1539,9 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 val completed = terminal ?: throw CloudFailure("incomplete","The reply has no completed answer. Retry the request.")
                 val courseTopic = completed.courseTopic
                 val testFix = completed.testFix
-                val devicePlanNeeds = completed.devicePlanNeeds
+                val devicePlanSteps = completed.devicePlanSteps
                 val memoryFact = completed.memoryFact
-                val preparedActions = listOfNotNull(courseTopic, testFix, devicePlanNeeds, completed.automationDraft, memoryFact)
+                val preparedActions = listOfNotNull(courseTopic, testFix, devicePlanSteps, completed.automationDraft, memoryFact)
                 if (preparedActions.isNotEmpty()) {
                     if (completed.text.isNotEmpty() || preparedActions.size != 1 || answerFragment.isNotEmpty() ||
                         completed.provenance != MessageProvenance.CLEAN) {
@@ -1558,11 +1563,11 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                     }
                     return@launch
                 }
-                if (devicePlanNeeds != null) {
+                if (devicePlanSteps != null) {
                     fun currentRequest() = isActive(request) && snapshot.selected?.takeIf { it.id == conversationId }
                         ?.messages?.lastOrNull { it.role == "user" }?.id == user.id
-                    if (assistant.requiresRefinement || !AgentCommand.validNeeds(user.text, devicePlanNeeds) ||
-                        !agent.propose(conversationId, user.text, selectedText, images, devicePlanNeeds, key, request.session, ::currentRequest))
+                    if (assistant.requiresRefinement || !PhoneActionEvidence.valid(user.text, devicePlanSteps) ||
+                        !agent.propose(conversationId, user.text, selectedText, images, devicePlanSteps, key, request.session, ::currentRequest))
                         throw CloudFailure("agent_plan", getApplication<Application>().getString(R.string.agent_plan_error))
                     updateMessage(request, assistant.id) {
                         it.copy(text = getApplication<Application>().getString(R.string.agent_plan_ready), status = "complete",

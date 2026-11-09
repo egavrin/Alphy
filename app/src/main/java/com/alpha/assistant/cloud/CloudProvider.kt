@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import com.alpha.assistant.weather.WeatherPlace
 import com.alpha.assistant.weather.WeatherRequest
-import com.alpha.assistant.agent.AgentCommand
+import com.alpha.assistant.agent.PhoneActionEvidence
 import kotlinx.coroutines.CancellationException
 import kotlin.coroutines.CoroutineContext
 
@@ -71,6 +71,7 @@ data class CloudRequest(
     val allowTestFix: Boolean = false,
     val allowMemoryFact: Boolean = false,
     internal val expandedWriterOutput: Boolean = false,
+    internal val capabilityDiscovery: (() -> JSONObject)? = null,
 )
 sealed interface CloudEvent {
     data class TestFixRequest(val target: String?)
@@ -85,7 +86,7 @@ sealed interface CloudEvent {
         val automationDraft: String? = null,
         val courseTopic: String? = null,
         val testFix: TestFixRequest? = null,
-        val devicePlanNeeds: List<String>? = null,
+        val devicePlanSteps: List<PhoneActionEvidence>? = null,
         val memoryFact: String? = null,
     ) : CloudEvent
     data class Search(val status: String, val sources: List<Source> = emptyList()) : CloudEvent
@@ -95,6 +96,7 @@ class CloudSession {
     private val canceled = AtomicBoolean(false)
     private val chatCorrectionUsed = AtomicBoolean(false)
     private val generationCorrectionUsed = AtomicBoolean(false)
+    private val capabilityDiscoveryUsed = AtomicBoolean(false)
     private val planRepairs = AtomicInteger()
     private val completeRepairs = AtomicInteger()
     private val refineRepairs = AtomicInteger()
@@ -103,6 +105,8 @@ class CloudSession {
     internal val generationAttempt: Int get() = if (generationCorrectionUsed.get()) 2 else 1
     internal var beforeHttp: (() -> Unit)? = null
     internal var decisionRejectionObserver: ((DecisionRejection) -> Unit)? = null
+    internal val canDiscoverCapabilities get() = !capabilityDiscoveryUsed.get()
+    internal fun claimCapabilityDiscovery(): Boolean = claimCorrection(capabilityDiscoveryUsed)
     internal fun claimChatCorrection(): Boolean = claimCorrection(chatCorrectionUsed)
     internal fun claimGenerationCorrection(): Boolean = claimCorrection(generationCorrectionUsed)
 
@@ -212,7 +216,7 @@ class DeepSeekProvider internal constructor(
             return published >= from && published < until
         }
     }
-    private data class Completion(val text: String, val calls: List<ToolCall>)
+    private data class Completion(val text: String, val calls: List<ToolCall>, val reasoning: String? = null)
     private enum class CompletionStage(val strictDecision: Boolean = false) {
         GENERAL, GENERATION, DECISION(true),
         AUTOMATION_DRAFT, SEARCH_PLAN, ANSWER, GROUNDED_DECISION
@@ -247,16 +251,37 @@ class DeepSeekProvider internal constructor(
                 body.put("tools",searchTool(request.scheduledAgent))
                 body.put("tool_choice", if (searches >= 2) "none" else "auto")
             }
-            val completion = stream(key, body, session, { if (!request.scheduledAgent && !request.agentPlan) emit(CloudEvent.Text(it)) },
-                maxText = when {
+            val discovery = request.capabilityDiscovery?.takeIf { !request.search && !request.scheduledAgent }
+            val offerDiscovery = discovery != null && session.canDiscoverCapabilities
+            if (offerDiscovery) {
+                body.put("tools", JSONArray().put(discoveryTool(strict = false))).put("tool_choice", "auto")
+            }
+            suspend fun complete(allowTools: Boolean, retainReasoning: Boolean): Completion =
+                stream(key, body, session, {
+                    if (discovery == null && !request.scheduledAgent && !request.agentPlan) emit(CloudEvent.Text(it))
+                }, maxText = when {
                     request.agentPlan -> ChatToolReply.MAX_REPLY
                     request.scheduledAgent -> ChatToolReply.MAX_TEXT
                     else -> 2 * 1024 * 1024
-                }, allowTools = !request.agentPlan,
-                reportLength = request.generationStage != null,
-                stage = if (request.generationStage == null) CompletionStage.GENERAL else CompletionStage.GENERATION,
-                // Each text or reasoning fragment carries its own SSE envelope. Visible text has a separate limit.
-                maxWireChars = if (think || request.expandedWriterOutput) 64 * 1024 * 1024 else 2 * 1024 * 1024)
+                }, allowTools = allowTools, reportLength = request.generationStage != null,
+                    stage = if (request.generationStage == null) CompletionStage.GENERAL else CompletionStage.GENERATION,
+                    maxWireChars = if (think || request.expandedWriterOutput) 64 * 1024 * 1024 else 2 * 1024 * 1024,
+                    retainReasoning = retainReasoning)
+            var completion = complete(if (discovery == null) !request.agentPlan else offerDiscovery, offerDiscovery && think)
+            if (discovery != null && completion.calls.isNotEmpty()) {
+                val call = validateDiscovery(completion)
+                val result = discover(session, discovery)
+                messages.put(JSONObject().put("role", "assistant").put("content", JSONObject.NULL)
+                    .put("tool_calls", JSONArray().put(JSONObject().put("id", call.id).put("type", "function")
+                        .put("function", JSONObject().put("name", call.name).put("arguments", call.arguments)))).apply {
+                    completion.reasoning?.let { put("reasoning_content", it) }
+                })
+                messages.put(JSONObject().put("role", "tool").put("tool_call_id", call.id).put("content", result.toString()))
+                body.put("tool_choice", "none")
+                session.checkActive(currentCoroutineContext())
+                completion = complete(false, false)
+            }
+            if (discovery != null && !request.agentPlan) emit(CloudEvent.Text(completion.text))
             if (completion.calls.isEmpty() && request.scheduledAgent) {
                 if (searches > 0 && agentSources.isEmpty())
                     throw CloudFailure("search_empty", "Не найдено подходящих веб-источников.")
@@ -309,6 +334,33 @@ class DeepSeekProvider internal constructor(
     private fun strictTool(name: String, description: String, parameters: JSONObject) =
         JSONObject().put("type", "function").put("function", JSONObject().put("name", name)
             .put("description", description).put("strict", true).put("parameters", parameters))
+
+    private fun discoveryTool(strict: Boolean): JSONObject {
+        val schema = JSONObject().put("type", "object").put("properties", JSONObject())
+            .put("required", JSONArray()).put("additionalProperties", false)
+        return strictTool(DISCOVER_CAPABILITIES, "List Alphy device capabilities and their current prerequisites. Read-only.", schema)
+            .apply { if (!strict) getJSONObject("function").remove("strict") }
+    }
+
+    private fun validateDiscovery(completion: Completion): ToolCall {
+        val call = completion.calls.singleOrNull()
+        if (call == null || call.name != DISCOVER_CAPABILITIES || completion.text.isNotBlank() ||
+            call.id.isBlank() || call.id.length > 128 || call.id.any(Char::isISOControl) ||
+            runCatching { ChatToolReply.strictObject(call.arguments, 4096).isEmpty() }.getOrDefault(false).not()) {
+            throw CloudFailure("tool_invalid", "The assistant returned an invalid capability discovery call.")
+        }
+        return call
+    }
+
+    private suspend fun discover(session: CloudSession, snapshot: () -> JSONObject): JSONObject {
+        session.checkActive(currentCoroutineContext())
+        if (!session.claimCapabilityDiscovery()) throw CloudFailure("tool_limit", "Only one capability discovery call is allowed.")
+        val result = snapshot()
+        session.checkActive(currentCoroutineContext())
+        if (result.toString().toByteArray(Charsets.UTF_8).size > 64 * 1024)
+            throw CloudFailure("response_size", "The capability snapshot exceeds its size limit.")
+        return result
+    }
 
     private fun actionTool(name: String, description: String, field: String) = strictTool(name, description,
         JSONObject().put("type", "object").put("required", JSONArray().put(field)).put("additionalProperties", false)
@@ -405,6 +457,7 @@ class DeepSeekProvider internal constructor(
         val allowCourse = userTextAvailable && request.allowCourseDecision
         val allowDevicePlan = userTextAvailable && request.allowDevicePlan
         val allowTestFix = userTextAvailable && request.allowTestFix
+        val inventory = request.capabilityDiscovery?.takeIf { userTextAvailable && session.canDiscoverCapabilities }
         val schema = ChatToolReply.decisionSchema(draftChat != null, canLocate)
         val decisionTools = JSONArray().put(strictTool(SUBMIT_CHAT_DECISION, "Submit the ordinary decision for the latest user request.", schema))
         if (allowMemory) decisionTools.put(actionTool(PREPARE_MEMORY_FACT, "Prepare one user-authored fact for review before saving it to memory.", "fact"))
@@ -416,11 +469,16 @@ class DeepSeekProvider internal constructor(
             decisionTools.put(strictTool(TEST_AND_FIX_APP, "Test a saved mini-app and fix verified issues when explicitly requested.", parameters))
         }
         if (allowDevicePlan) {
-            val needs = JSONObject().put("type", "array").put("items", JSONObject().put("type", "string"))
+            val text = JSONObject().put("type", "string")
+            val step = JSONObject().put("type", "object").put("additionalProperties", false)
+                .put("required", JSONArray(listOf("context", "anchor")))
+                .put("properties", JSONObject().put("context", text).put("anchor", text))
+            val needs = JSONObject().put("type", "array").put("items", step)
             val arguments = JSONObject().put("type", "object").put("required", JSONArray().put("steps"))
                 .put("properties", JSONObject().put("steps", needs)).put("additionalProperties", false)
             decisionTools.put(strictTool(PREPARE_DEVICE_PLAN, "Identify the explicitly requested phone steps to preview for approval.", arguments))
         }
+        if (inventory != null) decisionTools.put(discoveryTool(strict = true))
         val decisionChoice = if (decisionTools.length() == 1) JSONObject().put("type", "function")
             .put("function", JSONObject().put("name", SUBMIT_CHAT_DECISION)) else "required"
         val selection = memory?.let { readChatMemory { it.selectForRequest(current.text, MemoryPurpose.CHAT_ANSWER) } }
@@ -470,18 +528,40 @@ Use JSON null only if the user explicitly refers to the current mini-app, for ex
 Ask for clarification if the request does not identify an app. Quotes and requests only to test do not authorize repair.
 """.trimIndent()
         val memoryInstructions = if (!allowMemory) "" else """
-Call prepare_memory_fact when the latest user message asks Alphy to retain a fact or preference for later.
+Call prepare_memory_fact only when the entire latest request is to retain a single fact or preference.
+Use prepare_device_plan for two or more separate facts or for a memory operation alongside another
+phone action. Include every memory operation as its own step. Do not omit it when another action follows.
 This includes requests phrased as "keep in mind", "make a note for next time", or "учти на будущее".
 For "Make a note for next time: I work nights.", call prepare_memory_fact with {"fact":"I work nights."}.
 Copy only the fact as an exact continuous excerpt of the message. An ordinary answer cannot remember it.
 If no fact is stated, ask for it. Quotes, examples, and questions about remembering do not request a save.
-Use the device plan for memory operations that are part of a larger phone task or change existing records.
+Use the device plan to change an existing memory record.
 """.trimIndent()
         val devicePlanInstructions = if (!allowDevicePlan) "" else """
 Call prepare_device_plan for a direct request to use supported phone functions or change local records.
-Return one exact, continuous excerpt of the latest request per explicitly requested phone action.
-Include the verb and enough context to identify the action. Keep the user's order and language.
-Use automation for scheduled reminders or recurring tasks other than calendar events.
+Return one {context,anchor} object per explicitly requested phone action. Copy both fields verbatim from
+the latest request, preserving case, spaces and punctuation. Context is a short continuous clause with the
+action verb. Anchor is a distinct target or argument within that clause. Contexts can repeat or overlap.
+Anchors must be in user order and must not overlap. If a verb has two target values, return two objects.
+Example: for "Set alarms for 7:00 AM and 9:00 AM", use that clause as both contexts and use the anchors
+"7:00 AM" and "9:00 AM". A single action with several parameters still uses one object.
+An elliptical phrase such as "another for five minutes" is an anchor, never a context. Copy the original
+verb and the object noun into each step by using a longer continuous quote. For
+"Set a timer for two minutes and another for five minutes, then open Android Settings.",
+the first two contexts are both "Set a timer for two minutes and another for five minutes" and the
+anchors are "two minutes" and "five minutes". The third context is "open Android Settings" with
+anchor "Android Settings". Each context must make sense on its own to a reader who sees only that quote.
+A request like "Remember that I take the train. Remember that I start work at eight. Then open
+the browser." has three steps, two memory writes followed by one open action. For each memory write,
+copy the whole clause with the save or remember verb as context and only the fact as anchor.
+Route the entire request to prepare_device_plan.
+Example: for "Find the Eiffel Tower on the map. Then open https://example.com/ in my browser.",
+use "Eiffel Tower" and "https://example.com/" as anchors in their respective verb clauses.
+Start an immediate countdown or set a one-time Android Clock alarm with prepare_device_plan. For
+"Set a five-minute timer.", return one step with the full clause as context and "five-minute" as anchor.
+Use prepare_device_plan for a requested still photo or selfie. For "Take a selfie.", use that clause
+and the anchor "selfie". For a photo with an explicit lens, anchor the camera phrase.
+Use automation for future reminders or recurring rules, such as "Remind me in five minutes to call Sam".
 Ask for missing details. Course and mini-app requests use their own actions.
 Explanations, quotes, and references to earlier requests do not authorize a plan.
 The user reviews and approves the plan before any device action.
@@ -514,7 +594,9 @@ The user reviews and approves the plan before any device action.
         val localBriefAllowance = ChatToolReply.generationBriefAllowance(current.text, emptyList(), request.selectedText)
         fun classificationBody(notice: String = ""): ByteArray {
             val system = listOf(instructions, ChatToolReply.courseInstructions.takeIf { allowCourse }.orEmpty(),
-                weatherInstructions, repairInstructions, memoryInstructions, devicePlanInstructions, classificationInstructions, screenHint, answerContextHint,
+                weatherInstructions, repairInstructions, memoryInstructions, devicePlanInstructions,
+                if (inventory != null) "Call $DISCOVER_CAPABILITIES only for a direct question about what Alphy can do on this phone. Requests to perform an action use their normal tool." else "",
+                classificationInstructions, screenHint, answerContextHint,
                 "For a local mini-app, limit the brief to $localBriefAllowance characters.".takeIf { localBriefAllowance > 0 }.orEmpty(), notice)
                 .filter(String::isNotBlank).joinToString("\n")
             val turns = listOf(current.copy(images = emptyList()))
@@ -535,9 +617,9 @@ The user reviews and approves the plan before any device action.
             return ChatToolReply.Decision("automation", "", definition.json, "none")
         }
         fun decodeClassification(completion: Completion): ChatToolReply.Decision {
-            fun invalidAction(rule: String = "decision.tool_call"): Nothing =
+            fun invalidAction(rule: String = "decision.tool_call", path: String = "$"): Nothing =
                 throw CloudFailure("tool_invalid", "The assistant returned an invalid chat tool call.",
-                    ResponseShape(rule, "$", "tool_call"))
+                    ResponseShape(rule, path, "tool_call"))
             val call = completion.calls.singleOrNull()
             if (call == null || completion.text.isNotBlank() || call.id.isBlank() ||
                 call.id.length > 128 || call.id.any(Char::isISOControl)) invalidAction()
@@ -577,13 +659,27 @@ The user reviews and approves the plan before any device action.
                 PREPARE_DEVICE_PLAN -> {
                     if (!allowDevicePlan) invalidAction()
                     val steps = argument("steps") as? kotlinx.serialization.json.JsonArray
-                        ?: invalidAction("decision.device_steps")
-                    val needs = steps.map {
-                        (it as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { value -> value.isString }?.content
-                            ?: invalidAction("decision.device_steps")
+                        ?: invalidAction("decision.device_steps", "$.steps")
+                    if (steps.size !in 1..8) invalidAction("decision.device_steps.count", "$.steps")
+                    val needs = steps.mapIndexed { index, value ->
+                        val path = "$.steps[$index]"
+                        val step = value as? kotlinx.serialization.json.JsonObject
+                            ?: invalidAction("decision.device_steps", path)
+                        if (step.keys != setOf("context", "anchor")) invalidAction("decision.device_steps", path)
+                        fun quote(field: String) =
+                            (step[field] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
+                                ?: invalidAction("decision.device_steps", "$path.$field")
+                        PhoneActionEvidence(quote("context"), quote("anchor"))
                     }
-                    if (!AgentCommand.validNeeds(current.text, needs)) invalidAction("decision.device_steps")
-                    return ChatToolReply.Decision("device_plan", "", "", "none", devicePlanNeeds = needs)
+                    PhoneActionEvidence.invalidIndex(current.text, needs)?.let { index ->
+                        invalidAction("decision.device_steps.source", "$.steps[$index]")
+                    }
+                    return ChatToolReply.Decision("device_plan", "", "", "none", devicePlanSteps = needs)
+                }
+                DISCOVER_CAPABILITIES -> {
+                    if (inventory == null) invalidAction()
+                    validateDiscovery(completion)
+                    return ChatToolReply.Decision("capability_inventory", "", "", "none")
                 }
                 SUBMIT_CHAT_DECISION -> Unit
                 else -> invalidAction()
@@ -626,6 +722,9 @@ The user reviews and approves the plan before any device action.
                 val notice = "\nThe prior response failed ${shape.rule} at ${shape.path}. $missingFields$briefCorrection" +
                     if (stage == CompletionStage.AUTOMATION_DRAFT) {
                         "Return exactly one valid draft_automation tool call for a supported request, or a short explanation or question if a draft cannot be prepared. Do not return both."
+                    } else if (shape.rule.startsWith("decision.device_steps")) {
+                        "For $PREPARE_DEVICE_PLAN, return one {context,anchor} per action. Copy both fields exactly. " +
+                            "Repeat a shared verb clause when needed. Give each action a distinct, ordered anchor inside its context."
                     } else if (failure.code == "source_attribution") {
                         "Return one JSON decision with the original kind and search policy. Use only the supplied source numbers and exact source URLs. Fix or omit unsupported citations. Treat ordinary bracketed labels as text."
                     } else {
@@ -687,6 +786,18 @@ The user reviews and approves the plan before any device action.
         if(weather && decision.kind == "answer" && decision.search != "required")
             throw CloudFailure("weather_search","Для текущей погоды нужны веб-источники. Повторите запрос, указав город и период прогноза.")
         session.checkActive(currentCoroutineContext())
+        if (decision.kind == "capability_inventory") {
+            val snapshot = discover(session, checkNotNull(inventory))
+            val rows = snapshot.getJSONArray("implemented")
+            val text = (0 until rows.length()).map(rows::getJSONObject).joinToString("\n") { row ->
+                val callers = row.getJSONArray("callers")
+                val eligible = (0 until callers.length()).joinToString(", ", transform = callers::getString)
+                val state = row.getJSONObject("availability").getString("state")
+                "- ${row.getString("id")} · $eligible · $state"
+            }
+            emit(CloudEvent.RoundComplete(ChatToolReply.encode(ChatToolReply.Decision("answer", text, "", "none")), false, provenance))
+            return
+        }
         if(decision.requiresCleanPreparation && !userTextAvailable) {
             clarifyPreparation()
             return
@@ -728,7 +839,7 @@ The user reviews and approves the plan before any device action.
                 return
             }
             "device_plan" -> {
-                emit(CloudEvent.RoundComplete("", false, provenance, devicePlanNeeds = decision.devicePlanNeeds))
+                emit(CloudEvent.RoundComplete("", false, provenance, devicePlanSteps = decision.devicePlanSteps))
                 return
             }
             "course" -> {
@@ -920,12 +1031,12 @@ The user reviews and approves the plan before any device action.
     }
     private suspend fun stream(key: String, body: JSONObject, session: CloudSession, onText: suspend (String) -> Unit,
         maxText: Int = 2 * 1024 * 1024, allowTools: Boolean = true, reportLength: Boolean = false,
-        stage: CompletionStage, maxWireChars: Int = 2 * 1024 * 1024): Completion =
-        stream(key, body.utf8(), session, onText, maxText, allowTools, reportLength, stage, maxWireChars)
+        stage: CompletionStage, maxWireChars: Int = 2 * 1024 * 1024, retainReasoning: Boolean = false): Completion =
+        stream(key, body.utf8(), session, onText, maxText, allowTools, reportLength, stage, maxWireChars, retainReasoning)
 
     private suspend fun stream(key: String, body: ByteArray, session: CloudSession, onText: suspend (String) -> Unit,
         maxText: Int = 2 * 1024 * 1024, allowTools: Boolean = true, reportLength: Boolean = false,
-        stage: CompletionStage, maxWireChars: Int = 2 * 1024 * 1024): Completion {
+        stage: CompletionStage, maxWireChars: Int = 2 * 1024 * 1024, retainReasoning: Boolean = false): Completion {
         fun toolFragment(json: JSONObject, key: String): String {
             if (!stage.strictDecision) return json.optString(key)
             if (json.isNull(key)) return ""
@@ -943,6 +1054,7 @@ The user reviews and approves the plan before any device action.
             var received = 0
             var contentSeen = false
             var reasoning = false
+            val retainedReasoning = if (retainReasoning) StringBuilder() else null
             var alternateText = false
             var bomData = false
             connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
@@ -972,6 +1084,13 @@ The user reviews and approves the plan before any device action.
                     if(!allowTools && finish == "tool_calls") throw CloudFailure("tool_invalid","The answer cannot call tools.")
                     val delta = choice.optJSONObject("delta") ?: continue
                     reasoning = reasoning || delta.hasText("reasoning_content")
+                    if (retainedReasoning != null && !delta.isNull("reasoning_content")) {
+                        val fragment = delta.get("reasoning_content") as? String
+                            ?: throw CloudFailure("stream_invalid", "The provider returned invalid reasoning content.")
+                        if (retainedReasoning.length + fragment.length > maxWireChars)
+                            throw CloudFailure("response_size", "The reasoning response exceeds the allowed size.")
+                        retainedReasoning.append(fragment)
+                    }
                     val toolCalls = delta.optJSONArray("tool_calls")
                     if(!allowTools && !delta.isNull("tool_calls") && toolCalls?.length() != 0)
                         throw CloudFailure("tool_invalid","The answer cannot call tools.")
@@ -1012,7 +1131,7 @@ The user reviews and approves the plan before any device action.
                 recordEmptyCompletion("empty_response stage=${stage.name} content=$content reasoning=$reasoning alternateText=$alternateText bomData=$bomData")
                 throw CloudFailure("empty_response", "DeepSeek вернул пустой ответ. Повторите попытку.")
             }
-            return Completion(text.toString(), calls)
+            return Completion(text.toString(), calls, retainedReasoning?.toString())
         } catch (_: org.json.JSONException) {
             throw CloudFailure("stream_invalid", "Сервис вернул неверный поток ответа")
         } finally { session.detach(connection) }
@@ -1075,3 +1194,5 @@ private fun readBounded(input: java.io.InputStream, limit: Int): ByteArray {
     }
     return output.toByteArray()
 }
+
+private const val DISCOVER_CAPABILITIES = "discover_capabilities"

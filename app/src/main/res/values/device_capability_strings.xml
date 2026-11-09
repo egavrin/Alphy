@@ -10,7 +10,12 @@
     <string name="tool_calendar_unnamed">Календарь без названия</string>
     <string name="tool_camera_review_title">Сохранить этот снимок?</string>
     <string name="tool_camera_review_image">Предпросмотр снимка</string>
-    <string name="tool_camera_review_details">Это уменьшенный снимок камеры. Он остаётся на устройстве.</string>
+    <string name="tool_camera_review_details">Сохранённый снимок остаётся на устройстве.</string>
     <string name="tool_camera_keep">Сохранить снимок</string>
+    <string name="camera_front">Передняя камера</string>
+    <string name="camera_rear">Задняя камера</string>
+    <string name="camera_shutter">Сделать снимок</string>
+    <string name="camera_unavailable">Не удалось получить снимок с выбранной камеры.</string>
+    <string name="camera_cancelled">Снимок не сохранён.</string>
     <string name="tool_medicine_reactivate">Сохранённые напоминания требуют повторного включения. Выберите то же действие напоминания в мини-приложении, чтобы включить его заново.</string>
 </resources>

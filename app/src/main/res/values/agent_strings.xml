@@ -8,6 +8,12 @@
     <string name="agent_permission_calendar">Календарь — найти события и проверить доступ к изменениям</string>
     <string name="agent_permission_notification">Уведомления — показать уведомление в Android</string>
     <string name="agent_permission_flashlight">Камера — управлять фонариком</string>
+    <string name="agent_permission_photo">Камера — сделать снимок</string>
+    <string name="agent_continue_camera">Продолжить к камере</string>
+    <string name="agent_waiting_for_camera">Часы открыты. Вернитесь в Alphy и продолжите к камере.</string>
+    <string name="agent_photo_kept">Снимок сохранён в этом чате.</string>
+    <string name="agent_photo_title">Снимок · %1$s</string>
+    <string name="agent_delete_photo">Удалить снимок</string>
     <string name="agent_select_target">Выберите, к чему применить действие.</string>
     <string name="agent_select">Выбрать</string>
     <string name="agent_selected">Выбрано</string>

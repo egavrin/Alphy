@@ -1,0 +1,13 @@
+[
+  {"id":"single_timer","text":"Set a five-minute timer.","expected":[{"function":"clock.setTimer","args":{"seconds":300}}]},
+  {"id":"two_domains","text":"Find the Eiffel Tower on the map. Then open https://example.com/ in my browser.","expected":[{"function":"maps.open","args":{"query":"Eiffel Tower"}},{"function":"link.open","args":{"url":"https://example.com/"}}]},
+  {"id":"repeat_explicit","text":"Set an alarm for 7:00 AM. Set another alarm for 9:00 AM.","expected":[{"function":"clock.setAlarm","args":{"hour":7,"minute":0}},{"function":"clock.setAlarm","args":{"hour":9,"minute":0}}]},
+  {"id":"repeat_shared_verb","text":"Set alarms for 7:00 AM and 9:00 AM.","repeat":3,"expected":[{"function":"clock.setAlarm","args":{"hour":7,"minute":0}},{"function":"clock.setAlarm","args":{"hour":9,"minute":0}}]},
+  {"id":"repeat_elliptical_then_settings","text":"Set a timer for two minutes and another for five minutes, then open Android Settings.","repeat":3,"expected":[{"function":"clock.setTimer","args":{"seconds":120}},{"function":"clock.setTimer","args":{"seconds":300}},{"function":"app.open","args":{"app":"settings"}}]},
+  {"id":"three_domains_ru","text":"Поставь будильник на 07:00, заведи таймер на пять минут и открой настройки Android.","repeat":2,"expected":[{"function":"clock.setAlarm","args":{"hour":7,"minute":0}},{"function":"clock.setTimer","args":{"seconds":300}},{"function":"app.open","args":{"app":"settings"}}]},
+  {"id":"repeat_es_then_settings","text":"Pon dos alarmas, una a las 7:00 y otra a las 9:00, y abre los ajustes de Android.","repeat":2,"expected":[{"function":"clock.setAlarm","args":{"hour":7,"minute":0}},{"function":"clock.setAlarm","args":{"hour":9,"minute":0}},{"function":"app.open","args":{"app":"settings"}}]},
+  {"id":"two_memory_writes_then_settings","text":"Save the fact that I prefer tea in memory. Save the fact that I work nights in memory. Then open Android Settings.","repeat":2,"expected":[{"function":"memory.write","args":{"text":"I prefer tea"}},{"function":"memory.write","args":{"text":"I work nights"}},{"function":"app.open","args":{"app":"settings"}}]},
+  {"id":"selfie","text":"Take a selfie.","expected":[{"function":"camera.capture","args":{"lens":"front"}}]},
+  {"id":"rear_photo_with_timer","text":"Set a five-minute timer and take a photo with the rear camera.","expected":[{"function":"clock.setTimer","args":{"seconds":300}},{"function":"camera.capture","args":{"lens":"rear"}}]},
+  {"id":"unsupported_video_with_timer","text":"Set a five-minute timer and record a video with the rear camera.","expected":[]}
+]

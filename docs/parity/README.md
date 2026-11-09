@@ -17,7 +17,7 @@ The extractor must detect these failures:
 - A missing declaration, repeated output key, or unrecorded duplicate registry row.
 - A contract without source path, symbol, commit, and source hash.
 - A mapping that claims full support without explicit evidence.
-- A generated inventory that differs from the checked-in artifact.
+- A generated inventory that differs from the pinned digest.
 - A candidate or summary that appears as a verified callable intent.
 
 The extractor reads committed objects with `git show`.
@@ -26,20 +26,19 @@ All checks use Python standard-library modules.
 
 ## Files and reproduction
 
-- `extract.py` reads the pinned Git objects and produces `inventory.json`.
+- `extract.py` reads the pinned Git objects and verifies the recorded inventory digest.
 - `alphy-baseline.json` contains reviewed status mappings, evidence hashes, and functional acceptance criteria.
-- `inventory.json` contains finite catalogs, contracts, duplicate policies, and source provenance.
 - `android-dispositions.json` assigns all registered SDK, calendar, and curated intent targets to explicit Android contracts or open evidence items.
 - `verification.json` records the focused integrity check and artifact hashes.
 
 Run these commands from the Alpha repository root:
 
 ```sh
-python3 docs/parity/extract.py /Users/egavrin/Documents/deal-studio-ohos
+python3 docs/parity/extract.py /Users/egavrin/Documents/deal-studio-ohos --output /tmp/alphy-reference-inventory.json
 python3 docs/parity/extract.py /Users/egavrin/Documents/deal-studio-ohos --check
 ```
 
-The first command replaces only `docs/parity/inventory.json`.
+The first command writes a local audit artifact at the explicit output path.
 The second command makes no file changes.
 A clone with the pinned objects can replace the reference path.
 Reference working-tree changes do not affect extraction.

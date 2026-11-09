@@ -5,7 +5,11 @@ import android.content.Context
 import android.content.Intent
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.graphics.Bitmap
 import com.alpha.assistant.R
+import com.alpha.assistant.capabilities.CapabilityResult
+import com.alpha.assistant.capabilities.PHOTO_CAPTURE
+import com.alpha.assistant.capabilities.PhotoLens
 import com.alpha.assistant.memory.MemoryStore
 import com.alpha.assistant.tools.ToolStore
 import kotlinx.coroutines.CancellationException
@@ -25,6 +29,8 @@ internal class AgentRuntime(
 ) : Closeable {
     private val actions = AgentActions(context, name, memory, tools)
     private val journal = Journal(context, name)
+    private val photos = AgentPhotos(context, name)
+    private var recoveredPhotos = false
 
     suspend fun prepare(conversation: String, instruction: String, raw: String, replacing: AgentPlan? = null): AgentPlan {
         val commands = AgentCommand.parse(raw)
@@ -63,29 +69,63 @@ internal class AgentRuntime(
         return next
     }
 
-    fun approve(id: String, revision: Int): AgentPlan? {
-        val plan = journal.read(id)?.takeIf { it.revision == revision && it.phase == AgentPhase.REVIEW } ?: return null
+    fun approve(id: String, revision: Int, continueAfterClock: Boolean = false): AgentPlan? {
+        val plan = journal.read(id)?.takeIf { it.revision == revision && !it.stopRequested && it.claimed == null &&
+            if (continueAfterClock) it.phase == AgentPhase.WAITING_FOR_CAMERA && it.results.size == 1 && it.timerThenPhoto()
+            else it.phase == AgentPhase.REVIEW && it.results.isEmpty()
+        } ?: return null
         val running = plan.copy(phase = AgentPhase.RUNNING)
         return running.takeIf { journal.replace(plan, it) }
     }
 
     fun stop(id: String) {
-        journal.update(id) { if (it.phase == AgentPhase.RUNNING) it.copy(stopRequested = true) else it }
+        journal.update(id) {
+            when (it.phase) {
+                AgentPhase.RUNNING -> it.copy(stopRequested = true)
+                AgentPhase.WAITING_FOR_CAMERA -> it.copy(phase = AgentPhase.STOPPED, stopRequested = true)
+                else -> it
+            }
+        }
     }
 
     fun discard(plan: AgentPlan) {
-        if (plan.phase in editable) journal.replace(plan, plan.copy(phase = AgentPhase.STOPPED))
+        if (plan.phase in editable || plan.phase == AgentPhase.WAITING_FOR_CAMERA)
+            journal.replace(plan, plan.copy(phase = AgentPhase.STOPPED))
     }
 
     fun latest(conversation: String) = journal.latest(conversation)
-    fun forget(conversation: String) = journal.forget(conversation)
+    fun forget(conversation: String) = synchronized(photoLock) {
+        val owned = journal.photos(conversation)
+        journal.forget(conversation)
+        owned.forEach { photos.file(it.planId, it.step).delete() }
+    }
+
+    fun keptPhotos(conversation: String): List<AgentPhoto> = synchronized(photoLock) {
+        if (!recoveredPhotos) {
+            photos.prune(journal.photos(null).map { photos.file(it.planId, it.step).name }.toSet())
+            recoveredPhotos = true
+        }
+        journal.photos(conversation)
+    }
+
+    fun photoFile(photo: AgentPhoto) = photos.file(photo.planId, photo.step)
+
+    fun deletePhoto(conversation: String, photo: AgentPhoto) = synchronized(photoLock) {
+        val plan = journal.read(photo.planId)?.takeIf { it.conversationId == conversation && photo.step in it.keptPhotos }
+            ?: return@synchronized
+        journal.update(plan.id) { it.copy(keptPhotos = it.keptPhotos - photo.step) }
+        photoFile(photo).delete()
+        Unit
+    }
 
     suspend fun execute(run: AgentPlan, active: suspend () -> Boolean, launch: suspend (Intent) -> Unit,
+        capture: suspend (PhotoLens) -> Pair<String, Bitmap?> = { "unavailable" to null },
         onUpdate: suspend (AgentPlan) -> Unit = {}): AgentPlan {
         require(run.phase == AgentPhase.RUNNING)
         var interrupted = false
         try {
-            for ((index, step) in run.steps.withIndex()) {
+            for (index in run.results.size until run.steps.size) {
+                val step = run.steps[index]
                 val current = checkNotNull(journal.read(run.id))
                 // The recorded prefix and claim make reentrant execution harmless.
                 if (current.phase != AgentPhase.RUNNING || current.revision != run.revision ||
@@ -99,6 +139,7 @@ internal class AgentRuntime(
                 onUpdate(claimed)
                 val target = checkNotNull(step.target)
                 suspend fun mayStart() = active() && journal.read(run.id)?.stopRequested == false
+                var photo: Bitmap? = null
                 val result = try {
                     if (!mayStart()) {
                         com.alpha.assistant.capabilities.CapabilityResult("cancelled", context.getString(R.string.agent_step_stopped))
@@ -106,6 +147,22 @@ internal class AgentRuntime(
                         com.alpha.assistant.capabilities.CapabilityResult("cancelled", context.getString(R.string.agent_target_changed))
                     } else if (!mayStart()) {
                         com.alpha.assistant.capabilities.CapabilityResult("cancelled", context.getString(R.string.agent_step_stopped))
+                    } else if (step.command.function == PHOTO_CAPTURE) {
+                        val (status, bitmap) = capture(PhotoLens.requested(step.command.args()))
+                        photo = bitmap
+                        val outcome = when {
+                            status != "succeeded" -> status
+                            bitmap == null -> "failed"
+                            !actions.hasPermission(android.Manifest.permission.CAMERA) -> "denied"
+                            !mayStart() -> "cancelled"
+                            else -> status
+                        }
+                        CapabilityResult(outcome, context.getString(when (outcome) {
+                            "succeeded" -> R.string.agent_photo_kept
+                            "cancelled" -> R.string.camera_cancelled
+                            "denied" -> R.string.capability_permission_required
+                            else -> R.string.camera_unavailable
+                        }))
                     } else actions.execute(step.command, target, run.conversationId, ::mayStart, launch)
                 } catch (cancel: CancellationException) { throw cancel }
                 catch (_: SecurityException) {
@@ -113,17 +170,7 @@ internal class AgentRuntime(
                 } catch (_: Exception) {
                     com.alpha.assistant.capabilities.CapabilityResult("unknownOutcome", context.getString(R.string.agent_step_unknown))
                 }
-                val next = journal.update(run.id) {
-                    check(it.claimed == index)
-                    val phase = when {
-                        it.stopRequested -> AgentPhase.STOPPED
-                        result.status == "succeeded" && index < run.steps.lastIndex -> AgentPhase.RUNNING
-                        result.status in setOf("succeeded", "launched") && index == run.steps.lastIndex -> AgentPhase.COMPLETED
-                        result.status == "launched" -> AgentPhase.STOPPED
-                        else -> AgentPhase.FAILED
-                    }
-                    it.copy(claimed = null, phase = phase, results = it.results + result.message)
-                }
+                val next = recordStep(run, index, result, photo)
                 onUpdate(next)
                 if (next.phase != AgentPhase.RUNNING) return next
             }
@@ -139,6 +186,38 @@ internal class AgentRuntime(
         }
     }
 
+    private fun recordStep(run: AgentPlan, index: Int, result: CapabilityResult, photo: Bitmap?): AgentPlan = synchronized(photoLock) {
+        val file = if (result.status == "succeeded" && photo != null) photos.file(run.id, index) else null
+        var kept = false
+        try {
+            val outcome = if (file == null) result else try {
+                photos.save(file, checkNotNull(photo))
+                result
+            } catch (_: Exception) {
+                CapabilityResult("failed", context.getString(R.string.camera_unavailable))
+            }
+            val recorded = journal.update(run.id) {
+                check(it.claimed == index)
+                val phase = when {
+                    it.stopRequested -> AgentPhase.STOPPED
+                    outcome.status == "succeeded" && index < run.steps.lastIndex -> AgentPhase.RUNNING
+                    outcome.status in setOf("succeeded", "launched") && index == run.steps.lastIndex -> AgentPhase.COMPLETED
+                    outcome.status == "launched" && index == 0 && run.timerThenPhoto() -> AgentPhase.WAITING_FOR_CAMERA
+                    outcome.status == "launched" || (outcome.status == "cancelled" && run.steps[index].command.function == PHOTO_CAPTURE) -> AgentPhase.STOPPED
+                    else -> AgentPhase.FAILED
+                }
+                val keep = file != null && outcome.status == "succeeded" && !it.stopRequested
+                val message = if (file != null && it.stopRequested) context.getString(R.string.camera_cancelled) else outcome.message
+                it.copy(claimed = null, phase = phase, results = it.results + message,
+                    keptPhotos = if (keep) it.keptPhotos + index else it.keptPhotos)
+            }
+            kept = index in recorded.keptPhotos
+            recorded
+        } finally {
+            if (!kept && file != null) file.delete()
+        }
+    }
+
     private fun finish(id: String, phase: AgentPhase) = journal.update(id) {
         if (it.phase != AgentPhase.RUNNING) it else it.copy(phase = phase, claimed = null,
             results = if (it.claimed == null) it.results else it.results + context.getString(R.string.agent_step_unknown))
@@ -147,6 +226,7 @@ internal class AgentRuntime(
     override fun close() = journal.close()
 
     companion object {
+        private val photoLock = Any()
         val editable = setOf(AgentPhase.NEEDS_PERMISSION, AgentPhase.NEEDS_SELECTION, AgentPhase.UNAVAILABLE, AgentPhase.REVIEW)
         private fun phase(steps: List<AgentStep>, permissions: List<String>) = when {
             permissions.isNotEmpty() -> AgentPhase.NEEDS_PERMISSION
@@ -173,12 +253,26 @@ internal class AgentRuntime(
         fun latest(conversation: String) = query("conversation=?", conversation)
         fun forget(conversation: String) { writableDatabase.delete("plans", "conversation=?", arrayOf(conversation)) }
 
+        fun photos(conversation: String?): List<AgentPhoto> = readableDatabase.query(
+            "plans", arrayOf("body"), conversation?.let { "conversation=?" }, conversation?.let { arrayOf(it) },
+            null, null, "rowid DESC",
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    val plan = decode(cursor.getString(0))
+                    for (index in plan.keptPhotos) {
+                        add(AgentPhoto(plan.id, index, PhotoLens.requested(plan.steps[index].command.args())))
+                    }
+                }
+            }
+        }
+
         private fun query(where: String, argument: String): AgentPlan? = readableDatabase.query(
             "plans", arrayOf("body", "process"), where, arrayOf(argument), null, null, "rowid DESC", "1",
         ).use { cursor ->
             if (!cursor.moveToFirst()) return@use null
             val plan = decode(cursor.getString(0))
-            if (plan.phase == AgentPhase.RUNNING && cursor.getString(1) != process) {
+            if (plan.phase in setOf(AgentPhase.RUNNING, AgentPhase.WAITING_FOR_CAMERA) && cursor.getString(1) != process) {
                 val interrupted = plan.copy(phase = AgentPhase.INTERRUPTED)
                 replace(plan, interrupted)
                 interrupted
@@ -200,6 +294,7 @@ internal class AgentRuntime(
             private fun encode(plan: AgentPlan) = JSONObject().put("id", plan.id).put("conversation", plan.conversationId)
                 .put("instruction", plan.instruction).put("revision", plan.revision).put("phase", plan.phase.name)
                 .put("claimed", plan.claimed).put("stop", plan.stopRequested).put("results", JSONArray(plan.results))
+                .apply { if (plan.keptPhotos.isNotEmpty()) put("photos", JSONArray(plan.keptPhotos.sorted())) }
                 .put("permissions", JSONArray(plan.permissions)).put("steps", JSONArray().apply {
                     plan.steps.forEach { step -> put(step.command.json().put("selected", step.selected)
                         .put("options", JSONArray(step.options.map(AgentTarget::json)))) }
@@ -220,7 +315,8 @@ internal class AgentRuntime(
                 val results = json.getJSONArray("results").items { getString(it) }
                 return AgentPlan(json.getString("id"), json.getString("conversation"), json.getString("instruction"),
                     json.getInt("revision"), steps, permissions, AgentPhase.valueOf(json.getString("phase")),
-                    json.optionalIndex("claimed"), results, json.getBoolean("stop"))
+                    json.optionalIndex("claimed"), results, json.getBoolean("stop"),
+                    json.optJSONArray("photos")?.items { getInt(it) }?.toSet().orEmpty())
             }
 
             private fun JSONObject.optionalIndex(key: String) = if (has(key)) getInt(key) else null

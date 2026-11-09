@@ -64,6 +64,15 @@ object GraphicsContract {
             "frame" -> {require(o.get("dt") is Int);number(o,"dt",0.0,50.0);setOf("type","surfaceId","dt")}
             "pointer" -> {number(o,"x",0.0,2048.0);number(o,"y",0.0,2048.0);require(o.get("pointer") is Int && o.getInt("pointer") in 0..1);require(o.get("phase") in setOf("down","move","up","cancel"));setOf("type","surfaceId","x","y","phase","pointer")}
             "control" -> {require(o.get("direction") in setOf("left","right"));setOf("type","surfaceId","direction")}
+            "sensor" -> {
+                require(o.get("sensor") == "accelerometer")
+                for (key in listOf("sequence", "timestampMillis")) {
+                    val value = o.get(key)
+                    require((value is Int || value is Long) && (value as Number).toLong() > 0)
+                }
+                for (key in listOf("x", "y", "z")) number(o, key, -Float.MAX_VALUE.toDouble(), Float.MAX_VALUE.toDouble())
+                setOf("type", "sensor", "sequence", "timestampMillis", "x", "y", "z")
+            }
             "timer" -> {require(o.get("timerId") is String && o.getString("timerId").matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")));setOf("type","timerId")}
             else -> error("Unsupported artifact event")
         }

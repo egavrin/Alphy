@@ -332,6 +332,7 @@ internal class ArtifactCoordinator private constructor() {
         val frameOwner=registration.key==hosts.keys.last()
         val source=registration.value
         val type=raw.getString("type")
+        require(type != "sensor") { "Sensor events require an active native session." }
         if(frameOwner && type!="viewport") reconcileViewport(store)
         when(type) {
             "viewport" -> {
@@ -480,7 +481,9 @@ internal class ArtifactCoordinator private constructor() {
             throw failed
         }
     }
-    suspend fun event(store: ToolStore,generation: ToolGenerationService,id: String,revision: Int,event: JSONObject): ArtifactSnapshot {
+    suspend fun event(store: ToolStore,generation: ToolGenerationService,id: String,revision: Int,event: JSONObject,
+        publishAllowed: () -> Boolean = { true }): ArtifactSnapshot {
+        if (!publishAllowed()) throw CancellationException("The native input session ended.")
         ensureAvailable();val old=current(store,id,revision)
         val active=session
         check(active!=null || hosts.values.any {it.nonGraphics}) {"The artifact session is closed. Reopen the mini-app."}
@@ -499,8 +502,9 @@ internal class ArtifactCoordinator private constructor() {
             effectiveSurfaces=effectiveSurfaces+(surface.id to surface.copy(width=event.getInt("width"),height=event.getInt("height")))
             viewportApplied=true
         }
+        if (!publishAllowed()) throw CancellationException("The native input session ended.")
         publish(old.copy(state=result.state,ui=result.ui),result,event.getString("type"))
-        if(event.getString("type")=="frame" || event.getString("type")=="pointer" && event.getString("phase")=="move")scheduleFlush(store) else flush(store)
+        if(event.getString("type") in setOf("frame", "sensor") || event.getString("type")=="pointer" && event.getString("phase")=="move")scheduleFlush(store) else flush(store)
         return snapshot(store)
     }
     private fun scheduleFlush(store: ToolStore) {

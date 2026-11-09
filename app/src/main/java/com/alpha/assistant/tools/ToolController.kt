@@ -169,8 +169,17 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     var effects by mutableStateOf<List<CapabilityEffect>>(emptyList()); private set
     private val selections = CapabilitySelectionState(store.artifactIdentity)
     private val deviceReadHosts = DeviceReadHosts(::inputDeviceActive)
+    private val tiltJobs = SupervisorJob(scope.coroutineContext[Job])
+    @Volatile private var tilt: TiltRun? = null
+    internal var tiltOwner by mutableStateOf<String?>(null); private set
+
+    private class TiltRun(val host: DeviceReadHost, val source: com.alpha.assistant.device.AccelerometerStream) {
+        var job: Job? = null
+    }
     private var locationPermissionAnswer: CompletableDeferred<LocationPermissionAnswer>? = null
     internal var capabilityPrompt by mutableStateOf<CapabilityPrompt?>(null); private set
+    internal val settlingPhoto: Boolean
+        get() = (capabilityPrompt as? CapabilityPrompt.Reading)?.launch?.capability == com.alpha.assistant.capabilities.PHOTO_CAPTURE
     internal var devicePermissionIssue by mutableStateOf<String?>(null); private set
     internal var networkAccessHost by mutableStateOf<MiniAppNetworkAccessHost?>(null); private set
     @Volatile private var networkAuthority: ToolNetworkAuthority? = null
@@ -740,9 +749,78 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         localButtonChains.remove(host)
         localButtons.removeAll { it.host === host }
     }
-    internal fun updateDeviceReadHost(host: DeviceReadHost, resumed: Boolean?) = deviceReadHosts.update(host,resumed)
-    internal fun updateDeviceReadFocus(host: DeviceReadHost, focused: Boolean) = deviceReadHosts.updateFocus(host, focused)
-    internal fun stopDeviceReadHost(host: DeviceReadHost) = deviceReadHosts.stop(host)
+    internal fun updateDeviceReadHost(host: DeviceReadHost, resumed: Boolean?) {
+        deviceReadHosts.update(host, resumed)
+        if (resumed != true) finishDeviceInputs(host)
+    }
+
+    internal fun updateDeviceReadFocus(host: DeviceReadHost, focused: Boolean) {
+        deviceReadHosts.updateFocus(host, focused)
+        if (!focused && tilt?.host === host) stopTilt()
+    }
+
+    internal fun stopDeviceReadHost(host: DeviceReadHost) {
+        deviceReadHosts.stop(host)
+        finishDeviceInputs(host)
+    }
+
+    private fun finishDeviceInputs(host: DeviceReadHost) {
+        if (tilt?.host === host) stopTilt()
+        (capabilityPrompt as? CapabilityPrompt.Camera)?.takeIf { it.origin === host }?.capture?.finish("cancelled")
+    }
+
+    internal fun stopTilt() {
+        val current = tilt ?: return
+        tilt = null
+        tiltOwner = null
+        current.source.close()
+        current.job?.cancel()
+    }
+
+    private fun setTilt(host: DeviceReadHost, enabled: Boolean): CapabilityResult {
+        if (closing || !deviceReadHosts.initiating(host, requireFocus = true))
+            return CapabilityResult("cancelled", "Open and focus the mini-app to use tilt input.")
+        if (!enabled) {
+            if (tilt?.host === host) stopTilt()
+            return CapabilityResult("succeeded", "Tilt input stopped.", org.json.JSONObject().put("active", false))
+        }
+        if (tilt?.host !== host) {
+            stopTilt()
+            val source = com.alpha.assistant.device.AccelerometerStream(app)
+            if (!source.start()) {
+                source.close()
+                return CapabilityResult("unavailable", "The accelerometer is unavailable.")
+            }
+            val running = TiltRun(host, source)
+            tilt = running
+            tiltOwner = host.owner
+            val coordinator = ArtifactCoordinator.get(store, host.owner)
+            val active = { tilt === running && !closing && deviceReadHosts.initiating(host, requireFocus = true) }
+            running.job = scope.launch(Dispatchers.IO + tiltJobs) {
+                try {
+                    for (sample in source.samples) {
+                        if (!active()) break
+                        coordinator.ordered {
+                            val record = current(store, host.owner, host.revision)
+                            val spec = ToolSpec.parsePersisted(record.spec)
+                            if (!active() || record.archived || TiltContract.ID !in spec.capabilities || spec.surfaces.isEmpty())
+                                throw CancellationException("The tilt host changed.")
+                            event(store, generationService, host.owner, host.revision, sample, active)
+                        }
+                    }
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (failure: Exception) {
+                    android.util.Log.w("ArtifactRuntime", "Tilt session ended during evaluation", failure)
+                } finally {
+                    withContext(NonCancellable + Dispatchers.Main.immediate) {
+                        if (tilt === running) stopTilt()
+                    }
+                }
+            }
+        }
+        return CapabilityResult("succeeded", "Tilt input started.", org.json.JSONObject().put("active", true))
+    }
 
     internal fun nativeVideoHost(host: DeviceReadHost, displayed: () -> ToolRecord): ToolVideoHost {
         val effects=ToolVideoEffects(app,store,engine)
@@ -823,6 +901,15 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                 val result = when {
                     !allowed -> store.rejectPendingEffect(effect.key,CapabilityResult("denied","Системное действие не совпадает с выбранным элементом управления."))
                     launch==null -> broker.cancel(effect.key)
+                    capability == TiltContract.ID -> {
+                        if (deviceHost == null) broker.cancel(effect.key)
+                        else broker.executeOwned(effect.key) { claimed ->
+                            withContext(Dispatchers.Main.immediate) {
+                                if (!store.effectTargetValid(claimed) || !foreground()) CapabilityResult("cancelled", "The tilt host changed.")
+                                else setTilt(deviceHost, claimed.request.args.getBoolean("enabled"))
+                            }
+                        }
+                    }
                     capability == MiniAppAi.ID -> {
                         if (deviceHost == null) broker.cancel(effect.key)
                         else broker.executeAi(effect.key, deviceHost, deviceReadHosts) { prompt, active ->
@@ -832,7 +919,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                     capability in AudioContract.playbackIds -> {
                         if(deviceHost==null) broker.cancel(effect.key) else broker.executeAudio(effect.key,deviceHost,deviceReadHosts)
                     }
-                    (capability==AudioContract.PICK || capability==VideoContract.PICK) &&
+                    (capability==AudioContract.PICK || capability in setOf(VideoContract.PICK, VideoContract.CAPTURE)) &&
                         (deviceHost==null || !deviceReadHosts.initiating(deviceHost)) -> broker.cancel(effect.key)
                     capability in DeviceReadContract.ids -> {
                         if(deviceHost==null) broker.cancel(effect.key)
@@ -841,6 +928,24 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                             locationSettingsRequired=answer.settingsRequired
                             answer.granted
                         })
+                    }
+                    capability == "share.text" -> {
+                        val opened = withContext(Dispatchers.Main.immediate) {
+                            if (!closing && foreground() && capabilityPrompt == null && deviceHost != null &&
+                                deviceReadHosts.initiating(deviceHost)) {
+                                capabilityPrompt = CapabilityPrompt.Share(effect.key, effect.request.args.getString("text"), deviceHost, launch)
+                                true
+                            } else false
+                        }
+                        if (opened) null else broker.cancel(effect.key)
+                    }
+                    capability == com.alpha.assistant.capabilities.PHOTO_CAPTURE -> {
+                        if (deviceHost == null) broker.cancel(effect.key)
+                        else withContext(Dispatchers.Main.immediate) {
+                            val receipt = beginPhotoCapture(effect.key, deviceHost, foreground)
+                            deferredSelection = deferredSelection || receipt.status == "awaitingUser"
+                            receipt
+                        }
                     }
                     capability=="calendar.select" -> {
                         val opened=withContext(Dispatchers.Main.immediate) {
@@ -860,7 +965,15 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                             check(capabilityPrompt==null)
                             val picker=checkNotNull(selections.begin(claimed.key,claimed.request.capability))
                             val origin=deviceHost.takeIf {foregroundEffects}
-                            capabilityPrompt=CapabilityPrompt.Picker(picker,intent,origin)
+                            try {
+                                val selectionIntent = if (capability == VideoContract.CAPTURE)
+                                    CapabilityResources(app, store).prepareVideoCapture(picker, claimed.owner, intent) else intent
+                                capabilityPrompt = CapabilityPrompt.Picker(picker, selectionIntent, origin)
+                            } catch (failure: Exception) {
+                                selections.consume(picker.token)
+                                if (capability == VideoContract.CAPTURE) CapabilityResources(app, store).discardVideoCapture(picker)
+                                throw failure
+                            }
                             deferredSelection=origin!=null
                         } else launch(intent)
                     }
@@ -885,16 +998,28 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     }
 
     private fun afterLiveFinal(id: String,work: suspend ()->Unit) {
-        if(busy || closing || waitingDiscreteInput?.isActive==true) return
+        if(busy || closing || settlingPhoto || waitingDiscreteInput?.isActive==true) return
         val finalInputs=ArtifactCoordinator.get(store,id).pendingFinalLiveInput()
         if(finalInputs.isEmpty()) run(work)
         else waitingDiscreteInput=scope.launch {
             try {finalInputs.forEach {it.await()}}
             finally {waitingDiscreteInput=null}
-            run(work)
+            if (!settlingPhoto) run(work)
         }
     }
     internal suspend fun writableCalendars(): List<NativeOwnedCalendar> = withContext(Dispatchers.IO) {OwnedCalendarCapabilities(app,store).writableCalendars()}
+    internal fun finishShare(prompt: CapabilityPrompt.Share, confirmed: Boolean) {
+        if (capabilityPrompt !== prompt || busy || closing) return
+        capabilityPrompt = null
+        run {
+            if (confirmed) {
+                val result = broker.executeNative(prompt.effectKey,
+                    { !closing && deviceReadHosts.initiating(prompt.origin) }) { _, intent -> prompt.launch(intent) }
+                if (result.status == "awaitingUser") broker.cancel(prompt.effectKey)
+            } else broker.cancel(prompt.effectKey)
+            refresh()
+        }
+    }
     internal fun selectCalendar(key: String,calendar: NativeOwnedCalendar,foreground: ()->Boolean) {
         if(capabilityPrompt!=CapabilityPrompt.Calendar(key) || busy || closing) return
         capabilityPrompt=null
@@ -1002,19 +1127,11 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                     store.effect(launch.effectKey)?.let { it.phase=="waiting" && it.request.capability==launch.capability &&
                         store.effectTargetValid(it) && store.permissionGranted(it.request.capability) }==true
                 }
-                if(available && launch.capability=="camera.capture" && returned?.resultCode==Activity.RESULT_OK) {
-                    @Suppress("DEPRECATION")
-                    val bitmap=runCatching {returned.data?.extras?.get("data") as? Bitmap}.getOrNull()
-                    if(bitmap!=null && bitmap.width in 1..2048 && bitmap.height in 1..2048) {
-                        if(!closing && capabilityPrompt===reading) capabilityPrompt=CapabilityPrompt.Camera(launch,bitmap,origin)
-                        return@launch
-                    }
-                }
                 val result=when {
                     !available -> CapabilityResult("unavailable","Выбранные данные недоступны.")
                     returned==null -> CapabilityResult("unavailable","Android не открыл окно выбора.")
-                    launch.capability=="camera.capture" && returned.resultCode==Activity.RESULT_OK ->
-                        CapabilityResult("unknownOutcome","Камера не вернула подходящий снимок для просмотра.")
+                    launch.capability == VideoContract.CAPTURE && returned.resultCode == Activity.RESULT_OK ->
+                        withContext(Dispatchers.IO) { CapabilityResources(app, store).videoCaptureResult(launch) }
                     else -> AndroidCapabilities.selectionResult(returned.resultCode,returned.data)
                 }
                 finishPickerResult(launch,origin) { result }
@@ -1027,16 +1144,57 @@ class ToolController(private val app: Application, private val scope: CoroutineS
             }
         }
     }
-    internal fun finishCameraPreview(review: CapabilityPrompt.Camera, keep: Boolean) {
-        if(capabilityPrompt!==review || busy || closing) return
-        run {
+    private suspend fun beginPhotoCapture(key: String, host: DeviceReadHost, foreground: () -> Boolean): CapabilityResult {
+        fun active() = !closing && foreground() && deviceReadHosts.initiating(host)
+        var prompt: CapabilityPrompt.Camera? = null
+        val result = broker.executeOwned(key) { claimed ->
+            val lens = com.alpha.assistant.capabilities.PhotoLens.requested(claimed.request.args)
+            if (com.alpha.assistant.capabilities.PhotoLens.present(app)?.contains(lens) == false)
+                return@executeOwned CapabilityResult("unavailable", app.getString(R.string.camera_unavailable))
+            if (!active() || capabilityPrompt != null || claimed.owner != host.owner || claimed.revision != host.revision)
+                return@executeOwned CapabilityResult("cancelled", app.getString(R.string.camera_cancelled))
+            if (!store.permissionGranted(claimed.request.capability))
+                return@executeOwned CapabilityResult("denied", app.getString(R.string.capability_permission_required))
+            val launch = selections.begin(key, claimed.request.capability)
+                ?: return@executeOwned CapabilityResult("unavailable", app.getString(R.string.camera_unavailable))
+            val capture = com.alpha.assistant.capabilities.PhotoCapture(lens, {
+                active() && selections.active == launch && store.effectTargetValid(claimed)
+            }) { status, photo -> receivePhotoCapture(launch, status, photo) }
+            prompt = CapabilityPrompt.Camera(launch, capture, host)
+            CapabilityResult("awaitingUser", app.getString(R.string.tool_camera_review_title), JSONObject().put("launched", true))
+        }
+        prompt?.let { ready ->
+            if (result.status == "awaitingUser") capabilityPrompt = ready
+            else selections.consume(ready.launch.token)
+        }
+        return result
+    }
+
+    private fun receivePhotoCapture(launch: CapabilitySelectionLaunch, status: String, bitmap: Bitmap?) {
+        val review = (capabilityPrompt as? CapabilityPrompt.Camera)?.takeIf { it.launch == launch } ?: return
+        if (closing || selections.consume(launch.token) != launch) return
+        val reading = CapabilityPrompt.Reading(launch, review.origin)
+        capabilityPrompt = reading
+        selectionJob = scope.launch {
+            job?.join()
+            automaticJob?.join()
             try {
-                finishPickerResult(review.launch,review.origin) { manager ->
-                    if(keep) manager.saveCameraPreview(review.launch.effectKey,review.bitmap)
-                    else CapabilityResult("cancelled","Снимок предпросмотра удалён.")
+                if (!deviceReadHosts.initiating(review.origin)) {
+                    withContext(Dispatchers.IO) { abandonPicker(launch, review.origin) }
+                    return@launch
                 }
+                finishPickerResult(launch, review.origin) { manager ->
+                    if (bitmap != null && status == "succeeded") manager.saveCameraPreview(launch.effectKey, bitmap)
+                    else CapabilityResult(status, app.getString(when (status) {
+                        "denied" -> R.string.capability_permission_required
+                        "unavailable", "failed" -> R.string.camera_unavailable
+                        else -> R.string.camera_cancelled
+                    }))
+                }
+            } catch (_: ToolLibraryUnavailable) {
+                // The library that issued this capture is no longer selected.
             } finally {
-                withContext(Dispatchers.Main.immediate+NonCancellable) {if(capabilityPrompt===review) capabilityPrompt=null}
+                if (capabilityPrompt === reading) capabilityPrompt = null
             }
         }
     }
@@ -1089,6 +1247,8 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         val closingOnMain=Looper.myLooper()==Looper.getMainLooper()
         if(closingOnMain) mountedVideos.forEach(ToolVideoHost::close)
         videoJobs.cancel()
+        tiltJobs.cancel()
+        if (closingOnMain) stopTilt()
         val selection=selectionJob
         val abandoned=capabilityPrompt
         selection?.cancel()
@@ -1101,10 +1261,13 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         watchStore.cancel();cancel()
         return CoroutineScope(Dispatchers.IO).launch {
             if(!closingOnMain) withContext(Dispatchers.Main.immediate) {mountedVideos.forEach(ToolVideoHost::close)}
+            if (!closingOnMain) withContext(Dispatchers.Main.immediate) { stopTilt() }
             videoJobs.join()
+            tiltJobs.join()
             operation?.join();localOperation?.join();selection?.join();watchStore.join()
             runCatching {
                 when(abandoned) {
+                    is CapabilityPrompt.Share -> broker.cancel(abandoned.effectKey)
                     is CapabilityPrompt.Calendar -> broker.cancel(abandoned.effectKey)
                     is CapabilityPrompt.Picker -> abandonPicker(abandoned.launch,abandoned.origin)
                     is CapabilityPrompt.Reading -> abandonPicker(abandoned.launch,abandoned.origin)
@@ -1121,6 +1284,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         }.also {shutdown=it}
     }
     private fun abandonPicker(launch: CapabilitySelectionLaunch, origin: DeviceReadHost?) {
+        if (launch.capability == VideoContract.CAPTURE) CapabilityResources(app, store).discardVideoCapture(launch)
         val effect=if(origin==null) null else store.effect(launch.effectKey)
         store.finishUserEffect(launch.effectKey,CapabilityResult("cancelled","Окно выбора закрыто. Данные не сохранены."))
         if(effect!=null) {

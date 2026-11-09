@@ -733,7 +733,7 @@ class MiniAppPresentationWorkflowTest {
             ToolGenerationService(provider, com.alpha.assistant.sandbox.SandboxClient(instrumentation.targetContext))
                 .generate("offline", request, null, emptyList(), CloudSession(), "board-fixture")
         }
-        fixture(specJson = generated.spec.json) { _, store, _ ->
+        fixture(specJson = generated.spec.providerDefinition()) { _, store, _ ->
             fun canvases(node: AccessibilityNodeInfo?): List<AccessibilityNodeInfo> {
                 if (node == null) return emptyList()
                 if (node.contentDescription?.startsWith("Крестики-нолики.") == true) return listOf(node)

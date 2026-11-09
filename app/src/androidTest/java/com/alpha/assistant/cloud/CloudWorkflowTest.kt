@@ -774,8 +774,46 @@ class CloudWorkflowTest {
         }
     }
 
+    @Test fun discoveryContinuesThinkingWriterOnceWithoutLeakingIntermediateText() = kotlinx.coroutines.runBlocking {
+        var round = 0
+        Server { request, output ->
+            assertEquals("enabled", request.json.getJSONObject("thinking").getString("type"))
+            if (round++ == 0) {
+                assertEquals("discover_capabilities", request.json.getJSONArray("tools").getJSONObject(0)
+                    .getJSONObject("function").getString("name"))
+                output.headers()
+                for (fragment in listOf("a ", "b")) {
+                    output.event(JSONObject().put("choices", JSONArray().put(JSONObject().put("delta",
+                        JSONObject().put("reasoning_content", fragment)))))
+                }
+                output.event(toolDelta(call(0, id = "discovery-id", name = "discover_capabilities", arguments = "{}")))
+                output.event(end("tool_calls"))
+                output.write("data: [DONE]\n\n".toByteArray())
+            } else {
+                assertEquals("none", request.json.getString("tool_choice"))
+                val messages = request.json.getJSONArray("messages")
+                assertEquals("a b", messages.getJSONObject(messages.length()-2).getString("reasoning_content"))
+                val result = messages.getJSONObject(messages.length()-1)
+                assertEquals("discovery-id", result.getString("tool_call_id"))
+                assertEquals("""{"caller":"miniApp"}""", result.getString("content"))
+                output.headers()
+                output.event(textChunk("""{"done":true}"""))
+                output.event(end())
+                output.write("data: [DONE]\n\n".toByteArray())
+            }
+        }.use { server ->
+            val events = mutableListOf<CloudEvent>()
+            DeepSeekProvider(server.url).respond("alpha-test-only", CloudRequest(listOf(CloudTurn("user", "Build an app.")),
+                search = false, jsonObject = true, generationStage = CloudGenerationStage.COMPLETE,
+                capabilityDiscovery = { JSONObject().put("caller", "miniApp") }), CloudSession()) { events += it }
+            assertEquals(2, round)
+            assertEquals(listOf("""{"done":true}"""), events.filterIsInstance<CloudEvent.Text>().map { it.value })
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+        }
+    }
+
     @Test fun oneStrictDecisionCanAuthorizeACourseRepairMemoryOrDevicePlan() = kotlinx.coroutines.runBlocking {
-        val latest = "Latest user request"
+        val latest = "Set alarms for 7:00 AM and 9:00 AM."
         var candidate = "course"
         var mode = "accepted"
         Server { request, output ->
@@ -807,9 +845,11 @@ class CloudWorkflowTest {
             }
             val arguments = when (candidate) {
                 "course" -> """{"topic":"Calculated percentages"}"""
-                "device_plan" -> """{"steps":["Latest user request"]}"""
-                "memory_fact" -> """{"fact":"Latest user request"}"""
-                else -> """{"target":"Latest user request"}"""
+                "device_plan" -> JSONObject().put("steps", JSONArray(listOf("7:00 AM", "9:00 AM").map { anchor ->
+                    JSONObject().put("context", latest).put("anchor", anchor)
+                })).toString()
+                "memory_fact" -> JSONObject().put("fact", latest).toString()
+                else -> JSONObject().put("target", latest).toString()
             }
             when (mode) {
                 "declined", "non_user" -> output.classification(decision("Please clarify the request.", kind = "clarify"))
@@ -817,6 +857,8 @@ class CloudWorkflowTest {
                 "malformed" -> output.calls(call(0, name = name, arguments = """{"topic":"Bad","extra":1}"""))
                 "wrong_name" -> output.calls(call(0, name = "unknown", arguments = arguments))
                 "wrong_command" -> output.calls(call(0, name = name, arguments = """{"steps":["calendar"]}"""))
+                "reversed_steps" -> output.calls(call(0, name = name, arguments = JSONObject().put("steps",
+                    JSONArray(listOf("9:00 AM", "7:00 AM").map { JSONObject().put("context", latest).put("anchor", it) })).toString()))
                 "wrong_fact" -> output.calls(call(0, name = name, arguments = """{"fact":""}"""))
                 "reference" -> output.calls(call(0, name = name, arguments = """{"target":null}"""))
                 "wrong_target" -> output.calls(call(0, name = name, arguments = """{"target":"outside"}"""))
@@ -875,9 +917,11 @@ class CloudWorkflowTest {
             candidate = "device_plan"
             mode = "accepted"
             val beforeDevice = server.requests.size
-            assertEquals(listOf(latest), request().devicePlanNeeds)
+            assertEquals(listOf("7:00 AM", "9:00 AM"), request().devicePlanSteps?.map { it.anchor })
             assertEquals(beforeDevice + 1, server.requests.size)
             mode = "wrong_command"
+            assertTrue(runCatching { request() }.exceptionOrNull() is CloudFailure)
+            mode = "reversed_steps"
             assertTrue(runCatching { request() }.exceptionOrNull() is CloudFailure)
             candidate = "memory_fact"
             mode = "accepted"

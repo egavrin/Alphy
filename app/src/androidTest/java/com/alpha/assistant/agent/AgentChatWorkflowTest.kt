@@ -37,7 +37,7 @@ class AgentChatWorkflowTest {
         try {
             MemoryStore(fixture.context, memoryName).use { memory ->
                 memory.saveExplicitFact("Favorite color is blue")
-                fixture.provider.devicePlanNeeds = listOf("Change my memory of my favorite color to green")
+                fixture.provider.devicePlanSteps = listOf(PhoneActionEvidence("Change my memory of my favorite color to green", "Change my memory of my favorite color to green"))
                 fixture.provider.agentProposal = """
                     {"steps":[{"function":"memory.write","args":{"match":"Favorite color","text":"Favorite color is green"}}]}
                 """.trimIndent()
@@ -64,11 +64,39 @@ class AgentChatWorkflowTest {
         }
     }
 
+    @Test fun sharedVerbProducesTwoOrderedAlarmStepsInReview() {
+        val fixture = ShellFixture("agent-shared-verb")
+        val robot = ShellRobot("agent-shared-verb")
+        val request = "Set alarms for 7:00 AM and 9:00 AM."
+        try {
+            fixture.provider.devicePlanSteps = listOf(
+                PhoneActionEvidence(request, "7:00 AM"), PhoneActionEvidence(request, "9:00 AM"))
+            fixture.provider.agentProposal = """
+                {"steps":[{"function":"clock.setAlarm","args":{"hour":7,"minute":0}},
+                {"function":"clock.setAlarm","args":{"hour":9,"minute":0}}]}
+            """.trimIndent()
+            fixture.install()
+            fixture.launch().use { activity ->
+                robot.edit(robot.text(R.string.composer_label), request)
+                robot.click(robot.text(R.string.composer_send))
+                robot.waitFor(robot.text(R.string.agent_plan_title))
+                activity.onActivity {
+                    val plan = checkNotNull(fixture.model?.agent?.plan)
+                    assertEquals(AgentPhase.REVIEW, plan.phase)
+                    assertEquals(listOf(7, 9), plan.steps.map { it.command.args().getInt("hour") })
+                }
+            }
+        } finally {
+            fixture.remove()
+            fixture.context.deleteDatabase("${fixture.store.databaseName}-agent.db")
+        }
+    }
+
     @Test fun aModelCannotAddAnUnrequestedClockActionToAMemoryPlan() {
         val fixture = ShellFixture("agent-unrequested-action")
         val robot = ShellRobot("agent-unrequested-action")
         try {
-            fixture.provider.devicePlanNeeds = listOf("Change my memory of my favorite color to green")
+            fixture.provider.devicePlanSteps = listOf(PhoneActionEvidence("Change my memory of my favorite color to green", "Change my memory of my favorite color to green"))
             fixture.provider.agentProposal = """
                 {"steps":[{"function":"memory.write","args":{"text":"Unrequested fact"}},
                 {"function":"clock.setAlarm","args":{"hour":7,"minute":0}}]}
@@ -92,7 +120,7 @@ class AgentChatWorkflowTest {
         val fixture = ShellFixture("agent-unrequested-repeat")
         val robot = ShellRobot("agent-unrequested-repeat")
         try {
-            fixture.provider.devicePlanNeeds = listOf("Create a calendar event for a single visit")
+            fixture.provider.devicePlanSteps = listOf(PhoneActionEvidence("Create a calendar event for a single visit", "Create a calendar event for a single visit"))
             fixture.provider.agentProposal = """
                 {"steps":[{"function":"calendar.createOwned","args":{"calendar":"Work","title":"Visit",
                 "start":1893485700000,"end":1893487500000,"timeZone":"UTC","reminderMinutes":15,"repeatDaily":true}}]}

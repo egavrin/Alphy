@@ -8,6 +8,8 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.hardware.Sensor
+import android.hardware.SensorManager
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.net.Uri
@@ -38,9 +40,19 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
                 .put("prerequisites",access.json()).put("activityHandler","checkedAtExecution")
         }
         val manager = context.getSystemService(NotificationManager::class.java)
+        val lenses = if (id == PHOTO_CAPTURE) PhotoLens.present(context) else null
+        val sensors = if (id == DeviceReadContract.SENSOR || id == TiltContract.ID) {
+            val sensorManager = context.getSystemService(SensorManager::class.java)
+            val supported = mapOf("accelerometer" to Sensor.TYPE_ACCELEROMETER,
+                "gyroscope" to Sensor.TYPE_GYROSCOPE, "ambientLight" to Sensor.TYPE_LIGHT)
+            supported.filterKeys { id == DeviceReadContract.SENSOR || it == "accelerometer" }
+                .mapValues { (_, type) -> sensorManager?.getDefaultSensor(type) != null }
+        } else emptyMap()
         val state = when {
             Build.VERSION.SDK_INT < definition.minApi -> "unsupportedApi"
             definition.feature != null && !context.packageManager.hasSystemFeature(definition.feature) -> "missingHardware"
+            id == PHOTO_CAPTURE && lenses?.isEmpty() == true -> "missingHardware"
+            sensors.isNotEmpty() && sensors.values.none { it } -> "missingHardware"
             definition.action == CapabilityAction.VIBRATION_PLAY && !context.getSystemService(Vibrator::class.java).hasVibrator() -> "missingHardware"
             !permissionGranted(id) -> "permissionRequired"
             definition.action == CapabilityAction.NOTIFICATION_POST && (!manager.areNotificationsEnabled() ||
@@ -48,13 +60,35 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
             else -> "available"
         }
         return JSONObject().put("state",state).put("permissionGranted",permissionGranted(id))
-            .put("activityHandler",if(definition.foreground) "checkedAtExecution" else "notRequired")
+            .put("activityHandler", if (id != PHOTO_CAPTURE && (definition.selection ||
+                definition.action in setOf(CapabilityAction.CALENDAR_CREATE, CapabilityAction.CALENDAR_OWNED,
+                    CapabilityAction.LINK_OPEN, CapabilityAction.APP_OPEN, CapabilityAction.MAPS_OPEN,
+                    CapabilityAction.MAPS_ROUTE, CapabilityAction.PHONE_DIAL, CapabilityAction.SHARE_TEXT)))
+                "checkedAtExecution" else "notRequired")
+            .apply {
+                if (id == PHOTO_CAPTURE) put("lenses", JSONObject().apply {
+                    PhotoLens.entries.forEach { lens ->
+                        put(lens.wireName, if (lenses == null) JSONObject.NULL else lens in lenses)
+                    }
+                })
+                if (sensors.isNotEmpty()) put("sensors", JSONObject(sensors))
+                if (id == NetworkEffectContract.ID) put("miniAppGrantAndDestination", "checkedAtExecution")
+                if (id == MiniAppAi.ID) put("providerConsent", "checkedAtExecution")
+            }
     }
-    fun discover(): JSONObject = CapabilityCatalog.discovery().apply {
+    internal fun discover(caller: CapabilityCaller = CapabilityCaller.MINI_APP): JSONObject = CapabilityCatalog.discovery(caller).apply {
         val entries = getJSONArray("implemented")
         repeat(entries.length()) { index ->
             val entry = entries.getJSONObject(index)
-            entry.put("availability",availability(entry.getString("id")))
+            val id = entry.getString("id")
+            val phone = PhoneCapabilities.definitions[id]
+            val platform = if (phone != null && (caller == CapabilityCaller.PHONE || id !in CapabilityCatalog.ids)) {
+                val granted = phone.permissions.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+                JSONObject().put("state", if (granted) "available" else "permissionRequired")
+                    .put("permissionGranted", granted)
+                    .put("activityHandler", if (phone.handoff) "checkedAtExecution" else "notRequired")
+            } else availability(id)
+            entry.put("availability", platform)
         }
     }
     fun calendars(): List<Pair<Long,String>> {
@@ -81,6 +115,7 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
             } catch(_: android.content.ActivityNotFoundException) { CapabilityResult("unavailable","На устройстве нет приложения, которое поддерживает это системное действие.") }
         }
         return when(definition.action) {
+            CapabilityAction.TILT_STREAM -> CapabilityResult("unavailable", "Tilt requires an active mini-app host.")
             CapabilityAction.DEVICE_READ -> CapabilityResult("unavailable","Чтение доступно только из открытого мини-приложения.")
             CapabilityAction.NETWORK_REQUEST -> CapabilityResult("unavailable","Сетевой запрос требует текущего сеанса мини-приложения.")
             CapabilityAction.AI_ASK -> CapabilityResult("unavailable","Для запроса к DeepSeek откройте мини-приложение.")
@@ -109,6 +144,9 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
                 .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME,args.getLong("start"))
                 .putExtra(CalendarContract.EXTRA_EVENT_END_TIME,args.getLong("end"))
                 .putExtra(CalendarContract.Events.EVENT_LOCATION,args.optString("location")))
+            CapabilityAction.PHONE_DIAL -> open(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", args.getString("number"), null)))
+            CapabilityAction.SHARE_TEXT -> open(Intent.createChooser(
+                Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, args.getString("text")), null))
             CapabilityAction.LINK_OPEN -> open(Intent(Intent.ACTION_VIEW,Uri.parse(args.getString("url"))).addCategory(Intent.CATEGORY_BROWSABLE))
             CapabilityAction.MAPS_MARK_REACHED, CapabilityAction.MAPS_ROUTE -> CapabilityResult("denied","Navigation requires a claimed native owner context.")
             CapabilityAction.MAPS_OPEN -> open(Intent(Intent.ACTION_VIEW,Uri.parse("geo:0,0?q=${Uri.encode(args.getString("query"))}")))
@@ -138,7 +176,8 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION),true)
             CapabilityAction.VIDEO_PICK -> open(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION),true)
-            CapabilityAction.CAMERA_CAPTURE -> open(Intent(MediaStore.ACTION_IMAGE_CAPTURE),true)
+            CapabilityAction.VIDEO_CAPTURE -> open(Intent(MediaStore.ACTION_VIDEO_CAPTURE), true)
+            CapabilityAction.CAMERA_CAPTURE -> CapabilityResult("unavailable", "Photo capture requires an active Alphy camera host.")
         }
     }
     /** Stable provider IDs are for the local automation import only. */
