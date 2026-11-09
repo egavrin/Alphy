@@ -41,24 +41,19 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.alpha.assistant.R
+import com.alpha.assistant.cloud.markdownParser
+import com.alpha.assistant.cloud.sourceReference
 import com.alpha.assistant.cloud.validSourceUrl
 import org.commonmark.ext.gfm.strikethrough.Strikethrough
-import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
 import org.commonmark.ext.gfm.tables.TableBlock
 import org.commonmark.ext.gfm.tables.TableCell
-import org.commonmark.ext.gfm.tables.TablesExtension
 import org.commonmark.node.*
-import org.commonmark.parser.Parser
-
-private val markdownParser = Parser.builder().maxOpenBlockParsers(64).maxInlineNesting(64)
-    .extensions(listOf(TablesExtension.builder().maxCells(4096).build(),StrikethroughExtension.create())).build()
 
 private data class MarkdownBody(val text: AnnotatedString, val tables: List<MarkdownTable>)
 private data class MarkdownTable(val offset: Int, val rows: List<List<MarkdownCell>>)
 private data class MarkdownCell(val text: AnnotatedString, val alignment: TableCell.Alignment?)
 
 private fun Node.childNodes() = generateSequence(firstChild) { it.next }
-private val sourceReference = Regex("""\[(\d{1,3})]""")
 
 /** HTML and image references remain text. */
 @Composable internal fun MarkdownText(source: String, modifier: Modifier, announce: Boolean,

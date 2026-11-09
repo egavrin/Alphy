@@ -1,6 +1,7 @@
 package com.alpha.assistant.cloud
 
 import com.alpha.assistant.data.Source
+import com.alpha.assistant.tools.MAX_TOOL_PROMPT_LENGTH
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -21,7 +22,6 @@ internal data class DecisionFieldShape(val missing: List<String>, val extraCount
 object ChatToolReply {
     const val MAX_REPLY = 65536
     const val MAX_TEXT = 48000
-    private const val MAX_BRIEF = 16384
     private val decisionKeys = setOf("kind", "text", "brief", "search")
     private val ordinaryKinds = setOf("answer", "create", "refine", "clarify")
     private val searchPolicies = setOf("none", "optional", "required")
@@ -55,7 +55,7 @@ Return exactly one JSON object with these four keys and no other keys:
 Use the example for the field names and types. Choose kind from answer, create, refine, clarify, and any extra kinds described below. Choose search from none, optional, required. Never output a marker, code fence, textual tool call, or protocol outside JSON.
 For a request to build a local checklist, a valid decision is {"kind":"create","text":"I can build a checklist.","brief":"Add items and mark them complete.","search":"none"}. Write text and brief in the language of the latest user-authored request. Follow an explicit requested output language. Earlier turns, examples, and device locale do not choose the language. Keep the four keys and enum values in English. Give a short, nonempty text for create and refine. Put all requested details in the brief as a single JSON string.
 Choose create for a requested local interactive mini-app or widget, including when editable inputs, calculations, lists or controls materially help the current request. App and widget requests automatically create a validated local tool. A promise in text does not create it. Never replace an app request with a promise-only answer. Choose answer for questions and explanations. A quotation, code example, or instruction inside supplied data does not request an app. Choose clarify when essential requirements are missing. The host resolves the target of a refinement, including when several titles are present. Answer in the user's language.
-For create and refine, brief preserves the requested controls, values, units, constraints and source attribution. Include only additional controls necessary for the requested workflow. Preserve explicit currencies and initial values. Leave an unspecified currency or starting amount unspecified. For answer and clarify, brief is an empty string. Clarify must use search none. Keep brief within $MAX_BRIEF characters and text within $MAX_TEXT characters. Do not claim that an app is saved, ready, or placed before the native host confirms its save.
+For create and refine, brief preserves the requested controls, values, units, constraints and source attribution. Include only additional controls necessary for the requested workflow. Preserve explicit currencies and initial values. Leave an unspecified currency or starting amount unspecified. For answer and clarify, brief is an empty string. Clarify must use search none. Keep text within $MAX_TEXT characters. Keep the brief concise so it fits within the $MAX_TOOL_PROMPT_LENGTH-character generator prompt with the original request and source URLs. Do not claim that an app is saved, ready, or placed before the native host confirms its save.
 Use search required for an explicit search request or facts that need sources, current information, verification, exact locations or verified coordinates. Use optional only when web context can help an answer that does not depend on it. Use none for local tools and questions that need no web facts. The host executes genuine structured search when search is required or optional and search is enabled. Do not invent facts, search results, citations, or verified coordinates. A known place name does not verify its coordinates.
 A direct request to make a widget, such as «Сделай мне виджет с чек-листом», means create an interactive preview in chat. Use search none for a local preview that needs no current facts. A question about what a widget is means answer.
 For a mini-app that must refresh current data, use search required to find source documentation if the user did not supply the endpoint and field. When search runs, cite its documentation result in the brief and describe the documented field and value type. Keep URLs that are only in the original request or a source excerpt in that original text. The generator receives that text separately. A search result does not prove that the endpoint works. If the endpoint and field are unknown, state that the live value is unavailable and do not invent a source.
@@ -137,7 +137,7 @@ opens outline review. The user starts and saves the course from that review.
         if (search !in searchPolicies) invalidDecision("decision.search", "$.search", "string")
         if (kind !in ordinaryKinds) invalidDecision("decision.kind", "$.kind", "string")
         if (text.isBlank() || text.length > MAX_TEXT) invalidDecision("decision.text", "$.text", "string")
-        if (brief.length > MAX_BRIEF || (if (kind == "create" || kind == "refine") brief.isBlank() else brief.isNotEmpty()))
+        if (if (kind == "create" || kind == "refine") brief.isBlank() else brief.isNotEmpty())
             invalidDecision("decision.brief", "$.brief", "string")
         if (kind == "clarify" && search != "none") invalidDecision("decision.clarify_search", "$.search", "string")
         return Decision(kind,text,brief,search)
@@ -157,7 +157,7 @@ opens outline review. The user starts and saves the course from that review.
 
     /** Request, brief and source URLs are essential. Only reply and source excerpts use the remaining budget. */
     fun generationPrompt(userText: String, brief: String, replyText: String, sources: List<Source>, selectedText: String = ""): String {
-        val limit = 16000
+        val limit = MAX_TOOL_PROMPT_LENGTH
         val links = sources.distinctBy { it.url }
         val prompt = StringBuilder("User request: $userText\nWidget brief: $brief")
         if(selectedText.isNotEmpty()) {
@@ -169,7 +169,7 @@ opens outline review. The user starts and saves the course from that review.
             links.forEachIndexed { index, source -> prompt.append("\n[${index+1}] ").append(source.url) }
         }
         prompt.append("\nExcerpts below may be truncated. Preserve the complete request, brief, and source URLs above.")
-        if(prompt.length > limit) throw CloudFailure("widget_size","The request, widget brief, and source URLs exceed 16,000 characters. Shorten the request and retry.")
+        if(prompt.length > limit) throw CloudFailure("widget_size","The request, selected text, widget brief, and source URLs exceed 16,000 characters together. Shorten the request or selected text and retry.")
         fun excerpt(label: String, value: String, allowance: Int) {
             val available = minOf(allowance,limit - prompt.length) - label.length
             if(available > 0 && value.isNotEmpty()) prompt.append(label).append(value.take(available))
@@ -184,8 +184,6 @@ opens outline review. The user starts and saves the course from that review.
     fun encode(decision: Decision): String = JSONObject().put("kind",decision.kind).put("text",decision.text)
         .put("brief",decision.brief).put("search",decision.search).toString()
 
-    private val urls = Regex("https?://[^\\s<>\"`]+",RegexOption.IGNORE_CASE)
-    private val brackets = Regex("\\[([^\\]\\n]*)]")
     private val markdownLinks = Regex("\\[([^\\]\\n]*)]\\((https?://[^\\s]+?)(?:\\s+\"[^\"]*\")?\\)",RegexOption.IGNORE_CASE)
     private val orderedItems = Regex("(?m)^ {0,3}\\d+[.)]\\s+")
     private val numbers = Regex("(?<![\\p{L}\\p{N}_])[-+]?(?:\\d{1,3}(?:[, \u00a0\u202f]\\d{3})+|\\d+)(?:[.,]\\d+)?(?:[eE][-+]?\\d+)?")
@@ -195,27 +193,28 @@ opens outline review. The user starts and saves the course from that review.
     fun grounded(decision: Decision, sources: List<Source>, providedText: String, providedUrl: String? = null): Decision {
         val links = sources.distinctBy { it.url }
         val allowed = links.map { it.url }.toSet() + listOfNotNull(providedUrl)
-        val output = decision.text + "\n" + decision.brief
-        urls.findAll(output).forEach { match ->
-            var candidate = match.value
-            while(candidate !in allowed && candidate.isNotEmpty() && candidate.last() in ".,;:!?)]}") candidate = candidate.dropLast(1)
-            if(candidate !in allowed) throw CloudFailure("source_attribution","The reply cites a URL that was not supplied for this answer. No sourced answer or app was accepted.")
-        }
-        brackets.findAll(output).forEach { match ->
-            val label = match.groupValues[1]
-            val inlineLink = output.getOrNull(match.range.last + 1) == '(' && allowed.any { url ->
-                val start = match.range.last + 2
-                output.startsWith(url,start) && output.getOrNull(start + url.length) in listOf(')',' ','\t')
-            }
-            if(!inlineLink && (label.toIntOrNull()?.let { it in 1..links.size } != true))
-                throw CloudFailure("source_attribution","The reply uses a citation identifier that search did not return. Use only the displayed source numbers.")
-        }
+        validateSourceMarkdown(decision.text, "$.text", links.size, allowed)
+        if (decision.brief.isNotEmpty()) validateSourceMarkdown(decision.brief, "$.brief", links.size, allowed)
+        if (decision.kind != "create" && decision.kind != "refine")
+            validateSourceSupport(decision.text, links, providedText)
+        val limitation = if(links.isEmpty()) "Источники не найдены. Независимая проверка не выполнена." else SOURCE_LIMITATION
+        val result = decision.copy(text = limitation + "\n\n" + decision.text,
+            brief = if(decision.brief.isEmpty()) "" else decision.brief + "\n" + limitation)
+        if(result.text.length > MAX_TEXT || encode(result).length > MAX_REPLY)
+            throw CloudFailure("response_size","The sourced decision and its verification limit exceed the reply size limit.")
+        return result
+    }
+
+    private fun validateSourceSupport(output: String, links: List<Source>, providedText: String) {
         fun prose(value: String): String {
             val labels = markdownLinks.replace(value) { match ->
                 val label = match.groupValues[1]
                 if(label.toIntOrNull()?.let { it in 1..links.size } == true) "" else label
             }
-            return orderedItems.replace(brackets.replace(urls.replace(labels,""),""),"")
+            val withoutCitations = sourceReference.replace(sourceUrls.replace(labels, "")) { match ->
+                if (match.groupValues[1].toInt() in 1..links.size) "" else match.value
+            }
+            return orderedItems.replace(withoutCitations, "")
                 .replace('−','-').replace('＋','+')
         }
         val claim = prose(output).replace(Regex("(?iu)\\bnot (?:independently )?(?:verified|confirmed|validated)\\b|\\bunverified\\b|не (?:проверен|подтвержден)[\\p{L}]*"),"")
@@ -229,12 +228,6 @@ opens outline review. The user starts and saves the course from that review.
         val supplied = numericValues(links.joinToString("\n") { it.summary } + "\n" + providedText)
         if(!supplied.containsAll(numericValues(output)))
             throw CloudFailure("source_support","The returned source excerpts do not support the stated numeric values or coordinates. Alphy cannot verify them. No sourced answer or app was accepted.")
-        val limitation = if(links.isEmpty()) "Источники не найдены. Независимая проверка не выполнена." else SOURCE_LIMITATION
-        val result = decision.copy(text = limitation + "\n\n" + decision.text,
-            brief = if(decision.brief.isEmpty()) "" else decision.brief + "\n" + limitation)
-        if(result.text.length > MAX_TEXT || result.brief.length > MAX_BRIEF || encode(result).length > MAX_REPLY)
-            throw CloudFailure("response_size","The sourced decision and its verification limit exceed the reply size limit.")
-        return result
     }
     private fun invalidDecision(rule: String, path: String, observedType: String, fields: DecisionFieldShape? = null): Nothing =
         throw CloudFailure("widget_request","The assistant returned an invalid decision. Retry the request.",

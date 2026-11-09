@@ -103,18 +103,20 @@ object ToolUiCatalog {
     fun visible(node: JSONObject,state: JSONObject) = visible(node) && (!node.has("visibleBind") || value(state,node.getString("visibleBind")) == true)
     fun enabled(node: JSONObject,state: JSONObject) = enabled(node) && (!node.has("enabledBind") || value(state,node.getString("enabledBind")) == true)
     private fun path(value: String): List<String> = value.split('.').also { require(it.isNotEmpty() && it.all(ToolValueSchema::name)) {"Invalid object binding path."} }
-    fun value(state: JSONObject, binding: String): Any {
+    fun value(state: JSONObject, binding: String): Any = value(state,path(binding))
+    private fun value(state: JSONObject, parts: List<String>): Any {
         var result: Any=state
-        for(part in path(binding)) {
+        for(part in parts) {
             require(result is JSONObject) {"Binding must traverse state objects."}
             if(!result.has(part)) throw MissingBindingPath()
             result=result.get(part)
         }
         return result
     }
-    private fun schema(fields: JSONObject, binding: String): Any {
+    private fun schema(fields: JSONObject, binding: String): Any = schema(fields,path(binding))
+    private fun schema(fields: JSONObject, parts: List<String>): Any {
         var result: Any=JSONObject().put("type","object").put("fields",fields)
-        for(part in path(binding)) {
+        for(part in parts) {
             require(result is JSONObject && result.getString("type") == "object") {"Binding must traverse declared objects."}
             val children=result.getJSONObject("fields"); if(!children.has(part)) throw MissingBindingPath(); result=children.get(part)
         }
@@ -210,14 +212,14 @@ object ToolUiCatalog {
                     try {
                         if(!node.has("bind")) throw MissingBindingPath()
                         require(node.get("bind") is String)
-                        val bind=node.getString("bind"); path(bind)
+                        val parts=path(node.getString("bind"))
                         trace?.at("component_binding_schema_type","$location.bind","compatible_schema_type",node.opt("bind"))
-                        binding=schema(fields,bind)
+                        binding=schema(fields,parts)
                         trace?.at("component_binding_schema_type","$location.bind","compatible_schema_type",binding)
                         require(kind(checkNotNull(binding)) in definition.binding)
                         if(!schemaOnly) {
                             trace?.at("component_binding_state_value","$location.bind","schema_valid_state_value")
-                            val current=value(state,bind)
+                            val current=value(state,parts)
                             trace?.at("component_binding_state_value","$location.bind","schema_valid_state_value",current)
                             ToolValueSchema.validate(checkNotNull(binding),current)
                         }
@@ -500,8 +502,8 @@ object ToolUiCatalog {
                 trace?.at("time_value","$location.bind","integer_minutes_0_1439",node.opt("bind"))
                 if(!schemaOnly) require(validTime(value(state,node.getString("bind"))))
             }
-            if(type == "dateInput") {
-                val date=if(schemaOnly) "2000-01-01" else value(state,node.getString("bind"))
+            if(type == "dateInput" && !schemaOnly) {
+                val date=value(state,node.getString("bind"))
                 trace?.at("date_value","$location.bind","iso_date",date)
                 require(validDate(date))
             }

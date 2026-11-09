@@ -1165,6 +1165,12 @@ class AutomaticToolWorkflowTest {
         }
     }
     @Test fun longSearchSummariesKeepSourceUrlsWithoutExceedingGeneratorBudget() {
+        val request = "Create a counter"
+        val overhead = ChatToolReply.generationPrompt(request, "", "", emptyList()).length
+        val exact = "a".repeat(16_000 - overhead)
+        assertEquals(16_000, ChatToolReply.generationPrompt(request, exact, "Optional reply", emptyList()).length)
+        val over = runCatching { ChatToolReply.generationPrompt(request, exact + "a", "", emptyList()) }.exceptionOrNull()
+        assertEquals("widget_size", (over as? CloudFailure)?.code)
         val requests = CopyOnWriteArrayList<CloudRequest>()
         var generationCalls = 0
         val sources = List(5) { index -> Source("Verified source $index","https://example.com/source-$index","Verified value: $index. " + "x".repeat(5950)) }

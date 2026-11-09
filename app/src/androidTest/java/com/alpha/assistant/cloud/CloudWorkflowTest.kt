@@ -18,6 +18,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.data.*
 import com.alpha.assistant.surfaces.AssistContext
+import com.alpha.assistant.tools.ToolStore
 import com.alpha.assistant.tools.firstSelectorChoices
 import com.alpha.assistant.tools.replyWithFixturePlan
 import com.alpha.assistant.ui.ShellViewModel
@@ -33,6 +34,7 @@ import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /** Device workflows use the real HTTP provider, SQLite and Keystore, with isolated test data. */
@@ -1207,11 +1209,19 @@ class CloudWorkflowTest {
                 "The source reports 1\u202f200 meters [1]." to null,
                 "The source reports [30 minutes](https://example.com/real)." to null,
                 "The source reports [99 minutes](https://example.com/real)." to "source_support",
+                "The source reports [30 minutes] [1]." to null,
+                "The source reports [99 minutes] [1]." to "source_support",
+                "The location is [verified] [1]." to "source_support",
+                "A sourced statement [0]" to "source_attribution",
                 "A sourced statement [2]" to "source_attribution",
-                "A sourced statement [invented]" to "source_attribution",
+                "The label [Add] appears next to the source [1]." to null,
                 "A bad Markdown link [source](javascript:alert)" to "source_attribution",
                 "A fabricated source https://example.com/invented" to "source_attribution",
                 "A fabricated source [invented](https://example.com/invented)" to "source_attribution",
+                "A fabricated label [https://**invented.invalid**](https://example.com/real)" to "source_attribution",
+                "A fabricated source [Docs][ref]\n\n[ref]: https://example.com/invented" to "source_attribution",
+                "A fabricated source <https://example.com/invented>" to "source_attribution",
+                "A fabricated source `https://example.com/invented`" to "source_attribution",
                 "Verified coordinates: 30.25, 120.10 [1]" to "source_support",
                 "The location is verified [1]" to "source_support",
                 "The source reports 30 minutes [1]. These statements are not independently verified." to null).forEach { (text,code) ->
@@ -1476,17 +1486,142 @@ class CloudWorkflowTest {
 
     @Test fun correctedChatDecisionStillLetsTheNativePlanCorrectOnce() = recoverCounter(false)
 
+    @Test fun sourcedMiniAppAttributionCorrectsOnceWithoutRepeatingSearch() {
+        val url = "https://example.com/docs?a=1&b=2"
+        val brief = "Show [Add] and the Verified status. Two plus three is 5. Use [Docs](https://example.com/docs?a=1&amp;b=2) [1]."
+        val rejected = "Rejected brief [2]."
+        val plan = """{"wholeScreen":true,"language":"en"}"""
+        val candidate = """
+            {"formatVersion":3,"title":"Counter","description":"Local counter","capabilities":[],
+            "stateSchema":{"count":"number"},"initialState":{"count":0},
+            "ui":{"type":"column","children":[{"type":"metric","text":"Count","bind":"count"},
+            {"type":"button","text":"Add","action":"add"}]},
+            "source":"if(input.event.type==='action' && input.event.actionId==='add')input.state.count++;return {state:input.state};"}
+        """.trimIndent()
+        val classification = AtomicInteger()
+        val grounding = AtomicInteger()
+        val generation = AtomicInteger()
+        val kind = AtomicReference("create")
+        val mode = AtomicReference("correct")
+        val correcting = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val correctionFinished = CountDownLatch(1)
+        Server { request, output ->
+            if (request.path == "/v1/tools/search") {
+                val result = JSONObject().put("title", "Counter documentation").put("url", url)
+                output.headers(type = "application/json")
+                output.write(JSONObject().put("results", JSONArray().put(result)).toString().toByteArray())
+                return@Server
+            }
+            val messages = request.json.getJSONArray("messages")
+            val userMessage = messages.getJSONObject(1).getString("content")
+            when {
+                request.classifying -> {
+                    val attempt = classification.incrementAndGet()
+                    output.classification(if (mode.get() == "spent" && attempt == 1) """{"kind":"refine"}"""
+                        else decision("I can prepare that.", kind.get(), "required", "Prepare the counter."))
+                }
+                request.searching -> output.calls(call(0))
+                request.grounded -> {
+                    val attempt = grounding.incrementAndGet()
+                    val cancelledCorrection = mode.get() == "cancel" && attempt == 2
+                    if (cancelledCorrection) {
+                        correcting.countDown()
+                        check(release.await(10, TimeUnit.SECONDS))
+                    }
+                    val revisedKind = if (mode.get() == "kind" && attempt == 2) "create" else kind.get()
+                    val search = if (mode.get() == "policy" && attempt == 2) "optional" else "required"
+                    val text = when {
+                        mode.get() == "clean" || attempt == 2 && mode.get() != "reject" -> brief
+                        mode.get() == "reject" && attempt == 2 -> "Use https://example.com/invented"
+                        else -> rejected
+                    }
+                    try {
+                        output.answer(decision("I can prepare that.", revisedKind, search, text))
+                    } finally {
+                        if (cancelledCorrection) correctionFinished.countDown()
+                    }
+                }
+                else -> {
+                    assertTrue(userMessage.contains("Widget brief:"))
+                    val prompt = if (userMessage.startsWith("{")) JSONObject(userMessage).getString("context") else userMessage
+                    assertTrue(prompt.contains(brief))
+                    assertFalse(prompt.contains(rejected))
+                    val attempt = generation.incrementAndGet()
+                    output.answer(when {
+                        kind.get() == "refine" -> """{"appLanguage":"en","fields":{"description":"Updated local counter"}}"""
+                        attempt == 1 -> plan
+                        else -> candidate
+                    })
+                }
+            }
+        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+            fun savedTool() = ToolStore(app, "${fixture.name}.db-tools.db").use { it.tools().single() }
+            fun run(case: String, expectedGrounding: Int, expectedGeneration: Int) {
+                mode.set(case)
+                classification.set(0)
+                grounding.set(0)
+                generation.set(0)
+                server.requests.clear()
+                val create = kind.get() == "create"
+                fixture.submit(if (create) "Create a sourced counter in English that adds one."
+                    else "Update the counter description using a source.", search = true)
+                if (case == "cancel") {
+                    assertTrue(correcting.await(10, TimeUnit.SECONDS))
+                    main { fixture.model.cancelRequest() }
+                    release.countDown()
+                    assertTrue(correctionFinished.await(10, TimeUnit.SECONDS))
+                }
+                fixture.idle()
+                assertEquals(case, if (case == "spent") 2 else 1, classification.get())
+                assertEquals(case, 1, server.requests.count { it.searching })
+                assertEquals(case, 1, server.requests.count { it.path == "/v1/tools/search" })
+                assertEquals(case, expectedGrounding, grounding.get())
+                assertEquals("$case generation: ${fixture.last.error}. ${server.failures}", expectedGeneration, generation.get())
+                assertEquals(case, listOf(url), fixture.last.sources.map { it.url })
+                val payloads = server.requests.filter { it.grounded }.map {
+                    it.json.getJSONArray("messages").getJSONObject(1).getString("content")
+                }
+                assertEquals(case, 1, payloads.distinct().size)
+                assertTrue(server.failures.toString(), server.failures.isEmpty())
+            }
+            try {
+                run("correct", 2, 2)
+                assertEquals("complete", fixture.last.status)
+                assertEquals(1, fixture.last.toolRevision)
+                val original = savedTool()
+                main { fixture.model.tools.interact(original, "add", null) }
+                waitUntil { JSONObject(savedTool().state).getInt("count") == 1 }
+
+                kind.set("refine")
+                run("clean", 1, 1)
+                assertEquals("complete", fixture.last.status)
+                assertEquals(original.id, fixture.last.toolId)
+                assertEquals(2, fixture.last.toolRevision)
+                val revised = savedTool()
+                assertEquals(1, JSONObject(revised.state).getInt("count"))
+
+                for ((case, error) in listOf("reject" to "source_attribution", "spent" to "source_attribution",
+                    "kind" to "decision_changed", "policy" to "decision_changed", "cancel" to "cancelled")) {
+                    run(case, if (case == "spent") 1 else 2, 0)
+                    assertEquals(case, if (case == "cancel") "cancelled" else "error", fixture.last.status)
+                    assertEquals(case, error, fixture.last.errorCode)
+                    assertNull(fixture.last.toolId)
+                    assertEquals(case, revised, savedTool())
+                }
+            } finally {
+                release.countDown()
+            }
+        } }
+    }
+
     @Test fun mistakenDraftRecoversToAnAppThroughStrictDecision() = recoverCounter(true)
 
     private fun recoverCounter(malformedDraft: Boolean) {
         val prompt = "Build a counter that starts at zero and adds one."
         val plan = JSONObject("""{"title":"Counter","description":"Add one and reset","language":"en",
             "inputs":[],"constants":[],"questions":[],
-            "needs":[{"id":"count","type":"counter","label":"Count","description":"Add one and reset"}],
-            "behavior":{"status":"checkable","scenario":{"slots":{
-              "add":{"kind":"action","part":"count","member":"add"},
-              "total":{"kind":"value","part":"count","member":"value"}},
-              "steps":[{"op":"action","slot":"add"},{"op":"assert","slot":"total","test":"equals","value":1}]}}}""")
+            "needs":[{"id":"count","type":"counter","label":"Count","description":"Add one and reset"}]}""")
         val rejected = JSONObject(plan.toString()).put("constants", JSONArray().put(JSONObject().put("id", "unused").put("value", 2)))
         val calls = java.util.concurrent.atomic.AtomicInteger()
         Server { request, output ->
