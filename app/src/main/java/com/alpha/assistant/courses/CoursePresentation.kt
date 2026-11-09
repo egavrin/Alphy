@@ -10,7 +10,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 internal sealed interface CoursePage {
     data class Library(val courses: List<CourseSnapshot>) : CoursePage
-    data class Outline(val course: CourseSnapshot, val reading: Boolean = false) : CoursePage
+    data class Outline(val course: CourseSnapshot) : CoursePage
     data object LoadFailed : CoursePage
 
     data class Slide(
@@ -25,7 +25,6 @@ internal sealed interface CoursePage {
         val feedback: CourseAnswerFeedback?,
         val scene: ToolSpec? = null,
         val sceneRevision: Long = course.outlineRevision,
-        val narration: CourseNarration? = null,
     ) : CoursePage
 
     data class Unavailable(
@@ -39,7 +38,7 @@ internal sealed interface CoursePage {
                 CourseSlideGenerationRequest(course.id, course.revision, step.slide.id)
             } else null
     }
-    data class Complete(val course: CourseSnapshot, val reading: Boolean = false) : CoursePage
+    data class Complete(val course: CourseSnapshot) : CoursePage
 }
 
 internal enum class CourseSlideIssue { MISSING, GENERATION_FAILED, GENERATION_INTERRUPTED, GENERATION_BUSY, INVALID }
@@ -90,7 +89,7 @@ internal class CoursePresentation(
 ) {
     fun library(): CoursePage = read { CoursePage.Library(store.courses()) }
 
-    fun outline(courseId: String): CoursePage = read { CoursePage.Outline(requireCourse(courseId), store.isReading(courseId)) }
+    fun outline(courseId: String): CoursePage = read { CoursePage.Outline(requireCourse(courseId)) }
 
     fun unsavedReach(course: CourseSnapshot): CoursePage.Unavailable? =
         (player(course.id) as? CoursePage.Unavailable)?.takeIf {
@@ -111,7 +110,7 @@ internal class CoursePresentation(
             if (attempt != null) return@read slide(course, previous, position, attempt)
         }
 
-        val step = steps.getOrNull(position) ?: return@read CoursePage.Complete(course, store.isReading(courseId))
+        val step = steps.getOrNull(position) ?: return@read CoursePage.Complete(course)
         val attempt = if (step.slide.kind.requiresAnswer) {
             store.answerAttempts(courseId).lastOrNull { it.slideId == step.slide.id }
         } else null
@@ -299,7 +298,7 @@ internal class CoursePresentation(
         val (ui, state) = checkedCourseUi(spec, content.uiJson, content.stateJson, exercise, step.slide.kind)
         val feedback = attempt?.let { CourseAnswerFeedback(it.answer, it.correct) }
         CoursePage.Slide(course, step, number, ui.toString(), state.toString(), exercise?.prompt,
-            content.sources, content.adaptationNote, feedback, scene, narration = content.narration)
+            content.sources, content.adaptationNote, feedback, scene)
     }
 
     private fun requireCourse(id: String): CourseSnapshot =

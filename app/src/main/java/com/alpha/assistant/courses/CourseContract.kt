@@ -67,7 +67,6 @@ data class CourseSlideContent(
     val stateJson: String,
     val sources: List<CourseSourceReference> = emptyList(),
     val adaptationNote: String? = null,
-    val narration: CourseNarration? = null,
 )
 
 data class CourseSlide(val id: String, val outlineRevision: Long, val content: CourseSlideContent)

@@ -31,8 +31,6 @@ class CourseStorageWorkflowTest {
         }
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use { database ->
             database.execSQL("DROP TABLE IF EXISTS slide_scene_settings")
-            database.execSQL("DROP TABLE reading_sessions")
-            database.execSQL("ALTER TABLE slides DROP COLUMN narration")
             database.version = 1
         }
         CourseStore(context, name).use { store ->
@@ -41,7 +39,7 @@ class CourseStorageWorkflowTest {
             assertEquals(wrong, store.answers(id).single().answer)
         }
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READONLY).use { database ->
-            assertEquals(3, database.version)
+            assertEquals(2, database.version)
             database.rawQuery("SELECT version FROM slide_scene_settings", null).use { assertFalse(it.moveToFirst()) }
         }
     }
@@ -195,7 +193,7 @@ class CourseStorageWorkflowTest {
         }
         openFixtureDatabase(context, name).use { db ->
             assertEquals(200, db.version)
-            db.version = 3
+            db.version = 2
         }
         CourseStore(context, name).use { store -> assertEquals(course, store.course(course.id)) }
     }

@@ -135,8 +135,6 @@ internal fun CourseLibraryScreen(
     composerModel: ShellViewModel? = null,
     onOutlineApplied: (CourseSnapshot) -> Unit = {},
     nextGeneration: CourseNextGenerationHost? = null,
-    reading: ReadingProgram? = null,
-    readingVoice: ReadingVoice? = null,
 ) {
     val presentation = remember(store, controller) { CoursePresentation(store, controller) }
     val scope = rememberCoroutineScope()
@@ -154,7 +152,6 @@ internal fun CourseLibraryScreen(
     var busy by remember { mutableStateOf(false) }
     var notice by rememberSaveable { mutableIntStateOf(0) }
     var generationJob by remember { mutableStateOf<Job?>(null) }
-    var readingJob by remember { mutableStateOf<Job?>(null) }
     var generationAttempts by rememberSaveable { mutableStateOf(hashMapOf<String, String>()) }
     var handledEntryId by rememberSaveable { mutableStateOf<String?>(null) }
     val handleEntry by rememberUpdatedState(onEntryHandled)
@@ -230,11 +227,6 @@ internal fun CourseLibraryScreen(
         refine: Boolean = false,
     ) {
         stopGeneration()
-        if (readingJob != null) {
-            readingJob?.cancel()
-            readingJob = null
-            busy = false
-        }
         courseId = id
         playing = play
         returnToHost = exitToHost
@@ -342,52 +334,15 @@ internal fun CourseLibraryScreen(
         courseId != null -> R.string.course_back_to_library
         else -> R.string.course_exit
     }
-    var readingFailed by remember { mutableStateOf(false) }
-    fun openReading(current: String? = null) {
-        val program = reading ?: return
-        if (busy) return
-        busy = true
-        readingFailed = false
-        val request = scope.launch(start = CoroutineStart.LAZY) {
-            val job = currentCoroutineContext()[Job]
-            try {
-                val course = withContext(Dispatchers.IO) {
-                    if (current == null) program.openCore() else program.next(current)
-                }
-                ensureActive()
-                if (readingJob === job) {
-                    readingJob = null
-                    busy = false
-                    navigate(course.id, play = true)
-                }
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (_: Exception) {
-                if (readingJob === job) readingFailed = true
-            } finally {
-                if (readingJob === job) {
-                    readingJob = null
-                    busy = false
-                }
-            }
-        }
-        readingJob = request
-        request.start()
-    }
-
     @Composable
     fun PageContent() {
         when (val current = page) {
             null -> LinearProgressIndicator(Modifier.fillMaxWidth())
             CoursePage.LoadFailed -> CourseRecovery(R.string.course_load_failed) { refresh++ }
-            is CoursePage.Library -> {
-                if (reading != null) Button(enabled = !busy, onClick = { openReading() }) { Text("Открыть мастерскую слов") }
-                if (readingFailed) Text("Не удалось открыть мастерскую. Попробуйте ещё раз.")
-                SavedCourses(current.courses, onStartCourse) { navigate(it) }
-            }
+            is CoursePage.Library -> SavedCourses(current.courses, onStartCourse) { navigate(it) }
             is CoursePage.Outline -> SavedOutline(
                 current.course,
-                refinement.takeUnless { current.reading },
+                refinement,
                 composerModel,
                 refining,
                 onRefining = { refining = it },
@@ -396,12 +351,9 @@ internal fun CourseLibraryScreen(
                     page = CoursePage.Outline(it)
                     onOutlineApplied(it)
                 },
-                onResume = {
-                    if (current.reading && reading != null) openReading()
-                    else navigate(current.course.id, play = true, exitToHost = returnToHost)
-                },
+                onResume = { navigate(current.course.id, play = true, exitToHost = returnToHost) },
                 sourceAction = {
-                    if (sourcedGeneration != null && !current.reading) {
+                    if (sourcedGeneration != null) {
                         CourseOutlineSourceAction(
                             current.course, presentation, sourcedGeneration, generation,
                             onPrepared = {
@@ -415,11 +367,6 @@ internal fun CourseLibraryScreen(
             is CoursePage.Complete -> {
                 CourseHeading(current.course.setup.topic)
                 Text(stringResource(R.string.course_complete))
-                if (current.reading && reading != null) {
-                    Button(enabled = !busy, onClick = { openReading(current.course.id) }) { Text("Продолжить практику") }
-                    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                    if (readingFailed) Text("Не удалось открыть практику. Попробуйте ещё раз.")
-                }
                 if (!returnToHost) {
                     TextButton(onClick = { navigate(null) }) { Text(stringResource(R.string.course_back_to_library)) }
                 }
@@ -452,8 +399,6 @@ internal fun CourseLibraryScreen(
                         current.scene?.let { controller.sceneHost(current) }
                     },
                     busy = busy,
-                    readingVoice = readingVoice,
-                    audioUncovered = !tutorSession.open,
                     text = currentText(),
                     order = currentOrder(),
                     onText = {
@@ -1024,8 +969,6 @@ private fun CourseSlidePlayer(
     slide: CoursePage.Slide,
     sceneHost: CourseSceneHost?,
     busy: Boolean,
-    readingVoice: ReadingVoice?,
-    audioUncovered: Boolean,
     text: String,
     order: List<String>,
     onText: (String) -> Unit,
@@ -1057,8 +1000,6 @@ private fun CourseSlidePlayer(
                 Text(slide.step.lessonTitle, Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
                 if (sceneHost == null) ToolContent(ui = slide.ui, state = slide.state, enabled = false, embedded = true, event = { _, _ -> })
                 else CourseScene(sceneHost, !busy, onEditing = { sceneEditing = it })
-                val narration = slide.narration
-                if (narration != null && readingVoice != null) ReadingSpeechControls(readingVoice, narration, correct, slide.course.revision, audioUncovered)
                 slide.adaptationNote?.let {
                     CourseHeading(stringResource(R.string.course_adaptation))
                     Text(it)
@@ -1078,15 +1019,9 @@ private fun CourseSlidePlayer(
                     }
                 }
                 if (correct != null) {
-                    val message = if (narration != null) readingFeedback(correct, slide.course.revision)
-                        else stringResource(if (correct) R.string.course_answer_correct else R.string.course_answer_wrong)
-                    val color = when {
-                        correct -> colors.secondaryContainer
-                        narration != null -> colors.surfaceContainerHigh
-                        else -> colors.errorContainer
-                    }
-                    Surface(shape = MaterialTheme.shapes.medium, color = color) {
-                        Text(message, Modifier.fillMaxWidth().padding(12.dp).semantics { liveRegion = LiveRegionMode.Polite })
+                    Surface(shape = MaterialTheme.shapes.medium, color = if (correct) colors.secondaryContainer else colors.errorContainer) {
+                        Text(stringResource(if (correct) R.string.course_answer_correct else R.string.course_answer_wrong),
+                            Modifier.fillMaxWidth().padding(12.dp).semantics { liveRegion = LiveRegionMode.Polite })
                     }
                 }
             }

@@ -30,87 +30,20 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
     fun create(setup: CourseSetup, outline: CourseOutline): CourseSnapshot = withOpenStore {
         setup.validate()
         val encoded = outline.encode()
-        transaction { insertCourse(setup, encoded) }
-    }
-
-    private fun SQLiteDatabase.insertCourse(setup: CourseSetup, encoded: String): CourseSnapshot {
-        val id = UUID.randomUUID().toString()
-        insertOrThrow("courses", null, ContentValues().apply {
-            put("id", id)
-            put("topic", setup.topic)
-            put("level", setup.level)
-            put("goal", setup.goal)
-            put("conversation_id", setup.originatingConversationId)
-            put("outline", encoded)
-            put("revision", 1L)
-            put("outline_revision", 1L)
-            put("completed_slides", 0)
-        })
-        return requireCourse(id)
-    }
-
-    internal fun readingChain(courseId: String? = null): List<CourseSnapshot> = read {
-        readingIds(courseId).map { requireCourse(it) }
-    }
-
-    internal fun isReading(courseId: String): Boolean = read {
-        exists("SELECT 1 FROM reading_sessions WHERE course_id=?", courseId)
-    }
-
-    internal fun saveReading(course: ReadingCourse, previous: CourseSnapshot? = null): CourseSnapshot = write {
-        val chain = readingIds(previous?.id)
-        val latest = chain.lastOrNull()?.let { requireCourse(it) }
-        if (previous == null && latest != null) {
-            val core = requireCourse(chain.first())
-            val updated = refreshReadingMaterial(core, course)
-            return@write if (core.id == latest.id) updated else latest
-        }
-        if (previous != null) {
-            val current = checkNotNull(latest)
-            if (current.id != previous.id || current.revision != previous.revision) return@write current
-            check(current.progress.isComplete)
-        }
-        val saved = insertCourse(course.setup, course.outline.encode())
-        for ((id, content) in course.slides) insertSlide(saved, id, content)
-        insertOrThrow("reading_sessions", null, ContentValues().apply {
-            put("course_id", saved.id)
-            put("core_id", chain.firstOrNull() ?: saved.id)
-            put("ordinal", chain.size)
-        })
-        saved
-    }
-
-    private fun SQLiteDatabase.refreshReadingMaterial(core: CourseSnapshot, course: ReadingCourse): CourseSnapshot {
-        val saved = core.outline.steps()
-        val revised = course.outline.steps()
-        fun identity(step: CourseStep) = Triple(step.lessonId, step.slide.id, step.slide.kind)
-        if (saved.map(::identity) != revised.map(::identity)) return core
-        val future = revised.drop(core.progress.completedSlides + 1).associateBy { it.slide.id }
-        var changed = 0
-        for (id in future.keys) {
-            val content = course.slides.getValue(id)
-            val narration = checkNotNull(content.narration).encode()
-            changed += update("slides", ContentValues().apply {
-                put("definition", content.definitionJson)
-                put("ui", content.uiJson)
-                put("state", content.stateJson)
-                put("narration", narration)
-            }, "course_id=? AND slide_id=? AND (narration IS NOT ? OR definition IS NOT ?)",
-                arrayOf(core.id, id, narration, content.definitionJson))
-        }
-        val outline = CourseOutline(core.outline.lessons.map { lesson ->
-            lesson.copy(slides = lesson.slides.map { future[it.id]?.slide ?: it })
-        })
-        return if (changed == 0 && outline == core.outline) core
-        else updateCourse(core, ContentValues().apply { put("outline", outline.encode()) })
-    }
-
-    private fun SQLiteDatabase.readingIds(courseId: String?): List<String> {
-        val owner = if (courseId == null) "SELECT core_id FROM reading_sessions WHERE ordinal=0"
-            else "SELECT core_id FROM reading_sessions WHERE course_id=?"
-        return rawQuery("SELECT course_id FROM reading_sessions WHERE core_id=($owner) ORDER BY ordinal",
-            courseId?.let { arrayOf(it) }).use { rows ->
-            buildList { while (rows.moveToNext()) add(rows.getString(0)) }
+        transaction {
+            val id = UUID.randomUUID().toString()
+            insertOrThrow("courses", null, ContentValues().apply {
+                put("id", id)
+                put("topic", setup.topic)
+                put("level", setup.level)
+                put("goal", setup.goal)
+                put("conversation_id", setup.originatingConversationId)
+                put("outline", encoded)
+                put("revision", 1L)
+                put("outline_revision", 1L)
+                put("completed_slides", 0)
+            })
+            requireCourse(id)
         }
     }
 
@@ -119,14 +52,14 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
     internal fun courseAt(id: String, revision: Long): CourseSnapshot = read { requireRevision(id, revision) }
 
     fun courses(): List<CourseSnapshot> = read {
-        rawQuery("SELECT $COURSE_COLUMNS FROM courses WHERE id NOT IN (SELECT course_id FROM reading_sessions WHERE ordinal>0) ORDER BY rowid DESC", null).use { rows ->
+        rawQuery("SELECT $COURSE_COLUMNS FROM courses ORDER BY rowid DESC", null).use { rows ->
             buildList { while (rows.moveToNext()) add(rows.courseSnapshot()) }
         }
     }
 
     fun slide(courseId: String, slideId: String): CourseSlide? = read {
         rawQuery(
-            """SELECT outline_revision, definition, ui, state, sources, adaptation_note, narration FROM slides
+            """SELECT outline_revision, definition, ui, state, sources, adaptation_note FROM slides
                 WHERE course_id=? AND slide_id=?""",
             arrayOf(courseId, slideId),
         ).use { row ->
@@ -137,7 +70,6 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
                 stateJson = row.getString(3),
                 sources = decodeCourseSources(row.getString(4)),
                 adaptationNote = row.getString(5),
-                narration = row.getString(6)?.let(CourseNarration::decode),
             ))
         }
     }
@@ -239,7 +171,6 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
             put("state", content.stateJson)
             put("sources", sources)
             put("adaptation_note", content.adaptationNote)
-            put("narration", content.narration?.encode())
         })
     }
 
@@ -294,7 +225,6 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
         transaction {
             val course = requireRevision(courseId, expectedRevision)
             if (outline == course.outline) return@transaction course
-            if (exists("SELECT 1 FROM reading_sessions WHERE course_id=?", courseId)) reject(CourseRejection.PROTECTED_PROGRESS)
             val reached = course.progress.currentSlideId
             val attempted = reached != null && rawQuery(
                 "SELECT slide_id FROM answers WHERE course_id=? ORDER BY sequence DESC LIMIT 1", arrayOf(courseId),
@@ -401,7 +331,7 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
 
     // Android's default corruption handler deletes the database file.
     private class CourseDatabase(context: Context, name: String) :
-        SQLiteOpenHelper(context, name, null, 3, DatabaseErrorHandler { }) {
+        SQLiteOpenHelper(context, name, null, 2, DatabaseErrorHandler { }) {
         override fun onConfigure(db: SQLiteDatabase) = db.setForeignKeyConstraintsEnabled(true)
 
         override fun onCreate(db: SQLiteDatabase) {
@@ -445,7 +375,6 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
             )""")
             db.execSQL("CREATE INDEX answers_course_sequence ON answers(course_id, sequence)")
             createSceneSettings(db)
-            createReadingStorage(db)
         }
 
         private fun createSceneSettings(db: SQLiteDatabase) {
@@ -461,21 +390,9 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
             )""")
         }
 
-        private fun createReadingStorage(db: SQLiteDatabase) {
-            db.execSQL("ALTER TABLE slides ADD COLUMN narration TEXT")
-            db.execSQL("""CREATE TABLE reading_sessions(
-                course_id TEXT PRIMARY KEY NOT NULL REFERENCES courses(id),
-                core_id TEXT NOT NULL REFERENCES courses(id),
-                ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
-                UNIQUE(core_id, ordinal)
-            )""")
-            db.execSQL("CREATE UNIQUE INDEX reading_core ON reading_sessions(ordinal) WHERE ordinal=0")
-        }
-
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            if (newVersion != 3 || oldVersion !in 1..2) unknownVersion(oldVersion)
-            if (oldVersion == 1) createSceneSettings(db)
-            createReadingStorage(db)
+            if (oldVersion == 1 && newVersion == 2) createSceneSettings(db)
+            else unknownVersion(oldVersion)
         }
         override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = unknownVersion(oldVersion)
 

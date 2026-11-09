@@ -434,7 +434,6 @@ import kotlinx.coroutines.launch
                                         refinement = model.courseRefinement, sourcedGeneration = sourcedCourseGeneration,
                                         entryRequest = model.courseEntry?.takeUnless { it.inChat }?.request,
                                         onEntryHandled = model::courseEntryHandled, composerModel = model,
-                                        reading = model.readingProgram, readingVoice = model.readingVoice,
                                     )
                                     ShellDestination.Settings -> SettingsPane(
                                         model, settingsSection, currentLayout.settingsHinge, ::selectSettings,
