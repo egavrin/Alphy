@@ -1124,7 +1124,6 @@ private fun verticalArrangement(style: JSONObject?,gap: Dp): Arrangement.Vertica
                 ) { Text(stringResource(R.string.tool_dismiss)) }
             }} else null,
         ) { Text(text) }
-        "backHandler" -> BackHandler(enabled=enabled) {event(action,null)}
     }
 }
 

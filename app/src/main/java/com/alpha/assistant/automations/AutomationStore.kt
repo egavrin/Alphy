@@ -11,7 +11,7 @@ import java.util.UUID
 
 /** Separate local storage never opens conversations or credentials. */
 class AutomationStore(private val context: Context, name: String = ToolLibraryStorage.current(context).automation) :
-    SQLiteOpenHelper(context,name,null,3,ToolLibraryStorage.preserveOnCorruption) {
+    SQLiteOpenHelper(context,name,null,4,ToolLibraryStorage.preserveOnCorruption) {
     override fun getReadableDatabase(): SQLiteDatabase {
         ToolLibraryStorage.requireRelated(context,databaseName,"automations")
         return super.getReadableDatabase()
@@ -21,15 +21,31 @@ class AutomationStore(private val context: Context, name: String = ToolLibrarySt
         return super.getWritableDatabase()
     }
     override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE rules(id TEXT PRIMARY KEY, revision INTEGER NOT NULL, approved INTEGER NOT NULL, enabled INTEGER NOT NULL, definition TEXT NOT NULL, next_at INTEGER, attention TEXT NOT NULL)")
+        db.execSQL("CREATE TABLE rules(id TEXT PRIMARY KEY, revision INTEGER NOT NULL, approved INTEGER NOT NULL, enabled INTEGER NOT NULL, definition TEXT NOT NULL, next_at INTEGER, attention TEXT NOT NULL, retired_reason TEXT)")
         db.execSQL("CREATE TABLE runs(id TEXT PRIMARY KEY, rule_id TEXT NOT NULL, revision INTEGER NOT NULL, token TEXT NOT NULL, time INTEGER NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, details TEXT NOT NULL, UNIQUE(rule_id,token))")
         db.execSQL("CREATE TABLE effects(run_id TEXT NOT NULL, action_id TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(run_id,action_id))")
         db.execSQL("CREATE TABLE trigger_state(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         createAgentRuns(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion == 2 && newVersion == 3) { "Неизвестная схема автоматизаций. Данные сохранены." }
-        createAgentRuns(db)
+        check(oldVersion in 2..3 && newVersion == 4) { "Неизвестная схема автоматизаций. Данные сохранены." }
+        if (oldVersion == 2) createAgentRuns(db)
+        db.execSQL("ALTER TABLE rules ADD COLUMN retired_reason TEXT")
+        // SQLiteOpenHelper runs this upgrade in one transaction. Only the upgrade reads the retired action ID.
+        val retired = db.rawQuery("""
+            SELECT id FROM rules WHERE EXISTS (
+                SELECT 1 FROM json_each(rules.definition, '$.actions')
+                WHERE json_extract(value, '$.capability') = 'tool.records.calendar'
+            )
+        """.trimIndent(), null).use { cursor ->
+            buildList { while (cursor.moveToNext()) add(cursor.getString(0)) }
+        }
+        for (id in retired) {
+            db.execSQL("UPDATE rules SET retired_reason='calendar_sync', revision=revision+1, approved=0, enabled=0, next_at=NULL WHERE id=?",
+                arrayOf(id))
+            db.execSQL("INSERT OR REPLACE INTO trigger_state(key,value) VALUES (?,?)",
+                arrayOf("approval-archive:$id", UUID.randomUUID().toString()))
+        }
     }
 
     private fun createAgentRuns(db: SQLiteDatabase) {
@@ -82,10 +98,17 @@ class AutomationStore(private val context: Context, name: String = ToolLibrarySt
         finish(run.run, "ready", "Результат готов и ожидает отправки.")
     }
 
-    fun rules(): List<AutomationRule> = readableDatabase.rawQuery("SELECT * FROM rules ORDER BY rowid DESC",null).use { c ->
+    fun rules(): List<AutomationRule> = readableDatabase.rawQuery("SELECT * FROM rules WHERE retired_reason IS NULL ORDER BY rowid DESC",null).use { c ->
         buildList { while(c.moveToNext()) add(AutomationRule(c.getString(0),c.getInt(1),c.getInt(2),c.getInt(3) == 1,AutomationDefinition.parse(JSONObject(c.getString(4))),if(c.isNull(5)) null else c.getLong(5),c.getString(6))) }
     }
     fun rule(id: String) = rules().find { it.id == id }
+
+    internal data class RetiredRule(val id: String, val name: String)
+
+    internal fun retiredRules(): List<RetiredRule> = readableDatabase.rawQuery(
+        "SELECT id, json_extract(definition, '$.name') FROM rules WHERE retired_reason IS NOT NULL ORDER BY rowid DESC", null
+    ).use { cursor -> buildList { while (cursor.moveToNext()) add(RetiredRule(cursor.getString(0),cursor.getString(1))) } }
+
     fun save(id: String?, input: JSONObject, expectedRevision: Int? = null): AutomationRule {
         val definition = AutomationDefinition.parse(input)
         val key = id ?: UUID.randomUUID().toString()
@@ -106,7 +129,7 @@ class AutomationStore(private val context: Context, name: String = ToolLibrarySt
             (scheduledAt == null || it.nextAt == scheduledAt)
     } == true
     fun approve(id: String, revision: Int) {
-        check(writableDatabase.update("rules",ContentValues().apply { put("approved",revision); put("enabled",1); put("attention","") },"id=? AND revision=?",arrayOf(id,revision.toString())) == 1) { "Сценарий изменился" }
+        check(writableDatabase.update("rules",ContentValues().apply { put("approved",revision); put("enabled",1); put("attention","") },"id=? AND revision=? AND retired_reason IS NULL",arrayOf(id,revision.toString())) == 1) { "Сценарий изменился" }
     }
     internal fun approvalToken(id: String): String? = state("approval-archive:$id")
 
@@ -190,7 +213,9 @@ class AutomationStore(private val context: Context, name: String = ToolLibrarySt
         if(event.token.startsWith(AutomationOneTime.TOKEN_PREFIX)) return null
         var result: AutomationRun? = null
         transaction {
-            if(!dry && !active(rule.id, rule.revision, event.scheduledAt)) return@transaction
+            if (dry) {
+                if (rule(rule.id)?.revision != rule.revision) return@transaction
+            } else if (!active(rule.id, rule.revision, event.scheduledAt)) return@transaction
             result=insertClaim(rule,event.token,now)
         }
         return result
@@ -245,7 +270,8 @@ class AutomationStore(private val context: Context, name: String = ToolLibrarySt
         return changed
     }
     fun prune(now: Long = System.currentTimeMillis()) = transaction {
-        val expired = "time<? AND status NOT IN ('pending','preparing','ready','notifying')"
+        val expired = "time<? AND status NOT IN ('pending','preparing','ready','notifying') AND " +
+            "rule_id NOT IN (SELECT id FROM rules WHERE retired_reason IS NOT NULL)"
         val cutoff = arrayOf((now-30L*86400000).toString())
         writableDatabase.delete("agent_runs", "run_id IN (SELECT id FROM runs WHERE $expired)", cutoff)
         writableDatabase.delete("effects", "run_id IN (SELECT id FROM runs WHERE $expired)", cutoff)

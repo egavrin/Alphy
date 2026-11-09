@@ -9,9 +9,10 @@ import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
 import com.alpha.assistant.data.*
 import com.alpha.assistant.cloud.*
+import com.alpha.assistant.tools.ToolRecord
+import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
 import com.alpha.assistant.automations.AutomationStore
-import com.alpha.assistant.automations.AutomationTools
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CompletableDeferred
@@ -42,7 +43,11 @@ class HistoryManagementWorkflowTest {
         try {
             store.saveConversation(first); store.saveConversation(second); store.saveNewDraft(newDraft); store.seedOpenChat(first.id)
             keys.save("history-test-only").getOrThrow()
-            val tool = AutomationTools.createDayTool(tools)
+            val spec = ToolSpec.parse("""{"formatVersion":3,"title":"History fixture",
+                "description":"","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":0},
+                "ui":{"type":"text","text":"Fixture"},"source":"return {state:input.state};"}""")
+            val tool = ToolRecord("history-tool",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)
+            tools.commitTool(tool,null,true)
             val rule = rules.save(null, JSONObject("""{"name":"History fixture","trigger":{"type":"manual"},"conditions":{},"actions":[{"id":"notice","capability":"notification.post","args":{"title":"Fixture","text":"Fixture"}}]}"""))
             CloudTestActivity.factory = { app -> ShellViewModel(app, object : ChatProvider {
                 override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) { error("History actions must not call a provider") }

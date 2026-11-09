@@ -231,8 +231,12 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     internal suspend fun referencedTools(ids: List<String>): List<ToolRecord> = withContext(Dispatchers.IO) {
         // Open storage even when the chat has no cards, so creation fails before the provider if storage is unavailable.
         store.readableDatabase
-        ids.mapNotNull { id -> store.tool(id)?.takeIf { it.saved && !it.archived && ToolSpec.availablePersisted(it.spec) != null } }
+        ids.mapNotNull { id -> store.tool(id)?.takeIf { it.saved && !it.archived && ToolSpec.availablePersisted(it) != null } }
     }
+
+    internal val toolCardUpgradeMarker get() = "message-backed-tool-cards:${store.databaseName}"
+
+    internal fun savedCardOrigins() = store.tools().filter { it.saved && it.conversationId != null }
 
     internal fun importPortable(uri: Uri) = run {
         require(uri.scheme == android.content.ContentResolver.SCHEME_CONTENT) { "Выберите файл через Android." }
@@ -385,6 +389,8 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         try {
             prepared()
             val result = withContext(Dispatchers.IO) {
+                if (store.tool(target.id) != target || store.isDeleted(target.id))
+                    throw CloudFailure("tool_changed", "The mini-app changed. Review the current revision before testing.")
                 generationService.testAndFix(key, request, target, store.privateResults(target.id), call)
             }
             call.checkActive(currentCoroutineContext())
@@ -451,9 +457,25 @@ class ToolController(private val app: Application, private val scope: CoroutineS
             throw failure
         }
     }
-    fun accept(id: String) { run {
+    internal class ManualChatSave(val canCommit: () -> Boolean, val finish: suspend (ToolRecord?) -> Unit)
+
+    internal fun accept(id: String, prepareChat: suspend (ToolDraft) -> ManualChatSave? = { null }) { run {
         previews.clear(id)
-        val result=engine.accept(id)
+        val draft = checkNotNull(store.draft(id))
+        val result = withContext(Dispatchers.Main.immediate) {
+            val chat = prepareChat(draft) ?: return@withContext null
+            val accepted = try {
+                engine.accept(id,retainReceipt = true,canCommit = chat.canCommit)
+            } catch (cancel: CancellationException) {
+                if (!closing) withContext(NonCancellable) { chat.finish(null) }
+                throw cancel
+            } catch (failure: Exception) {
+                chat.finish(null)
+                throw failure
+            }
+            chat.finish(accepted)
+            accepted
+        } ?: engine.accept(id)
         withContext(Dispatchers.Main) {selectedId=result.id;selectedDraftId=null}
         if(result.revision>1 && store.primaryLibrary) AutomationRuntime.refresh(app)
         refresh()
@@ -873,9 +895,6 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         }
     }
     internal suspend fun writableCalendars(): List<NativeOwnedCalendar> = withContext(Dispatchers.IO) {OwnedCalendarCapabilities(app,store).writableCalendars()}
-    internal suspend fun createAutomationDayTool(): ToolRecord = withContext(Dispatchers.IO) {
-        com.alpha.assistant.automations.AutomationTools.createDayTool(store)
-    }
     internal fun selectCalendar(key: String,calendar: NativeOwnedCalendar,foreground: ()->Boolean) {
         if(capabilityPrompt!=CapabilityPrompt.Calendar(key) || busy || closing) return
         capabilityPrompt=null

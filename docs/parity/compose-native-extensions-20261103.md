@@ -77,7 +77,7 @@ The smoke sampler stops after one reveal step. It does not explore an arbitrary 
 | `runtime-state` | host_only | Declared validated durable artifact state; host controls Compose snapshot state | No generated snapshot/remember/derivedStateOf API or durable JavaScript globals. |
 | `runtime-effects` | host_only | Existing broker, subscriptions and validated effects; host controls Compose effects | Composition, focus, gestures, and control presence grant no native privilege or automatic capability authorization. |
 | `runtime-restoration` | partial | Durable artifact state; native lazy and pager state; declarative selected/page/scroll targets | No general focus/draft/offset restoration guarantee. Known controller cancellation defect remains outside this package. |
-| `android-back` | partial | Existing backHandler action and native modal dismissal | No generated predictive-back progress/cancel contract. |
+| `android-back` | partial | Route stack Back and native modal dismissal | No generated predictive-back progress/cancel contract. |
 | `android-results` | host_only | Existing capability-specific result adapters retain host ownership | Missing native services require explicit capability, authority and result contracts. |
 | `android-lifecycle` | host_only | Host lifecycle controls images, sandbox subscriptions and native composition | Process-death, background subscriptions, and revocation require device workflow acceptance. |
 | `android-interop` | host_only | AndroidView remains a native host implementation facility | No generated AndroidView, WebView, view-binding, arbitrary Android API, or host code. |

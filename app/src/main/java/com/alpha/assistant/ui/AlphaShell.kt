@@ -407,7 +407,8 @@ import kotlinx.coroutines.launch
                                     ShellDestination.MiniApps -> Box(Modifier.fillMaxSize().clipToBounds().testTag("mini-app")) {
                                         if (model.tools.storageUnavailable) ToolLibraryUnavailablePane()
                                         else Surface(Modifier.fillMaxSize()) {
-                                            ToolsPane(model.tools, currentSnapshot.selectedId, miniAppActions, miniAppRequests,
+                                            ToolsPane(model.tools, currentSnapshot.selectedId.takeUnless { currentLibraryOrigin }, miniAppActions, miniAppRequests,
+                                                accept = model::acceptToolDraft,
                                                 refine = model::refineTool, immersive = currentImmersive,
                                                 alignDetailStart = currentLibraryOrigin && currentLayout.wide,
                                                 exitImmersive = { immersiveExited = true },
@@ -585,7 +586,6 @@ import kotlinx.coroutines.launch
                     TextButton(onClick = model.tools::clearError) { Text(stringResource(R.string.tool_dialog_close)) }
                 }
             }
-            val legacyCards = model.tools.tools.filter { tool -> tool.conversationId == chat.id && tool.id !in chat.cardIds }
             val courses = if (resumeCourse == null) emptyList() else model.chatCourses.filter { it.setup.originatingConversationId == chat.id }
             val plan = model.courseSetup?.takeIf { resumeCourse != null && it.input.originatingConversationId == chat.id }
             val openTool: (String) -> Unit = { id -> model.tools.select(id); tools() }
@@ -674,10 +674,7 @@ import kotlinx.coroutines.launch
                             refineOutline = { model.openChatCourseOutline(course.id, refine = true) },
                         )
                     }
-                    items(legacyCards.asReversed(), key = { "tool-${it.id}" }) { artifact ->
-                        ArtifactCard(model.tools, artifact.id, cardActions, openTool, openAutomation,
-                            compact = !showLivePreviews || artifact.id == pairedToolId)
-                    }
+
                 }
                 if (listState.canScrollBackward) {
                     FilledTonalButton(onClick = { scope.launch { listState.scrollToItem(0) } },

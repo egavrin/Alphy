@@ -295,7 +295,7 @@ class CloudWorkflowTest {
         }.use { server ->
             val provider = DeepSeekProvider(server.url) { diagnostics += it }
             val request = CloudRequest(listOf(CloudTurn("user","PRIVATE_PROMPT")),false,
-                ChatToolReply.instructions(emptyList()),chatDecision = true)
+                ChatToolReply.instructions(),chatDecision = true)
             val expected = linkedMapOf(
                 "absent" to "stage=ANSWER content=absent reasoning=false alternateText=false bomData=false",
                 "empty" to "stage=ANSWER content=empty reasoning=false alternateText=false bomData=false",
@@ -374,7 +374,7 @@ class CloudWorkflowTest {
 
     private fun cleanChatRequest(text: String, selectedText: String = "", weatherLocation: (suspend () -> com.alpha.assistant.weather.WeatherPlace)? = null): CloudRequest {
         val turn = CloudTurn("user", text)
-        val instructions = ChatToolReply.instructions(emptyList())
+        val instructions = ChatToolReply.instructions()
         return CloudRequest(listOf(turn), true, instructions, chatDecision = true, selectedText = selectedText,
             weatherLocation = weatherLocation, decisionContext = ChatDecisionContext(turn, emptyList(), instructions, MessageProvenance.CLEAN))
     }
@@ -653,7 +653,7 @@ class CloudWorkflowTest {
     @Test fun legacyHistoryIsAvailableOnlyToContextualAnswers() = kotlinx.coroutines.runBlocking {
         val turn = CloudTurn("user", "Explain this question")
         val history = CloudTurn("assistant", "LEGACY_UNCLASSIFIED_TEXT")
-        val instructions = ChatToolReply.instructions(emptyList())
+        val instructions = ChatToolReply.instructions()
         Server { request, output ->
             assertFalse(request.searching)
             if (!request.answering) request.requireStrictDecision()
@@ -712,7 +712,7 @@ class CloudWorkflowTest {
             val request = CloudRequest(
                 listOf(current.copy(text = current.text + " SYNTHETIC_DIRECT_MEMORY")), search = false,
                 systemInstructions = "UNAUTHORIZED_SYSTEM_CONTEXT", chatDecision = true,
-                decisionContext = ChatDecisionContext(current, emptyList(), ChatToolReply.instructions(emptyList()), MessageProvenance.UNKNOWN),
+                decisionContext = ChatDecisionContext(current, emptyList(), ChatToolReply.instructions(), MessageProvenance.UNKNOWN),
             )
             val events = mutableListOf<CloudEvent>()
             DeepSeekProvider(server.url).respond("alpha-test-only", request, CloudSession()) { events += it }
@@ -784,7 +784,7 @@ class CloudWorkflowTest {
             val messages = request.json.getJSONArray("messages")
             assertEquals(2, messages.length())
             assertEquals(latest, messages.getJSONObject(1).getString("content"))
-            for (excluded in listOf("PRIVATE_HISTORY", "PRIVATE_SELECTED", "PRIVATE_IMAGE")) {
+            for (excluded in listOf("PRIVATE_HISTORY", "PRIVATE_SELECTED", "PRIVATE_IMAGE", "saved-counter", "Counter")) {
                 assertFalse(request.json.toString().contains(excluded))
             }
             val tools = request.json.getJSONArray("tools")
@@ -809,7 +809,7 @@ class CloudWorkflowTest {
                 "course" -> """{"topic":"Calculated percentages"}"""
                 "device_plan" -> """{"steps":["Latest user request"]}"""
                 "memory_fact" -> """{"fact":"Latest user request"}"""
-                else -> """{"target":"1"}"""
+                else -> """{"target":"Latest user request"}"""
             }
             when (mode) {
                 "declined", "non_user" -> output.classification(decision("Please clarify the request.", kind = "clarify"))
@@ -818,6 +818,7 @@ class CloudWorkflowTest {
                 "wrong_name" -> output.calls(call(0, name = "unknown", arguments = arguments))
                 "wrong_command" -> output.calls(call(0, name = name, arguments = """{"steps":["calendar"]}"""))
                 "wrong_fact" -> output.calls(call(0, name = name, arguments = """{"fact":""}"""))
+                "reference" -> output.calls(call(0, name = name, arguments = """{"target":null}"""))
                 "wrong_target" -> output.calls(call(0, name = name, arguments = """{"target":"outside"}"""))
                 "invalid_id" -> output.calls(call(0, id = "", name = name, arguments = arguments))
                 "multiple" -> output.calls(call(0, name = name, arguments = arguments), call(1, name = name, arguments = arguments))
@@ -838,11 +839,11 @@ class CloudWorkflowTest {
                 val hasContext = mode != "declined"
                 val current = CloudTurn(role, latest, if (hasContext) listOf("PRIVATE_IMAGE") else emptyList())
                 val history = if (hasContext) listOf(CloudTurn("user", "PRIVATE_HISTORY"), CloudTurn("assistant", "Prior answer")) else emptyList()
-                val instructions = ChatToolReply.instructions(emptyList())
+                val instructions = ChatToolReply.instructions()
                 provider.respond("alpha-test-only", CloudRequest(history + current, true, instructions, chatDecision = true,
                     selectedText = if (hasContext) "PRIVATE_SELECTED" else "", allowCourseDecision = allowed,
                     decisionContext = ChatDecisionContext(current, history, instructions, MessageProvenance.CLEAN),
-                    testFixTargets = mapOf("saved-counter" to "Counter"), allowDevicePlan = allowed, allowMemoryFact = allowed), CloudSession()) { events += it }
+                    allowTestFix = allowed, allowDevicePlan = allowed, allowMemoryFact = allowed), CloudSession()) { events += it }
                 return events.single() as CloudEvent.RoundComplete
             }
             val course = request()
@@ -865,8 +866,10 @@ class CloudWorkflowTest {
             candidate = "test_fix"
             mode = "accepted"
             val before = server.requests.size
-            assertEquals("saved-counter", request().testFixTargetId)
+            assertEquals(CloudEvent.TestFixRequest(latest), request().testFix)
             assertEquals(before + 1, server.requests.size)
+            mode = "reference"
+            assertEquals(CloudEvent.TestFixRequest(null), request().testFix)
             mode = "wrong_target"
             assertTrue(runCatching { request() }.exceptionOrNull() is CloudFailure)
             candidate = "device_plan"
@@ -1021,7 +1024,7 @@ class CloudWorkflowTest {
                 val start = server.requests.size
                 val events = mutableListOf<CloudEvent>()
                 val turn = CloudTurn("user","Create a sourced planner")
-                val instructions = ChatToolReply.instructions(emptyList())
+                val instructions = ChatToolReply.instructions()
                 val request = CloudRequest(listOf(turn),true,instructions,chatDecision = true,
                     decisionContext = ChatDecisionContext(turn, emptyList(), instructions, MessageProvenance.CLEAN))
                 val failure = runCatching { DeepSeekProvider(server.url).respond("alpha-test-only",request,CloudSession()) { events += it } }.exceptionOrNull()
@@ -1206,7 +1209,7 @@ class CloudWorkflowTest {
             for((text, selected) in cases) {
                 val events = mutableListOf<CloudEvent>()
                 DeepSeekProvider(server.url).respond("alpha-test-only", CloudRequest(listOf(CloudTurn("user", text)), true,
-                    ChatToolReply.instructions(emptyList()), chatDecision = true, selectedText = selected,
+                    ChatToolReply.instructions(), chatDecision = true, selectedText = selected,
                     weatherLocation = { error("Text operations must not request location") }), CloudSession()) { events += it }
                 assertEquals("none", ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text).search)
                 assertTrue(events.filterIsInstance<CloudEvent.Search>().isEmpty())
@@ -1385,7 +1388,7 @@ class CloudWorkflowTest {
                 decision().replace("\"kind\":", "\"kind\":\"answer\",\"kind\":") to "widget_request",
                 decision().dropLast(1) to "widget_request").forEach { (value,code) ->
                 answer = value; val events = mutableListOf<CloudEvent>()
-                val failure = runCatching { DeepSeekProvider(server.url).respond("alpha-test-only",CloudRequest(listOf(CloudTurn("user","Explain")),false,ChatToolReply.instructions(emptyList()),chatDecision = true),CloudSession()) { events += it } }.exceptionOrNull()
+                val failure = runCatching { DeepSeekProvider(server.url).respond("alpha-test-only",CloudRequest(listOf(CloudTurn("user","Explain")),false,ChatToolReply.instructions(),chatDecision = true),CloudSession()) { events += it } }.exceptionOrNull()
                 assertEquals(code,(failure as? CloudFailure)?.code)
                 assertTrue(events.isEmpty())
             }
@@ -1394,7 +1397,7 @@ class CloudWorkflowTest {
     }
 
     @Test fun malformedDecisionCorrectsOnceBeforeAuthorizingTheOriginalRequest() = kotlinx.coroutines.runBlocking {
-        val example = ChatToolReply.instructions(emptyList()).lineSequence().first { it.startsWith("{") }
+        val example = ChatToolReply.instructions().lineSequence().first { it.startsWith("{") }
         assertEquals(ChatToolReply.Decision("answer", "I can help.", "", "none"), ChatToolReply.decode(example))
         val prompt = "Build a tip calculator"
         var calls = 0
@@ -1829,7 +1832,7 @@ class CloudWorkflowTest {
     @Test fun decisionCorrectionKeepsContextOutOfAuthorization(): Unit = kotlinx.coroutines.runBlocking {
         val prompt = "Build a local checklist."
         val original = CloudTurn("user", prompt)
-        val instructions = ChatToolReply.instructions(emptyList())
+        val instructions = ChatToolReply.instructions()
         val session = CloudSession()
         val calls = java.util.concurrent.atomic.AtomicInteger()
         val ordinary = decision("I can build that.", "create", "none", prompt)
@@ -1909,7 +1912,7 @@ class CloudWorkflowTest {
         }.use { server ->
             examples.forEach { value ->
                 answer = value; val events = mutableListOf<CloudEvent>()
-                DeepSeekProvider(server.url).respond("alpha-test-only",CloudRequest(listOf(CloudTurn("user","Explain this example")),true,ChatToolReply.instructions(emptyList()),chatDecision = true),CloudSession()) { events += it }
+                DeepSeekProvider(server.url).respond("alpha-test-only",CloudRequest(listOf(CloudTurn("user","Explain this example")),true,ChatToolReply.instructions(),chatDecision = true),CloudSession()) { events += it }
                 assertTrue(events.filterIsInstance<CloudEvent.Text>().isEmpty())
                 val final = ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text)
                 assertEquals(value,final.text)

@@ -791,9 +791,11 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         viewModelScope.launch {
             val result = runCatching {
                 val loaded = withContext(Dispatchers.IO) { store.load() }
-                loaded.copy(conversations = loaded.conversations.map { conversation ->
+                val recovered = loaded.copy(conversations = loaded.conversations.map { conversation ->
                     val interruptedUsers = conversation.messages.filter { it.status in unfinishedStatuses }.mapNotNull { it.replyTo }.toSet()
-                    val messages = conversation.messages.map { message ->
+                    val manualReceipts = mutableListOf<Message>()
+                    val messages = conversation.messages.mapNotNull { message ->
+                        val manual = message.toolOperationId?.let { manualCardId(it) == message.id } == true
                         var recoveryUnavailable = false
                         val recover = message.status == "generating" || (message.status == "interrupted" && message.errorCode == "tool_storage")
                         val recovered = if(recover && message.toolOperationId != null) {
@@ -804,13 +806,43 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                         if(recoveryUnavailable) message.copy(status = "interrupted",errorCode = "tool_storage",
                             error = getApplication<Application>().getString(R.string.tool_storage_recovery_unavailable))
                         else if(recovered != null) message.copy(status = "complete",toolId = recovered.first,toolRevision = recovered.second,error = "",errorCode = "")
+                            .also { if (manual) manualReceipts += it }
+                        else if (recover && manual) null
                         else if (message.role == "assistant" && (message.status in unfinishedStatuses || recover))
                             message.copy(status = "interrupted", error = "Приложение закрылось до завершения ответа. Можно повторить запрос.", errorCode = "interrupted", searchStatus = if (message.searchStatus == "searching") "error" else message.searchStatus)
                         else if(message.status == "pending" && message.id in interruptedUsers) message.copy(status = "not_sent")
                         else message
                     }
-                    conversation.copy(messages = messages).also { if (messages != conversation.messages) writes.trySend { store.updateConversation(it) } }
+                    conversation.copy(messages = manualReceipts.fold(messages, ::mergeManualCard))
                 })
+                val before = loaded.conversations.associateBy { it.id }
+                val upgraded = try {
+                    withContext(Dispatchers.IO) {
+                        val marker = tools.toolCardUpgradeMarker
+                        if (store.hasSetting(marker) || recovered.conversations.any { chat ->
+                            chat.messages.any { it.toolOperationId != null && it.errorCode == "tool_storage" }
+                        }) return@withContext null
+                        val origins = tools.savedCardOrigins().groupBy { it.conversationId }
+                        val chats = recovered.conversations.map { chat ->
+                            val cards = origins[chat.id].orEmpty().asReversed().filter { it.id !in chat.cardIds }.map { tool ->
+                                Message("tool-card:${tool.id}","assistant","",tool.createdAt,"complete",
+                                    toolId = tool.id,toolRevision = tool.revision)
+                            }
+                            if (cards.isEmpty()) chat else chat.copy(messages = chat.messages + cards)
+                        }
+                        store.completeToolCardUpgrade(marker,chats.filter { it != before[it.id] })
+                        recovered.copy(conversations = chats)
+                    }
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    saveFailed = true
+                    null
+                }
+                if (upgraded == null) recovered.conversations.filter { it != before[it.id] }.forEach { chat ->
+                    writes.trySend { store.updateConversation(chat) }
+                }
+                upgraded ?: recovered
             }
             result.onSuccess {
                 snapshot = it
@@ -1138,12 +1170,68 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     }
     private fun persist(write: () -> Unit): CompletableDeferred<Boolean> {
         val saved = CompletableDeferred<Boolean>()
-        writes.trySend {
+        val queued = writes.trySend {
             val result = runCatching(write)
             saved.complete(result.isSuccess)
             result.getOrThrow()
         }
+        if (queued.isFailure) saved.complete(false)
         return saved
+    }
+
+    internal fun acceptToolDraft(id: String) = tools.accept(id) { draft ->
+        val chat = snapshot.conversations.find { it.id == draft.conversationId } ?: return@accept null
+        val messageId = manualCardId(draft.id)
+        val now = System.currentTimeMillis()
+        val pending = Message(messageId,"assistant","",now,"generating",toolOperationId = draft.id)
+        val updated = chat.copy(updatedAt = now,messages = chat.messages.filterNot { it.id == messageId } + pending)
+        replace(updated)
+        if (!persist { store.updateConversation(updated) }.await()) {
+            removeManualCard(chat.id,messageId)
+            throw CloudFailure("storage", "The app save could not be linked to the conversation.")
+        }
+        ToolController.ManualChatSave(
+            canCommit = { snapshot.conversations.any { it.id == chat.id && pending in it.messages } },
+            finish = { accepted ->
+                val link = accepted?.let { it.id to it.revision }
+                val result = try { link ?: tools.recoverAutomatic(draft.id,chat.id) }
+                catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) {
+                    updateManualCard(chat.id,messageId) { it.copy(status = "interrupted", errorCode = "tool_storage",
+                        error = getApplication<Application>().getString(R.string.tool_storage_recovery_unavailable)) }
+                    return@ManualChatSave
+                }
+                if (result == null) removeManualCard(chat.id,messageId)
+                else updateManualCard(chat.id,messageId,merge = true) {
+                    it.copy(status = "complete",toolId = result.first,toolRevision = result.second,error = "",errorCode = "")
+                }
+            },
+        )
+    }
+
+    private fun manualCardId(operationId: String) = "manual-tool:$operationId"
+
+    private fun mergeManualCard(messages: List<Message>, receipt: Message): List<Message> {
+        val linked = messages.lastOrNull { it.id != receipt.id && it.toolId == receipt.toolId } ?: return messages
+        return messages.mapNotNull {
+            when (it.id) {
+                receipt.id -> null
+                linked.id -> it.copy(toolRevision = maxOf(it.toolRevision ?: 0,checkNotNull(receipt.toolRevision)))
+                else -> it
+            }
+        }
+    }
+
+    private fun removeManualCard(chatId: String, messageId: String) =
+        updateManualCard(chatId,messageId) { null }
+
+    private fun updateManualCard(chatId: String, messageId: String, merge: Boolean = false, change: (Message) -> Message?) {
+        val chat = snapshot.conversations.find { it.id == chatId } ?: return
+        val messages = chat.messages.mapNotNull { if (it.id == messageId) change(it) else it }
+        val receipt = if (merge) messages.firstOrNull { it.id == messageId } else null
+        val updated = chat.copy(messages = if (receipt == null) messages else mergeManualCard(messages,receipt))
+        replace(updated)
+        writes.trySend { store.updateConversation(updated) }
     }
     private fun queueHasRoom(): Boolean {
         if(requests.size + (if(active == null) 0 else 1) < MAX_QUEUED_CHAT_REQUESTS) return true
@@ -1343,8 +1431,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                         throw ChooseRefinement(choices)
                     }
                 }
-                val titles = (choices.filter { it.toolId == targetId } + choices).distinctBy { it.toolId }.take(20).map { it.title }
-                val toolInstructions = ChatToolReply.instructions(titles, available = knownTools != null)
+                val toolInstructions = ChatToolReply.instructions(available = knownTools != null)
                 updateMessage(request, assistant.id, persist = false) { it.copy(status = "pending", hostTargetId = targetId) }
                 val pending = snapshot.conversations.find { it.id == conversationId } ?: return@launch
                 if(!persist { store.updateConversation(pending) }.await())
@@ -1409,7 +1496,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                         decisionContext = ChatDecisionContext(originalTurn, turns(cleanHistory), toolInstructions, inputProvenance, memoryStore),
                         automationDraftChatId = draftChat, screenContext = user.screenContext, screenImages = screenImages,
                         allowDevicePlan = !assistant.requiresRefinement, allowMemoryFact = !assistant.requiresRefinement,
-                        testFixTargets = if (assistant.requiresRefinement) emptyMap() else choices.take(20).associate { it.toolId to it.title })
+                        allowTestFix = !assistant.requiresRefinement && choices.isNotEmpty())
                     provider.respond(key, cloudRequest, request.session) { event ->
                         withContext(Dispatchers.Main) {
                             if (isActive(request)) {
@@ -1446,10 +1533,10 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 if(!isActive(request)) return@launch
                 val completed = terminal ?: throw CloudFailure("incomplete","The reply has no completed answer. Retry the request.")
                 val courseTopic = completed.courseTopic
-                val testFixTargetId = completed.testFixTargetId
+                val testFix = completed.testFix
                 val devicePlanNeeds = completed.devicePlanNeeds
                 val memoryFact = completed.memoryFact
-                val preparedActions = listOfNotNull(courseTopic, testFixTargetId, devicePlanNeeds, completed.automationDraft, memoryFact)
+                val preparedActions = listOfNotNull(courseTopic, testFix, devicePlanNeeds, completed.automationDraft, memoryFact)
                 if (preparedActions.isNotEmpty()) {
                     if (completed.text.isNotEmpty() || preparedActions.size != 1 || answerFragment.isNotEmpty() ||
                         completed.provenance != MessageProvenance.CLEAN) {
@@ -1502,7 +1589,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                             throw CloudFailure("widget_request", "The assistant returned an invalid course topic.")
                         ChatToolReply.Decision("course", "", "", "none")
                     }
-                    testFixTargetId != null -> ChatToolReply.Decision("test_fix", "", "", "none")
+                    testFix != null -> ChatToolReply.Decision("test_fix", "", "", "none")
                     else -> ChatToolReply.decode(completed.text)
                 }
                 if(answerFragment.isNotEmpty() && decoded.kind != "answer")
@@ -1544,9 +1631,29 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                         it.copy(text = getApplication<Application>().getString(notice), status = "complete", error = "", errorCode = "",
                             provenance = replyProvenance)
                     }
-                } else if (testFixTargetId != null) {
+                } else if (testFix != null) {
                     val app = getApplication<Application>()
-                    val testTarget = knownTools?.singleOrNull { it.id == testFixTargetId }
+                    val candidates = knownTools.orEmpty()
+                    val targetPhrase = testFix.target
+                    val ranked = when {
+                        user.text.isBlank() -> null
+                        targetPhrase == null -> candidates.singleOrNull()
+                        targetPhrase.isBlank() || targetPhrase.length > 256 || targetPhrase !in user.text -> null
+                        else -> try {
+                            com.alpha.assistant.semantic.SemanticRuntime.get(app).rank(targetPhrase,candidates,{ tool ->
+                                val spec = ToolSpec.parsePersisted(tool.spec)
+                                "${spec.title}\n${spec.description}"
+                            }).filter { it.score >= 0.75f }.singleOrNull()?.item
+                        } catch (_: com.alpha.assistant.semantic.SemanticUnavailable) {
+                            null
+                        }
+                    }
+                    val currentChat = snapshot.conversations.find { it.id == conversationId }
+                    val testTarget = ranked?.takeIf { candidate ->
+                        currentChat?.messages?.lastOrNull { it.role == "user" }?.id == user.id &&
+                            candidate.id in currentChat.cardIds &&
+                            tools.referencedTools(listOf(candidate.id)).singleOrNull() == candidate
+                    }
                     if (testTarget == null) {
                         val titles = choices.take(20).joinToString(", ") { it.title }
                         val text = if (titles.isEmpty()) app.getString(R.string.chat_app_test_no_target)

@@ -31,14 +31,14 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.UUID
 
-/** Boundaries under test: legacy grants, declaration, Android denial, prior-process work, and old picker identity. */
+/** Boundaries under test: declaration, Android denial, prior-process work, and old picker identity. */
 @RunWith(AndroidJUnit4::class)
 class DeviceAuthorizationWorkflowTest {
     private val app get() = InstrumentationRegistry.getInstrumentation().targetContext
     private val pick = CapabilityRequest("pick", "photo.pick", JSONObject())
     private val vibration = CapabilityRequest("tap", "vibration.play", JSONObject().put("milliseconds", 10))
 
-    @Test fun declaredDeviceActionIgnoresAbsentAndDeniedRowsWhileNetworkStillRequiresItsOwnGrant(): Unit = runBlocking {
+    @Test fun declaredDeviceActionRunsWithoutNetworkConsent(): Unit = runBlocking {
         withStore { store ->
             val tool = save(store, vibration)
             val network = MiniAppNetwork(NetworkLimits(16, 16, 64, 1000, 0, 1), object : NetworkGrantPersistence {
@@ -47,17 +47,13 @@ class DeviceAuthorizationWorkflowTest {
             })
             val scope = NetworkScope(NetworkOwner(store.databaseName, tool.id), "1", "fixture")
             var executions = 0
-            for (legacyDenied in listOf(false, true)) {
-                if (legacyDenied) store.seedLegacyDeviceGrant(tool.id, vibration.capability, false)
-                val key = enqueue(store, vibration)
-                val broker = CapabilityBroker(app, store)
-                assertNull(network.activate(scope))
-                assertEquals("succeeded", broker.execute(key) { executions++; CapabilityResult("succeeded", "Fixture") }.status)
-                assertEquals("succeeded", broker.execute(key) { error("The effect replayed") }.status)
-                assertNull(network.activate(scope))
-            }
-            assertEquals(2, executions)
-            assertEquals(false, store.legacyDeviceGrant(tool.id, vibration.capability))
+            val key = enqueue(store, vibration)
+            val broker = CapabilityBroker(app, store)
+            assertNull(network.activate(scope))
+            assertEquals("succeeded", broker.execute(key) { executions++; CapabilityResult("succeeded", "Fixture") }.status)
+            assertEquals("succeeded", broker.execute(key) { error("The effect replayed") }.status)
+            assertNull(network.activate(scope))
+            assertEquals(1, executions)
         }
     }
 
@@ -153,7 +149,6 @@ class DeviceAuthorizationWorkflowTest {
         try {
             ToolStore(app, toolName).use { store ->
                 val tool = actionTool(store)
-                store.seedLegacyDeviceGrant(tool.id, vibration.capability, false)
                 fixture.install(saveKey = false)
                 fixture.launch().use { scenario ->
                     robot.waitUntil { fixture.model?.let { !it.loading && !it.tools.busy } == true }

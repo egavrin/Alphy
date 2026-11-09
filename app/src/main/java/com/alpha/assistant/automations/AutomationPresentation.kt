@@ -75,6 +75,8 @@ private val automationTimeFormat = DateTimeFormatter.ofPattern("HH:mm", Locale.R
 
 @Composable internal fun AutomationRuleList(
     rules: List<AutomationRule>,
+    retired: List<AutomationStore.RetiredRule>,
+    histories: Map<String,List<AutomationRun>>,
     loaded: Boolean,
     selectedId: String?,
     state: LazyListState,
@@ -86,7 +88,7 @@ private val automationTimeFormat = DateTimeFormatter.ofPattern("HH:mm", Locale.R
 ) {
     Column(modifier.fillMaxHeight().testTag("automation-list")) {
         if (error != null) AutomationError(error, Modifier.padding(16.dp))
-        if (rules.isEmpty() && loaded && error == null) {
+        if (rules.isEmpty() && retired.isEmpty() && loaded && error == null) {
             Column(
                 Modifier.weight(1f).fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 44.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
@@ -147,6 +149,10 @@ private val automationTimeFormat = DateTimeFormatter.ofPattern("HH:mm", Locale.R
                     }
                     if (!selected) HorizontalDivider(Modifier.padding(horizontal = 8.dp))
                 }
+                items(retired, key = { it.id }) { rule ->
+                    RetiredAutomationRule(rule,histories[rule.id].orEmpty())
+                    HorizontalDivider(Modifier.padding(horizontal = 8.dp))
+                }
             }
         }
         Button(
@@ -157,6 +163,18 @@ private val automationTimeFormat = DateTimeFormatter.ofPattern("HH:mm", Locale.R
             AlphaIcon(Glyph.Chat, Modifier.size(18.dp), color = MaterialTheme.colorScheme.onPrimary)
             Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.automation_create_chat))
+        }
+    }
+}
+
+@Composable internal fun RetiredAutomationRule(rule: AutomationStore.RetiredRule, history: List<AutomationRun>) {
+    var expanded by remember(rule.id) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(rule.name, style = MaterialTheme.typography.titleSmall)
+        Text(stringResource(R.string.automation_calendar_sync_retired), style = MaterialTheme.typography.bodySmall)
+        if (history.isNotEmpty()) {
+            TextButton(onClick = { expanded = !expanded }) { Text(stringResource(R.string.automation_retired_history)) }
+            if (expanded) history.forEach { AutomationHistoryRow(it, canContinue = false) {} }
         }
     }
 }

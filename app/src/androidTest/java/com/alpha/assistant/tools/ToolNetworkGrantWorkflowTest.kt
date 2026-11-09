@@ -69,12 +69,11 @@ class ToolNetworkGrantWorkflowTest {
         } finally { fixture.remove() }
     }
 
-    @Test fun durableGrantDoesNotCopyAndOldDeviceRowsCannotGrantNetworkAccess(): Unit = runBlocking {
+    @Test fun durableConsentDoesNotCopyToAnotherApp(): Unit = runBlocking {
         withStore { store ->
             val appRecord = save(store)
             val copy = save(store, appRecord.copy(id = UUID.randomUUID().toString()))
             val draftOnly = save(store, appRecord.copy(id = UUID.randomUUID().toString(), saved = false))
-            store.writableDatabase.execSQL("INSERT INTO capability_grants VALUES(?, 'notification.post', 1)", arrayOf(appRecord.id))
             val authority = ToolNetworkGrants.authority(store)
             val host = checkNotNull(authority.refreshAccess())
             assertEquals(setOf(appRecord.id,copy.id), host.apps.value.map {it.id}.toSet())

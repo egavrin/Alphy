@@ -115,7 +115,7 @@ class AutomationOneTimeWorkflowTest {
         }
     }
 
-    @Test fun confirmationUsesFrozenCalendarInstancesAndNeverReadsAgain(): Unit=runBlocking {
+    @Test fun confirmationUsesFrozenCalendarReadAndNeverReadsAgain(): Unit=runBlocking {
         fixture { _,rules,device ->
             seed(device.tools)
             val first=JSONObject().put("id",42).put("title","Frozen one").put("start",at).put("end",at+60000)
@@ -123,22 +123,16 @@ class AutomationOneTimeWorkflowTest {
             device.calendar=JSONArray().put(first).put(second)
             val runner=device.runner(at)
             val read=action("source","calendar.read.rolling","""{"calendarId":9,"days":2,"zone":"UTC"}""")
-            val write=action("write","tool.records.calendar","""{"toolId":"target","revision":1,"field":"events","source":"source"}""")
-            val rule=rules.save(null,definition(read,write))
+            val rule=rules.save(null,definition(read))
             val proposal=runner.propose(rules,rule)
             assertEquals(at,proposal.steps.first().readAt)
             assertEquals(at,proposal.steps.first().from)
             assertEquals(at+172800000,proposal.steps.first().to)
-            assertTrue(proposal.steps.last().after.orEmpty().contains("Frozen two"))
             first.put("title","Changed after preview")
             device.calendar=JSONArray()
             val result=checkNotNull(runner.confirm(rules,proposal))
             assertEquals("succeeded",result.status)
             assertEquals(1,device.readCount)
-            val rows=JSONObject(device.tools.tool("target")!!.state).getJSONArray("events")
-            assertEquals(2,rows.length())
-            assertNotEquals(rows.getJSONObject(0).getString("id"),rows.getJSONObject(1).getString("id"))
-            assertTrue(rows.getJSONObject(0).getString("text").contains("Frozen one"))
             assertFalse(result.details.contains("\"id\":42"))
         }
     }

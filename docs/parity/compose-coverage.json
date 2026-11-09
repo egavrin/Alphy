@@ -4,18 +4,17 @@
   "base_revision": "62179af217478075a1d7a10960c949440dcc4ad8",
   "scope": "Bounded native mappings, not complete Compose or reference parity. Device status requires the evidence record.",
   "source_sha256": {
-    "app/src/main/java/com/alpha/assistant/tools/ToolUiCatalog.kt": "2eb9676ea1f3b070c512864cb5610479b88eaf4761cf8e58b57253e1ae3c74e9",
-    "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt": "196c30473f05dc5f9b247660d8c7659768ecc4780d13934065f150aaa7600b33",
-    "app/src/main/java/com/alpha/assistant/tools/ArtifactProtocol.kt": "4086e0e19179654e53bcb090540fae2a6edbd188e5612f21bea2e0ce76140a4a",
+    "app/src/main/java/com/alpha/assistant/tools/ToolUiCatalog.kt": "54f17764a90f9ea40d8f090d6b7ae34057138ec94bf4542f4749fe9b464500e8",
+    "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt": "e1add8165ccdf84440a3c8cce832273c24ad8c6771d2efc43cc0490526fa24fc",
+    "app/src/main/java/com/alpha/assistant/tools/ArtifactProtocol.kt": "9c88be98357dab974da6c501ad9b33ad76ee68030e95bc0a2041d25810827dac",
     "app/src/main/java/com/alpha/assistant/tools/GraphicsContract.kt": "1627bd924d96cf010c77fde6d33d026d3621e04d75a7b70e663a884bd11cd270",
-    "app/src/main/java/com/alpha/assistant/capabilities/CapabilityContract.kt": "fd227f77e467c285741a3d047f64959a55b9a609b3b9ea11ca1f08b726d4d5e8",
+    "app/src/main/java/com/alpha/assistant/capabilities/CapabilityContract.kt": "25bc54b8a5ef98fec4925b5ccbcea8be92c67d38a177f0b6245f566a3fac7c0b",
     "app/src/main/java/com/alpha/assistant/capabilities/MedicineCapabilities.kt": "89a148d2f00bc46270d0d4a459b75da7d7449edc4a53e5273970aab24662ec52",
-    "app/build.gradle.kts": "2424611f434e979eae56080639809871555c4db43cba7f31eacb3d1f199d803e"
+    "app/build.gradle.kts": "8f7be0b6919d0da4a9994b7a7b26df4b97fd6a808421a765f2dd67f84fe6f626"
   },
   "catalog_types": [
     "actionChip",
     "appBar",
-    "backHandler",
     "badge",
     "banner",
     "bottomBar",
@@ -152,10 +151,10 @@
         "line": 257,
         "end_line": 260
       },
-      "native_contract": "backHandler",
+      "native_contract": "routeStack",
       "status": "bounded_native_mapping",
       "test_owners": [
-        "NativeUiWorkflowTest"
+        "RouteStackWorkflowTest"
       ],
       "device_status": "partial_or_not_run",
       "evidence": "evidence/compose-execution/coverage-verification.md"

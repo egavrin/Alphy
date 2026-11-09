@@ -96,7 +96,6 @@ internal class AutomationOneTime(
         checkAccess(rule.definition)
         val targets=linkedMapOf<String,ToolRecord>()
         val predicted=mutableMapOf<String,ToolRecord>()
-        val sources=mutableMapOf<String,CapabilityResult>()
         val plan=rule.definition.actions.map {action ->
             currentCoroutineContext().ensureActive()
             when(action.capability) {
@@ -106,7 +105,6 @@ internal class AutomationOneTime(
                     val readAt=clock()
                     check(result.status=="succeeded") {result.message}
                     val exact=CapabilityResult.parse(result.json().toString())
-                    sources[action.id]=exact
                     val from=resolved.args.getLong("from")
                     val to=resolved.args.getLong("to")
                     val frozen=exact.copy(data=JSONObject(exact.data.toString()).put("range",resolved.args).put("readAt",readAt))
@@ -114,14 +112,14 @@ internal class AutomationOneTime(
                         after=hideProviderIds(frozen).data.getJSONArray("events").toString(),readAt=readAt,from=from,to=to),
                         frozenResult=frozen.json().toString())
                 }
-                "tool.state.set","tool.records.calendar" -> {
+                "tool.state.set" -> {
                     val id=action.args.getString("toolId")
                     val revision=action.args.getInt("revision")
                     val original=targets[id] ?: ArtifactCoordinator.get(tools,id).ordered {
                         AutomationTools.exactTarget(this,tools,id,revision)
                     }.also {targets[id]=it}
                     check(original.revision==revision) {"Версия мини-приложения изменилась."}
-                    val write=AutomationTools.planTestWrite(predicted[id] ?: original,rule.definition,action,sources,render)
+                    val write=AutomationTools.planTestWrite(predicted[id] ?: original,action,render)
                     predicted[id]=write.after
                     Planned(Step(action.id,action.capability,"${write.title} · ${write.field}",
                         displayValue(write.before,write.field),displayValue(write.after,write.field),uiChanged=write.before.ui!=write.after.ui,

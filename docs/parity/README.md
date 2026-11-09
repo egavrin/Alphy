@@ -197,12 +197,11 @@ A platform acceptance code must not become a claim that the requested physical o
 **Requirement:** Alpha project instructions prohibit silent deletion of existing user data or credentials.
 They also prohibit compatibility layers and migrations without an explicit request.
 
-The current `ToolSpec.parse` accepts integer `formatVersion: 2` only.
-The artifact has exactly eight top-level fields:
+The current `ToolSpec.parse` accepts integer `formatVersion: 3`. A basic artifact has eight required fields.
 
 ```json
 {
-  "formatVersion": 2,
+  "formatVersion": 3,
   "title": "Counter",
   "description": "A local counter",
   "capabilities": [],
@@ -221,7 +220,7 @@ It is not VERA source, VBC2 bytecode, a WebView document, or native application 
 The host executes its source in the isolated sandbox.
 Generated code cannot access host files, credentials, imports, network services, or native APIs directly.
 
-The specification permits 1..40 state fields.
+The specification requires 1 to 40 state fields.
 Scalar types are `number`, `string`, and `boolean`.
 Numbers must be finite with absolute value at most `1e12`.
 Strings have a 2,048-character limit.
@@ -229,24 +228,22 @@ State has a 48 KiB limit.
 A list schema defines `type`, `maxItems`, and `fields`.
 It permits at most 100 records and 12 scalar fields per record.
 Every record has a nonempty, unique string `id` of at most 128 characters.
-Nested records and arrays remain unsupported.
+State fields can also declare fixed-shape objects and bounded arrays. List records use scalar fields.
 
-The specification has a 64 KiB JSON limit and depth limit 24.
-Source has a 32 KiB limit.
-UI has at most 80 nodes, maximum depth 8, and 1..30 children per container.
+The artifact definition has a 256 KiB limit. Decoded JavaScript source has a 64 KiB limit.
+The UI has at most 512 nodes, a maximum depth of 8, and 1 to 50 children per container.
 Each leaf has bounded text.
 Action identifiers are unique and validated against the current layout.
 Preview and render events preserve state and request no effects.
 Action events can request at most three declared native effects.
-The broker checks grants, Android permissions, and native confirmation.
+The broker checks Android permissions and the applicable native approval. Network requests require per-app network consent.
 
 Refinement can add fields with defaults.
 It must preserve existing fields, types, collection definitions, IDs, and values.
 This rule is stricter than the reference `carryState`, which can reset incompatible values or drop removed fields.
 A parity implementation must preserve Alphy's data rule rather than copy that destructive reference behavior.
 
-`docs/tool-integration.md` still describes version 1 and older limits.
-This P0 package preserves that existing file and records the current source contract here.
+The [tool integration guide](../tool-integration.md) describes the generation and runtime workflow.
 
 ## Known verification limits
 

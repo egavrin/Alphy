@@ -20,8 +20,8 @@
     "device_provider_calls": 0
   },
   "source_sha256": {
-    "app/src/main/java/com/alpha/assistant/tools/ToolUiCatalog.kt": "7ccc1522221967c05f47d6d183531ae0a5f272f9f964ee15206011e790f47396",
-    "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt": "311837a68f7eab3f375bdc7f6086a9b995ac3295fadd414a76d776640cdb37bc",
+    "app/src/main/java/com/alpha/assistant/tools/ToolUiCatalog.kt": "54f17764a90f9ea40d8f090d6b7ae34057138ec94bf4542f4749fe9b464500e8",
+    "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt": "e1add8165ccdf84440a3c8cce832273c24ad8c6771d2efc43cc0490526fa24fc",
     "app/src/main/java/com/alpha/assistant/tools/NativeUiMotion.kt": "6da192d9c9c9217c98480d5604f75b620cb8cc8d31f682261b8ccb3df3792d7d",
     "app/src/main/java/com/alpha/assistant/tools/ToolGenerationSmoke.kt": "011547bd091d4e4dac62a677647ef3805089abf3697e4638edf3fe5525426c65",
     "app/src/androidTest/java/com/alpha/assistant/tools/NativeMaterialWorkflowTest.kt": "b8a7abdd6257f401dd61bdcd654021dc909ba9fec6ea297a6d2e75c4ad6fa325",
@@ -347,7 +347,7 @@
       "id": "android-back",
       "family": "Back and predictive back",
       "status": "partial",
-      "implemented_contract": "Existing backHandler action and native modal dismissal",
+      "implemented_contract": "Route stack Back and native modal dismissal",
       "remaining_gap": "No generated predictive-back progress/cancel contract.",
       "source_or_test": "NativeUiWorkflowTest",
       "evidence_status": "compiled_sources_only; workflow_not_run_by_this_package"

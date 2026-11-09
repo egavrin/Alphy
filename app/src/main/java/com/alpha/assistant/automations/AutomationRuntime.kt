@@ -79,10 +79,10 @@ object AutomationRuntime {
         else -> null
     }
     fun dependencies(rule: AutomationRule, toolId: String) = rule.definition.actions.any {
-        it.capability in setOf("tool.state.set","tool.records.calendar") && it.args.getString("toolId") == toolId
+        it.capability == "tool.state.set" && it.args.getString("toolId") == toolId
     }
     fun dependencyFailure(tools: ToolStore, rule: AutomationRule): String? = rule.definition.actions
-        .filter { it.capability in setOf("tool.state.set","tool.records.calendar") }.firstNotNullOfOrNull { action ->
+        .filter { it.capability == "tool.state.set" }.firstNotNullOfOrNull { action ->
             val target=tools.tool(action.args.getString("toolId"))
             when {
                 target == null -> "Целевой инструмент недоступен. Все действия сценария остановлены."
@@ -151,7 +151,7 @@ object AutomationRuntime {
     fun pause(context: Context,store: AutomationStore,expected: AutomationRule): Boolean {
         synchronized(alarmLock) {
             if(!store.pause(expected.id,expected.revision)) return false
-            cancelAlarm(context,store,expected)
+            cancelAlarm(context,store,expected.id)
         }
         notifyChanged(context)
         if(expected.definition.type=="geofence" || expected.definition.agent != null) refreshDatabase(context,store.databaseName)
@@ -177,7 +177,7 @@ object AutomationRuntime {
         check(deleting.add(expected.id)) { "Сценарий уже удаляется." }
         try {
             store.stopForDeletion(expected.id,expected.revision)
-            cancelAlarm(context,store,expected)
+            cancelAlarm(context,store,expected.id)
             mutex.withLock {
                 geofenceMutex.withLock {
                     check(store.rule(expected.id)?.revision==expected.revision) {
@@ -416,17 +416,14 @@ object AutomationRuntime {
 
     private fun dependencyFailure(context: Context,store: AutomationStore,rule: AutomationRule) = toolsForRules(context,store).use {dependencyFailure(it,rule)}
     private fun actionFailure(context: Context,store: AutomationStore,action: CapabilityRequest): String? {
-        if(action.capability in setOf("tool.state.set","tool.records.calendar")) return toolsForRules(context,store).use { tools ->
+        if(action.capability == "tool.state.set") return toolsForRules(context,store).use { tools ->
             val tool = tools.tool(action.args.getString("toolId"))
             when {
                 tool == null || tool.archived || tool.revision != action.args.getInt("revision") -> "Целевой инструмент изменился или недоступен. Проверь и одобри новую версию сценария."
                 else -> runCatching {
                     val spec=ToolSpec.parsePersisted(tool.spec)
-                    if(action.capability == "tool.records.calendar") AutomationDataflow.validateCollection(spec,action.args.getString("field"))
-                    else {
-                        require(spec.schema.get(action.args.getString("field")) is String)
-                        spec.validateState(JSONObject(tool.state).put(action.args.getString("field"),action.args.get("value")).toString())
-                    }
+                    require(spec.schema.get(action.args.getString("field")) is String)
+                    spec.validateState(JSONObject(tool.state).put(action.args.getString("field"),action.args.get("value")).toString())
                     null
                 }.getOrElse { "Новое значение не соответствует полю инструмента." }
             }
@@ -444,7 +441,7 @@ object AutomationRuntime {
     }
 
     private fun nativeActionFailure(context: Context,action: CapabilityRequest): String? {
-        if(action.capability in setOf("tool.state.set","tool.records.calendar",AGENT_ACTION)) return null
+        if(action.capability in setOf("tool.state.set",AGENT_ACTION)) return null
         val id=if(action.capability=="calendar.read.rolling") "calendar.read" else action.capability
         return when {
             !AndroidCapabilities(context).permissionGranted(id) -> "Доступ Android к действию отозван: ${CapabilityCatalog.definition(id).title}."
@@ -508,8 +505,8 @@ object AutomationRuntime {
 
     private suspend fun perform(context: Context, store: AutomationStore, rule: AutomationRule, action: CapabilityRequest, step: AutomationStep): CapabilityResult {
         if(!step.dry && !store.active(rule.id,rule.revision)) return CapabilityResult("cancelled","Сценарий остановлен.")
-        if(action.capability in setOf("tool.state.set","tool.records.calendar")) {
-            val result=toolsForRules(context,store).use { tools -> AutomationTools.execute(tools,rule.definition,action,step,AutomationTools.renderer(context,tools)) {store.active(rule.id,rule.revision)} }
+        if(action.capability == "tool.state.set") {
+            val result=toolsForRules(context,store).use { tools -> AutomationTools.execute(tools,action,step.dry,AutomationTools.renderer(context,tools)) {store.active(rule.id,rule.revision)} }
             if(!step.dry) {
                 ToolWidgets.updateAll(context)
                 context.sendBroadcast(Intent(SurfaceEntry.TOOLS_CHANGED).setPackage(context.packageName))
@@ -549,17 +546,19 @@ object AutomationRuntime {
     fun refresh(context: Context, resetGeofences: Boolean = false) = launch(context) { reconcile(context,it,resetGeofences) }
     private fun rulesGeneration(context: Context,store: AutomationStore) =
         ToolLibraryStorage.relatedSelection(context,store.databaseName,"automations")?.generation ?: ToolLibraryStorage.ORIGINAL
-    private fun alarmIntent(context: Context,store: AutomationStore,rule: AutomationRule): Intent {
+    private fun alarmIntent(context: Context,store: AutomationStore,id: String): Intent {
         val generation=rulesGeneration(context,store)
         val prefix=if(generation==ToolLibraryStorage.ORIGINAL) "" else "$generation/"
         return Intent(context,AutomationReceiver::class.java).setAction(ALARM)
-            .setData(Uri.parse("alpha-automation://alarm/$prefix${rule.id}"))
+            .setData(Uri.parse("alpha-automation://alarm/$prefix$id"))
             .putExtra(ToolLibraryStorage.GENERATION_EXTRA,generation)
-            .putExtra("id",rule.id).putExtra("revision",rule.revision).putExtra("at",rule.nextAt ?: 0)
+            .putExtra("id",id)
     }
-    private fun alarm(context: Context,store: AutomationStore,rule: AutomationRule) = PendingIntent.getBroadcast(context,0,alarmIntent(context,store,rule),PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-    private fun cancelAlarm(context: Context,store: AutomationStore,rule: AutomationRule) = synchronized(alarmLock) {
-        val pending=PendingIntent.getBroadcast(context,0,alarmIntent(context,store,rule),PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE)
+    private fun alarm(context: Context,store: AutomationStore,rule: AutomationRule) = PendingIntent.getBroadcast(context,0,
+        alarmIntent(context,store,rule.id).putExtra("revision",rule.revision).putExtra("at",rule.nextAt ?: 0),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    private fun cancelAlarm(context: Context,store: AutomationStore,id: String) = synchronized(alarmLock) {
+        val pending=PendingIntent.getBroadcast(context,0,alarmIntent(context,store,id),PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE)
         if(pending!=null) {
             context.getSystemService(AlarmManager::class.java).cancel(pending)
             pending.cancel()
@@ -569,7 +568,7 @@ object AutomationRuntime {
     private fun cancelInactiveAlarm(context: Context,store: AutomationStore,rule: AutomationRule) = synchronized(alarmLock) {
         val current=store.rule(rule.id)
         if(current==null || !current.enabled || current.approvedRevision!=current.revision || current.attention.isNotEmpty()) {
-            cancelAlarm(context,store,rule)
+            cancelAlarm(context,store,rule.id)
         }
     }
 
@@ -578,6 +577,7 @@ object AutomationRuntime {
         val manager = context.getSystemService(AlarmManager::class.java)
         val now = System.currentTimeMillis()
         AgentAutomationRuntime.reconcile(context, store, now)
+        store.retiredRules().forEach { cancelAlarm(context,store,it.id) }
         for(rule in store.rules()) {
             if(rule.approvedRevision!=rule.revision || rule.attention.isNotEmpty()) {cancelInactiveAlarm(context,store,rule);continue}
             val failure=accessFailure(context,store,rule)
@@ -598,7 +598,7 @@ object AutomationRuntime {
                     current.approvedRevision!=current.revision || current.attention.isNotEmpty() ||
                     current.nextAt!=rule.nextAt || store.approvalToken(rule.id)!=token) return@synchronized false
                 store.next(rule.id,rule.revision,at)
-                if(at==null) {cancelAlarm(context,store,rule);return@synchronized false}
+                if(at==null) {cancelAlarm(context,store,rule.id);return@synchronized false}
                 val pending=alarm(context,store,rule.copy(nextAt=at))
                 try {
                     if(rule.definition.trigger.optBoolean("exact")) manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,at,pending)
@@ -606,7 +606,7 @@ object AutomationRuntime {
                     true
                 } catch(_: SecurityException) {
                     store.attention(rule.id,rule.revision,"Android запретил расписание. Проверь доступ к точным напоминаниям.")
-                    cancelAlarm(context,store,rule)
+                    cancelAlarm(context,store,rule.id)
                     false
                 }
             }

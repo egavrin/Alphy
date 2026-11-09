@@ -13,7 +13,6 @@ import android.provider.CalendarContract
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.capabilities.CapabilityRequest
-import com.alpha.assistant.tools.ToolStore
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -31,9 +30,8 @@ class ScheduledCalendarWorkflowTest {
     private val calendarId = 7L
     private val eventId = 42L
 
-    @Test fun scheduledImportKeepsSeparateRecurringInstancesAndExistingCompletion(): Unit = runBlocking {
+    @Test fun standaloneScheduledCalendarReadStillHonorsPermissions(): Unit = runBlocking {
         val app = InstrumentationRegistry.getInstrumentation().targetContext
-        val toolDatabase = "scheduled-calendar-${UUID.randomUUID()}.db"
         val calendar = CalendarFixture()
         val resolver = ContentResolver.wrap(calendar)
         var allowed = true
@@ -44,64 +42,32 @@ class ScheduledCalendarWorkflowTest {
                     if (allowed) PackageManager.PERMISSION_GRANTED else PackageManager.PERMISSION_DENIED
                 } else super.checkSelfPermission(permission)
         }
-        val automationDatabase = ToolStore(context, toolDatabase).use { it.automationDatabase }
+        val automationDatabase = "scheduled-calendar-${UUID.randomUUID()}.db"
         try {
-            ToolStore(context, toolDatabase).use { tools ->
-                AutomationStore(context, automationDatabase).use { rules ->
-                    val tool = AutomationTools.createDayTool(tools)
-                    val at = day + 8 * 3600000
-                    val trigger = JSONObject().put("type", "interval").put("minutes", 15).put("anchor", at)
-                    val read = CapabilityRequest("read", "calendar.read.rolling",
-                        JSONObject().put("calendarId", calendarId).put("days", 2).put("zone", "UTC"))
-                    val sync = CapabilityRequest("sync", "tool.records.calendar",
-                        JSONObject().put("toolId", tool.id).put("revision", tool.revision).put("field", "events").put("source", read.id))
-                    val rule = rules.save(null, JSONObject().put("name", "Calendar import")
-                        .put("trigger", trigger).put("conditions", JSONObject())
-                        .put("actions", JSONArray().put(read.json()).put(sync.json())))
-                    rules.approve(rule.id, rule.revision)
-                    val executor = AutomationRuntime.executor(context, rules)
-                    suspend fun deliver(time: Long): AutomationRun? {
-                        rules.next(rule.id, rule.revision, time)
-                        return AutomationSchedule.deliver(rules, checkNotNull(rules.rule(rule.id)), time, time, executor)
-                    }
-
-                    val imported = deliver(at)
-                    assertEquals(imported?.details, "succeeded", imported?.status)
-                    val initial = checkNotNull(tools.tool(tool.id))
-                    val state = JSONObject(initial.state)
-                    val events = state.getJSONArray("events")
-                    assertEquals(2, events.length())
-                    val completed = events.getJSONObject(0)
-                    val completedId = completed.getString("id")
-                    val otherId = events.getJSONObject(1).getString("id")
-                    assertNotEquals(completedId, otherId)
-                    assertEquals(first / 1000, completed.getLong("start"))
-                    assertEquals(second / 1000, events.getJSONObject(1).getLong("start"))
-                    completed.put("done", true)
-                    tools.commitTool(initial.copy(state = state.toString(), stateVersion = initial.stateVersion + 1), initial, false)
-
-                    calendar.title = "Updated appointment"
-                    val repeated = deliver(at + 15 * 60000)
-                    assertEquals(repeated?.details, "succeeded", repeated?.status)
-                    val saved = checkNotNull(tools.tool(tool.id))
-                    val updated = JSONObject(saved.state).getJSONArray("events")
-                    assertEquals(2, updated.length())
-                    assertEquals(completedId, updated.getJSONObject(0).getString("id"))
-                    assertEquals(otherId, updated.getJSONObject(1).getString("id"))
-                    assertTrue(updated.getJSONObject(0).getBoolean("done"))
-                    assertFalse(updated.getJSONObject(1).getBoolean("done"))
-                    assertTrue(updated.getJSONObject(0).getString("text").contains(calendar.title))
-
-                    allowed = false
-                    assertEquals("revoked", deliver(at + 30 * 60000)?.status)
-                    assertEquals(2, calendar.instanceReads)
-                    assertEquals(saved, tools.tool(tool.id))
-                    assertFalse(rules.active(rule.id, rule.revision))
+            AutomationStore(context, automationDatabase).use { rules ->
+                val at = day + 8 * 3600000
+                val trigger = JSONObject().put("type", "interval").put("minutes", 15).put("anchor", at)
+                val read = CapabilityRequest("read", "calendar.read.rolling",
+                    JSONObject().put("calendarId", calendarId).put("days", 2).put("zone", "UTC"))
+                val rule = rules.save(null, JSONObject().put("name", "Calendar read")
+                    .put("trigger", trigger).put("conditions", JSONObject()).put("actions", JSONArray().put(read.json())))
+                rules.approve(rule.id, rule.revision)
+                val executor = AutomationRuntime.executor(context, rules)
+                suspend fun deliver(time: Long): AutomationRun? {
+                    rules.next(rule.id, rule.revision, time)
+                    return AutomationSchedule.deliver(rules, checkNotNull(rules.rule(rule.id)), time, time, executor)
                 }
+                val result = deliver(at)
+                assertEquals(result?.details, "succeeded", result?.status)
+                assertTrue(result?.details.orEmpty().contains("2 событий"))
+                assertEquals(1, calendar.instanceReads)
+                allowed = false
+                assertEquals("revoked", deliver(at + 15 * 60000)?.status)
+                assertEquals(1, calendar.instanceReads)
+                assertFalse(rules.active(rule.id, rule.revision))
             }
         } finally {
             app.deleteDatabase(automationDatabase)
-            app.deleteDatabase(toolDatabase)
         }
     }
 

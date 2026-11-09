@@ -58,7 +58,7 @@ data class AutomationDefinition(val json: String, val name: String, val trigger:
         return null
     }
     companion object {
-        val actionIds = setOf("notification.post","calendar.read","calendar.read.rolling","tool.records.calendar","tool.state.set","app.open","link.open","maps.open","calendar.create")
+        val actionIds = setOf("notification.post","calendar.read","calendar.read.rolling","tool.state.set","app.open","link.open","maps.open","calendar.create")
         fun parse(input: JSONObject): AutomationDefinition {
             require(input.toString().toByteArray().size <= 20000) { "Сценарий слишком большой" }
             require(input.keys().asSequence().toSet() == setOf("name","trigger","conditions","actions"))
@@ -112,7 +112,7 @@ data class AutomationDefinition(val json: String, val name: String, val trigger:
             val actions = (0 until a.length()).map { i ->
                 val raw = a.getJSONObject(i); val capability = raw.getString("capability")
                 require(capability in actionIds || capability == AGENT_ACTION)
-                if(capability !in setOf("tool.state.set","tool.records.calendar","calendar.read.rolling",AGENT_ACTION)) CapabilityCatalog.request(raw)
+                if(capability !in setOf("tool.state.set","calendar.read.rolling",AGENT_ACTION)) CapabilityCatalog.request(raw)
                 else {
                     require(raw.keys().asSequence().toSet() == setOf("id","capability","args"))
                     require(raw.getString("id").matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")))
@@ -125,22 +125,17 @@ data class AutomationDefinition(val json: String, val name: String, val trigger:
                         require(args.get("days") is Int && args.getInt("days") in 1..30)
                         if(args.getString("zone") != "device") ZoneId.of(args.getString("zone"))
                     } else {
-                        val fields=if(capability == "tool.state.set") setOf("toolId","revision","field","value") else setOf("toolId","revision","field","source")
+                        val fields=setOf("toolId","revision","field","value")
                         require(args.keys().asSequence().toSet() == fields)
                         require(args.getString("toolId").length in 1..128 && args.get("revision") is Int && args.getInt("revision") > 0)
                         require(args.getString("field").matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")))
-                        if(capability == "tool.state.set") {
-                            val value = args.get("value")
-                            require(value is Boolean || value is String && value.length <= 2048 || value is Number && value.toDouble().isFinite() && kotlin.math.abs(value.toDouble()) <= 1e12)
-                        } else require(args.getString("source").matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")))
+                        val value = args.get("value")
+                        require(value is Boolean || value is String && value.length <= 2048 || value is Number && value.toDouble().isFinite() && kotlin.math.abs(value.toDouble()) <= 1e12)
                     }
                     CapabilityRequest(raw.getString("id"),capability,args)
                 }
             }
             require(actions.map { it.id }.distinct().size == actions.size)
-            actions.forEachIndexed { index,action -> if(action.capability == "tool.records.calendar") {
-                require(actions.take(index).any { it.id == action.args.getString("source") && it.capability in setOf("calendar.read","calendar.read.rolling") }) { "Записи должны получать результат предыдущего чтения календаря" }
-            } }
             if(actions.any { it.capability in setOf("app.open","link.open","maps.open","calendar.create") }) require(actions.size == 1) { "Открытие приложения должно быть отдельным сценарием" }
             if(actions.any { it.capability == AGENT_ACTION }) require(actions.size == 1) { "Задача Alphy выполняется отдельным сценарием." }
             if(type == "schedule" && t.getBoolean("exact")) require(actions.all { it.capability in setOf("notification.post", AGENT_ACTION) }) { "Точное время доступно только для уведомлений Alphy. Остальные действия выполняются приблизительно." }
@@ -154,4 +149,4 @@ data class AutomationRule(val id: String, val revision: Int, val approvedRevisio
 data class AutomationRun(val id: String, val ruleId: String, val revision: Int, val token: String,
     val time: Long, val status: String, val message: String, val details: String)
 
-data class AutomationStep(val key: String, val now: Long, val previous: Map<String,com.alpha.assistant.capabilities.CapabilityResult>, val dry: Boolean)
+data class AutomationStep(val now: Long, val dry: Boolean)

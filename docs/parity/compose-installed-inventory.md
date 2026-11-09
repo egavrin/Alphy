@@ -83,7 +83,7 @@ The table summarizes each family. The machine record contains properties, events
 | `material-ranges` | `slider`, `numberInput` | `partial` | No range pair, dual thumb contract, tick labels, or drag-finished event. |
 | `material-containers` | `card`, `section`, `listItem`, `banner`, `emptyState`, `divider` | `partial` | No generic Surface type, arbitrary elevation, border, shape, or clickable Card contract. Existing named compositions do not expose all upstream slots. |
 | `material-overlays` | Host/protocol facility only | `planned` | No declarative dialog, sheet, popup, or tooltip contract. Existing native review dialogs do not grant generated modal support. |
-| `material-shell` | `row`, `tabs`, `backHandler` | `planned` | No mini-app scaffold, top/bottom app bar, navigation bar/rail/drawer, route stack, or scroll behavior contract. navigation type means maps capabilities. |
+| `material-shell` | `row`, `tabs`, `routeStack` | `planned` | No mini-app scaffold, top/bottom app bar, navigation bar/rail/drawer or scroll behavior contract. navigation type means maps capabilities. |
 | `material-menu-tabs` | `select`, `tabs` | `partial` | No explicit menu groups, separators, menu item icons, or independent popup lifecycle. |
 | `material-status` | `progress`, `progressRing`, `badge`, `skeleton`, `spinner`, `snackbar` | `partial` | No SnackbarHost queue/duration, indeterminate mode option, badge anchor, or animated placeholder contract. |
 | `material-pickers` | `dateInput`, `timeInput` | `partial` | No Compose DatePicker/TimePicker style, date range, selectable-date policy, or time zone field. |
@@ -106,7 +106,7 @@ The table summarizes each family. The machine record contains properties, events
 | `runtime-state` | Host/protocol facility only | `host_only` | Compose snapshot APIs are host implementation facilities. Generated JavaScript globals are transient and cannot replace durable declared state. |
 | `runtime-effects` | Host/protocol facility only | `host_only` | Compose effects are host-only. Native effect authority comes from validated foreground actions, not composition or timer presence. |
 | `runtime-restoration` | Host/protocol facility only | `partial` | rememberSaveable/retain are not generated APIs. No general UI scroll/focus/draft restoration contract; pre-existing controller cancellation leak remains unresolved. |
-| `android-back` | `backHandler` | `partial` | No predictive-back progress/cancel contract. BackHandler support does not expose predictive back APIs. |
+| `android-back` | `routeStack` | `partial` | No predictive-back progress/cancel contract. |
 | `android-results` | `calendar`, `medicine`, `navigation` | `partial` | Activity result plumbing is host-only. Each missing capability needs its own explicit adapter, authority, and result contract. |
 | `android-lifecycle` | `image` | `host_only` | Host APIs are installed. Background subscriptions, process recreation, and image revocation each need workflow evidence. |
 | `android-interop` | Host/protocol facility only | `host_only` | AndroidView is installed for native host code only. ui-viewbinding and WebView mini-app content are not exposed. |

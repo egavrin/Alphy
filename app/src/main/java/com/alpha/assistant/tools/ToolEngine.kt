@@ -1073,7 +1073,7 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
             }
             check(store.draft(id)==null) {"This operation already exists."}
             ToolDraft(id,toolId,base?.revision ?: 0,base?.stateVersion ?: 0,prompt,null,null,null,
-                conversationId ?: base?.lastConversationId).also(store::saveDraft)
+                conversationId).also(store::saveDraft)
         }
     }
     suspend fun generate(draftId: String, key: String, images: List<String>, session: CloudSession,
@@ -1142,7 +1142,7 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
             }
             val ui=spec.validateUi(JSONObject(checkNotNull(d.previewUi)),JSONObject(state)).toString()
             val next=ToolRecord(old?.id ?: d.id,(old?.revision ?: 0)+1,(old?.stateVersion ?: 0)+1,spec.json,state,ui,
-                if(old==null) d.conversationId else old.conversationId,true,createdAt=old?.createdAt ?: System.currentTimeMillis(),
+                old?.conversationId,true,createdAt=old?.createdAt ?: System.currentTimeMillis(),
                 lastConversationId=d.conversationId ?: old?.lastConversationId,onDesktop=old?.onDesktop ?: false)
             if(rules==null) store.transaction {
                 context.ensureActive()

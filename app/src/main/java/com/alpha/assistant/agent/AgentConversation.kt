@@ -158,7 +158,7 @@ internal class AgentConversation(private val app: Application, private val scope
         change(plan) {
             val key = getKey()
             val turn = CloudTurn("user", revised.text)
-            val instructions = ChatToolReply.instructions(emptyList(), available = false)
+            val instructions = ChatToolReply.instructions(available = false)
             var needs: List<String>? = null
             provider.respond(key, CloudRequest(listOf(turn), false, instructions, chatDecision = true, allowDevicePlan = true,
                 decisionContext = ChatDecisionContext(turn, emptyList(), instructions, MessageProvenance.CLEAN)), session) { event ->

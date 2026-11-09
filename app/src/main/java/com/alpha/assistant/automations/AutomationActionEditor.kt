@@ -23,9 +23,7 @@ import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.ui.AlphaIcon
 import com.alpha.assistant.ui.Glyph
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.Instant
@@ -42,23 +40,20 @@ internal data class AutomationActionDraft(val request: CapabilityRequest, val st
         val next=JSONObject(args.toString())
         when(capability) {
             "calendar.read.rolling" -> (next.opt("days") as? String)?.let { next.put("days",it.toInt()) }
-            "tool.state.set","tool.records.calendar" -> if(targetChanged || stateValue!=null) {
+            "tool.state.set" -> if(targetChanged || stateValue!=null) {
                 val target=tools.find { it.id==next.optString("toolId") && it.revision==next.optInt("revision") && !it.archived }
                 requireNotNull(target) { staleTargetMessage }
                 val spec=ToolSpec.parsePersisted(target.spec)
                 val field=next.getString("field")
-                if(capability=="tool.records.calendar") AutomationDataflow.validateCollection(spec,field)
-                else {
-                    val input=checkNotNull(stateValue)
-                    val value=when(spec.schema.get(field)) {
-                        "boolean" -> input.toBooleanStrict()
-                        "number" -> input.toDouble()
-                        "string" -> input
-                        else -> error(staleTargetMessage)
-                    }
-                    spec.validateState(JSONObject(target.state).put(field,value).toString())
-                    next.put("value",value)
+                val input=checkNotNull(stateValue)
+                val value=when(spec.schema.get(field)) {
+                    "boolean" -> input.toBooleanStrict()
+                    "number" -> input.toDouble()
+                    "string" -> input
+                    else -> error(staleTargetMessage)
                 }
+                spec.validateState(JSONObject(target.state).put(field,value).toString())
+                next.put("value",value)
             }
         }
         return request.copy(args=next).json()
@@ -98,17 +93,11 @@ internal fun newAutomationAction(capability: String, notice: String,
     return AutomationActionDraft(CapabilityRequest(id,capability,args))
 }
 
-internal fun newDayActions(notice: String): List<AutomationActionDraft> {
-    val read=newAutomationAction("calendar.read.rolling",notice)
-    return listOf(read,newAutomationAction("tool.records.calendar",notice).edit { put("source",read.id) })
-}
-
 internal val automationActionLabels=linkedMapOf(
     AGENT_ACTION to R.string.automation_agent_action,
     "notification.post" to R.string.automation_editor_action_notice,
     "calendar.read" to R.string.automation_editor_action_read,
     "calendar.read.rolling" to R.string.automation_editor_action_rolling,
-    "tool.records.calendar" to R.string.automation_editor_action_sync,
     "tool.state.set" to R.string.automation_editor_action_state,
     "app.open" to R.string.automation_editor_action_app,
     "link.open" to R.string.automation_editor_action_link,
@@ -153,7 +142,7 @@ internal val automationActionLabels=linkedMapOf(
                                 if (capability != action.capability) update(newAutomationAction(capability, notice, action.id))
                             }
                         }
-                        AutomationActionFields(action, actions.take(index), tools, update)
+                        AutomationActionFields(action, tools, update)
                     }
                 }
                 if (actions.size > 1) {
@@ -190,13 +179,11 @@ internal val automationActionLabels=linkedMapOf(
         Spacer(Modifier.width(8.dp))
         Text(stringResource(R.string.automation_editor_add_action))
     }
-    if(actions.size==1 && actions.none { it.capability == AGENT_ACTION }) TextButton(onClick={changed(actions+newDayActions(notice))},modifier=Modifier.heightIn(min=48.dp)) {
-        Text(stringResource(R.string.automation_editor_day_template))
-    }
+
 }
 
 @Composable private fun AutomationActionFields(
-    draft: AutomationActionDraft, previous: List<AutomationActionDraft>, tools: ToolController,
+    draft: AutomationActionDraft, tools: ToolController,
     changed: (AutomationActionDraft)->Unit
 ) {
     val context=LocalContext.current
@@ -226,7 +213,7 @@ internal val automationActionLabels=linkedMapOf(
                 AutomationZone(args.getString("zone")) {set("zone",it)}
             }
         }
-        "tool.state.set","tool.records.calendar" -> AutomationTargetFields(draft,previous,tools,changed)
+        "tool.state.set" -> AutomationTargetFields(draft,tools,changed)
         "app.open" -> AutomationChoice(args.getString("app"),mapOf(
             "settings" to stringResource(R.string.automation_editor_app_settings),
             "browser" to stringResource(R.string.automation_editor_app_browser),
@@ -259,15 +246,10 @@ internal val automationActionLabels=linkedMapOf(
 }
 
 @Composable private fun AutomationTargetFields(
-    draft: AutomationActionDraft,previous: List<AutomationActionDraft>,tools: ToolController,
+    draft: AutomationActionDraft,tools: ToolController,
     changed: (AutomationActionDraft)->Unit
 ) {
-    val context=LocalContext.current
-    val scope=rememberCoroutineScope()
-    val currentDraft by rememberUpdatedState(draft)
-    val onChanged by rememberUpdatedState(changed)
     val args=draft.args
-    val sync=draft.capability=="tool.records.calendar"
     val targets=tools.tools.filter { !it.archived && ToolSpec.availablePersisted(it.spec)!=null }
     val current=targets.find { it.id==args.optString("toolId") && it.revision==args.optInt("revision") }
     val spec=current?.let {ToolSpec.availablePersisted(it.spec)}
@@ -280,45 +262,16 @@ internal val automationActionLabels=linkedMapOf(
                 put("toolId",next.id)
                 put("revision",next.revision)
                 if(next.id!=args.optString("toolId")) remove("field")
-            }.copy(stateValue=if(sync) null else value,targetChanged=true))
+            }.copy(stateValue=value,targetChanged=true))
         }
     }
     if(args.has("revision")) Text(stringResource(R.string.automation_editor_target_version,args.getInt("revision")))
-    Text(stringResource(if(sync) R.string.automation_editor_target_list else R.string.automation_editor_target_field))
+    Text(stringResource(R.string.automation_editor_target_field))
     val fields=spec?.schema?.keys()?.asSequence()?.filter { field ->
-        if(sync) runCatching { AutomationDataflow.validateCollection(spec,field) }.isSuccess
-        else spec.schema.get(field) is String
+        spec.schema.get(field) is String
     }?.associateWith { it }.orEmpty()
     AutomationChoice(args.optString("field"),fields) { field ->
-        if(field!=args.optString("field")) changed(draft.edit { put("field",field) }.copy(stateValue=if(sync) null else value,targetChanged=true))
+        if(field!=args.optString("field")) changed(draft.edit { put("field",field) }.copy(stateValue=value,targetChanged=true))
     }
-    if(sync) {
-        Text(stringResource(R.string.automation_editor_calendar_source))
-        val sources=previous.filter {it.capability in setOf("calendar.read","calendar.read.rolling")}
-        AutomationChoice(args.optString("source"),sources.associate { it.id to it.id }) {
-            changed(draft.edit { put("source",it) })
-        }
-        if(sources.isEmpty()) Text(stringResource(R.string.automation_editor_no_calendar_source))
-        var creating by remember { mutableStateOf(false) }
-        var failure by remember { mutableStateOf(false) }
-        TextButton(enabled=!creating,onClick={
-            creating=true
-            failure=false
-            scope.launch {
-                try {
-                    val target=tools.createAutomationDayTool()
-                    tools.reload()
-                    onChanged(currentDraft.edit {put("toolId",target.id);put("revision",target.revision);put("field","events")}
-                        .copy(targetChanged=true))
-                } catch(cancel: CancellationException) {
-                    throw cancel
-                } catch(_: Exception) {
-                    failure=true
-                } finally {
-                    creating=false
-                }
-            }
-        },modifier=Modifier.heightIn(min=48.dp)) { Text(stringResource(R.string.automation_editor_day_tool)) }
-        if(failure) Text(stringResource(R.string.automation_editor_day_tool_error),color=MaterialTheme.colorScheme.error)
-    } else AutomationField(stringResource(R.string.automation_editor_target_value),value) {changed(draft.copy(stateValue=it))}
+    AutomationField(stringResource(R.string.automation_editor_target_value),value) {changed(draft.copy(stateValue=it))}
 }

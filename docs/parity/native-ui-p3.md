@@ -32,7 +32,7 @@ The catalog contains 34 native types. Compositions cover 55 applicable entries f
 | Slider | `slider`, with a local draft and explicit Apply |
 | Select | `select` |
 | Tabs | `tabs` |
-| BackHandler | `backHandler`, active only for an enabled visible tree |
+| Back | `routeStack`, available above the root route |
 | NumberField | `numberInput` |
 | TimeField | `timeInput`, with local minutes from midnight |
 | DateField | `dateInput`, with ISO date strings |

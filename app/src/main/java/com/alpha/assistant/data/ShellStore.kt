@@ -156,6 +156,22 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
         writableDatabase.insertWithOnConflict("settings", null, ContentValues().apply { put("name", name); put("value", value) }, SQLiteDatabase.CONFLICT_REPLACE)
             .also { check(it != -1L) { "Setting write failed" } }
     }
+    internal fun hasSetting(name: String): Boolean =
+        readableDatabase.query("settings",arrayOf("name"),"name=?",arrayOf(name),null,null,null).use { it.moveToFirst() }
+
+    internal fun completeToolCardUpgrade(marker: String, chats: List<Conversation>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            if (!hasSetting(marker)) {
+                chats.forEach(::updateConversation)
+                saveSetting(marker,"1")
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
     fun createFromNewDraft(conversation: Conversation, nextDraft: Draft = Draft()) {
         writableDatabase.beginTransaction()
         try {

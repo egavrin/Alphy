@@ -636,13 +636,61 @@ class AutomaticToolWorkflowTest {
         }
     }
 
+    @Test fun manualSaveAndUpgradeUseOneDurableCardPerLinkedApp() {
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                error("A prepared manual draft must save locally.")
+            }
+        }
+        Fixture(provider) { shell, tools ->
+            seedChat(shell,"already-linked")
+            seedTool(tools,"already-linked","Existing card")
+            seedTool(tools,"orphan","Missing card")
+            seedTool(tools,"deleted-chat","Deleted chat","missing-chat")
+            val candidate = ToolSpec.parse(spec())
+            for ((id, chat) in listOf("manual" to "chat","library" to null)) {
+                tools.saveDraft(ToolDraft(id,null,0,0,"Counter",candidate.json,candidate.initialState,candidate.ui.toString(),chat))
+            }
+        }.use { f ->
+            assertEquals(listOf("already-linked","orphan"),f.model.snapshot.selected?.cardIds)
+            assertEquals(1L,f.model.snapshot.selected?.updatedAt)
+            f.store.writableDatabase.execSQL("""
+                CREATE TRIGGER fixture_interrupt_card BEFORE UPDATE ON conversations
+                WHEN instr(NEW.body, '"toolId":"manual"') > 0
+                BEGIN SELECT RAISE(ABORT,'fixture card write interruption'); END
+            """.trimIndent())
+            main { f.model.acceptToolDraft("manual") }
+            f.idle()
+            assertNotNull(f.toolStore.tool("manual"))
+            assertEquals("generating",f.store.load().conversations.single().messages.single { it.toolOperationId == "manual" }.status)
+            f.store.writableDatabase.execSQL("DROP TRIGGER fixture_interrupt_card")
+            f.restart()
+            waitUntil { f.model.snapshot.selected?.cardIds?.contains("manual") == true }
+            val saved = checkNotNull(f.toolStore.tool("manual"))
+            f.toolStore.saveDraft(ToolDraft("manual-edit",saved.id,saved.revision,saved.stateVersion,
+                "Update counter",saved.spec,saved.state,saved.ui,"chat"))
+            main { f.model.acceptToolDraft("manual-edit") }
+            f.idle()
+            main { f.model.acceptToolDraft("library") }
+            f.idle()
+            assertNotNull(f.toolStore.tool("library"))
+            f.restart()
+            val chat = checkNotNull(f.model.snapshot.selected)
+            assertEquals(listOf("already-linked","orphan","manual"),chat.messages.mapNotNull { it.toolId })
+            assertEquals(2,chat.messages.single { it.toolId == "manual" }.toolRevision)
+            assertEquals(2,f.toolStore.revisions("manual").size)
+            assertNull(f.toolStore.tool("manual")?.conversationId)
+            assertEquals("chat",f.toolStore.tool("manual")?.lastConversationId)
+        }
+    }
+
     @Test fun testAndFixRunsSeparatelyAndSavesExactlyOneVerifiedRevision() {
         val calls = CopyOnWriteArrayList<CloudRequest>()
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 calls += request
                 if (request.chatDecision) {
-                    emit(CloudEvent.RoundComplete("", false, MessageProvenance.CLEAN, testFixTargetId = "counter"))
+                    emit(CloudEvent.RoundComplete("", false, MessageProvenance.CLEAN, testFix = CloudEvent.TestFixRequest(null)))
                     return
                 }
                 val response = when {
@@ -704,19 +752,48 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 if (!request.chatDecision) diagnosticCalls++
-                emit(CloudEvent.RoundComplete("", false, MessageProvenance.CLEAN, testFixTargetId = "outside"))
+                emit(CloudEvent.RoundComplete("", false, MessageProvenance.CLEAN, testFix = CloudEvent.TestFixRequest("Weather")))
             }
         }
         Fixture(provider) { shell, tools ->
-            seedTool(tools, "short", "Clock")
-            seedTool(tools, "long", "World Clock")
-            seedChat(shell, "short", "long")
+            seedTool(tools, "counter", "Counter")
+            seedChat(shell, "counter")
         }.use { f ->
-            f.send("Test World Clock and fix it.")
+            f.send("Test Weather and fix it.")
             f.idle()
             assertEquals(0, diagnosticCalls)
-            assertEquals(1, f.toolStore.tool("short")?.revision)
-            assertEquals(1, f.toolStore.tool("long")?.revision)
+            assertEquals(1, f.toolStore.tool("counter")?.revision)
+        }
+    }
+
+    @Test fun testAndFixRanksAllChatCandidatesAndRejectsDuplicateNames() {
+        var diagnosticCalls = 0
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (request.chatDecision) {
+                    assertTrue(request.allowTestFix)
+                    assertFalse(request.systemInstructions.contains("Zebra inventory"))
+                    emit(CloudEvent.RoundComplete("", false, MessageProvenance.CLEAN,
+                        testFix = CloudEvent.TestFixRequest("Zebra inventory")))
+                } else {
+                    diagnosticCalls++
+                    error("Stop after observing the selected app.")
+                }
+            }
+        }
+        for (duplicate in listOf(false, true)) {
+            Fixture(provider) { shell, tools ->
+                val others = (1..20).map { index -> "item-$index".also { seedTool(tools,it,"Alarm $index") } }
+                seedTool(tools,"target","Zebra inventory")
+                if (duplicate) seedTool(tools,"duplicate","Zebra inventory")
+                val ids = others + "target" + listOfNotNull("duplicate".takeIf { duplicate })
+                seedChat(shell,*ids.toTypedArray())
+            }.use { f ->
+                f.send("Test and fix Zebra inventory.")
+                f.idle()
+                assertEquals(1,diagnosticCalls)
+                assertEquals(1,f.toolStore.tool("target")?.revision)
+            }
         }
     }
 

@@ -37,7 +37,6 @@ class AutomationExecutor(private val store: AutomationStore, private val chargin
 
     private suspend fun runClaim(rule: AutomationRule,claim: AutomationRun,now: Long,dry: Boolean,oneTime: OneTime?=null): AutomationRun {
         val results = JSONArray()
-        val previous=linkedMapOf<String,CapabilityResult>()
         fun stop(action: CapabilityRequest): AutomationRun? {
             if(oneTime!=null) return oneTime.authority.stopped()?.let {store.finish(claim,it.status,checkNotNull(it.message),results.toString())}
             if(!dry && !store.active(rule.id,rule.revision))
@@ -47,7 +46,6 @@ class AutomationExecutor(private val store: AutomationStore, private val chargin
             return store.finish(claim,"revoked",denied,results.toString())
         }
         for(action in rule.definition.actions) {
-            val key = "${claim.id}:${action.id}"
             val unknown = CapabilityResult("unknownOutcome","Выполнение начато. Автоматический повтор запрещён.")
 
             var result=unknown
@@ -57,7 +55,7 @@ class AutomationExecutor(private val store: AutomationStore, private val chargin
                 stop(action)?.let {return it}
                 attempts++
                 if(!dry) store.effect(claim.id,action.id,unknown.json().put("attempts",attempts).toString())
-                val step=AutomationStep(key,now,previous.toMap(),dry)
+                val step=AutomationStep(now,dry)
                 result = try {
                     when {
                         oneTime!=null -> oneTime.perform(action)
@@ -78,7 +76,6 @@ class AutomationExecutor(private val store: AutomationStore, private val chargin
                 if(result.status !in setOf("unavailable","failed")) break
             }
             results.put(detail(result,action,attempts,dry))
-            previous[action.id]=result
             if(result.status != "succeeded") {
                 if(!dry && oneTime==null && result.status in setOf("denied","revoked")) store.attention(rule.id,rule.revision,result.message)
                 return store.finish(claim,result.status,result.message,results.toString())

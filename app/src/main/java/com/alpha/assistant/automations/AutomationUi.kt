@@ -66,7 +66,6 @@ private fun actionText(d: AutomationDefinition, tools: ToolController): String =
         "notification.post" -> "Уведомление Alphy: «${a.getString("title") }» — ${a.getString("text") }"
         "calendar.read" -> "Календарь ${a.getLong("calendarId")}: ${date(a.getLong("from"))} — ${date(a.getLong("to"))}. До 50 событий, только на устройстве."
         "calendar.read.rolling" -> "Каждый запуск: календарь ${a.getLong("calendarId")}, от начала текущего дня на ${a.getInt("days")} дн., ${if(a.getString("zone") == "device") "часовой пояс устройства (${ZoneId.systemDefault().id})" else a.getString("zone")}. До 50 событий, только на устройстве."
-        "tool.records.calendar" -> "Результат «${a.getString("source") }» → список «${a.getString("field") }» инструмента ${tools.tools.find { it.id == a.getString("toolId") }?.let { ToolSpec.storedTitle(it.spec) } ?: a.getString("toolId")}, версия ${a.getInt("revision")}. Импортированные записи этого календаря заменяются текущими. Ручные записи сохраняются."
         "tool.state.set" -> "Инструмент ${tools.tools.find { it.id == a.getString("toolId") }?.let { ToolSpec.storedTitle(it.spec) } ?: a.getString("toolId")}, версия ${a.getInt("revision")}: ${a.getString("field")} = ${a.get("value")}"
         "calendar.create" -> "Форма события «${a.getString("title")}»: ${date(a.getLong("start"))} — ${date(a.getLong("end"))}"
         "app.open" -> "Открыть: ${a.getString("app")}. В фоне ожидает пользователя."
@@ -120,7 +119,7 @@ internal fun conditionText(d: AutomationDefinition): String = buildList {
                     }
                 } else {
                     when(step.capability) {
-                        "tool.state.set","tool.records.calendar" -> {
+                        "tool.state.set" -> {
                             Text(stringResource(R.string.automation_test_tool_target,checkNotNull(step.toolId),checkNotNull(step.toolRevision)))
                             Text(stringResource(R.string.automation_test_before,checkNotNull(step.before)))
                             Text(stringResource(R.string.automation_test_after,checkNotNull(step.after)))
@@ -153,6 +152,7 @@ internal fun conditionText(d: AutomationDefinition): String = buildList {
     val appLabels=remember { context.packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0)
         .associate { it.activityInfo.packageName to it.loadLabel(context.packageManager).toString() } }
     var rules by remember { mutableStateOf(emptyList<AutomationRule>()) }
+    var retired by remember { mutableStateOf(emptyList<AutomationStore.RetiredRule>()) }
     var loadedRules by remember { mutableStateOf(false) }
     var histories by remember { mutableStateOf(emptyMap<String,List<AutomationRun>>()) }
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
@@ -186,8 +186,17 @@ internal fun conditionText(d: AutomationDefinition): String = buildList {
     var testSettingsVisited by remember { mutableStateOf(false) }
     var testRunning by remember { mutableStateOf(false) }
     fun reload() { scope.launch {
-        try { val loaded = withContext(Dispatchers.IO) { AutomationStore(context,tools.automationDatabase).use { store -> store.prune(); store.rules().let { r -> r to r.associate { it.id to store.history(it.id) } } } }
-            rules=loaded.first; histories=loaded.second; loadedRules=true
+        try {
+            val (current, retiredRules, history) = withContext(Dispatchers.IO) {
+                AutomationStore(context,tools.automationDatabase).use { store ->
+                    store.prune()
+                    val current = store.rules()
+                    val retiredRules = store.retiredRules()
+                    val ids = current.map { it.id } + retiredRules.map { it.id }
+                    Triple(current,retiredRules,ids.associateWith(store::history))
+                }
+            }
+            rules=current; retired=retiredRules; histories=history; loadedRules=true
         } catch(cancel: CancellationException) { throw cancel }
         catch(_: Exception) { error="Не удалось открыть сценарии. Данные не удалены." }
     } }
@@ -217,7 +226,14 @@ internal fun conditionText(d: AutomationDefinition): String = buildList {
     LaunchedEffect(pendingTest,testAccessInProgress,busy) {
         val request=pendingTest ?: return@LaunchedEffect
         if(testAccessInProgress || busy) return@LaunchedEffect
-        val definition=AutomationDefinition.parse(JSONObject(request.definition))
+        val definition = withContext(Dispatchers.IO) {
+            AutomationStore(context,tools.automationDatabase).use { it.oneTimeRule(request)?.definition }
+        }
+        if (definition == null) {
+            pendingTest = null
+            reload()
+            return@LaunchedEffect
+        }
         val missing=AutomationRuntime.oneTimePermissions(context,definition)
         val settingsIntent=if(missing.isEmpty()) AutomationRuntime.oneTimeSettings(context,definition) else null
         if(missing.isNotEmpty() && !testPermissionAsked) {
@@ -449,6 +465,7 @@ internal fun conditionText(d: AutomationDefinition): String = buildList {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = chatSetup == null && (split != null || maxWidth >= 840.dp)
             val visibleRules = if (openRuleId == null) rules else rules.filter { it.id == openRuleId }
+            val retiredRule = retired.find { it.id == openRuleId }
             val selectedRule = visibleRules.find { it.id == (openRuleId ?: selected) }
             val rule = when {
                 wide -> selectedRule ?: visibleRules.firstOrNull()
@@ -471,7 +488,7 @@ internal fun conditionText(d: AutomationDefinition): String = buildList {
                         contentAlignment = if (split == null) Alignment.TopStart else Alignment.TopEnd,
                     ) {
                         AutomationRuleList(
-                            visibleRules, loadedRules && openRuleId == null, (selectedRule ?: rule)?.id, listState,
+                            visibleRules, retired.takeIf { openRuleId == null }.orEmpty(), histories, loadedRules && openRuleId == null, (selectedRule ?: rule)?.id, listState,
                             globalError.takeUnless { editing }, enabled = !editing, create = createInChat, select = ::selectRule,
                             modifier = Modifier.width(listWidth),
                         )
@@ -561,6 +578,11 @@ internal fun conditionText(d: AutomationDefinition): String = buildList {
                                         }
                                     },
                                 )
+                            }
+                        } else if (retiredRule != null) {
+                            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
+                                TextButton(onClick = ::clearFocus) { Text(stringResource(R.string.automation_all)) }
+                                RetiredAutomationRule(retiredRule,histories[retiredRule.id].orEmpty())
                             }
                         } else {
                             Column(Modifier.fillMaxWidth().padding(16.dp)) {

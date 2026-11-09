@@ -24,7 +24,7 @@ class AutomationCardEditorWorkflowTest {
         "conditions":{"charging":true,"fromMinute":450,"toMinute":1200},
         "actions":[
             {"id":"read_custom","capability":"calendar.read","args":{"calendarId":17,"from":1793589634321,"to":1793689298765}},
-            {"id":"sync_custom","capability":"tool.records.calendar","args":{"toolId":"calendar-view","revision":4,"field":"events","source":"read_custom"}},
+            {"id":"set_custom","capability":"tool.state.set","args":{"toolId":"calendar-view","revision":4,"field":"title","value":"Fixture"}},
             {"id":"notice_custom","capability":"notification.post","args":{"title":"Private notice","text":"Keep the action unchanged"}}
         ]
     }""")
@@ -98,19 +98,17 @@ class AutomationCardEditorWorkflowTest {
         assertEquals("Europe/Berlin",saved.definition.trigger.getString("zone"))
         assertEquals(rule.definition.conditions.toString(),saved.definition.conditions.toString())
         assertEquals(rule.definition.actions.map { it.json().toString() },saved.definition.actions.map { it.json().toString() })
-        assertEquals("read_custom",saved.definition.actions[1].args.getString("source"))
+        assertEquals("Fixture",saved.definition.actions[1].args.getString("value"))
         assertFalse(saved.enabled)
         assertEquals(0,saved.approvedRevision)
     }
 
-    @Test fun actionLimitAndInvalidCalendarOrderPreserveSavedRuleWhenCanceled() = withRule { store,rule,_ ->
+    @Test fun actionLimitAndCanceledReorderPreserveSavedRule() = withRule { store,rule,_ ->
         click("Что сделать")
         var add: AccessibilityNodeInfo?=robot.reveal("Добавить действие")
         while(add!=null && add.isEnabled) add=add.parent
         assertNotNull("The action limit must disable the add control",add)
         click("Поднять действие 2", forward = false)
-        click("Сохранить для проверки")
-        robot.reveal("Записи должны получать результат предыдущего чтения календаря")
         assertEquals(rule.definition.json,store.rule(rule.id)?.definition?.json)
         assertEquals(1,store.rule(rule.id)?.revision)
         click("Отмена")

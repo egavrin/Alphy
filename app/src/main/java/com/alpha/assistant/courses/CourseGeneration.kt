@@ -254,7 +254,7 @@ internal fun checkedCourseUi(
     ui to state
 }
 
-private val DEVICE_CONTROLS = setOf("calendar", "medicine", "navigation", "image", "backHandler")
+private val DEVICE_CONTROLS = setOf("calendar", "medicine", "navigation", "image")
 private val EXTRA_ACTION_FIELDS = setOf("interactions", "dismissAction", "rowActions", "swipeAction", "reorder")
 
 private fun requireLocalUi(node: JSONObject, answerAction: String?) {

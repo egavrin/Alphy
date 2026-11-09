@@ -6,7 +6,6 @@ import com.alpha.assistant.cloud.*
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.*
 import org.json.JSONObject
-import java.util.UUID
 
 object AutomationTools {
     private fun localGeneration(context: Context): ToolGenerationService {
@@ -40,12 +39,12 @@ object AutomationTools {
     internal data class TestWrite(val before: ToolRecord,val after: ToolRecord,val field: String,val title: String,
         val surfaces: String?,val frames: Set<String>?,val timers: Map<String,Int>?,val playback: String?)
 
-    internal suspend fun planTestWrite(old: ToolRecord,definition: AutomationDefinition,action: CapabilityRequest,
-        previous: Map<String,CapabilityResult>,render: suspend (ToolRecord,String)->ToolPreview): TestWrite {
+    internal suspend fun planTestWrite(old: ToolRecord,action: CapabilityRequest,
+        render: suspend (ToolRecord,String)->ToolPreview): TestWrite {
         val spec=ToolSpec.parsePersisted(old.spec)
         val field=action.args.getString("field")
-        if(action.capability=="tool.state.set") require(spec.schema.get(field) is String) {"Новое значение не соответствует полю мини-приложения."}
-        val state=nextState(spec,old,definition,action,previous)
+        require(spec.schema.get(field) is String) {"Новое значение не соответствует полю мини-приложения."}
+        val state=nextState(spec,old,action)
         val rendered=render(old,state)
         require(rendered.effects.isEmpty() && rendered.records.length()==0 && JSONObject(rendered.state).toString()==JSONObject(state).toString()) {
             "Нельзя точно показать изменения мини-приложения. Проверка ничего не сохранила."
@@ -72,41 +71,31 @@ object AutomationTools {
             CapabilityResult("succeeded","Данные и интерфейс мини-приложения обновлены.")
         }
 
-    private fun nextState(spec: ToolSpec,old: ToolRecord,definition: AutomationDefinition,action: CapabilityRequest,
-        previous: Map<String,CapabilityResult>): String {
+    private fun nextState(spec: ToolSpec,old: ToolRecord,action: CapabilityRequest): String {
         require(!spec.isSealedStandalone) {"Эти данные можно изменить только в мини-приложении."}
-        return if(action.capability=="tool.state.set") {
-            spec.validateState(JSONObject(old.state).put(action.args.getString("field"),action.args.get("value")).toString()).toString()
-        } else AutomationDataflow.calendarState(spec,old.state,definition,action,previous)
+        return spec.validateState(JSONObject(old.state).put(action.args.getString("field"),action.args.get("value")).toString()).toString()
     }
 
-    suspend fun execute(tools: ToolStore, definition: AutomationDefinition, action: CapabilityRequest, step: AutomationStep,
+    suspend fun execute(tools: ToolStore, action: CapabilityRequest, dry: Boolean,
         render: suspend (ToolRecord,String) -> ToolPreview, stillApproved: () -> Boolean): CapabilityResult = ArtifactCoordinator.get(tools,action.args.getString("toolId")).ordered {
         current(tools,action.args.getString("toolId"))
-        if(!step.dry)flush(tools)
+        if(!dry)flush(tools)
         val old=current(tools,action.args.getString("toolId"))
         check(!tools.artifactWorkPending(old.id)) {"A native result must finish before automation can change state."}
         check(!old.archived) { "Инструмент в архиве" }
         check(old.revision == action.args.getInt("revision")) { "Версия инструмента изменилась" }
         val spec=ToolSpec.parsePersisted(old.spec)
-        val state=nextState(spec,old,definition,action,step.previous)
+        val state=nextState(spec,old,action)
         val rendered=prepareOutput(render(old,state))
         require(rendered.effects.isEmpty() && JSONObject(rendered.state).toString() == JSONObject(state).toString()) { "Отображение изменило данные или запросило системное действие" }
         spec.validateState(rendered.state); spec.validateUi(JSONObject(rendered.ui),JSONObject(rendered.state))
-        if(!step.dry) {
+        if(!dry) {
             check(stillApproved()) { "Сценарий выключен или изменён" }
             val next=old.copy(state=rendered.state,ui=rendered.ui,stateVersion=old.stateVersion+1)
             tools.commitTool(next,old,false,autonomous=true)
             committed(next,rendered)
         }
-        val preview=if(action.capability == "tool.records.calendar") {
-            val list=JSONObject(state).getJSONArray(action.args.getString("field"))
-            "Список «${action.args.getString("field")}»: ${list.length()} записей.\n"+(0 until list.length()).joinToString("\n") { list.getJSONObject(it).getString("text") }
-        } else "${action.args.getString("field")} = ${action.args.get("value")}"
-        CapabilityResult("succeeded",if(step.dry) "Изменения рассчитаны без сохранения." else "Данные и интерфейс инструмента обновлены.",JSONObject().put("preview",preview).put("state",JSONObject(state)).put("ui",JSONObject(rendered.ui)))
-    }
-    fun createDayTool(store: ToolStore): ToolRecord {
-        val spec=ToolSpec.parse("""{"formatVersion":3,"title":"Мой день","description":"Локальные события выбранного календаря","capabilities":[],"stateSchema":{"title":"string","events":{"type":"list","maxItems":100,"fields":{"id":"string","text":"string","done":"boolean","start":"number","end":"number"}}},"initialState":{"title":"Мой день","events":[]},"ui":{"type":"column","children":[{"type":"text","text":"Мой день","bind":"title"},{"type":"text","text":"События: 0"},{"type":"list","text":"События календаря","bind":"events"}]},"source":"return {state:input.state,ui:{type:'column',children:[{type:'text',text:'Мой день',bind:'title'},{type:'text',text:'События: '+input.state.events.length},{type:'list',text:'События календаря',bind:'events'}]}};"}""")
-        return ToolRecord(UUID.randomUUID().toString(),1,1,spec.json,spec.initialState,spec.ui.toString(),null,true).also { store.commitTool(it,null,true) }
+        val preview="${action.args.getString("field")} = ${action.args.get("value")}"
+        CapabilityResult("succeeded",if(dry) "Изменения рассчитаны без сохранения." else "Данные и интерфейс инструмента обновлены.",JSONObject().put("preview",preview).put("state",JSONObject(state)).put("ui",JSONObject(rendered.ui)))
     }
 }

@@ -2,8 +2,6 @@ package com.alpha.assistant.tools.generation
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.alpha.assistant.automations.AutomationDefinition
-import com.alpha.assistant.automations.AutomationStep
 import com.alpha.assistant.automations.AutomationTools
 import com.alpha.assistant.capabilities.CapabilityRequest
 import com.alpha.assistant.cloud.ChatProvider
@@ -148,23 +146,18 @@ class StandaloneClockedHostWorkflowTest {
         withHost(ideas) { host ->
             fun action(tool: ToolRecord, field: String) = CapabilityRequest("set","tool.state.set",JSONObject()
                 .put("toolId",tool.id).put("revision",tool.revision).put("field",field).put("value",7))
-            fun definition(action: CapabilityRequest) = AutomationDefinition.parse(JSONObject().put("name","Fixture")
-                .put("trigger",JSONObject().put("type","manual")).put("conditions",JSONObject())
-                .put("actions",JSONArray().put(action.json())))
             val saved = host.create()
             val history = host.store.revisions(saved.id)
             val field = JSONObject(saved.state).keys().asSequence().single { it.endsWith("_limit") }
             val sealedAction = action(saved,field)
-            val sealedRule = definition(sealedAction)
-            val step = AutomationStep("fixture",0,emptyMap(),false)
             val testFailure = runCatching {
-                AutomationTools.planTestWrite(saved,sealedRule,sealedAction,emptyMap()) { _, _ ->
+                AutomationTools.planTestWrite(saved,sealedAction) { _, _ ->
                     error("A sealed standalone write reached render.")
                 }
             }.exceptionOrNull()
             assertTrue(testFailure is IllegalArgumentException)
             val scheduledFailure = runCatching {
-                AutomationTools.execute(host.store,sealedRule,sealedAction,step,{ _, _ ->
+                AutomationTools.execute(host.store,sealedAction,false,{ _, _ ->
                     error("A sealed standalone write reached render.")
                 }) { true }
             }.exceptionOrNull()
@@ -183,13 +176,12 @@ class StandaloneClockedHostWorkflowTest {
             val ordinary = ToolRecord(UUID.randomUUID().toString(),1,1,mixed.json,mixed.initialState,mixed.ui.toString(),null,true)
             host.store.commitTool(ordinary,null,true)
             val mixedAction = action(ordinary,"fill_value")
-            val mixedRule = definition(mixedAction)
             val context = InstrumentationRegistry.getInstrumentation().targetContext
             val render = AutomationTools.isolatedRenderer(context)
-            val preview = AutomationTools.planTestWrite(ordinary,mixedRule,mixedAction,emptyMap(),render)
+            val preview = AutomationTools.planTestWrite(ordinary,mixedAction,render)
             assertEquals(7,JSONObject(preview.after.state).getInt("fill_value"))
             assertEquals(ordinary,host.store.tool(ordinary.id))
-            assertEquals("succeeded",AutomationTools.execute(host.store,mixedRule,mixedAction,step,render) { true }.status)
+            assertEquals("succeeded",AutomationTools.execute(host.store,mixedAction,false,render) { true }.status)
             assertEquals(preview.after,host.store.tool(ordinary.id))
             assertTrue(host.store.effects(ordinary.id).isEmpty())
         }

@@ -53,7 +53,7 @@ class LibraryManagementWorkflowTest {
             tools.commitTool(live,initial,true,effects=listOf(pending))
             val draft=ToolDraft("draft",live.id,live.revision,live.stateVersion,"Правка",null,null,null,null)
             tools.saveDraft(draft)
-            tools.seedLegacyDeviceGrant(live.id,"notification.post",true)
+            tools.setNetworkGrant(live.id,true)
             val dependent=rules.save(null,rule(live)); rules.approve(dependent.id,dependent.revision)
             ToolWidgets.bind(app,widget,live.id,WidgetPreferences())
             val stale=ToolWidgets.actionIntent(app,widget,live,"add",null)
@@ -145,7 +145,7 @@ class LibraryManagementWorkflowTest {
             tools.commitTool(target,null,true,effects=listOf(effect))
             tools.commitTool(sibling,null,true)
             val key=tools.effects(target.id).single().key
-            tools.seedLegacyDeviceGrant(target.id,"notification.post",true)
+            tools.setNetworkGrant(target.id,true)
             val draft=ToolDraft("pending",target.id,1,1,"Change",null,null,null,null)
             tools.saveDraft(draft)
             tools.setDesktopPlacement(target,true)
@@ -174,7 +174,7 @@ class LibraryManagementWorkflowTest {
             assertTrue(AutomationRuntime.deleteTool(tools,rules,confirmed))
             assertNull(tools.tool(target.id));assertEquals(sibling,tools.tool(sibling.id))
             assertTrue(tools.revisions(target.id).isEmpty());assertNull(tools.draft(draft.id))
-            assertTrue(tools.effects(target.id).isEmpty());assertNull(tools.legacyDeviceGrant(target.id,"notification.post"))
+            assertTrue(tools.effects(target.id).isEmpty());assertFalse(tools.networkGrantEnabled(target.id))
             assertNull(tools.resource(own.id));assertEquals(shared.copy(ownsGrant=true),tools.resource(shared.id))
             assertNull(ToolWidgets.toolId(app,widget));assertEquals(sibling.id,ToolWidgets.toolId(app,otherWidget))
             assertTrue(ToolWidgets.deleted(app,widget))
@@ -374,7 +374,7 @@ class LibraryManagementWorkflowTest {
             try { ToolStore(app,name).use { tools -> AutomationStore(app,rulesName).use { rules ->
                 val target=counter("target","Counter")
                 tools.commitTool(target,null,true)
-                tools.seedLegacyDeviceGrant(target.id,"notification.post",true)
+                tools.setNetworkGrant(target.id,true)
                 val dependent=rules.save(null,rule(target))
                 rules.approve(dependent.id,dependent.revision)
                 val approval=AutomationRuntime.prepareApproval(rules,dependent.id,dependent.revision)
@@ -396,7 +396,7 @@ class LibraryManagementWorkflowTest {
                 ToolStore(app,name).use { reopened ->
                     assertEquals(target,reopened.tool(target.id))
                     assertEquals(listOf(1),reopened.revisions(target.id).map {it.revision})
-                    assertEquals(true,reopened.legacyDeviceGrant(target.id,"notification.post"))
+                    assertTrue(reopened.networkGrantEnabled(target.id))
                     assertFalse(reopened.isDeleted(target.id))
                 }
                 val paused=rules.rule(dependent.id)!!

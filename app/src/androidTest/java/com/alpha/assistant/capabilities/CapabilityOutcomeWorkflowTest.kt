@@ -54,12 +54,11 @@ class CapabilityOutcomeWorkflowTest {
         }
     }
     @Test fun postClaimChangesReturnTheDurableDecisionWithoutReplay(): Unit = runBlocking {
-        for(mode in listOf("legacyRow","state","revision","archive","permission","invalidData","terminal")) fixture { permissions,store,tool,key ->
+        for(mode in listOf("state","revision","archive","permission","invalidData","terminal")) fixture { permissions,store,tool,key ->
             var calls=0
             val result=CapabilityBroker(permissions,store).execute(key) {
                 calls++; assertEquals("running",store.effect(key)!!.phase)
                 when(mode) {
-                    "legacyRow" -> store.seedLegacyDeviceGrant(tool.id,it.capability,false)
                     "state" -> store.commitTool(tool.copy(stateVersion=2),tool,false)
                     "revision" -> store.commitTool(tool.copy(revision=2),tool,true)
                     "archive" -> store.setArchived(tool,true)
@@ -69,7 +68,6 @@ class CapabilityOutcomeWorkflowTest {
                 CapabilityResult("succeeded","Adapter reply",if(mode=="invalidData") JSONObject().put("unexpected",true) else JSONObject())
             }
             consistent(store,key,result,when(mode) {
-                "legacyRow" -> "succeeded"
                 "permission" -> "denied"
                 "invalidData" -> "failed"
                 else -> "cancelled"

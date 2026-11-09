@@ -105,7 +105,6 @@ class MedicineWorkflowTest {
                 "INSERT INTO reminders(owner,key,revision,capability,args,mode,status,next_at) VALUES(?,?,?,?,?,?,?,?)",
                 arrayOf<Any>("owner","daily",1,"medicine.remindDaily",args.toString(),"daily","scheduled",oldAt))
             val legacy=medicine.reminders().single()
-            tools.seedLegacyDeviceGrant("owner","medicine.remindDaily",false)
             MedicineRuntime.deliver(context,tools,medicine,alarm(legacy),oldAt,platform)
             assertEquals(0,platform.posts)
             assertTrue(platform.armed.isEmpty())

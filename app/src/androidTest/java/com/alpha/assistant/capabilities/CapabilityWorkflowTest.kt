@@ -19,7 +19,7 @@ import java.util.UUID
 @RunWith(AndroidJUnit4::class)
 class CapabilityWorkflowTest {
     // Failure cases: catalog drift, executable planned entries, false success, discovery effects,
-    // invalid arguments, legacy grant rows, unsupported actions, and stale picker results.
+    // invalid arguments, unsupported actions, and stale picker results.
     @Test fun catalogDiscoveryAndGenerationPromptUseOnlyBoundActions() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val discovery = AndroidCapabilities(context).discover()
@@ -49,7 +49,7 @@ class CapabilityWorkflowTest {
             assertTrue(entry.has("result"))
         }
         val guidance = CapabilityCatalog.modelGuidance(CapabilityCatalog.ids)
-        val chatPrompt = ChatToolReply.instructions(emptyList())
+        val chatPrompt = ChatToolReply.instructions()
         assertTrue(chatPrompt.contains("Leave implementation, capability declarations, and UI schemas to generation."))
         assertFalse(chatPrompt.contains(guidance))
         val name = "catalog-${UUID.randomUUID()}.db"
@@ -63,13 +63,14 @@ class CapabilityWorkflowTest {
         }
         ToolStore(context,name).use { store ->
             val engine = ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))
-            val draft = engine.createDraft("Catalog fixture",null)
+            val draft = engine.createDraft("Create a shopping list with a button that posts an Android notification.",null)
             engine.generate(draft.id,"fixture",emptyList(),CloudSession())
-            assertTrue(generationPrompt.contains(guidance))
-            val callable = JSONArray(generationPrompt.substringAfter("Alphy Android callable catalog (device availability is checked at execution): ")
+            assertFalse(generationPrompt.contains(guidance))
+            val callable = JSONArray(generationPrompt.substringAfter("Alphy Android callable shortlist (device availability is checked at execution): ")
                 .substringBefore(". Declare only these implemented IDs."))
             val callableIds = (0 until callable.length()).map { callable.getJSONObject(it).getString("id") }.toSet()
-            assertEquals(CapabilityCatalog.ids,callableIds)
+            assertTrue("notification.post" in callableIds)
+            assertTrue(callableIds.size <= 5 && CapabilityCatalog.ids.containsAll(callableIds))
             CapabilityCatalog.planned.forEach { assertFalse(it.id in callableIds) }
             assertTrue(store.effects(draft.id).isEmpty())
             val before = AndroidCapabilities(context).discover().toString()
@@ -138,7 +139,7 @@ class CapabilityWorkflowTest {
         val store = ToolStore(context,name)
         try {
             val engine = ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))
-            val draft = engine.createDraft("Shopping list",null)
+            val draft = engine.createDraft("Create a shopping list with a button that posts an Android notification.",null)
             engine.generate(draft.id,"fixture",emptyList(),CloudSession())
             assertTrue(store.effects(draft.id).isEmpty())
             val live = engine.accept(draft.id)
@@ -159,7 +160,6 @@ class CapabilityWorkflowTest {
             ToolStore(context,name).use { reopened ->
                 assertEquals(second,reopened.tool(live.id))
                 assertEquals(2,JSONObject(reopened.tool(live.id)!!.state).getJSONArray("items").length())
-                assertNull(reopened.legacyDeviceGrant(live.id,"notification.post"))
             }
             answer = JSONObject(spec()).put("stateSchema",JSONObject("""{"items":"string"}""")).put("initialState",JSONObject("""{"items":""}""")).put("ui",JSONObject("""{"type":"text","text":"Items","bind":"items"}""")).toString()
             val incompatible = engine.createDraft("Change schema",live.id)
@@ -199,7 +199,7 @@ class CapabilityWorkflowTest {
         }
         ToolStore(context,name).use { store ->
             val engine = ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))
-            val draft = engine.createDraft("Preview",null)
+            val draft = engine.createDraft("Create a shopping list with a button that posts an Android notification.",null)
             assertTrue(runCatching { engine.generate(draft.id,"fixture",emptyList(),CloudSession()) }.isFailure)
             assertTrue(store.tools().isEmpty()); assertTrue(store.effects(draft.id).isEmpty())
             answer = spec()

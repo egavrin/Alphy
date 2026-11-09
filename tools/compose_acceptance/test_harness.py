@@ -298,8 +298,8 @@ class HarnessBoundaries(unittest.TestCase):
         self.assertEqual(62, len(reference))
         self.assertEqual(reference, {row["reference"] for row in coverage["reference_ui"]})
         self.assertEqual(inventory["reference_commit"], coverage["reference_commit"])
-        self.assertEqual(73, len(coverage["catalog_types"]))
-        self.assertEqual(73, len(set(coverage["catalog_types"])))
+        self.assertEqual(72, len(coverage["catalog_types"]))
+        self.assertEqual(72, len(set(coverage["catalog_types"])))
         for path, expected in coverage["source_sha256"].items():
             self.assertEqual(expected, harness.digest(harness.ROOT / path), path)
 

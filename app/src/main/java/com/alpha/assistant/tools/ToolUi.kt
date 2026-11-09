@@ -166,7 +166,7 @@ internal class MiniAppActions {
             style = MaterialTheme.typography.labelMedium)
         return
     }
-    val spec = remember(tool.spec) { ToolSpec.availablePersisted(tool.spec) }
+    val spec = remember(tool.spec,tool.ui,tool.state) { ToolSpec.availablePersisted(tool) }
     val history by produceState<List<ToolRevision>?>(null, tool.id, tool.revision) {
         value = readToolDetails { controller.revisionHistory(tool.id) }
     }
@@ -320,7 +320,7 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
     archiveEnabled: Boolean = false,
     dismiss: () -> Unit,
 ) {
-    val available = remember(tool.spec) { ToolSpec.availablePersisted(tool.spec) != null }
+    val available = remember(tool.spec,tool.ui,tool.state) { ToolSpec.availablePersisted(tool) != null }
     val enabled = !controller.busy
     item(R.string.tool_versions, Glyph.Layers, true) { dismiss(); actions.request = tool.id to MiniAppAction.Versions }
     if (tool.saved && !tool.archived && available) {
@@ -397,7 +397,7 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
                 title = { Text(stringResource(R.string.tool_pin)) },
                 text = {
                     val enabled = !controller.busy && tool.saved && !tool.archived &&
-                        remember(tool.spec) { ToolSpec.availablePersisted(tool.spec) != null }
+                        remember(tool.spec,tool.ui,tool.state) { ToolSpec.availablePersisted(tool) != null }
                     Column(Modifier.verticalScroll(rememberScrollState())) {
                         val alphyLabel = if (tool.onDesktop) R.string.tool_desktop_remove else R.string.tool_desktop_add
                         MiniAppActionRow(alphyLabel, Glyph.Grid, enabled) {
@@ -571,7 +571,7 @@ catch (cancel: CancellationException) { throw cancel }
 catch (_: Exception) { null }
 
 @Composable internal fun ToolsPane(controller: ToolController, conversationId: String?, actions: MiniAppActions,
-    requests: MutableState<Map<String, String>>, refine: (String) -> Unit, immersive: Boolean=false, alignDetailStart: Boolean = false, exitImmersive: () -> Unit = {}, settings: () -> Unit, close: () -> Unit) {
+    requests: MutableState<Map<String, String>>, accept: (String) -> Unit, refine: (String) -> Unit, immersive: Boolean=false, alignDetailStart: Boolean = false, exitImmersive: () -> Unit = {}, settings: () -> Unit, close: () -> Unit) {
     val draft=controller.drafts.find {it.id == controller.selectedDraftId}
     val tool=controller.tools.find {it.id == (controller.selectedId ?: draft?.toolId)}
     val contextId=tool?.id ?: draft?.toolId ?: "new"
@@ -587,7 +587,7 @@ catch (_: Exception) { null }
         controller.generate(prompt,tool?.id,conversationId,emptyList())
     }
     if (tool != null || draft != null) key(tool?.id, draft?.id) {
-        FocusedToolPane(controller,tool,draft,prompt,edit,submit,{archiveConfirm=true},actions,refine,immersive,exitImmersive,settings,close,
+        FocusedToolPane(controller,tool,draft,prompt,edit,submit,accept,{archiveConfirm=true},actions,refine,immersive,exitImmersive,settings,close,
             hostCovered = archiveConfirm, alignDetailStart = alignDetailStart)
     }
     if(archiveConfirm && tool != null && !tool.archived) AlertDialog(onDismissRequest = { archiveConfirm = false },
@@ -607,9 +607,9 @@ catch (_: Exception) { null }
 
 @OptIn(ExperimentalMaterial3Api::class,ExperimentalLayoutApi::class)
 @Composable private fun FocusedToolPane(controller: ToolController, tool: ToolRecord?, draft: ToolDraft?,
-    prompt: String, edit: (String) -> Unit, submit: () -> Unit, archive: () -> Unit, actions: MiniAppActions, refine: (String) -> Unit,
+    prompt: String, edit: (String) -> Unit, submit: () -> Unit, accept: (String) -> Unit, archive: () -> Unit, actions: MiniAppActions, refine: (String) -> Unit,
     immersive: Boolean, exitImmersive: () -> Unit, settings: () -> Unit, close: () -> Unit, hostCovered: Boolean, alignDetailStart: Boolean) {
-    val spec=remember(tool?.spec) {tool?.let {ToolSpec.availablePersisted(it.spec)}}
+    val spec=remember(tool?.spec,tool?.ui,tool?.state) { tool?.let { ToolSpec.availablePersisted(it) } }
     val graphicsHost = if (tool != null && spec != null && (spec.surfaces.isNotEmpty() || immersive)) {
         // The outgoing presentation can close after the incoming one has opened.
         remember(controller, tool.id, tool.revision, immersive) {
@@ -829,7 +829,7 @@ catch (_: Exception) { null }
                             }
                             Text(stringResource(R.string.tool_discard_preview))
                         }
-                        Button(onClick = { controller.accept(readyDraft.id) }, enabled = !controller.busy,
+                        Button(onClick = { accept(readyDraft.id) }, enabled = !controller.busy,
                             modifier = Modifier.weight(1f).heightIn(min = 48.dp), shape = shape, contentPadding = actionPadding) {
                             if (showPreviewIcons) {
                                 AlphaIcon(Glyph.Check, Modifier.size(18.dp), color = LocalContentColor.current)
@@ -954,7 +954,7 @@ private fun hasLiveControl(node: JSONObject): Boolean {
         navigationLifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) && !ToolWidgets.isLocked(navigationContext)
     }
     val initial = checkNotNull(displayed)
-    val spec = remember(tool.spec) { ToolSpec.availablePersisted(tool.spec) }
+    val spec = remember(tool.spec,tool.ui,tool.state) { ToolSpec.availablePersisted(tool) }
     val hasLive = remember(initial.ui) { hasLiveControl(JSONObject(initial.ui)) }
     val localHost = if (graphicsHost == null && (openNonGraphics || hasLive) && !tool.archived) {
         if (spec?.surfaces?.isEmpty() == true) remember(controller, tool.id, tool.revision) { controller.nonGraphicsLiveInputHost(tool) }

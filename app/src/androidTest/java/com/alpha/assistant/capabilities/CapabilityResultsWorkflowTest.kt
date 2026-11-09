@@ -43,7 +43,6 @@ class CapabilityResultsWorkflowTest {
         finally { context.deleteDatabase(name) }
     }
     @Test fun batchWaitsForAllSiblingsAndCommitsOnce(): Unit = runBlocking { fixture { store, tool ->
-        store.seedLegacyDeviceGrant(tool.id,"vibration.play",false)
         store.commitTool(tool.copy(stateVersion=2),tool,false,effects=listOf(request("a"),request("b"),request("c")))
         val broker = CapabilityBroker(context,store)
         var calls = 0

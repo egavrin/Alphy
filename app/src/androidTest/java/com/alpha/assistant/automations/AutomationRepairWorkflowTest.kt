@@ -58,61 +58,21 @@ class AutomationRepairWorkflowTest {
         } } finally {context.deleteDatabase(name)}
     }
 
-    @Test fun rollingCalendarFeedsRenderedToolRecordsAndDryRunChangesNothing() = runBlocking {
-        val context=InstrumentationRegistry.getInstrumentation().targetContext
-        val automationName="automation-flow-${UUID.randomUUID()}.db"
-        val toolName="automation-flow-tools-${UUID.randomUUID()}.db"
-        try { AutomationStore(context,automationName).use { store -> ToolStore(context,toolName).use { tools ->
-            val tool=AutomationTools.createDayTool(tools)
-            val read=CapabilityRequest("calendar","calendar.read.rolling",JSONObject().put("calendarId",7).put("days",1).put("zone","UTC"))
-            val sync=CapabilityRequest("sync","tool.records.calendar",JSONObject().put("toolId",tool.id).put("revision",tool.revision).put("field","events").put("source","calendar"))
-            val data=notice(daily(false)).put("actions",JSONArray().put(read.json()).put(sync.json()))
-            val rule=store.save(null,data); store.approve(rule.id,rule.revision)
-            val day=Instant.parse("2026-10-30T08:00:00Z").toEpochMilli()
-            val resolved=AutomationDataflow.resolveRead(read,day)
-            assertEquals(Instant.parse("2026-10-30T00:00:00Z").toEpochMilli(),resolved.args.getLong("from"))
-            assertEquals(Instant.parse("2026-10-31T00:00:00Z").toEpochMilli(),resolved.args.getLong("to"))
-            assertNotEquals(resolved.args.getLong("from"),AutomationDataflow.resolveRead(read,day+86400000).args.getLong("from"))
-            val render=AutomationTools.renderer(context,tools)
-            var writes=0
-            val executor=AutomationExecutor(store,{null},{_,_->null},preview={ owner,action,step ->
-                if(action.capability == "calendar.read.rolling") calendarFixture()
-                else AutomationTools.execute(tools,owner.definition,action,step,render) {store.active(owner.id,owner.revision)}
-            }) { owner,action,step ->
-                if(action.capability == "calendar.read.rolling") calendarFixture()
-                else {writes++; AutomationTools.execute(tools,owner.definition,action,step,render) {store.active(owner.id,owner.revision)}}
-            }
-            val before=tools.tool(tool.id)
-            val dry=executor.run(rule.id,rule.revision,AutomationEvent("manual","dry"),true,day)
-            assertEquals("dryRun",dry?.status); assertEquals(0,writes); assertEquals(before,tools.tool(tool.id))
-            assertTrue(dry!!.details.contains("Meeting"))
-            assertEquals("succeeded",executor.run(rule.id,rule.revision,AutomationEvent("manual","real"),false,day)?.status)
-            val saved=checkNotNull(tools.tool(tool.id))
-            assertEquals(1,JSONObject(saved.state).getJSONArray("events").length())
-            assertTrue(saved.ui.contains("1")); assertEquals(before!!.stateVersion+1,saved.stateVersion)
-            assertTrue(JSONObject(saved.state).getJSONArray("events").getJSONObject(0).getString("text").contains("Meeting"))
-            assertEquals(1793347200L,JSONObject(saved.state).getJSONArray("events").getJSONObject(0).getLong("start"))
-            val current=JSONObject(saved.state).getJSONArray("events")
-            current.put(JSONObject().put("id","manual").put("text","Keep").put("done",false).put("start",0).put("end",0))
-            tools.commitTool(saved.copy(state=JSONObject(saved.state).put("events",current).toString(),stateVersion=saved.stateVersion+1),saved,false)
-            executor.run(rule.id,rule.revision,AutomationEvent("manual","again"),false,day)
-            assertEquals(2,JSONObject(tools.tool(tool.id)!!.state).getJSONArray("events").length())
-        } } } finally {context.deleteDatabase(automationName); context.deleteDatabase(toolName)}
-    }
-    private fun calendarFixture() = CapabilityResult("succeeded","Fixture",JSONObject().put("events",JSONArray().put(JSONObject().put("id",42).put("title","Meeting").put("start",1793347200000L).put("end",1793350800000L))))
-
     @Test fun renderEffectsCannotCommitAndInvalidIntervalIsRejected() = runBlocking {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val name="automation-render-${UUID.randomUUID()}.db"
         try {ToolStore(context,name).use { tools ->
-            val initial=AutomationTools.createDayTool(tools)
+            val spec = ToolSpec.parse("""{"formatVersion":3,"title":"Fixture","description":"","capabilities":[],
+                "stateSchema":{"title":"string"},"initialState":{"title":"Fixture"},
+                "ui":{"type":"text","text":"Fixture","bind":"title"},"source":"return {state:input.state};"}""")
+            val initial = ToolRecord("target",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)
+            tools.commitTool(initial,null,true)
             val badSpec=JSONObject(initial.spec).put("capabilities",JSONArray().put("notification.post"))
                 .put("source","return {state:input.state,effects:[{id:'bad',capability:'notification.post',args:{title:'Bad',text:'Bad'}}]};").toString()
             val bad=initial.copy(spec=badSpec,revision=initial.revision+1)
             tools.commitTool(bad,initial,true)
             val action=CapabilityRequest("set","tool.state.set",JSONObject().put("toolId",bad.id).put("revision",bad.revision).put("field","title").put("value","Changed"))
-            val definition=AutomationDefinition.parse(notice(JSONObject().put("type","manual")).put("actions",JSONArray().put(action.json())))
-            assertTrue(runCatching {AutomationTools.execute(tools,definition,action,AutomationStep("fixture",0,emptyMap(),false),AutomationTools.renderer(context,tools)) {true}}.isFailure)
+            assertTrue(runCatching {AutomationTools.execute(tools,action,false,AutomationTools.renderer(context,tools)) {true}}.isFailure)
             assertEquals(bad,tools.tool(bad.id))
             assertTrue(runCatching {AutomationDefinition.parse(notice(JSONObject().put("type","interval").put("minutes",14).put("anchor",1000)))}.isFailure)
         }} finally {context.deleteDatabase(name)}

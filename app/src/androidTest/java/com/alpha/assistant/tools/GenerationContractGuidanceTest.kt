@@ -107,7 +107,7 @@ class GenerationContractGuidanceTest {
     @Test fun nativeGuidanceRequiresLabelsEvenWhenAValueIsBound() {
         val guidance = ToolUiCatalog.modelGuidance()
         assertTrue(guidance.contains("A bind supplies a value. It does not supply the text label."))
-        assertTrue(guidance.contains("The only non-container exceptions are spacer, divider, skeleton, spinner, backHandler, navigation, calendar, medicine."))
+        assertTrue(guidance.contains("The only non-container exceptions are spacer, divider, skeleton, spinner, navigation, calendar, medicine."))
         assertTrue(guidance.contains("Every supplied text value must contain 1 to 300 characters"))
         val invalid = spec().put("ui", JSONObject("""{"type":"text","text":"","bind":"$secret"}"""))
         val failure = runCatching { ToolSpec.parse(invalid.toString()) }.exceptionOrNull() as ToolValidationFailure

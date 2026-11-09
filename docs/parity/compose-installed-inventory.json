@@ -477,11 +477,11 @@
       "native_types": [
         "row",
         "tabs",
-        "backHandler"
+        "routeStack"
       ],
       "native_contract": {
-        "properties": "Bounded compositions; tabs current option; backHandler.action",
-        "events": "Null back action or selected scalar.",
+        "properties": "Bounded compositions, tab selection, and local route navigation",
+        "events": "Back sends the current route stack. Tab selection sends a scalar.",
         "limits": "Mini-app remains within host screen; no activity or arbitrary destination.",
         "source": [
           "ToolUiCatalog.kt#components",
@@ -1264,12 +1264,12 @@
         "activity-compose/PredictiveBackHandler.kt#PredictiveBackHandler"
       ],
       "native_types": [
-        "backHandler"
+        "routeStack"
       ],
       "native_contract": {
-        "properties": "action; visible/enabled and bound flags",
-        "events": "Enabled visible handler sends null.",
-        "limits": "No generated activity object or navigation stack.",
+        "properties": "Bound route stack with a root route and current route children",
+        "events": "Back sends the exact current route stack above the root.",
+        "limits": "One local route stack per mini-app.",
         "source": [
           "ToolUiCatalog.kt#components",
           "NativeToolUi.kt#NativeNode",
@@ -1279,10 +1279,10 @@
       "disposition": "partial",
       "evidence_status": "source_verified_workflow_partial",
       "workflow_status": "not_run_for_this_inventory",
-      "gaps": "No predictive-back progress/cancel contract. BackHandler support does not expose predictive back APIs.",
+      "gaps": "No predictive-back progress/cancel contract.",
       "representative_workflow": "Navigate a local detail screen, cancel back gesture, then complete back.",
       "acceptance_criteria": [
-        "Hidden/disabled handlers do not dispatch.",
+        "Back at the root cannot dispatch a route action.",
         "Completed back dispatches once.",
         "Keep host exit and local back behavior explicit."
       ],
@@ -3176,14 +3176,13 @@
     "app/build.gradle.kts": "6aadbbc09c01f83b445b1a70ac874a52be6d428d5b06ad2d53366edd3009649a",
     "app/src/main/java/com/alpha/assistant/tools/ArtifactProtocol.kt": "9b65f56f6b824ec984d55c285fe6b5e3af466c1dfe80756127a8cc4a339c8a3c",
     "app/src/main/java/com/alpha/assistant/tools/GraphicsContract.kt": "3fc077b915e82dcc839771f394f6a94f4a3943c68947f566e0987546f55e41e4",
-    "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt": "2cdd89d572bdc1c5a1874a190b16fec2117ee3b81a5e1002afe1e609f78e0f48",
+    "app/src/main/java/com/alpha/assistant/tools/NativeToolUi.kt": "e1add8165ccdf84440a3c8cce832273c24ad8c6771d2efc43cc0490526fa24fc",
     "app/src/main/java/com/alpha/assistant/tools/NativeUiMotion.kt": "03556159417714a566b8ca962fac703c40830de3f1f38ea7826d2e1ee715c916",
-    "app/src/main/java/com/alpha/assistant/tools/ToolSpec.kt": "994ee3716aece837847030c2907b12001c4c9c49f9a3be62bb139687597cb449",
-    "app/src/main/java/com/alpha/assistant/tools/ToolUiCatalog.kt": "ec434e3d677055ce79524a6959c2e161ce034feb25019b204760bb50d80e2e49",
+    "app/src/main/java/com/alpha/assistant/tools/ToolSpec.kt": "9692ce4bacceec1ea383ab1d2692b6eb2b332a917ec0d8842a3c1afd7afc3071",
+    "app/src/main/java/com/alpha/assistant/tools/ToolUiCatalog.kt": "54f17764a90f9ea40d8f090d6b7ae34057138ec94bf4542f4749fe9b464500e8",
     "build.gradle.kts": "550f33bcb1803a424b0f80a42c8f5dae40c75126bbfdb43769a69e20c2ad67c5"
   },
   "catalog_types": [
-    "backHandler",
     "badge",
     "banner",
     "button",
@@ -3213,6 +3212,7 @@
     "numberInput",
     "progress",
     "progressRing",
+    "routeStack",
     "row",
     "scroll",
     "section",

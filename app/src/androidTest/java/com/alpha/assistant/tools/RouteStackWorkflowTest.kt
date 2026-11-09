@@ -11,6 +11,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class RouteStackWorkflowTest {
@@ -145,9 +146,12 @@ class RouteStackWorkflowTest {
         for (property in listOf("action", "children", "bind", "routes")) assertFalse(widget.has(property))
         assertFalse(ToolUiCatalog.widgetLabel(widget, active).contains(details))
         val legacy = JSONObject("""{"type":"backHandler","action":"legacyBack"}""")
-        val legacySpec = ToolSpec.parse(definition(legacy).toString())
-        ToolUiCatalog.validateAction(legacySpec.ui, "legacyBack", null, root)
-        assertTrue(ToolUiCatalog.widgetNodes(legacySpec.ui, root).isEmpty())
+        val retired = definition(legacy).toString()
+        rejects { ToolSpec.parse(retired) }
+        assertNull(ToolSpec.availablePersisted(retired))
+        assertEquals(definition().getString("title"), ToolSpec.storedTitle(retired))
+        val saved = ToolRecord("fixture",1,1,spec.json,spec.initialState,legacy.toString(),null,true)
+        assertNull(ToolSpec.availablePersisted(saved))
     }
 
     @Test fun routeDefinitionsAndInactiveContentConsumeTheExistingLimits() {
@@ -173,7 +177,7 @@ class RouteStackWorkflowTest {
         val nested = ui().apply { getJSONArray("children").put(1, ui().put("action", "otherBack")) }
         rejects { parse(definition(nested)) }
         val oversized = ui().apply {
-            getJSONArray("children").put(1, column(List(6) { column(List(45) { text() }) }))
+            getJSONArray("children").put(1, column(List(12) { column(List(45) { text() }) }))
         }
         rejects { parse(definition(oversized)) }
         val largeInactive = ui().apply {

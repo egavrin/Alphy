@@ -68,6 +68,12 @@ class ToolStore private constructor(internal val context: Context, internal val 
                         val opened = context.openOrCreateDatabase(databaseName, Context.MODE_PRIVATE, null, ToolLibraryStorage.preserveOnCorruption)
                         try {
                             initialize(opened)
+                            val obsolete = "capability<>?"
+                            val network = arrayOf(NETWORK_GRANT)
+                            val hasObsoleteGrants = opened.rawQuery(
+                                "SELECT 1 FROM capability_grants WHERE $obsolete LIMIT 1",network,
+                            ).use { it.moveToFirst() }
+                            if (hasObsoleteGrants) opened.delete("capability_grants",obsolete,network)
                         } catch (failure: Exception) {
                             opened.close()
                             if (failure is SQLiteDatabaseLockedException) throw failure

@@ -12,7 +12,7 @@ internal data class GallerySample(val id: String, val title: String, val section
     val capabilities: List<String> = emptyList()) {
     fun spec(section: String? = null): ToolSpec {
         val selected = if (section == null) sections else listOf(sections.single { it.id == section })
-        val state = JSONObject(GalleryState).put("handlingBack", section == "back")
+        val state = JSONObject(GalleryState)
         return gallerySpec(column(selected.joinToString(",") { it.content }), state.toString(), GallerySchema, title, capabilities)
     }
 
@@ -31,7 +31,7 @@ internal data class GallerySample(val id: String, val title: String, val section
 private const val GallerySchema = """{
     "active":"boolean","tick":"number","done":"boolean","transition":"boolean",
     "name":"string","count":"number","date":"string","minutes":"number","deadline":"number","video":"string",
-    "dialog":"boolean","sheet":"boolean","mode":"string","page":"number","handlingBack":"boolean","returned":"boolean",
+    "dialog":"boolean","sheet":"boolean","mode":"string","page":"number",
     "range":{"type":"array","maxItems":2,"items":"number"},
     "dates":{"type":"array","maxItems":2,"items":"string"},
     "routePath":{"type":"array","maxItems":4,"items":"string"},
@@ -44,7 +44,7 @@ private const val GallerySchema = """{
 private const val GalleryState = """{
     "active":false,"tick":0,"done":false,"transition":true,
     "name":"Июнь","count":2,"date":"2028-06-03","minutes":540,"deadline":0,"video":"",
-    "dialog":false,"sheet":false,"mode":"week","page":0,"handlingBack":false,"returned":false,
+    "dialog":false,"sheet":false,"mode":"week","page":0,
     "range":[2,8],"dates":["2028-06-03","2028-06-05"],"tags":["week"],
     "routePath":["overview"],
     "rows":[{"id":"one","title":"Заметка из поездки","group":"Июнь"}],
@@ -188,11 +188,6 @@ internal val GallerySamples = listOf(
         section("video", """{"type":"video","text":"Видео из поездки","bind":"video","action":"videoPlay","enabled":false}"""),
         section("loading", """{"type":"skeleton","text":"Каркас изображения"},{"type":"spinner","text":"Загрузка снимка"}"""),
         section("snackbar", """{"type":"snackbar","text":"Запись добавлена","action":"snack"}"""),
-        section("back", """
-            ${label("Образец кнопки Назад")},
-            {"type":"backHandler","action":"back","enabledBind":"handlingBack"},
-            {"type":"text","text":"Назад обработано","visibleBind":"returned"}
-        """),
     )),
     GallerySample("device", "Действия Android", listOf(
         section("calendar", """{"type":"calendar","action":"calendar","capability":"calendar.select","args":{"version":1},"enabled":false}"""),

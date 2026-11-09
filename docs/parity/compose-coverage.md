@@ -4,7 +4,7 @@ This record describes protocol 3 above baseline `62179af217478075a1d7a10960c9494
 The pinned reference is `deal-studio-ohos@7ee06af1941729b00a110493ad9d1d9b5b127d17`.
 The reference working tree is not an input. [Extracted source provenance](inventory.json)
 
-The machine record contains all 62 pinned reference UI entries and all 73 current native catalog types.
+The machine record contains all 62 pinned reference UI entries and all 72 current native catalog types.
 It also records current source hashes. [Coverage data](compose-coverage.json)
 A mapping identifies a native composition approach. It does not certify identical reference properties, behavior, style, or performance.
 The historical inventory and baseline keep their earlier status. This record supplies the current mapping.
@@ -26,7 +26,7 @@ The verification record contains actual commands, results, screenshots, and fail
 | ActionBar | `row button icon` | NativeUiWorkflowTest | 419 |
 | AdaptiveColumns | `grid` | NativeUiWorkflowTest | 304 |
 | AppTheme | `theme` | NativeUiWorkflowTest | 293 |
-| BackHandler | `backHandler` | NativeUiWorkflowTest | 257 |
+| BackHandler | `routeStack` | RouteStackWorkflowTest | 257 |
 | Badge | `badge` | NativeUiWorkflowTest | 469 |
 | Button | `button` | NativeUiWorkflowTest | 172 |
 | Canvas | `surfaces` | GraphicsBoundariesTest; GraphicsWorkflowTest | 215 |
@@ -101,12 +101,12 @@ Generated artifacts use the closed native catalog. They cannot invoke arbitrary 
 | Layout and theme | column, row, grid, scroll, theme, card, section, listItem, spacer, divider | Bounded native composition, grid columns 1–4, theme presets, closed styles. NativeUiWorkflowTest. |
 | Semantic composition | form, listGroup, facts, fact, timeline, timelineItem, banner, emptyState | Native labels and grouped content. NativeComposeContractTest. Rendered acceptance remains partial. |
 | Text and status | text, metric, badge, progress, progressRing, skeleton, spinner, snackbar | Scalar binding, bounded number/clock formats, compact widget projection. NativeUiWorkflowTest. |
-| Actions and typed controls | button, icon, input, numberInput, timeInput, dateInput, toggle, checkbox, slider, select, tabs, backHandler | Typed actions, current state, hidden/disabled rejection, labels, dates, and bounds. NativeUiWorkflowTest. |
+| Actions and typed controls | button, icon, input, numberInput, timeInput, dateInput, toggle, checkbox, slider, select, tabs | Typed actions, current state, hidden/disabled rejection, labels, dates, and bounds. NativeUiWorkflowTest. |
 | Collections and media | list, table, groupedList, chart, image | Stable keys, relative row templates, aggregate work, private image handles, bounded charts. NativeComposeContractTest; NativeImageLifecycleTest. |
 | Motion and layers | motion, transform, stage | Triggered presets, bounded poses, parent transforms, one camera, reduced-motion handling. NativeComposeContractTest. Visual acceptance remains open. |
-| Native capabilities | calendar, medicine, navigation | Explicit native descriptors, current grants, authority checks, and confirmation. These are not generic platform calls. |
+| Native capabilities | calendar, medicine, navigation | Explicit native descriptors, Android permissions, authority checks, and confirmation. These are not generic platform calls. |
 
-All 49 types appear exactly once in the machine catalog list.
+The machine catalog lists each type once.
 Surfaces, paths, gradients, frame subscriptions, and timers belong to the artifact protocol rather than native catalog types.
 GraphicsBoundariesTest and GraphicsWorkflowTest cover these contracts. [Graphics contract](../../evidence/compose-execution/graphics-contract.md)
 The installed Compose library contains APIs that this catalog does not expose.
@@ -125,7 +125,7 @@ Each result must retain its actual status. Requests, launches, provider readback
 | calendar.select, calendar.createOwned, calendar.readOwned, calendar.deleteOwned, calendar.deleteAllOwned | READ_CALENDAR and WRITE_CALENDAR; selected writable calendar; app-owned refs; native review; provider verification | Migration preservation passes; no provider write in package 5 | Real create/read/delete, reminder and unrelated-event preservation remain open |
 | calendar.open | Foreground native control and installed calendar handler | Calendar handler resolves on emulator-5556 | Actual launch not executed |
 | link.open, app.open, maps.open | Explicit public intent; HTTPS validation or fixed app choice | Geo handler resolves to Google Maps | Visible destination and further actions unverified |
-| maps.markReached, maps.route | Foreground scoped grant; explicit stop; native latest reachedRef; adapter coordinate-system rules | Not executed | Real origin/destination checks remain open; routeVerified stays false |
+| maps.markReached, maps.route | Foreground native action, explicit stop, native latest reachedRef, and adapter coordinate-system rules | Not executed | Real origin/destination checks remain open; routeVerified stays false |
 | vibration.play | VIBRATE and vibrator hardware | Not executed | Physical vibration unavailable as evidence |
 | flashlight.set | CAMERA; flash hardware; native boolean request | Not executed | Physical torch state unavailable as evidence |
 | photo.pick, file.pick, camera.capture | Explicit system picker or camera; selected URI access; camera permission where required; native review | Not executed | Selection, cancellation, and external app results remain open |

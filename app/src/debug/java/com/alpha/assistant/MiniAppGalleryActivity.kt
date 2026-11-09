@@ -112,7 +112,6 @@ internal fun gallerySpec(ui: String, state: String, schema: String, title: Strin
                 "active", "animate" -> { put("active", !getBoolean("active")); put("tick", getInt("tick") + 1) }
                 "show", "hide" -> put("dialog", id == "show")
                 "showSheet", "hideSheet" -> put("sheet", id == "showSheet")
-                "back" -> put("returned", true)
                 "routePush" -> getJSONArray("routePath").put("detail")
                 "routeBack" -> getJSONArray("routePath").let { it.remove(it.length() - 1) }
                 else -> id.substringBefore('_').takeIf { value != null && has(it) }?.let { put(it, value) }

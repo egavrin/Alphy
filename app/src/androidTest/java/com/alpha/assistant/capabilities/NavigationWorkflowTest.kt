@@ -161,15 +161,15 @@ class NavigationWorkflowTest {
             assertNotEquals(change,"launched",work.await().status); assertEquals(change,0,launches)
         }
     }
-    @Test fun storedFileMetadataDoesNotHideGrants(): Unit = runBlocking { fixture { store, tool ->
-        store.seedLegacyDeviceGrant(tool.id,"maps.markReached",true)
+    @Test fun storedFileMetadataDoesNotHideNetworkConsent(): Unit = runBlocking { fixture { store, tool ->
+        store.setNetworkGrant(tool.id,true)
         store.writableDatabase.version=5
         ToolStore(context,store.databaseName).use { reopened ->
             assertNotNull(reopened.tool(tool.id))
         }
         SQLiteDatabase.openDatabase(context.getDatabasePath(store.databaseName).path,null,SQLiteDatabase.OPEN_READONLY).use { database ->
             assertEquals(5,database.version)
-            database.rawQuery("SELECT granted FROM capability_grants WHERE owner=? AND capability='maps.markReached'",arrayOf(tool.id)).use {
+            database.rawQuery("SELECT granted FROM capability_grants WHERE owner=? AND capability='host.network'",arrayOf(tool.id)).use {
                 assertTrue(it.moveToFirst());assertEquals(1,it.getInt(0))
             }
         }

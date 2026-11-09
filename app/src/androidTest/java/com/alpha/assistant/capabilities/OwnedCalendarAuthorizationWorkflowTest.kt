@@ -63,7 +63,7 @@ class OwnedCalendarAuthorizationWorkflowTest {
         while(node!=null && node?.isClickable!=true)node=node?.parent
         assertTrue(diagnostics.click(label,node))
     }
-    private fun workflow(semantic: Boolean,substitute: Boolean,legacyDenied: Boolean = false,bulk: Boolean=false,lateCreate: Boolean=false) {
+    private fun workflow(semantic: Boolean,substitute: Boolean,bulk: Boolean=false,lateCreate: Boolean=false) {
         val name="owned-calendar-ui-${UUID.randomUUID()}"
         val shell=ShellStore(context,"$name.db");val store=ToolStore(context,"$name.db-tools.db")
         val keys=SecureKeyStore(context,name,name)
@@ -82,7 +82,7 @@ class OwnedCalendarAuthorizationWorkflowTest {
                 .put("capabilities",JSONArray().put("calendar.createOwned").put("calendar.deleteAllOwned")).put("stateSchema",JSONObject("{\"ready\":\"boolean\"}")).put("initialState",JSONObject("{\"ready\":true}"))
                 .put("ui",node).put("source",source).toString())
             var tool=ToolRecord("calendar-ui",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)
-            store.saveTool(tool,true);if(legacyDenied)store.seedLegacyDeviceGrant(tool.id,capability,false)
+            store.saveTool(tool,true)
             if(bulk)kotlinx.coroutines.runBlocking {
                 val native=OwnedCalendarCapabilities(context,store,unlocked={true})
                 repeat(if(lateCreate)1 else 5) {index ->
@@ -133,9 +133,9 @@ class OwnedCalendarAuthorizationWorkflowTest {
                     assertNull(find("Подтвердить системное действие"))
                 } else {assertEquals("denied",effect.result.status);assertEquals(0,count)}
                 val dir=File(context.getExternalFilesDir(null),"owned-calendar-evidence").apply {mkdirs()}
-                val stem="ui-$semantic-$substitute-$legacyDenied-$bulk-$lateCreate"
+                val stem="ui-$semantic-$substitute-$bulk-$lateCreate"
                 automation.takeScreenshot()?.let {image->File(dir,"$stem.png").outputStream().use {out->image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out)};image.recycle()}
-                File(dir,"$stem.json").writeText(JSONObject().put("input",JSONObject().put("semantic",semantic).put("substitute",substitute).put("legacyDenied",legacyDenied).put("bulk",bulk).put("lateCreate",lateCreate))
+                File(dir,"$stem.json").writeText(JSONObject().put("input",JSONObject().put("semantic",semantic).put("substitute",substitute).put("bulk",bulk).put("lateCreate",lateCreate))
                     .put("expectedRows",if(semantic && !substitute && !bulk)1 else 0).put("observedRows",count).put("effectStatus",effect.result.status).put("effectPhase",effect.phase).toString(2))
             }
         }} finally {CloudTestActivity.factory=null;SystemClock.sleep(100);store.close();shell.close();context.deleteDatabase("$name.db");context.deleteDatabase("$name.db-tools.db");context.deleteSharedPreferences(name)}
@@ -145,5 +145,4 @@ class OwnedCalendarAuthorizationWorkflowTest {
     @Test fun genericButtonCannotCreate()=workflow(semantic=false,substitute=false)
     @Test fun semanticSelectionCannotSubstituteAnotherEvent()=workflow(semantic=true,substitute=true)
     @Test fun semanticClickCreatesExactlyOneEventWithoutAnotherDialog()=workflow(semantic=true,substitute=false)
-    @Test fun semanticClickIgnoresLegacyDeniedGrant()=workflow(semantic=true,substitute=false,legacyDenied=true)
 }

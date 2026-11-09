@@ -107,8 +107,6 @@ internal fun galleryCaptureChecks(context: Context): Map<String, GalleryCaptureC
         "presentation/video" to GalleryCaptureCheck(listOf("Видео из поездки", context.getString(R.string.tool_video_open_app))),
         "presentation/loading" to GalleryCaptureCheck(graphics = listOf("Каркас изображения", "Загрузка снимка")),
         "presentation/snackbar" to GalleryCaptureCheck(listOf("Запись добавлена"), listOf(context.getString(R.string.tool_dismiss))),
-        "presentation/back" to GalleryCaptureCheck(listOf("Образец кнопки Назад"),
-            next = GalleryCaptureStep("handled", GalleryCaptureCheck(listOf("Назад обработано")), back = true)),
         "device/calendar" to GalleryCaptureCheck(disabled = listOf(calendar)),
         "device/medicine" to GalleryCaptureCheck(disabled = listOf(medicine)),
         "device/navigation" to GalleryCaptureCheck(disabled = listOf(navigation)),

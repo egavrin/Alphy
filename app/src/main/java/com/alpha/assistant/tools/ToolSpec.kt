@@ -128,6 +128,15 @@ data class ToolSpec private constructor(val json: String, val title: String, val
         fun available(raw: String): ToolSpec? = try {parse(raw)} catch(_: IllegalArgumentException) {null} catch(_: IllegalStateException) {null} catch(_: org.json.JSONException) {null}
         /** Only app-owned records may contain a host composition manifest. */
         internal fun availablePersisted(raw: String): ToolSpec? = try {parsePersisted(raw)} catch(_: IllegalArgumentException) {null} catch(_: IllegalStateException) {null} catch(_: org.json.JSONException) {null}
+        internal fun availablePersisted(record: ToolRecord): ToolSpec? = try {
+            parsePersisted(record.spec).also { it.validateUi(JSONObject(record.ui),JSONObject(record.state)) }
+        } catch (_: IllegalArgumentException) {
+            null
+        } catch (_: IllegalStateException) {
+            null
+        } catch (_: org.json.JSONException) {
+            null
+        }
         fun storedTitle(raw: String): String = runCatching {JSONObject(raw).optString("title").take(100).ifBlank {"Unavailable mini-app"}}.getOrDefault("Unavailable mini-app")
         /** Refinements may add fields, but cannot remove, retype, or reset stored values. */
         fun stateForRevision(previous: ToolSpec, next: ToolSpec, raw: String): String {

@@ -1,5 +1,4 @@
 package com.alpha.assistant.tools
-import com.alpha.assistant.capabilities.legacyDeviceGrant
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -278,7 +277,7 @@ class SharedArtifactWorkflowTest {
             assertEquals(before.surfaces.toString(),retained.surfaces.toString())
             assertEquals(before.tool,retained.tool)
             assertEquals(tool,store.tool(tool.id));assertTrue(store.effects(tool.id).isEmpty())
-            assertNull(store.legacyDeviceGrant(tool.id,"vibration.play"))
+            assertFalse(store.networkGrantEnabled(tool.id))
         }
     }
     /** Old engine cleanup and stale hosts must not close or drive a successor's retained session. */
