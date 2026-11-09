@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import com.alpha.assistant.R
 import com.alpha.assistant.capabilities.AccessSettings
 import com.alpha.assistant.capabilities.AssistantSettingsRow
+import com.alpha.assistant.capabilities.HealthSettings
 import com.alpha.assistant.memory.MemoryScreen
 
 internal val SettingsSplitWidth = 700.dp
@@ -76,13 +77,14 @@ internal enum class SettingsSection(@StringRes val label: Int, val glyph: Glyph)
     Voice(R.string.settings_voice, Glyph.Mic),
     Appearance(R.string.settings_appearance, Glyph.Screen),
     Access(R.string.access, Glyph.Shield),
+    Health(R.string.health_title, Glyph.Bolt),
     Memory(R.string.memory_title, Glyph.Notebook),
     Updates(R.string.update_title, Glyph.Refresh),
 }
 
 private val settingsGroups = listOf(
     R.string.settings_group_app to listOf(SettingsSection.DeepSeek, SettingsSection.Voice, SettingsSection.Appearance),
-    R.string.settings_group_data to listOf(SettingsSection.Access, SettingsSection.Memory),
+    R.string.settings_group_data to listOf(SettingsSection.Access, SettingsSection.Health, SettingsSection.Memory),
     R.string.settings_group_maintenance to listOf(SettingsSection.Updates),
 )
 
@@ -137,6 +139,7 @@ private fun SettingsLayout(
                             SettingsSection.Voice -> SettingsDetail(section) { SettingsPanel { VoiceControls(model, settingsDisclosure = true) } }
                             SettingsSection.Appearance -> SettingsDetail(section) { AppearanceSettings() }
                             SettingsSection.Access -> SettingsDetail(section) { AccessSettings(model.tools.networkAccessHost) }
+                            SettingsSection.Health -> SettingsDetail(section) { HealthSettings() }
                             SettingsSection.Memory -> MemoryScreen(model.memoryPage, settingsPage = true, profile = { NameSettings(model) })
                             SettingsSection.Updates -> SettingsDetail(section) { SettingsPanel { UpdateSettings(model.updates, openUpdateInstaller) } }
                         }

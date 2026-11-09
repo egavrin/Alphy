@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import com.alpha.assistant.surfaces.SurfaceEntry
+import com.alpha.assistant.surfaces.SharedDraft
 import com.alpha.assistant.surfaces.ToolWidgets
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -36,6 +37,10 @@ class MainActivity : AlphyActivity() {
     private fun receiveEntry(intent: Intent) {
         // Recents repeats the old intent. A launcher tap on a live task keeps its current screen.
         if (intent.isFromRecents() || intent.isPlainLauncher()) return
+        if (intent.action == Intent.ACTION_SEND) {
+            model.receiveSharedDraft(SharedDraft.from(intent))
+            return
+        }
         if (intent.action == Intent.ACTION_VIEW && intent.data?.scheme == "alpha" && intent.data?.authority == "automation-chat") {
             intent.data?.pathSegments?.singleOrNull()?.let(model::openAutomationConversation)
             return

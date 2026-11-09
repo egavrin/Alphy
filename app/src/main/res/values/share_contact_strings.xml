@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="share_draft_text">Текст из меню «Поделиться»</string>
+    <string name="share_draft_image">Изображение из меню «Поделиться»</string>
+    <string name="share_draft_unavailable">Не удалось добавить материал. Поделитесь одним изображением или текстом до 8000 символов после загрузки Alphy.</string>
+    <string name="share_draft_course">Материал добавлен в черновик чата. Он будет доступен после выхода из курса.</string>
+    <string name="contact_title">Контакты</string>
+    <string name="contact_privacy">Выбранный номер используется только для открытия звонка или SMS. Контакты остаются на устройстве.</string>
+    <string name="contact_choose">Выбрать один номер</string>
+    <string name="contact_search_open">Поиск по адресной книге</string>
+    <string name="contact_search_close">Скрыть поиск</string>
+    <string name="contact_search_hint">Имя или номер</string>
+    <string name="contact_search_empty">Контакты не найдены</string>
+    <string name="contact_dial">Открыть звонок</string>
+    <string name="contact_sms">Написать SMS</string>
+    <string name="contact_picker_error">Не удалось получить выбранный номер.</string>
+    <string name="contact_search_error">Не удалось прочитать адресную книгу.</string>
+    <string name="contact_handoff_error">На устройстве нет доступного приложения для этого действия.</string>
+</resources>

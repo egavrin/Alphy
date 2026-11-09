@@ -7,6 +7,8 @@ import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.alpha.assistant.R
@@ -34,6 +36,7 @@ import com.alpha.assistant.courses.kind
 import com.alpha.assistant.surfaces.AssistContext
 import com.alpha.assistant.surfaces.AssistCapture
 import com.alpha.assistant.surfaces.AssistantCapture
+import com.alpha.assistant.surfaces.SharedDraft
 import com.alpha.assistant.surfaces.assistantUnavailable
 import com.alpha.assistant.memory.MemoryPageState
 import com.alpha.assistant.memory.MemoryStore
@@ -60,10 +63,14 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.io.File
 import java.util.UUID
 import com.alpha.assistant.weather.*
 import kotlinx.coroutines.withTimeout
@@ -578,6 +585,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     var surfaceSequence by mutableStateOf(0); private set
     internal var surfaceDestination by mutableStateOf<ShellDestination?>(null); private set
     internal var surfaceAutomationRuleId by mutableStateOf<String?>(null); private set
+    internal var surfaceFromShare by mutableStateOf(false); private set
     /** The model outlives each activity, so it holds the entry until a shell applies it. */
     var surfacePending by mutableStateOf(false); private set
     fun openSurface(toolId: String?, settings: Boolean = false) {
@@ -602,17 +610,19 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     internal fun openAutomationSurface(id: String) {
         queueSurface(ShellDestination.Automations, automationRuleId = id)
     }
-    private fun queueSurface(destination: ShellDestination?, automationRuleId: String? = null) {
+    private fun queueSurface(destination: ShellDestination?, automationRuleId: String? = null, fromShare: Boolean = false) {
         pendingChatEntry = null
-        if (destination != ShellDestination.Courses && courseEntry?.inChat == false) courseEntry = null
+        if (!fromShare && destination != ShellDestination.Courses && courseEntry?.inChat == false) courseEntry = null
         surfaceDestination = destination
         surfaceAutomationRuleId = automationRuleId
+        surfaceFromShare = fromShare
         surfacePending = true
         surfaceSequence++
     }
     fun consumeSurface() {
         surfacePending = false
         surfaceAutomationRuleId = null
+        surfaceFromShare = false
     }
     var snapshot by mutableStateOf(ShellSnapshot()); private set
     var loading by mutableStateOf(true); private set
@@ -933,6 +943,79 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     }
     fun clearRequestError() { requestError = null }
     fun contextDraftKey(): String = snapshot.draft.id
+
+    private val sharedDraftLock = Mutex()
+
+    internal fun receiveSharedDraft(input: SharedDraft?) {
+        val application = getApplication<Application>()
+        val initialDraft = contextDraftKey().takeUnless { loading }
+        viewModelScope.launch {
+            snapshotFlow { loading }.first { !it }
+            sharedDraftLock.withLock {
+                val origin = initialDraft ?: contextDraftKey()
+                if (input == null || loadFailed) {
+                    requestError = application.getString(R.string.share_draft_unavailable)
+                    return@withLock
+                }
+                if (!acceptsContext(origin)) return@withLock
+                if (attachmentBusy) {
+                    requestError = application.getString(R.string.context_wait_for_image_check)
+                    return@withLock
+                }
+                val added = when (input) {
+                    is SharedDraft.Text -> addReviewedText(input.value, application.getString(R.string.share_draft_text), origin)
+                    is SharedDraft.Image -> attachSharedImage(application, input, origin)
+                }
+                if (added) queueSurface(null, fromShare = true)
+            }
+        }
+    }
+
+    private suspend fun attachSharedImage(application: Application, input: SharedDraft.Image, origin: String): Boolean {
+        if (composerAttachmentCount(null, snapshot.draft) >= ImageInput.MAX_IMAGES) {
+            requestError = application.getString(R.string.context_attachment_count_limit)
+            return false
+        }
+        val directory = File(application.filesDir, "shared-images")
+        val id = UUID.randomUUID().toString()
+        var copiedFile: File? = null
+        var attached = false
+        attachmentBusy = true
+        try {
+            val attachment = withContext(Dispatchers.IO) {
+                val resolver = application.contentResolver
+                val mime = resolver.getType(input.uri)
+                val extension = when (mime) {
+                    "image/jpeg" -> "jpg"
+                    "image/png" -> "png"
+                    "image/gif" -> "gif"
+                    "image/webp" -> "webp"
+                    else -> throw IOException("Unsupported shared image")
+                }
+                if (input.mime != "image/*" && input.mime != mime) throw IOException("Mismatched shared image type")
+                val name = application.getString(R.string.share_draft_image)
+                val bytes = ImageInput.read(resolver, Attachment(input.uri.toString(), name, mime))
+                val file = File(directory, "$id.$extension")
+                copiedFile = file
+                directory.mkdirs()
+                file.writeBytes(bytes)
+                val uri = FileProvider.getUriForFile(application, "${application.packageName}.chat-camera", file)
+                Attachment(uri.toString(), name, mime)
+            }
+            if (!acceptsContext(origin)) return false
+            editDraft(snapshot.draft.copy(attachments = snapshot.draft.attachments + attachment))
+            attached = true
+            return true
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Exception) {
+            requestError = (failure as? CloudFailure)?.message ?: application.getString(R.string.context_image_read_failed)
+            return false
+        } finally {
+            if (!attached) copiedFile?.delete()
+            attachmentBusy = false
+        }
+    }
 
     internal fun bindAssistantCapture(invocation: String) {
         val draft = snapshot.draft

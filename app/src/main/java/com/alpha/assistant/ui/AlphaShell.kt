@@ -87,6 +87,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable fun AlphaShell(model: ShellViewModel) {
+    val context = LocalContext.current
     var destination by rememberSaveable { mutableStateOf<ShellDestination?>(null) }
     var settingsSection by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
     var settingsFromMenu by rememberSaveable { mutableStateOf(true) }
@@ -128,6 +129,11 @@ import kotlinx.coroutines.launch
     LaunchedEffect(model.surfaceSequence) {
         // The model applies each entry once. So a recreation or a new activity applies no entry again, and a rotation keeps an open drawer open.
         if (model.surfacePending) {
+            if (model.surfaceFromShare && (model.courseSetup != null || model.courseEntry != null || destination == ShellDestination.Courses)) {
+                model.consumeSurface()
+                android.widget.Toast.makeText(context, R.string.share_draft_course, android.widget.Toast.LENGTH_LONG).show()
+                return@LaunchedEffect
+            }
             model.dismissCourseSetup()
             model.closeChatCourse()
             if (model.surfaceDestination != null) model.detachCourseChat(courseChatHost)

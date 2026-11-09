@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="health_title">Здоровье</string>
+    <string name="health_privacy">Alphy читает шаги, сон и тренировки из Health Connect для сводки на этом экране. В Health Connect сохраняются только тренировки, которые вы подтвердили. Alphy не передаёт эти данные в чат или облако.</string>
+    <string name="health_unavailable">Health Connect недоступен на этом устройстве.</string>
+    <string name="health_read_title">Чтение данных Health Connect</string>
+    <string name="health_partial_access">Разрешено чтение части данных.</string>
+    <string name="health_period">Сводка за 7 дней · %1$s — %2$s</string>
+    <string name="health_steps">Шаги</string>
+    <string name="health_sleep">Сон</string>
+    <string name="health_exercise">Тренировки</string>
+    <string name="health_metric">%1$s · %2$s</string>
+    <string name="health_minutes">%1$d мин</string>
+    <string name="health_no_access">нет доступа</string>
+    <string name="health_no_data">нет данных</string>
+    <string name="health_loading">загрузка…</string>
+    <string name="health_read_error">не удалось прочитать данные</string>
+    <string name="health_refresh">Обновить сводку</string>
+    <string name="health_write_title">Запись тренировки</string>
+    <string name="health_write_access">Разрешение на запись тренировок</string>
+    <string name="health_record">Записать тренировку</string>
+    <string name="health_walk">Ходьба</string>
+    <string name="health_run">Бег</string>
+    <string name="health_other">Другое</string>
+    <string name="health_date">Дата начала (ГГГГ-ММ-ДД)</string>
+    <string name="health_time">Время начала (ЧЧ:ММ)</string>
+    <string name="health_duration">Длительность в минутах</string>
+    <string name="health_workout_title">Название (необязательно)</string>
+    <string name="health_invalid_workout">Введите дату, время и длительность от 1 до 1440 минут. Тренировка должна уже закончиться.</string>
+    <string name="health_review">Проверить тренировку</string>
+    <string name="health_workout_summary">%1$s\nНачало: %2$s\nКонец: %3$s</string>
+    <string name="health_save">Сохранить в Health Connect</string>
+    <string name="health_saving">Сохранение…</string>
+    <string name="health_saved">Тренировка сохранена в Health Connect.</string>
+    <string name="health_write_error">Не удалось сохранить тренировку. Проверьте доступ и попробуйте ещё раз.</string>
+</resources>

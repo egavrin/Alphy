@@ -25,6 +25,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.alpha.assistant.R
 import com.alpha.assistant.capabilities.AndroidPermissionControl
+import com.alpha.assistant.capabilities.ContactActions
 import com.alpha.assistant.data.Attachment
 import com.alpha.assistant.surfaces.AssistContext
 import com.alpha.assistant.surfaces.ReviewedCalendar
@@ -157,10 +158,11 @@ import java.io.InputStreamReader
                 },
                 ContextSourceAction(R.string.context_file, Glyph.File) { launchPicker("file") { files.launch(arrayOf("*/*")) } },
             ),
-            rows = listOf(
-                ContextSourceAction(R.string.context_calendar, Glyph.Calendar) { if (checkOrigin()) page = "calendar" },
-                ContextSourceAction(R.string.context_paste, Glyph.Clipboard) { if (checkOrigin()) page = "paste" },
-            ),
+            rows = buildList {
+                add(ContextSourceAction(R.string.context_calendar, Glyph.Calendar) { if (checkOrigin()) page = "calendar" })
+                add(ContextSourceAction(R.string.context_paste, Glyph.Clipboard) { if (checkOrigin()) page = "paste" })
+                if (destination == null) add(ContextSourceAction(R.string.contact_title, Glyph.Profile) { page = "contact" })
+            },
             enabled = pickerSource == null && !model.attachmentBusy,
             canClose = canClose,
             close = ::close,
@@ -191,13 +193,14 @@ import java.io.InputStreamReader
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (page != "sources") {
                     Text(stringResource(R.string.context_title), style = MaterialTheme.typography.titleLarge)
-                    Text(stringResource(R.string.context_privacy))
+                    Text(stringResource(if (page == "contact") R.string.contact_privacy else R.string.context_privacy))
                     TextButton(onClick = { page = "sources"; error = null }, enabled = canClose) {
                         Text(stringResource(R.string.context_back_to_sources))
                     }
                 }
                 when (page) {
                     "sources" -> Sources()
+                    "contact" -> ContactActions()
                     "camera" -> {
                         AndroidPermissionControl(stringResource(R.string.context_camera), listOf(Manifest.permission.CAMERA), PackageManager.FEATURE_CAMERA_ANY)
                         if (cameraReady && cameraUri != null) {
