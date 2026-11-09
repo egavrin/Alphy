@@ -715,6 +715,10 @@ import kotlinx.coroutines.launch
 }
 
 @Composable internal fun ImagePreview(attachment: Attachment, modifier: Modifier = Modifier.size(76.dp)) {
+    if (attachment.mime == com.alpha.assistant.tools.three.ThreeSceneAssets.ATTACHMENT_MIME) {
+        Text(attachment.name, modifier, style = MaterialTheme.typography.bodySmall)
+        return
+    }
     if(attachment.contextText != null) {
         androidx.compose.foundation.text.selection.SelectionContainer {
             Text(attachment.contextText,Modifier.heightIn(max = 160.dp).verticalScroll(rememberScrollState()),style = MaterialTheme.typography.bodySmall)

@@ -14,8 +14,9 @@ internal sealed interface GenerationBehavior {
     data class Scenario(val slots: Map<String, Slot>, val steps: List<Step>) : GenerationBehavior
 
     enum class Kind(val wire: String) {
-        ACTION("action"), SURFACE("surface"), TIMER("timer"), VALUE("value"), COLLECTION("collection"), GEOMETRY("geometry");
-        val observable get() = this == VALUE || this == COLLECTION || this == GEOMETRY
+        ACTION("action"), SURFACE("surface"), TIMER("timer"), VALUE("value"), COLLECTION("collection"), GEOMETRY("geometry"),
+        STATE("state"), AUDIO("audio");
+        val observable get() = this in setOf(VALUE, COLLECTION, GEOMETRY, STATE, AUDIO)
     }
     data class Slot(val kind: Kind, val part: String?, val member: String?)
 
@@ -72,8 +73,8 @@ internal sealed interface GenerationBehavior {
             Use {"status":"unchecked","reason":"unsupported_observation"} only if these checks cannot express the result.
         """.trimIndent() + "\n" + scenarioLimits
 
-        fun parse(raw: Any?, needIds: Set<String>): GenerationBehavior = try {
-            parseBehavior(raw, needIds)
+        fun parse(raw: Any?, needIds: Set<String>, threeScene: Boolean = false): GenerationBehavior = try {
+            parseBehavior(raw, needIds, threeScene)
         } catch (failure: PartsContractFailure) {
             // Only host-owned rule codes enter traces, never candidate values or exception text.
             val rule = when (failure.expected) {
@@ -113,7 +114,7 @@ internal sealed interface GenerationBehavior {
                 ResponseShape("behavior.$rule", failure.path, "unknown"))
         }
 
-        private fun parseBehavior(raw: Any?, needIds: Set<String>): GenerationBehavior {
+        private fun parseBehavior(raw: Any?, needIds: Set<String>, threeScene: Boolean): GenerationBehavior {
             val behavior = obj(raw, FIELD)
             return when (behavior.opt("status") as? String) {
                 "unchecked" -> {
@@ -124,13 +125,13 @@ internal sealed interface GenerationBehavior {
                 }
                 "checkable" -> {
                     behavior.requireKeys(FIELD, setOf("status", "scenario"))
-                    parseScenario(obj(behavior.opt("scenario"), FIELD), needIds)
+                    parseScenario(obj(behavior.opt("scenario"), FIELD), needIds, threeScene)
                 }
                 else -> throw PartsContractFailure(FIELD, "a checkable or explicitly unchecked behavior")
             }
         }
 
-        private fun parseScenario(raw: JSONObject, needIds: Set<String>): Scenario {
+        private fun parseScenario(raw: JSONObject, needIds: Set<String>, threeScene: Boolean): Scenario {
             raw.requireKeys(FIELD, setOf("slots", "steps"))
             val slotObject = obj(raw.opt("slots"), FIELD)
             requireParts(slotObject.length() in 1..12, FIELD, "1 to 12 slots")
@@ -140,6 +141,7 @@ internal sealed interface GenerationBehavior {
                 row.requireKeys(FIELD, setOf("kind"), setOf("part", "member"))
                 val kind = Kind.entries.firstOrNull { it.wire == row.opt("kind") }
                     ?: throw PartsContractFailure(FIELD, "a supported slot kind")
+                requireParts(threeScene || kind !in setOf(Kind.STATE, Kind.AUDIO), FIELD, "a supported slot kind")
                 val part = row.opt("part")?.let { identifier(it, FIELD) }
                 val member = row.opt("member")?.let { identifier(it, FIELD) }
                 requireParts(part == null || part in needIds && kind in setOf(Kind.ACTION, Kind.VALUE, Kind.COLLECTION), FIELD, "a compatible declared part")
@@ -175,6 +177,7 @@ internal sealed interface GenerationBehavior {
                             "pointer" -> setOf("phase", "x", "y")
                             "control" -> setOf("direction")
                             "viewport", "start", "pause", "resume", "restart" -> emptySet()
+                            "reopen" -> if (threeScene) emptySet() else throw PartsContractFailure(at, "a supported surface event")
                             else -> throw PartsContractFailure(at, "a supported surface event")
                         }
                         row.requireKeys(at, setOf("op", "slot", "event") + extras)
@@ -219,8 +222,9 @@ internal sealed interface GenerationBehavior {
                         val value = row.opt("value")?.let { scalar(it, at) }
                         val capture = row.opt("capture")?.let { identifier(it, at) }
                         requireParts(capture == null || captures[capture] == kind, at, "an earlier capture of the same kind")
-                        requireParts(value == null || kind == Kind.VALUE || kind == Kind.COLLECTION && value is Number, at, "a compatible expected value")
-                        requireParts(test !in setOf("greater", "less") || kind != Kind.GEOMETRY && (value == null || value is Number), at, "a numeric comparison")
+                        requireParts(value == null || kind in setOf(Kind.VALUE, Kind.STATE) || kind == Kind.AUDIO && value == "completed" ||
+                            kind == Kind.COLLECTION && value is Number, at, "a compatible expected value")
+                        requireParts(test !in setOf("greater", "less") || kind !in setOf(Kind.GEOMETRY, Kind.AUDIO) && (value == null || value is Number), at, "a numeric comparison")
                         Step.Assert(source, checkNotNull(test), value, capture)
                     }
                     else -> throw PartsContractFailure(at, "a supported behavior step")
@@ -261,7 +265,7 @@ internal sealed interface GenerationBehavior {
                 when (slot.kind) {
                     Kind.ACTION -> if (value is JSONArray) read(value, "a UI index path") { Binding.Ui(indices(value, BINDINGS)) }
                         else read(value, "an action ID string or a UI index path") { Binding.Id(identifier(value, BINDINGS, 48)) }
-                    Kind.SURFACE, Kind.TIMER -> read(value, "a ${slot.kind.wire} ID string") {
+                    Kind.SURFACE, Kind.TIMER, Kind.STATE, Kind.AUDIO -> read(value, "a ${slot.kind.wire} ID string") {
                         Binding.Id(identifier(value, BINDINGS, 48))
                     }
                     Kind.VALUE, Kind.COLLECTION -> read(value, "a UI index path") { Binding.Ui(indices(value, BINDINGS)) }
@@ -340,6 +344,26 @@ internal fun behaviorUiObservation(node: JSONObject, state: JSONObject, kind: Ge
             val shape = BehaviorValueShape.of(value)
             rejected?.invoke(if (value == null) BehaviorFailureRule.SCALAR_MISSING else BehaviorFailureRule.SCALAR_SHAPE, shape)
             null
+        }
+    }
+}
+
+
+/** Executes the frozen workflow. Renderers supply input delivery and observable output. */
+internal suspend fun GenerationBehavior.Scenario.execute(
+    before: suspend (Int) -> Unit,
+    read: suspend (String) -> Any,
+    perform: suspend (GenerationBehavior.Step) -> Unit,
+    assert: (Int, GenerationBehavior.Step.Assert, Any, Any?) -> Unit,
+) {
+    val captures = mutableMapOf<String, Any>()
+    steps.forEachIndexed { index, step ->
+        before(index)
+        when (step) {
+            is GenerationBehavior.Step.Capture -> captures[step.name] = read(step.slot)
+            is GenerationBehavior.Step.Assert ->
+                assert(index, step, read(step.slot), step.capture?.let(captures::getValue) ?: step.value)
+            else -> perform(step)
         }
     }
 }

@@ -1,5 +1,8 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.tools.three.ThreeSceneAssetRef
+import com.alpha.assistant.tools.three.ThreeSceneSnapshot
+
 import android.app.Application
 import android.app.Activity
 import android.graphics.Bitmap
@@ -347,7 +350,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     suspend fun generateAutomatic(prompt: String, target: ToolRecord?, conversationId: String, operationId: String,
         key: String, images: List<String>, call: CloudSession, cancelRequest: () -> Unit,
         prepared: suspend () -> Unit, canCommit: () -> Boolean, committed: (ToolRecord) -> Unit,
-        originalRequest: String = prompt) {
+        originalRequest: String = prompt, sceneAttachments: List<Attachment> = emptyList()) {
         if(busy || closing) throw CloudFailure("widget_busy","Another tool operation is active. Retry after it completes.")
         busy = true; error = null; errorCode = null; automaticCancel = cancelRequest; automaticJob = currentCoroutineContext()[Job]
         previews.clear()
@@ -363,7 +366,8 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                 engine.createDraft(prompt,target?.id,conversationId,operationId,target)
                 created = true
             }
-            withContext(Dispatchers.IO) { generateWithPreview(operationId,key,images,call,originalRequest) }
+            withContext(Dispatchers.IO) { generateWithPreview(operationId,key,images,call,originalRequest,
+                com.alpha.assistant.tools.three.ThreeSceneAssets.attachmentRefs(sceneAttachments)) }
             currentCoroutineContext().ensureActive(); call.check()
             previews.clear(operationId)
             val result = engine.accept(operationId,retainReceipt = true,canCommit = canCommit)
@@ -453,13 +457,14 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     }
     internal var generationTraceObserver: ((ToolGenerationTraceEvent) -> Unit)? = null
 
-    private suspend fun generateWithPreview(id: String,key: String,images: List<String>,call: CloudSession,originalRequest: String? = null) {
+    private suspend fun generateWithPreview(id: String,key: String,images: List<String>,call: CloudSession,originalRequest: String? = null,
+        sceneAssets: List<ThreeSceneAssetRef> = emptyList()) {
         check(!closing) {"The tool controller is closed."}
         val requestId=UUID.randomUUID().toString()
         val observer=previews.begin(id,requestId)
         try {
             val trace = generationTraceObserver?.let { ToolGenerationTrace(UUID.fromString(id), it) }
-            val completed=engine.generate(id,key,images,call,previewObserver=observer,trace=trace,originalRequest=originalRequest)
+            val completed=engine.generate(id,key,images,call,previewObserver=observer,trace=trace,originalRequest=originalRequest,sceneAssets=sceneAssets)
             previews.complete(requestId,completed)
         } catch(failure: Throwable) {
             previews.clearRequest(requestId)
@@ -549,6 +554,26 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     private var waitingDiscreteInput: Job?=null
     private fun inputDeviceActive() = !closing && !app.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked &&
         app.getSystemService(android.os.PowerManager::class.java).isInteractive
+
+    internal suspend fun saveThreeScene(expected: ToolRecord, snapshot: ThreeSceneSnapshot): ToolRecord =
+        withContext(Dispatchers.IO) {
+            lateinit var saved: ToolRecord
+            store.transaction {
+                val old = checkNotNull(store.tool(expected.id))
+                check(!old.archived && old.revision == expected.revision &&
+                    old.stateVersion == expected.stateVersion) { "This 3D scene revision changed." }
+                val spec = ToolSpec.parsePersisted(old.spec)
+                check(spec.threeScene)
+                spec.validateUi(JSONObject(snapshot.ui), spec.validateState(snapshot.state))
+                saved = old.copy(state = snapshot.state, ui = snapshot.ui, stateVersion = old.stateVersion + 1)
+                store.commitTool(saved, old, revision = false)
+            }
+            withContext(Dispatchers.Main) {
+                tools = tools.map { if (it.id == saved.id && it.revision == saved.revision &&
+                    it.stateVersion <= saved.stateVersion) saved else it }
+            }
+            saved
+        }
 
     fun artifactHost(t: ToolRecord): ArtifactUiHost=createArtifactHost(t,nonGraphics=false)
     internal fun nonGraphicsLiveInputHost(t: ToolRecord): LiveArtifactUiHost=createArtifactHost(t,nonGraphics=true)

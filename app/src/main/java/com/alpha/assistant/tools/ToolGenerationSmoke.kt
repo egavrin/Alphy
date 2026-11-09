@@ -12,6 +12,7 @@ import com.alpha.assistant.tools.generation.GenerationBehavior.Kind
 import com.alpha.assistant.tools.generation.GenerationBehavior.Step
 import com.alpha.assistant.tools.generation.behaviorUiObservation
 import com.alpha.assistant.tools.generation.sameToolJson
+import com.alpha.assistant.tools.generation.execute
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 import org.json.JSONObject
@@ -214,95 +215,98 @@ internal class ToolGenerationSmoke(
             }
             fun numeric(value: Any?, slot: String) = (value as? Number)?.toDouble()
                 ?: fail("numeric output unavailable", BehaviorFailureRule.SCALAR_SHAPE, slot, valueShape = BehaviorValueShape.of(value))
-            val captures = mutableMapOf<String, Any>()
             send(JSONObject().put("type", "open"))
             for (surface in effectiveSurfaces.values) {
                 if (surface.sizing == "viewport") send(GraphicsContract.viewport(surface))
                 if (playback.automaticStart) send(GraphicsContract.event("start", surfaceId = surface.id))
             }
-            scenario.steps.forEachIndexed { index, step ->
-                stepIndex = index
-                checkActive()
-                when (step) {
-                    is Step.Action -> {
-                        val root = JSONObject(ui)
-                        val action = when (val binding = target(step.slot)) {
-                            is Binding.Id -> binding.value
-                            is Binding.Ui -> {
-                                val node = visibleNode(root, displayState(), binding.path) { rule, type ->
-                                    fail("action binding path is unavailable", rule, step.slot, type)
+            scenario.execute(
+                before = { index ->
+                    stepIndex = index
+                    checkActive()
+                },
+                read = ::read,
+                perform = { step ->
+                    when (step) {
+                        is Step.Action -> {
+                            val root = JSONObject(ui)
+                            val action = when (val binding = target(step.slot)) {
+                                is Binding.Id -> binding.value
+                                is Binding.Ui -> {
+                                    val node = visibleNode(root, displayState(), binding.path) { rule, type ->
+                                        fail("action binding path is unavailable", rule, step.slot, type)
+                                    }
+                                    node.optString("action").takeIf(String::isNotEmpty)
+                                        ?: fail("action binding path is unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE,
+                                            step.slot, node.getString("type"))
                                 }
-                                node.optString("action").takeIf(String::isNotEmpty)
-                                    ?: fail("action binding path is unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE,
-                                        step.slot, node.getString("type"))
+                                is Binding.Drawing -> fail("invalid action binding", BehaviorFailureRule.BINDING_SHAPE, step.slot)
                             }
-                            is Binding.Drawing -> fail("invalid action binding", BehaviorFailureRule.BINDING_SHAPE, step.slot)
+                            val value = step.value.takeUnless { it == JSONObject.NULL }
+                            val control = ToolUiCatalog.action(root, action)
+                            val liveInput = control?.let(ToolUiCatalog::isLiveInput) == true
+                            if (step.slot in liveInputSlots && !liveInput) {
+                                fail("the planned scene control requires live input", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot)
+                            }
+                            val event = try {
+                                controlEvent(root, JSONObject(state), action, value, liveInput)
+                            } catch (_: IllegalArgumentException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot) }
+                              catch (_: IllegalStateException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot) }
+                            send(event)
+                            recordEvent("action", step.slot)
                         }
-                        val value = step.value.takeUnless { it == JSONObject.NULL }
-                        val control = ToolUiCatalog.action(root, action)
-                        val liveInput = control?.let(ToolUiCatalog::isLiveInput) == true
-                        if (step.slot in liveInputSlots && !liveInput) {
-                            fail("the planned scene control requires live input", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot)
-                        }
-                        val event = try {
-                            controlEvent(root, JSONObject(state), action, value, liveInput)
-                        } catch (_: IllegalArgumentException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot) }
-                          catch (_: IllegalStateException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot) }
-                        send(event)
-                        recordEvent("action", step.slot)
-                    }
-                    is Step.Surface -> {
-                        val surface = surface(targetId(step.slot), step.slot)
-                        when (step.event) {
-                            "viewport" -> {
-                                if (surface.sizing != "viewport") fail("viewport event unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
-                                send(GraphicsContract.viewport(surface))
-                            }
-                            "pointer" -> {
-                                if (playback.value !in setOf("playing", "ready")) fail("pointer event unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
-                                send(GraphicsContract.event("pointer", x = checkNotNull(step.x)*surface.width,
-                                    y = checkNotNull(step.y)*surface.height, phase = checkNotNull(step.phase), surfaceId = surface.id))
-                            }
-                            "control" -> {
-                                if (surface.id !in spec.hostControls.movement) {
-                                    fail("movement control unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
+                        is Step.Surface -> {
+                            val surface = surface(targetId(step.slot), step.slot)
+                            when (step.event) {
+                                "viewport" -> {
+                                    if (surface.sizing != "viewport") fail("viewport event unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
+                                    send(GraphicsContract.viewport(surface))
                                 }
-                                send(GraphicsContract.event("control", direction = checkNotNull(step.direction), surfaceId = surface.id))
-                            }
-                            else -> {
-                                if (!spec.hostControls.playback || step.event != "restart" && ArtifactPlayback.primaryControl(playback.value) != step.event) {
-                                    fail("playback control unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
+                                "pointer" -> {
+                                    if (playback.value !in setOf("playing", "ready")) fail("pointer event unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
+                                    send(GraphicsContract.event("pointer", x = checkNotNull(step.x)*surface.width,
+                                        y = checkNotNull(step.y)*surface.height, phase = checkNotNull(step.phase), surfaceId = surface.id))
                                 }
-                                for (id in effectiveSurfaces.keys) send(GraphicsContract.event(step.event, surfaceId = id))
+                                "control" -> {
+                                    if (surface.id !in spec.hostControls.movement) {
+                                        fail("movement control unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
+                                    }
+                                    send(GraphicsContract.event("control", direction = checkNotNull(step.direction), surfaceId = surface.id))
+                                }
+                                else -> {
+                                    if (!spec.hostControls.playback || step.event != "restart" && ArtifactPlayback.primaryControl(playback.value) != step.event) {
+                                        fail("playback control unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
+                                    }
+                                    for (id in effectiveSurfaces.keys) send(GraphicsContract.event(step.event, surfaceId = id))
+                                }
                             }
+                            recordEvent("surface event", step.slot)
                         }
-                        recordEvent("surface event", step.slot)
-                    }
-                    is Step.Advance -> {
-                        val id = targetId(step.slot)
-                        val isFrame = scenario.slots.getValue(step.slot).kind == Kind.SURFACE
-                        if (step.observe != null && (target(step.observe) as Binding.Drawing).surface != id)
-                            fail("frame and observation must use the same surface", BehaviorFailureRule.BINDING_SHAPE, step.observe)
-                        var previous = step.observe?.let { read(it) as SurfaceGeometry }
-                        var changes = 0
-                        repeat(step.count) {
-                            if (playback.value != "playing" || (if (isFrame) id !in frames else id !in timers))
-                                fail("active subscription unavailable", BehaviorFailureRule.SUBSCRIPTION_UNAVAILABLE, step.slot)
-                            send(if (isFrame) GraphicsContract.event("frame", dt = 16, surfaceId = id)
-                                else JSONObject().put("type", "timer").put("timerId", id))
-                            step.observe?.let {
-                                val current = read(it) as SurfaceGeometry
-                                if (current.movedFrom(checkNotNull(previous))) changes++
-                                previous = current
+                        is Step.Advance -> {
+                            val id = targetId(step.slot)
+                            val isFrame = scenario.slots.getValue(step.slot).kind == Kind.SURFACE
+                            if (step.observe != null && (target(step.observe) as Binding.Drawing).surface != id)
+                                fail("frame and observation must use the same surface", BehaviorFailureRule.BINDING_SHAPE, step.observe)
+                            var previous = step.observe?.let { read(it) as SurfaceGeometry }
+                            var changes = 0
+                            repeat(step.count) {
+                                if (playback.value != "playing" || (if (isFrame) id !in frames else id !in timers))
+                                    fail("active subscription unavailable", BehaviorFailureRule.SUBSCRIPTION_UNAVAILABLE, step.slot)
+                                send(if (isFrame) GraphicsContract.event("frame", dt = 16, surfaceId = id)
+                                    else JSONObject().put("type", "timer").put("timerId", id))
+                                step.observe?.let {
+                                    val current = read(it) as SurfaceGeometry
+                                    if (current.movedFrom(checkNotNull(previous))) changes++
+                                    previous = current
+                                }
                             }
+                            recordEvent(if (isFrame) "frame advance" else "timer advance", step.slot)
+                            if (changes < step.changes) fail("assertion failed, repeated geometry change required", BehaviorFailureRule.ASSERTION_FAILED, step.observe)
                         }
-                        recordEvent(if (isFrame) "frame advance" else "timer advance", step.slot)
-                        if (changes < step.changes) fail("assertion failed, repeated geometry change required", BehaviorFailureRule.ASSERTION_FAILED, step.observe)
+                        else -> error("The shared checker handles observations.")
                     }
-                    is Step.Capture -> captures[step.name] = read(step.slot)
-                    is Step.Assert -> {
-                        val current = read(step.slot)
-                        val expected = step.capture?.let(captures::getValue) ?: step.value
+                },
+                assert = { index, step, current, expected ->
                         val equal = if (current is SurfaceGeometry && expected is SurfaceGeometry) {
                             current.width == expected.width && current.height == expected.height && current.visible == expected.visible
                         } else sameToolJson(current, expected)
@@ -320,9 +324,8 @@ internal class ToolGenerationSmoke(
                         }
                         if (!passed && !allowAssertionFailure(index)) fail("assertion failed (${step.test})", BehaviorFailureRule.ASSERTION_FAILED,
                             step.slot, valueShape = BehaviorValueShape.of(current))
-                    }
-                }
-            }
+                },
+            )
         }
 
     }

@@ -272,7 +272,7 @@ internal data class PlanQuestion(val id: String, val ask: String, val options: L
 
 internal sealed interface GenerationPlan {
     val scene: SceneRequirement?
-    data class WholeScreen(override val scene: SceneRequirement?) : GenerationPlan
+    data class WholeScreen(override val scene: SceneRequirement?, val threeScene: Boolean = false) : GenerationPlan
     data class Parts(val needs: NeedsPlan, override val scene: SceneRequirement? = null) : GenerationPlan
 }
 
@@ -451,11 +451,15 @@ internal class NeedsPlan private constructor(
             val root = partsObject(raw, "$")
             if (root.has("wholeScreen")) {
                 requireParts(lessonTarget == null, "$.wholeScreen", "a new non-lesson app")
-                root.requireKeys("$", setOf("wholeScreen", "language"), setOf("literals", "iconId", "scene"))
+                root.requireKeys("$", setOf("wholeScreen", "language"), setOf("literals", "iconId", "scene", "runtime"))
                 requireParts(root.opt("language").let { it is String && validAppLanguageTag(it) },
                     "$.language", "a lowercase two- or three-letter language tag")
                 requireParts(root.opt("wholeScreen") == true, "$.wholeScreen", "the Boolean true")
-                return GenerationPlan.WholeScreen(SceneRequirement.read(root.opt("scene")))
+                val threeScene = root.has("runtime")
+                val scene = SceneRequirement.read(root.opt("scene"), threeScene)
+                requireParts(!threeScene || root.opt("runtime") == "threejs-worker" && scene?.placement == "stage",
+                    "$.runtime", "threejs-worker with a stage scene check")
+                return GenerationPlan.WholeScreen(scene, threeScene)
             }
             val scene = SceneRequirement.read(root.remove("scene"))
             val needs = parse(root, lessonTarget, allowedSourceIds, scene)

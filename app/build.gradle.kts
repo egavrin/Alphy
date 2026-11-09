@@ -34,7 +34,7 @@ android {
     buildFeatures { compose = true }
     packaging { jniLibs { excludes += setOf("lib/armeabi-v7a/**", "lib/x86/**", "lib/x86_64/**") } }
     androidResources {
-        noCompress += setOf("onnx", "litertlm")
+        noCompress += setOf("onnx", "litertlm", "glb", "wav")
         ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:CVS:thumbs.db:picasa.ini:*~:whisper:whisper-MIT.txt:silero"
     }
 }
@@ -61,6 +61,7 @@ dependencies {
     implementation("androidx.glance:glance-appwidget:1.2.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("androidx.javascriptengine:javascriptengine:1.1.1")
+    implementation("androidx.webkit:webkit:1.14.0")
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("com.google.mlkit:language-id:17.0.6")
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.0")

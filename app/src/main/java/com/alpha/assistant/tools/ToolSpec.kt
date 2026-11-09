@@ -1,6 +1,8 @@
 package com.alpha.assistant.tools
 
 import com.alpha.assistant.sandbox.SandboxContract
+import com.alpha.assistant.tools.three.ThreeSceneAssetRef
+import com.alpha.assistant.tools.three.ThreeSceneAssets
 import com.alpha.assistant.tools.generation.NativePresentation
 import com.alpha.assistant.tools.generation.PartsContractFailure
 import com.alpha.assistant.tools.generation.ToolComposition
@@ -60,9 +62,10 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     val collections: JSONObject, val surfaces: Map<String,ToolSurface>, val presentation: String,
     internal val hostControls: ArtifactHostControls,
     internal val composition: ToolComposition?, internal val nativePresentation: NativePresentation?,
-    internal val appLanguage: String?, internal val iconId: String?) {
+    internal val appLanguage: String?, internal val iconId: String?,
+    internal val threeScene: Boolean, internal val sceneAssets: List<ThreeSceneAssetRef>) {
     internal val isSealedStandalone: Boolean get() = composition?.isSealedStandalone == true
-    internal val canQueueLocalButtons: Boolean get() = capabilities.isEmpty() && collections.length() == 0 && surfaces.isEmpty()
+    internal val canQueueLocalButtons: Boolean get() = !threeScene && capabilities.isEmpty() && collections.length() == 0 && surfaces.isEmpty()
 
     fun validateState(value: String): JSONObject {
         require(value.toByteArray().size <= 49152) { "Данные инструмента превышают 48 КиБ" }
@@ -98,11 +101,20 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     fun action(ui: JSONObject, id: String): JSONObject? = ToolUiCatalog.action(ui,id)
 
     internal fun providerDefinition(): String {
-        if (composition == null && nativePresentation == null && appLanguage == null && iconId == null) return json
+        if (composition == null && nativePresentation == null && appLanguage == null && iconId == null && !threeScene) return json
         val definition = composition?.fillDefinition(this) ?: JSONObject(json).apply { remove(NativePresentation.FIELD) }
         definition.remove(APP_LANGUAGE_FIELD)
         definition.remove(ICON_ID_FIELD)
+        definition.remove("sceneAssets")
+        definition.remove("threeLibrary")
         return definition.toString()
+    }
+
+    internal fun withThreeAssets(assets: List<ThreeSceneAssetRef>): ToolSpec {
+        require(threeScene)
+        val definition = JSONObject(json).put("threeLibrary", THREE_LIBRARY)
+            .put("sceneAssets", org.json.JSONArray(assets.map { it.json() }))
+        return parsePersisted(definition.toString())
     }
 
     internal fun withAppLanguage(tag: String?): ToolSpec {
@@ -132,6 +144,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     }
 
     companion object {
+        private const val THREE_LIBRARY = "three@0.180.0"
         internal const val MAX_DEFINITION_BYTES = 256 * 1024
 
         private const val ICON_ID_FIELD = "iconId"
@@ -198,7 +211,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
         internal fun parsePersisted(raw: String,observer: ((ToolUiDiagnostic)->Unit)? = null): ToolSpec = parse(raw,observer,true)
 
         private val requiredGeneratedFields = setOf("formatVersion", "title", "description", "capabilities", "stateSchema", "initialState", "ui", "source")
-        private val optionalGeneratedFields = setOf("capabilityResults", "collections", "surfaces", "presentation", "hostControls")
+        private val optionalGeneratedFields = setOf("capabilityResults", "collections", "surfaces", "presentation", "hostControls", "runtime")
         internal val generatedFields = requiredGeneratedFields + optionalGeneratedFields
 
         private fun parse(raw: String,observer: ((ToolUiDiagnostic)->Unit)?,persisted: Boolean): ToolSpec {
@@ -206,7 +219,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
             validateTool(ToolValidationCategory.FIELDS) {
                 val fields = j.keys().asSequence().toSet()
                 val optional = optionalGeneratedFields +
-                    (if (persisted) setOf("composition",NativePresentation.FIELD,APP_LANGUAGE_FIELD,ICON_ID_FIELD) else emptySet())
+                    (if (persisted) setOf("composition",NativePresentation.FIELD,APP_LANGUAGE_FIELD,ICON_ID_FIELD,"sceneAssets","threeLibrary") else emptySet())
                 require(fields.containsAll(requiredGeneratedFields) && fields.all { it in requiredGeneratedFields || it in optional })
                 require(!j.has("capabilityResults") || j.get("capabilityResults") is Boolean) { "Неверные поля инструмента" }
             }
@@ -277,12 +290,30 @@ data class ToolSpec private constructor(val json: String, val title: String, val
                     composition?.requireNativePresentation(it)
                 }
             } else null
+            val threeScene = j.has("runtime")
+            val sceneAssets = validateTool(ToolValidationCategory.FIELDS) {
+                if (threeScene) {
+                    val runtime = j.getJSONObject("runtime")
+                    require(runtime.keys().asSequence().toSet() == setOf("kind", "version") &&
+                        runtime.get("kind") == "threejs-worker" && runtime.get("version") == 1)
+                    require(capabilities.isEmpty() && surfaces.isEmpty() && composition == null &&
+                        nativePresentation == null && canvasSurfaceIds(ui).isEmpty() &&
+                        !j.has("collections") && !j.has("hostControls") && !j.optBoolean("capabilityResults"))
+                    if (persisted) {
+                        require(j.get("threeLibrary") == THREE_LIBRARY)
+                        ThreeSceneAssets.read(j.getJSONArray("sceneAssets"))
+                    } else emptyList()
+                } else {
+                    require(!j.has("threeLibrary") && !j.has("sceneAssets"))
+                    emptyList()
+                }
+            }
             val encoded = j.toString()
             validateTool(ToolValidationCategory.JSON) {
                 require(encoded.toByteArray(Charsets.UTF_8).size <= MAX_DEFINITION_BYTES)
             }
             return ToolSpec(encoded, j.getString("title"), j.getString("description"), source, schema,
-                initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surfaces,presentation,hostControls,composition,nativePresentation,appLanguage,iconId).also {
+                initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surfaces,presentation,hostControls,composition,nativePresentation,appLanguage,iconId,threeScene,sceneAssets).also {
                 validateTool(ToolValidationCategory.INITIAL_STATE) { it.validateState(it.initialState) }
                 it.validateUi(it.ui,JSONObject(it.initialState),ToolUiValidationStage.DEFINITION,observer)
             }

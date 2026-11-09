@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.os.LocaleList
 import androidx.activity.ComponentActivity
 import com.alpha.assistant.semantic.SemanticRuntime
+import com.alpha.assistant.tools.three.ThreeSceneForeground
 import java.util.Locale
 
 /** Every Alphy activity uses Russian resources, so Material component labels are Russian on any device locale. */
@@ -23,6 +24,16 @@ abstract class AlphyActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         SemanticRuntime.activityStarted()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        ThreeSceneForeground.resumed(this)
+    }
+
+    override fun onPause() {
+        ThreeSceneForeground.paused(this)
+        super.onPause()
     }
 
     override fun onStop() {

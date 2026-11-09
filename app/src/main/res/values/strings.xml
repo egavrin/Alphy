@@ -441,4 +441,5 @@
     <string name="tool_share_review_title">Проверьте текст перед отправкой</string>
     <string name="tool_share_confirm">Поделиться</string>
     <string name="tool_stop_tilt">Остановить наклон</string>
+    <string name="context_three_asset">Ресурс 3D-сцены</string>
 </resources>

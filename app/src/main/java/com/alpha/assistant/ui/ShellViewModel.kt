@@ -1,5 +1,7 @@
 package com.alpha.assistant.ui
 
+import com.alpha.assistant.tools.three.ThreeSceneAssets
+
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
@@ -1146,6 +1148,31 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     fun addAttachment(attachment: Attachment, origin: String = contextDraftKey(), completed: (Boolean) -> Unit = {}) {
         viewModelScope.launch { completed(attachImage(attachment, origin)) }
     }
+    internal suspend fun attachThreeSceneAsset(uri: Uri, name: String, mime: String, origin: String): Boolean {
+        if (attachmentBusy || !acceptsComposerContext(origin, null)) return false
+        if (composerAttachmentCount(null, composerDraft(null)) >= ImageInput.MAX_IMAGES) {
+            contextFailure(getApplication<Application>().getString(R.string.context_attachment_count_limit), null)
+            return false
+        }
+        attachmentBusy = true
+        try {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { ThreeSceneAssets(getApplication<Application>()).import(uri, name, mime) }
+            }
+            if (!acceptsComposerContext(origin, null)) return false
+            val attachment = result.getOrElse { failure ->
+                if (failure is CancellationException) throw failure
+                contextFailure(failure.message ?: "Не удалось добавить ресурс 3D-сцены.", null)
+                return false
+            }
+            val draft = composerDraft(null)
+            editComposerDraft(null, draft.copy(attachments = draft.attachments.filterNot { it.uri == attachment.uri } + attachment))
+            return true
+        } finally {
+            attachmentBusy = false
+        }
+    }
+
     internal suspend fun attachImage(
         attachment: Attachment,
         origin: String,
@@ -1453,15 +1480,16 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 if(!persist { store.updateConversation(pending) }.await())
                     throw CloudFailure("storage", "Запрос не отправлен: не удалось сохранить историю. Повторите сохранение.")
                 val key = withContext(Dispatchers.IO) { keys.cloudKey(getApplication()) }
+                val (sceneAttachments, ordinaryAttachments) = user.attachments.partition { it.mime == ThreeSceneAssets.ATTACHMENT_MIME }
                 val (images, screenImages) = withContext(Dispatchers.IO) {
                     if (user.attachments.size > ImageInput.MAX_IMAGES) throw CloudFailure("image_count", "Можно отправить не более 4 изображений")
                     val resolver = getApplication<Application>().contentResolver
-                    val (screen, manual) = user.attachments.filter { it.contextText == null }.partition { it.automaticScreen }
+                    val (screen, manual) = ordinaryAttachments.filter { it.contextText == null }.partition { it.automaticScreen }
                     manual.map { ImageInput.dataUrl(resolver, it) } to screen.map { ImageInput.dataUrl(resolver, it) }
                 }
                 val selectedText = try {
-                    com.alpha.assistant.surfaces.AssistContext.requestText("",user.attachments)
-                    user.attachments.singleOrNull { it.contextText != null }?.contextText.orEmpty()
+                    com.alpha.assistant.surfaces.AssistContext.requestText("",ordinaryAttachments)
+                    ordinaryAttachments.singleOrNull { it.contextText != null }?.contextText.orEmpty()
                 } catch (_: Exception) { throw CloudFailure("context_text","Selected text must be one text attachment within 8,000 characters.") }
                 val before = conversation.messages.takeWhile { it.id != user.id }
                 val complete = before.filter { it.role == "assistant" && it.status == "complete" && it.refinementChoices.isEmpty() }.mapNotNull { answer ->
@@ -1704,7 +1732,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                     val prompt = ChatToolReply.generationPrompt(
                         user.text,decoded.brief,decoded.text,sources,selectedText)
                     tools.generateAutomatic(prompt,target.takeIf { decoded.kind == "refine" },conversationId,operationId,key,images,request.session,
-                        cancelRequest = ::cancelRequest, originalRequest = user.text,
+                        cancelRequest = ::cancelRequest, originalRequest = user.text, sceneAttachments = sceneAttachments,
                         prepared = {
                             val progress = if (decoded.kind == "refine") R.string.chat_app_update_progress else R.string.chat_app_create_progress
                             prepareToolOperation(progress)

@@ -27,7 +27,7 @@ internal data class SceneRequirement(
             Omit scene for ordinary forms and controls that need no drawing. Checks format:
         """.trimIndent() + "\n" + GenerationBehavior.diagnosticGuidance
 
-        fun read(raw: Any?): SceneRequirement? {
+        fun read(raw: Any?, threeScene: Boolean = false): SceneRequirement? {
             if (raw == null) return null
             val scene = raw as? JSONObject ?: throw PartsContractFailure("$.scene", "a scene object")
             scene.requireKeys("$.scene", setOf("placement", "brief", "checks"), setOf("liveInputs"))
@@ -35,7 +35,7 @@ internal data class SceneRequirement(
             requireParts(placement in setOf("inline", "stage", "immersive"), "$.scene.placement", "inline, stage, or immersive")
             val brief = scene.opt("brief")
             requireParts(brief is String && brief.isNotBlank() && brief.length <= 1200, "$.scene.brief", "a visual brief up to 1200 characters")
-            val checks = GenerationBehavior.parse(scene.opt("checks"), emptySet()) as? GenerationBehavior.Scenario
+            val checks = GenerationBehavior.parse(scene.opt("checks"), emptySet(), threeScene) as? GenerationBehavior.Scenario
                 ?: throw PartsContractFailure("$.scene.checks", "an executable drawing check")
             requireParts(checks.steps.any { step ->
                 step is GenerationBehavior.Step.Advance && step.observe != null ||

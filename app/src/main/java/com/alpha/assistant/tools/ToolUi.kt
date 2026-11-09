@@ -1,5 +1,7 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.tools.three.ThreeScenePane
+
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -180,7 +182,7 @@ internal class MiniAppActions {
             Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             if (tool.archived) Text(stringResource(R.string.tool_placed_archive))
             if (spec == null) Text(stringResource(R.string.tool_closed_format))
-            else if (compact) {
+            else if (compact || spec.threeScene) {
                 if (spec.description.isNotBlank()) Text(spec.description, style = MaterialTheme.typography.bodySmall)
             } else if (!tool.archived) {
                 Column(Modifier.fillMaxWidth().heightIn(max = 280.dp).verticalScroll(rememberScrollState())) {
@@ -622,7 +624,7 @@ catch (_: Exception) { null }
     prompt: String, edit: (String) -> Unit, submit: () -> Unit, accept: (String) -> Unit, archive: () -> Unit, actions: MiniAppActions, refine: (String) -> Unit,
     immersive: Boolean, exitImmersive: () -> Unit, settings: () -> Unit, close: () -> Unit, hostCovered: Boolean, alignDetailStart: Boolean) {
     val spec=remember(tool?.spec,tool?.ui,tool?.state) { tool?.let { ToolSpec.availablePersisted(it) } }
-    val graphicsHost = if (tool != null && spec != null && (spec.surfaces.isNotEmpty() || immersive)) {
+    val graphicsHost = if (tool != null && spec != null && !spec.threeScene && (spec.surfaces.isNotEmpty() || immersive)) {
         // The outgoing presentation can close after the incoming one has opened.
         remember(controller, tool.id, tool.revision, immersive) {
             if (spec.surfaces.isEmpty()) controller.nonGraphicsLiveInputHost(tool) else controller.artifactHost(tool)
@@ -817,7 +819,10 @@ catch (_: Exception) { null }
                             openNonGraphics = draft == null, allowVideo = true,
                             liveAllowed = draft == null && details == null && !menu && !hostCovered && !actions.covers(tool.id))
                     }
-                    if (draft == null && graphicsHost != null) CoveredToolSurface(tool, spec, !tool.archived,
+                    if (spec.threeScene) ThreeScenePane(tool, spec,
+                        draft == null && !controller.busy && !tool.archived && !menu &&
+                            !hostCovered && details == null && !actions.covers(tool.id), controller::saveThreeScene)
+                    else if (draft == null && graphicsHost != null) CoveredToolSurface(tool, spec, !tool.archived,
                         canvasHeight, graphicsHost, actions, covered = details != null || menu || hostCovered,
                         content = content) { artifactSnapshot = it }
                     else content()

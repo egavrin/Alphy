@@ -143,6 +143,7 @@ class CloudSession {
     }
 }
 interface ChatProvider {
+    val supportsSceneVision: Boolean get() = false
     suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit)
 }
 

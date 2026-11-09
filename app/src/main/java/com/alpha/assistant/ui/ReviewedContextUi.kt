@@ -95,15 +95,19 @@ import java.io.InputStreamReader
             val mime = withContext(Dispatchers.IO) {
                 runCatching { if (uri.scheme == "content") resolver.getType(uri) else null }.getOrNull()
             }
-            when (mime) {
-                "image/jpeg", "image/png", "image/gif", "image/webp" -> {
-                    val name = withContext(Dispatchers.IO) {
-                        runCatching {
-                            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-                                if (it.moveToFirst()) it.getString(0) else null
-                            }
-                        }.getOrNull() ?: imageName
+            suspend fun displayName(fallback: String) = withContext(Dispatchers.IO) {
+                runCatching {
+                    resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                        if (it.moveToFirst()) it.getString(0) else null
                     }
+                }.getOrNull() ?: fallback
+            }
+            if (pickerSource == "three") {
+                val name = displayName("3D asset")
+                if (checkOrigin() && model.attachThreeSceneAsset(uri, name, mime.orEmpty(), origin)) close()
+            } else when (mime) {
+                "image/jpeg", "image/png", "image/gif", "image/webp" -> {
+                    val name = displayName(imageName)
                     if (checkOrigin() && model.attachImage(Attachment(uri.toString(), name, mime), origin, persistReadAccess = true, destination = destination)) close()
                 }
                 "text/plain" -> if (pickerSource == "file") {
@@ -161,6 +165,9 @@ import java.io.InputStreamReader
             rows = buildList {
                 add(ContextSourceAction(R.string.context_calendar, Glyph.Calendar) { if (checkOrigin()) page = "calendar" })
                 add(ContextSourceAction(R.string.context_paste, Glyph.Clipboard) { if (checkOrigin()) page = "paste" })
+                if (destination == null) add(ContextSourceAction(R.string.context_three_asset, Glyph.File) {
+                    launchPicker("three") { files.launch(arrayOf("*/*")) }
+                })
                 if (destination == null) add(ContextSourceAction(R.string.contact_title, Glyph.Profile) { page = "contact" })
             },
             enabled = pickerSource == null && !model.attachmentBusy,
