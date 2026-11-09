@@ -29,6 +29,8 @@ import com.alpha.assistant.courses.CourseSlideGenerationRequest
 import com.alpha.assistant.courses.CourseSnapshot
 import com.alpha.assistant.courses.CourseStore
 import com.alpha.assistant.courses.CourseStoreException
+import com.alpha.assistant.courses.ReadingProgram
+import com.alpha.assistant.courses.ReadingVoice
 import com.alpha.assistant.courses.CourseTutorHost
 import com.alpha.assistant.courses.CourseTutorRequest
 import com.alpha.assistant.courses.encode
@@ -216,6 +218,19 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     )
     internal val courseController = CourseController(courseStore, ToolGenerationService(provider, SandboxClient(application)))
     private val courseRequests = mutableMapOf<CloudSession, () -> Unit>()
+    internal val readingVoice = if (application.packageName.endsWith(".readingtest")) {
+        val namespace = if (store.databaseName == "alpha.db") "" else ".${store.databaseName}"
+        ReadingVoice(application, namespace)
+    } else null
+    internal val readingProgram = readingVoice?.let {
+        ReadingProgram(courseStore) { request ->
+            courseRequest { key, session ->
+                completeCourseResponse(CloudRequest(listOf(CloudTurn("user", request.toString())), search = false,
+                    jsonObject = true, systemInstructions = ReadingProgram.INSTRUCTIONS), key, session, 4096)
+            }
+        }
+    }
+
     internal val courseGeneration = CourseSlideGenerationHost { request ->
         courseRequest { key, session ->
             courseController.generate(request.courseId, request.expectedRevision, request.slideId, key, session)

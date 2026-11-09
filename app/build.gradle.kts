@@ -4,17 +4,28 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+val readingTestBuild = providers.gradleProperty("alphyReadingTest").map(String::toBoolean).orElse(false)
+
 android {
     namespace = "com.alpha.assistant"
     compileSdk = 37
     defaultConfig {
         applicationId = "com.alpha.assistant"
+        manifestPlaceholders["applicationLabel"] = "@string/app_name"
         minSdk = 36
         targetSdk = 37
         ndk { abiFilters += "arm64-v8a" }
         versionCode = 10
         versionName = "0.1.0-alpha.10"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    buildTypes {
+        getByName("debug") {
+            if (readingTestBuild.get()) {
+                applicationIdSuffix = ".readingtest"
+                manifestPlaceholders["applicationLabel"] = "Alphy · Чтение"
+            }
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
