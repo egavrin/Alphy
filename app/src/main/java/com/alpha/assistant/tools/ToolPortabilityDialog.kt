@@ -44,6 +44,7 @@ internal fun ToolPortabilityDialog(controller: ToolController, tool: ToolRecord,
     val hasCollections = remember(expected.spec) { ToolSpec.availablePersisted(expected.spec)?.collections?.length() != 0 }
     var includeState by remember { mutableStateOf(false) }
     var definition by remember { mutableStateOf(expected.spec) }
+    var oversized by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
     AlertDialog(
@@ -62,9 +63,14 @@ internal fun ToolPortabilityDialog(controller: ToolController, tool: ToolRecord,
                     if (hasCollections) Text(stringResource(R.string.tool_export_collections))
                 } else {
                     Text(stringResource(R.string.tool_manual_edit_notice))
-                    OutlinedTextField(definition, { definition = it.take(65536) },
-                        label = { Text(stringResource(R.string.tool_manual_edit_definition)) },
-                        maxLines = 12, enabled = !busy, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(definition, {
+                        val limit = ToolSpec.MAX_DEFINITION_BYTES
+                        oversized = it.length > limit || it.toByteArray(Charsets.UTF_8).size > limit
+                        if (!oversized) definition = it
+                    }, label = { Text(stringResource(R.string.tool_manual_edit_definition)) },
+                        isError = oversized, maxLines = 12, enabled = !busy, modifier = Modifier.fillMaxWidth())
+                    if (oversized) Text(stringResource(R.string.tool_manual_edit_size, ToolSpec.MAX_DEFINITION_BYTES / 1024),
+                        color = MaterialTheme.colorScheme.error)
                 }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (stale) Text(stringResource(R.string.tool_refinement_current_version), color = MaterialTheme.colorScheme.error)
@@ -72,7 +78,7 @@ internal fun ToolPortabilityDialog(controller: ToolController, tool: ToolRecord,
             }
         },
         confirmButton = {
-            TextButton(enabled = !busy && !stale && (export || definition != expected.spec), onClick = {
+            TextButton(enabled = !busy && !stale && !oversized && (export || definition != expected.spec), onClick = {
                 busy = true
                 failed = false
                 scope.launch {

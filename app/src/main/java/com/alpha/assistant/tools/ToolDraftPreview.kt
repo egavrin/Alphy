@@ -1,6 +1,5 @@
 package com.alpha.assistant.tools
 
-import com.alpha.assistant.sandbox.SandboxContract
 import kotlinx.coroutines.CancellationException
 
 data class ToolDraftPreviewIdentity(val draftId: String, val requestId: String, val attempt: Int)
@@ -30,7 +29,7 @@ internal class ToolDraftPreviewPublisher(private val draftId: String, private va
 
     suspend fun publish(attempt: Int, preview: ToolPreview, surfacesJson: String) {
         val candidate = preview.spec.json
-        if (draftId.isBlank() || draftId.length > 128 || candidate.toByteArray(Charsets.UTF_8).size > SandboxContract.MAX_BYTES) return
+        if (draftId.isBlank() || draftId.length > 128 || candidate.toByteArray(Charsets.UTF_8).size > ToolSpec.MAX_DEFINITION_BYTES) return
         val identity = ToolDraftPreviewIdentity(draftId, observer.requestId, attempt)
         offered = identity
         try {

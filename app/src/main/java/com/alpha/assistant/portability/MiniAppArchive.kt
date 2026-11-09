@@ -19,8 +19,8 @@ internal object MiniAppArchive {
     private const val DEFINITION = "definition.json"
     private const val STATE = "state.json"
     private const val VERSION = 1
-    private const val MAX_BYTES = 128 * 1024L
-    private val limits = ZipLimits(MAX_BYTES + 4096, 3, SandboxContract.MAX_BYTES.toLong(), MAX_BYTES)
+    private const val MAX_BYTES = 320 * 1024L
+    private val limits = ZipLimits(MAX_BYTES + 4096, 3, ToolSpec.MAX_DEFINITION_BYTES.toLong(), MAX_BYTES)
     private val artifactId = Regex("[A-Za-z0-9_-]{1,128}")
 
     data class Contents(val id: String, val spec: ToolSpec, val state: String)

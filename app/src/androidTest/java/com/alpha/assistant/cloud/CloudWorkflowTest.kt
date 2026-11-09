@@ -184,6 +184,9 @@ class CloudWorkflowTest {
     // Failure cases: JSON mode leaks into chat/search, blank output, truncation, malformed streams, and HTTP failures.
     @Test fun jsonOutputIsExplicitAndProviderFailuresStayVisible() = kotlinx.coroutines.runBlocking {
         var mode = "valid"
+        val largePatch = JSONObject().put("sourceEdits", JSONArray().put(JSONObject()
+            .put("search", "/*" + "x".repeat(50_000) + "*/")
+            .put("replace", "/*" + "y".repeat(50_000) + "*/"))).toString()
         val httpCalls = java.util.concurrent.atomic.AtomicInteger()
         Server { request, output ->
             assertTrue(request.json.getBoolean("stream"))
@@ -203,14 +206,28 @@ class CloudWorkflowTest {
                     output.event(end())
                     output.write("data: [DONE]\n\n".toByteArray())
                 }
+                "refine" -> {
+                    output.headers()
+                    val wire = buildString {
+                        for (chunk in largePatch.chunked(4)) {
+                            val event = textChunk(chunk).put("object", "chat.completion.chunk")
+                                .put("model", "deepseek-flash").put("id", "fixture-chunk")
+                            append("data: ").append(event).append("\n\n")
+                        }
+                    }
+                    assertTrue(wire.length > 2 * 1024 * 1024)
+                    output.write(wire.toByteArray())
+                    output.event(end())
+                    output.write("data: [DONE]\n\n".toByteArray())
+                }
                 else -> output.answer("{\"count\":1}")
             }
         }.use { server ->
             val provider = DeepSeekProvider(server.url, onHttpCall = { httpCalls.incrementAndGet() }) {}
-            suspend fun request(json: Boolean, search: Boolean = false, stage: CloudGenerationStage? = null): String {
+            suspend fun request(json: Boolean, search: Boolean = false, stage: CloudGenerationStage? = null, expanded: Boolean = false): String {
                 val text = StringBuilder()
                 provider.respond("alpha-test-only",CloudRequest(listOf(CloudTurn("user","Return JSON {\"count\":1}")),search,
-                    jsonObject = json, generationStage = stage),CloudSession()) {
+                    jsonObject = json, generationStage = stage, expandedWriterOutput = expanded),CloudSession()) {
                     if(it is CloudEvent.Text) text.append(it.value)
                 }
                 return text.toString()
@@ -233,12 +250,15 @@ class CloudWorkflowTest {
             assertEquals("{\"count\":1}", request(true, stage = CloudGenerationStage.REFINE))
             assertEquals("disabled", server.requests.last().json.getJSONObject("thinking").getString("type"))
             assertFalse(server.requests.last().json.has("max_tokens"))
+            mode = "refine"
+            assertEquals(largePatch, request(true, stage = CloudGenerationStage.REFINE, expanded = true))
+            assertEquals(131_072, server.requests.last().json.getInt("max_tokens"))
             listOf("blank" to "empty_response","truncated" to "incomplete","disconnect" to "incomplete","malformed" to "stream_invalid","auth" to "auth").forEach { (response,code) ->
                 mode = response
                 val failure = runCatching { request(true) }.exceptionOrNull()
                 assertTrue(response,failure is CloudFailure); assertEquals(code,(failure as CloudFailure).code)
             }
-            assertEquals(11, server.requests.size)
+            assertEquals(12, server.requests.size)
             assertEquals(server.requests.size, httpCalls.get())
             assertTrue(server.failures.toString(),server.failures.isEmpty())
         }
@@ -926,13 +946,13 @@ class CloudWorkflowTest {
                     val hits = JSONObject(result.getString("content")).getJSONArray("results")
                     assertEquals(1, hits.length())
                     assertEquals(allowed, hits.getJSONObject(0).getString("url"))
-                    output.answer("World events [1]")
+                    output.answer("Verified tally: 17 world events [1]")
                 }
             }
         }.use { server ->
             val result = com.alpha.assistant.automations.prepareAgentResult(DeepSeekProvider(server.url), "alpha-test-only",
                 com.alpha.assistant.automations.AgentAutomation("Summarize yesterday's news.", "PRIVATE_CHAT_ID"), target, zone, CloudSession())
-            assertTrue(result.getString("text").contains("World events"))
+            assertEquals("Источники не заменяют независимую проверку.\n\nVerified tally: 17 world events [1]", result.getString("text"))
             assertEquals(allowed, result.getJSONArray("sources").getJSONObject(0).getString("url"))
             assertEquals(3, server.requests.size)
             assertTrue(server.failures.toString(), server.failures.isEmpty())
@@ -1089,7 +1109,7 @@ class CloudWorkflowTest {
     @Test fun sourcedWeatherCorrectsOnceWithoutRepeatingSearch() = kotlinx.coroutines.runBlocking {
         var answers = 0
         var searches = 0
-        var failCorrection = false
+        var failCorrection: Boolean? = null
         Server { request, output ->
             when {
                 request.path == "/v1/tools/search" -> {
@@ -1102,13 +1122,14 @@ class CloudWorkflowTest {
                     val system = request.json.getJSONArray("messages").getJSONObject(0).getString("content")
                     val correction = ++answers == 2
                     assertEquals(correction, "The previous weather answer failed source validation" in system)
-                    assertFalse(request.json.toString().contains("+99 °C"))
-                    output.answer(if (correction && !failCorrection) "Москва: −3 °C, 08:30 UTC [1]." else "Москва: +99 °C [1].")
+                    assertFalse(request.json.toString().contains("Москва: −3 °C [2]."))
+                    output.answer(if (failCorrection == null || correction && failCorrection == false)
+                        "Verified conversion: −3 °C is 26.6 °F [1]." else "Москва: −3 °C [2].")
                 }
                 else -> output.classification(decision("Погода", kind = "weather_answer", search = "required"))
             }
         }.use { server ->
-            for (reject in listOf(false, true)) {
+            for (reject in listOf(null, false, true)) {
                 failCorrection = reject
                 answers = 0
                 searches = 0
@@ -1117,16 +1138,16 @@ class CloudWorkflowTest {
                     DeepSeekProvider(server.url).respond("alpha-test-only", cleanChatRequest("Какая погода в Москве?"), CloudSession()) { events += it }
                 }
                 val completed = events.filterIsInstance<CloudEvent.RoundComplete>()
-                if (reject) {
-                    assertEquals("source_support", (result.exceptionOrNull() as? CloudFailure)?.code)
+                if (reject == true) {
+                    assertEquals("source_attribution", (result.exceptionOrNull() as? CloudFailure)?.code)
                     assertTrue(completed.isEmpty())
                 } else {
                     result.getOrThrow()
                     val text = ChatToolReply.decode(completed.single().text).text
-                    assertTrue(text.contains("−3 °C, 08:30 UTC [1]"))
-                    assertFalse(text.contains("+99 °C"))
+                    assertTrue(text.contains("Verified conversion: −3 °C is 26.6 °F [1]"))
+                    assertFalse(text.contains("[2]"))
                 }
-                assertEquals(2, answers)
+                assertEquals(if (reject == null) 1 else 2, answers)
                 assertEquals(1, searches)
                 assertTrue(events.filterIsInstance<CloudEvent.AnswerFragment>().isEmpty())
             }
@@ -1193,7 +1214,7 @@ class CloudWorkflowTest {
     }
 
     // Failure cases: source-shaped prose invents URLs, citation indices, coordinates, or verification.
-    @Test fun groundedOutputCannotInventSourcesOrAssertUnsupportedVerification() = kotlinx.coroutines.runBlocking {
+    @Test fun groundedOutputChecksAttributionWithoutFactHeuristics() = kotlinx.coroutines.runBlocking {
         var result = "A sourced statement [1](https://example.com/real)"
         Server { request, output ->
             when {
@@ -1208,10 +1229,10 @@ class CloudWorkflowTest {
                 "The source reports 1,200 meters and −3,5 °C [1]." to null,
                 "The source reports 1\u202f200 meters [1]." to null,
                 "The source reports [30 minutes](https://example.com/real)." to null,
-                "The source reports [99 minutes](https://example.com/real)." to "source_support",
+                "The source reports [99 minutes](https://example.com/real)." to null,
                 "The source reports [30 minutes] [1]." to null,
-                "The source reports [99 minutes] [1]." to "source_support",
-                "The location is [verified] [1]." to "source_support",
+                "The source reports [99 minutes] [1]." to null,
+                "The location is [verified] [1]." to null,
                 "A sourced statement [0]" to "source_attribution",
                 "A sourced statement [2]" to "source_attribution",
                 "The label [Add] appears next to the source [1]." to null,
@@ -1222,8 +1243,8 @@ class CloudWorkflowTest {
                 "A fabricated source [Docs][ref]\n\n[ref]: https://example.com/invented" to "source_attribution",
                 "A fabricated source <https://example.com/invented>" to "source_attribution",
                 "A fabricated source `https://example.com/invented`" to "source_attribution",
-                "Verified coordinates: 30.25, 120.10 [1]" to "source_support",
-                "The location is verified [1]" to "source_support",
+                "Verified coordinates: 30.25, 120.10 [1]" to null,
+                "The location is verified [1]" to null,
                 "The source reports 30 minutes [1]. These statements are not independently verified." to null).forEach { (text,code) ->
                 result = text; val events = mutableListOf<CloudEvent>()
                 val failure = runCatching { DeepSeekProvider(server.url).respond("alpha-test-only",cleanChatRequest("Find a sourced statement"),CloudSession()) { events += it } }.exceptionOrNull()
@@ -1486,6 +1507,63 @@ class CloudWorkflowTest {
 
     @Test fun correctedChatDecisionStillLetsTheNativePlanCorrectOnce() = recoverCounter(false)
 
+    @Test fun groundedMiniAppBriefFitsTheActualBudgetWithoutAnotherSearch(): Unit = kotlinx.coroutines.runBlocking {
+        val prompt = "Create a sourced dashboard. Preserve the first section. " +
+            "Describe the current screen. ".repeat(500) + " Preserve the final section."
+        val selected = "Selected text: " + "\\\"".repeat(3_900)
+        val urls = List(10) { "https://example.com/source/$it?q=" + "a".repeat(1_950) }
+        var searches = 0
+        var grounded = 0
+        var firstPayload: String? = null
+        Server { request, output ->
+            when {
+                request.path == "/v1/tools/search" -> {
+                    val hits = JSONArray()
+                    urls.drop(searches++ * 5).take(5).forEach {
+                        hits.put(JSONObject().put("title", "Documentation").put("url", it)
+                            .put("summary", "Quoted \\\"JSON\\\" field. ".repeat(290)))
+                    }
+                    output.headers(type = "application/json")
+                    output.write(JSONObject().put("results", hits).toString().toByteArray())
+                }
+                request.searching -> output.calls(call(0), call(1))
+                request.grounded -> {
+                    val messages = request.json.getJSONArray("messages")
+                    val system = messages.getJSONObject(0).getString("content")
+                    val payload = messages.getJSONObject(1).getString("content")
+                    val context = JSONObject(payload)
+                    assertTrue(payload.length <= ChatToolReply.MAX_REPLY)
+                    assertEquals(prompt, context.getString("originalRequest"))
+                    assertEquals(selected, context.getString("untrusted_selected_text"))
+                    val sources = context.getJSONArray("validatedSources")
+                    assertEquals(urls, (0 until sources.length()).map { sources.getJSONObject(it).getString("url") })
+                    assertTrue(system.contains("Limit the brief to"))
+                    if (++grounded == 1) {
+                        firstPayload = payload
+                        output.answer(decision(kind = "create", search = "required", brief = "x".repeat(40_000)))
+                    } else {
+                        assertEquals(firstPayload, payload)
+                        assertTrue(system.contains("decision.brief_budget"))
+                        output.answer(decision(kind = "create", search = "required", brief = "Keep all sections. [10]"))
+                    }
+                }
+                else -> output.classification(decision(kind = "create", search = "required", brief = "Build the dashboard. " + "x".repeat(30_000)))
+            }
+        }.use { server ->
+            val events = mutableListOf<CloudEvent>()
+            val result = runCatching {
+                DeepSeekProvider(server.url).respond("alpha-test-only",
+                    cleanChatRequest(prompt).copy(selectedText = selected), CloudSession()) { events += it }
+            }
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+            result.getOrThrow()
+            val accepted = ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text)
+            assertTrue(accepted.brief.startsWith("Keep all sections. [10]"))
+            assertEquals(2, searches)
+            assertEquals(2, grounded)
+        }
+    }
+
     @Test fun sourcedMiniAppAttributionCorrectsOnceWithoutRepeatingSearch() {
         val url = "https://example.com/docs?a=1&b=2"
         val brief = "Show [Add] and the Verified status. Two plus three is 5. Use [Docs](https://example.com/docs?a=1&amp;b=2) [1]."
@@ -1548,6 +1626,8 @@ class CloudWorkflowTest {
                     assertTrue(prompt.contains(brief))
                     assertFalse(prompt.contains(rejected))
                     val attempt = generation.incrementAndGet()
+                    if (kind.get() == "refine" || attempt > 1) assertEquals(131_072, request.json.getInt("max_tokens"))
+                    else assertFalse(request.json.has("max_tokens"))
                     output.answer(when {
                         kind.get() == "refine" -> """{"appLanguage":"en","fields":{"description":"Updated local counter"}}"""
                         attempt == 1 -> plan
@@ -1843,7 +1923,7 @@ class CloudWorkflowTest {
         val rejectRelease = CountDownLatch(1)
         val finishRelease = CountDownLatch(1)
         val cancelledText = "[Late citation](https://example.com/untrusted)"
-        val rejectedText = "The source reports 99 minutes [1]."
+        val rejectedText = "The source reports 99 minutes [2]."
         val acceptedText = "A complete answer"
         Server { request, output ->
             val messages = request.json.optJSONArray("messages")
@@ -1901,7 +1981,7 @@ class CloudWorkflowTest {
                 waitForFragment(rejectedText)
                 rejectRelease.countDown()
                 fixture.idle()
-                assertEquals("source_support",fixture.last.errorCode)
+                assertEquals("source_attribution",fixture.last.errorCode)
                 assertEquals("",fixture.last.text)
                 assertEquals("https://example.com/duration",fixture.persisted().selected!!.messages.last().sources.single().url)
 
@@ -2249,13 +2329,37 @@ class CloudWorkflowTest {
         var response = "empty"
         Server { request, output ->
             if(request.answering) { output.answer("Результаты не найдены"); return@Server }
-            if(request.classifying) { output.classification(decision(search = "optional")); return@Server }
+            if (request.classifying) {
+                val messages = request.json.getJSONArray("messages")
+                val liveData = messages.getJSONObject(1).getString("content").startsWith("Create a live dashboard")
+                if (liveData) {
+                    assertTrue(messages.getJSONObject(0).getString("content").contains("use optional search when a local shell"))
+                    output.classification(decision(kind = "create", search = "optional", brief = "Prepare a dashboard."))
+                } else output.classification(decision(search = "optional"))
+                return@Server
+            }
+            if (request.grounded) {
+                output.answer(decision(kind = "create", search = "optional",
+                    text = "The live value is unavailable. What endpoint and JSON path should I use?",
+                    brief = "Show Unavailable and provide a working local counter."))
+                return@Server
+            }
             if (request.path == "/v1/tools/search") {
                 if (response == "quota") { output.headers(402, "application/json"); output.write("{}".toByteArray()) }
                 else { output.headers(type = "application/json"); output.write("{\"results\":[]}".toByteArray()) }
             } else {
                 val messages = request.json.getJSONArray("messages")
-                if (messages.getJSONObject(messages.length() - 1).getString("role") == "tool") output.answer("Результаты не найдены")
+                val input = messages.getJSONObject(1).getString("content")
+                if (input.contains("Widget brief:")) {
+                    assertTrue(input.contains("Show Unavailable and provide a working local counter."))
+                    if (request.json.getJSONObject("thinking").getString("type") == "enabled" && !request.json.has("max_tokens")) {
+                        output.answer("""{"wholeScreen":true,"language":"en"}""")
+                    } else output.answer("""{"formatVersion":3,"title":"Dashboard","description":"","capabilities":[],
+                        "stateSchema":{"count":"number"},"initialState":{"count":0},
+                        "ui":{"type":"column","children":[{"type":"text","text":"Unavailable"},
+                        {"type":"text","text":"Count","bind":"count"},{"type":"button","text":"Add","action":"add"}]},
+                        "source":"if(input.event.actionId==='add') input.state.count++; return {state:input.state};"}""")
+                } else if (messages.getJSONObject(messages.length() - 1).getString("role") == "tool") output.answer("Результаты не найдены")
                 else {
                     output.headers(); output.event(JSONObject().put("choices", JSONArray().put(JSONObject().put("delta", JSONObject().put("tool_calls", JSONArray().put(JSONObject()
                         .put("index", 0).put("id", "search").put("function", JSONObject().put("name", "web_search").put("arguments", "{\"query\":\"Alpha\"}"))))))))
@@ -2277,6 +2381,12 @@ class CloudWorkflowTest {
             fixture.keys.clear(); fixture.keys.save("alpha-test-only")
             fixture.submit("Empty search", true); fixture.idle()
             assertEquals("complete", fixture.last.status); assertEquals("empty", fixture.last.searchStatus); assertTrue(fixture.last.sources.isEmpty())
+            fixture.submit("Create a live dashboard with a local counter.", true); fixture.idle()
+            assertEquals("complete", fixture.last.status)
+            assertEquals("empty", fixture.last.searchStatus)
+            val shell = ToolStore(app, "${fixture.name}.db-tools.db").use { it.tools().single() }
+            assertTrue(shell.ui.contains("Unavailable"))
+            assertTrue(com.alpha.assistant.tools.ToolSpec.parsePersisted(shell.spec).capabilities.isEmpty())
             response = "quota"; fixture.submit("Quota search", true); fixture.idle()
             assertEquals("quota", fixture.last.errorCode); assertEquals("error", fixture.last.searchStatus)
             assertTrue(fixture.last.error.startsWith("Поиск:")); assertTrue(server.failures.isEmpty())

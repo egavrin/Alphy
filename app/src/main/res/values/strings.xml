@@ -27,7 +27,7 @@
     <string name="chat_message_create_automation">Создать сценарий из запроса</string>
     <string name="chat_message_retry">Повторить запрос</string>
     <string name="chat_attachment_history">Вложение · %1$s · только в исходном запросе</string>
-    <string name="chat_source_support">Не удалось составить ответ по найденным источникам. Можно открыть ссылки или повторить запрос.</string>
+    <string name="chat_source_attribution">Не удалось составить ответ по найденным источникам. Можно открыть ссылки или повторить запрос.</string>
     <string name="chat_empty_answer">Ответ не пришёл.</string>
     <string name="chat_search_running">Поиск в интернете…</string>
     <string name="chat_search_found">Веб-поиск завершён</string>

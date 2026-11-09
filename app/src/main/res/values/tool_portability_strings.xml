@@ -11,5 +11,6 @@
     <string name="tool_manual_edit_notice">Измените описание JSON. При сохранении Alphy проверит данные и приостановит связанные сценарии.</string>
     <string name="tool_manual_edit_definition">Описание мини-приложения (JSON)</string>
     <string name="tool_manual_edit_save">Проверить и сохранить</string>
+    <string name="tool_manual_edit_size">Описание превышает допустимый размер (%1$d КиБ).</string>
     <string name="tool_manual_edit_failed">Не удалось сохранить изменения. Проверьте JSON и текущую версию мини-приложения.</string>
 </resources>

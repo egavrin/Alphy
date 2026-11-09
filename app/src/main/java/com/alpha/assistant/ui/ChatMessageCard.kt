@@ -63,7 +63,7 @@ import com.alpha.assistant.data.Source
     }
     val accepted = user || message.status == "complete"
     val hasTextActions = accepted && message.text.isNotBlank()
-    val sourceProblem = message.errorCode in setOf("source_support", "source_attribution")
+    val sourceProblem = message.errorCode == "source_attribution"
     val emptyReply = message.errorCode == "empty_response"
     val hasMenu = hasTextActions || (retry != null && !sourceProblem && !emptyReply)
     val colors = MaterialTheme.colorScheme
@@ -120,7 +120,7 @@ import com.alpha.assistant.data.Source
                     Surface(shape = RoundedCornerShape(12.dp), color = if (canRecover) colors.secondaryContainer else colors.errorContainer,
                         contentColor = if (canRecover) colors.onSecondaryContainer else colors.onErrorContainer) {
                         val error = when {
-                            sourceProblem -> stringResource(R.string.chat_source_support)
+                            sourceProblem -> stringResource(R.string.chat_source_attribution)
                             emptyReply -> stringResource(R.string.chat_empty_answer)
                             else -> message.error
                         }

@@ -4,12 +4,14 @@ import org.json.JSONObject
 
 internal object SandboxContract {
     const val LIVE_INPUT_EVENT = "liveInput"
-    const val MAX_BYTES = 65536
+    const val MAX_BYTES = 64 * 1024
+    const val MAX_SOURCE_BYTES = 64 * 1024
+    const val MAX_RESULT_BYTES = 192 * 1024
     const val HEAP_BYTES = 16L * 1024 * 1024
     const val EVALUATION_MS = 500L
 
-    fun objectFrom(json: String): JSONObject {
-        require(json.toByteArray(Charsets.UTF_8).size <= MAX_BYTES)
+    fun objectFrom(json: String, maxBytes: Int = MAX_BYTES): JSONObject {
+        require(json.toByteArray(Charsets.UTF_8).size <= maxBytes)
         StrictJson(json).validate()
         return JSONObject(json)
     }
@@ -78,7 +80,7 @@ internal object SandboxContract {
     }
 
     fun validateRequest(source: String, input: String) {
-        require(source.isNotBlank() && source.toByteArray(Charsets.UTF_8).size <= MAX_BYTES)
+        require(source.isNotBlank() && source.toByteArray(Charsets.UTF_8).size <= MAX_SOURCE_BYTES)
         val json = objectFrom(input)
         require(json.getString("artifactId").length in 1..128)
         require(json.get("revision") is Int && json.getInt("revision") > 0)
@@ -146,7 +148,7 @@ internal object SandboxContract {
     }
 
     fun validateResult(result: String, liveInput: Boolean = false) {
-        val json = objectFrom(result)
+        val json = objectFrom(result, MAX_RESULT_BYTES)
         val fields=if(liveInput) setOf("state", "ui", "surfaces")
             else setOf("state", "ui", "effects", "records", "surfaces", "frames", "timers", "playback")
         require(json.keys().asSequence().all { it in fields })

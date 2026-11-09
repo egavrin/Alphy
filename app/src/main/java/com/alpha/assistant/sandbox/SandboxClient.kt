@@ -13,7 +13,7 @@ class SandboxClient internal constructor(context: Context,private val runtime: A
     suspend fun availability(): SandboxResult=runtime.availability()
     /** Generation owns only the transient slot. Closing this lease never replaces a foreground session. */
     internal suspend fun <T> disposable(block: suspend (suspend (String,String)->SandboxResult)->T): T {
-        val isolate=runtime.acquire(retained=false,maxReturnBytes=SandboxContract.MAX_BYTES)
+        val isolate=runtime.acquire(retained=false,maxReturnBytes=SandboxContract.MAX_RESULT_BYTES)
         try {
             return block {source,input ->
                 val valid=runCatching {SandboxContract.validateRequest(source,input)}.isSuccess
@@ -31,7 +31,7 @@ class SandboxClient internal constructor(context: Context,private val runtime: A
         try {SandboxContract.validateRequest(source,input)}
         catch(_: Exception) {return SandboxResult("INVALID_REQUEST")}
         currentCoroutineContext().ensureActive()
-        val isolate=try {runtime.acquire(retained=false,maxReturnBytes=SandboxContract.MAX_BYTES)}
+        val isolate=try {runtime.acquire(retained=false,maxReturnBytes=SandboxContract.MAX_RESULT_BYTES)}
             catch(cancel: CancellationException) {throw cancel}
             catch(failure: RuntimeFailure) {return SandboxResult(failure.status)}
         try {

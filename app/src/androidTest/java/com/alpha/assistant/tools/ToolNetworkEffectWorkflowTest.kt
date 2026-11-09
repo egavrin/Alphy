@@ -109,6 +109,55 @@ class ToolNetworkEffectWorkflowTest {
         }
     }
 
+    @Test fun liveDataGenerationUsesTheDocumentedExtractorOrOffersALocalShell(): Unit = runBlocking {
+        val endpoint = "https://fixture.invalid/sensors"
+        val network = JSONObject("""{"id":"refresh","capability":"network.request","args":{
+            "method":"GET","url":"$endpoint","extract":{"kind":"number","path":["readings",0,"value"]}}}""")
+        val name = "live-data-generation-${UUID.randomUUID()}.db"
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (request.replyWithFixturePlan(emit)) return
+                val prompt = request.turns.first().text
+                assertTrue(prompt.contains("Use the exact endpoint, JSON key/index path, and value type"))
+                assertTrue(prompt.contains("Do not emit a live network effect for an incomplete source"))
+                val configured = prompt.contains("Use $endpoint")
+                val effects = if (configured) ",effects:[$network]" else ""
+                emit(CloudEvent.Text(JSONObject("""{"formatVersion":3,"title":"Sensor dashboard","description":"",
+                    "stateSchema":{"count":"number"},"initialState":{"count":0},
+                    "ui":{"type":"column","children":[{"type":"text","text":"Unavailable"},
+                    {"type":"button","text":"Refresh","action":"refresh"},{"type":"button","text":"Add","action":"add"}]}}""")
+                    .put("capabilities", if (configured) JSONArray().put("network.request") else JSONArray())
+                    .put("capabilityResults", configured)
+                    .put("source", """
+                        if (input.event.actionId === 'add') input.state.count++;
+                        if (input.event.actionId === 'refresh') return {state:input.state$effects};
+                        return {state:input.state};
+                    """.trimIndent()).toString()))
+            }
+        }
+        try {
+            ToolStore(app, name).use { store ->
+                val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(app)))
+                for (configured in listOf(true, false)) {
+                    val request = "Create a sensor dashboard with a local counter. " + if (configured)
+                        "Use $endpoint and read the number at readings[0].value."
+                    else "Show the live value as unavailable while the endpoint and JSON path are missing."
+                    val draft = engine.createDraft(request, null)
+                    engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+                    val saved = engine.accept(draft.id)
+                    assertTrue(saved.ui.contains("Unavailable"))
+                    val refresh = engine.interactForeground(saved.id, saved.revision, saved.stateVersion, "refresh", null, acceptNetwork = true)
+                    if (configured) assertEquals(network.getJSONObject("args").toString(), checkNotNull(refresh.network).args.toString())
+                    else assertNull(refresh.network)
+                    val updated = engine.interact(refresh.tool.id, refresh.tool.revision, refresh.tool.stateVersion, "add", null)
+                    assertEquals(1, JSONObject(updated.state).getInt("count"))
+                }
+            }
+        } finally {
+            app.deleteDatabase(name)
+        }
+    }
+
     @Test fun liveJsonRefreshKeepsItsLastValueAndTimeAfterFailure(): Unit = runBlocking {
         val request = JSONObject("""{"id":"PrivateRequestIdSentinel","capability":"network.request","args":{
             "method":"GET","url":"https://fixture.invalid/private-url-sentinel","extract":{"kind":"number","path":["readings",0,"value"]}}}""")

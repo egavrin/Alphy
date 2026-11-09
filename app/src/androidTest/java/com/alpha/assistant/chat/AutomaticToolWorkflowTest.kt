@@ -23,6 +23,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -370,13 +371,32 @@ class AutomaticToolWorkflowTest {
     }
 
     @Test fun aDefinitionAtTheSizeLimitRepairsBeforeSavingItsLanguage() {
-        val large = JSONObject(spec()).put("source", "")
+        val large = JSONObject(spec())
+        val schema = large.getJSONObject("stateSchema")
+        val initial = large.getJSONObject("initialState")
+        val fields = JSONObject().put("id", "string").apply {
+            repeat(11) { put("field$it" + "x".repeat(40), "string") }
+        }
+        val recordList = JSONObject().put("type", "list").put("maxItems", 1).put("fields", fields)
+        repeat(26) {
+            schema.put("records$it", recordList)
+            initial.put("records$it", JSONArray())
+        }
+        repeat(12) {
+            schema.put("note$it", "string")
+            initial.put("note$it", "\"".repeat(2000))
+        }
+        val controls = large.getJSONObject("ui").getJSONArray("children")
+        val label = JSONObject().put("type", "text").put("text", "x".repeat(300))
+        repeat(4) {
+            controls.put(JSONObject().put("type", "column").put("children", JSONArray(List(50) { label })))
+        }
         val prefix = "/*"
-        val suffix = "*/ return {state:input.state};"
+        val suffix = "*/ " + large.getString("source")
         large.put("source", prefix + suffix)
-        val count = (65_530 - large.toString().toByteArray().size) / 2
+        val count = (262_138 - large.toString().toByteArray().size) / 2
         large.put("source", prefix + "\"".repeat(count) + suffix)
-        assertTrue(large.toString().toByteArray().size in 65_529..65_530)
+        assertTrue(large.toString().toByteArray().size in 262_137..262_138)
         assertNotNull(ToolSpec.parse(large.toString()))
         var completions = 0
         val provider = object : SingleRoundProvider() {
@@ -440,7 +460,7 @@ class AutomaticToolWorkflowTest {
             main { f.model.tools.interact(tool,"add",null) }; waitUntil { !f.model.tools.busy }
             assertEquals(1,JSONObject(f.toolStore.tool(tool.id)!!.state).getInt("count"))
         }
-        listOf(reply + " trailing",reply + reply,reply.dropLast(1),decision("x".repeat(17000)),
+        listOf(reply + " trailing",reply + reply,reply.dropLast(1),decision("x".repeat(ChatToolReply.MAX_REPLY)),
             decision().replace("\"kind\":", "\"kind\":\"answer\",\"kind\":"),
             decision().replace("\"brief\":\"Create a counter\"", "\"brief\":42"),
             JSONObject(decision()).put("targetId","forged").toString(),
@@ -517,7 +537,7 @@ class AutomaticToolWorkflowTest {
         }
         Fixture(provider).use { f ->
             listOf("Ready. <<app: {}>>", "<｜｜DSML｜｜ invoke name=\"web_search\">", decision()+decision(),
-                decision("x".repeat(17000)), JSONObject(decision("Update",kind = "refine")).put("targetId","unknown").toString(), decision().dropLast(1),
+                decision("x".repeat(64_000)), JSONObject(decision("Update",kind = "refine")).put("targetId","unknown").toString(), decision().dropLast(1),
                 decision().replace("\"brief\":", "\"brief\":42,\"brief\":")).forEach { invalid ->
                 reply = invalid; f.send("Create an app"); f.idle()
                 assertEquals(invalid.take(80),"error",f.last.status)
@@ -973,7 +993,7 @@ class AutomaticToolWorkflowTest {
                 assertTrue(f.toolStore.tools().isEmpty()); assertTrue(f.toolStore.drafts().isEmpty())
             }
             failure = null
-            calls = 0; answer = "é".repeat(40000)
+            calls = 0; answer = "é".repeat(131_073)
             f.send("Create a counter"); f.idle()
             assertEquals(1,calls); assertEquals("widget_response_size",f.last.errorCode); assertTrue(f.toolStore.tools().isEmpty())
             calls = 0; answer = spec()
@@ -1167,14 +1187,16 @@ class AutomaticToolWorkflowTest {
     @Test fun longSearchSummariesKeepSourceUrlsWithoutExceedingGeneratorBudget() {
         val request = "Create a counter"
         val overhead = ChatToolReply.generationPrompt(request, "", "", emptyList()).length
-        val exact = "a".repeat(16_000 - overhead)
-        assertEquals(16_000, ChatToolReply.generationPrompt(request, exact, "Optional reply", emptyList()).length)
+        val exact = "a".repeat(64_000 - overhead)
+        assertEquals(64_000, ChatToolReply.generationPrompt(request, exact, "Optional reply", emptyList()).length)
         val over = runCatching { ChatToolReply.generationPrompt(request, exact + "a", "", emptyList()) }.exceptionOrNull()
         assertEquals("widget_size", (over as? CloudFailure)?.code)
         val requests = CopyOnWriteArrayList<CloudRequest>()
         var generationCalls = 0
         val sources = List(5) { index -> Source("Verified source $index","https://example.com/source-$index","Verified value: $index. " + "x".repeat(5950)) }
         var brief = "Counter starts at verified value 12"
+        val longRequest = "Create a counter with verified value 12. " + "Keep the comparison label visible. ".repeat(430) +
+            " End with a Reset button."
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
@@ -1184,7 +1206,7 @@ class AutomaticToolWorkflowTest {
             }
         }
         Fixture(provider).use { f ->
-            f.send("Create a counter with verified value 12"); f.idle()
+            f.send(longRequest); f.idle()
             assertEquals("complete",f.last.status)
             assertEquals(listOf(null, CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.COMPLETE),
                 requests.map { it.generationStage })
@@ -1195,14 +1217,14 @@ class AutomaticToolWorkflowTest {
             )
             prompts.forEach { prompt ->
                 assertTrue("The generator must contain the bounded draft prompt",prompt.isNotEmpty())
-                assertTrue(prompt.length <= 16000)
-                assertEquals(ChatToolReply.generationPrompt("Create a counter with verified value 12",brief,"Ready.",sources),prompt)
-                assertTrue(prompt.contains("Create a counter with verified value 12"))
+                assertTrue(prompt.length in 16_001..64_000)
+                assertEquals(ChatToolReply.generationPrompt(longRequest,brief,"Ready.",sources),prompt)
+                assertTrue(prompt.contains(longRequest))
                 assertTrue(prompt.contains("Counter starts at verified value 12"))
                 sources.forEach { source -> assertTrue(prompt.contains(source.url)) }
             }
             assertEquals(sources,f.last.sources)
-            brief = "Counter " + "a".repeat(15000)
+            brief = "Counter " + "a".repeat(62_500)
             f.send("Create a counter " + "b".repeat(2000)); f.idle()
             assertEquals("widget_size",f.last.errorCode)
             assertEquals(5,requests.size)

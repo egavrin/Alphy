@@ -6,7 +6,6 @@ import com.alpha.assistant.cloud.validSourceUrl
 import com.alpha.assistant.data.Source
 import com.alpha.assistant.sandbox.SandboxContract
 import com.alpha.assistant.tools.LessonToolPreview
-import com.alpha.assistant.tools.MAX_TOOL_PROMPT_LENGTH
 import com.alpha.assistant.tools.ToolExecutionPolicy
 import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolPreview
@@ -15,6 +14,8 @@ import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+
+private const val MAX_LESSON_PROMPT_LENGTH = 16_000
 
 internal enum class CourseWorkflowError(val message: String) {
     CONTEXT_LIMIT("The course context exceeds the generation limit. No context was sent."),
@@ -75,7 +76,7 @@ internal class CourseGeneration(
         val exerciseBySlide = mutableMapOf<String, CourseExercise>()
         val prompt = StringBuilder(SLIDE_INSTRUCTIONS)
         fun append(value: String) {
-            if (value.length > MAX_TOOL_PROMPT_LENGTH - prompt.length) courseFailure(CourseWorkflowError.CONTEXT_LIMIT)
+            if (value.length > MAX_LESSON_PROMPT_LENGTH - prompt.length) courseFailure(CourseWorkflowError.CONTEXT_LIMIT)
             prompt.append(value)
         }
         append("\nCourse and reached slide:\n")
@@ -111,7 +112,7 @@ internal class CourseGeneration(
             if (source.title.isBlank() || source.title.length > 512 || source.url.length > 2048 || !validSourceUrl(source.url)) {
                 courseFailure(CourseWorkflowError.INVALID_SOURCE)
             }
-            if (source.summary.length > MAX_TOOL_PROMPT_LENGTH - prompt.length) courseFailure(CourseWorkflowError.CONTEXT_LIMIT)
+            if (source.summary.length > MAX_LESSON_PROMPT_LENGTH - prompt.length) courseFailure(CourseWorkflowError.CONTEXT_LIMIT)
             val sourceId = "s${index + 1}"
             sources[sourceId] = CourseSourceReference(source.title, source.url)
             if (index > 0) append(",")

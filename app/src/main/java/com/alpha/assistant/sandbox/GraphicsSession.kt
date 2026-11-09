@@ -44,13 +44,13 @@ class GraphicsSession(context: Context) {
                 val input=request()
                 input.toString().also {
                     SandboxContract.validateRequest(source,it)
-                    require(source.toByteArray(Charsets.UTF_8).size<=32768 && input.getJSONObject("event").getString("type")=="open")
+                    require(input.getJSONObject("event").getString("type")=="open")
                     artifactId=input.getString("artifactId")
                     revision=input.getInt("revision")
                     standalone=rememberState
                 }
             } catch(_: Exception) {close();return SandboxResult("INVALID_REQUEST")}
-            val active=try {runtime.acquire(retained=true,maxReturnBytes=SandboxContract.MAX_BYTES,waitForRetainedRelease=waitForRetainedRelease)}
+            val active=try {runtime.acquire(retained=true,maxReturnBytes=SandboxContract.MAX_RESULT_BYTES,waitForRetainedRelease=waitForRetainedRelease)}
                 catch(failure: RuntimeFailure) {close();return SandboxResult(failure.status)}
             synchronized(lock) {if(closed) {active.close();return SandboxResult("CLOSED")};isolate=active}
             currentCoroutineContext().ensureActive()

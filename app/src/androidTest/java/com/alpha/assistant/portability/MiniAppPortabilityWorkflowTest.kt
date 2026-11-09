@@ -7,6 +7,11 @@ import android.net.Uri
 import androidx.core.content.IntentCompat
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.R
+import com.alpha.assistant.cloud.ChatProvider
+import com.alpha.assistant.cloud.CloudEvent
+import com.alpha.assistant.cloud.CloudGenerationStage
+import com.alpha.assistant.cloud.CloudRequest
+import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.cloud.DeepSeekProvider
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.ToolEngine
@@ -14,9 +19,12 @@ import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
+import com.alpha.assistant.tools.patchSavedFixture
+import com.alpha.assistant.tools.replyWithFixturePlan
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -84,6 +92,94 @@ class MiniAppPortabilityWorkflowTest {
         }
     }
 
+    @Test fun largeAppGeneratesRunsRefinesAndSurvivesPortability() = runBlocking {
+        val app = InstrumentationRegistry.getInstrumentation().targetContext
+        val databases = List(2) { "portable-large-${UUID.randomUUID()}.db" }
+        val label = " — Field notes describe the local survey area, access conditions, and the observations to record when revisiting this location."
+        fun definition(title: String, heading: String): String {
+            val labels = List(300) { "Station ${it + 1}$label" }
+            val controls = JSONArray()
+                .put(JSONObject("""{"type":"text","text":"$heading","bind":"count"}"""))
+                .put(JSONObject("""{"type":"button","text":"Add","action":"add"}"""))
+            labels.chunked(30).forEach { group ->
+                controls.put(JSONObject().put("type", "column").put("children", JSONArray(group.map {
+                    JSONObject().put("type", "text").put("text", it)
+                })))
+            }
+            val state = JSONObject().put("count", 0)
+            val schema = JSONObject().put("count", "number")
+            repeat(12) { index ->
+                state.put("note$index", label.repeat(15))
+                schema.put("note$index", "string")
+            }
+            val source = """
+                const labels = ${JSONArray(labels)};
+                const children = [{type:'text',text:'$heading',bind:'count'}, {type:'button',text:'Add',action:'add'}];
+                for (let start = 0; start < labels.length; start += 30) {
+                    children.push({type:'column',children:labels.slice(start,start+30).map(text=>({type:'text',text}))});
+                }
+                if (input.event.actionId === 'add') input.state.count++;
+                return {state:input.state,ui:{type:'column',children}};
+            """.trimIndent()
+            assertTrue(source.toByteArray().size in 32769..65536)
+            return JSONObject(spec.json).put("title", title).put("stateSchema", schema).put("initialState", state)
+                .put("ui", JSONObject().put("type", "column").put("children", controls))
+                .put("source", source).toString()
+        }
+        var answer = definition("Survey log", "Visits")
+        assertTrue(answer.toByteArray().size > 65536)
+        val stages = mutableListOf<CloudGenerationStage?>()
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                stages += request.generationStage
+                if (request.replyWithFixturePlan(emit)) return
+                val response = request.patchSavedFixture(answer)
+                if (request.generationStage == CloudGenerationStage.REFINE) assertTrue(response.toByteArray().size > 65536)
+                emit(CloudEvent.Text(response))
+            }
+        }
+        val generation = ToolGenerationService(provider, SandboxClient(app))
+        try {
+            ToolStore(app, databases[0]).use { store ->
+                val engine = ToolEngine(store, generation)
+                val draft = engine.createDraft("Create a large survey log", null)
+                engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+                val created = engine.accept(draft.id)
+                val changed = engine.interact(created.id, created.revision, created.stateVersion, "add", null)
+                assertEquals(1, JSONObject(changed.state).getInt("count"))
+                assertTrue(changed.ui.toByteArray().size > 32768)
+                assertTrue(changed.state.toByteArray().size + changed.ui.toByteArray().size > 65536)
+                answer = definition("Updated survey log", "Total visits")
+                val refine = engine.createDraft("Rename the log and its counter", changed.id)
+                engine.generate(refine.id, "fixture", emptyList(), CloudSession())
+                val updated = engine.accept(refine.id)
+                assertEquals("Updated survey log", ToolSpec.parsePersisted(updated.spec).title)
+                assertEquals(1, JSONObject(updated.state).getInt("count"))
+                ToolStore(app, databases[0]).use { reopened ->
+                    assertEquals(updated, reopened.tool(updated.id))
+                }
+
+                val archive = ByteArrayOutputStream().also { engine.exportPortable(updated, true, it) }.toByteArray()
+                ToolStore(app, databases[1]).use { destination ->
+                    val receiver = ToolEngine(destination, generation)
+                    val imported = receiver.importPortable(archive.inputStream())
+                    assertEquals(updated.spec, imported.spec)
+                    assertEquals(updated.state, imported.state)
+                    val edited = receiver.saveManualDefinition(imported, JSONObject(imported.spec)
+                        .put("title", "Imported survey log").toString())
+                    val interacted = receiver.interact(edited.id, edited.revision, edited.stateVersion, "add", null)
+                    assertEquals(2, JSONObject(interacted.state).getInt("count"))
+                    val oversized = JSONObject(interacted.spec).put("source", " ".repeat(65536) + "return {};").toString()
+                    assertTrue(runCatching { receiver.saveManualDefinition(interacted, oversized) }.isFailure)
+                    assertEquals(interacted, destination.tool(interacted.id))
+                }
+            }
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.REFINE), stages)
+        } finally {
+            databases.forEach(app::deleteDatabase)
+        }
+    }
+
     @Test fun shareUsesSelectedDataAndAnOpenEditorCannotReplaceANewerRevision() {
         val fixture = ShellFixture("portable-share")
         val robot = ShellRobot("portable-share")
@@ -128,6 +224,13 @@ class MiniAppPortabilityWorkflowTest {
                 robot.click(robot.text(R.string.tool_manual_edit))
                 val input = robot.text(R.string.tool_manual_edit_definition)
                 val userEdit = JSONObject(spec.json).put("title", "Unsaved title").toString()
+                robot.edit(input, userEdit)
+                robot.enter(input, "я".repeat(131_073))
+                robot.reveal(robot.text(R.string.tool_manual_edit_size, 256))
+                assertTrue(generateSequence(robot.waitFor(robot.text(R.string.tool_manual_edit_save))) { it.parent }.any { !it.isEnabled })
+                robot.reveal(input, forward = false)
+                assertEquals(userEdit, robot.field(input).text.toString())
+                robot.edit(input, userEdit + " ")
                 robot.edit(input, userEdit)
                 val newer = saved.copy(revision = 2, stateVersion = 3,
                     spec = JSONObject(spec.json).put("title", "Newer title").toString())

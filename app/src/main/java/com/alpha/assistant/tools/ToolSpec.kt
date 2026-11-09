@@ -7,16 +7,16 @@ import com.alpha.assistant.tools.generation.ToolComposition
 import org.json.JSONObject
 
 internal enum class ToolValidationCategory(val id: String, val guidance: String) {
-    JSON("tool_json", "Return one JSON object without Markdown. Keep the object within 65536 bytes and nesting depth 24."),
+    JSON("tool_json", "Return one JSON object without Markdown. Keep the object within ${ToolSpec.MAX_DEFINITION_BYTES} bytes and nesting depth 24."),
     FIELDS("tool_fields", "Use exactly these fields: formatVersion, title, description, capabilities, stateSchema, initialState, ui, source. Optional surfaces declares identified native drawing surfaces. Optional presentation selects app or immersive mode. Optional hostControls declares playback and movement for declared surfaces. Optional capabilityResults and collections enable local typed results and private durable records. Remove other extra fields and include missing fields."),
     VERSION("tool_version", "Set formatVersion to the integer 3. Incompatible saved artifacts remain unavailable with their data intact."),
     METADATA("tool_metadata", "Use a title string with 1 to 100 characters and a description string with at most 500 characters."),
     CAPABILITIES("tool_capabilities", "Use an array of unique capability IDs from the supplied catalog. For local counters, use an empty array."),
     STATE_SCHEMA("tool_state_schema", "Use 1 to 40 named fields with scalar types number, string, or boolean, or documented bounded list, object, and array definitions. Do not use JSON Schema objects for scalars."),
-    SOURCE("tool_source", "Use a nonempty JavaScript function body string within 32768 bytes."),
+    SOURCE("tool_source", "Use a nonempty JavaScript function body string within ${SandboxContract.MAX_SOURCE_BYTES} bytes."),
     INITIAL_STATE("tool_initial_state", "Supply exactly the declared state fields with valid types and bounded values. Lists need valid records with unique stable IDs."),
     STATE_NUMBER("tool_state_number", "Keep numeric state values finite and within ±${ToolValueSchema.MAX_SAFE_NUMBER.toLong()}, including calculated results at input bounds. Show an unavailable result if a calculation exceeds this range."),
-    UI_STRUCTURE("tool_ui_structure", "Use the native UI catalog. Keep UI within 256 nodes, depth 8, 50 children per container, and 32768 bytes."),
+    UI_STRUCTURE("tool_ui_structure", "Use the native UI catalog. Keep UI within ${ToolUiCatalog.MAX_NODES} nodes, depth 8, 50 children per container, and ${ToolUiCatalog.MAX_UI_BYTES} bytes."),
     UI_PROPERTIES("tool_ui_properties", "Remove unsupported properties. Put a component's tone and emphasis inside its style object. Use only the styles allowed for that component. visible and enabled must be booleans."),
     UI_BINDINGS("tool_ui_bindings", "Use declared dotted object paths with the documented type. Paths must exist in both schema and state. Never use array indices or prototype access."),
     UI_ACTIONS("tool_ui_actions", "Use a unique action ID for each actionable control. IDs must start with an ASCII letter and contain at most 48 letters, digits, or underscores."),
@@ -97,8 +97,8 @@ data class ToolSpec private constructor(val json: String, val title: String, val
         require(validAppLanguageTag(tag))
         val encoded = JSONObject(json).put(APP_LANGUAGE_FIELD, tag).toString()
         validateTool(ToolValidationCategory.JSON, ToolValidationDetails("definition_size", "$",
-            "at most 65536 bytes including native presentation metadata", "oversized definition")) {
-            require(encoded.toByteArray(Charsets.UTF_8).size <= SandboxContract.MAX_BYTES)
+            "at most $MAX_DEFINITION_BYTES bytes including metadata", "oversized definition")) {
+            require(encoded.toByteArray(Charsets.UTF_8).size <= MAX_DEFINITION_BYTES)
         }
         return copy(json = encoded, appLanguage = tag)
     }
@@ -112,6 +112,8 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     }
 
     companion object {
+        internal const val MAX_DEFINITION_BYTES = 256 * 1024
+
         private const val APP_LANGUAGE_FIELD = "appLanguage"
 
         fun available(raw: String): ToolSpec? = try {parse(raw)} catch(_: IllegalArgumentException) {null} catch(_: IllegalStateException) {null} catch(_: org.json.JSONException) {null}
@@ -170,7 +172,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
         internal val generatedFields = requiredGeneratedFields + optionalGeneratedFields
 
         private fun parse(raw: String,observer: ((ToolUiDiagnostic)->Unit)?,persisted: Boolean): ToolSpec {
-            val j = validateTool(ToolValidationCategory.JSON) { SandboxContract.objectFrom(raw) }
+            val j = validateTool(ToolValidationCategory.JSON) { SandboxContract.objectFrom(raw, MAX_DEFINITION_BYTES) }
             validateTool(ToolValidationCategory.FIELDS) {
                 val fields = j.keys().asSequence().toSet()
                 val optional = optionalGeneratedFields +
@@ -196,7 +198,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
                 }
             }
             val source = validateTool(ToolValidationCategory.SOURCE) {
-                j.getString("source").also { require(it.isNotBlank() && it.toByteArray().size <= 32768) }
+                j.getString("source").also { require(it.isNotBlank() && it.toByteArray().size <= SandboxContract.MAX_SOURCE_BYTES) }
             }
             val surfaces = validateTool(ToolValidationCategory.SOURCE) {
                 val declarations=if(j.has("surfaces")) j.getJSONArray("surfaces") else org.json.JSONArray()
@@ -236,7 +238,11 @@ data class ToolSpec private constructor(val json: String, val title: String, val
                     composition?.requireNativePresentation(it)
                 }
             } else null
-            return ToolSpec(j.toString(), j.getString("title"), j.getString("description"), source, schema,
+            val encoded = j.toString()
+            validateTool(ToolValidationCategory.JSON) {
+                require(encoded.toByteArray(Charsets.UTF_8).size <= MAX_DEFINITION_BYTES)
+            }
+            return ToolSpec(encoded, j.getString("title"), j.getString("description"), source, schema,
                 initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surfaces,presentation,hostControls,composition,nativePresentation,appLanguage).also {
                 validateTool(ToolValidationCategory.INITIAL_STATE) { it.validateState(it.initialState) }
                 it.validateUi(it.ui,JSONObject(it.initialState),ToolUiValidationStage.DEFINITION,observer)

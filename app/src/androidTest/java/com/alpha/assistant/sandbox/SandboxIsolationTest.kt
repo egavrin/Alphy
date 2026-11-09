@@ -54,8 +54,10 @@ class SandboxIsolationTest {
     }
     @Test fun loopOversizeMalformedAndRecovery(): Unit=runBlocking {
         val client=SandboxClient(context)
+        val maxValue = 192 * 1024 - """{"state":{"value":""}}""".length
+        assertEquals("OK", client.execute("return {state:{value:'x'.repeat($maxValue)}};",input()).status)
         for((source,expected) in listOf("while(true){}" to "TIMEOUT",
-            "return {state:{value:'x'.repeat(70000)}};" to "INVALID_RESULT","throw Error('private failure');" to "SCRIPT_ERROR")) {
+            "return {state:{value:'x'.repeat(${maxValue + 1})}};" to "INVALID_RESULT","throw Error('private failure');" to "SCRIPT_ERROR")) {
             val result=client.execute(source,input())
             println("ANDROIDX_FAILURE_STEP kind=${if(source.startsWith("while")) "loop" else if(source.startsWith("function")) "recursion" else if(source.startsWith("return")) "oversize" else "throw"} expected=$expected observed=${result.status}")
             assertEquals(source.take(32),expected,result.status)
@@ -70,7 +72,9 @@ class SandboxIsolationTest {
     @Test fun retainedSessionAndSharedHeapDeathDoNotReplay(): Unit=runBlocking {
         val graphics=GraphicsSession(context)
         try {
-            assertEquals(1,counter(graphics.open(game,"{}")))
+            val largeSource = game.padEnd(65536)
+            assertEquals("INVALID_REQUEST", GraphicsSession(context).open(largeSource + " ", "{}").status)
+            assertEquals(1,counter(graphics.open(largeSource,"{}")))
             repeat(20) {assertEquals(it+2,counter(graphics.event(GraphicsContract.event("frame",33))))}
             val failed=SandboxClient(context).execute("let a=[];while(true)a.push(new Array(100000).fill('memory'));",input())
             assertTrue(failed.status,failed.status in setOf("MEMORY_LIMIT","SANDBOX_DIED"))

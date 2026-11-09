@@ -19,7 +19,7 @@ internal val markdownParser = Parser.builder().maxOpenBlockParsers(64).maxInline
     .extensions(listOf(TablesExtension.builder().maxCells(4096).build(), StrikethroughExtension.create())).build()
 
 internal val sourceReference = Regex("""\[(\d{1,3})]""")
-internal val sourceUrls = Regex("https?://[^\\s<>\"`]+",RegexOption.IGNORE_CASE)
+private val sourceUrls = Regex("https?://[^\\s<>\"`]+",RegexOption.IGNORE_CASE)
 
 internal fun validateSourceMarkdown(text: String, path: String, sourceCount: Int, allowed: Set<String>) {
     fun invalid(message: String): Nothing =

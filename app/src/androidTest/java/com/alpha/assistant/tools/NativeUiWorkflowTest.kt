@@ -92,9 +92,20 @@ class NativeUiWorkflowTest {
     @Test fun structuralLimitsAndUnknownStyleAreStrict() {
         rejects {validate(JSONObject().put("type","column").put("children",JSONArray().apply {repeat(51) {put(JSONObject("""{"type":"text","text":"Child"}"""))}}).toString())}
         var deep=JSONObject("""{"type":"text","text":"Too deep"}"""); repeat(9) {deep=JSONObject().put("type","column").put("children",JSONArray().put(deep))}; rejects {validate(deep.toString())}
-        val leaves=JSONArray().apply {repeat(50) {put(JSONObject().put("type","text").put("text","x".repeat(300)))}}
-        val large=JSONObject().put("type","column").put("children",JSONArray().apply {repeat(3) {put(JSONObject().put("type","column").put("children",leaves))}})
-        rejects {validate(large.toString())}
+        val leaf = JSONObject().put("type", "text").put("text", "Child")
+        fun column(children: JSONArray) = JSONObject().put("type", "column").put("children", children)
+        val group = column(JSONArray(List(50) { leaf }))
+        val structural = JSONArray(List(10) { group }).put(leaf)
+        validate(column(structural).toString())
+        rejects { validate(column(structural.put(leaf)).toString()) }
+
+        val longLeaf = JSONObject().put("type", "text").put("text", "x".repeat(300))
+        val largeGroup = column(JSONArray(List(50) { longLeaf }))
+        val finalLeaf = JSONObject().put("type", "text").put("text", "")
+        val large = column(JSONArray(List(4) { largeGroup }).put(finalLeaf))
+        val remaining = 64 * 1024 - large.toString().toByteArray().size
+        validate(large.also { finalLeaf.put("text", "x".repeat(remaining)) }.toString())
+        rejects { validate(large.also { finalLeaf.put("text", "x".repeat(remaining + 1)) }.toString()) }
         rejects {validate("""{"type":"text","text":"Bad","style":{"url":"https://example.com"}}""")}
         for(type in listOf("Path","Canvas","Motion","Transform","Stage","Surface","Ticker","html")) rejects {validate("""{"type":"$type","text":"Unsupported"}""")}
     }
@@ -199,8 +210,8 @@ class NativeUiWorkflowTest {
         val secret="SECRET_SENTINEL"
         var tooDeep=JSONObject().put("type","divider")
         repeat(9) {tooDeep=JSONObject().put("type","column").put("children",JSONArray().put(tooDeep))}
-        val tooMany=JSONObject().put("type","column").put("children",JSONArray().apply {repeat(6) {
-            put(JSONObject().put("type","column").put("children",JSONArray().apply {repeat(43) {put(JSONObject().put("type","divider"))}}))
+        val tooMany=JSONObject().put("type","column").put("children",JSONArray().apply {repeat(11) {
+            put(JSONObject().put("type","column").put("children",JSONArray().apply {repeat(47) {put(JSONObject().put("type","divider"))}}))
         }})
         val tooManyImages=JSONObject().put("type","column").put("visible",false).put("children",JSONArray().apply {repeat(5) {
             put(JSONObject().put("type","image").put("text",secret).put("resourceId","a".repeat(64)))
@@ -219,7 +230,7 @@ class NativeUiWorkflowTest {
             tooMany.toString() to ToolValidationCategory.UI_STRUCTURE,
             tooManyImages.toString() to ToolValidationCategory.UI_STRUCTURE,
             JSONObject().put("type","column").put("children",JSONArray().apply {repeat(51) {put(JSONObject().put("type","divider"))}}).toString() to ToolValidationCategory.UI_STRUCTURE,
-            JSONObject().put("type","text").put("text",secret.repeat(3000)).toString() to ToolValidationCategory.UI_STRUCTURE
+            JSONObject().put("type","text").put("text",secret.repeat(5000)).toString() to ToolValidationCategory.UI_STRUCTURE
         )
         for((ui,category) in cases) {
             val raw=JSONObject(definition(ui)).put("source","/* $secret */ return {state:input.state};").toString()

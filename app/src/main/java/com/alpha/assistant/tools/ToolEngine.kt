@@ -41,7 +41,7 @@ import org.json.JSONObject
 import java.util.Collections
 import java.util.UUID
 
-internal const val MAX_TOOL_PROMPT_LENGTH = 16_000
+internal const val MAX_TOOL_PROMPT_LENGTH = 64_000
 
 internal fun isValidToolPrompt(prompt: String) = prompt.isNotBlank() && prompt.length <= MAX_TOOL_PROMPT_LENGTH
 
@@ -144,7 +144,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             throw InvalidGeneratedOutput(problem,validation)
         }
     private fun generatedObject(raw: String): JsonObject = validateTool(ToolValidationCategory.JSON) {
-        SandboxContract.objectFrom(raw)
+        SandboxContract.objectFrom(raw, ToolSpec.MAX_DEFINITION_BYTES)
         Json.parseToJsonElement(raw) as? JsonObject ?: error("object")
     }
 
@@ -222,15 +222,16 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
     }
 
     internal suspend fun response(key: String, turns: List<CloudTurn>, session: CloudSession, stage: CloudGenerationStage?,
-        instructions: String = ""): String {
+        instructions: String = "", expandedWriterOutput: Boolean = false): String {
+        val maxBytes = if (expandedWriterOutput) ToolSpec.MAX_DEFINITION_BYTES else SandboxContract.MAX_BYTES
         val output = StringBuilder()
         fun tooLarge() = CloudFailure("widget_response_size", "The generator response exceeds the allowed size. Request a smaller tool.")
         session.checkActive(currentCoroutineContext())
         try {
             provider.respond(key, CloudRequest(turns, false, systemInstructions = instructions, jsonObject = true,
-                generationStage = stage), session) { event ->
+                generationStage = stage, expandedWriterOutput = expandedWriterOutput), session) { event ->
                 if (event is CloudEvent.Text) {
-                    if (event.value.length > SandboxContract.MAX_BYTES - output.length) throw tooLarge()
+                    if (event.value.length > maxBytes - output.length) throw tooLarge()
                     output.append(event.value)
                 }
             }
@@ -240,7 +241,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             throw CloudFailure("widget_generation", "The tool generation connection failed. Retry the request.")
         }
         session.checkActive(currentCoroutineContext())
-        return output.toString().also { if (it.toByteArray(Charsets.UTF_8).size > SandboxContract.MAX_BYTES) throw tooLarge() }
+        return output.toString().also { if (it.toByteArray(Charsets.UTF_8).size > maxBytes) throw tooLarge() }
     }
 
     private suspend fun repairResponse(
@@ -595,7 +596,15 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         }
         val responseExample = writerResponseExample(responseSchema, fillPositions)
         val task = if (previous == null) "Create a local Alphy native mini-tool." else "Revise the saved Alphy native mini-tool."
-        val definitionFormat = """Return exactly one strict JSON object without Markdown, comments, duplicate keys, or trailing content. Use double quotes for every JSON key and string. Encode source as one JSON string with JSON string escaping: escape double quotes, backslashes, newlines, and control characters. JavaScript quotes inside source do not replace JSON escaping. Do not return a JavaScript object literal or a fenced code block. Schema:
+        val outputLimits = if (lessonTarget == null) {
+            "Keep the complete JSON within ${ToolSpec.MAX_DEFINITION_BYTES / 1024} KiB and decoded JavaScript within ${SandboxContract.MAX_SOURCE_BYTES / 1024} KiB."
+        } else {
+            "Keep the complete slide JSON within 64 KiB and its native UI within 32 KiB."
+        }
+        val liveDataGuidance = if (lessonTarget == null) {
+            """For a requested live JSON value, configure one foreground Refresh action using network.request with method GET, no headers or body, and extract:{kind,path}. Use the exact endpoint, JSON key/index path, and value type from the original request or supplied documentation. Cite the documentation when available. Keep the value unavailable until a successful result. Store the returned value, source, and dataTimeMs together. Show the value, source, and data time in the app. If refresh fails, keep the prior value and time and mark them stale. If the endpoint, path, or value type is missing, build the usable local controls, show Unavailable, and ask for the missing detail. Do not emit a live network effect for an incomplete source. The native host handles network access, source approval, and scheduling."""
+        } else ""
+        val definitionFormat = """Return exactly one strict JSON object without Markdown, comments, duplicate keys, or trailing content. Use double quotes for every JSON key and string. Encode source as one JSON string with JSON string escaping: escape double quotes, backslashes, newlines, and control characters. JavaScript quotes inside source do not replace JSON escaping. Do not return a JavaScript object literal or a fenced code block. $outputLimits Schema:
 $responseExample
 """
         val instructions = """Use the original request for currencies, units, and initial values. Leave monetary amounts currency-neutral when the user specifies no currency. Do not infer currency from the request language, location, example, or brief. Preserve values and units the user requested. With no starting amount, use zero where allowed or a neutral valid minimum where zero is invalid. Keep calculated values as numbers in state. Put units and formatting in the display. Recalculate dependent results after an accepted input change.
@@ -610,6 +619,7 @@ Arrays use exactly type, maxItems, and items. Their maxItems must be an integer 
 Small structured-history example: stateSchema={"history":{"type":"array","maxItems":100,"items":{"type":"object","fields":{"id":"string","at":"number","note":"string"}}}}, initialState={"history":[]}, ui={"type":"list","text":"History","bind":"history","columns":[{"text":"Note","field":"note"}]}. Each history item must contain exactly id, at, and note with those types. IDs must be unique nonempty strings. This example stores at most 100 records. Use native collections for durable history beyond that bound.
 Schema depth is at most 6. Structured schemas contain at most 256 nodes. All schemas together contain at most 1024 nodes. Structured state contains at most 4096 values. Numbers must be finite with magnitude at most 9007199254740991.
 JavaScript is a function BODY with input {artifactId,revision,state,event}. Events are {type:'preview'}, {type:'render'}, {type:'action',actionId:'id',value:...}, or opt-in {type:'capabilityResults',deliveryId:'opaque',entries:[{requestId:'id',capability:'catalog.id',status:'terminal status',data:{typed catalog data}}]}. Set top-level capabilityResults:true to receive one local event after all effects from an action finish. Result handlers may update state and UI but must return no effects. Resource IDs are opaque, owner-scoped native handles, never paths or URIs. Return {state:...}, optionally ui with the same native schema and effects:[{id:'uniqueId',capability:'catalog.id',args:{...}}]. Only action events may request effects, at most 3. Preview/render must preserve state and return no effects. No direct network, files, credentials, host APIs or imports. A declared network.request runs as the single effect of a foreground action with the app's network grant and Android access. Never retry an uncertain write automatically. The native host validates declared capabilities, the foreground action and Android permissions. Android pickers and dedicated native controls apply where required. Never claim an external action completed from a request. calendar.create only opens a form. Use calendar.createOwned for actual owned events with provider verification, an explicit selected calendar, and the native calendar control. Capability results remain native and do not enter this model request automatically. Preserve all existing state fields, collection definitions and IDs in refinement. New fields may use initial defaults.
+$liveDataGuidance
 ${ArtifactProtocol.modelGuidance()}
 Use ordinary Apply for numeric fields and sliders unless the user asks for continuous updates while editing. Store the submitted numeric value, including zero when allowed. Recalculate from the new value on the same action. A liveInput event is {type:'liveInput',actionId:'id',value:...}. It can return only state, ui, and surfaces. The host sends this same event for live delivery and its Apply fallback.
 The smoke check exercises numeric controls at their allowed bounds. A numberInput without a maximum can accept ${ToolValueSchema.MAX_SAFE_NUMBER.toLong()}. Check calculated values as well as inputs against the numeric state range. If a result exceeds the range, keep the input and show the result as unavailable.
@@ -673,6 +683,7 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
             If the request changes one rule or message, edit its smallest matching source fragment and the affected label if needed.
             Preview and render must return state unchanged and must not request effects or records.
             Preserve every existing state field, type, collection definition, and record ID.
+            $liveDataGuidance
         """.trimIndent() + sharedRules
         val original = CloudTurn("user", if (wholeScreen) "Request: $prompt" else "$contract${languageGuidance()}\nRequest: $prompt", images.toList())
         val fields = if (mixed) ToolComposition.generatedFillFields else ToolSpec.generatedFields
@@ -713,7 +724,7 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
                             else -> contract + languageGuidance()
                         }
                         suspend fun fetch(): String {
-                            val output = response(key, turns, session, modelStage, system)
+                            val output = response(key, turns, session, modelStage, system, expandedWriterOutput = lessonTarget == null)
                             if (!selectLanguage) return output
                             val candidate = try {
                                 generatedObject(output)

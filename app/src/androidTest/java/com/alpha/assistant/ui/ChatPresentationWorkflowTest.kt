@@ -221,14 +221,14 @@ class ChatPresentationWorkflowTest {
         val rawError = "Search returned sources, but Alphy cannot independently verify the stated facts."
         fixture.store.saveConversation(Conversation("weather", question, 1, 1, messages = listOf(
             Message("question", "user", question, 1, "sent"),
-            Message("answer", "assistant", "", 1, "error", replyTo = "question", errorCode = "source_support",
+            Message("answer", "assistant", "", 1, "error", replyTo = "question", errorCode = "source_attribution",
                 error = rawError, sources = listOf(Source("Прогноз", "https://example.com/moscow"))),
         )))
         fixture.store.seedOpenChat("weather")
         fixture.install()
         try {
             fixture.launch().use {
-                robot.waitFor(robot.text(R.string.chat_source_support))
+                robot.waitFor(robot.text(R.string.chat_source_attribution))
                 assertEquals(1, robot.texts().count { it.trim() == question })
                 assertNull(robot.find(rawError))
                 robot.click(robot.text(R.string.chat_message_retry))

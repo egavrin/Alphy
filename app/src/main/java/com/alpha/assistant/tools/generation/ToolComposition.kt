@@ -211,7 +211,7 @@ internal class ToolComposition private constructor(private val layout: Layout, p
     }
 
     internal fun catalogUi(fullUi: JSONObject, fullState: JSONObject): JSONObject {
-        requireParts(fullUi.toString().toByteArray(Charsets.UTF_8).size <= 32768, "$.ui", "at most 32768 bytes")
+        requireParts(fullUi.toString().toByteArray(Charsets.UTF_8).size <= ToolUiCatalog.MAX_UI_BYTES, "$.ui", "at most ${ToolUiCatalog.MAX_UI_BYTES} bytes")
         val children = checkedChildren(fullUi)
         if (!isSealedStandalone) {
             val fill = layout.fillPositions.map(children::get)

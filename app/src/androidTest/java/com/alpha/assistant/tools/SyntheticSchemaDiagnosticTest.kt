@@ -31,7 +31,7 @@ class SyntheticSchemaDiagnosticTest {
         private const val ARKANOID_REQUEST = "Create a playable Arkanoid game with touch paddle control, moving ball, brick collisions, score, three lives, and restart. Save the high score locally."
         private const val REFINEMENT_REQUEST = "Refine this synthetic medication tracker. Improve medicine entry, recording a taken dose, and the history controls. Preserve all saved data. Do not suggest medicines or doses."
         private val uiRules=mapOf(
-            "ui_object" to "object", "ui_bytes" to "bytes_at_most_32768", "node_depth_limit" to "nodes_256_depth_8",
+            "ui_object" to "object", "ui_bytes" to "bytes_at_most_65536", "node_depth_limit" to "nodes_512_depth_8",
             "component_type" to "catalog_component", "component_properties" to "catalog_properties", "component_flag" to "boolean",
             "component_text" to "string_length_1_300", "component_style" to "catalog_style", "accessible_label" to "label_present",
             "component_binding" to "declared_binding_and_state",
@@ -46,7 +46,7 @@ class SyntheticSchemaDiagnosticTest {
             "table_rows" to "rows_at_most_50", "table_columns" to "columns_1_8_cells_400", "table_column" to "scalar_record_column",
             "image_handle" to "opaque_resource_handle", "numeric_bounds" to "finite_ordered_bounds_and_value",
             "time_value" to "integer_minutes_0_1439", "date_value" to "iso_date", "container_children" to "children_1_50",
-            "child_object" to "object", "render_node_depth_limit" to "nodes_256_depth_8", "render_image_limit" to "images_at_most_4",
+            "child_object" to "object", "render_node_depth_limit" to "nodes_512_depth_8", "render_image_limit" to "images_at_most_4",
             "render_work_limit" to "render_work_at_most_2048", "render_children" to "children_1_50", "chart_kind" to "line_or_bar",
             "chart_categories" to "scalar_array_binding", "chart_series" to "series_1_2_points_256",
             "chart_series_entry" to "aligned_numeric_array", "chart_category_values" to "declared_category_values"

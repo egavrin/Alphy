@@ -1,6 +1,7 @@
 package com.alpha.assistant.tools.generation
 
 import com.alpha.assistant.sandbox.SandboxContract
+import com.alpha.assistant.tools.ToolSpec
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -36,12 +37,13 @@ internal class GenerationRepair private constructor(
     private data class Candidate(val text: String, val json: JsonObject)
     private data class SourceEdit(val start: Int, val end: Int, val replacement: String)
 
+    private val maxBytes = if (writer) ToolSpec.MAX_DEFINITION_BYTES else SandboxContract.MAX_BYTES
     private var base: Candidate? = null
     private val seen = mutableListOf<JsonObject>()
     private var rewritten = false
 
     fun retain(raw: String) {
-        val json = strictObject(raw) ?: return
+        val json = strictObject(raw, maxBytes) ?: return
         if (!writer && json.keys.none { it in editableFields }) return
         if (writer) {
             if (targetField == null && ("fill" in json || "holes" in json)) return
@@ -86,8 +88,8 @@ internal class GenerationRepair private constructor(
     }
 
     fun apply(raw: String, restrictRemovals: Boolean = false): Applied {
-        if (byteSize(raw) > SandboxContract.MAX_BYTES) reject(Problem.SIZE)
-        val patch = strictObject(raw) ?: reject()
+        if (byteSize(raw) > maxBytes) reject(Problem.SIZE)
+        val patch = strictObject(raw, maxBytes) ?: reject()
         val sections = buildSet {
             addAll(planPatchKeys)
             if (writer) add("sourceEdits")
@@ -116,7 +118,7 @@ internal class GenerationRepair private constructor(
         }
         val json = JsonObject(result)
         val text = json.toString()
-        if (byteSize(text) > SandboxContract.MAX_BYTES) reject(Problem.SIZE)
+        if (byteSize(text) > maxBytes) reject(Problem.SIZE)
         if (json == previous) reject(Problem.NO_CHANGE)
         if (json in seen) reject(Problem.REPEATED_CANDIDATE)
         base = Candidate(text, json)
@@ -165,8 +167,8 @@ internal class GenerationRepair private constructor(
         private fun string(value: JsonElement?) =
             (value as? JsonPrimitive)?.takeIf { it.isString }?.content
 
-        private fun strictObject(raw: String): JsonObject? = try {
-            SandboxContract.objectFrom(raw)
+        private fun strictObject(raw: String, maxBytes: Int): JsonObject? = try {
+            SandboxContract.objectFrom(raw, maxBytes)
             Json.parseToJsonElement(raw) as? JsonObject
         } catch (_: IllegalArgumentException) {
             null

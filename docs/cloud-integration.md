@@ -26,7 +26,7 @@ The provider sends each search to `POST /v1/tools/search` with `count = 5` and `
 
 The chat shows source chips in citation order. Each chip opens the result in the browser. The app requests a provider icon only from a public HTTPS address on port 443. It sends no credentials and follows no redirects. Each request has a four-second limit, and the app cancels the request when its chip leaves the composition. It uses a local icon when the response is absent, invalid, larger than 64 KiB, or more than 256 pixels on either side.
 
-An answer uses a tool-free text completion, including when it needs no search. The text can appear in parts. The original decision fixes the operation and search policy. Before the provider accepts a searched answer, it checks cited URLs, source numbers, numeric support, and verification claims. App creation, app refinement, and clarification decisions stay buffered.
+An answer uses a tool-free text completion, including when it needs no search. The text can appear in parts. The original decision fixes the operation and search policy. Before the provider accepts a searched reply, it checks cited URLs against the allowed sources and checks that citation numbers refer to supplied results. The reply includes the source limitation notice. App creation, app refinement, and clarification decisions stay buffered.
 
 ## Image scope and validation
 
