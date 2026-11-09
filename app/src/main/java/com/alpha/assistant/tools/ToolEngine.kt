@@ -688,7 +688,8 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
         val original = CloudTurn("user", if (wholeScreen) "Request: $prompt" else "$contract${languageGuidance()}\nRequest: $prompt", images.toList())
         val fields = if (mixed) ToolComposition.generatedFillFields else ToolSpec.generatedFields
         val writerRepair = when {
-            savedEnvelope != null -> GenerationRepair.refinement(fields, mixed, savedEnvelope)
+            savedEnvelope != null -> GenerationRepair.refinement(fields, mixed, savedEnvelope,
+                protectedUi = redactSaved, allowPrepend = previous?.nativePresentation == null)
             patchNewApp && !partsOnly -> GenerationRepair.writer(fields, holeIds)
             else -> null
         }
@@ -799,6 +800,25 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
                 }
                 session.checkActive(currentCoroutineContext())
                 stage=ToolGenerationStage.SMOKE
+                val prependedText = writerRepair?.prependedText
+                val checkUi: (suspend (ToolPreview) -> Unit)? = if (languageCheck == null && prependedText == null) null else { result ->
+                    val root = JSONObject(result.ui)
+                    checkLanguage(root)
+                    if (prependedText != null) {
+                        val state = JSONObject(result.state)
+                        val first = root.optJSONArray("children")?.optJSONObject(0)
+                        val section = first?.takeIf { it.optString("type") == "section" }
+                        val line = if (section == null) first else section.optJSONArray("children")?.optJSONObject(0)
+                        if (root.optString("type") != "column" || !ToolUiCatalog.visible(root, state) ||
+                            section?.let { !ToolUiCatalog.visible(it, state) } == true ||
+                            line?.optString("type") != "text" || line.opt("text") != prependedText ||
+                            !ToolUiCatalog.visible(line, state)) {
+                            throw InvalidGeneratedOutput(GenerationProblem.RESULT, ToolValidationFailure(ToolValidationCategory.UI_STRUCTURE,
+                                ToolValidationDetails("protected_ui_text", "$.ui",
+                                    "Keep the added line first in the root column or its first section. Use sourceEdits.", "missing visible top line")))
+                        }
+                    }
+                }
                 val onInitialPreview: (suspend (ToolPreview) -> Unit)? =
                     if(sceneHoles>0 || draftPreview!=null) { initial ->
                         val surfaces=initial.surfaces
@@ -813,7 +833,7 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
                 val checker = ToolGenerationSmoke(sandbox,spec,artifactId,(base?.revision ?: 0)+1,state,
                     checkActive={session.checkActive(currentCoroutineContext())},
                     generation=this@ToolGenerationService,policy=policy,onInitialPreview=onInitialPreview,
-                    checkUi=if (languageCheck == null) null else { ui -> checkLanguage(JSONObject(ui)) })
+                    checkUi=checkUi)
                 val preview = try {
                     trace.timed(attemptNumber, stage) { checker.run() }
                 } catch(cancel: CancellationException) { throw cancel }

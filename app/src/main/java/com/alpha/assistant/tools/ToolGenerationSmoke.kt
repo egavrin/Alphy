@@ -40,7 +40,7 @@ internal class ToolGenerationSmoke(
     private val generation: ToolGenerationService,
     private val policy: ToolExecutionPolicy? = null,
     private val onInitialPreview: (suspend (ToolPreview) -> Unit)? = null,
-    private val checkUi: (suspend (String) -> Unit)? = null,
+    private val checkUi: (suspend (ToolPreview) -> Unit)? = null,
     private val clockSample: com.alpha.assistant.tools.generation.PartClockSample? = null,
     private val observeReplay: ((List<String>) -> Unit)? = null,
 ) {
@@ -78,7 +78,7 @@ internal class ToolGenerationSmoke(
                     val surface=effectiveSurfaces.getValue(event.getString("surfaceId"))
                     effectiveSurfaces=effectiveSurfaces+(surface.id to surface.copy(width=event.getInt("width"),height=event.getInt("height")))
                 }
-                checkUi?.invoke(result.ui)
+                checkUi?.invoke(result)
                 state=result.state;ui=result.ui;surfaces=merged
                 frames=result.frames ?: frames;timers=result.timers ?: timers
                 playback.update(result.playback,type)

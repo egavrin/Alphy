@@ -1061,6 +1061,127 @@ class GenerationRouteWorkflowTest {
         }
     }
 
+    @Test fun protectedRefinementAddsOneLineWithoutReplacingTheSavedLayout(): Unit = runBlocking {
+        val source = """
+            if (input.event.type === 'action' && input.event.actionId === 'fill_copy') input.state.fill_value++;
+            if (input.event.type === 'action' && input.event.actionId === 'refresh') {
+                return {state:input.state,effects:[{id:'clock',capability:'network.request',args:{
+                    method:'GET',url:'https://example.com/clock',extract:{kind:'number',path:['epoch']}}}]};
+            }
+            return {state:input.state};
+        """.trimIndent()
+        val original = JSONObject(definition(source = source)).apply {
+            put("capabilityResults", true)
+            put("capabilities", JSONArray().put("network.request"))
+            getJSONObject("stateSchema").put("note", "string")
+            getJSONObject("initialState").put("note", "PRIVATE_DEFAULT")
+            put("ui", JSONObject("""{"type":"column","style":{"gap":"small"},"children":[
+                {"type":"column","children":[{"type":"text","text":"PRIVATE_LABEL"},
+                {"type":"metric","text":"Count","bind":"fill_value"}]},
+                {"type":"button","text":"Copy","action":"fill_copy"},
+                {"type":"button","text":"Refresh","action":"refresh"}]}"""))
+        }
+        val spec = ToolSpec.parse(original.toString()).withAppLanguage("en")
+        val liveState = JSONObject(spec.initialState).put("fill_value", 7).put("note", "PRIVATE_LIVE").toString()
+        val saved = ToolRecord("protected-ui", 1, 2, spec.json, liveState, spec.ui.toString(), null, true)
+        val replacement = """{"type":"text","text":"Handoff audit ready"}"""
+        val responses = ArrayDeque(listOf(
+            """{"fields":{"ui":$replacement}}""", """{"removeFields":["ui"]}""", "bad JSON",
+            JSONObject(spec.json).apply { remove("appLanguage"); put("ui", JSONObject(replacement)) }.toString()
+        ))
+        val provider = FixtureProvider { turn, _ ->
+            assertEquals(CloudGenerationStage.REFINE, turn.generationStage)
+            assertTrue(turn.turns.none { it.text.contains("PRIVATE_") })
+            assertTrue(turn.turns.last().text.contains("Return one JSON patch object only"))
+            responses.removeFirst()
+        }
+        withEngine(provider) { store, engine, _ ->
+            store.saveTool(saved, revision = true)
+            val edit = "Rename the app and add Handoff audit ready above the controls"
+            val bad = engine.createDraft(edit, saved.id)
+            failure("widget_patch") { engine.generate(bad.id, "fixture", emptyList(), CloudSession()) }
+            assertEquals(List(4) { CloudGenerationStage.REFINE }, provider.stages)
+            assertTrue(responses.isEmpty())
+            assertEquals(saved, store.tool(saved.id))
+            assertNull(store.draft(bad.id)!!.candidate)
+            engine.reject(bad.id)
+
+            responses.add("""{"fields":{"description":"${"x".repeat(501)}","prependText":"Handoff audit ready"}}""")
+            responses.add("""{"fields":{"description":"","title":"Updated","prependText":"Handoff audit ready"}}""")
+            val good = engine.createDraft(edit, saved.id)
+            engine.generate(good.id, "fixture", emptyList(), CloudSession())
+            val revised = engine.accept(good.id)
+            assertTrue(responses.isEmpty())
+            assertEquals(saved.revision + 1, revised.revision)
+            assertEquals(saved.state, revised.state)
+            val revisedSpec = ToolSpec.parsePersisted(revised.spec)
+            assertEquals("Updated", revisedSpec.title)
+            assertEquals(spec.source, revisedSpec.source)
+            assertEquals(spec.initialState, revisedSpec.initialState)
+            val actual = JSONObject(revised.ui)
+            val children = actual.getJSONArray("children")
+            assertEquals(replacement, children.remove(0).toString())
+            assertEquals(saved.ui, actual.toString())
+
+            val counted = engine.interact(revised.id, revised.revision, revised.stateVersion, "fill_copy", null)
+            assertEquals(8, JSONObject(counted.state).getInt("fill_value"))
+            val refresh = engine.interactForeground(counted.id, counted.revision, counted.stateVersion, "refresh", null,
+                acceptNetwork = true)
+            assertEquals("https://example.com/clock", checkNotNull(refresh.network).args.getString("url"))
+        }
+    }
+
+    @Test fun protectedRefinementKeepsTheAddedLineInRuntimeUi(): Unit = runBlocking {
+        val ui = JSONObject("""{"type":"column","children":[{"type":"section","text":"Status","children":[{"type":"metric","text":"Clock","bind":"fill_value"}]},
+            {"type":"button","text":"Copy","action":"fill_copy"},{"type":"button","text":"Refresh","action":"refresh"}]}""").toString()
+        val hiddenUi = JSONObject(ui).put("visible", false).apply {
+            val section = getJSONArray("children").getJSONObject(0)
+            section.put("children", JSONArray().put(JSONObject("""{"type":"text","text":"Handoff audit ready"}"""))
+                .put(section.getJSONArray("children").getJSONObject(0)))
+        }
+        val source = """
+            function buildUi() { return $ui; }
+            if (input.event.actionId === 'fill_copy') input.state.fill_value++;
+            if (input.event.type === 'capabilityResults') input.state.fill_value = input.event.entries[0].data.value;
+            return {state:input.state,ui:buildUi()};
+        """.trimIndent()
+        val spec = ToolSpec.parse(JSONObject(definition(source = source)).put("ui", JSONObject(ui))
+            .put("capabilityResults", true).put("capabilities", JSONArray().put("network.request")).toString()).withAppLanguage("en")
+        val saved = ToolRecord("protected-runtime-ui", 1, 1, spec.json, spec.initialState, spec.ui.toString(), null, true)
+        var calls = 0
+        val provider = FixtureProvider { turn, _ ->
+            if (++calls == 1) """{"fields":{"prependText":"Handoff audit ready"}}"""
+            else {
+                assertTrue(turn.turns.last().text, turn.turns.last().text.contains("protected_ui_text"))
+                val edit = if (calls == 2) JSONObject()
+                    .put("search", "return $ui;").put("replace", "return $hiddenUi;")
+                else JSONObject().put("search", ""","visible":false""").put("replace", "")
+                JSONObject().put("sourceEdits", JSONArray().put(edit)).toString()
+            }
+        }
+        withEngine(provider) { store, engine, generation ->
+            store.saveTool(saved, revision = true)
+            val draft = engine.createDraft("Add Handoff audit ready at the top", saved.id)
+            engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+            val revised = engine.accept(draft.id)
+            assertEquals(3, calls)
+            val rendered = JSONObject(revised.ui)
+            val top = rendered.getJSONArray("children").getJSONObject(0).getJSONArray("children")
+            assertEquals("Handoff audit ready", (top.remove(0) as JSONObject).getString("text"))
+            assertEquals(saved.ui, rendered.toString())
+            val counted = engine.interact(revised.id, revised.revision, revised.stateVersion, "fill_copy", null)
+            assertEquals(revised.ui, counted.ui)
+            assertEquals(1, JSONObject(counted.state).getInt("fill_value"))
+            val result = JSONObject("""{"type":"capabilityResults","deliveryId":"${UUID.randomUUID()}",
+                "entries":[{"requestId":"clock","capability":"network.request","status":"succeeded",
+                "data":{"value":17,"source":"https://example.com/clock","dataTimeMs":12345}}]}""")
+            val refreshed = generation.evaluate(ToolSpec.parsePersisted(counted.spec), counted.id, counted.revision,
+                counted.state, result, counted.ui)
+            assertEquals(17, JSONObject(refreshed.state).getInt("fill_value"))
+            assertEquals(revised.ui, refreshed.ui)
+        }
+    }
+
     @Test fun savedEditUsesOneFullFallbackAfterThreeRejectedPatches(): Unit = runBlocking {
         val original = definition()
         val fallback = JSONObject(original).put("title", "Fallback revision").toString()

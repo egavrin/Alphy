@@ -203,11 +203,12 @@ class CapabilityResultsWorkflowTest {
         val capture=object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests.add(request)
-                if (!request.replyWithFixturePlan(emit)) emit(CloudEvent.Text(spec().json))
+                emit(CloudEvent.Text(request.withFixtureLanguage("""{"fields":{"title":"Updated results"}}""")))
             }
         }
-        val result=ToolGenerationService(capture,SandboxClient(context)).generate("fixture","Change label",base,emptyList(),CloudSession(),tool.id)
+        val result=ToolGenerationService(capture,SandboxClient(context)).generate("fixture","Rename to Updated results",base,emptyList(),CloudSession(),tool.id)
         assertFalse(requests.any { marker in it.systemInstructions || it.turns.any { turn -> marker in turn.text } })
+        assertEquals("Updated results", result.spec.title)
         assertEquals(marker,JSONObject(result.state).getString("secret"))
     } }
     // Review regressions: permission changes in the final guard, aggregate IPC limits, resource capacity after expiry,
