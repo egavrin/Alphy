@@ -188,12 +188,14 @@ internal class MiniAppActions {
                         controller.artifactHost(tool)
                     } else null
                     var graphicsSnapshot by remember(graphicsHost) { mutableStateOf<ArtifactSnapshot?>(null) }
-                    if (graphicsHost != null) {
-                        CoveredToolSurface(tool, spec, true, 180.dp, graphicsHost, actions) { graphicsSnapshot = it }
+                    val content: @Composable () -> Unit = {
+                        MiniAppContent(controller, tool, tool, spec.title, enabled = !controller.busy && !covered, embedded = true,
+                            presentation = spec.nativePresentation, graphicsHost = graphicsHost, graphicsSnapshot = graphicsSnapshot,
+                            liveAllowed = !covered && !menu, allowVideo = true)
                     }
-                    MiniAppContent(controller, tool, tool, spec.title, enabled = !controller.busy && !covered, embedded = true,
-                        presentation = spec.nativePresentation, graphicsHost = graphicsHost, graphicsSnapshot = graphicsSnapshot,
-                        liveAllowed = !covered && !menu, allowVideo = true)
+                    if (graphicsHost != null) {
+                        CoveredToolSurface(tool, spec, true, 180.dp, graphicsHost, actions, content = content) { graphicsSnapshot = it }
+                    } else content()
                 }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -226,6 +228,7 @@ internal class MiniAppActions {
     tool: ToolRecord, spec: ToolSpec, enabled: Boolean, maxCanvasHeight: Dp, host: ArtifactUiHost,
     actions: MiniAppActions, immersive: Boolean = false, covered: Boolean = false,
     onCoverReady: (Boolean) -> Unit = {}, topControls: @Composable () -> Unit = {},
+    content: @Composable () -> Unit = {},
     onSnapshot: (ArtifactSnapshot) -> Unit = {},
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -258,6 +261,7 @@ internal class MiniAppActions {
                 onCoverReady(ready)
             },
             topControls = topControls,
+            content = content,
             onSnapshot = {
                 latestSnapshot = it
                 onSnapshot(it)
@@ -268,7 +272,7 @@ internal class MiniAppActions {
 private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val state: String, val drawing: String?)
 
 @Composable private fun rememberDraftPreview(draft: ToolDraft?, snapshot: ToolDraftPreview?): DraftPreviewContent? =
-    remember(draft?.candidate, draft?.previewUi, draft?.previewState, snapshot) {
+    remember(draft?.candidate, draft?.previewUi, draft?.previewState, draft?.previewSurfaces, snapshot) {
         if (snapshot != null) {
             ToolSpec.availablePersisted(snapshot.candidateJson)?.let { spec ->
                 DraftPreviewContent(spec, snapshot.uiJson, snapshot.stateJson, snapshot.surfacesJson)
@@ -278,7 +282,10 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
             val spec = savedDraft.candidate?.let(ToolSpec::availablePersisted) ?: return@remember null
             val ui = savedDraft.previewUi ?: return@remember null
             val state = savedDraft.previewState ?: return@remember null
-            DraftPreviewContent(spec, ui, state, drawing = null)
+            val drawing = savedDraft.previewSurfaces?.takeIf { raw ->
+                runCatching { ArtifactProtocol.validateSurfaces(JSONObject(raw)) }.isSuccess
+            }
+            DraftPreviewContent(spec, ui, state, drawing)
         }
     }
 
@@ -289,9 +296,14 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
         else LinearProgressIndicator(Modifier.fillMaxWidth())
         return
     }
-    StaticDraftDrawing(spec, drawing, drawingHeight)
-    ToolContent(ui, projected?.getOrNull() ?: state, false, heading = spec.title, embedded = true,
-        presentation = spec.nativePresentation, appLanguage = spec.appLanguage) { _, _ -> }
+    if (canvasSurfaceIds(spec.ui).isEmpty()) StaticDraftDrawing(spec, drawing, drawingHeight)
+    val canvas: @Composable (List<String>, String, Modifier, Boolean) -> Unit = { ids, label, modifier, _ ->
+        StaticDraftDrawing(spec, drawing, drawingHeight, ids, label, modifier)
+    }
+    CompositionLocalProvider(LocalToolCanvas provides canvas) {
+        ToolContent(ui, projected?.getOrNull() ?: state, false, heading = spec.title, embedded = true,
+            presentation = spec.nativePresentation, appLanguage = spec.appLanguage) { _, _ -> }
+    }
 }
 
 @Composable internal fun GeneratedToolPreview(draft: ToolDraft?, snapshot: ToolDraftPreview?) {
@@ -795,15 +807,21 @@ catch (_: Exception) { null }
                         Text(stringResource(R.string.tool_archive_restore))
                     }
                 }
-                if(spec != null && draft == null && graphicsHost != null) CoveredToolSurface(tool, spec, !tool.archived,
-                    canvasHeight, graphicsHost, actions, covered = details != null || menu || hostCovered) { artifactSnapshot = it }
                 if(spec == null) Text(stringResource(R.string.tool_closed_format_detail))
-                if(spec != null) MiniAppContent(controller,tool,displayed,spec.title,
-                    enabled=!controller.busy && draft == null && !tool.archived && !menu && !hostCovered && !actions.covers(tool.id),
-                    routeSystemBackEnabled = details == null, presentation = spec.nativePresentation,
-                    graphicsHost = graphicsHost, graphicsSnapshot = artifactSnapshot,
-                    openNonGraphics = draft == null, allowVideo = true,
-                    liveAllowed = draft == null && details == null && !menu && !hostCovered && !actions.covers(tool.id))
+                if (spec != null) {
+                    val content: @Composable () -> Unit = {
+                        MiniAppContent(controller,tool,displayed,spec.title,
+                            enabled=!controller.busy && draft == null && !tool.archived && !menu && !hostCovered && !actions.covers(tool.id),
+                            routeSystemBackEnabled = details == null, presentation = spec.nativePresentation,
+                            graphicsHost = graphicsHost, graphicsSnapshot = artifactSnapshot,
+                            openNonGraphics = draft == null, allowVideo = true,
+                            liveAllowed = draft == null && details == null && !menu && !hostCovered && !actions.covers(tool.id))
+                    }
+                    if (draft == null && graphicsHost != null) CoveredToolSurface(tool, spec, !tool.archived,
+                        canvasHeight, graphicsHost, actions, covered = details != null || menu || hostCovered,
+                        content = content) { artifactSnapshot = it }
+                    else content()
+                }
             } else Text(draft?.prompt.orEmpty(),style=MaterialTheme.typography.bodyLarge)
             if (tool != null && spec != null && draft == null && tool.saved && !tool.archived) {
                 SourceRefreshControl(controller, tool)

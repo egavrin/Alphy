@@ -1,4 +1,9 @@
 {
+  "moon-canvas": {
+    "request": "Create an English course that teaches why the Moon orbits Earth. Use one short lesson with exactly two slides, an EXPLANATION and an EXAMPLE. Both have a drawn canvas labeled Orbit illustration, then a native live slider and a short explanation. On the first slide, Speed changes how fast the Moon moves around Earth and immediately changes the length of its drawn velocity arrow during the drag. On the second slide, Orbit radius changes the drawn orbit size during the drag.",
+    "cards": [],
+    "kind": "EXPLANATION"
+  },
   "alphabet": {
     "request": "Научи меня по теме русский алфавит. Курс для ребёнка, который только начинает читать. Нужен один урок из пяти слайдов: карточки А/а — арбуз, Б/б — банан, В/в — виноград с крупными буквами и цветными картинками, затем вопрос с вариантами А, Б, В о первой букве слова банан, затем короткий итог.",
     "cards": [

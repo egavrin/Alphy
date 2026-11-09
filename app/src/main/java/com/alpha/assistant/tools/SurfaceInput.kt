@@ -22,11 +22,11 @@ internal class SurfacePointerRouter(surfaces: List<ToolSurface>) {
     fun resize(surfaces: List<ToolSurface>) {check(owners.isEmpty());placements=surfacePlacements(surfaces)}
     private data class Owner(val placement: SurfacePlacement,val slot: Int,var x: Double,var y: Double)
     private val owners=linkedMapOf<Long,Owner>()
-    fun route(id: Long,phase: String,x: Double,y: Double): JSONObject? {
+    fun route(id: Long,phase: String,x: Double,y: Double,area: List<SurfacePlacement> = placements): JSONObject? {
         require(phase in setOf("down","move","up","cancel") && x.isFinite() && y.isFinite())
         if(phase=="down") {
             if(id in owners || owners.size>=2)return null
-            val placement=placements.lastOrNull {x>=it.x && x<it.x+it.surface.width && y>=it.y && y<it.y+it.surface.height} ?: return null
+            val placement=area.lastOrNull {x>=it.x && x<it.x+it.surface.width && y>=it.y && y<it.y+it.surface.height} ?: return null
             owners[id]=Owner(placement,if(owners.values.any {it.slot==0})1 else 0,0.0,0.0)
         }
         val owner=owners[id] ?: return null
@@ -36,7 +36,13 @@ internal class SurfacePointerRouter(surfaces: List<ToolSurface>) {
         if(phase=="up" || phase=="cancel")owners.remove(id)
         return event
     }
-    fun cancel(): List<JSONObject> = owners.values.map {GraphicsContract.event("pointer",x=it.x,y=it.y,phase="cancel",pointer=it.slot,surfaceId=it.placement.surface.id)}.also {owners.clear()}
+    fun cancel(surfaces: Set<String>? = null): List<JSONObject> {
+        val cancelled = owners.filterValues { surfaces == null || it.placement.surface.id in surfaces }
+        for (id in cancelled.keys) owners.remove(id)
+        return cancelled.values.map {
+            GraphicsContract.event("pointer", x = it.x, y = it.y, phase = "cancel", pointer = it.slot, surfaceId = it.placement.surface.id)
+        }
+    }
 }
 
 /** Only consumed events advance this ledger. Producer ownership can include future queued input. */

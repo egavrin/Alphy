@@ -23,6 +23,8 @@ data class CourseSlidePlan(val id: String, val kind: CourseSlideKind, val goal: 
 enum class CourseSlideKind {
     EXPLANATION, EXAMPLE, CHOICE, FILL_IN, ORDER, CHECK, SUMMARY;
 
+    internal val allowsScene: Boolean get() = this == EXPLANATION || this == EXAMPLE
+
     internal val requiresAnswer: Boolean get() = this == CHOICE || this == FILL_IN || this == ORDER
 }
 

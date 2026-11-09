@@ -691,6 +691,10 @@ private fun verticalArrangement(style: JSONObject?,gap: Dp): Arrangement.Vertica
         return
     }
     when(definition.type) {
+        "canvas" -> LocalToolCanvas.current?.let { render ->
+            val ids = node.getJSONArray("surfaces")
+            render(List(ids.length()) { ids.getString(it) }, text, modifier, enabled)
+        } ?: Text(text, modifier)
         "appBar" -> TopAppBar(title={if (showsToolHeading(text, heading)) Text(text)},modifier=modifier,actions={content()})
         "bottomBar" -> BottomAppBar(modifier=modifier) {content()}
         "routeStack" -> NativeRouteStack(node, state, enabled, modifier, event) { route ->

@@ -10,6 +10,7 @@ import com.alpha.assistant.data.SecureKeyStore
 import kotlinx.coroutines.*
 import org.junit.Assert.*
 import org.junit.Test
+import org.json.JSONObject
 import org.junit.runner.RunWith
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
@@ -126,7 +127,7 @@ class ToolControllerDraftPreviewWorkflowTest {
             "source":"return {state:input.state,surfaces:{board:{commands:[{type:'circle',x:8,y:16,radius:2,color:'accent'}]}}};"}"""
         val fixture=object: ChatProvider {
             override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
-                if(!request.replyWithFixturePlan(emit)) emit(CloudEvent.Text(definition))
+                if(!request.replyWithFixturePlan(emit, fixtureScene())) emit(CloudEvent.Text(JSONObject(definition).withFixtureDrawingBinding("board").toString()))
             }
         }
         val offline=object: ChatProvider {

@@ -23,14 +23,15 @@ import androidx.compose.ui.unit.Dp
 import com.alpha.assistant.R
 import org.json.JSONObject
 
-@Composable internal fun StaticDraftDrawing(spec: ToolSpec, surfacesJson: String?, maxHeight: Dp) {
+@Composable internal fun StaticDraftDrawing(spec: ToolSpec, surfacesJson: String?, maxHeight: Dp, ids: List<String> = spec.surfaces.keys.toList(),
+    label: String? = null, modifier: Modifier = Modifier) {
     if (spec.surfaces.isEmpty()) return
     if (surfacesJson == null) {
         Text(stringResource(R.string.tool_preview_drawing_unavailable), style = MaterialTheme.typography.bodySmall)
         return
     }
 
-    val placements = remember(spec) { surfacePlacements(spec.surfaces.values) }
+    val placements = remember(spec, ids) { surfacePlacements(spec.surfaces.values.filter { it.id in ids }) }
     val frames = remember(placements, surfacesJson) {
         val surfaces = JSONObject(surfacesJson)
         placements.mapNotNull { placement ->
@@ -44,13 +45,13 @@ import org.json.JSONObject
     val labels = frames.joinToString("") { (_, commands) ->
         surfaceLabels(commands, unavailableImage = { label -> resources.getString(R.string.tool_image_unavailable, label) })
     }.trim()
-    val drawingLabel = stringResource(R.string.tool_preview_drawing)
+    val drawingLabel = label ?: stringResource(R.string.tool_preview_drawing)
     val description = if (labels.isEmpty()) drawingLabel else "$drawingLabel. $labels"
     val scheme = MaterialTheme.colorScheme
     val canvasBackground = scheme.surface
     val roleColors = remember(scheme) { ToolUiCatalog.tones.associateWith { scheme.toolInk(it, canvasBackground).toArgb() } }
 
-    BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+    BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Canvas(Modifier.width(minOf(maxWidth, maxHeight * ratio)).aspectRatio(ratio).clipToBounds()
             .background(canvasBackground).semantics { contentDescription = description }) {
             val canvas = drawContext.canvas.nativeCanvas

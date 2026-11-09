@@ -649,7 +649,7 @@ def main():
     course = commands.add_parser("course", help="Capture one live lesson on a dedicated emulator.")
     course.add_argument("--serial", required=True)
     course.add_argument("--label", required=True)
-    course.add_argument("--scenario", required=True, choices=("alphabet", "weather", "fractions"))
+    course.add_argument("--scenario", required=True, choices=("alphabet", "weather", "fractions", "moon-canvas"))
     course.add_argument("--baseline", action="store_true", help="Measure whether the first slide appears.")
     course.add_argument("--adb", default=ADB)
     course.add_argument("--output", type=Path, default=ROOT / "evidence/lesson-reliability")

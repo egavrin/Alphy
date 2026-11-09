@@ -32,6 +32,7 @@ internal class ArtifactCoordinator private constructor() {
     private var frames=emptySet<String>()
     private var timers=emptyMap<String,Int>()
     private var sequence=0L
+    private var controlVersion=0
     private var flushJob: Job?=null
     @Volatile private var failure: String?=null
     private var liveRecoveryRequired=false
@@ -47,7 +48,7 @@ internal class ArtifactCoordinator private constructor() {
         inputView=if(record==null || saved==null) null else InputView(record,saved,inputVersion(record),hosts.values.mapNotNull {it.input}.toSet())
     }
 
-    private fun inputVersion(record: ToolRecord)=LiveInputVersion(record.revision,record.stateVersion,sequence)
+    private fun inputVersion(record: ToolRecord)=LiveInputVersion(record.revision,controlVersion,controlVersion.toLong())
 
     /** Checks an existing drawing registration without dispatching or refreshing an artifact event. */
     fun drawingHostCurrent(id: String,revision: Int,generation: Long): Boolean = synchronized(liveInputs) {
@@ -74,6 +75,7 @@ internal class ArtifactCoordinator private constructor() {
             val previous=durable
             if(previous!=null && (previous.revision!=saved.revision || previous.spec!=saved.spec)) invalidate()
             durable=saved;live=saved
+            ++controlVersion
             updateInputView()
         }
         return checkNotNull(live)
@@ -92,6 +94,8 @@ internal class ArtifactCoordinator private constructor() {
     }
     /** Surface maps are complete candidates validated before any corresponding durable commit. */
     private fun publish(next: ToolRecord,result: ToolPreview?=null,eventType: String?=null) {
+        if (eventType != "frame" && eventType != "timer" ||
+            live?.let { ToolUiCatalog.liveInputContractChanged(it.ui, next.ui) } == true) ++controlVersion
         live=next;++sequence
         playback.update(result?.playback,eventType)
         result?.surfaces?.let {surfaces=it}
@@ -102,7 +106,7 @@ internal class ArtifactCoordinator private constructor() {
     private fun effectiveViewport() = effectiveSurfaces.values.singleOrNull()?.takeIf { it.sizing=="viewport" }
     fun snapshot(store: ToolStore)=snapshot(store.artifactWorkPending(checkNotNull(live).id))
     private fun snapshot(fenced: Boolean)=ArtifactSnapshot(checkNotNull(live),sequence,JSONObject(surfaces.toString()),
-        frames.toSet(),timers.toMap(),fenced,sessionGeneration,playback.value,viewport=effectiveViewport())
+        frames.toSet(),timers.toMap(),fenced,sessionGeneration,playback.value,viewport=effectiveViewport(),controlVersion=controlVersion)
 
     private fun host(owner: Any,generation: Long?) = checkNotNull(
         hosts.entries.lastOrNull { it.value.owner===owner && (generation==null || it.key==generation) }
@@ -168,7 +172,7 @@ internal class ArtifactCoordinator private constructor() {
                 val host=hosts[lease.generation]?.takeIf {it.input===lease}
                 val expected=liveInputs.expected(delivery)
                 if(host==null || expected==null || !delivery.active()) return@ordered rejectLive(LiveInputRejection.Inactive)
-                val old=try {current(store,id,expected.revision,expected.stateVersion)} catch(_: IllegalStateException) {
+                val old=try {current(store,id,expected.revision)} catch(_: IllegalStateException) {
                     return@ordered rejectLive(LiveInputRejection.Conflict)
                 }
                 if(inputVersion(old)!=expected) return@ordered rejectLive(LiveInputRejection.Conflict)
@@ -242,8 +246,10 @@ internal class ArtifactCoordinator private constructor() {
         val ui=JSONObject(record.ui)
         val state=JSONObject(record.state)
         val composition=spec.composition
-        ToolUiCatalog.validateLiveInput(composition?.fillUi(ui) ?: ui,event.getString("actionId"),event.get("value"),
-            composition?.fillState(state) ?: state)
+        val actionId = event.getString("actionId")
+        val fill = composition != null && ToolUiCatalog.action(composition.fillUi(ui), actionId) != null
+        ToolUiCatalog.validateLiveInput(if (fill) checkNotNull(composition).fillUi(ui) else ui, actionId,
+            event.get("value"), if (fill) checkNotNull(composition).fillState(state) else state)
     }
 
     private fun commitLiveInput(store: ToolStore,old: ToolRecord,output: ToolPreview) {

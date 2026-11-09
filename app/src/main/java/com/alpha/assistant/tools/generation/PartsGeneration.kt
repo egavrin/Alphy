@@ -73,7 +73,7 @@ internal object PartsGeneration {
                 ToolParts.requests(plan, lessonTarget)
             }
             // Each typed lesson need has one native part. The plan already supplies its content.
-            val selected = requests.associate { request ->
+            val selected = requests.filter { it.type != NeedType.SCENE }.associate { request ->
                 request.slotFailure?.let { throw it }
                 request.id to (request.candidates.singleOrNull()
                     ?: throw PartsContractFailure("$.needs", "one native part per lesson need"))
@@ -160,7 +160,15 @@ internal object PartsGeneration {
         if (selected.isEmpty()) {
             holes += PartHole(HoleKind.SCREEN, requests.map(PartRequest::id), "$.ui", requests.mapNotNull(PartRequest::slotFailure))
         } else {
-            requests.forEachIndexed { index, request ->
+            val sceneForInput = mutableMapOf<String, String>()
+            for (scene in plan.needs.filter { it.type == NeedType.SCENE }) {
+                for (input in scene.reads.orEmpty()) sceneForInput[input] = scene.id
+            }
+            val liveReaders = plan.inputs.filter { it.control?.live == true && it.id in sceneForInput }.map { it.id }.toSet()
+            val (controls, content) = requests.partition { it.id in liveReaders }
+            val controlsAfterScene = controls.groupBy { sceneForInput.getValue(it.id) }
+            val ordered = content.flatMap { listOf(it) + controlsAfterScene[it.id].orEmpty() }
+            ordered.forEachIndexed { index, request ->
                 val path = "$.ui.children[$index]"
                 val part = selected[request.id]
                 if (part == null) {

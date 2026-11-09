@@ -82,6 +82,9 @@ import androidx.compose.ui.window.DialogProperties
 import com.alpha.assistant.R
 import com.alpha.assistant.data.Attachment
 import com.alpha.assistant.data.Draft
+import com.alpha.assistant.tools.ArtifactSnapshot
+import com.alpha.assistant.tools.NativeLiveInput
+import com.alpha.assistant.tools.NativeToolSurface
 import com.alpha.assistant.tools.ToolContent
 import com.alpha.assistant.tools.ToolUiCatalog
 import com.alpha.assistant.ui.AdaptiveShellLayout
@@ -392,6 +395,9 @@ internal fun CourseLibraryScreen(
                 fun currentOrder() = if (draftSlideId == slideId) draftOrder else (savedAnswer as? CourseAnswer.Order)?.optionIds.orEmpty()
                 CourseSlidePlayer(
                     slide = current,
+                    sceneHost = remember(controller, current.course.id, current.course.revision, current.step.slide.id, current.scene?.json) {
+                        current.scene?.let { controller.sceneHost(current) }
+                    },
                     busy = busy,
                     text = currentText(),
                     order = currentOrder(),
@@ -416,7 +422,7 @@ internal fun CourseLibraryScreen(
                     onRetryNext = {
                         when (nextPreparation) {
                             CourseNextPreparation.Stale -> refresh++
-                            CourseNextPreparation.Failed -> {
+                            CourseNextPreparation.Failed, is CourseNextPreparation.SceneFailed -> {
                                 nextPreparation = null
                                 nextRetry++
                             }
@@ -961,6 +967,7 @@ private fun CourseOutlineRefinementPanel(
 @Composable
 private fun CourseSlidePlayer(
     slide: CoursePage.Slide,
+    sceneHost: CourseSceneHost?,
     busy: Boolean,
     text: String,
     order: List<String>,
@@ -973,6 +980,7 @@ private fun CourseSlidePlayer(
     scroll: ScrollState,
 ) {
     val colors = MaterialTheme.colorScheme
+    var sceneEditing by remember(sceneHost) { mutableStateOf(false) }
     val lessonIndex = slide.course.outline.lessons.indexOfFirst { it.id == slide.step.lessonId }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(Modifier.widthIn(max = 680.dp).fillMaxSize().padding(top = 14.dp, bottom = 12.dp),
@@ -990,7 +998,8 @@ private fun CourseSlidePlayer(
             val correct = slide.feedback?.correct
             Column(Modifier.weight(1f).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(slide.step.lessonTitle, Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
-                ToolContent(ui = slide.ui, state = slide.state, enabled = false, embedded = true, event = { _, _ -> })
+                if (sceneHost == null) ToolContent(ui = slide.ui, state = slide.state, enabled = false, embedded = true, event = { _, _ -> })
+                else CourseScene(sceneHost, !busy, onEditing = { sceneEditing = it })
                 slide.adaptationNote?.let {
                     CourseHeading(stringResource(R.string.course_adaptation))
                     Text(it)
@@ -1019,15 +1028,16 @@ private fun CourseSlidePlayer(
             if (slide.prompt == null || correct == true) {
                 when {
                     slide.nextRequest == null || nextPreparation is CourseNextPreparation.Ready ->
-                        Button(onClick = onNext, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                        Button(onClick = onNext, enabled = !busy && !sceneEditing, modifier = Modifier.fillMaxWidth()) {
                             Text(stringResource(R.string.course_next))
                         }
                     nextPreparation == null -> CourseNextNotice(R.string.course_next_preparing)
                     nextPreparation == CourseNextPreparation.Unavailable -> CourseNextNotice(R.string.course_next_unavailable)
                     else -> {
                         val stale = nextPreparation == CourseNextPreparation.Stale
-                        CourseNextNotice(if (stale) R.string.course_next_changed
-                            else R.string.course_next_failed)
+                        if (nextPreparation is CourseNextPreparation.SceneFailed) {
+                            Text(nextPreparation.detail, Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                        } else CourseNextNotice(if (stale) R.string.course_next_changed else R.string.course_next_failed)
                         TextButton(onClick = onRetryNext, enabled = !busy) {
                             Text(stringResource(if (stale) R.string.course_reload else R.string.course_generation_retry))
                         }
@@ -1036,6 +1046,33 @@ private fun CourseSlidePlayer(
             }
         }
     }
+}
+
+@Composable
+private fun CourseScene(host: CourseSceneHost, enabled: Boolean, onEditing: (Boolean) -> Unit) {
+    var snapshot by remember(host) { mutableStateOf<ArtifactSnapshot?>(null) }
+    val scope = rememberCoroutineScope()
+    DisposableEffect(host) {
+        onDispose { host.dispose() }
+    }
+    NativeToolSurface(host.initial, host.spec, true, 360.dp, host, covered = !enabled, content = {
+        val accepted = snapshot
+        val record = accepted?.tool ?: host.initial
+        ToolContent(record.ui, record.state, enabled && accepted != null, embedded = true,
+            liveInput = accepted?.let { NativeLiveInput.automatic(host, it, enabled) },
+            onLiveInputState = { unfinished, _ -> onEditing(unfinished) }) { action, value ->
+            scope.launch {
+                try {
+                    snapshot = host.event(JSONObject().put("type", "action").put("actionId", action)
+                        .put("value", value ?: JSONObject.NULL))
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    // The shared surface driver observes the stopped session and offers recovery.
+                }
+            }
+        }
+    }) { snapshot = it }
 }
 
 @Composable
@@ -1139,7 +1176,7 @@ private fun CourseGenerationPage(
             page.issue == CourseSlideIssue.GENERATION_BUSY -> R.string.course_generation_busy
             else -> R.string.course_slide_missing
         }
-        Text(stringResource(message), Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+        Text(page.sceneFailure?.takeUnless { waiting } ?: stringResource(message), Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         when {
             waiting -> {
                 LinearProgressIndicator(Modifier.fillMaxWidth())

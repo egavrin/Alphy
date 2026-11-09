@@ -77,9 +77,21 @@ data class ToolSpec private constructor(val json: String, val title: String, val
         return try {
             val catalogRoot = composition?.let { validateComposition { it.catalogUi(root,state) } } ?: root
             validateTool(ToolValidationCategory.UI_STRUCTURE) {ToolUiCatalog.validate(catalogRoot,schema,state,trace,capabilities)}
+            val placed = canvasSurfaceIds(root)
+            if (placed.isNotEmpty() && (presentation != "app" || placed.size != surfaces.size || placed.toSet() != surfaces.keys ||
+                    canvasSurfaceIds(ui).isEmpty())) {
+                val observed = when {
+                    presentation == "immersive" -> "canvas UI node in immersive presentation"
+                    canvasSurfaceIds(ui).isEmpty() -> "inline canvas missing from initial UI"
+                    else -> "invalid surface ownership"
+                }
+                throw ToolValidationFailure(ToolValidationCategory.UI_STRUCTURE, ToolValidationDetails(
+                    "canvas_placement", "$.ui", "Declare inline canvases in initial app UI. Place each surface once. Immersive uses the host stage.", observed))
+            }
             nativePresentation?.let { validateNativePresentation { it.focalNode(root) } }
             root
         } catch(failure: ToolValidationFailure) {
+            if (failure.details?.rule == "canvas_placement") throw failure
             throw ToolValidationFailure(failure.category,failure.details,trace.failure(failure.category))
         }
     }
@@ -218,13 +230,17 @@ data class ToolSpec private constructor(val json: String, val title: String, val
             val source = validateTool(ToolValidationCategory.SOURCE) {
                 j.getString("source").also { require(it.isNotBlank() && it.toByteArray().size <= SandboxContract.MAX_SOURCE_BYTES) }
             }
-            val surfaces = validateTool(ToolValidationCategory.SOURCE) {
+            val surfaces = validateTool(ToolValidationCategory.FIELDS, ToolValidationDetails(
+                "surface_declarations", "$.surfaces", "an array of up to four {id,width,height} declarations with distinct IDs", "invalid surface declarations")) {
                 val declarations=if(j.has("surfaces")) j.getJSONArray("surfaces") else org.json.JSONArray()
                 require(declarations.length() <= 4) {"At most four surfaces are permitted."}
                 (0 until declarations.length()).map {GraphicsContract.declaration(declarations.getJSONObject(it),schema)}
                     .also {require(it.map(ToolSurface::id).distinct().size == it.size)}.associateBy(ToolSurface::id)
             }
-            validateTool(ToolValidationCategory.SOURCE) {require(surfaces.values.none {it.sizing=="viewport"} || surfaces.size==1 && surfaces.values.single().x==null) {"Viewport sizing requires one unpositioned surface."}}
+            validateTool(ToolValidationCategory.FIELDS, ToolValidationDetails(
+                "surface_viewport", "$.surfaces", "one unpositioned surface for viewport sizing", "invalid viewport layout")) {
+                require(surfaces.values.none { it.sizing == "viewport" } || surfaces.size == 1 && surfaces.values.single().x == null)
+            }
             val hostControls = validateTool(ToolValidationCategory.FIELDS,
                 ToolValidationDetails("host_controls", "$.hostControls", "Boolean playback and unique declared movement surface IDs", "invalid controls")) {
                 if (j.has("hostControls")) ArtifactHostControls.parse(j.getJSONObject("hostControls"), surfaces.keys)
@@ -271,5 +287,33 @@ data class ToolSpec private constructor(val json: String, val title: String, val
                 it.validateUi(it.ui,JSONObject(it.initialState),ToolUiValidationStage.DEFINITION,observer)
             }
         }
+    }
+}
+
+internal fun canvasSurfaceIds(node: JSONObject, state: JSONObject? = null): List<String> = buildList {
+    if (state != null && !ToolUiCatalog.visible(node, state)) return@buildList
+    val type = node.optString("type")
+    if (state != null && type == "transition" && ToolUiCatalog.value(state, node.getString("bind")) != true) return@buildList
+    if (state != null && type == "transform") {
+        val pose = NativeLayerMath.target(node, state)
+        val facing = kotlin.math.cos(pose[0] * Math.PI / 180) * kotlin.math.cos(pose[1] * Math.PI / 180)
+        if (pose[7] == 0.0 || node.optBoolean("solid") && facing <= 0.0) return@buildList
+    }
+    if (node.optString("type") == "canvas") {
+        val ids = node.getJSONArray("surfaces")
+        repeat(ids.length()) { add(ids.getString(it)) }
+    }
+    node.optJSONArray("children")?.let { children ->
+        val active = if (state == null) null else when (type) {
+            "pager" -> (ToolUiCatalog.value(state, node.getString("bind")) as Number).toInt()
+            "routeStack" -> {
+                val route = ToolUiCatalog.routeStack(node, state).last()
+                val routes = node.getJSONArray("routes")
+                (0 until routes.length()).firstOrNull { routes.getString(it) == route }
+            }
+            else -> null
+        }
+        if (active != null) addAll(canvasSurfaceIds(children.getJSONObject(active), state))
+        else repeat(children.length()) { addAll(canvasSurfaceIds(children.getJSONObject(it), state)) }
     }
 }

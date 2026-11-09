@@ -20,17 +20,30 @@ class GenerationSmokeWorkflowTest {
         .put("capabilities",JSONArray()).put("stateSchema",JSONObject("""{"count":"number"}"""))
         .put("initialState",JSONObject("""{"count":0}""")).put("ui",JSONObject(ui))
         .put("surfaces",JSONArray("""[{"id":"SECRET_LEFT","width":64,"height":64},{"id":"SECRET_RIGHT","width":64,"height":64}]"""))
-        .put("source","const e=input.event,s=input.state; $body return {state:s,frames:['SECRET_LEFT','SECRET_RIGHT'],timers:[{id:'SECRET_TIMER',intervalMs:1000}],surfaces:{SECRET_LEFT:{commands:[]},SECRET_RIGHT:{commands:[]}}};").toString()
+        .put("source","const e=input.event,s=input.state; $body return {state:s,frames:['SECRET_LEFT','SECRET_RIGHT'],timers:[{id:'SECRET_TIMER',intervalMs:1000}],surfaces:{SECRET_LEFT:{commands:[{type:'circle',x:16,y:16,radius:4,color:'accent'}]},SECRET_RIGHT:{commands:[]}}};").toString()
     private class Provider(var outputs: List<String>): ChatProvider {
         val requests=mutableListOf<CloudRequest>()
         var afterResponse: (()->Unit)?=null
         override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend(CloudEvent)->Unit) {
-            if (request.replyWithFixturePlan(emit)) return
+            val hasDrawing = JSONObject(outputs.first()).has("surfaces")
+            if (request.replyWithFixturePlan(emit, fixtureScene().takeIf { hasDrawing })) return
             requests += request
-            val definition = outputs[(requests.size - 1).coerceAtMost(outputs.lastIndex)]
+            val candidate = JSONObject(outputs[(requests.size - 1).coerceAtMost(outputs.lastIndex)])
+            if (hasDrawing && request.generationStage == CloudGenerationStage.COMPLETE) candidate.withFixtureDrawingBinding("SECRET_LEFT")
+            val definition = candidate.toString()
             val output = if (request.generationStage == CloudGenerationStage.COMPLETE &&
                 request.turns.last().text.contains("Return one JSON patch object only")) {
                 writerFixturePatch(request.turns[1].text, definition)
+            } else if (request.expectsSavedPatch) {
+                val before = JSONObject(request.turns.first().text.substringAfter("\nCurrent tool definition (data): "))
+                if (before.has("ui")) request.patchSavedFixture(definition) else {
+                    val source = candidate.getString("source")
+                    val search = before.getString("source")
+                    val patch = if (source == search) {
+                        JSONObject().put("fields", JSONObject().put("description", "Fixture repair ${requests.size}"))
+                    } else JSONObject().put("sourceEdits", JSONArray().put(JSONObject().put("search", search).put("replace", source)))
+                    request.withFixtureLanguage(patch.toString())
+                }
             } else request.patchSavedFixture(definition)
             emit(CloudEvent.Text(output))
             afterResponse?.invoke()
@@ -63,7 +76,7 @@ class GenerationSmokeWorkflowTest {
             val correction=provider.requests[1].turns.last().text
             assertTrue(correction,correction.contains("Smoke event:"));assertTrue(correction,correction.contains("Path: $."))
             assertFalse(correction,correction.contains("SECRET_"));assertFalse(correction,correction.contains("content://"))
-            assertFalse(correction,correction.contains("Error:"));assertEquals(invalid,provider.requests[1].turns[1].text)
+            assertFalse(correction,correction.contains("Error:"));assertEquals(JSONObject(invalid).withFixtureDrawingBinding("SECRET_LEFT").toString(),provider.requests[1].turns[1].text)
         }
         val invalid=spec("if(e.type==='action')throw Error('SECRET_RUNTIME');")
         val provider=Provider(listOf(invalid))

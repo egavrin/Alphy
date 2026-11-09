@@ -17,6 +17,8 @@ import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
 import com.alpha.assistant.tools.writerFixturePatch
+import com.alpha.assistant.tools.fixtureScene
+import com.alpha.assistant.tools.withFixtureDrawingBinding
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -36,7 +38,7 @@ class StaticDraftPreviewWorkflowTest {
 
     private fun plan(mixed: Boolean) = """
         {"title":"Static fixture","description":"","language":"en","inputs":[],"constants":[],
-         "needs":[${if (mixed) "$counter,$scene" else scene}],"questions":[]}
+         "needs":[${if (mixed) "$counter,$scene" else scene}],"questions":[],"scene":${fixtureScene(moving = true)}}
     """.trimIndent()
 
     private inner class Provider(
@@ -63,7 +65,9 @@ class StaticDraftPreviewWorkflowTest {
                 }
                 CloudGenerationStage.COMPLETE -> {
                     order += "request ${codeCalls + 1}"
-                    val output = replies.getOrNull(codeCalls++) ?: throw CloudFailure("auth", "The fixture has no further candidate.")
+                    val output = JSONObject(replies.getOrNull(codeCalls++) ?: throw CloudFailure("auth", "The fixture has no further candidate."))
+                        .also { if (mixed) it.getJSONObject("fill").withFixtureDrawingBinding("fill_board", moving = true)
+                            else it.withFixtureDrawingBinding("board", moving = true) }.toString()
                     if (!request.turns.last().text.contains("Return one JSON patch object only")) output else {
                         val previous = JSONObject(request.turns[1].text)
                         val next = JSONObject(output)
@@ -95,7 +99,7 @@ class StaticDraftPreviewWorkflowTest {
             return result;
         """.trimIndent()
         val spec = JSONObject().put("title", title).put("description", "").put("source", source)
-            .put("capabilities", JSONArray().put("vibration.play"))
+            .put("capabilities", JSONArray())
             .put("collections", JSONObject("""{"saved":{"type":"object","fields":{"name":"string"}}}"""))
             .put("stateSchema", JSONObject().put(field, "number")).put("initialState", JSONObject().put(field, 0))
             .put("surfaces", JSONArray("""[{"id":"$surface","width":64,"height":64}]"""))

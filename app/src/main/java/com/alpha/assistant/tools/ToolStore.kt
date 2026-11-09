@@ -37,7 +37,8 @@ data class ToolDeletionSnapshot internal constructor(
     internal val automationVersions: Map<String,Int>
 )
 data class ToolDraft(val id: String, val toolId: String?, val baseRevision: Int, val baseStateVersion: Int,
-    val prompt: String, val candidate: String?, val previewState: String?, val previewUi: String?, val conversationId: String?) {
+    val prompt: String, val candidate: String?, val previewState: String?, val previewUi: String?, val conversationId: String?,
+    val previewSurfaces: String? = null) {
     // Automatic chat receipts use a negative base revision and never appear as editable drafts.
     val acceptedRevision: Int? get() = baseRevision.takeIf { it < 0 }?.let { -it }
 }
@@ -141,6 +142,7 @@ class ToolStore private constructor(internal val context: Context, internal val 
             SourceRefresh.createTables(db)
             RecurringSearch.createTables(db)
             db.execSQL("CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY, tool_id TEXT, base_revision INTEGER NOT NULL, base_state_version INTEGER NOT NULL, prompt TEXT NOT NULL, candidate TEXT, preview_state TEXT, preview_ui TEXT, conversation_id TEXT)")
+            addColumn(db, "drafts", "preview_surfaces", "TEXT")
             if (addColumn(db, "tools", "last_conversation_id", "TEXT")) {
                 db.execSQL("UPDATE tools SET last_conversation_id=conversation_id")
             }
@@ -159,6 +161,7 @@ class ToolStore private constructor(internal val context: Context, internal val 
         columns(db, "tools").containsAll(TOOL_COLUMNS.split(',')) &&
         columns(db, "revisions").containsAll(listOf("tool_id", "revision", "spec", "state", "ui", "label", "created_at", "stopped_automations")) &&
         columns(db, "capability_effects").containsAll(listOf("phase", "session")) &&
+        "preview_surfaces" in columns(db, "drafts") &&
         "write_token" in columns(db, "live_sources")
 
     private fun tables(db: SQLiteDatabase): Set<String> = db.rawQuery(
@@ -224,7 +227,7 @@ class ToolStore private constructor(internal val context: Context, internal val 
         if(it.moveToFirst()) it.toolRecord() else null
     }
     private fun android.database.Cursor.toolDraft() = ToolDraft(getString(0), getString(1), getInt(2),
-        getInt(3), getString(4), getString(5), getString(6), getString(7), getString(8))
+        getInt(3), getString(4), getString(5), getString(6), getString(7), getString(8), getString(getColumnIndexOrThrow("preview_surfaces")))
     fun drafts(): List<ToolDraft> = readableDatabase.rawQuery("SELECT * FROM drafts WHERE base_revision>=0 ORDER BY rowid DESC", null).use { c ->
         buildList { while(c.moveToNext()) add(c.toolDraft()) }
     }
@@ -243,6 +246,7 @@ class ToolStore private constructor(internal val context: Context, internal val 
         put("drafts", ContentValues().apply {
             put("id", d.id); put("tool_id", d.toolId); put("base_revision", d.baseRevision); put("base_state_version", d.baseStateVersion)
             put("prompt", d.prompt); put("candidate", d.candidate); put("preview_state", d.previewState); put("preview_ui", d.previewUi); put("conversation_id", d.conversationId)
+            put("preview_surfaces", d.previewSurfaces)
         })
     }
     fun deleteDraft(id: String) = transaction { writableDatabase.delete("drafts","id=?",arrayOf(id)) }
@@ -304,7 +308,7 @@ class ToolStore private constructor(internal val context: Context, internal val 
             }) != -1L)
         }
         if (draft != null) {
-            if(retainReceipt) saveDraft(draft.copy(toolId = t.id,baseRevision = -t.revision,baseStateVersion = t.stateVersion))
+            if(retainReceipt) saveDraft(draft.copy(toolId = t.id,baseRevision = -t.revision,baseStateVersion = t.stateVersion,previewSurfaces = null))
             else deleteDraft(draft.id)
         }
         if(old!=null && (old.revision!=t.revision || old.saved!=t.saved)) {

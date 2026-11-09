@@ -122,7 +122,7 @@ class StaticDraftPreviewUiWorkflowTest {
         }
     }
 
-    @Test fun savedDraftCanApplyAfterModelRecreationWithoutBorrowingDrawing() = withFixture(Provider("Restored")) { fixture, store ->
+    @Test fun savedDraftCanApplyAfterModelRecreationWithItsOwnDrawing() = withFixture(Provider("Restored")) { fixture, store ->
         val prompt = "Draw the saved candidate"
         val drawing = canvasLabel("Restored first. Restored second.")
         fixture.launch().use { scenario ->
@@ -137,12 +137,11 @@ class StaticDraftPreviewUiWorkflowTest {
             reveal(prompt)
             robot.click(prompt)
             robot.waitFor(robot.text(R.string.tool_content))
-            val unavailable = robot.text(R.string.tool_preview_drawing_unavailable)
-            assertTrue("Restored drawing notice is visible", robot.waitFor(unavailable).isVisibleToUser)
-            robot.waitGone(drawing)
+            reveal(drawing)
+            robot.waitGone(robot.text(R.string.tool_preview_drawing_unavailable))
             assertDisabledAction("Restored action")
             waitForEnabledAction(robot.text(R.string.tool_apply_changes))
-            robot.diagnostics.capture("recreated-without-drawing")
+            robot.diagnostics.capture("recreated-with-saved-drawing")
             robot.click(robot.text(R.string.tool_apply_changes))
             robot.waitUntil { store.tools().singleOrNull()?.revision == 1 }
         }
@@ -348,11 +347,11 @@ class StaticDraftPreviewUiWorkflowTest {
     private inner class Provider(vararg titles: String, private val mixed: Boolean = false) : ChatProvider {
         private val responses = ArrayDeque(titles.toList())
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-            if (!mixed && request.replyWithFixturePlan(emit)) return
+            if (!mixed && request.replyWithFixturePlan(emit, fixtureScene())) return
             val response = when (request.generationStage) {
                 CloudGenerationStage.PLAN -> """{"title":"Mixed","description":"","language":"en","inputs":[],"constants":[],"questions":[],"needs":[
                     {"id":"count","type":"counter","label":"Count","description":"Increase and reset"},
-                    {"id":"scene","type":"scene","label":"Dot","description":"Draw a dot"}]}"""
+                    {"id":"scene","type":"scene","label":"Dot","description":"Draw a dot"}],"scene":${fixtureScene()}}"""
                 CloudGenerationStage.SELECTOR -> {
                     val questions = JSONObject(request.turns.single().text).getJSONArray("questions")
                     val answers = JSONArray()
@@ -372,7 +371,9 @@ class StaticDraftPreviewUiWorkflowTest {
                     }
                     JSONObject().put("answers", answers).toString()
                 }
-                CloudGenerationStage.COMPLETE -> definition(responses.removeFirst(), mixed)
+                CloudGenerationStage.COMPLETE -> JSONObject(definition(responses.removeFirst(), mixed)).also {
+                    if (mixed) it.getJSONObject("fill").withFixtureDrawingBinding("fill_first") else it.withFixtureDrawingBinding("first")
+                }.toString()
                 CloudGenerationStage.REFINE -> {
                     check(!mixed) { "The fixture only refines a full definition" }
                     request.patchSavedFixture(definition(responses.removeFirst(), mixed = false))

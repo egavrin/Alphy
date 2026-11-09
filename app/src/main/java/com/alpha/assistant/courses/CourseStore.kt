@@ -7,6 +7,7 @@ import android.database.DatabaseErrorHandler
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import java.io.Closeable
+import org.json.JSONObject
 import java.util.UUID
 
 /** Course storage is independent of the conversation and mini-app databases. */
@@ -72,6 +73,36 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
             ))
         }
     }
+
+    internal data class SceneSettings(val version: Long, val values: String)
+
+    internal fun sceneSettings(courseId: String, slideId: String, outlineRevision: Long, definitionHash: String): SceneSettings =
+        read { readSceneSettings(courseId, slideId, outlineRevision, definitionHash) }
+
+    internal fun saveSceneSettings(courseId: String, courseRevision: Long, slideId: String, outlineRevision: Long,
+        definition: String, definitionHash: String, expected: Long, values: String): SceneSettings = write {
+        val course = requireRevision(courseId, courseRevision)
+        require(course.requireReached(slideId).kind.allowsScene)
+        require(exists("SELECT 1 FROM slides WHERE course_id=? AND slide_id=? AND outline_revision=? AND definition=?",
+            courseId, slideId, outlineRevision.toString(), definition)) { "The slide definition changed." }
+        validateCourseState(values)
+        val old = readSceneSettings(courseId, slideId, outlineRevision, definitionHash)
+        check(old.version == expected) { "The slide settings changed." }
+        val next = SceneSettings(Math.incrementExact(expected), values)
+        val row = ContentValues().apply {
+            put("course_id", courseId); put("slide_id", slideId)
+            put("outline_revision", outlineRevision); put("definition_hash", definitionHash)
+            put("version", next.version); put("settings", next.values)
+        }
+        check(insertWithOnConflict("slide_scene_settings", null, row, SQLiteDatabase.CONFLICT_REPLACE) != -1L)
+        next
+    }
+
+    private fun SQLiteDatabase.readSceneSettings(courseId: String, slideId: String, outlineRevision: Long,
+        definitionHash: String): SceneSettings = rawQuery(
+        "SELECT version, settings FROM slide_scene_settings WHERE course_id=? AND slide_id=? AND outline_revision=? AND definition_hash=?",
+        arrayOf(courseId, slideId, outlineRevision.toString(), definitionHash),
+    ).use { if (it.moveToFirst()) SceneSettings(it.getLong(0), it.getString(1)) else SceneSettings(0, JSONObject().toString()) }
 
     /** Attempts are never trimmed. Read successive pages with the last returned sequence. */
     fun answers(courseId: String, afterSequence: Long = 0, limit: Int = 100): List<CourseAnswerAttempt> = withOpenStore {
@@ -300,7 +331,7 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
 
     // Android's default corruption handler deletes the database file.
     private class CourseDatabase(context: Context, name: String) :
-        SQLiteOpenHelper(context, name, null, 1, DatabaseErrorHandler { }) {
+        SQLiteOpenHelper(context, name, null, 2, DatabaseErrorHandler { }) {
         override fun onConfigure(db: SQLiteDatabase) = db.setForeignKeyConstraintsEnabled(true)
 
         override fun onCreate(db: SQLiteDatabase) {
@@ -343,9 +374,26 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
                 FOREIGN KEY(course_id, slide_id) REFERENCES slides(course_id, slide_id)
             )""")
             db.execSQL("CREATE INDEX answers_course_sequence ON answers(course_id, sequence)")
+            createSceneSettings(db)
         }
 
-        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = unknownVersion(oldVersion)
+        private fun createSceneSettings(db: SQLiteDatabase) {
+            db.execSQL("""CREATE TABLE slide_scene_settings(
+                course_id TEXT NOT NULL,
+                slide_id TEXT NOT NULL,
+                outline_revision INTEGER NOT NULL,
+                definition_hash TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                settings TEXT NOT NULL,
+                PRIMARY KEY(course_id, slide_id),
+                FOREIGN KEY(course_id, slide_id) REFERENCES slides(course_id, slide_id) ON DELETE CASCADE
+            )""")
+        }
+
+        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+            if (oldVersion == 1 && newVersion == 2) createSceneSettings(db)
+            else unknownVersion(oldVersion)
+        }
         override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = unknownVersion(oldVersion)
 
         private fun unknownVersion(version: Int): Unit = error("Unknown course database version $version. Course data was kept.")

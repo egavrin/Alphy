@@ -193,7 +193,8 @@ internal object ToolParts {
         try {
             val builder = FragmentBuilder(need.id)
             val part = if (lessonTarget != null) {
-                if (need.type in passiveLessonNeeds) content(builder, need.label, slots.text("body", 300), slots.pictogram())
+                if (need.type == NeedType.SCENE) null
+                else if (need.type in passiveLessonNeeds) content(builder, need.label, slots.text("body", 300), slots.pictogram())
                 else lessonExercise(builder, need.label, lessonTarget, slots)
             } else when (need.type) {
                 NeedType.COUNTER -> counter(builder, need.label, slots.number("initial", counterInitial, 0),
@@ -435,6 +436,7 @@ internal object ToolParts {
         if (type == "input") full.put("maxLength", 500)
         val config = JSONObject().put("label", input.label).put("initial", input.initial.raw)
         input.control?.let { bounds ->
+            if (bounds.live) full.put("inputMode", "live")
             bounds.min?.let { full.put("min", it) }
             bounds.max?.let { full.put("max", it) }
             bounds.step?.let { full.put("step", it) }

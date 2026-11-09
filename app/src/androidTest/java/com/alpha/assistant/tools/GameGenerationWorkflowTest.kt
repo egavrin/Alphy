@@ -26,8 +26,11 @@ class GameGenerationWorkflowTest {
         val requests=mutableListOf<CloudRequest>()
         override suspend fun respond(key:String,request:CloudRequest,session:CloudSession,emit:suspend(CloudEvent)->Unit) {
             requests+=request
-            if (request.replyWithFixturePlan(emit)) return
-            emit(CloudEvent.Text(output))
+            val candidate = JSONObject(output)
+            val hasDrawing = candidate.has("surfaces")
+            if (request.replyWithFixturePlan(emit, fixtureScene("immersive", moving = true, start = true).takeIf { hasDrawing })) return
+            if (hasDrawing && request.generationStage == CloudGenerationStage.COMPLETE) candidate.withFixtureDrawingBinding("main", moving = true)
+            emit(CloudEvent.Text(candidate.toString()))
         }
     }
     private suspend fun fixture(raw:String,block:suspend(ToolStore,ToolEngine,ToolRecord)->Unit) {

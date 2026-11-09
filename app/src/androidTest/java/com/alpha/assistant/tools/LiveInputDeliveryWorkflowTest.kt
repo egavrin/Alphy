@@ -100,6 +100,13 @@ class LiveInputDeliveryWorkflowTest {
     private suspend fun fixture(block: suspend (ToolStore,ToolEngine,ToolGenerationService,ToolRecord,ArtifactCoordinator)->Unit) {
         val database="live-delivery-${UUID.randomUUID()}.db"
         val generation=ToolGenerationService(offline,SandboxClient(context))
+        val ui = """{"type":"column","children":[
+            {"type":"input","text":"Edit","bind":"text","action":"edit","inputMode":"live"},
+            {"type":"input","text":"Hidden","bind":"text","action":"hidden","inputMode":"live","visible":false},
+            {"type":"input","text":"Disabled","bind":"text","action":"disabled","inputMode":"live","enabled":false},
+            {"type":"input","text":"Apply","bind":"text","action":"apply"},
+            {"type":"button","text":"Probe","action":"probe"}
+        ]}"""
         val source="""
             const e=input.event,s=input.state;
             if(e.type==='liveInput') {
@@ -109,20 +116,20 @@ class LiveInputDeliveryWorkflowTest {
                 s.text=e.value;
             }
             if(e.type==='action' && e.actionId==='probe' && globalThis.lastEdit) s.text=globalThis.lastEdit;
-            if(e.type==='frame') s.frames++;
+            if(e.type==='frame') {
+                s.frames++;
+                const ui=$ui;
+                ui.children.push({type:'text',text:'Frame '+s.frames});
+                if(s.frames>=3) ui.children[0].bind='other';
+                return {state:s,ui};
+            }
             return e.type==='open' ? {state:s,frames:['board']} : {state:s};
         """.trimIndent()
         val spec=ToolSpec.parse(JSONObject("""{
             "formatVersion":3,"title":"Live fixture","description":"","capabilities":[],
-            "stateSchema":{"text":"string","frames":"number"},"initialState":{"text":"","frames":0},
+            "stateSchema":{"text":"string","other":"string","frames":"number"},"initialState":{"text":"","other":"","frames":0},
             "surfaces":[{"id":"board","width":64,"height":64}],
-            "ui":{"type":"column","children":[
-                {"type":"input","text":"Edit","bind":"text","action":"edit","inputMode":"live"},
-                {"type":"input","text":"Hidden","bind":"text","action":"hidden","inputMode":"live","visible":false},
-                {"type":"input","text":"Disabled","bind":"text","action":"disabled","inputMode":"live","enabled":false},
-                {"type":"input","text":"Apply","bind":"text","action":"apply"},
-                {"type":"button","text":"Probe","action":"probe"}
-            ]}}
+            "ui":$ui}
         """).put("source",source).toString())
         try {
             ToolStore(context,database).use {store ->
@@ -164,7 +171,7 @@ class LiveInputDeliveryWorkflowTest {
         }
     }
 
-    @Test fun foregroundLossAndUnflushedFrameChangesRejectPendingInput(): Unit=runBlocking {
+    @Test fun foregroundLossRejectsInputButFramesContinueDuringADrag(): Unit=runBlocking {
         fixture {store,engine,_,initial,coordinator ->
             val first=engine.openArtifact(initial)
             val lease=coordinator.ordered {attachLiveInput(store,initial.id,1,first.sessionGeneration)}
@@ -174,14 +181,27 @@ class LiveInputDeliveryWorkflowTest {
             coordinator.liveInputFrame(store,initial.id,1)
             assertEquals(LiveInputResult.Rejected(LiveInputRejection.Inactive),withTimeout(5000) {lost.await()})
             active.set(true)
-            val stale=receipt(coordinator.offerLiveInput(store,lease,first,"edit","stale",true,active::get))
+            val intermediate=receipt(coordinator.offerLiveInput(store,lease,first,"edit","dragging",false,active::get))
             val frame=engine.artifactEvent(initial.id,1,GraphicsContract.event("frame",16,surfaceId="board"),first.sessionGeneration)
             assertEquals(1,JSONObject(frame.tool.state).getInt("frames"))
+            assertTrue(frame.tool.ui.contains("Frame 1"))
             coordinator.liveInputFrame(store,initial.id,2)
-            assertEquals(LiveInputResult.Rejected(LiveInputRejection.Conflict),withTimeout(5000) {stale.await()})
+            val dragged=withTimeout(5000) {intermediate.await()} as LiveInputResult.Accepted
+            assertEquals("dragging",JSONObject(dragged.snapshot.tool.state).getString("text"))
+            val final=receipt(coordinator.offerLiveInput(store,lease,dragged.snapshot,"edit","released",true,active::get))
+            engine.artifactEvent(initial.id,1,GraphicsContract.event("frame",16,surfaceId="board"),first.sessionGeneration)
+            coordinator.liveInputFrame(store,initial.id,3)
+            val accepted=withTimeout(5000) {final.await()} as LiveInputResult.Accepted
+            assertEquals(accepted.snapshot.tool,store.tool(initial.id))
+            val saved=JSONObject(checkNotNull(store.tool(initial.id)).state)
+            assertEquals("released",saved.getString("text"))
+            assertEquals(2,saved.getInt("frames"))
+            val replaced=receipt(coordinator.offerLiveInput(store,lease,accepted.snapshot,"edit","old binding",true,active::get))
+            engine.artifactEvent(initial.id,1,GraphicsContract.event("frame",16,surfaceId="board"),first.sessionGeneration)
+            coordinator.liveInputFrame(store,initial.id,4)
+            assertEquals(LiveInputResult.Rejected(LiveInputRejection.Conflict),withTimeout(5000) {replaced.await()})
             engine.flushArtifact(initial.id,1,first.sessionGeneration)
-            assertEquals("",JSONObject(store.tool(initial.id)!!.state).getString("text"))
-            assertEquals(1,JSONObject(store.tool(initial.id)!!.state).getInt("frames"))
+            assertEquals("",JSONObject(checkNotNull(store.tool(initial.id)).state).getString("other"))
         }
     }
 

@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -56,10 +57,12 @@ internal class SurfaceEventQueue {
     fun clear()=events.clear()
 }
 
+internal val LocalToolCanvas = compositionLocalOf<(@Composable (List<String>, String, Modifier, Boolean) -> Unit)?> { null }
+
 private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
 
 @OptIn(ExperimentalLayoutApi::class)
-@Composable internal fun NativeToolSurface(tool: ToolRecord,spec: ToolSpec,enabled: Boolean,maxCanvasHeight: Dp,host: ArtifactUiHost,immersive: Boolean=false,covered: Boolean=false,onCoverReady: (Boolean)->Unit = {},topControls: @Composable () -> Unit = {},onSnapshot: (ArtifactSnapshot) -> Unit = {}) {
+@Composable internal fun NativeToolSurface(tool: ToolRecord,spec: ToolSpec,enabled: Boolean,maxCanvasHeight: Dp,host: ArtifactUiHost,immersive: Boolean=false,covered: Boolean=false,onCoverReady: (Boolean)->Unit = {},topControls: @Composable () -> Unit = {},content: @Composable () -> Unit = {},onSnapshot: (ArtifactSnapshot) -> Unit = {}) {
     val context=LocalContext.current
     val view=LocalView.current
     val lifecycle=LocalLifecycleOwner.current.lifecycle
@@ -77,7 +80,6 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
     if(immersive) ImmersiveSystemBars(error==null)
     val queue=remember(tool.id,tool.revision,attempt) {SurfaceEventQueue()}
     val effectiveSurfaces=snapshot?.viewport?.let {listOf(it)} ?: spec.surfaces.values.toList()
-    val placements=remember(effectiveSurfaces) {surfacePlacements(effectiveSurfaces)}
     val router=remember(tool.id,tool.revision,attempt) {SurfacePointerRouter(spec.surfaces.values.toList())}
     val latestCovered=rememberUpdatedState(covered)
     val latestCoverReady=rememberUpdatedState(onCoverReady)
@@ -231,7 +233,9 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
     val roleColors = remember(scheme) {
         ToolUiCatalog.tones.associateWith { scheme.toolInk(it, canvasBackground).toArgb() }
     }
-    val stage: @Composable () -> Unit = {
+    val stage: @Composable (List<String>, String, Modifier, Boolean) -> Unit = { ids, description, modifier, interactive ->
+        val selected = effectiveSurfaces.filter { it.id in ids }
+        val placements = remember(selected) { surfacePlacements(selected) }
         if(placements.isNotEmpty()) {
             val stageWidth=placements.maxOf {it.x+it.surface.width}
             val stageHeight=placements.maxOf {it.y+it.surface.height}
@@ -244,27 +248,33 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
                     resources.getString(R.string.tool_image_unavailable,label)
                 }
             }
-            BoxWithConstraints(if(immersive)Modifier.fillMaxSize() else Modifier.fillMaxWidth(),contentAlignment=Alignment.Center) {
+            BoxWithConstraints(if(immersive)modifier.fillMaxSize() else modifier.fillMaxWidth(),contentAlignment=Alignment.Center) {
+                var measuredSize by remember { mutableStateOf(IntSize.Zero) }
                 val ratio=stageWidth.toFloat()/stageHeight
                 val canvasModifier=if(viewportSurface!=null) {
                     val measured=if(immersive)Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(maxCanvasHeight)
-                    measured.onSizeChanged {if(it.width>0 && it.height>0)requestedViewport=surfaceViewport(viewportSurface,it.width,it.height,density)}
+                    measured
                 } else Modifier.width(minOf(maxWidth,(if(immersive)maxHeight else minOf(maxCanvasHeight,maxHeight))*ratio)).aspectRatio(ratio)
-                Canvas(canvasModifier.background(canvasBackground)
-                    .semantics {contentDescription="${spec.title}. $labels"}
-                    .pointerInput(tool.id,tool.revision,enabled,snapshot?.playback in setOf("ready","playing"),error==null,attempt,acceptedViewport,requestedViewport,covered) {
-                        if(!enabled || covered || snapshot?.playback !in setOf("ready","playing") || error!=null || viewportSurface!=null && acceptedViewport!=requestedViewport)return@pointerInput
+                Canvas(canvasModifier.onSizeChanged {
+                    measuredSize = it
+                    if (viewportSurface != null && it.width > 0 && it.height > 0) {
+                        requestedViewport = surfaceViewport(viewportSurface,it.width,it.height,density)
+                    }
+                }.background(canvasBackground)
+                    .semantics {contentDescription="$description. $labels"}
+                    .pointerInput(ids,measuredSize,interactive,enabled,snapshot?.playback in setOf("ready","playing"),error==null,attempt,acceptedViewport,requestedViewport,covered) {
+                        if(!interactive || !enabled || covered || snapshot?.playback !in setOf("ready","playing") || error!=null || viewportSurface!=null && acceptedViewport!=requestedViewport)return@pointerInput
                         try {awaitPointerEventScope {
                             while(true) {
                                 val event=awaitPointerEvent()
                                 for(change in event.changes) {
                                     if(!change.pressed && !change.previousPressed)continue
                                     val phase=when {change.pressed && !change.previousPressed -> "down";!change.pressed -> "up";else -> "move"}
-                                    val routed=router.route(change.id.value,phase,change.position.x.toDouble()/size.width*inputWidth,change.position.y.toDouble()/size.height*inputHeight)
+                                    val routed=router.route(change.id.value,phase,change.position.x.toDouble()/size.width*inputWidth,change.position.y.toDouble()/size.height*inputHeight, placements)
                                     if(routed!=null) {enqueue(routed);change.consume()}
                                 }
                             }
-                        }} finally {router.cancel().forEach(::enqueue)}
+                        }} finally {router.cancel(ids.toSet()).forEach(::enqueue)}
                     }) {
                     val canvas=drawContext.canvas.nativeCanvas
                     val saved=canvas.save()
@@ -321,7 +331,7 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
     val showControls = stringResource(R.string.tool_game_controls_open)
     val gameControls = stringResource(R.string.tool_game_controls)
     if(immersive) Box(Modifier.fillMaxSize()) {
-        stage()
+        stage(spec.surfaces.keys.toList(), spec.title, Modifier, true)
         if(!controlsExpanded && error==null)IconButton(onClick={controlsExpanded=true},modifier=Modifier.align(Alignment.TopEnd).windowInsetsPadding(WindowInsets.displayCutout.union(WindowInsets.systemGestures.only(WindowInsetsSides.Horizontal))).size(48.dp).semantics {contentDescription=showControls}) {
             Surface(shape = MaterialTheme.shapes.small, color = scheme.surfaceContainerHigh, contentColor = scheme.onSurface) {
                 AlphaIcon(Glyph.Menu, Modifier.padding(6.dp), color = LocalContentColor.current)
@@ -340,7 +350,8 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
             }
         }
     } else Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
-        stage()
+        val inline = canvasSurfaceIds(spec.ui).isNotEmpty()
+        if (!inline) stage(spec.surfaces.keys.toList(), spec.title, Modifier, true)
         val failure = error
         if (failure != null) recovery(failure)
         else {
@@ -357,5 +368,6 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {playbackControls()}
             }
         }
+        CompositionLocalProvider(LocalToolCanvas provides stage, content = content)
     }
 }

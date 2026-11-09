@@ -126,7 +126,7 @@ private val CourseSlideKind.lessonNeed: NeedType get() = when (this) {
     CourseSlideKind.SUMMARY -> NeedType.SUMMARY
 }
 
-internal data class NumberControl(val min: Double?, val max: Double?, val step: Double?, val slider: Boolean) {
+internal data class NumberControl(val min: Double?, val max: Double?, val step: Double?, val slider: Boolean, val live: Boolean = false) {
     val range get() = (min ?: -ToolValueSchema.MAX_SAFE_NUMBER)..(max ?: ToolValueSchema.MAX_SAFE_NUMBER)
 
     fun json() = JSONObject().apply {
@@ -134,10 +134,11 @@ internal data class NumberControl(val min: Double?, val max: Double?, val step: 
         max?.let { put("max", it) }
         if (step != null) put("step", step)
         if (slider) put("control", "slider")
+        if (live) put("inputMode", "live")
     }
 
     companion object {
-        val fields = setOf("min", "max", "step", "control")
+        val fields = setOf("min", "max", "step", "control", "inputMode")
 
         fun read(row: JSONObject, initial: PlanValue, path: String): NumberControl? {
             if (fields.none(row::has)) return null
@@ -146,7 +147,9 @@ internal data class NumberControl(val min: Double?, val max: Double?, val step: 
             val minimum = if (slider || row.has("min")) planNumber(row.opt("min"), "$path.min") else null
             val maximum = if (slider || row.has("max")) planNumber(row.opt("max"), "$path.max") else null
             val step = if (row.has("step")) planNumber(row.opt("step"), "$path.step") else null
-            val control = NumberControl(minimum, maximum, step, slider)
+            val live = row.opt("inputMode") == "live"
+            requireParts(!row.has("inputMode") || slider && live, "$path.inputMode", "live on a numeric slider")
+            val control = NumberControl(minimum, maximum, step, slider, live)
             val range = control.range
             requireParts(initial is PlanValue.Numeric && range.start < range.endInclusive && initial.raw.toDouble() in range,
                 path, "ordered numeric bounds containing the initial value")
@@ -268,8 +271,9 @@ internal data class PlanNeed(
 internal data class PlanQuestion(val id: String, val ask: String, val options: List<String>)
 
 internal sealed interface GenerationPlan {
-    data object WholeScreen : GenerationPlan
-    data class Parts(val needs: NeedsPlan) : GenerationPlan
+    val scene: SceneRequirement?
+    data class WholeScreen(override val scene: SceneRequirement?) : GenerationPlan
+    data class Parts(val needs: NeedsPlan, override val scene: SceneRequirement? = null) : GenerationPlan
 }
 
 internal class NeedsPlan private constructor(
@@ -282,13 +286,15 @@ internal class NeedsPlan private constructor(
     val questions: List<PlanQuestion>
 ) {
     fun validateLesson(target: CourseSlideKind) {
-        requireParts(inputs.isEmpty(), "$.inputs", "no generated lesson inputs")
+        val hasScene = target.allowsScene && needs.any { it.type == NeedType.SCENE }
+        requireParts(inputs.isEmpty() || hasScene && inputs.all { it.initial is PlanValue.Numeric && it.control?.live == true },
+            "$.inputs", "live numeric sliders for an interactive explanation or example")
         requireParts(questions.isEmpty(), "$.questions", "no lesson clarification questions")
         val main = target.lessonNeed
         val count = needs.count { it.type == main }
         requireParts(if (target.requiresAnswer) count == 1 else count > 0, "$.needs", "the host-selected ${main.wire} need")
         needs.forEachIndexed { index, need ->
-            requireParts(need.type == main || need.type in passiveLessonNeeds,
+            requireParts(need.type == main || need.type in passiveLessonNeeds || hasScene && need.type == NeedType.SCENE,
                 "$.needs[$index].type", "the host-selected need or passive lesson content")
         }
     }
@@ -384,7 +390,7 @@ internal class NeedsPlan private constructor(
             Use idea_deck for supplied ideas with time and effort filters, cycling, and a daily completion count.
             Give it an ideas array in the supplied order. Each object has name, positive whole minutes, and effort low, medium, or high.
             For a choice exercise, use option1 to option4 text constants and correct as the one-based number of the correct option.
-            Use scene for moving or touch-driven drawing, and include its interaction and result rules in description.
+            Use scene for static, input-driven or moving drawing. Include its interaction and result rules in description. Use inputMode "live" on numeric sliders that update the drawing during a drag.
             A countdown with no completion effect uses a length role referencing a positive whole seconds constant up to 86400. A stopwatch has no uses. Describe any required completion alert explicitly.
         """.trimIndent() + "\n\n" + structureChecklist
 
@@ -406,7 +412,7 @@ internal class NeedsPlan private constructor(
                 "Write visible text in the language requested for the reached slide. If none is specified, use the language of the reached slide goal. Use language for the lowercase two- or three-letter tag, such as en, ru, or it."
             ) + "\n\n" + """
                 The host selected a ${lessonTarget.name} course slide. Include a ${lessonTarget.lessonNeed.wire} need.
-                Leave inputs and questions empty. Include only that need and passive lesson content.
+                Leave questions empty. For a passive slide, leave inputs empty and use passive lesson content.
                 Every passive need must set uses.body to a text constant of at most 300 characters. A check is passive feedback.
                 For a requested picture card, use a short title as label and a short visible caption as body.
                 Preserve a title or caption supplied in the current goal. If the goal gives a pair of letters or symbols,
@@ -422,6 +428,13 @@ internal class NeedsPlan private constructor(
                 Exercise needs accept only the roles above for that exercise kind. Do not put body or pictogram on an exercise need.
                 Use a separate passive need if the exercise needs visible explanatory content.
                 The course supplies the answer controls. Include no action, code, or exercise metadata fields.
+                ${if (lessonTarget.allowsScene) """
+                    If the reached slide goal requests an interactive scene, keep the required ${lessonTarget.lessonNeed.wire} need and add a need with type "scene". Give the scene a reads array with the control's input ID.
+                    For each slider in the scene, the inputs array must contain a numeric input like this, with the requested label, bounds, and starting value:
+                    {"id":"amount","label":"Amount","type":"number","value":2,"control":"slider","min":1,"max":10,"step":1,"inputMode":"live"}
+                    Set the inputMode field exactly as shown. A description of live behavior does not set that field.
+                    Include the top-level scene with placement "inline" and its executable checks. Keep the scene, slider, and checks in every correction of the plan.
+                """.trimIndent() else "Leave inputs empty for this slide kind."}
             """.trimIndent()
             if (allowedSourceIds.isEmpty()) return lessonPrompt
             val offered = jsonArray(courseSourceIds.filter(allowedSourceIds::contains))
@@ -438,13 +451,21 @@ internal class NeedsPlan private constructor(
             val root = partsObject(raw, "$")
             if (root.has("wholeScreen")) {
                 requireParts(lessonTarget == null, "$.wholeScreen", "a new non-lesson app")
-                root.requireKeys("$", setOf("wholeScreen", "language"), setOf("literals", "iconId"))
+                root.requireKeys("$", setOf("wholeScreen", "language"), setOf("literals", "iconId", "scene"))
                 requireParts(root.opt("language").let { it is String && validAppLanguageTag(it) },
                     "$.language", "a lowercase two- or three-letter language tag")
                 requireParts(root.opt("wholeScreen") == true, "$.wholeScreen", "the Boolean true")
-                return GenerationPlan.WholeScreen
+                return GenerationPlan.WholeScreen(SceneRequirement.read(root.opt("scene")))
             }
-            return GenerationPlan.Parts(parse(root, lessonTarget, allowedSourceIds))
+            val scene = SceneRequirement.read(root.remove("scene"))
+            val needs = parse(root, lessonTarget, allowedSourceIds, scene)
+            val hasScene = needs.needs.any { it.type == NeedType.SCENE }
+            requireParts(!hasScene || scene != null, "$.scene", "a behavior check for the declared scene")
+            if (lessonTarget != null) requireParts(
+                if (hasScene) lessonTarget.allowsScene && scene?.placement == "inline" else scene == null,
+                "$.scene", "an inline check for the requested lesson scene"
+            )
+            return GenerationPlan.Parts(needs, scene)
         }
 
         fun parse(raw: String, lessonTarget: CourseSlideKind? = null, allowedSourceIds: Set<String> = emptySet()): NeedsPlan {
@@ -452,7 +473,7 @@ internal class NeedsPlan private constructor(
             return parse(partsObject(raw, "$"), lessonTarget, allowedSourceIds)
         }
 
-        private fun parse(root: JSONObject, lessonTarget: CourseSlideKind?, allowedSourceIds: Set<String>): NeedsPlan {
+        private fun parse(root: JSONObject, lessonTarget: CourseSlideKind?, allowedSourceIds: Set<String>, scene: SceneRequirement? = null): NeedsPlan {
             root.requireKeys("$", setOf("title", "description", "language", "inputs", "constants", "needs", "questions"),
                 if (lessonTarget == null) setOf("literals", "iconId") else emptySet())
             val title = planText(root.opt("title"), "$.title", 100)
@@ -583,7 +604,13 @@ internal class NeedsPlan private constructor(
                 requireParts(options.distinct().size == options.size, "$path.options", "distinct answers")
                 PlanQuestion(questionId, planText(row.opt("ask"), "$path.ask", 120), options)
             }
-            return NeedsPlan(title, description, language == "ru", inputs, constants, needs, questions).also { plan ->
+            val sceneReads = if (scene == null || lessonTarget == null) emptySet() else needs.filter { it.type == NeedType.SCENE }
+                .flatMap { it.reads.orEmpty() }.toSet()
+            val controls = inputs.map { input ->
+                val control = input.control
+                if (control?.slider == true && input.id in sceneReads) input.copy(control = control.copy(live = true)) else input
+            }
+            return NeedsPlan(title, description, language == "ru", controls, constants, needs, questions).also { plan ->
                 lessonTarget?.let(plan::validateLesson)
             }
         }

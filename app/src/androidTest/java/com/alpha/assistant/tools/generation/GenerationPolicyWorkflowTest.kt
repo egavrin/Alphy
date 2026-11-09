@@ -17,6 +17,8 @@ import com.alpha.assistant.tools.ToolExecutionPolicy
 import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolPreview
 import com.alpha.assistant.tools.ToolSpec
+import com.alpha.assistant.tools.fixtureScene
+import com.alpha.assistant.tools.withFixtureDrawingBinding
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -28,7 +30,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class GenerationPolicyWorkflowTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
-    private val request = "Show one local button."
+    private val request = "Make a mini-app with a button that vibrates the phone when pressed"
     private val plan = """
         {"title":"Policy fixture","description":"","language":"en","inputs":[],"constants":[],"needs":[
           {"id":"custom","type":"other","label":"Local","description":"Show one local button"}
@@ -40,10 +42,21 @@ class GenerationPolicyWorkflowTest {
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
             stages += request.generationStage
             emit(CloudEvent.Text(when (request.generationStage) {
-                CloudGenerationStage.PLAN -> plan
+                CloudGenerationStage.PLAN -> if (!definition.has("surfaces")) plan else {
+                    val scene = fixtureScene()
+                    val scenario = scene.getJSONObject("checks").getJSONObject("scenario")
+                    scenario.getJSONObject("slots").put("input", JSONObject("""{"kind":"action"}"""))
+                    val steps = scenario.getJSONArray("steps")
+                    scenario.put("steps", JSONArray().put(JSONObject("""{"op":"action","slot":"input"}""")).put(steps.getJSONObject(0)))
+                    JSONObject(plan).put("scene", scene).toString()
+                }
                 CloudGenerationStage.COMPLETE -> if (request.turns.last().text.contains("Return one JSON patch object only"))
                     JSONObject().put("fields", JSONObject().put("description", "Retry ${stages.size}")).toString()
-                else definition.toString()
+                else if (definition.has("surfaces")) {
+                    JSONObject(definition.toString()).withFixtureDrawingBinding("board").apply {
+                        getJSONObject("behaviorBindings").put("input", "apply")
+                    }.toString()
+                } else definition.toString()
                 else -> error("Unexpected provider call.")
             }))
         }

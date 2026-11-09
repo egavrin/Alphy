@@ -1,6 +1,7 @@
 package com.alpha.assistant.courses
 
 import com.alpha.assistant.cloud.CloudFailure
+import com.alpha.assistant.tools.ToolSpec
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.currentCoroutineContext
@@ -22,12 +23,15 @@ internal sealed interface CoursePage {
         val sources: List<CourseSourceReference>,
         val adaptationNote: String?,
         val feedback: CourseAnswerFeedback?,
+        val scene: ToolSpec? = null,
+        val sceneRevision: Long = course.outlineRevision,
     ) : CoursePage
 
     data class Unavailable(
         val course: CourseSnapshot,
         val issue: CourseSlideIssue,
         val step: CourseStep,
+        val sceneFailure: String? = null,
     ) : CoursePage {
         val generationRequest: CourseSlideGenerationRequest?
             get() = if (issue != CourseSlideIssue.INVALID && step.slide.id == course.progress.currentSlideId) {
@@ -58,6 +62,7 @@ internal fun interface CourseNextGenerationHost {
 internal sealed interface CourseNextPreparation {
     data class Ready(val request: CourseNextRequest, val page: CoursePage.Slide, val draft: CourseSlideContent?) : CourseNextPreparation
     data object Failed : CourseNextPreparation
+    data class SceneFailed(val detail: String) : CourseNextPreparation
     data object Unavailable : CourseNextPreparation
     data object Stale : CourseNextPreparation
 }
@@ -153,6 +158,9 @@ internal class CoursePresentation(
         } catch (_: CancellationException) {
             currentCoroutineContext().ensureActive()
             return CourseNextPreparation.Failed
+        } catch (failure: CourseWorkflowException) {
+            return if (failure.reason == CourseWorkflowError.INVALID_SCENE) CourseNextPreparation.SceneFailed(checkNotNull(failure.message))
+            else CourseNextPreparation.Failed
         } catch (failure: CourseStoreException) {
             return when (failure.reason) {
                 CourseRejection.STALE_REVISION, CourseRejection.COURSE_NOT_FOUND, CourseRejection.SLIDE_NOT_REACHED ->
@@ -206,11 +214,14 @@ internal class CoursePresentation(
             var issue = CourseSlideIssue.GENERATION_FAILED
             var reloaded = false
             var searchIssue: CourseSourceSearchIssue? = null
+            var sceneFailure: String? = null
             try {
                 host.generate(current)
             } catch (_: CancellationException) {
                 currentCoroutineContext().ensureActive()
                 issue = CourseSlideIssue.GENERATION_INTERRUPTED
+            } catch (failure: CourseWorkflowException) {
+                if (failure.reason == CourseWorkflowError.INVALID_SCENE) sceneFailure = failure.message
             } catch (failure: CourseStoreException) {
                 reloaded = when (failure.reason) {
                     CourseRejection.STALE_REVISION, CourseRejection.STALE_GENERATION, CourseRejection.SLIDE_NOT_REACHED,
@@ -239,7 +250,8 @@ internal class CoursePresentation(
                     val failure = if (sameReach && saved.issue == CourseSlideIssue.MISSING && !reloaded) {
                         saved.copy(issue = issue)
                     } else saved
-                    CourseSlideGenerationUpdate(failure, reloaded || !sameReach, searchIssue)
+                    CourseSlideGenerationUpdate(failure.copy(sceneFailure = sceneFailure.takeIf { sameReach && !reloaded }),
+                        reloaded || !sameReach, searchIssue)
                 }
                 is CoursePage.Slide -> CourseSlideGenerationUpdate(saved, reloaded || saved.step != pending.step ||
                     saved.course.outlineRevision != pending.course.outlineRevision)
@@ -277,15 +289,16 @@ internal class CoursePresentation(
         course: CourseSnapshot, step: CourseStep, number: Int, attempt: CourseAnswerAttempt?, content: CourseSlideContent,
     ): CoursePage.Slide = validateCourseOutput {
         content.encodeSources()
-        val spec = parseCourseSpec(content)
-        require(spec.composition == null)
+        val spec = parseCourseSpec(content, step.slide.kind)
+        val scene = spec.takeIf { step.slide.kind.allowsScene && it.surfaces.isNotEmpty() }
+        require(spec.composition == null || scene != null)
         val exercise = CourseExercise.read(spec, step.slide.kind)
         require(exercise?.actionId == null)
-        checkedCourseUi(spec, spec.ui.toString(), spec.initialState, exercise)
-        val (ui, state) = checkedCourseUi(spec, content.uiJson, content.stateJson, exercise)
+        checkedCourseUi(spec, spec.ui.toString(), spec.initialState, exercise, step.slide.kind)
+        val (ui, state) = checkedCourseUi(spec, content.uiJson, content.stateJson, exercise, step.slide.kind)
         val feedback = attempt?.let { CourseAnswerFeedback(it.answer, it.correct) }
         CoursePage.Slide(course, step, number, ui.toString(), state.toString(), exercise?.prompt,
-            content.sources, content.adaptationNote, feedback)
+            content.sources, content.adaptationNote, feedback, scene)
     }
 
     private fun requireCourse(id: String): CourseSnapshot =

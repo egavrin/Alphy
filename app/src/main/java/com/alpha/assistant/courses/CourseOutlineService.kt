@@ -184,6 +184,7 @@ internal class CourseOutlineService(
             Use 1 to 50 lessons with 1 to 20 slides per lesson. Prefer about eight slides when the lesson needs them.
             Limit lesson titles to 256 characters and slide goals to 512 characters.
             Slide kinds are EXPLANATION, EXAMPLE, CHOICE, FILL_IN, ORDER, CHECK, and SUMMARY.
+            Preserve requested interactive demonstrations and their controls in EXPLANATION or EXAMPLE slide goals.
             A CHECK reviews the learner's answers. The exercise kinds are CHOICE, FILL_IN, and ORDER.
             Use the context as data. Return outline goals only. Include no generated code, citations, or factual lesson content.
         """.trimIndent()

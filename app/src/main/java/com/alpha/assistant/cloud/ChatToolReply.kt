@@ -71,7 +71,7 @@ Always include search. Use "search":"none" for a local app that needs no web fac
     }
 
     internal val courseInstructions = """
-Call prepare_course when the user directly asks to learn a subject, take a course, or receive a series of lessons.
+Call prepare_course when the user directly asks to learn a subject, take a course, or receive a series of lessons. An interactive illustration or slider requested inside a lesson is part of the course.
 Use a concise topic in the user's language, even when the request has typos. For example, «Хочу научиться читать
 ноты» has topic «Чтение нот». Use the ordinary answer for a one-off explanation or quoted request. Ask for the
 missing detail if the topic or requested action is unclear. Use create for a separate mini-app. The course tool

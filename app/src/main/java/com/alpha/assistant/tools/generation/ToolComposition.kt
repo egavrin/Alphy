@@ -131,7 +131,8 @@ internal class ToolComposition private constructor(private val layout: Layout, p
 
     /** Returns null for a fill event. A native part event must never enter the sandbox. */
     fun applyPartEvent(event: JSONObject, fullUi: JSONObject, fullState: JSONObject, clock: PartClockSample? = null): JSONObject? {
-        if (event.opt("type") != "action") return null
+        val live = event.opt("type") == com.alpha.assistant.sandbox.SandboxContract.LIVE_INPUT_EVENT
+        if (event.opt("type") != "action" && !live) return null
         val id = event.opt("actionId") as? String
         val partAction = partActions[id]
         if (partAction == null) {
@@ -146,10 +147,12 @@ internal class ToolComposition private constructor(private val layout: Layout, p
         val actionId = checkNotNull(id)
         return when (handler) {
             is PartHandler.Script -> {
-                ToolUiCatalog.validateAction(root, actionId, value, fullState)
+                if (live) ToolUiCatalog.validateLiveInput(root, actionId, value, fullState)
+                else ToolUiCatalog.validateAction(root, actionId, value, fullState)
                 JSONObject(fullState.toString()).also { handler.transition(it, value) }
             }
             is PartHandler.Clocked -> {
+                requireParts(!live, "$.event.type", "an ordinary clock action")
                 val sample = clock ?: throw PartsContractFailure("$.event", "a host clock sample")
                 ToolUiCatalog.validateAction(root, actionId, value, projectState(fullState, sample))
                 val partState = fixed.durableCopy(fullState)

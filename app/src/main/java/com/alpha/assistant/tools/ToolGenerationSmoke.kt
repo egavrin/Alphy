@@ -144,6 +144,7 @@ internal class ToolGenerationSmoke(
 
     suspend fun checkBehavior(scenario: GenerationBehavior.Scenario, bindings: Map<String, Binding>, preview: ToolPreview,
         route: ToolGenerationRoute, nativeSlots: Set<String>,
+        requireVisibleDrawing: Boolean = false, liveInputSlots: Set<String> = emptySet(),
         allowAssertionFailure: (Int) -> Boolean = { false }) {
         val freshUi = if (initialState == spec.initialState) preview.ui else branch(seedState = spec.initialState) {
             event(JSONObject().put("type", "preview"), "$.ui").ui
@@ -195,10 +196,18 @@ internal class ToolGenerationSmoke(
                         })
                     }
                     is Binding.Drawing -> {
+                        if (requireVisibleDrawing && canvasSurfaceIds(spec.ui).isNotEmpty() &&
+                            binding.surface !in canvasSurfaceIds(JSONObject(ui), displayState())) {
+                            fail("the required canvas is hidden", BehaviorFailureRule.DRAWING_UNAVAILABLE, slot)
+                        }
                         val commands = surfaces.optJSONObject(binding.surface)?.optJSONArray("commands")
                             ?: fail("drawing output unavailable", BehaviorFailureRule.DRAWING_UNAVAILABLE, slot)
-                        observeSurfaceGeometry(surface(binding.surface, slot), commands, binding.path)
+                        val geometry = observeSurfaceGeometry(surface(binding.surface, slot), commands, binding.path)
                             ?: fail("drawing selection unavailable", BehaviorFailureRule.DRAWING_UNAVAILABLE, slot)
+                        if (requireVisibleDrawing && !geometry.hasInk) {
+                            fail("the required drawing produces no visible pixels", BehaviorFailureRule.DRAWING_UNAVAILABLE, slot)
+                        }
+                        geometry
                     }
                     is Binding.Id -> fail("invalid observation binding", BehaviorFailureRule.BINDING_SHAPE, slot)
                 }
@@ -230,7 +239,11 @@ internal class ToolGenerationSmoke(
                             is Binding.Drawing -> fail("invalid action binding", BehaviorFailureRule.BINDING_SHAPE, step.slot)
                         }
                         val value = step.value.takeUnless { it == JSONObject.NULL }
-                        val liveInput = ToolUiCatalog.action(root, action)?.let(ToolUiCatalog::isLiveInput) == true
+                        val control = ToolUiCatalog.action(root, action)
+                        val liveInput = control?.let(ToolUiCatalog::isLiveInput) == true
+                        if (step.slot in liveInputSlots && !liveInput) {
+                            fail("the planned scene control requires live input", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot)
+                        }
                         val event = try {
                             controlEvent(root, JSONObject(state), action, value, liveInput)
                         } catch (_: IllegalArgumentException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot) }

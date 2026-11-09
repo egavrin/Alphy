@@ -24,7 +24,9 @@ internal sealed interface LiveInputResult {
 }
 
 internal data class LiveInputVersion(val revision: Int,val stateVersion: Int,val sequence: Long)
-internal val ArtifactSnapshot.liveInputVersion get()=LiveInputVersion(tool.revision,tool.stateVersion,sequence)
+internal val ArtifactSnapshot.liveInputVersion get() = controlVersion?.let {
+    LiveInputVersion(tool.revision, it, it.toLong())
+} ?: LiveInputVersion(tool.revision, tool.stateVersion, sequence)
 internal class LiveInputLease(val generation: Long)
 internal data class LiveInputKey(val lease: LiveInputLease,val actionId: String,val row: String?)
 

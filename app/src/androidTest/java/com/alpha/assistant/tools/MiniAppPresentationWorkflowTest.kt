@@ -719,13 +719,41 @@ class MiniAppPresentationWorkflowTest {
             }
         }
     }
+    @Test fun inlineDrawingAppearsBetweenNativeControls() {
+        val spec = JSONObject(RequestGameplayExamples.orbitSpec())
+        val old = spec.getJSONObject("ui").getJSONArray("children")
+        val children = JSONArray()
+            .put(JSONObject("""{"type":"text","text":"Before the scene"}"""))
+            .put(JSONObject("""{"type":"canvas","text":"Illustration","surfaces":["orbit"]}"""))
+        repeat(old.length()) { children.put(old.getJSONObject(it)) }
+        spec.getJSONObject("ui").put("children", children)
+        fixture(specJson = spec.toString()) { _, _, _ ->
+            click("Открыть")
+            val before = shown("Before the scene")
+            fun findVisible(node: AccessibilityNodeInfo?, matches: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
+                if (node == null) return null
+                if (node.isVisibleToUser && matches(node)) return node
+                repeat(node.childCount) { findVisible(node.getChild(it), matches)?.let { found -> return found } }
+                return null
+            }
+            val drawing = checkNotNull(findVisible(diagnostics.freshRoot()) {
+                it.contentDescription?.startsWith("Illustration.") == true
+            })
+            val slider = checkNotNull(findVisible(diagnostics.freshRoot()) { it.className == "android.widget.SeekBar" })
+            fun top(node: AccessibilityNodeInfo) = Rect().also(node::getBoundsInScreen).top
+            assertTrue(top(before) < top(drawing))
+            assertTrue(top(drawing) < top(slider))
+        }
+    }
+
     /** Regression: a duplicate board or an implicit host control must never be needed to play. */
     @Test fun generatedBoardUsesDirectTouchAndOneGameStatus() {
         val request = RequestGameplayExamples.TIC_TAC_TOE
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                val result = if (request.generationStage == CloudGenerationStage.PLAN) """{"wholeScreen":true,"language":"en"}"""
-                else RequestGameplayExamples.ticTacToeSpec()
+                val result = if (request.generationStage == CloudGenerationStage.PLAN)
+                    JSONObject("""{"wholeScreen":true,"language":"en"}""").put("scene", fixtureScene()).toString()
+                else JSONObject(RequestGameplayExamples.ticTacToeSpec()).withFixtureDrawingBinding("board").toString()
                 emit(CloudEvent.Text(result))
             }
         }

@@ -64,6 +64,7 @@ object ToolUiCatalog {
             },if(type in setOf("dialog","bottomSheet","pager","transition")) Projection.SUMMARY else Projection.CONTAINER,
             binding=when(type) {"pager" -> setOf("number"); "transition" -> setOf("boolean"); else -> emptySet()},action=type == "pager",container=true))
         add(entry("routeStack", setOf("bind", "routes", "children", "action"), binding = setOf("array"), action = true, container = true))
+        add(entry("canvas", setOf("surfaces")).let { it.copy(properties = it.properties - "interactions") })
         add(entry("spacer",setOf("size"),Projection.OMIT))
         add(entry("text",setOf("bind","format","maxLines","overflow","softWrap","lineHeight","selectable","spans"),Projection.TEXT,scalar))
         add(entry("metric",setOf("bind","format"),Projection.TEXT,setOf("number","string")))
@@ -99,6 +100,22 @@ object ToolUiCatalog {
     }.associateBy {it.type}
     fun component(type: String) = requireNotNull(components[type]) {"Unsupported native component: $type"}
     fun isLiveInput(node: JSONObject): Boolean = node.opt("inputMode") == "live" && node.optString("type") in liveInputTypes
+    private val liveContractFields = listOf("type", "bind", "min", "max", "step", "visible", "enabled", "visibleBind", "enabledBind")
+
+    internal fun liveInputContractChanged(previous: String, next: String): Boolean {
+        if (previous == next) return false
+        fun contracts(raw: String) = buildMap {
+            fun visit(node: JSONObject, rowBinding: String? = null) {
+                if (isLiveInput(node)) put(node.getString("action"), listOf(rowBinding) + liveContractFields.map(node::opt))
+                node.optJSONObject("rowTemplate")?.let { visit(it, node.getString("bind")) }
+                node.optJSONArray("children")?.let { children ->
+                    repeat(children.length()) { visit(children.getJSONObject(it), rowBinding) }
+                }
+            }
+            visit(JSONObject(raw))
+        }
+        return contracts(previous) != contracts(next)
+    }
     fun visible(node: JSONObject) = node.optBoolean("visible",true)
     fun enabled(node: JSONObject) = node.optBoolean("enabled",true)
     fun visible(node: JSONObject,state: JSONObject) = visible(node) && (!node.has("visibleBind") || value(state,node.getString("visibleBind")) == true)
@@ -163,12 +180,18 @@ object ToolUiCatalog {
             require((!register || ++count <= MAX_NODES) && depth <= 8) {"Native UI exceeds its node or depth limit."}
             trace?.at("component_type","$location.type","catalog_component",node.opt("type"))
             val type=node.getString("type"); val definition=component(type)
-            if(template) require(type !in setOf("list","table","groupedList","lazyList","lazyGrid","image","video","calendar","medicine","navigation","stage","dialog","bottomSheet","pager","routeStack")) {"Unsupported row-template component."}
+            if(template) require(type !in setOf("list","table","groupedList","lazyList","lazyGrid","image","video","calendar","medicine","navigation","stage","canvas","dialog","bottomSheet","pager","routeStack")) {"Unsupported row-template component."}
             if(stage && layerContent) require(type != "transform") {"Stage transforms must be direct layer children."}
-            if(stage) require(!node.has("interactions") && !node.has("dismissAction") && !node.has("action") && !component(type).actionRequired && type !in setOf("motion","stage","list","table","groupedList","lazyList","lazyGrid")) {"Stage content must be noninteractive layers."}
+            if(stage) require(!node.has("interactions") && !node.has("dismissAction") && !node.has("action") && !component(type).actionRequired && type !in setOf("motion","stage","list","table","groupedList","lazyList","lazyGrid","canvas")) {"Stage content must be noninteractive layers."}
             validateTool(ToolValidationCategory.UI_PROPERTIES) {
                 trace?.at("component_properties",location,"catalog_properties",node,node.length())
                 if(type == "theme") validateTheme(node)
+                if (type == "canvas") {
+                    val ids = node.getJSONArray("surfaces")
+                    require(ids.length() in 1..4 && (0 until ids.length()).all { ids.get(it) is String }) {
+                        "A canvas needs one to four surface IDs."
+                    }
+                }
                 require(ToolValueSchema.keys(node).all {it in definition.properties}) {"Unsupported component property."}
                 if (node.has("inputMode")) {
                     val mode = node.get("inputMode")
@@ -911,6 +934,7 @@ Every supplied text value must contain 1 to 300 characters. For a checklist, use
 Native UI catalog: ${components.keys.joinToString(", ")}. Properties by type: ${components.values.joinToString("; ") {"${it.type}=${(it.properties-common).sorted().joinToString(",")} (style: ${it.styles.sorted().joinToString(",")})"}}.
 Binding schema types by component: ${components.values.filter {it.binding.isNotEmpty()}.joinToString("; ") {"${it.type}=${it.binding.sorted().joinToString("|")}"}}.
 Required bind: ${components.values.filter {it.binding.isNotEmpty() && it.type !in optionalBindings}.joinToString(", ") {it.type}}. Optional bind: ${components.values.filter {it.binding.isNotEmpty() && it.type in optionalBindings}.joinToString(", ") {it.type}}. Every supplied bind must resolve in both stateSchema and state. Use only a compatible schema type from that component's binding list. Lists and arrays need structured schema objects, not scalar aliases.
+Canvas: {"type":"canvas","text":"Accessible scene description","surfaces":["sceneId"]} places declared drawing surfaces inside the native layout. Assign each surface to one canvas.
 Containers require children (1..50). Declared calendar, medicine, and navigation operations follow Android permissions and pickers. Alphy requires no additional device grant. medicine has type, action, capability, args and common style/flags only, without text. Use implemented medicine.* schemas. Native code displays exact selected values. Echo input.event.medicine in one effect. Only its foreground native click authorizes direct execution. Never invent medicine schedules, doses, meals, or intake.  calendar has exactly type, action, capability, args plus common flags/style, with no generated text. Its capability is calendar.select, calendar.createOwned, calendar.readOwned, calendar.deleteOwned, calendar.deleteAllOwned or calendar.open. Args follow the closed capability schema. Native code displays the operation and exact event details. Echo input.event.calendar={capability,args} in exactly one effect. deleteAllOwned takes only version:1. Its native control displays and freezes every owned-event detail. Scripts cannot supply its deletion targets. Only a native foreground click authorizes direct calendar execution. navigation has exactly type, action, capability, args plus common flags/style. Its capability is maps.markReached or maps.route; args exactly follow that capability schema. It has no generated text property. Native code displays the operation, selected stop/coordinates/system and route mode. It sends null and input.event.navigation={capability,args}. Echo that exact selection in one navigation effect. Only this dedicated foreground control can authorize direct navigation. Generic buttons, inputs and row actions do not authorize automatic navigation. Optional visible/enabled are booleans. Hidden nodes still validate. UI maximum $MAX_NODES structural nodes, depth 8, ${MAX_UI_BYTES / 1024} KiB. Aggregate rendered work is at most $MAX_RENDER_WORK units (each structural node, expanded record row/cell, option, and chart point consumes work). Repeated bindings consume work again. At most $MAX_IMAGES image nodes are allowed, each decoded within ${MAX_IMAGE_EDGE}x$MAX_IMAGE_EDGE pixels. Hidden nodes also consume these limits. Exceeding a limit rejects the UI without truncation. Every actionable control has a unique ASCII action ID. Controls never change state directly. button/icon/listItem/snackbar send null. input sends a string with maxLength <=2048. toggle/checkbox send boolean. numberInput and slider send a finite number within min/max. numberInput uses Apply. slider defaults 0..100. Optional positive step must be no greater than max minus min. It sets the slider increment or adds increase and decrease buttons to numberInput. The numberInput buttons change the draft. Apply sends the value. timeInput binds minutes since local midnight (integer 0..1439); dateInput binds ISO YYYY-MM-DD without a timezone. select/tabs require options:[{text:'Label',value:'scalar'}], same type as bind, 1..30 unique values, and send the selected current value.
 Only input and slider accept inputMode. Omit it or use apply for an ordinary Apply action. Use live only with a host that supports live input delivery. The live mode and its explicit Apply fallback both use event.type liveInput. This event can update state, UI, and drawing. It cannot request effects, records, frames, timers, or playback. Row template editors send the current stable key and value. In mixed mini-apps, use live only in fill-owned controls. A widget opens the mini-app for input.
 Labeled native leaves include {"type":"text","text":"Score","bind":"score"} and {"type":"icon","name":"Plus","text":"Add","action":"add"}. An icon name does not replace its accessible text label.

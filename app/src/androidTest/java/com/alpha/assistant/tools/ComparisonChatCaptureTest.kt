@@ -17,10 +17,14 @@ import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.cloud.DeepSeekProvider
+import com.alpha.assistant.data.Conversation
+import com.alpha.assistant.data.Message
 import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.data.ShellStore
 import com.alpha.assistant.ui.ShellRobot
+import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellViewModel
+import com.alpha.assistant.ui.seedOpenChat
 import com.alpha.assistant.weather.WeatherLocator
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -39,6 +43,75 @@ class ComparisonChatCaptureTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val app get() = instrumentation.targetContext
 
+    private fun firstCanvasLabel(node: JSONObject): String? {
+        if (node.optString("type") == "canvas") return node.getString("text")
+        val children = node.optJSONArray("children") ?: return null
+        repeat(children.length()) { firstCanvasLabel(children.getJSONObject(it))?.let { label -> return label } }
+        return null
+    }
+
+    @Test fun replayGeneratedCanvasGameFromChat() {
+        val origin = InstrumentationRegistry.getArguments().getString("canvasReplayRun")
+        assumeNotNull(origin)
+        require(checkNotNull(origin).matches(Regex("[a-f0-9]{32}")))
+        val files = checkNotNull(app.getExternalFilesDir(null))
+        val captured = File(files, "comparison-capture/$origin/artifact.json").readText()
+        val artifact = JSONObject(captured)
+        val id = artifact.getString("artifact_id")
+        val revision = artifact.getInt("artifact_revision")
+        val spec = ToolSpec.parsePersisted(artifact.getJSONObject("spec").toString())
+        check(spec.presentation == "immersive")
+        val evidence = JSONObject().put("origin", origin).put("artifact_sha256", sha256(captured)).put("status", "failed")
+        val directory = File(files, "canvas-replay/$origin").apply { check(mkdirs()) }
+        val fixture = ShellFixture("canvas-replay")
+        val robot = ShellRobot(fixture.name)
+        try {
+            val chat = "canvas-chat"
+            fixture.store.saveConversation(Conversation(chat, "Generated game", 1, 2, messages = listOf(
+                Message("request", "user", "Generate an immersive Arkanoid game.", 1, "sent"),
+                Message("answer", "assistant", spec.description, 2, "complete", replyTo = "request", toolId = id, toolRevision = revision),
+            )))
+            fixture.store.seedOpenChat(chat)
+            ToolStore(app, "${fixture.store.databaseName}-tools.db").use { store ->
+                store.saveTool(ToolRecord(id, revision, 1, spec.json, spec.initialState, spec.ui.toString(), chat, true), revision = true)
+            }
+            fixture.install(saveKey = false)
+            fixture.launch().use {
+                val vm = checkNotNull(fixture.model)
+                val checks = CanvasLiveChecks(robot, evidence) { name ->
+                    val bitmap = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+                    try {
+                        File(directory, "$name.png").outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                    } finally { bitmap.recycle() }
+                }
+                val card = robot.text(R.string.tool_open)
+                fun score(state: String) = JSONObject(state).getDouble("score")
+                fun state() = onMain { vm.tools.tools.single { tool -> tool.id == id }.state }
+                robot.click(card)
+                checks.game(spec.title, score(spec.initialState), { score(state()) }) {
+                    onMain { vm.openSurface(null) }
+                    robot.waitGone(robot.text(R.string.tool_game_controls_open))
+                    robot.click(card)
+                }
+                checks.captureCompact(spec.title) {
+                    robot.waitFor(robot.text(R.string.tool_game_controls_open))
+                    robot.waitUntil {
+                        val viewport = JSONObject(state())
+                        viewport.getDouble("vh") / viewport.getDouble("vw") > 1.8
+                    }
+                }
+                evidence.put("status", "passed")
+            }
+        } catch (failure: Throwable) {
+            evidence.put("failure", failure.message)
+            throw failure
+        } finally {
+            File(directory, "report.json").writeText(evidence.toString(2))
+            fixture.model?.let { vm -> runBlocking { vm.tools.closeAndJoin() } }
+            fixture.remove()
+        }
+    }
+
     @Test
     fun captureFrozenSlot() {
         val encoded = InstrumentationRegistry.getArguments().getString("comparisonEnvelope")
@@ -49,6 +122,7 @@ class ComparisonChatCaptureTest {
         val request = input.getString("request")
         val reviewSeconds = input.getInt("review_seconds")
         val caseId = slotId.substringBeforeLast(":candidate:")
+        val canvasWorkflow = caseId in setOf("canvas:arkanoid", "canvas:wave")
         val savedEdit = input.optBoolean("saved_edit")
         val verifyWorkflow = input.optBoolean("verify_workflow")
         require(!savedEdit || verifyWorkflow && caseId in setOf("extra:reference-points-ledger", "extra:russian-grid-game"))
@@ -57,7 +131,7 @@ class ComparisonChatCaptureTest {
         require(request.isNotBlank() && request.trim() == request && request.length <= MAX_CHAT_INPUT && '\u0000' !in request)
         require(reviewSeconds in 5..180)
         require(!verifyTip || caseId == "bench:tip")
-        require(!verifyWorkflow || caseId == "bench:tip" || caseId in Plan5WorkflowChecks.cases)
+        require(!verifyWorkflow || caseId == "bench:tip" || canvasWorkflow || caseId in Plan5WorkflowChecks.cases)
         val report = JSONObject().put("run_id", runId).put("slot_id", slotId)
         for (field in listOf("plan_sha256", "request_sha256", "execution_sha256", "revision", "source_sha256", "build_sha256")) {
             val value = input.getString(field)
@@ -258,6 +332,7 @@ class ComparisonChatCaptureTest {
             })
             if (assistant.status != "complete") {
                 report.put("failure_code", ToolGenerationAttemptDiagnostic.safeCode(assistant.errorCode))
+                if (canvasWorkflow) report.put("scene_diagnostic", assistant.error?.take(400))
             }
             if (artifact != null) {
                 report.put("artifact_id", artifact).put("artifact_revision", assistant.toolRevision)
@@ -306,6 +381,35 @@ class ComparisonChatCaptureTest {
                     check(report.optBoolean("open_card_action"))
                     if (verifyTip) {
                         check(report.getJSONObject("tip_interaction").getString("status") == "passed")
+                    } else if (canvasWorkflow) {
+                        save("review")
+                        val checks = CanvasLiveChecks(robot, proof) { name ->
+                            val bitmap = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+                            try {
+                                File(directory, "$name.png").outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                            } finally { bitmap.recycle() }
+                        }
+                        val saved = onMain { vm.tools.tools.single { it.id == artifact } }
+                        val spec = ToolSpec.parsePersisted(saved.spec)
+                        if (caseId == "canvas:wave") {
+                            check(canvasSurfaceIds(spec.ui).isNotEmpty())
+                            val sceneLabel = checkNotNull(firstCanvasLabel(spec.ui))
+                            val amplitude = checks.slider("Amplitude", sceneLabel)
+                            checks.captureCompact(sceneLabel) { robot.waitUntil { checks.progress("Amplitude") == amplitude } }
+                        } else {
+                            check(spec.presentation == "immersive") { "The generated game was not immersive." }
+                            fun score(values: JSONObject): Double? {
+                                val key = values.keys().asSequence().firstOrNull { it.equals("score", true) || it.endsWith("_score") }
+                                return key?.let { (values.opt(it) as? Number)?.toDouble() }
+                            }
+                            val initial = checkNotNull(score(JSONObject(spec.initialState))) { "The game has no observable Score." }
+                            checks.game(spec.title, initial, { onMain { score(JSONObject(vm.tools.tools.single { it.id == artifact }.state)) } }) {
+                                onMain { vm.openSurface(null) }
+                                robot.waitGone(robot.text(R.string.tool_game_controls_open))
+                                robot.click(robot.text(R.string.tool_open))
+                            }
+                            checks.captureCompact(spec.title) { robot.waitFor(robot.text(R.string.tool_game_controls_open)) }
+                        }
                     } else {
                         val toolDatabase = "$database-tools.db"
                         fun savedTool() = onMain { vm.tools.tools.single { it.id == artifact } }
@@ -330,14 +434,17 @@ class ComparisonChatCaptureTest {
                     proof.put("status", "passed")
                 }
             }
+            if (canvasWorkflow && verifyWorkflow) check(report.optJSONObject("workflow")?.optString("status") == "passed")
             save("review")
             SystemClock.sleep(reviewSeconds * 1_000L)
             report.put("review_screen", screenshot("review"))
             terminal = "complete"
         } catch (failure: Exception) {
             report.put("failure_stage", failureAt).put("failure_type", failure.javaClass.simpleName)
+            if (canvasWorkflow) report.put("failure_detail", failure.message?.take(400))
         } catch (failure: AssertionError) {
             report.put("failure_stage", failureAt).put("failure_type", failure.javaClass.simpleName)
+            if (canvasWorkflow) report.put("failure_detail", failure.message?.take(400))
         } finally {
             try {
                 val vm = onMain { model }

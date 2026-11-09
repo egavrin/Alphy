@@ -1,5 +1,6 @@
 package com.alpha.assistant.courses
 
+import com.alpha.assistant.tools.CanvasLiveChecks
 import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -22,6 +23,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(AndroidJUnit4::class)
@@ -34,6 +36,7 @@ class LiveCourseWorkflowTest {
         require(runId.matches(Regex("course-[a-f0-9]{12}")))
         val case = requireNotNull(args.getString("courseScenario"))
         val baseline = args.getString("courseBaseline") == "true"
+        val canvasWorkflow = case == "moon-canvas"
         val robot = ShellRobot(runId)
         val fixture = ShellFixture(runId)
         val cases = robot.instrumentation.context.assets.open("course-scenarios.json").bufferedReader().use { it.readText() }
@@ -141,12 +144,24 @@ class LiveCourseWorkflowTest {
                 val kind = CourseSlideKind.valueOf(input.getString("kind"))
                 val cardCount = if (cards.length() == 0) 1 else cards.length()
                 val exercises = steps.map { it.slide.kind }.filter { it.requiresAnswer }
-                if (!baseline) check(steps.size == cardCount + 2 && exercises == listOf(kind)) {
+                if (canvasWorkflow) check(steps.take(2).map { it.slide.kind } == listOf(CourseSlideKind.EXPLANATION, CourseSlideKind.EXAMPLE))
+                if (!baseline && !canvasWorkflow) check(steps.size == cardCount + 2 && exercises == listOf(kind)) {
                     "Unexpected outline slide count or exercise kinds: ${steps.map { it.slide.kind }}"
                 }
                 var nextTappedAt: Long? = null
+                var retriedNext = false
                 val next = robot.text(R.string.course_next)
                 fun waitForNext() {
+                    val retry = robot.text(R.string.course_generation_retry)
+                    if (canvasWorkflow && !retriedNext) {
+                        robot.waitUntil(240_000) { robot.find(next)?.isEnabled == true || robot.find(retry)?.isEnabled == true }
+                        if (robot.find(next)?.isEnabled != true) {
+                            retriedNext = true
+                            event(JSONObject().put("retry_next_scene", true))
+                            robot.click(retry)
+                            robot.waitGone(retry)
+                        }
+                    }
                     robot.waitUntil(240_000) {
                         check(robot.find(robot.text(R.string.course_next_failed)) == null) { "Next slide preparation failed." }
                         robot.find(next)?.isEnabled == true
@@ -161,7 +176,7 @@ class LiveCourseWorkflowTest {
                     val slide = checkNotNull(store.slide(course.id, step.slide.id)) {
                         "Slide generation failed: ${store.course(course.id)?.generationFailure}"
                     }
-                    val exercise = CourseExercise.read(parseCourseSpec(slide.content), step.slide.kind)
+                    val exercise = CourseExercise.read(parseCourseSpec(slide.content, step.slide.kind), step.slide.kind)
                     val position = robot.text(R.string.course_slide_position, index + 1, steps.size)
                     robot.waitUntil(240_000) { robot.find(position)?.isVisibleToUser == true }
                     val visibleAt = SystemClock.elapsedRealtime()
@@ -174,6 +189,31 @@ class LiveCourseWorkflowTest {
                     }
                     if (!baseline && index != 0 && exercise == null) recordReadiness(visibleAt)
                     screenshot("slide-${index + 1}")
+                    if (canvasWorkflow && index < 2) {
+                        val proof = JSONObject()
+                        val checker = CanvasLiveChecks(robot, proof) { screenshot("slide-${index + 1}-$it") }
+                        val accepted = checker.slider(if (index == 0) "Speed" else "Orbit radius", "Orbit illustration")
+                        check(store.course(course.id)?.progress?.currentSlideId == step.slide.id)
+                        val definition = parseCourseSpec(slide.content, step.slide.kind).json
+                        val hash = MessageDigest.getInstance("SHA-256").digest(definition.toByteArray()).joinToString("") { "%02x".format(it) }
+                        val savedSettings = store.sceneSettings(course.id, step.slide.id, slide.outlineRevision, hash)
+                        check(savedSettings.version > 0) { "The slider had no accepted setting in the course database." }
+                        event(proof.put("settings_version", savedSettings.version).put("slide", step.slide.id))
+                        robot.back()
+                        click(R.string.shell_course_continue)
+                        robot.waitFor(position)
+                        val label = if (index == 0) "Speed" else "Orbit radius"
+                        checker.progress(label, reveal = true)
+                        robot.waitUntil { checker.progress(label) == accepted }
+                        event(JSONObject().put("scene_reopened", true).put("slide", step.slide.id))
+                        if (index == 1) {
+                            checker.captureCompact("Orbit illustration") {
+                                checker.progress(label, reveal = true)
+                                robot.waitUntil { checker.progress(label) == accepted }
+                            }
+                            event(JSONObject().put("layout", proof.getJSONObject("display_widths")))
+                        }
+                    }
                     if (!baseline && index < cards.length()) {
                         val expected = cards.getJSONArray(index)
                         val label = expected.getString(0)

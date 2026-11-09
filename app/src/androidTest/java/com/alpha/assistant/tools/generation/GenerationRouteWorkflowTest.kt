@@ -1,6 +1,8 @@
 package com.alpha.assistant.tools.generation
 
 import com.alpha.assistant.tools.patchSavedFixture
+import com.alpha.assistant.tools.fixtureScene
+import com.alpha.assistant.tools.withFixtureDrawingBinding
 import com.alpha.assistant.tools.withFixtureLanguage
 import com.alpha.assistant.tools.ToolRecord
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -103,7 +105,9 @@ class GenerationRouteWorkflowTest {
     }
 
     private fun mixed(fill: JSONObject, hole: String = "scene") =
-        JSONObject().put("holes", JSONArray().put(hole)).put("fill", fill).toString()
+        JSONObject().put("holes", JSONArray().put(hole)).put("fill", fill.apply {
+            if (has("surfaces")) withFixtureDrawingBinding(surface, moving = true)
+        }).toString()
 
     private class FixtureProvider(
         var fixture: suspend (CloudRequest, CloudSession) -> String
@@ -341,10 +345,10 @@ class GenerationRouteWorkflowTest {
         """.trimIndent()
         val fragment = JSONObject(definition(source = source))
             .put("surfaces", JSONArray("""[{"id":"dot","width":64,"height":64}]"""))
-            .put("presentation", JSONObject("""{"mode":"immersive"}""")).toString()
+            .put("presentation", JSONObject("""{"mode":"immersive"}""")).withFixtureDrawingBinding("dot", moving = true).toString()
         val provider = FixtureProvider { turn, _ ->
             when (turn.generationStage) {
-                CloudGenerationStage.PLAN -> plan(scene)
+                CloudGenerationStage.PLAN -> JSONObject(plan(scene)).put("scene", fixtureScene("immersive", moving = true)).toString()
                 CloudGenerationStage.SELECTOR -> answer(turn)
                 CloudGenerationStage.COMPLETE -> fragment
                 else -> error("Unexpected request stage.")
@@ -374,7 +378,7 @@ class GenerationRouteWorkflowTest {
         var attemptedOwnershipEdit = false
         val provider = FixtureProvider { turn, _ ->
             when (turn.generationStage) {
-                CloudGenerationStage.PLAN -> plan("$count,$scene")
+                CloudGenerationStage.PLAN -> JSONObject(plan("$count,$scene")).put("scene", fixtureScene(moving = true)).toString()
                 CloudGenerationStage.SELECTOR -> answer(turn)
                 CloudGenerationStage.COMPLETE -> {
                     assertTrue(turn.turns.first().text.contains("Move a dot on each frame"))
@@ -513,7 +517,7 @@ class GenerationRouteWorkflowTest {
         var providerRepairNumber = 0
         val provider = FixtureProvider { turn, session ->
             when (turn.generationStage) {
-                CloudGenerationStage.PLAN -> plan("$count,$scene")
+                CloudGenerationStage.PLAN -> JSONObject(plan("$count,$scene")).put("scene", fixtureScene(moving = true)).toString()
                 CloudGenerationStage.SELECTOR -> answer(turn)
                 CloudGenerationStage.COMPLETE -> {
                     if (cancel) { session.cancel(); session.check() }

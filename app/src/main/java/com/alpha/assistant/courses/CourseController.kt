@@ -20,10 +20,12 @@ internal class CourseController(
 
     private val interactions = Mutex()
 
+    fun sceneHost(page: CoursePage.Slide) = generation.sceneHost(store, page)
+
     fun exercise(courseId: String, expectedRevision: Long, slideId: String): CourseExercisePrompt? {
         val (_, step) = reached(courseId, expectedRevision, slideId)
         val slide = generated(courseId, slideId)
-        return CourseExercise.read(parseCourseSpec(slide.content), step.slide.kind)?.prompt
+        return CourseExercise.read(parseCourseSpec(slide.content, step.slide.kind), step.slide.kind)?.prompt
     }
 
     /** Reopening an existing slide returns the saved revision without a provider request. */
@@ -112,9 +114,9 @@ internal class CourseController(
         val (_, step) = reached(courseId, expectedRevision, slideId)
         if (step.slide.kind.requiresAnswer) reject(CourseRejection.ANSWER_REQUIRED)
         val slide = generated(courseId, slideId)
-        val spec = parseCourseSpec(slide.content)
+        val spec = parseCourseSpec(slide.content, step.slide.kind)
         CourseExercise.read(spec, step.slide.kind)
-        checkedCourseUi(spec, slide.content.uiJson, slide.content.stateJson, null)
+        checkedCourseUi(spec, slide.content.uiJson, slide.content.stateJson, null, step.slide.kind)
         return store.advance(courseId, expectedRevision, slideId)
     }
 

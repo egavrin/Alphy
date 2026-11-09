@@ -119,7 +119,7 @@ class GenerationContractGuidanceTest {
 
     @Test fun wholeScreenMarkerIsExactAndUnavailableToLessonPlans() {
         val marker = """{"wholeScreen":true,"language":"en"}"""
-        assertSame(GenerationPlan.WholeScreen, NeedsPlan.parseResponse(marker, null, emptySet()))
+        assertEquals(GenerationPlan.WholeScreen(null), NeedsPlan.parseResponse(marker, null, emptySet()))
         for (invalid in listOf("{}", """{"wholeScreen":false}""", """{"wholeScreen":1}""",
             """{"wholeScreen":null}""", """{"wholeScreen":"true"}""",
             """{"wholeScreen":true,"questions":[]}""", """{"wholeScreen":true,"wholeScreen":true}""",

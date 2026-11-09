@@ -21,12 +21,31 @@ internal fun firstSelectorChoices(body: String): String {
 private const val fixtureNeeds = """{"title":"Fixture","description":"Local test fixture","language":"en","inputs":[],"constants":[],"needs":[{"id":"custom","type":"other","label":"Fixture behavior","description":"Implement the complete behavior in the request."}],"questions":[]}"""
 
 // A single unsupported need makes production request a full definition from the fixture.
-internal suspend fun CloudRequest.replyWithFixturePlan(emit: suspend (CloudEvent) -> Unit): Boolean {
+internal suspend fun CloudRequest.replyWithFixturePlan(emit: suspend (CloudEvent) -> Unit, scene: JSONObject? = null): Boolean {
     if (generationStage == CloudGenerationStage.SELECTOR) error("The fixture plan must not require part selection")
     if (generationStage != CloudGenerationStage.PLAN) return false
     check(jsonObject && !search && !systemInstructions.contains("top-level \"behavior\"") && selectedText.isEmpty())
-    emit(CloudEvent.Text(fixtureNeeds))
+    emit(CloudEvent.Text(if (scene == null) fixtureNeeds else JSONObject(fixtureNeeds).put("scene", scene).toString()))
     return true
+}
+
+internal fun fixtureScene(placement: String = "stage", moving: Boolean = false, start: Boolean = false): JSONObject {
+    val slots = JSONObject("""{"drawing":{"kind":"geometry"}}""")
+    val steps = JSONArray()
+    if (moving) {
+        slots.put("surface", JSONObject("""{"kind":"surface"}"""))
+        if (start) steps.put(JSONObject("""{"op":"surface","slot":"surface","event":"start"}"""))
+        steps.put(JSONObject("""{"op":"frames","slot":"surface","count":4,"observe":"drawing","changes":3}"""))
+    } else steps.put(JSONObject("""{"op":"assert","slot":"drawing","test":"nonempty"}"""))
+    val scenario = JSONObject().put("slots", slots).put("steps", steps)
+    return JSONObject().put("placement", placement).put("brief", "Show visible drawing.")
+        .put("checks", JSONObject().put("status", "checkable").put("scenario", scenario))
+}
+
+internal fun JSONObject.withFixtureDrawingBinding(surface: String, moving: Boolean = false): JSONObject {
+    val bindings = JSONObject().put("drawing", JSONObject().put("surface", surface).put("path", JSONArray()))
+    if (moving) bindings.put("surface", surface)
+    return put("behaviorBindings", bindings)
 }
 
 /** Adapt an existing full-output fixture to the writer repair wire format. */
