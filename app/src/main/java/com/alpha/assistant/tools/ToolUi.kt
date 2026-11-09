@@ -746,7 +746,7 @@ catch (_: Exception) { null }
             val showBadge = preview != null || tool?.archived == true
             val descriptionAfterContent = preview == null && tool?.saved == true && !tool.archived
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (showBadge) MiniAppBadge(title, size = 56.dp, draft = preview != null)
+                if (showBadge) MiniAppBadge(candidate?.iconId ?: spec?.iconId, size = 56.dp, draft = preview != null)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
                     if (showBadge && !description.isNullOrBlank()) {

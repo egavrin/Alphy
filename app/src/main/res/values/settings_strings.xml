@@ -15,4 +15,7 @@
     <string name="settings_access_automation">Уведомления и автоматизации</string>
     <string name="settings_access_scope">Как Alphy использует разрешения</string>
     <string name="settings_network_disclosure">Как работает доступ к сети</string>
+    <string name="semantic_preparing">Подготавливаем модель поиска…</string>
+    <string name="semantic_searching">Ищем на устройстве…</string>
+    <string name="semantic_search_unavailable">Поиск недоступен. Очистите запрос, чтобы открыть список.</string>
 </resources>

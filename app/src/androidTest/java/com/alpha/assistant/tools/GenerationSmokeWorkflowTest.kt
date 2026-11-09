@@ -134,7 +134,14 @@ class GenerationSmokeWorkflowTest {
             .put("collections",JSONObject("""{"history":{"type":"object","fields":{"note":"string"}}}"""))
         val provider=Provider(listOf(definition.toString()));val engine=ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))
         try {
-            val first=engine.createDraft("Effect fixture",null);val preview=engine.generate(first.id,"offline",emptyList(),CloudSession());val saved=engine.accept(first.id)
+            val first=engine.createDraft("Make a mini-app with a button that vibrates the phone when pressed",null)
+            val preview = try {
+                engine.generate(first.id,"offline",emptyList(),CloudSession())
+            } catch (failure: CloudFailure) {
+                throw AssertionError("Fixture shortlist and repair: " + provider.requests.map { it.turns.joinToString("\n") { turn -> turn.text }
+                    .substringAfter("Alphy Android callable shortlist", "").substringBefore(". Declare only these").take(900) }, failure)
+            }
+            val saved=engine.accept(first.id)
             assertEquals(0,JSONObject(preview.previewState!!).getInt("count"));assertTrue(store.effects(saved.id).isEmpty())
             store.seedLegacyDeviceGrant(saved.id,"vibration.play",true)
             val revisions=store.revisions(saved.id)

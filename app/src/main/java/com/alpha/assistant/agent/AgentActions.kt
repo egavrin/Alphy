@@ -26,6 +26,7 @@ import com.alpha.assistant.tools.ArtifactCoordinator
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
+import com.alpha.assistant.semantic.SemanticRuntime
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
@@ -34,6 +35,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 internal class AgentActions(private val context: Context, name: String, private val memory: MemoryStore, private val tools: ToolStore) {
+    private val semantic = SemanticRuntime.get(context)
     private val android = AndroidCapabilities(context)
     private val calendar = AgentCalendar(context, name)
 
@@ -74,12 +76,12 @@ internal class AgentActions(private val context: Context, name: String, private 
                 " " + args.optString("label"))
             "maps.route" -> single(R.string.agent_route, "${args.getString("from")} → ${args.getString("to")}")
             "memory.read" -> {
-                val facts = memory.list().filter { it.text.contains(args.getString("match"), true) }.take(50)
+                val facts = memory.search(args.getString("match"), 0.75f, 50)
                 listOf(AgentTarget(text(R.string.memory_title), "", facts.joinToString("\n") { it.text }.ifEmpty { text(R.string.agent_empty) },
                     JSONArray(facts.map { "${it.id}:${it.revision}" }).toString()))
             }
             "memory.write" -> if (!args.has("match")) single(R.string.memory_add, args.getString("text")) else
-                memory.list().filter { it.text.contains(args.getString("match"), true) }.take(50).map { fact ->
+                memory.search(args.getString("match"), 0.75f, 50).map { fact ->
                     AgentTarget(text(R.string.memory_edit), fact.text, args.getString("text"), JSONArray(listOf(fact.id, fact.revision)).toString())
                 }
             "artifact.setState" -> artifactTargets(args)
@@ -96,7 +98,8 @@ internal class AgentActions(private val context: Context, name: String, private 
                 single(R.string.automation_editor_create, summary.joinToString("\n"))
             }
             "automation.pause", "automation.resume" -> AutomationStore(context, tools.automationDatabase).use { store ->
-                store.rules().filter { it.definition.name.contains(args.getString("name"), true) }.take(50).map { rule ->
+                semantic.rank(args.getString("name"), store.rules(), { it.definition.name })
+                    .filter { it.score >= 0.75f }.take(50).map { it.item }.map { rule ->
                     AgentTarget(rule.definition.name, text(if (rule.enabled) R.string.agent_enabled else R.string.agent_disabled),
                         text(if (id == "automation.resume") R.string.agent_enabled else R.string.agent_disabled),
                         JSONArray(listOf(rule.id, rule.revision, rule.approvedRevision, rule.enabled, rule.attention)).toString())
@@ -162,8 +165,13 @@ internal class AgentActions(private val context: Context, name: String, private 
 
     private suspend fun artifactTargets(args: JSONObject): List<AgentTarget> {
         val field = args.getString("field")
-        return tools.tools().asSequence().filter { it.saved && !it.archived && ToolSpec.storedTitle(it.spec).contains(args.getString("app"), true) }
-            .take(50).toList().mapNotNull { candidate ->
+        val eligible = tools.tools().filter { it.saved && !it.archived }.mapNotNull { record ->
+            val spec = ToolSpec.availablePersisted(record.spec) ?: return@mapNotNull null
+            if (spec.isSealedStandalone || spec.schema.opt(field) !is String) return@mapNotNull null
+            record to spec
+        }
+        return semantic.rank(args.getString("app"), eligible, { (_, spec) -> "${spec.title}\n${spec.description}" })
+            .filter { it.score >= 0.75f }.take(50).map { it.item.first }.mapNotNull { candidate ->
                 try {
                     ArtifactCoordinator.get(tools, candidate.id).ordered {
                         val current = AutomationTools.exactTarget(this, tools, candidate.id, candidate.revision)

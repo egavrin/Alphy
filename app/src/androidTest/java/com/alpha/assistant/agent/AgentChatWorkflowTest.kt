@@ -37,7 +37,7 @@ class AgentChatWorkflowTest {
         try {
             MemoryStore(fixture.context, memoryName).use { memory ->
                 memory.saveExplicitFact("Favorite color is blue")
-                fixture.provider.devicePlanGrants = listOf("memory.write")
+                fixture.provider.devicePlanNeeds = listOf("Change my memory of my favorite color to green")
                 fixture.provider.agentProposal = """
                     {"steps":[{"function":"memory.write","args":{"match":"Favorite color","text":"Favorite color is green"}}]}
                 """.trimIndent()
@@ -68,7 +68,7 @@ class AgentChatWorkflowTest {
         val fixture = ShellFixture("agent-unrequested-action")
         val robot = ShellRobot("agent-unrequested-action")
         try {
-            fixture.provider.devicePlanGrants = listOf("memory.write")
+            fixture.provider.devicePlanNeeds = listOf("Change my memory of my favorite color to green")
             fixture.provider.agentProposal = """
                 {"steps":[{"function":"memory.write","args":{"text":"Unrequested fact"}},
                 {"function":"clock.setAlarm","args":{"hour":7,"minute":0}}]}
@@ -92,7 +92,7 @@ class AgentChatWorkflowTest {
         val fixture = ShellFixture("agent-unrequested-repeat")
         val robot = ShellRobot("agent-unrequested-repeat")
         try {
-            fixture.provider.devicePlanGrants = listOf("calendar.createOwned")
+            fixture.provider.devicePlanNeeds = listOf("Create a calendar event for a single visit")
             fixture.provider.agentProposal = """
                 {"steps":[{"function":"calendar.createOwned","args":{"calendar":"Work","title":"Visit",
                 "start":1893485700000,"end":1893487500000,"timeZone":"UTC","reminderMinutes":15,"repeatDaily":true}}]}

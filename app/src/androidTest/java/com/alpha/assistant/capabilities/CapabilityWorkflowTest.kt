@@ -48,7 +48,7 @@ class CapabilityWorkflowTest {
             assertFalse(entry.getJSONObject("access").getBoolean("confirmation"))
             assertTrue(entry.has("result"))
         }
-        val guidance = CapabilityCatalog.modelGuidance()
+        val guidance = CapabilityCatalog.modelGuidance(CapabilityCatalog.ids)
         val chatPrompt = ChatToolReply.instructions(emptyList())
         assertTrue(chatPrompt.contains("Leave implementation, capability declarations, and UI schemas to generation."))
         assertFalse(chatPrompt.contains(guidance))

@@ -8,6 +8,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
+import com.alpha.assistant.semantic.SemanticRuntime
+import com.alpha.assistant.semantic.SemanticUnavailable
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.ChatDecisionContext
 import com.alpha.assistant.cloud.ChatProvider
@@ -67,14 +69,14 @@ internal class AgentConversation(private val app: Application, private val scope
     }
 
     suspend fun propose(conversation: String, text: String, reviewedText: String, reviewedImages: List<String>,
-        grants: List<String>, key: String,
+        needs: List<String>, key: String,
         session: CloudSession, active: () -> Boolean): Boolean {
         if (!active() || selectedChat() != conversation || running?.isActive == true || busy) return false
         val request = Request(text, reviewedText, reviewedImages)
         busy = true
         try {
             val previous = plan?.takeIf { it.conversationId == conversation && it.phase in AgentRuntime.editable }
-            val next = withContext(Dispatchers.IO) { prepare(conversation, request, grants, key, session, previous) }
+            val next = withContext(Dispatchers.IO) { prepare(conversation, request, needs, key, session, previous) }
             if (!active() || selectedChat() != conversation || running?.isActive == true) {
                 withContext(Dispatchers.IO) { runtime.discard(next) }
                 return false
@@ -86,23 +88,30 @@ internal class AgentConversation(private val app: Application, private val scope
         } finally { busy = false }
     }
 
-    private suspend fun prepare(conversation: String, request: Request, grants: List<String>, key: String, session: CloudSession,
+    private suspend fun prepare(conversation: String, request: Request, needs: List<String>, key: String, session: CloudSession,
         replacing: AgentPlan?): AgentPlan {
+        if (!AgentCommand.validNeeds(request.text, needs)) throw CloudFailure("agent_plan", app.getString(R.string.agent_plan_error))
+        val embeddings = SemanticRuntime.get(app)
+        val candidates = try {
+            needs.map { AgentCommand.shortlist(it, embeddings) }
+        } catch (_: SemanticUnavailable) {
+            throw CloudFailure("agent_plan", app.getString(R.string.agent_plan_error))
+        }
+        if (candidates.any { it.isEmpty() }) throw CloudFailure("agent_plan", app.getString(R.string.agent_plan_error))
         val selection = memory.selectForRequest(request.text, MemoryPurpose.AGENT_PLAN)
         repeat(2) { attempt ->
             currentCoroutineContext().ensureActive()
             session.check()
             val context = memory.withRequestFacts(selection, MemoryPurpose.AGENT_PLAN, MemoryProvenance.CLEAN) { facts ->
-                JSONObject().put("currentRequest", request.text).put("deviceTime", ZonedDateTime.now().toString()).apply {
+                JSONObject().put("currentRequest", request.text).put("steps", JSONArray(needs))
+                    .put("deviceTime", ZonedDateTime.now().toString()).apply {
                     if (request.reviewedText.isNotEmpty()) put("reviewedReference", request.reviewedText)
                     if (facts.texts.isNotEmpty()) put("localMemoryReference", JSONArray(facts.texts))
                 }.toString()
             }
             val correction = if (attempt == 0) "" else
                 "\nThe prior response failed validation. Stay within the allowed commands and return only the supported JSON fields."
-            val instructions = AgentCommand.instructions +
-                "\nAllowed commands: ${JSONArray(grants)}. Include only these commands and keep within their counts. " +
-                "calendar.createOwned.daily means calendar.createOwned with repeatDaily=true. Other calendar creation is one-time." + correction
+            val instructions = AgentCommand.instructions(candidates) + correction
             var raw: String? = null
             provider.respond(key, CloudRequest(listOf(CloudTurn("user", context, request.reviewedImages)), false,
                 instructions, jsonObject = true, agentPlan = true), session) { event ->
@@ -111,8 +120,8 @@ internal class AgentConversation(private val app: Application, private val scope
             session.check()
             val reply = raw
             val commands = reply?.let { runCatching { AgentCommand.parse(it) }.getOrNull() }
-            val remaining = grants.toMutableList()
-            if (reply != null && commands != null && commands.all { remaining.remove(it.grant) }) {
+            if (reply != null && commands?.size == candidates.size &&
+                commands.withIndex().all { (index, command) -> command.grant in candidates[index] }) {
                 val prepared = runtime.prepare(conversation, request.text, reply, replacing)
                 if (currentCoroutineContext()[Job]?.isActive != true || runCatching { session.check() }.isFailure) {
                     runtime.discard(prepared)
@@ -150,13 +159,13 @@ internal class AgentConversation(private val app: Application, private val scope
             val key = getKey()
             val turn = CloudTurn("user", revised.text)
             val instructions = ChatToolReply.instructions(emptyList(), available = false)
-            var grants: List<String>? = null
+            var needs: List<String>? = null
             provider.respond(key, CloudRequest(listOf(turn), false, instructions, chatDecision = true, allowDevicePlan = true,
                 decisionContext = ChatDecisionContext(turn, emptyList(), instructions, MessageProvenance.CLEAN)), session) { event ->
                 if (event is CloudEvent.RoundComplete && !event.hasToolCalls && event.text.isEmpty() &&
-                    event.provenance == MessageProvenance.CLEAN) grants = event.devicePlanGrants
+                    event.provenance == MessageProvenance.CLEAN) needs = event.devicePlanNeeds
             }
-            val allowed = grants?.takeIf(AgentCommand::validGrants)
+            val allowed = needs?.takeIf { AgentCommand.validNeeds(revised.text, it) }
                 ?: throw CloudFailure("agent_plan", app.getString(R.string.agent_plan_error))
             prepare(plan.conversationId, revised, allowed, key, session, it)
         }?.let { job ->

@@ -84,7 +84,7 @@ sealed interface CloudEvent {
         val automationDraft: String? = null,
         val courseTopic: String? = null,
         val testFixTargetId: String? = null,
-        val devicePlanGrants: List<String>? = null,
+        val devicePlanNeeds: List<String>? = null,
         val memoryFact: String? = null,
     ) : CloudEvent
     data class Search(val status: String, val sources: List<Source> = emptyList()) : CloudEvent
@@ -337,7 +337,7 @@ class DeepSeekProvider internal constructor(
         }
     }
 
-    private fun <T> readChatMemory(read: () -> T): T = try {
+    private inline fun <T> readChatMemory(read: () -> T): T = try {
         read()
     } catch (cancelled: CancellationException) {
         throw cancelled
@@ -410,11 +410,10 @@ class DeepSeekProvider internal constructor(
         if (allowCourse) decisionTools.put(actionTool(PREPARE_COURSE, "Prepare a course outline for review. The user starts it.", "topic"))
         if (repairTargets.isNotEmpty()) decisionTools.put(actionTool(TEST_AND_FIX_APP, "Test a saved mini-app and fix verified issues when explicitly requested.", "target"))
         if (allowDevicePlan) {
-            val command = JSONObject().put("type", "string").put("enum", JSONArray(AgentCommand.grantNames))
-            val commands = JSONObject().put("type", "array").put("items", command)
-            val arguments = JSONObject().put("type", "object").put("required", JSONArray().put("commands"))
-                .put("properties", JSONObject().put("commands", commands)).put("additionalProperties", false)
-            decisionTools.put(strictTool(PREPARE_DEVICE_PLAN, "Select the explicit phone commands to preview for approval.", arguments))
+            val needs = JSONObject().put("type", "array").put("items", JSONObject().put("type", "string"))
+            val arguments = JSONObject().put("type", "object").put("required", JSONArray().put("steps"))
+                .put("properties", JSONObject().put("steps", needs)).put("additionalProperties", false)
+            decisionTools.put(strictTool(PREPARE_DEVICE_PLAN, "Identify the explicitly requested phone steps to preview for approval.", arguments))
         }
         val decisionChoice = if (decisionTools.length() == 1) JSONObject().put("type", "function")
             .put("function", JSONObject().put("name", SUBMIT_CHAT_DECISION)) else "required"
@@ -479,11 +478,11 @@ Use the device plan for memory operations that are part of a larger phone task o
 """.trimIndent()
         val devicePlanInstructions = if (!allowDevicePlan) "" else """
 Call prepare_device_plan for a direct request to use supported phone functions or change local records.
-Return one command name for each step explicitly requested, including repeated commands only when requested.
-Use calendar.createOwned.daily only for an explicitly daily calendar event and calendar.deleteAllOwned
-only for an explicit request to delete all Alphy-owned events. Use automation for scheduled reminders
-or recurring tasks other than calendar events. Ask for missing details. Course and mini-app requests
-use their own actions. Explanations, quotes, and references to earlier requests do not authorize a plan.
+Return one exact, continuous excerpt of the latest request per explicitly requested phone action.
+Include the verb and enough context to identify the action. Keep the user's order and language.
+Use automation for scheduled reminders or recurring tasks other than calendar events.
+Ask for missing details. Course and mini-app requests use their own actions.
+Explanations, quotes, and references to earlier requests do not authorize a plan.
 The user reviews and approves the plan before any device action.
 """.trimIndent()
         val classificationInstructions = "Call exactly one available function and return no separate text. " +
@@ -573,14 +572,14 @@ The user reviews and approves the plan before any device action.
                 }
                 PREPARE_DEVICE_PLAN -> {
                     if (!allowDevicePlan) invalidAction()
-                    val commands = argument("commands") as? kotlinx.serialization.json.JsonArray
-                        ?: invalidAction("decision.device_commands")
-                    val grants = commands.map {
+                    val steps = argument("steps") as? kotlinx.serialization.json.JsonArray
+                        ?: invalidAction("decision.device_steps")
+                    val needs = steps.map {
                         (it as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { value -> value.isString }?.content
-                            ?: invalidAction("decision.device_commands")
+                            ?: invalidAction("decision.device_steps")
                     }
-                    if (!AgentCommand.validGrants(grants)) invalidAction("decision.device_commands")
-                    return ChatToolReply.Decision("device_plan", "", "", "none", devicePlanGrants = grants)
+                    if (!AgentCommand.validNeeds(current.text, needs)) invalidAction("decision.device_steps")
+                    return ChatToolReply.Decision("device_plan", "", "", "none", devicePlanNeeds = needs)
                 }
                 SUBMIT_CHAT_DECISION -> Unit
                 else -> invalidAction()
@@ -725,7 +724,7 @@ The user reviews and approves the plan before any device action.
                 return
             }
             "device_plan" -> {
-                emit(CloudEvent.RoundComplete("", false, provenance, devicePlanGrants = decision.devicePlanGrants))
+                emit(CloudEvent.RoundComplete("", false, provenance, devicePlanNeeds = decision.devicePlanNeeds))
                 return
             }
             "course" -> {

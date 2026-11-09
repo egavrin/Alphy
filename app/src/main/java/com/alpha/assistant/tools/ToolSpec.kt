@@ -60,7 +60,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     val collections: JSONObject, val surfaces: Map<String,ToolSurface>, val presentation: String,
     internal val hostControls: ArtifactHostControls,
     internal val composition: ToolComposition?, internal val nativePresentation: NativePresentation?,
-    internal val appLanguage: String?) {
+    internal val appLanguage: String?, internal val iconId: String?) {
     internal val isSealedStandalone: Boolean get() = composition?.isSealedStandalone == true
     internal val canQueueLocalButtons: Boolean get() = capabilities.isEmpty() && collections.length() == 0 && surfaces.isEmpty()
 
@@ -86,9 +86,10 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     fun action(ui: JSONObject, id: String): JSONObject? = ToolUiCatalog.action(ui,id)
 
     internal fun providerDefinition(): String {
-        if (composition == null && nativePresentation == null && appLanguage == null) return json
+        if (composition == null && nativePresentation == null && appLanguage == null && iconId == null) return json
         val definition = composition?.fillDefinition(this) ?: JSONObject(json).apply { remove(NativePresentation.FIELD) }
         definition.remove(APP_LANGUAGE_FIELD)
+        definition.remove(ICON_ID_FIELD)
         return definition.toString()
     }
 
@@ -103,6 +104,13 @@ data class ToolSpec private constructor(val json: String, val title: String, val
         return copy(json = encoded, appLanguage = tag)
     }
 
+    internal fun withIcon(id: String?): ToolSpec {
+        if (id == iconId) return this
+        val definition = JSONObject(json)
+        if (id == null) definition.remove(ICON_ID_FIELD) else definition.put(ICON_ID_FIELD, id)
+        return parsePersisted(definition.toString())
+    }
+
     internal fun preserveNativePresentation(candidate: ToolSpec, observer: ((ToolUiDiagnostic) -> Unit)? = null): ToolSpec {
         require(candidate.nativePresentation == null)
         val recipe = nativePresentation ?: return candidate
@@ -114,6 +122,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     companion object {
         internal const val MAX_DEFINITION_BYTES = 256 * 1024
 
+        private const val ICON_ID_FIELD = "iconId"
         private const val APP_LANGUAGE_FIELD = "appLanguage"
 
         fun available(raw: String): ToolSpec? = try {parse(raw)} catch(_: IllegalArgumentException) {null} catch(_: IllegalStateException) {null} catch(_: org.json.JSONException) {null}
@@ -143,7 +152,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
                 .put("initialState",JSONObject(current.initialState))
             if(current.collections.length()>0) definition.put("collections",current.collections)
             else definition.remove("collections")
-            return parsePersisted(definition.toString())
+            return parsePersisted(definition.toString()).withIcon(current.iconId)
         }
         private fun requireSameComposition(previous: ToolSpec,next: ToolSpec) = validateComposition {
             val composition = previous.composition
@@ -176,7 +185,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
             validateTool(ToolValidationCategory.FIELDS) {
                 val fields = j.keys().asSequence().toSet()
                 val optional = optionalGeneratedFields +
-                    (if (persisted) setOf("composition",NativePresentation.FIELD,APP_LANGUAGE_FIELD) else emptySet())
+                    (if (persisted) setOf("composition",NativePresentation.FIELD,APP_LANGUAGE_FIELD,ICON_ID_FIELD) else emptySet())
                 require(fields.containsAll(requiredGeneratedFields) && fields.all { it in requiredGeneratedFields || it in optional })
                 require(!j.has("capabilityResults") || j.get("capabilityResults") is Boolean) { "Неверные поля инструмента" }
             }
@@ -223,6 +232,11 @@ data class ToolSpec private constructor(val json: String, val title: String, val
                     require(validAppLanguageTag(it))
                 } else null
             }
+            val iconId = validateTool(ToolValidationCategory.METADATA) {
+                if (j.has(ICON_ID_FIELD)) (j.get(ICON_ID_FIELD) as String).also { id ->
+                    require(AppBadge.entries.any { it.id == id })
+                } else null
+            }
             val initialState = validateTool(ToolValidationCategory.INITIAL_STATE) { j.getJSONObject("initialState").toString() }
             val ui = try {validateTool(ToolValidationCategory.UI_STRUCTURE) { j.getJSONObject("ui") }}
                 catch(failure: ToolValidationFailure) {
@@ -243,7 +257,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
                 require(encoded.toByteArray(Charsets.UTF_8).size <= MAX_DEFINITION_BYTES)
             }
             return ToolSpec(encoded, j.getString("title"), j.getString("description"), source, schema,
-                initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surfaces,presentation,hostControls,composition,nativePresentation,appLanguage).also {
+                initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surfaces,presentation,hostControls,composition,nativePresentation,appLanguage,iconId).also {
                 validateTool(ToolValidationCategory.INITIAL_STATE) { it.validateState(it.initialState) }
                 it.validateUi(it.ui,JSONObject(it.initialState),ToolUiValidationStage.DEFINITION,observer)
             }

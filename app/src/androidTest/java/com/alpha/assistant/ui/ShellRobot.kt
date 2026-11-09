@@ -68,7 +68,7 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
     @Volatile var lastRequest: CloudRequest? = null
     var automationDraft: String? = null
     @Volatile var memoryFact: String? = null
-    var devicePlanGrants: List<String>? = null
+    var devicePlanNeeds: List<String>? = null
     var agentProposal: String? = null
     @Volatile var failure: Exception? = null              // thrown after the count
     @Volatile var gate: CompletableDeferred<Unit>? = null // awaited before the answer
@@ -85,8 +85,8 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
             emit(CloudEvent.RoundComplete("", false, com.alpha.assistant.data.MessageProvenance.CLEAN, memoryFact = it))
             return
         }
-        devicePlanGrants?.takeIf { request.chatDecision && request.allowDevicePlan }?.let {
-            emit(CloudEvent.RoundComplete("", false, com.alpha.assistant.data.MessageProvenance.CLEAN, devicePlanGrants = it))
+        devicePlanNeeds?.takeIf { request.chatDecision && request.allowDevicePlan }?.let {
+            emit(CloudEvent.RoundComplete("", false, com.alpha.assistant.data.MessageProvenance.CLEAN, devicePlanNeeds = it))
             return
         }
         agentProposal?.takeIf { request.agentPlan }?.let {

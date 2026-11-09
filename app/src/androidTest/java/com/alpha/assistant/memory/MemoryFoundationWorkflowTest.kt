@@ -87,7 +87,7 @@ class MemoryFoundationWorkflowTest {
                         store.beginClose()
                         assertClosed { store.list() }
                         assertClosed { store.saveExplicitFact("Новый факт.") }
-                        assertClosed { store.match("Москва", MemoryPurpose.CHAT_ANSWER) }
+                        assertClosed { store.list() }
                     }.get(1, SECONDS)
 
                     val closing = CountDownLatch(1)
@@ -118,7 +118,7 @@ class MemoryFoundationWorkflowTest {
         val store = MemoryStore(context, name)
         store.close()
         assertClosed { store.list() }
-        assertClosed { store.match("Москва", MemoryPurpose.MINI_APP_GENERATION) }
+        assertClosed { store.list() }
         assertFalse(file.exists())
     }
 
@@ -315,70 +315,43 @@ class MemoryFoundationWorkflowTest {
     }
 
     @Test
-    fun matchesRussianInflectionsAndWholeWordsOnly() = withDatabase { name, _ ->
-        MemoryStore(context, name).use { store ->
-            val tree = store.saveExplicitFact("Люблю ёлки, кошек и полёты. Гуляю с кошками.")
-            val safety = store.saveExplicitFact("Важна безопасность.")
-            val house = store.saveExplicitFact("Дом.")
-            val short = store.saveExplicitFact("Он.")
-            store.saveExplicitFact("Слон играет в домино.")
-            store.saveExplicitFact("xёлки")
-            store.saveExplicitFact("apple")
-
-            for (query in listOf("Apple, Е\u0308ЛКОЙ!", "КОШКЕ", "ПОЛЕТАМИ")) {
-                assertEquals(listOf(tree), store.match(query, MemoryPurpose.CHAT_DECISION))
-            }
-            assertEquals(listOf(safety), store.match("безопасный", MemoryPurpose.CHAT_ANSWER))
-            assertEquals(listOf(house), store.match("ДОМ", MemoryPurpose.AGENT_PLAN))
-            assertEquals(listOf(short), store.match("он", MemoryPurpose.CHAT_ANSWER))
-            for (query in listOf("", " ...?! ", "xёлки", "apple")) {
-                assertTrue(store.match(query, MemoryPurpose.CHAT_ANSWER).isEmpty())
-            }
-        }
-    }
-
-    @Test
-    fun rankUsesDistinctTermsAndStableIdsAndReturnsAtMostFiveFacts() = withDatabase { name, _ ->
+    fun savedFactsUseSemanticRetrievalAfterReopen() = withDatabase { name, _ ->
         val expected = MemoryStore(context, name).use { store ->
-            val strongest = store.saveExplicitFact("Кошки и ёлки.")
-            val tied = (1..7).map { store.saveExplicitFact("Кошка номер $it.") }
-            store.saveExplicitFact(strongest.text)
-            val firstCopy = store.list().filter { it.text == strongest.text }.minBy { it.id }
-            listOf(firstCopy) + tied.sortedBy { it.id }.take(4)
+            val wanted = store.saveExplicitFact("My favorite color is blue")
+            store.saveExplicitFact("My passport number is 40482819")
+            wanted
         }
-
-        MemoryStore(context, name).use { store ->
-            val query = "кошками, кошкой, ёлками"
-            assertEquals(expected, store.match(query, MemoryPurpose.CHAT_ANSWER))
-            assertEquals(expected, store.match(query, MemoryPurpose.CHAT_DECISION))
-            assertEquals(expected, store.match(query, MemoryPurpose.AGENT_PLAN))
-            for (purpose in listOf(MemoryPurpose.MINI_APP_GENERATION, MemoryPurpose.LESSON, MemoryPurpose.AUTOMATION)) {
-                assertTrue(store.match(query, purpose).isEmpty())
+        kotlinx.coroutines.runBlocking {
+            MemoryStore(context, name).use { store ->
+                assertEquals(listOf(expected), store.search("What is my favorite color?", 0.82f, 5))
+                store.delete(expected.id, expected.revision)
+                assertTrue(store.search("What is my favorite color?", 0.82f, 5).isEmpty())
             }
         }
     }
 
     @Test
-    fun requestStagesShareOneLocalSelectionAndSendOnlyCurrentFactText() = withDatabase { name, _ ->
+    fun requestStagesShareOneLocalSelectionAndSendOnlyCurrentFactText() = withDatabase { name, _ -> kotlinx.coroutines.runBlocking {
         MemoryStore(context, name).use { store ->
-            val matching = (1..7).map { store.saveExplicitFact("Ёлка, образец $it.") }
-            store.saveExplicitFact("Сосна, образец 8.")
-            val expected = matching.sortedBy { it.id }.take(5).map { it.text }
+            val wanted = store.saveExplicitFact("My favorite color is blue.")
+            store.saveExplicitFact(wanted.text)
+            store.saveExplicitFact("My passport number is 40482819.")
+            val expected = listOf(wanted.text)
 
-            val selection = store.selectForRequest("ёлками, берёзами", MemoryPurpose.CHAT_DECISION)
+            val selection = store.selectForRequest("What is my favorite color?", MemoryPurpose.CHAT_DECISION)
             store.withRequestFacts(selection, MemoryPurpose.CHAT_DECISION, MemoryProvenance.CLEAN) { stage ->
                 assertEquals(expected, stage.texts)
                 assertEquals(MemoryProvenance.MEMORY_DERIVED, stage.outputProvenance)
                 assertFalse(stage.outputProvenance.isEligibleForRestrictedRequest)
             }
-            store.saveExplicitFact("Ёлка и берёза, образец 9.")
+            store.saveExplicitFact("My favorite color is orange.")
             store.withRequestFacts(selection, MemoryPurpose.CHAT_ANSWER, MemoryProvenance.CLEAN) { stage ->
                 assertEquals(expected, stage.texts)
             }
 
-            val plan = store.selectForRequest("сосной", MemoryPurpose.AGENT_PLAN)
+            val plan = store.selectForRequest("What is my favorite color?", MemoryPurpose.AGENT_PLAN)
             store.withRequestFacts(plan, MemoryPurpose.AGENT_PLAN, MemoryProvenance.CLEAN) { stage ->
-                assertEquals(listOf("Сосна, образец 8."), stage.texts)
+                assertEquals(setOf("My favorite color is blue.", "My favorite color is orange."), stage.texts.toSet())
             }
             assertThrows(IllegalArgumentException::class.java) {
                 store.withRequestFacts(plan, MemoryPurpose.CHAT_ANSWER, MemoryProvenance.CLEAN) {
@@ -386,10 +359,10 @@ class MemoryFoundationWorkflowTest {
                 }
             }
         }
-    }
+    } }
 
     @Test
-    fun aChangedOrDeletedSelectionStopsTheEntireStageBeforeSerialization() = withDatabase { name, _ ->
+    fun aChangedOrDeletedSelectionStopsTheEntireStageBeforeSerialization() = withDatabase { name, _ -> kotlinx.coroutines.runBlocking {
         MemoryStore(context, name).use { store ->
             val first = store.saveExplicitFact("Ёлка, образец 1.")
             val second = store.saveExplicitFact("Ёлка, образец 2.")
@@ -415,14 +388,14 @@ class MemoryFoundationWorkflowTest {
                 }
             }
         }
-    }
+    } }
 
     @Test
-    fun restrictedPurposesRejectSelectionsAndInheritedProvenanceRemainsVisible() = withDatabase { name, file ->
+    fun restrictedPurposesRejectSelectionsAndInheritedProvenanceRemainsVisible() = withDatabase { name, file -> kotlinx.coroutines.runBlocking {
         MemoryStore(context, name).use { store ->
             val empty = store.selectForRequest("?!", MemoryPurpose.CHAT_DECISION)
             for (purpose in listOf(MemoryPurpose.MINI_APP_GENERATION, MemoryPurpose.LESSON, MemoryPurpose.AUTOMATION)) {
-                assertThrows(IllegalArgumentException::class.java) { store.selectForRequest("ёлка", purpose) }
+                assertThrows(IllegalArgumentException::class.java) { kotlinx.coroutines.runBlocking { store.selectForRequest("ёлка", purpose) } }
                 assertThrows(IllegalArgumentException::class.java) {
                     store.withRequestFacts(empty, purpose, MemoryProvenance.CLEAN) {
                         error("A restricted purpose reached the memory serializer.")
@@ -440,7 +413,7 @@ class MemoryFoundationWorkflowTest {
             assertEquals(MemoryProvenance.UNKNOWN, MemoryProvenance.UNKNOWN.merge(MemoryProvenance.CLEAN))
         }
         assertFalse(file.exists())
-    }
+    } }
 
     private fun assertRejected(expected: MemoryRejection, operation: () -> Unit) {
         val error = assertThrows(MemoryStoreException::class.java) { operation() }

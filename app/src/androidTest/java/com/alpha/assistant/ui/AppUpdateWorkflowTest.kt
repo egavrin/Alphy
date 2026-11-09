@@ -33,7 +33,8 @@ import java.util.concurrent.atomic.AtomicInteger
 class AppUpdateWorkflowTest {
     private val robot = ShellRobot("app-update")
     private val app = robot.instrumentation.targetContext.applicationContext as AssistantFixtureApplication
-    private val apk = File(app.filesDir, "update-test/Alphy-v0.1.0-alpha.5.apk")
+    private val fixtureTag = InstrumentationRegistry.getArguments().getString("updateFixtureTag") ?: "v0.1.0-alpha.5"
+    private val apk = File(app.filesDir, "update-test/Alphy-$fixtureTag.apk")
 
     @Test fun selectsNewestReleaseAndRejectsCorruptDownload() {
         val tag = "v0.1.0-alpha.10"
@@ -78,10 +79,10 @@ class AppUpdateWorkflowTest {
     }
 
     @Test fun resumesInterruptedDownloadAfterActivityCloses() {
-        assumeTrue("Stage the signed Alpha 5 APK in ${apk.path}", apk.isFile)
+        assumeTrue("Stage the signed update fixture in ${apk.path}", apk.isFile)
         val data = apk.readBytes()
         val offset = data.size / 2
-        val tag = "v0.1.0-alpha.5"
+        val tag = fixtureTag
         val digest = MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }
         val disconnected = CountDownLatch(1)
         val allowResume = CountDownLatch(1)
@@ -155,8 +156,8 @@ class AppUpdateWorkflowTest {
     }
 
     private fun withReadyUpdate(run: (String) -> Unit) {
-        assumeTrue("Stage the signed Alpha 5 APK in ${apk.path}", apk.isFile)
-        val tag = "v0.1.0-alpha.5"
+        assumeTrue("Stage the signed update fixture in ${apk.path}", apk.isFile)
+        val tag = fixtureTag
         val sha256 = MessageDigest.getInstance("SHA-256")
         apk.inputStream().use { input ->
             val buffer = ByteArray(64 * 1024)

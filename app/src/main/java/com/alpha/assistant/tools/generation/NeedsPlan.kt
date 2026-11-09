@@ -433,7 +433,7 @@ internal class NeedsPlan private constructor(
             val root = partsObject(raw, "$")
             if (root.has("wholeScreen")) {
                 requireParts(lessonTarget == null, "$.wholeScreen", "a new non-lesson app")
-                root.requireKeys("$", setOf("wholeScreen", "language"), setOf("literals"))
+                root.requireKeys("$", setOf("wholeScreen", "language"), setOf("literals", "iconId"))
                 requireParts(root.opt("language").let { it is String && com.alpha.assistant.tools.validAppLanguageTag(it) },
                     "$.language", "a lowercase two- or three-letter language tag")
                 requireParts(root.opt("wholeScreen") == true, "$.wholeScreen", "the Boolean true")
@@ -449,7 +449,7 @@ internal class NeedsPlan private constructor(
 
         private fun parse(root: JSONObject, lessonTarget: CourseSlideKind?, allowedSourceIds: Set<String>): NeedsPlan {
             root.requireKeys("$", setOf("title", "description", "language", "inputs", "constants", "needs", "questions"),
-                if (lessonTarget == null) setOf("literals") else emptySet())
+                if (lessonTarget == null) setOf("literals", "iconId") else emptySet())
             val title = planText(root.opt("title"), "$.title", 100)
             val description = planText(root.opt("description"), "$.description", 500, allowEmpty = true)
             val language = root.opt("language")

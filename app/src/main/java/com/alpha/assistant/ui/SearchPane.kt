@@ -49,10 +49,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -65,7 +61,8 @@ import java.util.Date
     conversations: List<Conversation>,
     search: String,
     edit: (String) -> Unit,
-    select: (String) -> Unit,
+    select: (HistoryResult) -> Unit,
+    retrieve: suspend (String) -> List<HistoryResult>,
     rename: (String, String) -> Unit,
     delete: (String) -> Unit,
     clear: () -> Unit,
@@ -91,17 +88,22 @@ import java.util.Date
     val dates = remember(locale) { DateFormat.getDateInstance(DateFormat.SHORT, locale) }
     val colors = MaterialTheme.colorScheme
     val type = MaterialTheme.typography
-    val matchStyle = SpanStyle(color = colors.primary, fontWeight = FontWeight.SemiBold)
     val hasQuery = search.isNotBlank()
-    val results = remember(conversations, search, matchStyle) {
-        conversations.mapNotNull { chat ->
-            val preview = if (hasQuery) {
-                matchPreview(chat.draft.text, search, matchStyle)
-                    ?: chat.messages.firstNotNullOfOrNull { matchPreview(it.text, search, matchStyle) }
-            } else null
-            SearchResult(chat, preview).takeIf { !hasQuery || preview != null || chat.title.contains(search, ignoreCase = true) }
+    var hits by remember(conversations, search) { mutableStateOf<Result<List<HistoryResult>>?>(null) }
+    LaunchedEffect(conversations, search) {
+        if (!hasQuery) return@LaunchedEffect
+        kotlinx.coroutines.delay(200)
+        hits = try {
+            Result.success(retrieve(search))
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            Result.failure(failure)
         }
     }
+    val results = if (hasQuery) hits?.getOrNull().orEmpty().mapNotNull { hit ->
+        conversations.firstOrNull { it.id == hit.conversationId }?.let { it to hit }
+    } else conversations.map { it to HistoryResult(it.id) }
     // The shell consumes the IME inset except in tabletop mode.
     Column(Modifier.fillMaxSize().imePadding()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 4.dp),
@@ -128,21 +130,26 @@ import java.util.Date
             }
             // A query can stay after «Очистить всё», so an empty history shows search_empty for each query.
             if (results.isEmpty()) item {
-                Text(stringResource(if (conversations.isEmpty()) R.string.search_empty else R.string.search_none),
+                Text(stringResource(when {
+                    conversations.isEmpty() -> R.string.search_empty
+                    hasQuery && hits == null -> R.string.semantic_searching
+                    hits?.isFailure == true -> R.string.semantic_search_unavailable
+                    else -> R.string.search_none
+                }),
                     Modifier.padding(vertical = 16.dp).semantics { liveRegion = LiveRegionMode.Polite }, color = colors.onSurfaceVariant)
             }
-            items(results, key = { it.chat.id }) { (c, preview) ->
+            items(results, key = { (chat, hit) -> "${chat.id}:${hit.messageId ?: hit.draft}" }) { (c, hit) ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Row(Modifier.weight(1f).clickable { select(c.id) }.padding(vertical = 10.dp),
+                    Row(Modifier.weight(1f).clickable { select(hit) }.padding(vertical = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         Box(Modifier.size(40.dp).background(colors.surfaceContainerHigh, MaterialTheme.shapes.small),
                             contentAlignment = Alignment.Center) {
                             AlphaIcon(Glyph.Chat, accent = true)
                         }
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(if (hasQuery) highlightedTitle(c.title, search, matchStyle) else AnnotatedString(c.title),
+                            Text(c.title,
                                 style = type.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            if (preview != null) Text(preview, style = type.bodyMedium, color = colors.onSurfaceVariant,
+                            if (hit.preview != null) Text(hit.preview, style = type.bodyMedium, color = colors.onSurfaceVariant,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                             val date = dates.format(Date(c.updatedAt))
                             val draft = c.draft.text.isNotEmpty() || c.draft.attachments.isNotEmpty()
@@ -228,36 +235,4 @@ import java.util.Date
         }) { Text(stringResource(R.string.clear_history_confirm)) }
     },
         dismissButton = { TextButton(onClick = dismissClear) { Text(stringResource(R.string.cancel)) } })
-}
-
-private data class SearchResult(val chat: Conversation, val preview: AnnotatedString?)
-
-private fun highlightedTitle(title: String, query: String, style: SpanStyle) = buildAnnotatedString {
-    append(title)
-    var start = title.indexOf(query, ignoreCase = true)
-    while (start >= 0) {
-        val end = start + query.length
-        addStyle(style, start, end)
-        start = title.indexOf(query, startIndex = end, ignoreCase = true)
-    }
-}
-
-private fun matchPreview(text: String, query: String, style: SpanStyle): AnnotatedString? {
-    val match = text.indexOf(query, ignoreCase = true)
-    if (match < 0) return null
-    // Keep the match visible when the preview is too narrow to show its context.
-    var start = match
-    if (start > 0 && text[start].isLowSurrogate()) start--
-    var end = (start + 112).coerceAtMost(text.length)
-    if (end < text.length && text[end].isLowSurrogate()) end++
-    return buildAnnotatedString {
-        if (start > 0) append('…')
-        val offset = length - start
-        for (index in start until end) {
-            val character = text[index]
-            append(if (character.isWhitespace()) ' ' else character)
-        }
-        addStyle(style, match + offset, minOf(match + query.length, end) + offset)
-        if (end < text.length) append('…')
-    }
 }

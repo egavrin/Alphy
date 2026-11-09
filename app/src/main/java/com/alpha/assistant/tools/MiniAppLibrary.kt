@@ -61,9 +61,21 @@ import com.alpha.assistant.ui.RussianHyphenation
         }
     }
     val hasDetail = controller.selectedId != null || controller.selectedDraftId != null
-    val tools = controller.tools.filter {
-        it.saved && it.archived == archived && ToolSpec.storedTitle(it.spec).contains(query.trim(), ignoreCase = true)
+    var matches by remember(query, archived, controller.tools) { mutableStateOf<Result<List<ToolRecord>>?>(null) }
+    LaunchedEffect(query, archived, controller.tools) {
+        if (query.isBlank()) return@LaunchedEffect
+        kotlinx.coroutines.delay(200)
+        matches = try {
+            Result.success(controller.searchLibrary(query, archived))
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            Result.failure(failure)
+        }
     }
+    val tools = if (query.isBlank()) controller.tools.filter { it.saved && it.archived == archived }
+        else matches?.getOrNull().orEmpty()
+
 
     Surface(Modifier.fillMaxSize().testTag("mini-app-library").semantics { contentDescription = libraryLabel }) {
         Column(Modifier.fillMaxSize().padding(top = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -137,9 +149,9 @@ import com.alpha.assistant.ui.RussianHyphenation
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     items(controller.drafts, key = { "draft-" + it.id }) { draft ->
-                        val badgeTitle = remember(draft.candidate) { draft.candidate?.let { ToolSpec.availablePersisted(it)?.title } }
+                        val iconId = remember(draft.candidate) { draft.candidate?.let { ToolSpec.availablePersisted(it)?.iconId } }
                         LibraryRow(draft.prompt.take(100), null, controller.selectedDraftId == draft.id, !controller.busy,
-                            badgeTitle = badgeTitle, draft = true) {
+                            iconId = iconId, draft = true) {
                             focus.clearFocus()
                             onOpen()
                             controller.selectDraft(draft.id)
@@ -149,6 +161,8 @@ import com.alpha.assistant.ui.RussianHyphenation
                 } else if (tools.isNotEmpty()) item { Spacer(Modifier.height(10.dp)) }
                 if (tools.isEmpty()) item {
                     Text(stringResource(when {
+                        query.isNotBlank() && matches == null -> R.string.semantic_searching
+                        matches?.isFailure == true -> R.string.semantic_search_unavailable
                         query.isNotBlank() -> R.string.tool_no_matches
                         archived -> R.string.tool_archive_empty
                         else -> R.string.tool_catalog_empty
@@ -158,10 +172,12 @@ import com.alpha.assistant.ui.RussianHyphenation
                     val spec = remember(tool.spec) { ToolSpec.availablePersisted(tool.spec) }
                     val description = spec?.description ?: stringResource(R.string.tool_closed_format)
                     LibraryRow(ToolSpec.storedTitle(tool.spec), description,
-                        controller.selectedDraftId == null && controller.selectedId == tool.id, enabled = true) {
-                        focus.clearFocus()
-                        onOpen()
-                        controller.select(tool.id)
+                        controller.selectedDraftId == null && controller.selectedId == tool.id, enabled = true, iconId = spec?.iconId) {
+                        if (controller.tools.any { it.id == tool.id && it.revision == tool.revision && it.saved && it.archived == archived }) {
+                            focus.clearFocus()
+                            onOpen()
+                            controller.select(tool.id)
+                        }
                     }
                 }
             }
@@ -204,7 +220,7 @@ import com.alpha.assistant.ui.RussianHyphenation
     description: String?,
     selected: Boolean,
     enabled: Boolean,
-    badgeTitle: String? = title,
+    iconId: String? = null,
     draft: Boolean = false,
     open: () -> Unit,
 ) {
@@ -219,7 +235,7 @@ import com.alpha.assistant.ui.RussianHyphenation
                 .heightIn(min = if (draft) 64.dp else 76.dp).padding(horizontal = 6.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
-            MiniAppBadge(badgeTitle, draft = draft)
+            MiniAppBadge(iconId, draft = draft)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(title, style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
                 if (!description.isNullOrBlank()) Text(description, style = MaterialTheme.typography.bodySmall,

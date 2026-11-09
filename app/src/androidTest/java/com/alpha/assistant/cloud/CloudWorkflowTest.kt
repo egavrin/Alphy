@@ -507,7 +507,7 @@ class CloudWorkflowTest {
     }
 
     @Test fun chatSendsAtMostFiveMatchedFactsOnlyForTheAnswer() {
-        val prompt = "Расскажи про садоводство"
+        val prompt = "Какие растения я выращиваю в моём саду?"
         Server { request, output ->
             assertFalse(request.searching)
             if (!request.answering) request.requireStrictDecision()
@@ -519,8 +519,8 @@ class CloudWorkflowTest {
                 output.classification(decision("Clean decision"))
             }
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
-            val facts = (1..7).map { fixture.model.memoryStore.saveExplicitFact("садоводство MATCHED_FACT_$it") }
-            val unrelated = fixture.model.memoryStore.saveExplicitFact("астрономия UNRELATED_FACT")
+            val facts = (1..7).map { fixture.model.memoryStore.saveExplicitFact("В моём саду я выращиваю растения сорта MATCHED_FACT_$it.") }
+            val unrelated = fixture.model.memoryStore.saveExplicitFact("Мой код банковского сейфа UNRELATED_FACT.")
             fixture.submit(prompt, search = true)
             fixture.idle()
             assertTrue(server.failures.toString(), server.failures.isEmpty())
@@ -554,12 +554,12 @@ class CloudWorkflowTest {
                 output.classification(decision("Clean decision"))
             }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
                 val memory = fixture.model.memoryStore
-                val fact = memory.saveExplicitFact("садоводство STALE_MEMORY_MARKER")
-                val prompt = "Расскажи про садоводство"
+                val fact = memory.saveExplicitFact("В моём саду я выращиваю растения сорта STALE_MEMORY_MARKER.")
+                val prompt = "Какие растения я выращиваю в моём саду?"
                 try {
                     fixture.submit(prompt)
                     assertTrue(cleanReceived.await(10, TimeUnit.SECONDS))
-                    if (delete) memory.delete(fact.id, fact.revision) else memory.edit(fact.id, fact.revision, "садоводство REVISED_MEMORY_MARKER")
+                    if (delete) memory.delete(fact.id, fact.revision) else memory.edit(fact.id, fact.revision, "В моём саду я выращиваю растения сорта REVISED_MEMORY_MARKER.")
                 } finally { resume.countDown() }
                 fixture.idle()
                 assertTrue(server.failures.toString(), server.failures.isEmpty())
@@ -594,8 +594,8 @@ class CloudWorkflowTest {
                     }
                 }
             }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
-                fixture.model.memoryStore.saveExplicitFact("садоводство MEMORY_FOR_ANSWER")
-                val prompt = "Расскажи про садоводство"
+                fixture.model.memoryStore.saveExplicitFact("В моём саду я выращиваю растения сорта MEMORY_FOR_ANSWER.")
+                val prompt = "Какие растения я выращиваю в моём саду?"
                 try {
                     fixture.submit(prompt)
                     assertTrue(paused.await(10, TimeUnit.SECONDS))
@@ -626,21 +626,24 @@ class CloudWorkflowTest {
     @Test fun unavailableOrOverBudgetMemoryNeverSendsFactsAndPreservesUserInput() {
         for (unavailable in listOf(false, true)) {
             Server { request, output ->
-                request.requireStrictDecision()
                 assertFalse(request.json.toString().contains("localMemory"))
-                output.classification(decision("Clean decision"))
+                if (request.answering) output.answer("Обычный ответ") else {
+                    request.requireStrictDecision()
+                    output.classification(decision("Clean decision"))
+                }
             }.use { server ->
                 Fixture(DeepSeekProvider(server.url)).use { fixture ->
                     val memory = fixture.model.memoryStore
                     if (unavailable) memory.beginClose()
-                    else memory.saveExplicitFact("садоводство " + "А".repeat(100_000))
-                    val prompt = "Расскажи про садоводство"
+                    else memory.saveExplicitFact("В моём саду я выращиваю растения. ".repeat(8) + "А".repeat(100_000))
+                    val prompt = "Какие растения я выращиваю в моём саду?"
                     fixture.submit(prompt)
                     fixture.idle()
-                    assertEquals(if (unavailable) 0 else 1, server.requests.size)
+                    assertEquals(if (unavailable) 2 else 1, server.requests.size)
                     assertTrue(server.failures.toString(), server.failures.isEmpty())
-                    assertEquals("error", fixture.last.status)
-                    assertEquals(if (unavailable) "memory_unavailable" else "memory_budget", fixture.last.errorCode)
+                    assertEquals(if (unavailable) "complete" else "error", fixture.last.status)
+                    if (unavailable) assertEquals("Обычный ответ", fixture.last.text)
+                    else assertEquals("memory_budget", fixture.last.errorCode)
                     assertEquals(prompt, fixture.persisted().selected!!.messages.first { it.role == "user" }.text)
                 }
             }
@@ -788,7 +791,7 @@ class CloudWorkflowTest {
             val functions = (0 until tools.length()).map { tools.getJSONObject(it).getJSONObject("function") }
             val (name, field) = when (candidate) {
                 "course" -> "prepare_course" to "topic"
-                "device_plan" -> "prepare_device_plan" to "commands"
+                "device_plan" -> "prepare_device_plan" to "steps"
                 "memory_fact" -> "prepare_memory_fact" to "fact"
                 else -> "test_and_fix_app" to "target"
             }
@@ -804,7 +807,7 @@ class CloudWorkflowTest {
             }
             val arguments = when (candidate) {
                 "course" -> """{"topic":"Calculated percentages"}"""
-                "device_plan" -> """{"commands":["memory.write"]}"""
+                "device_plan" -> """{"steps":["Latest user request"]}"""
                 "memory_fact" -> """{"fact":"Latest user request"}"""
                 else -> """{"target":"1"}"""
             }
@@ -813,7 +816,7 @@ class CloudWorkflowTest {
                 "generic" -> output.classification(decision("Legacy decision", kind = candidate))
                 "malformed" -> output.calls(call(0, name = name, arguments = """{"topic":"Bad","extra":1}"""))
                 "wrong_name" -> output.calls(call(0, name = "unknown", arguments = arguments))
-                "wrong_command" -> output.calls(call(0, name = name, arguments = """{"commands":["calendar"]}"""))
+                "wrong_command" -> output.calls(call(0, name = name, arguments = """{"steps":["calendar"]}"""))
                 "wrong_fact" -> output.calls(call(0, name = name, arguments = """{"fact":""}"""))
                 "wrong_target" -> output.calls(call(0, name = name, arguments = """{"target":"outside"}"""))
                 "invalid_id" -> output.calls(call(0, id = "", name = name, arguments = arguments))
@@ -869,7 +872,7 @@ class CloudWorkflowTest {
             candidate = "device_plan"
             mode = "accepted"
             val beforeDevice = server.requests.size
-            assertEquals(listOf("memory.write"), request().devicePlanGrants)
+            assertEquals(listOf(latest), request().devicePlanNeeds)
             assertEquals(beforeDevice + 1, server.requests.size)
             mode = "wrong_command"
             assertTrue(runCatching { request() }.exceptionOrNull() is CloudFailure)

@@ -1,3 +1,4 @@
 app/src/main/assets/voice/tone/model.onnx filter=lfs diff=lfs merge=lfs -text
 app/src/main/assets/voice/whisper/base-q5_1.bin filter=lfs diff=lfs merge=lfs -text
 app/libs/*.aar filter=lfs diff=lfs merge=lfs -text
+app/src/main/assets/semantic/embeddinggemma-2-text-270m.litertlm filter=lfs diff=lfs merge=lfs -text

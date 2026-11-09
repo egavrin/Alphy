@@ -711,6 +711,25 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
             }
         }
     }
+    private val historyIndex = HistorySearch(application, store)
+    private val historyChanges = Channel<Unit>(Channel.CONFLATED)
+    internal var historyTarget by mutableStateOf<HistoryResult?>(null)
+        private set
+
+    internal suspend fun searchHistory(query: String) = historyIndex.search(query)
+
+    internal fun openHistoryResult(result: HistoryResult): Boolean {
+        val chat = snapshot.conversations.firstOrNull { it.id == result.conversationId } ?: return false
+        if (!result.matches(chat)) return false
+        select(result.conversationId)
+        historyTarget = result
+        return true
+    }
+
+    internal fun consumeHistoryTarget(result: HistoryResult) {
+        if (historyTarget === result) historyTarget = null
+    }
+
     private val writes = Channel<() -> Unit>(Channel.UNLIMITED)
     private val deletedConversationIds = mutableSetOf<String>()
     private var historyCleared = false
@@ -719,7 +738,14 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         viewModelScope.launch {
             for (write in writes) {
                 val result = withContext(Dispatchers.IO) { runCatching(write) }
-                if (result.isFailure) saveFailed = true
+                if (result.isFailure) saveFailed = true else historyChanges.trySend(Unit)
+            }
+        }
+        viewModelScope.launch {
+            for (change in historyChanges) try {
+                historyIndex.update()
+            } catch (failure: com.alpha.assistant.semantic.SemanticUnavailable) {
+                android.util.Log.w("AlphySemantic", "History indexing unavailable", failure)
             }
         }
         load()
@@ -756,6 +782,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
             val results = withContext(Dispatchers.IO) { runCatching { store.automationMessages() }.getOrNull() } ?: return@launch
             snapshot = snapshot.copy(conversations = snapshot.conversations
                 .map { it.withAutomationMessages(results[it.id].orEmpty()) }.sortedByDescending { it.updatedAt })
+            historyChanges.trySend(Unit)
         }
     }
 
@@ -821,6 +848,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     fun select(id: String?) {
         if (id != null && snapshot.conversations.none { it.id == id }) return
         pendingChatEntry = null
+        historyTarget = null
         if (id != snapshot.selectedId) {
             dismissAutomationSetup()
             leaveCourseChat()
@@ -1419,9 +1447,9 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 val completed = terminal ?: throw CloudFailure("incomplete","The reply has no completed answer. Retry the request.")
                 val courseTopic = completed.courseTopic
                 val testFixTargetId = completed.testFixTargetId
-                val devicePlanGrants = completed.devicePlanGrants
+                val devicePlanNeeds = completed.devicePlanNeeds
                 val memoryFact = completed.memoryFact
-                val preparedActions = listOfNotNull(courseTopic, testFixTargetId, devicePlanGrants, completed.automationDraft, memoryFact)
+                val preparedActions = listOfNotNull(courseTopic, testFixTargetId, devicePlanNeeds, completed.automationDraft, memoryFact)
                 if (preparedActions.isNotEmpty()) {
                     if (completed.text.isNotEmpty() || preparedActions.size != 1 || answerFragment.isNotEmpty() ||
                         completed.provenance != MessageProvenance.CLEAN) {
@@ -1443,11 +1471,11 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                     }
                     return@launch
                 }
-                if (devicePlanGrants != null) {
+                if (devicePlanNeeds != null) {
                     fun currentRequest() = isActive(request) && snapshot.selected?.takeIf { it.id == conversationId }
                         ?.messages?.lastOrNull { it.role == "user" }?.id == user.id
-                    if (assistant.requiresRefinement || !AgentCommand.validGrants(devicePlanGrants) ||
-                        !agent.propose(conversationId, user.text, selectedText, images, devicePlanGrants, key, request.session, ::currentRequest))
+                    if (assistant.requiresRefinement || !AgentCommand.validNeeds(user.text, devicePlanNeeds) ||
+                        !agent.propose(conversationId, user.text, selectedText, images, devicePlanNeeds, key, request.session, ::currentRequest))
                         throw CloudFailure("agent_plan", getApplication<Application>().getString(R.string.agent_plan_error))
                     updateMessage(request, assistant.id) {
                         it.copy(text = getApplication<Application>().getString(R.string.agent_plan_ready), status = "complete",

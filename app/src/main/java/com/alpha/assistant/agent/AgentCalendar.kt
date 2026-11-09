@@ -14,6 +14,7 @@ import com.alpha.assistant.R
 import com.alpha.assistant.capabilities.AndroidOwnedCalendarProvider
 import com.alpha.assistant.capabilities.CapabilityResult
 import com.alpha.assistant.capabilities.NativeOwnedEvent
+import com.alpha.assistant.semantic.SemanticRuntime
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
@@ -61,13 +62,17 @@ internal class AgentCalendar(private val context: Context, name: String) {
             .put("snapshot", JSONArray(listOf(event.toString(), calendar.toString(), attendees.toString(), reminders.toString()))).toString()
     }
 
-    fun resolve(function: String, args: JSONObject): List<AgentTarget> = when (function) {
-        "calendar.read" -> calendars().filter { it.name.contains(args.optString("calendar"), true) }.map { calendar ->
+    private suspend fun <T> named(query: String, items: List<T>, title: (T) -> String): List<T> =
+        if (query.isBlank()) items else SemanticRuntime.get(context).rank(query, items, title)
+            .filter { it.score >= 0.75f }.take(50).map { it.item }
+
+    suspend fun resolve(function: String, args: JSONObject): List<AgentTarget> = when (function) {
+        "calendar.read" -> named(args.optString("calendar"), calendars()) { it.name }.map { calendar ->
             val items = instances(args, calendar.id).map(Instance::description)
             AgentTarget(calendar.name, "", items.joinToString("\n").ifEmpty { text(R.string.agent_empty) },
                 JSONArray(listOf(calendar.toString(), items)).toString())
         }
-        "calendar.updateEvent" -> moves(args).map { move ->
+        "calendar.updateEvent" -> named(args.getString("title"), moves(args).filter { it.unavailable != R.string.agent_calendar_read_only }) { it.event.title }.map { move ->
             val attendeeText = move.attendees.filterNot { it.address.equals(move.event.organizer, true) }
                 .mapNotNull { it.name?.takeIf(String::isNotBlank) ?: it.address }
             val proposed = buildList {
@@ -78,19 +83,18 @@ internal class AgentCalendar(private val context: Context, name: String) {
             AgentTarget("${move.event.title} · ${move.calendar.name}", move.instance.description(),
                 move.unavailable?.let(::text) ?: proposed, move.identity(), available = move.unavailable == null)
         }
-        "calendar.select", "calendar.createOwned" -> owned.calendars().filter {
-            val match = if (args.has("calendar")) it.name.contains(args.getString("calendar"), true)
-                else selection.getString("calendar", null) == JSONArray(listOf(it.id, it.identity)).toString()
-            match && (function == "calendar.select" || it.supportsReminder)
-        }.map { calendar ->
+        "calendar.select", "calendar.createOwned" -> named(args.optString("calendar"), owned.calendars().filter {
+            (args.has("calendar") || selection.getString("calendar", null) == JSONArray(listOf(it.id, it.identity)).toString()) &&
+                (function == "calendar.select" || it.supportsReminder)
+        }) { it.name }.map { calendar ->
             val description = if (function == "calendar.select") calendar.name else ownedDescription(args)
             AgentTarget(calendar.name, "", description, JSONArray(listOf(calendar.id, calendar.identity)).toString())
         }
-        "calendar.readOwned", "calendar.deleteOwned" -> ownedEvents(args.getString("title")).map { item ->
+        "calendar.readOwned", "calendar.deleteOwned" -> named(args.getString("title"), ownedEvents()) { it.details.getString("title") }.map { item ->
             AgentTarget(item.details.getString("title"), ownedDescription(item),
                 if (function == "calendar.deleteOwned") text(R.string.agent_deleted) else ownedDescription(item), ownedIdentity(item))
         }
-        "calendar.deleteAllOwned" -> ownedEvents("").takeIf { it.isNotEmpty() }?.let { items ->
+        "calendar.deleteAllOwned" -> ownedEvents(bulk = true).takeIf { it.isNotEmpty() }?.let { items ->
             listOf(AgentTarget(text(R.string.agent_owned_calendar), items.joinToString("\n", transform = ::ownedDescription),
                 text(R.string.agent_deleted), JSONArray(items.map(::ownedIdentity)).toString()))
         }.orEmpty()
@@ -125,7 +129,7 @@ internal class AgentCalendar(private val context: Context, name: String) {
                 }
             }
             "calendar.deleteOwned", "calendar.deleteAllOwned" -> {
-                val items = ownedEvents(args.optString("title"))
+                val items = ownedEvents(bulk = function == "calendar.deleteAllOwned")
                 val expected = if (function == "calendar.deleteOwned") items.filter { ownedIdentity(it) == target.identity }
                     else items.takeIf { JSONArray(it.map(::ownedIdentity)).toString() == target.identity }.orEmpty()
                 if (expected.isEmpty()) result("cancelled", text(R.string.agent_target_changed)) else deleteOwned(expected, active)
@@ -197,7 +201,7 @@ internal class AgentCalendar(private val context: Context, name: String) {
 
     private fun moves(args: JSONObject): List<Move> {
         val calendars = calendars().associateBy(Calendar::id)
-        return instances(args, title = args.getString("title")).mapNotNull { instance ->
+        return instances(args, forMove = true).mapNotNull { instance ->
             val calendar = calendars[instance.calendar] ?: return@mapNotNull null
             val event = event(instance.event) ?: return@mapNotNull null
             val readOnly = !calendar.writable || event.organizer.isNullOrBlank() || !event.organizer.equals(calendar.account, true)
@@ -219,7 +223,7 @@ internal class AgentCalendar(private val context: Context, name: String) {
             cursor.getString(2).orEmpty(), cursor.getString(3).orEmpty(), cursor.getInt(4), cursor.getString(5).orEmpty(), cursor.getInt(6))) }
     } ?: error("Calendar provider unavailable")
 
-    private fun instances(args: JSONObject, calendar: Long? = null, title: String? = null): List<Instance> {
+    private fun instances(args: JSONObject, calendar: Long? = null, forMove: Boolean = false): List<Instance> {
         val from = args.getLong("from")
         val to = args.getLong("to")
         val uri = Instances.CONTENT_URI.buildUpon().appendPath(from.toString()).appendPath(to.toString()).build()
@@ -227,9 +231,9 @@ internal class AgentCalendar(private val context: Context, name: String) {
             calendar?.let { "${Instances.CALENDAR_ID}=?" }, calendar?.let { arrayOf(it.toString()) }, "${Instances.BEGIN} ASC")?.use { cursor ->
             buildList {
                 var scanned = 0
-                while (size < 50 && scanned++ < 500 && cursor.moveToNext()) {
+                while (size < (if (forMove) 500 else 50) && scanned++ < 500 && cursor.moveToNext()) {
                     val name = cursor.getString(2).orEmpty()
-                    if (title != null && (cursor.getLong(3) !in from until to || !name.contains(title, true))) continue
+                    if (forMove && cursor.getLong(3) !in from until to) continue
                     add(Instance(cursor.getLong(0), cursor.getLong(1), name.take(500), cursor.getLong(3), cursor.getLong(4)))
                 }
             }
@@ -258,14 +262,13 @@ internal class AgentCalendar(private val context: Context, name: String) {
         buildList { while (cursor.moveToNext()) { require(size < 50); add(Reminder(cursor.getLong(0), cursor.getInt(1), cursor.getInt(2))) } }
     } ?: error("Reminders unavailable")
 
-    private fun ownedEvents(title: String): List<NativeOwnedEvent> {
+    private fun ownedEvents(bulk: Boolean = false): List<NativeOwnedEvent> {
         val calendars = owned.calendars().associateBy { it.id }
         val events: List<Pair<Long, String>> = resolver.query(Events.CONTENT_URI, arrayOf(Events.CALENDAR_ID, Events.CUSTOM_APP_URI, Events.TITLE),
             "${Events.CUSTOM_APP_PACKAGE}=? AND ${Events.CUSTOM_APP_URI} LIKE ? AND ${Events.DELETED}=0",
             arrayOf(context.packageName, "$OWNED_PREFIX%"), Events._ID)?.use { cursor ->
             buildList { while (cursor.moveToNext()) {
-                if (!cursor.getString(2).orEmpty().contains(title, true)) continue
-                require(size < 50)
+                if (bulk) require(size < 50)
                 add(cursor.getLong(0) to checkNotNull(cursor.getString(1)))
             } }
         } ?: error("Owned events unavailable")

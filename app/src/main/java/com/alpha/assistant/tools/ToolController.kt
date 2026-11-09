@@ -39,12 +39,43 @@ import com.alpha.assistant.automations.AutomationStore
 import com.alpha.assistant.tools.generation.StandaloneRefinementUnavailable
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.sync.withLock
+import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 
 class ToolController(private val app: Application, private val scope: CoroutineScope, private val provider: ChatProvider,
     private val keys: SecureKeyStore, private val store: ToolStore,
     private val readImage: (Attachment) -> String = { ImageInput.dataUrl(app.contentResolver,it) }) {
+    private val librarySearch = com.alpha.assistant.semantic.SemanticIndex.get(app, "apps:${store.databaseName}")
+
+    private fun libraryRecords() = store.tools().filter(ToolRecord::saved).map {
+        val metadata = JSONObject(it.spec)
+        com.alpha.assistant.semantic.SemanticRecord(it.id, it.revision.toString(),
+            "${metadata.optString("title")}\n${metadata.optString("description")}")
+    }
+
+    private fun appCurrent(id: String, revision: String) =
+        store.tool(id)?.let { it.saved && it.revision.toString() == revision } == true
+
+    internal suspend fun searchLibrary(query: String, archived: Boolean): List<ToolRecord> = withContext(Dispatchers.IO) {
+        val hits = librarySearch.search(query, 0.70f, 100, ::libraryRecords, ::appCurrent) { id -> store.tool(id)?.archived == archived }
+        hits.mapNotNull { hit ->
+            store.tool(hit.id)?.takeIf { it.saved && it.archived == archived && it.revision.toString() == hit.revision }
+        }
+    }
+
+    init {
+        scope.launch {
+            store.changes.drop(1).collect {
+                try {
+                    librarySearch.update(::libraryRecords, ::appCurrent)
+                } catch (failure: com.alpha.assistant.semantic.SemanticUnavailable) {
+                    android.util.Log.w("AlphySemantic", "Library indexing unavailable", failure)
+                }
+            }
+        }
+    }
+
     private val generationService = ToolGenerationService(provider,SandboxClient(app))
     private val engine = ToolEngine(store,generationService)
     private val sources = SourceRefresh(store)

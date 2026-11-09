@@ -81,7 +81,7 @@ class AgentWorkflowTest {
                     "from":$initialTime,"to":${initialTime + 3_600_000},"start":${initialTime + 7_200_000}}}]}
                 """.trimIndent())
                 assertEquals(AgentPhase.UNAVAILABLE, plan.phase)
-                assertFalse(plan.steps.single().options.single().available)
+                assertTrue(plan.steps.single().options.isEmpty())
                 assertNull(agent.approve(plan.id, plan.revision))
                 assertEquals(listOf(initialTime), eventStarts(event))
             }

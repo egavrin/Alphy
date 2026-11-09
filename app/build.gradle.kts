@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -21,7 +23,7 @@ android {
     buildFeatures { compose = true }
     packaging { jniLibs { excludes += setOf("lib/armeabi-v7a/**", "lib/x86/**", "lib/x86_64/**") } }
     androidResources {
-        noCompress += "onnx"
+        noCompress += setOf("onnx", "litertlm")
         ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:CVS:thumbs.db:picasa.ini:*~:whisper:whisper-MIT.txt:silero"
     }
 }
@@ -47,7 +49,31 @@ dependencies {
     implementation("androidx.javascriptengine:javascriptengine:1.1.1")
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("com.google.mlkit:language-id:17.0.6")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.window:window-testing:1.5.1")
 }
+
+val embeddingModel = layout.projectDirectory.file("src/main/assets/semantic/embeddinggemma-2-text-270m.litertlm")
+val verifyEmbeddingModel by tasks.registering {
+    inputs.file(embeddingModel)
+    doLast {
+        val model = embeddingModel.asFile
+        check(model.length() == 164_626_432L) { "Invalid embedding model size. Run git lfs pull." }
+        val digest = MessageDigest.getInstance("SHA-256")
+        model.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count == -1) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        val hash = digest.digest().joinToString("") { "%02x".format(it) }
+        check(hash == "2d079ee2f6f066b1f368e8d7c819f55214eaef1d0513b312321901f30ab286fb") {
+            "Invalid embedding model checksum. Run git lfs pull."
+        }
+    }
+}
+tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(verifyEmbeddingModel) }

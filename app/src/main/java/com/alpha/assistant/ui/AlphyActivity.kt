@@ -5,6 +5,7 @@ import android.content.res.Configuration
 import android.os.Bundle
 import android.os.LocaleList
 import androidx.activity.ComponentActivity
+import com.alpha.assistant.semantic.SemanticRuntime
 import java.util.Locale
 
 /** Every Alphy activity uses Russian resources, so Material component labels are Russian on any device locale. */
@@ -17,5 +18,20 @@ abstract class AlphyActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppearanceMode.read(this).applyTo(this)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        SemanticRuntime.activityStarted()
+    }
+
+    override fun onStop() {
+        SemanticRuntime.activityStopped()
+        super.onStop()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level != TRIM_MEMORY_UI_HIDDEN) SemanticRuntime.trim()
     }
 }

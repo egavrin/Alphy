@@ -150,6 +150,8 @@ import kotlinx.coroutines.launch
             drawerState.snapTo(DrawerValue.Closed)
         }
     }
+    val semantic = com.alpha.assistant.semantic.SemanticRuntime.get(androidx.compose.ui.platform.LocalContext.current)
+    val modelBytes by semantic.preparationBytes.collectAsState()
     val snapshot = model.snapshot
     val chatCourseEntry = model.courseEntry?.takeIf { it.inChat }
     val sourcedCourseGeneration = remember(model) { CourseSourcedSlideGenerationHost(model::generateSourcedCourseSlide) }
@@ -414,7 +416,7 @@ import kotlinx.coroutines.launch
                                     }
                                     ShellDestination.Search -> SearchPane(
                                         currentSnapshot.conversations, search, { search = it },
-                                        select = { model.select(it); navigate(null) },
+                                        select = { if (model.openHistoryResult(it)) navigate(null) }, retrieve = model::searchHistory,
                                         rename = model::renameConversation, delete = model::deleteConversation, clear = model::clearHistory,
                                         back = ::back, focusReady = destination == ShellDestination.Search && drawerState.isClosed && !drawerTargetsOpen,
                                     )
@@ -440,6 +442,10 @@ import kotlinx.coroutines.launch
                         })
                     }
                     // One call place keeps the voice start state when the Chat route replaces the Desktop route.
+                    modelBytes?.let { bytes ->
+                        Text(stringResource(R.string.semantic_preparing), Modifier.padding(horizontal = 16.dp))
+                        LinearProgressIndicator(progress = { bytes.toFloat() / com.alpha.assistant.semantic.MODEL_BYTES }, modifier = Modifier.fillMaxWidth())
+                    }
                     if (destination == null) Composer(model, { contextSheet = true },
                         Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp).fillMaxWidth().testTag("composer"),
                         compact = compact, onContextAnchorChanged = { contextAnchor = it },
@@ -606,6 +612,17 @@ import kotlinx.coroutines.launch
                         returnToCourse = null
                         listState.requestScrollToItem(chat.messages.size + index)
                     }
+                }
+            }
+            val target = model.historyTarget
+            LaunchedEffect(chat.id, target) {
+                if (target?.conversationId == chat.id && !target.draft) {
+                    val index = chat.messages.asReversed().indexOfFirst { it.id == target.messageId }
+                    if (index >= 0) {
+                        val before = listOfNotNull(plan, model.agent.plan?.takeIf { it.conversationId == chat.id }).size
+                        listState.scrollToItem(index + before)
+                    }
+                    model.consumeHistoryTarget(target)
                 }
             }
             val chatMessages = stringResource(R.string.chat_messages)

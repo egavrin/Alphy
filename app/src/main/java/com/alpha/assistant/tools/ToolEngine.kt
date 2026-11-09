@@ -14,6 +14,8 @@ import com.alpha.assistant.sandbox.SandboxResult
 import com.alpha.assistant.tools.generation.HoleKind
 import com.alpha.assistant.tools.generation.NativeEditBase
 import com.alpha.assistant.tools.generation.NeedsPlan
+import com.alpha.assistant.semantic.SemanticRuntime
+import com.alpha.assistant.semantic.SemanticUnavailable
 import com.alpha.assistant.tools.generation.GenerationPlan
 import com.alpha.assistant.tools.generation.GenerationRepair
 import com.alpha.assistant.tools.generation.GenerationBehavior
@@ -375,6 +377,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         }
         val lengthCorrection = "The previous response reached the output limit. Return a shorter complete JSON object that keeps the required behavior."
         var appLanguage: AppLanguage? = null
+        var iconId = previous?.iconId
         fun languageGuidance() = appLanguage?.tag?.let { "\n\n" + GenerationLanguage.guidance(it) }.orEmpty()
         val localeContext = JSONObject()
             .put("appLocales", sandbox.context.resources.configuration.locales.toLanguageTags())
@@ -400,6 +403,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             val planInstructions = when {
                 lessonTarget != null -> NeedsPlan.promptFor(lessonTarget, allowedSourceIds)
                 else -> NeedsPlan.prompt + "\n\n" + languageRules + """
+                    Optional iconId selects one badge for the app: ${AppBadge.entries.joinToString { it.id }}. Omit it for a generic badge.
                     Use language for the selected tag. Native parts supply English or Russian labels.
                     If the selected language is neither en nor ru, use wholeScreen.
                 """.trimIndent().let { "\n$it" } + "\n\n" + GenerationBehavior.workflowScopeGuidance
@@ -442,6 +446,11 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                         }
                         if (lessonTarget == null) {
                             val language = JSONObject(planText)
+                            iconId = if (language.has("iconId")) language.opt("iconId").let { value ->
+                                requireParts(value is String && AppBadge.entries.any { it.id == value },
+                                    "$.iconId", "one stable badge ID")
+                                value as String
+                            } else null
                             appLanguage = GenerationLanguage.parse(language.opt("language"), language.opt("literals"), originalRequest)
                         }
                         generation
@@ -601,8 +610,16 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         } else {
             "Keep the complete slide JSON within 64 KiB and its native UI within 32 KiB."
         }
+        val rankedCapabilities = if (lessonTarget != null || partsOnly) emptySet() else try {
+            SemanticRuntime.get(sandbox.context).rank(originalRequest, CapabilityCatalog.definitions,
+                { "${it.title} (${it.id}). ${it.explanation}" }, cache = true)
+                .filter { it.score >= 0.72f }.take(5).map { it.item.id }.toSet()
+        } catch (_: SemanticUnavailable) {
+            throw CloudFailure("semantic_unavailable", "Alphy could not prepare Android tools. Retry the request.")
+        }
+        val allowedCapabilities = rankedCapabilities + assembly?.preview?.capabilities.orEmpty() + previous?.capabilities.orEmpty()
         val liveDataGuidance = if (lessonTarget == null) {
-            """For a requested live JSON value, configure one foreground Refresh action using network.request with method GET, no headers or body, and extract:{kind,path}. Use the exact endpoint, JSON key/index path, and value type from the original request or supplied documentation. Cite the documentation when available. Keep the value unavailable until a successful result. Store the returned value, source, and dataTimeMs together. Show the value, source, and data time in the app. If refresh fails, keep the prior value and time and mark them stale. If the endpoint, path, or value type is missing, build the usable local controls, show Unavailable, and ask for the missing detail. Do not emit a live network effect for an incomplete source. The native host handles network access, source approval, and scheduling."""
+            """If network.request appears in the shortlist and the user requests a live JSON value, configure one foreground Refresh action using network.request with method GET, no headers or body, and extract:{kind,path}. Use the exact endpoint, JSON key/index path, and value type from the original request or supplied documentation. Cite the documentation when available. Keep the value unavailable until a successful result. Store the returned value, source, and dataTimeMs together. Show the value, source, and data time in the app. If refresh fails, keep the prior value and time and mark them stale. If the endpoint, path, or value type is missing, build the usable local controls, show Unavailable, and ask for the missing detail. Do not emit a live network effect for an incomplete source. The native host handles network access, source approval, and scheduling."""
         } else ""
         val definitionFormat = """Return exactly one strict JSON object without Markdown, comments, duplicate keys, or trailing content. Use double quotes for every JSON key and string. Encode source as one JSON string with JSON string escaping: escape double quotes, backslashes, newlines, and control characters. JavaScript quotes inside source do not replace JSON escaping. Do not return a JavaScript object literal or a fenced code block. $outputLimits Schema:
 $responseExample
@@ -623,11 +640,11 @@ $liveDataGuidance
 ${ArtifactProtocol.modelGuidance()}
 Use ordinary Apply for numeric fields and sliders unless the user asks for continuous updates while editing. Store the submitted numeric value, including zero when allowed. Recalculate from the new value on the same action. A liveInput event is {type:'liveInput',actionId:'id',value:...}. It can return only state, ui, and surfaces. The host sends this same event for live delivery and its Apply fallback.
 The smoke check exercises numeric controls at their allowed bounds. A numberInput without a maximum can accept ${ToolValueSchema.MAX_SAFE_NUMBER.toLong()}. Check calculated values as well as inputs against the numeric state range. If a result exceeds the range, keep the input and show the result as unavailable.
-For local video, use video.pick from a foreground selection button and save the returned opaque resourceId to the video node's string binding. The native video button sends {type:'action',actionId:'id',value:'handle',video:{resourceId:'handle'}}. Return exactly one video.play effect with args equal to input.event.video. Keep the same control visible and enabled with the same binding. An ordinary action cannot request video.play.
+If video.pick and video.play appear in the shortlist, use video.pick for requested local video from a foreground selection button and save the returned opaque resourceId to the video node's string binding. The native video button sends {type:'action',actionId:'id',value:'handle',video:{resourceId:'handle'}}. Return exactly one video.play effect with args equal to input.event.video. Keep the same control visible and enabled with the same binding. An ordinary action cannot request video.play.
 When the request needs continuous updates, execute state changes through a frame or timer subscription. Derive drawing and input geometry from the same state. Verify visible changes and any requested terminal or reset behavior.
 
 Optional top-level collections declares up to 8 private native-owned record schemas, for example {"history":{"type":"object","fields":{"at":"number","note":"string"}}}. Collections start empty. For history beyond bounded state, use native collections and page results into state. Never discard prior history to fit an in-state list or array. Only action events may return records:[{id:'save',collection:'history',op:'put',key:'id',expectedToken:null,value:{at:Date.now(),note:'Observation'}}]. Create requires null expectedToken. Update and delete require the exact token from a prior result. Delete omits value. Get uses {id:'read',collection:'history',op:'get',key:'id'}. Page uses {id:'page',collection:'history',op:'page',order:'asc',limit:50,cursor:null}; order is asc or desc. Up to 8 operations and one page per action. No records with device effects. The host returns a local {type:'recordResults',deliveryId:'opaque',entries:[{requestId:'save',collection:'history',op:'put',status:'succeeded',record:{key:'id',token:'opaque',value:{...}}}]} event. Get can return notFound; page returns records and opaque cursor or null, and staleCursor after a change. Result handlers can update state/UI but cannot request records or effects. Keep each record/page within 8 KiB and the full result event within 15 KiB. Keep state plus event and envelope within 64 KiB. Collection limits are 10000 records each and 20000 records/20 MiB per artifact. Collection values, counts, cursors, result events, and live state remain local. Preserve every existing collection schema in refinement.
-${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
+${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by effects."""
         val savedEnvelope = previous?.providerDefinition()?.let { definition ->
             if (mixed) JSONObject().put("fill", JSONObject(definition)).toString() else definition
         }
@@ -684,6 +701,7 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
             Preview and render must return state unchanged and must not request effects or records.
             Preserve every existing state field, type, collection definition, and record ID.
             $liveDataGuidance
+            ${CapabilityCatalog.modelGuidance(allowedCapabilities)}
         """.trimIndent() + sharedRules
         val original = CloudTurn("user", if (wholeScreen) "Request: $prompt" else "$contract${languageGuidance()}\nRequest: $prompt", images.toList())
         val fields = if (mixed) ToolComposition.generatedFillFields else ToolSpec.generatedFields
@@ -781,7 +799,12 @@ ${CapabilityCatalog.modelGuidance()} Declare only IDs used by effects."""
                     }
                     enforcePolicy(policy?.validateDefinition,candidate.json,GenerationProblem.SPEC)
                     generatedOutput(GenerationProblem.SPEC) {
-                        candidate.withAppLanguage(appLanguage?.tag ?: previous?.appLanguage)
+                        validateTool(ToolValidationCategory.CAPABILITIES) {
+                            require(allowedCapabilities.containsAll(candidate.capabilities)) {
+                                "Declare only capabilities from the request shortlist."
+                            }
+                        }
+                        candidate.withAppLanguage(appLanguage?.tag ?: previous?.appLanguage).withIcon(iconId)
                     }
                 }
                 val languageCheck = appLanguage?.let { GenerationLanguage.Check(it) }
@@ -1193,7 +1216,7 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
                 "Мини-приложение изменилось. Откройте текущую версию."
             }
             val previous = ToolSpec.parsePersisted(old.spec)
-            val spec = ToolSpec.parsePersisted(definition).withAppLanguage(previous.appLanguage)
+            val spec = ToolSpec.parsePersisted(definition).withAppLanguage(previous.appLanguage).withIcon(previous.iconId)
             val state = ToolSpec.stateForRevision(previous, spec, old.state)
             val revision = Math.incrementExact(old.revision)
             val preview = generation.evaluate(spec, old.id, revision, state,

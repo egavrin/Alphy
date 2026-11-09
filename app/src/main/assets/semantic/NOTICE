@@ -1,0 +1,4 @@
+EmbeddingGemma 2 Text 270M
+Source: https://huggingface.co/litert-community/embeddinggemma-2-text-270m-litert-lm/tree/9be6e8b90982095dc05c2bd162e4b954ee4dbac7
+License: Apache License, Version 2.0 (see LICENSE)
+The bundled LiteRT-LM file is unchanged from that revision.

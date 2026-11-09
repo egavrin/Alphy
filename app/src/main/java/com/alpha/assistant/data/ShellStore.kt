@@ -60,8 +60,14 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
     internal fun hasConversation(id: String): Boolean =
         readableDatabase.rawQuery("SELECT 1 FROM conversations WHERE id=?", arrayOf(id)).use { it.moveToFirst() }
 
-    internal fun automationMessages(): Map<String, List<Message>> =
-        readableDatabase.rawQuery("SELECT id, conversation_id, delivered_at, body FROM automation_messages ORDER BY delivered_at,id", null).use { cursor ->
+    internal fun automationMessages(): Map<String, List<Message>> = automationMessages(null)
+
+    private fun automationMessages(conversationId: String?): Map<String, List<Message>> {
+        val selection = if (conversationId == null) "" else " WHERE conversation_id=?"
+        return readableDatabase.rawQuery(
+            "SELECT id, conversation_id, delivered_at, body FROM automation_messages$selection ORDER BY delivered_at,id",
+            conversationId?.let { arrayOf(it) },
+        ).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
                     val result = JSONObject(cursor.getString(3))
@@ -70,6 +76,7 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
                 }
             }.groupBy({ it.first }, { it.second })
         }
+    }
 
     internal fun hasAutomationMessage(messageId: String): Boolean =
         readableDatabase.rawQuery("SELECT 1 FROM automation_messages WHERE id=?", arrayOf(messageId)).use { it.moveToFirst() }
@@ -91,6 +98,19 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
             }
         } finally { db.endTransaction() }
     }
+    internal fun searchConversations(id: String? = null): List<Conversation> {
+        val results = automationMessages(id)
+        return readableDatabase.query("conversations", arrayOf("body"), id?.let { "id=?" },
+            id?.let { arrayOf(it) }, null, null, "updated_at DESC").use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    val conversation = decodeConversation(JSONObject(cursor.getString(0)))
+                    add(conversation.withAutomationMessages(results[conversation.id].orEmpty()))
+                }
+            }
+        }
+    }
+
     fun load(): ShellSnapshot {
         val settings = mutableMapOf<String, String>()
         readableDatabase.query("settings", null, null, null, null, null, null).use { c ->

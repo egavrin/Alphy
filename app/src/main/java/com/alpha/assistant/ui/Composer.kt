@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -92,6 +93,14 @@ internal class CourseComposerState(
     displayedCapture: AssistCapture? = null,
 ) {
     val draft = model.composerDraft(destination)
+    val searchFocus = androidx.compose.runtime.remember { androidx.compose.ui.focus.FocusRequester() }
+    val historyTarget = model.historyTarget
+    androidx.compose.runtime.LaunchedEffect(historyTarget, destination) {
+        if (destination == null && historyTarget?.draft == true && historyTarget.conversationId == model.snapshot.selectedId) {
+            searchFocus.requestFocus()
+            model.consumeHistoryTarget(historyTarget)
+        }
+    }
     fun updateDraft(update: (Draft) -> Draft) {
         val current = model.composerDraft(destination)
         if (current.id == draft.id) model.editComposerDraft(destination, update(current))
@@ -164,7 +173,7 @@ internal class CourseComposerState(
                             val composerLabel = stringResource(label)
                             // The vertical space is inside the decoration, so the field node keeps the 48 dp minimum height.
                             // In compact, the shell column above the keyboard limits the height, and the field scrolls inside it.
-                            BasicTextField(value = draft.text, enabled = editable, onValueChange = { text -> updateDraft { it.copy(text = text) } }, modifier = Modifier.weight(1f).heightIn(max = 120.dp).padding(horizontal = 6.dp).semantics { contentDescription = composerLabel }, textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface), cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), decorationBox = { inner ->
+                            BasicTextField(value = draft.text, enabled = editable, onValueChange = { text -> updateDraft { it.copy(text = text) } }, modifier = Modifier.weight(1f).focusRequester(searchFocus).heightIn(max = 120.dp).padding(horizontal = 6.dp).semantics { contentDescription = composerLabel }, textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface), cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), decorationBox = { inner ->
                                 Box(Modifier.heightIn(min = 48.dp).padding(vertical = 4.dp), contentAlignment = Alignment.CenterStart) {
                                     if (draft.text.isEmpty()) Text(stringResource(placeholder), color = colors.onSurfaceVariant,
                                         fontSize = 16.sp, maxLines = if (singleRow) 1 else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis)

@@ -5,6 +5,16 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.util.Log
+import com.alpha.assistant.semantic.SemanticIndex
+import com.alpha.assistant.semantic.SemanticRecord
+import com.alpha.assistant.semantic.SemanticUnavailable
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import java.io.Closeable
 import java.security.MessageDigest
 import java.util.UUID
@@ -18,12 +28,27 @@ class MemoryStore(context: Context, name: String = "alpha-memory.db") : Closeabl
     }
 
     private val helper = MemoryDatabase(context.applicationContext, name)
+    private val index = SemanticIndex.get(context.applicationContext, "memory:$name")
+    private val changes = Channel<Unit>(Channel.CONFLATED)
+    private val indexing = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lifecycleLock = Any()
     @Volatile private var closeRequested = false
+
+    init {
+        indexing.launch {
+            for (change in changes) try {
+                index.update(::records, ::isCurrent)
+            } catch (failure: SemanticUnavailable) {
+                Log.w("AlphySemantic", "Saved memory indexing unavailable", failure)
+            }
+        }
+    }
 
     /** Reject new operations immediately. Call close to release the database. */
     fun beginClose() {
         closeRequested = true
+        changes.close()
+        indexing.cancel()
     }
 
     /** Finish the current operation and close this store permanently. */
@@ -35,7 +60,7 @@ class MemoryStore(context: Context, name: String = "alpha-memory.db") : Closeabl
     /** The caller must verify that the user issued an explicit save command. */
     fun saveExplicitFact(text: String): MemoryFact = withOpenStore {
         require(text.isNotBlank()) { "The memory fact requires text." }
-        transaction { insertFact(text, MemorySource.EXPLICIT_SAVE_COMMAND) }
+        transaction { insertFact(text, MemorySource.EXPLICIT_SAVE_COMMAND) }.also { changes.trySend(Unit) }
     }
 
     /** Use one host-generated ID for the accepted offer, including every retry. */
@@ -57,7 +82,7 @@ class MemoryStore(context: Context, name: String = "alpha-memory.db") : Closeabl
                 put("fingerprint", fingerprint)
             })
             check(receipt != -1L) { "The memory suggestion receipt write failed." }
-        }
+        }.also { changes.trySend(Unit) }
     }
 
     fun list(): List<MemoryFact> = withOpenStore { readFacts() }
@@ -73,26 +98,39 @@ class MemoryStore(context: Context, name: String = "alpha-memory.db") : Closeabl
             }, "id=?", arrayOf(id))
             check(changed == 1) { "The memory edit failed." }
             verifyWrite(edited)
-        }
+        }.also { changes.trySend(Unit) }
     }
 
     fun delete(id: String, expectedRevision: Long): Unit = withOpenStore {
         transaction {
             requireRevision(id, expectedRevision)
             check(delete(TABLE, "id=?", arrayOf(id)) == 1) { "The memory deletion failed." }
-        }
+        }.also { changes.trySend(Unit) }
     }
 
-    /** Request serializers must also enforce their own memory exclusions. */
-    fun match(query: String, purpose: MemoryPurpose): List<MemoryFact> = withOpenStore {
-        RussianMemoryMatcher.match(query, purpose) { readFacts() }
+    private fun records() = list().map { SemanticRecord(it.id, it.revision.toString(), it.text) }
+
+    private fun isCurrent(id: String, revision: String) = withOpenStore {
+        writableDatabase.read(id)?.revision?.toString() == revision
     }
+
+    internal suspend fun search(query: String, cutoff: Float, limit: Int): List<MemoryFact> =
+        index.search(query, cutoff, limit, ::records, ::isCurrent).let { hits ->
+            withOpenStore {
+                hits.mapNotNull { hit -> writableDatabase.read(hit.id)?.takeIf { it.revision.toString() == hit.revision } }
+            }
+        }
 
     /** Select once when the request starts. Keep only the matched IDs and revisions. */
-    internal fun selectForRequest(query: String, purpose: MemoryPurpose): MemoryRequestSelection = withOpenStore {
+    internal suspend fun selectForRequest(query: String, purpose: MemoryPurpose): MemoryRequestSelection {
         val family = purpose.requestFamily()
-        val matches = RussianMemoryMatcher.match(query, purpose) { readFacts() }
-        SelectedFacts(family, matches.map { FactRevision(it.id, it.revision) })
+        val matches = if (query.none(Char::isLetterOrDigit)) emptyList() else try {
+            search(query, 0.82f, 25).distinctBy { it.text.trim().lowercase() }.take(5)
+        } catch (failure: SemanticUnavailable) {
+            Log.w("AlphySemantic", "Automatic memory retrieval unavailable", failure)
+            emptyList()
+        }
+        return SelectedFacts(family, matches.map { FactRevision(it.id, it.revision) })
     }
 
     /**
@@ -104,23 +142,25 @@ class MemoryStore(context: Context, name: String = "alpha-memory.db") : Closeabl
         purpose: MemoryPurpose,
         inheritedProvenance: MemoryProvenance,
         serialize: (MemoryRequestFacts) -> T,
-    ): T = withOpenStore {
+    ): T {
         val selected = selection as SelectedFacts
         require(selected.family == purpose.requestFamily()) { "The memory selection belongs to another request family." }
         if (selected.revisions.isEmpty()) {
-            return@withOpenStore serialize(MemoryRequestFacts(emptyList(), inheritedProvenance))
+            return serialize(MemoryRequestFacts(emptyList(), inheritedProvenance))
         }
 
         // The transaction excludes writes from other store instances during serialization.
-        transaction {
-            val texts = buildList {
-                for ((id, revision) in selected.revisions) {
-                    val fact = read(id)
-                    if (fact == null || fact.revision != revision) throw MemoryRequestInvalidatedException()
-                    add(fact.text)
+        return withOpenStore {
+            transaction {
+                val texts = buildList {
+                    for ((id, revision) in selected.revisions) {
+                        val fact = read(id)
+                        if (fact == null || fact.revision != revision) throw MemoryRequestInvalidatedException()
+                        add(fact.text)
+                    }
                 }
+                serialize(MemoryRequestFacts(texts, MemoryProvenance.MEMORY_DERIVED))
             }
-            serialize(MemoryRequestFacts(texts, MemoryProvenance.MEMORY_DERIVED))
         }
     }
 

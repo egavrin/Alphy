@@ -40,7 +40,7 @@ object ChatToolReply {
     }
 
     data class Decision(val kind: String, val text: String, val brief: String, val search: String,
-        internal val devicePlanGrants: List<String>? = null) {
+        internal val devicePlanNeeds: List<String>? = null) {
         internal val requiresCleanPreparation: Boolean get() = kind != "answer" && kind != "clarify"
         internal val isMiniApp: Boolean get() = kind == "create" || kind == "refine"
     }
