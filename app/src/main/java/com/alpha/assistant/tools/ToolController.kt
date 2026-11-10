@@ -1,5 +1,8 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.tools.three.ThreeSceneAssetCleanup
+import com.alpha.assistant.tools.three.ThreeSceneAssets
+
 import com.alpha.assistant.tools.three.ThreeSceneAssetRef
 import com.alpha.assistant.tools.three.ThreeSceneSnapshot
 
@@ -356,6 +359,8 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         previews.clear()
         var accepted = false
         var created = false
+        val assetLease = if (sceneAttachments.any { it.mime == ThreeSceneAssets.ATTACHMENT_MIME })
+            ThreeSceneAssetCleanup(app).lease() else null
         try {
             prepared()
             withContext(Dispatchers.IO) {
@@ -367,7 +372,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                 created = true
             }
             withContext(Dispatchers.IO) { generateWithPreview(operationId,key,images,call,originalRequest,
-                com.alpha.assistant.tools.three.ThreeSceneAssets.attachmentRefs(sceneAttachments)) }
+                ThreeSceneAssets.attachmentRefs(sceneAttachments)) }
             currentCoroutineContext().ensureActive(); call.check()
             previews.clear(operationId)
             val result = engine.accept(operationId,retainReceipt = true,canCommit = canCommit)
@@ -388,7 +393,11 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                         errorCode = null
                     }
                 }
-            } finally { busy = false; automaticJob = null }
+            } finally {
+                assetLease?.close()
+                busy = false
+                automaticJob = null
+            }
         }
     }
     internal suspend fun testAndFix(request: String, target: ToolRecord, conversationId: String, operationId: String,

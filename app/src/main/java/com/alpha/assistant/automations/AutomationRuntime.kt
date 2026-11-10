@@ -387,6 +387,7 @@ object AutomationRuntime {
                     }
                 }
                 invalidate()
+                com.alpha.assistant.tools.three.ThreeSceneAssetCleanup(tools.context).request()
                 finishToolDeletion(tools,owner,snapshot.widgetIds)
             }
         }

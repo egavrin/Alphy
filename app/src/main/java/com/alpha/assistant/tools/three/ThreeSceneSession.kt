@@ -2,19 +2,18 @@ package com.alpha.assistant.tools.three
 
 import android.app.Activity
 import android.content.Context
-import android.graphics.Bitmap
 import android.view.MotionEvent
 import com.alpha.assistant.media.DeviceMediaPlayback
 import com.alpha.assistant.media.MediaPlaybackResult
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolUiCatalog
+import com.alpha.assistant.tools.generation.sameToolJson
 import java.lang.ref.WeakReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -25,7 +24,7 @@ internal object ThreeSceneForeground {
     fun resumed(activity: Activity) { current = WeakReference(activity) }
     fun paused(activity: Activity) { if (current.get() === activity) current.clear() }
     fun activity(): Activity = current.get()?.takeUnless { it.isFinishing || it.isDestroyed }
-        ?: throw ThreeSceneFailure("Open Alphy in the foreground to check the 3D scene.")
+        ?: throw ThreeSceneFailure(ThreeSceneProblem.FOREGROUND)
 }
 
 internal data class ThreeSceneSnapshot(val state: String, val ui: String)
@@ -40,9 +39,24 @@ internal class ThreeSceneSession(
     private val awaitAudio: Boolean = true,
 ) {
     private val assets = ThreeSceneAssets(context)
-    val web = ThreeSceneWebView(context, artifactId, revision, spec.source, assets.workerAssets(spec.sceneAssets))
+    private val assetLease = ThreeSceneAssetCleanup(context.applicationContext).lease()
+    private val audioIds: Set<String>
+    val web: ThreeSceneWebView
+
+    init {
+        try {
+            val workerAssets = assets.workerAssets(spec.sceneAssets)
+            audioIds = workerAssets.filter { it.mediaType.startsWith("audio/") }.map { it.id }.toSet()
+            web = ThreeSceneWebView(context, artifactId, revision, spec.source, workerAssets)
+        } catch (failure: Throwable) {
+            assetLease.close()
+            throw failure
+        }
+    }
+
     private val media = DeviceMediaPlayback()
-    private val audioScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val audioJob = SupervisorJob()
+    private val audioScope = CoroutineScope(audioJob + Dispatchers.Main.immediate)
     private var pendingAudio: Deferred<Pair<String, String>>? = null
     private var closed = false
     private var started = false
@@ -54,8 +68,11 @@ internal class ThreeSceneSession(
         private set
 
     suspend fun start() {
-        accept(web.start(JSONObject(snapshot.state)), audioAllowed = false)
-        event(JSONObject().put("type", "open"))
+        val expected = spec.validateState(snapshot.state)
+        val initialized = startupSnapshot(web.start(expected), expected, snapshot.ui, ThreeSceneOperation.INIT)
+        val opened = startupSnapshot(web.event(JSONObject().put("type", "open")), expected,
+            initialized.ui, ThreeSceneOperation.OPEN)
+        snapshot = opened.copy(state = expected.toString())
         started = true
     }
 
@@ -77,7 +94,7 @@ internal class ThreeSceneSession(
     suspend fun action(id: String, value: Any?) {
         val ui = JSONObject(snapshot.ui)
         val state = JSONObject(snapshot.state)
-        val node = ToolUiCatalog.action(ui, id) ?: throw ThreeSceneFailure("The scene control is unavailable.")
+        val node = ToolUiCatalog.action(ui, id) ?: throw ThreeSceneFailure(ThreeSceneProblem.INVALID_BINDING)
         val type = if (ToolUiCatalog.isLiveInput(node)) {
             ToolUiCatalog.validateLiveInput(ui, id, value, state)
             "liveInput"
@@ -117,24 +134,46 @@ internal class ThreeSceneSession(
     fun close() {
         if (closed) return
         closed = true
-        audioScope.cancel()
-        media.close()
-        web.close()
+        try {
+            audioJob.cancel()
+            try { media.close() } finally { web.close() }
+        } finally {
+            audioJob.invokeOnCompletion { assetLease.close() }
+        }
+    }
+
+    private fun validatedSnapshot(result: JSONObject, fallbackUi: String): ThreeSceneSnapshot = try {
+        require(result.keys().asSequence().all { it in setOf("state", "ui", "audio") })
+        val state = spec.validateState(result.getJSONObject("state").toString())
+        val ui = if (result.has("ui")) result.getJSONObject("ui") else JSONObject(fallbackUi)
+        spec.validateUi(ui, state)
+        ThreeSceneSnapshot(state.toString(), ui.toString())
+    } catch (_: Exception) {
+        throw ThreeSceneFailure(ThreeSceneProblem.INVALID_SNAPSHOT)
+    }
+
+    private fun startupSnapshot(result: JSONObject, expected: JSONObject, fallbackUi: String,
+        operation: ThreeSceneOperation): ThreeSceneSnapshot {
+        val checked = try {
+            validatedSnapshot(result, fallbackUi)
+        } catch (failure: ThreeSceneFailure) {
+            throw ThreeSceneFailure(failure.problem, operation)
+        }
+        if (result.has("audio")) throw ThreeSceneFailure(ThreeSceneProblem.INVALID_AUDIO, operation)
+        if (!sameToolJson(expected, JSONObject(checked.state)))
+            throw ThreeSceneFailure(ThreeSceneProblem.STARTUP_MUTATION, operation)
+        return checked
     }
 
     private suspend fun accept(result: JSONObject, audioAllowed: Boolean) {
-        require(result.has("state") && result.keys().asSequence().all { it in setOf("state", "ui", "audio") }) {
-            "Return state and optional native ui and audio."
-        }
-        val state = spec.validateState(result.getJSONObject("state").toString())
-        val ui = result.optJSONObject("ui") ?: JSONObject(snapshot.ui)
-        require(!result.has("ui") || result.optJSONObject("ui") != null)
-        spec.validateUi(ui, state)
+        val checked = validatedSnapshot(result, snapshot.ui)
         val audio = if (result.has("audio")) {
-            require(audioAllowed && foreground) { "Request audio only as a result of a foreground action or drop." }
-            result.get("audio") as? String ?: throw ThreeSceneFailure("Invalid scene audio handle.")
+            if (!audioAllowed || !foreground) throw ThreeSceneFailure(ThreeSceneProblem.INVALID_AUDIO)
+            val id = result.get("audio") as? String
+            if (id == null || id !in audioIds) throw ThreeSceneFailure(ThreeSceneProblem.INVALID_AUDIO)
+            id
         } else null
-        snapshot = ThreeSceneSnapshot(state.toString(), ui.toString())
+        snapshot = checked
         if (audio == null) return
         if (pendingAudio != null) {
             deliverAudio(audio, MediaPlaybackResult.BUSY.name.lowercase())
@@ -153,14 +192,18 @@ internal class ThreeSceneSession(
     }
 
     private suspend fun play(id: String): String = try {
-        withContext(Dispatchers.IO) { assets.audio(spec.sceneAssets, id) }.use { descriptor ->
-            media.playAudio(descriptor) { start ->
-                if (closed || !foreground || !web.view.isShown) false
-                else {
-                    start()
-                    true
+        withContext(Dispatchers.IO) {
+            assets.audio(spec.sceneAssets, id).use { descriptor ->
+                withContext(Dispatchers.Main.immediate) {
+                    media.playAudio(descriptor) { start ->
+                        if (closed || !foreground || !web.view.isShown) false
+                        else {
+                            start()
+                            true
+                        }
+                    }.name.lowercase()
                 }
-            }.name.lowercase()
+            }
         }
     } catch (cancel: CancellationException) {
         throw cancel

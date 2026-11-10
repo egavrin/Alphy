@@ -19,6 +19,7 @@ import com.alpha.assistant.tools.generation.execute
 import com.alpha.assistant.cloud.CloudFailure
 import java.io.ByteArrayOutputStream
 import kotlin.math.abs
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -26,7 +27,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -36,42 +37,48 @@ internal suspend fun checkThreeScene(
     id: String,
     revision: Int,
     initialState: String,
-    scenario: GenerationBehavior.Scenario,
+    scenario: GenerationBehavior.Scenario?,
     bindings: Map<String, Binding>,
     checkActive: suspend () -> Unit,
     visualReview: (suspend (List<String>) -> String?)?,
 ): ToolPreview = withContext(Dispatchers.Main.immediate) {
     val activity = ThreeSceneForeground.activity()
-    var session = ThreeSceneSession(activity, spec, id, revision, initialState, spec.ui.toString())
+    var session = ThreeSceneSession(activity, spec, id, revision,
+        if (scenario == null) initialState else spec.initialState, spec.ui.toString())
     val accepted = CompletableDeferred<Boolean>()
     val lifecycle = (activity as LifecycleOwner).lifecycle
+    fun decline() {
+        if (accepted.complete(false)) session.close()
+    }
+    fun declined() = CloudFailure("three_declined", "The 3D preview was declined.")
     val observer = LifecycleEventObserver { _, event ->
-        if (event == Lifecycle.Event.ON_PAUSE) {
-            accepted.complete(false)
-            session.close()
-        }
+        if (event == Lifecycle.Event.ON_PAUSE) decline()
     }
     val height = (300 * activity.resources.displayMetrics.density).toInt()
     val preview = FrameLayout(activity).apply {
         addView(session.web.view, FrameLayout.LayoutParams(-1, height))
     }
     val dialog = AlertDialog.Builder(activity).setTitle(spec.title).setView(preview)
-        .setNegativeButton("Cancel") { _, _ -> accepted.complete(false) }
-        .setPositiveButton("Save scene", null).setOnCancelListener { accepted.complete(false) }.create()
-    dialog.setOnDismissListener { accepted.complete(false) }
+        .setNegativeButton("Cancel") { _, _ -> decline() }
+        .apply { if (scenario != null) setPositiveButton("Save scene", null) }
+        .setOnCancelListener { decline() }.create()
+    dialog.setOnDismissListener { decline() }
     try {
         lifecycle.addObserver(observer)
         dialog.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED)
         dialog.show()
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.apply {
             isEnabled = false
             setOnClickListener { accepted.complete(true) }
         }
         val window = checkNotNull(dialog.window)
         suspend fun start() {
-            withTimeout(2_500) {
-                while (!session.web.view.isShown || session.web.view.width == 0 || session.web.view.height == 0) delay(16)
-            }
+            withTimeoutOrNull(2_500) {
+                while (!session.web.view.isShown || session.web.view.width == 0 || session.web.view.height == 0) {
+                    if (accepted.isCompleted && !accepted.await()) throw declined()
+                    delay(16)
+                }
+            } ?: throw ThreeSceneFailure(ThreeSceneProblem.CAPTURE_FAILED)
             session.start()
         }
         suspend fun reopen(snapshot: ThreeSceneSnapshot, interactive: Boolean = false) {
@@ -84,10 +91,12 @@ internal suspend fun checkThreeScene(
         start()
         val initial = session.snapshot
         val crops = mutableListOf<String>()
+        var collectCrops = scenario != null && visualReview != null
         suspend fun checkOpen() {
             checkActive()
-            if (!dialog.isShowing || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
-                throw CloudFailure("three_declined", "The 3D preview was closed.")
+            if (accepted.isCompleted && !accepted.await() ||
+                !dialog.isShowing || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+                throw declined()
         }
         suspend fun capture(region: Int): ScenePixels {
             checkOpen()
@@ -95,10 +104,27 @@ internal suspend fun checkThreeScene(
             val bitmap = session.web.capture(window)
             try {
                 val pixels = ScenePixels.read(bitmap, region)
-                if (pixels.visible && visualReview != null && crops.size < 3) crops += bitmap.dataUrl()
+                if (pixels.visible && collectCrops && crops.size < 3) crops += bitmap.dataUrl()
                 return pixels
             } finally { bitmap.recycle() }
         }
+        suspend fun ensureVisible() {
+            var firstFrame = capture(0)
+            repeat(12) {
+                if (!firstFrame.visible) {
+                    repeat(8) {
+                        checkOpen()
+                        session.frame(0)
+                        delay(16)
+                    }
+                    firstFrame = capture(0)
+                }
+            }
+            if (!firstFrame.visible) throw ThreeSceneFailure(ThreeSceneProblem.BLANK_FRAME)
+        }
+        ensureVisible()
+        if (scenario == null) return@withContext ToolPreview(spec, initial.state, initial.ui)
+
         suspend fun read(slot: String): Any = when (val binding = bindings.getValue(slot)) {
             is Binding.Drawing -> {
                 require(binding.surface == "scene" && binding.path.size == 1 && binding.path[0] in 0..4)
@@ -108,8 +134,8 @@ internal suspend fun checkThreeScene(
                 val state = JSONObject(session.snapshot.state)
                 val node = sceneNode(JSONObject(session.snapshot.ui), state, binding.path)
                 behaviorUiObservation(node, state, scenario.slots.getValue(slot).kind) { _, _ ->
-                    throw ThreeSceneFailure("The planned native observation is unavailable.")
-                } ?: throw ThreeSceneFailure("The planned native observation is unavailable.")
+                    throw ThreeSceneFailure(ThreeSceneProblem.INVALID_BINDING)
+                } ?: throw ThreeSceneFailure(ThreeSceneProblem.INVALID_BINDING)
             }
             is Binding.Id -> when (scenario.slots.getValue(slot).kind) {
                 GenerationBehavior.Kind.AUDIO -> session.lastAudio ?: JSONObject.NULL
@@ -118,21 +144,9 @@ internal suspend fun checkThreeScene(
                     require(value is String || value is Boolean || value is Number) { "Bind the check to a saved scalar state key." }
                     value
                 }
-                else -> throw ThreeSceneFailure("The planned observation requires a view.")
+                else -> throw ThreeSceneFailure(ThreeSceneProblem.INVALID_BINDING)
             }
         }
-        var firstFrame = capture(0)
-        repeat(12) {
-            if (!firstFrame.visible) {
-                repeat(8) {
-                    checkOpen()
-                    session.frame(0)
-                    delay(16)
-                }
-                firstFrame = capture(0)
-            }
-        }
-        require(firstFrame.visible) { "The 3D scene did not render visible content." }
         val activePointers = mutableSetOf<Int>()
         var stepIndex = 0
         try {
@@ -187,7 +201,7 @@ internal suspend fun checkThreeScene(
                                     previous = current
                                 }
                             }
-                            require(changes >= step.changes) { "Rendered motion did not match the requested check." }
+                            if (changes < step.changes) throw ThreeSceneFailure(ThreeSceneProblem.ASSERTION_FAILED)
                         }
                         else -> error("The shared checker handles observations.")
                     }
@@ -195,7 +209,7 @@ internal suspend fun checkThreeScene(
                 assert = { _, step, observed, expected ->
                         val equal = if (observed is ScenePixels && expected is ScenePixels) !observed.changedFrom(expected)
                             else sameToolJson(observed, expected)
-                        require(when (step.test) {
+                        val passed = when (step.test) {
                             "equals", "unchanged" -> equal
                             "changed" -> !equal
                             "greater" -> (observed as Number).toDouble() > (expected as Number).toDouble()
@@ -207,15 +221,25 @@ internal suspend fun checkThreeScene(
                                 else -> false
                             }
                             else -> false
-                        }) { "Observed output did not pass the planned assertion." }
+                        }
+                        if (!passed) throw ThreeSceneFailure(ThreeSceneProblem.ASSERTION_FAILED)
                 },
             )
-        } catch (cancel: kotlinx.coroutines.CancellationException) {
+        } catch (cancel: CancellationException) {
             throw cancel
         } catch (failure: CloudFailure) {
             throw failure
-        } catch (failure: Exception) {
-            throw ThreeSceneFailure("Step " + (stepIndex + 1) + ": " + (failure.message ?: "scene check failed").take(200))
+        } catch (failure: ThreeSceneFailure) {
+            throw failure.atStep(stepIndex + 1)
+        } catch (_: Exception) {
+            throw ThreeSceneFailure(ThreeSceneProblem.INVALID_BINDING, step = stepIndex + 1)
+        }
+        collectCrops = false
+        val committed = try {
+            reopen(ThreeSceneSnapshot(initialState, spec.ui.toString()), interactive = true)
+            session.snapshot.also { ensureVisible() }
+        } catch (failure: ThreeSceneFailure) {
+            throw ThreeSceneFailure(failure.problem, ThreeSceneOperation.CHECKPOINT)
         }
         if (visualReview != null) {
             val issue = coroutineScope {
@@ -223,37 +247,40 @@ internal suspend fun checkThreeScene(
                 select {
                     accepted.onAwait {
                         review.cancel()
-                        throw CloudFailure("three_declined", "The 3D preview was declined.")
+                        throw declined()
                     }
                     review.onAwait { it }
                 }
             }
             checkOpen()
-            issue?.let { throw ThreeSceneFailure("Visual review: " + it.take(280)) }
-        } else {
-            reopen(initial, interactive = true)
-            val input = Channel<JSONObject>(32)
-            session.web.view.setOnTouchListener { _, event ->
-                for (pointer in session.pointerEvents(event)) input.trySend(pointer)
-                true
-            }
-            dialog.setMessage("Local checks passed. Review this preview before saving.")
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
-            var lastFrame = android.os.SystemClock.uptimeMillis()
-            while (!accepted.isCompleted) {
-                checkOpen()
-                repeat(16) {
-                    val pointer = input.tryReceive().getOrNull() ?: return@repeat
-                    session.event(pointer)
-                }
-                delay(16)
-                val now = android.os.SystemClock.uptimeMillis()
-                session.frame((now - lastFrame).coerceIn(1, 50).toInt())
-                lastFrame = now
-            }
-            if (!accepted.await()) throw CloudFailure("three_declined", "The 3D preview was declined.")
+            if (issue != null) throw ThreeSceneFailure(ThreeSceneProblem.VISUAL_CHECK)
         }
-        ToolPreview(spec, initial.state, initial.ui)
+        val input = Channel<JSONObject>(32)
+        session.web.view.setOnTouchListener { _, event ->
+            for (pointer in session.pointerEvents(event)) input.trySend(pointer)
+            true
+        }
+        dialog.setMessage("Planned checks passed (${scenario.steps.size} steps). Try the scene and review details the checks did not cover.")
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
+        var lastFrame = android.os.SystemClock.uptimeMillis()
+        while (!accepted.isCompleted) {
+            checkOpen()
+            repeat(16) {
+                val pointer = input.tryReceive().getOrNull() ?: return@repeat
+                session.event(pointer)
+            }
+            delay(16)
+            val now = android.os.SystemClock.uptimeMillis()
+            session.frame((now - lastFrame).coerceIn(1, 50).toInt())
+            lastFrame = now
+        }
+        if (!accepted.await()) throw declined()
+        ToolPreview(spec, committed.state, committed.ui)
+    } catch (cancel: CancellationException) {
+        throw cancel
+    } catch (failure: Exception) {
+        if (accepted.isCompleted && !accepted.await()) throw declined()
+        throw failure
     } finally {
         lifecycle.removeObserver(observer)
         dialog.dismiss()

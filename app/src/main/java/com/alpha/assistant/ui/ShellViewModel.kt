@@ -1,6 +1,7 @@
 package com.alpha.assistant.ui
 
 import com.alpha.assistant.tools.three.ThreeSceneAssets
+import com.alpha.assistant.tools.three.ThreeSceneAssetCleanup
 
 import android.app.Application
 import android.content.Intent
@@ -71,6 +72,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.Closeable
 import java.io.IOException
 import java.io.File
 import java.util.UUID
@@ -733,13 +735,26 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     }
 
     private val writes = Channel<() -> Unit>(Channel.UNLIMITED)
+    private val sceneAssetCleanup = ThreeSceneAssetCleanup(application)
+    private val unpublishedSceneAssets = mutableSetOf<Closeable>()
+
+    private fun releaseSceneAssetWrites(leases: Collection<Closeable>) = synchronized(unpublishedSceneAssets) {
+        leases.forEach { if (unpublishedSceneAssets.remove(it)) it.close() }
+    }
     private val deletedConversationIds = mutableSetOf<String>()
     private var historyCleared = false
 
     init {
         viewModelScope.launch {
             for (write in writes) {
-                val result = withContext(Dispatchers.IO) { runCatching(write) }
+                val result = withContext(Dispatchers.IO) {
+                    val job = currentCoroutineContext()
+                    val lease = synchronized(unpublishedSceneAssets) {
+                        job.ensureActive()
+                        if (unpublishedSceneAssets.isNotEmpty()) sceneAssetCleanup.lease() else null
+                    }
+                    lease.use { runCatching(write) }
+                }
                 if (result.isFailure) saveFailed = true else historyChanges.trySend(Unit)
             }
         }
@@ -853,6 +868,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
             loadFailed = result.isFailure
             loading = false
             if (result.isSuccess) {
+                sceneAssetCleanup.request()
                 val entry = pendingChatEntry
                 pendingChatEntry = null
                 entry?.let(::openChatEntry)
@@ -865,6 +881,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         val current = snapshot
         val deletedIds = deletedConversationIds.toSet()
         val clearHistory = historyCleared
+        val assetWrites = synchronized(unpublishedSceneAssets) { unpublishedSceneAssets.toList() }
         writes.trySend {
             synchronized(ShellStore.deliveryLock) {
                 store.writableDatabase.beginTransaction()
@@ -876,6 +893,8 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                     store.writableDatabase.setTransactionSuccessful()
                 } finally { store.writableDatabase.endTransaction() }
             }
+            releaseSceneAssetWrites(assetWrites)
+            sceneAssetCleanup.request()
         }
         saveFailed = false
     }
@@ -898,18 +917,31 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         snapshot = snapshot.copy(userName = name)
         writes.trySend { store.saveSetting("userName", name) }
     }
-    fun editDraft(draft: Draft) {
+    fun editDraft(draft: Draft) = editDraft(draft, null)
+
+    private fun editDraft(draft: Draft, assetLease: Closeable?) {
+        val removedAsset = snapshot.draft.attachments.any { old ->
+            old.mime == ThreeSceneAssets.ATTACHMENT_MIME && draft.attachments.none { it.uri == old.uri }
+        }
         if(active?.weatherDraft != null && draft != snapshot.draft) cancelRequest()
         if (voice.active && voiceBelongsTo(null) && (voice.oneShot || voice.phase in listOf("preparing", "listening", "recognizing")) && draft != snapshot.draft) voiceDraftConflict()
         val selected = snapshot.selected
+        val save: () -> Unit
         if (selected == null) {
             snapshot = snapshot.copy(newDraft = draft)
-            writes.trySend { store.saveNewDraft(draft) }
+            save = { store.saveNewDraft(draft) }
         } else {
             val updated = if(selected.refinementDraft != null) selected.copy(refinementDraft = draft) else selected.copy(draft = draft)
             replace(updated)
-            writes.trySend { store.updateConversation(updated) }
+            save = { store.updateConversation(updated) }
         }
+        if (assetLease != null) synchronized(unpublishedSceneAssets) { unpublishedSceneAssets += assetLease }
+        val queued = writes.trySend {
+            save()
+            if (removedAsset) sceneAssetCleanup.request()
+            if (assetLease != null) releaseSceneAssetWrites(listOf(assetLease))
+        }
+        if (queued.isFailure) saveFailed = true
     }
     fun renameConversation(id: String, title: String) {
         if (title.isBlank()) return
@@ -1140,6 +1172,8 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
             return false
         }
         attachmentBusy = true
+        val lease = sceneAssetCleanup.lease()
+        var published = false
         try {
             val result = withContext(Dispatchers.IO) {
                 runCatching { ThreeSceneAssets(getApplication<Application>()).import(uri, name, mime) }
@@ -1151,9 +1185,12 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 return false
             }
             val draft = composerDraft(null)
-            editComposerDraft(null, draft.copy(attachments = draft.attachments.filterNot { it.uri == attachment.uri } + attachment))
+            editDraft(draft.copy(attachments = draft.attachments.filterNot { it.uri == attachment.uri } + attachment), lease)
+            published = true
             return true
         } finally {
+            sceneAssetCleanup.request()
+            if (!published) lease.close()
             attachmentBusy = false
         }
     }
@@ -1819,6 +1856,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         voice.close()
         tools.close()
         writes.close()
+        synchronized(unpublishedSceneAssets) { releaseSceneAssetWrites(unpublishedSceneAssets.toList()) }
         super.onCleared()
     }
     private fun replace(conversation: Conversation) {

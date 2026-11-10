@@ -9,6 +9,7 @@ import android.os.SystemClock
 import java.io.Closeable
 import com.alpha.assistant.capabilities.*
 import com.alpha.assistant.scheduling.SourceRefresh
+import com.alpha.assistant.tools.three.ThreeSceneAssetCleanup
 import com.alpha.assistant.scheduling.RecurringSearch
 import com.alpha.assistant.surfaces.widgetauthoring.WidgetLayoutStore
 import org.json.JSONArray
@@ -249,7 +250,10 @@ class ToolStore private constructor(internal val context: Context, internal val 
             put("preview_surfaces", d.previewSurfaces)
         })
     }
-    fun deleteDraft(id: String) = transaction { writableDatabase.delete("drafts","id=?",arrayOf(id)) }
+    fun deleteDraft(id: String) {
+        transaction { writableDatabase.delete("drafts","id=?",arrayOf(id)) }
+        ThreeSceneAssetCleanup(context).request()
+    }
     private fun toolValues(t: ToolRecord) = ContentValues().apply {
         put("id",t.id); put("revision",t.revision); put("state_version",t.stateVersion)
         put("spec",t.spec); put("state",t.state); put("ui",t.ui)
@@ -309,7 +313,7 @@ class ToolStore private constructor(internal val context: Context, internal val 
         }
         if (draft != null) {
             if(retainReceipt) saveDraft(draft.copy(toolId = t.id,baseRevision = -t.revision,baseStateVersion = t.stateVersion,previewSurfaces = null))
-            else deleteDraft(draft.id)
+            else writableDatabase.delete("drafts","id=?",arrayOf(draft.id))
         }
         if(old!=null && (old.revision!=t.revision || old.saved!=t.saved)) {
             invalidateAppSchedulesAndGrants(t.id)

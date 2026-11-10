@@ -21,7 +21,6 @@ import androidx.webkit.WebViewFeature
 import com.alpha.assistant.sandbox.SandboxContract
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
@@ -31,8 +30,6 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.max
 import kotlin.math.sqrt
-
-internal class ThreeSceneFailure(message: String) : IllegalStateException(message)
 
 internal data class ThreeSceneAsset(
     val id: String,
@@ -60,6 +57,7 @@ internal class ThreeSceneWebView(
     private val ready = CompletableDeferred<Unit>()
     private var pending: CompletableDeferred<JSONObject>? = null
     private var sequence = 0
+    private var operation: ThreeSceneOperation? = null
     private var failure: ThreeSceneFailure? = null
     private var closed = false
     private val handler = Handler(Looper.getMainLooper())
@@ -94,7 +92,7 @@ internal class ThreeSceneWebView(
                 response(context, request)
 
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
-                fail("3D renderer closed.")
+                fail(ThreeSceneProblem.RENDERER_CLOSED)
                 close()
                 return true
             }
@@ -109,7 +107,7 @@ internal class ThreeSceneWebView(
         view.loadUrl("$origin/index.html")
         ready.await()
         exchange("init", JSONObject().put("state", state).put("viewport", viewport()), 9_000)
-    } ?: throw ThreeSceneFailure("The 3D scene did not start.")
+    } ?: throw ThreeSceneFailure(ThreeSceneProblem.TIMEOUT, ThreeSceneOperation.INIT)
 
     suspend fun event(event: JSONObject): JSONObject = exchange("event", event, 500)
 
@@ -126,13 +124,13 @@ internal class ThreeSceneWebView(
             .put("height", max(1, (height * scale).toInt()))
     }
 
-    suspend fun capture(window: Window): Bitmap = withTimeout(1_500) {
+    suspend fun capture(window: Window): Bitmap = withTimeoutOrNull(1_500) {
         suspendCancellableCoroutine { continuation ->
             val xy = IntArray(2).also(view::getLocationInWindow)
             val width = view.width
             val height = view.height
             if (width <= 0 || height <= 0 || !view.isShown) {
-                continuation.resumeWithException(ThreeSceneFailure("The scene is not visible."))
+                continuation.resumeWithException(ThreeSceneFailure(ThreeSceneProblem.CAPTURE_FAILED))
                 return@suspendCancellableCoroutine
             }
             val scale = minOf(1.0, 640.0 / max(width, height))
@@ -145,21 +143,21 @@ internal class ThreeSceneWebView(
                     } else {
                         bitmap.recycle()
                         if (continuation.isActive) {
-                            continuation.resumeWithException(ThreeSceneFailure("Alphy could not capture the scene."))
+                            continuation.resumeWithException(ThreeSceneFailure(ThreeSceneProblem.CAPTURE_FAILED))
                         }
                     }
                 }, handler)
-            } catch (error: Exception) {
+            } catch (_: Exception) {
                 bitmap.recycle()
-                continuation.resumeWithException(error)
+                continuation.resumeWithException(ThreeSceneFailure(ThreeSceneProblem.CAPTURE_FAILED))
             }
         }
-    }
+    } ?: throw ThreeSceneFailure(ThreeSceneProblem.CAPTURE_FAILED)
 
     fun close() {
         if (closed) return
         closed = true
-        fail("3D scene closed.")
+        fail(ThreeSceneProblem.CLOSED)
         (view.parent as? ViewGroup)?.removeView(view)
         view.destroy()
         WebStorageCompat.deleteBrowsingDataForSite(storage, origin) {}
@@ -170,15 +168,22 @@ internal class ThreeSceneWebView(
         check(pending == null)
         val result = CompletableDeferred<JSONObject>()
         pending = result
+        operation = when (type) {
+            "init" -> ThreeSceneOperation.INIT
+            "frame" -> ThreeSceneOperation.FRAME
+            "dispose" -> ThreeSceneOperation.DISPOSE
+            else -> if (payload.optString("type") == "open") ThreeSceneOperation.OPEN else ThreeSceneOperation.EVENT
+        }
         val request = JSONObject().put("sequence", ++sequence).put("type", type).put("payload", payload)
         try {
             view.evaluateJavascript("window.alphySceneSend(" + JSONObject.quote(request.toString()) + ")", null)
             return withTimeoutOrNull(timeoutMs) { result.await() } ?: run {
-                fail("The 3D worker did not answer.")
+                fail(ThreeSceneProblem.TIMEOUT)
                 throw checkNotNull(failure)
             }
         } finally {
             pending = null
+            operation = null
         }
     }
 
@@ -200,17 +205,21 @@ internal class ThreeSceneWebView(
                     require(message.get("sequence") == sequence)
                     requireNotNull(pending).complete(payload)
                 }
-                "failed" -> fail(payload.getString("message").take(280))
-                else -> fail("Invalid 3D scene response.")
+                "failed" -> {
+                    require(message.get("sequence") == if (pending == null) 0 else sequence)
+                    require(payload.keys().asSequence().toSet() == setOf("code"))
+                    fail(ThreeSceneProblem.fromWorker(payload.getString("code")))
+                }
+                else -> fail(ThreeSceneProblem.INVALID_RESPONSE)
             }
         } catch (_: Exception) {
-            fail("Invalid 3D scene response.")
+            fail(ThreeSceneProblem.INVALID_RESPONSE)
         }
     }
 
-    private fun fail(message: String) {
+    private fun fail(problem: ThreeSceneProblem) {
         if (failure != null) return
-        val error = ThreeSceneFailure(message)
+        val error = ThreeSceneFailure(problem, operation)
         failure = error
         ready.completeExceptionally(error)
         pending?.completeExceptionally(error)

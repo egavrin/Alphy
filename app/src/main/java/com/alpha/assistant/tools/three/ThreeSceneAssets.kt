@@ -25,7 +25,10 @@ internal data class ThreeSceneAssetRef(val id: String, val name: String, val mim
 internal class ThreeSceneAssets(private val context: Context) {
     private val directory = File(context.filesDir, "threejs-assets")
 
-    suspend fun import(uri: Uri, name: String, requestedMime: String): Attachment {
+    suspend fun import(uri: Uri, name: String, requestedMime: String): Attachment =
+        ThreeSceneAssetCleanup(context).lease().use { importFile(uri, name, requestedMime) }
+
+    private suspend fun importFile(uri: Uri, name: String, requestedMime: String): Attachment {
         require(uri.scheme == "content")
         check(directory.mkdirs() || directory.isDirectory)
         val temporary = File.createTempFile("import-", ".part", directory)
@@ -215,7 +218,8 @@ internal class ThreeSceneAssets(private val context: Context) {
                     }
                     seen[index] = 2
                 }
-                for (i in seen.indices) visit(i, 1)
+                for (i in parents.indices) if (parents[i] == 0) visit(i, 1)
+                require(seen.all { it == 2 }) { "Invalid GLB node hierarchy." }
                 val images = model.optJSONArray("images") ?: JSONArray()
                 require(images.length() <= 32)
                 var pixels = 0L

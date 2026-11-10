@@ -12,7 +12,7 @@ import java.security.MessageDigest
 internal class ToolLibraryUnavailable(cause: Throwable? = null) :
     IllegalStateException("The selected mini-app storage is unavailable. Existing files are preserved.", cause)
 
-internal data class ToolLibrarySelection(val logical: String,val physical: String) {
+internal data class ToolLibrarySelection(val logical: String,val physical: String,val preserved: String? = null) {
     val original get()=logical==physical
     val primary get()=logical==ToolLibraryStorage.DEFAULT
     val automation get()=if(primary && original) "alpha-automations.db" else "$physical-automations.db"
@@ -54,7 +54,7 @@ internal object ToolLibraryStorage {
                 val active=record.getString("active")
                 val preserved=record.getString("preserved")
                 check(active!=preserved && generated.matches(active) && logicalName(active)==logical && logicalName(preserved)==logical)
-                ToolLibrarySelection(logical,active)
+                ToolLibrarySelection(logical,active,preserved)
             }
         } catch(_: Exception) {throw ToolLibraryUnavailable()}
     }

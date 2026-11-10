@@ -141,7 +141,8 @@ internal sealed interface GenerationBehavior {
                 row.requireKeys(FIELD, setOf("kind"), setOf("part", "member"))
                 val kind = Kind.entries.firstOrNull { it.wire == row.opt("kind") }
                     ?: throw PartsContractFailure(FIELD, "a supported slot kind")
-                requireParts(threeScene || kind !in setOf(Kind.STATE, Kind.AUDIO), FIELD, "a supported slot kind")
+                requireParts(if (threeScene) kind != Kind.TIMER else kind !in setOf(Kind.STATE, Kind.AUDIO),
+                    FIELD, "a supported slot kind")
                 val part = row.opt("part")?.let { identifier(it, FIELD) }
                 val member = row.opt("member")?.let { identifier(it, FIELD) }
                 requireParts(part == null || part in needIds && kind in setOf(Kind.ACTION, Kind.VALUE, Kind.COLLECTION), FIELD, "a compatible declared part")
@@ -175,7 +176,7 @@ internal sealed interface GenerationBehavior {
                         val event = row.opt("event") as? String
                         val extras = when (event) {
                             "pointer" -> setOf("phase", "x", "y")
-                            "control" -> setOf("direction")
+                            "control" -> if (!threeScene) setOf("direction") else throw PartsContractFailure(at, "a supported surface event")
                             "viewport", "start", "pause", "resume", "restart" -> emptySet()
                             "reopen" -> if (threeScene) emptySet() else throw PartsContractFailure(at, "a supported surface event")
                             else -> throw PartsContractFailure(at, "a supported surface event")
@@ -191,6 +192,7 @@ internal sealed interface GenerationBehavior {
                     }
                     "frames", "timers" -> {
                         val frames = row.opt("op") == "frames"
+                        requireParts(!threeScene || frames, at, "a supported step")
                         val withObservation = row.has("observe") || row.has("changes")
                         requireParts(!withObservation || frames, at, "a frame observation")
                         val extra = if (withObservation) setOf("observe", "changes") else emptySet()

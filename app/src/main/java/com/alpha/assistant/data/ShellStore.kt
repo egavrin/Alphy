@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.alpha.assistant.chat.RefinementChoice
+import com.alpha.assistant.tools.three.ThreeSceneAssetCleanup
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -37,7 +38,7 @@ data class ShellSnapshot(val conversations: List<Conversation> = emptyList(), va
 }
 
 /** The chat body and background results have independent writers. */
-class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper(context, name, null, 2) {
+class ShellStore(private val context: Context, name: String = "alpha.db") : SQLiteOpenHelper(context, name, null, 2) {
     companion object {
         internal const val AUTOMATION_RESULT_CHANGED = "com.alpha.assistant.AUTOMATION_RESULT_CHANGED"
         internal val deliveryLock = Any()
@@ -199,6 +200,7 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
             writableDatabase.delete("conversations", "id=?", arrayOf(id))
             writableDatabase.setTransactionSuccessful()
         } finally { writableDatabase.endTransaction() }
+        ThreeSceneAssetCleanup(context).request()
     }
     internal fun retryHistoryClear(keep: Set<String>) {
         val remove = readableDatabase.rawQuery("SELECT id FROM conversations", null).use { cursor ->
@@ -215,6 +217,7 @@ class ShellStore(context: Context, name: String = "alpha.db") : SQLiteOpenHelper
             writableDatabase.delete("conversations", null, null)
             writableDatabase.setTransactionSuccessful()
         } finally { writableDatabase.endTransaction() }
+        ThreeSceneAssetCleanup(context).request()
     }
 
     private fun encodeAttachments(items: List<Attachment>) = JSONArray().apply {

@@ -11,9 +11,12 @@ import org.json.JSONArray
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.sandbox.SandboxContract
 import com.alpha.assistant.sandbox.SandboxResult
+import com.alpha.assistant.tools.three.ThreeSceneAssetCleanup
 import com.alpha.assistant.tools.three.ThreeSceneAssetRef
 import com.alpha.assistant.tools.three.ThreeSceneWebView
 import com.alpha.assistant.tools.three.ThreeSceneAssets
+import com.alpha.assistant.tools.three.ThreeSceneFailure
+import com.alpha.assistant.tools.three.ThreeSceneProblem
 import com.alpha.assistant.tools.three.checkThreeScene
 import com.alpha.assistant.tools.generation.HoleKind
 import com.alpha.assistant.tools.generation.NativeEditBase
@@ -118,6 +121,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         val code=invalid?.problem?.code ?: (failure as? CloudFailure)?.code ?: when(failure) {
             null -> "none"
             is CancellationException -> "cancelled"
+            is ThreeSceneFailure -> failure.problem.code
             else -> "unknown"
         }
         val validation=invalid?.validation ?: failure as? ToolValidationFailure
@@ -1076,6 +1080,7 @@ ${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by
                     request?.base?.let { CloudTurn("assistant", it) },
                     request?.let { CloudTurn("user", it.instructions, visualFrames) },
                 )
+                visualFrames = emptyList()
                 val instructions = if (request?.mode == GenerationRepair.Mode.PATCH) contract + GenerationRepair.FORMAT_OVERRIDE
                     else contract
                 suspend fun fetch() = response(key, turns, session, stage, instructions, expandedWriterOutput = true)
@@ -1084,10 +1089,12 @@ ${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by
                 val generated = generatedObject(raw)
                 if (!tested.add(generated)) throw GenerationRepair.Rejected(GenerationRepair.Problem.REPEATED_CANDIDATE)
                 val envelope = JSONObject(generated.toString())
-                val requestedBindings = envelope.remove("behaviorBindings") as? JSONObject ?: JSONObject()
+                val requestedBindings = envelope.remove("behaviorBindings")
+                if (requestedBindings != null && requestedBindings !is JSONObject)
+                    throw ThreeSceneFailure(ThreeSceneProblem.INVALID_BINDING)
                 val candidate = ToolSpec.parse(envelope.toString())
-                require(candidate.threeScene) { "Use runtime threejs-worker." }
-                val bindings = threeSceneBindings(scene.checks, requestedBindings)
+                if (!candidate.threeScene) throw ToolValidationFailure(ToolValidationCategory.FIELDS)
+                val bindings = threeSceneBindings(scene.checks, requestedBindings as? JSONObject ?: JSONObject())
                 val spec = candidate.withThreeAssets(assets).withAppLanguage(language?.tag ?: previous?.appLanguage).withIcon(iconId)
                 val state = if (previous == null) spec.initialState else ToolSpec.stateForRevision(previous, spec, checkNotNull(base).state)
                 val review: (suspend (List<String>) -> String?)? = if (provider.supportsSceneVision && assets.isEmpty()) { frames ->
@@ -1111,11 +1118,12 @@ ${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by
                     is ToolValidationFailure -> if (failure.category == ToolValidationCategory.FIELDS) {
                         "Use only the required Three.js definition fields. Set capabilities to [], remove surfaces, " +
                             "hostControls, collections and capabilityResults, and remove every canvas node from ui."
-                    } else failure.message.orEmpty()
+                    } else failure.category.feedback
+                    is ThreeSceneFailure -> failure.message.orEmpty()
                     is GenerationBehavior.BindingFailure ->
                         failure.slotId?.let { "Behavior slot $it requires ${failure.expected}." }
                             ?: "Behavior bindings require ${failure.expected}."
-                    else -> failure.message ?: "Invalid 3D behavior."
+                    else -> "Return a valid Three.js definition and preserve the saved state schema."
                 }.take(300)
                 val repeated = failure is GenerationRepair.Rejected &&
                     failure.problem in setOf(GenerationRepair.Problem.NO_CHANGE, GenerationRepair.Problem.REPEATED_CANDIDATE)
@@ -1293,9 +1301,10 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
         progress: ((ToolGenerationProgress) -> Unit)? = null, previewObserver: ToolDraftPreviewObserver?,
         trace: ToolGenerationTrace?, originalRequest: String? = null,
         sceneAssets: List<ThreeSceneAssetRef> = emptyList()): ToolDraft {
-        val (draft, base) = mutex.withLock { val d = checkNotNull(store.draft(draftId)); check(d.acceptedRevision == null); d to d.toolId?.let { current(it,d.baseRevision,d.baseStateVersion) } }
         val draftPreview=previewObserver?.let {ToolDraftPreviewPublisher(draftId,it)}
+        val assetLease = if (sceneAssets.isEmpty()) null else ThreeSceneAssetCleanup(store.context).lease()
         try {
+            val (draft, base) = mutex.withLock { val d = checkNotNull(store.draft(draftId)); check(d.acceptedRevision == null); d to d.toolId?.let { current(it,d.baseRevision,d.baseStateVersion) } }
             val preview = generation.generate(key, draft.prompt, base, images, session, draft.toolId ?: draft.id,
                 privateState = base?.let { store.privateResults(it.id) } == true, progress = progress, draftPreview = draftPreview,
                 trace = trace?.takeIf { it.operationId.toString() == draftId },
@@ -1315,6 +1324,8 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
         } catch(failure: Throwable) {
             draftPreview?.clear()
             throw failure
+        } finally {
+            assetLease?.close()
         }
     }
     internal suspend fun acceptTestFix(operationId: String, conversationId: String, expected: ToolRecord,
@@ -1765,7 +1776,11 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
         ArtifactCoordinator.get(store,expected.id).ordered {
             try {
                 check(current(store,expected.id)==expected)
-                renderRestore(expected,target)
+                val spec = restoreSpec(expected, target)
+                if (spec.threeScene) {
+                    spec.validateState(expected.state)
+                    ThreeSceneAssets(store.context).workerAssets(spec.sceneAssets)
+                } else renderRestore(expected, spec)
                 check(store.tool(expected.id)==expected)
                 ToolRestoreAvailability()
             } catch(cancel: CancellationException) {
@@ -1778,18 +1793,27 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
             }
         }
 
-    private suspend fun renderRestore(current: ToolRecord,target: Int): ToolPreview {
+    private fun restoreSpec(current: ToolRecord, target: Int): ToolSpec {
         check(!store.artifactWorkPending(current.id)) { "Дождись завершения текущего действия." }
-        val previous=checkNotNull(store.revisions(current.id).find { it.revision==target }) { "Версия недоступна." }
-        val spec=ToolSpec.forRestore(ToolSpec.parsePersisted(current.spec),ToolSpec.parsePersisted(previous.spec))
-        return generation.evaluate(spec,current.id,current.revision+1,current.state,JSONObject().put("type","render"),spec.ui.toString())
+        val previous = checkNotNull(store.revisions(current.id).find { it.revision == target }) { "Версия недоступна." }
+        val activeSpec = ToolSpec.parsePersisted(current.spec)
+        val targetSpec = ToolSpec.parsePersisted(previous.spec)
+        check(activeSpec.threeScene == targetSpec.threeScene) { "Версия использует другой способ запуска." }
+        return ToolSpec.forRestore(activeSpec, targetSpec)
     }
+
+    private suspend fun renderRestore(current: ToolRecord, spec: ToolSpec): ToolPreview =
+        if (spec.threeScene) checkThreeScene(spec, current.id, current.revision + 1, current.state,
+            scenario = null, bindings = emptyMap(), checkActive = { currentCoroutineContext().ensureActive() },
+            visualReview = null)
+        else generation.evaluate(spec, current.id, current.revision + 1, current.state,
+            JSONObject().put("type", "render"), spec.ui.toString())
 
     suspend fun rollback(id: String, revision: Int, stateVersion: Int, target: Int): ToolRecord =
         AutomationRuntime.withToolRevisionChange(store,id) { rules ->
             val old=current(id,revision,stateVersion)
             check(current(store,id)==old) { "Инструмент изменился. Открой текущую версию." }
-            val preview=renderRestore(old,target)
+            val preview=renderRestore(old,restoreSpec(old,target))
             val next=old.copy(revision=revision+1,stateVersion=stateVersion+1,spec=preview.spec.json,ui=preview.ui)
             currentCoroutineContext().ensureActive()
             AutomationRuntime.commitToolRevision(store,rules,id) { stopped ->
@@ -1868,7 +1892,8 @@ private fun threeSceneWriterContract(scene: SceneRequirement, plan: JSONObject, 
         zero-based child indices, not a state field name or a string. Use [] for the root UI node.
         The host supplies surface, full-viewport geometry and audio bindings automatically. To select a
         specific geometry region, use {"surface":"scene","path":[1]} for quadrant 1 through 4.
-        On open, render the state supplied by the host. The host reopens by creating a new worker with that state.
+        Render the supplied state without changing any values in createScene or open. The host reopens in a new worker.
+        Request audio only after a foreground action or drop.
         Keep every required binding valid after repair. Preserve existing schema and control IDs during refinement.
     """.trimIndent()
 }
@@ -1879,8 +1904,10 @@ private val THREE_SCENE_PLAN = """
     "brief":"Describe the visible Three.js scene requested by the user.",
     "checks":{"status":"checkable","scenario":{"slots":{"view":{"kind":"surface"},"image":{"kind":"geometry"}},
     "steps":[{"op":"frames","slot":"view","count":8,"observe":"image","changes":3}]}}}}
-    Adapt the checks to the requested behavior. For a drag, capture geometry, send down/move/up,
-    then assert changed geometry and the visible completion result. Use the planned normalized coordinates.
+    Adapt the checks to the requested behavior. Use only Three.js steps: native action, pointer, viewport,
+    start, pause, resume, restart, reopen, frames, capture, and assert. Do not use control or timers.
+    For a drag, use normalized coordinates. Test a wrong drop that leaves progress unchanged, then a
+    correct drop that changes geometry and shows the requested completion result.
     For requested audio, add an audio slot with {"kind":"audio"} and assert equals with "value":"completed" after the action.
     For requested persistence, use a state slot with {"kind":"state"}, then send a surface event "reopen" and
     assert the requested saved scalar value. For a static scene check nonempty geometry.
@@ -1889,20 +1916,32 @@ private val THREE_SCENE_PLAN = """
 """.trimIndent()
 
 private fun threeSceneBindings(scenario: GenerationBehavior.Scenario, proposed: JSONObject): Map<String, GenerationBehavior.Binding> {
+    if (proposed.keys().asSequence().any { it !in scenario.slots })
+        throw GenerationBehavior.BindingFailure(null, null, "only planned slot IDs", null)
     val bindings = JSONObject()
-    for ((id, slot) in scenario.slots) when (slot.kind) {
-        GenerationBehavior.Kind.SURFACE -> bindings.put(id, "scene")
-        GenerationBehavior.Kind.AUDIO -> bindings.put(id, "receipt")
-        GenerationBehavior.Kind.GEOMETRY -> {
-            val region = proposed.optJSONObject(id)?.optJSONArray("path")?.takeIf { it.length() == 1 }
-                ?.opt(0) as? Int ?: 0
-            bindings.put(id, JSONObject().put("surface", "scene").put("path", JSONArray().put(region.coerceIn(0, 4))))
+    for ((id, slot) in scenario.slots) {
+        val value = proposed.opt(id) ?: when (slot.kind) {
+            GenerationBehavior.Kind.SURFACE -> "scene"
+            GenerationBehavior.Kind.AUDIO -> "receipt"
+            GenerationBehavior.Kind.GEOMETRY -> JSONObject().put("surface", "scene").put("path", JSONArray().put(0))
+            else -> throw GenerationBehavior.BindingFailure(id, slot.kind, "an explicit ${slot.kind.wire} binding", null)
         }
-        else -> {
-            val binding = proposed.opt(id)
-            require(binding != null) { "Add behaviorBindings entry for the planned ${slot.kind.wire} slot $id." }
-            bindings.put(id, binding)
+        bindings.put(id, value)
+    }
+    return GenerationBehavior.bindings(bindings, scenario.slots).also { checked ->
+        for ((id, binding) in checked) {
+            val kind = scenario.slots.getValue(id).kind
+            val expected = when (kind) {
+                GenerationBehavior.Kind.SURFACE -> if (binding != GenerationBehavior.Binding.Id("scene")) "the scene surface" else null
+                GenerationBehavior.Kind.AUDIO -> if (binding != GenerationBehavior.Binding.Id("receipt")) "the audio receipt" else null
+                GenerationBehavior.Kind.GEOMETRY -> {
+                    check(binding is GenerationBehavior.Binding.Drawing)
+                    if (binding.surface != "scene" || (binding.path.singleOrNull() ?: -1) !in 0..4)
+                        "the scene surface and one region index from 0 to 4" else null
+                }
+                else -> null
+            }
+            if (expected != null) throw GenerationBehavior.BindingFailure(id, kind, expected, null)
         }
     }
-    return GenerationBehavior.bindings(bindings, scenario.slots)
 }

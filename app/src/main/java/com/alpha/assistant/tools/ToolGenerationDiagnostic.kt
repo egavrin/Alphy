@@ -1,5 +1,7 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.tools.three.ThreeSceneProblem
+
 import android.os.SystemClock
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudGenerationStage
@@ -255,9 +257,11 @@ internal data class ToolGenerationAttemptDiagnostic(
         private val codes=setOf("none","unknown","auth","cancelled","empty_response","incomplete","provider","quota","rate_limit",
             "response_length","response_size","stream_invalid","unavailable","tool_invalid","tool_limit","widget_generation","widget_response_size",
             "widget_request","widget_plan","widget_selector","widget_questions","widget_incomplete",
+            "three_behavior","three_declined","three_deadline","three_unavailable",
             "widget_spec","widget_state","widget_behavior","widget_patch","widget_preview","widget_preview_state","widget_preview_effects",
             "javascript_unavailable","javascript_busy","javascript_sandbox_died","javascript_closed","javascript_memory_limit",
-            "javascript_script_error","javascript_timeout","javascript_invalid_request","javascript_invalid_result")
+            "javascript_script_error","javascript_timeout","javascript_invalid_request","javascript_invalid_result") +
+            ThreeSceneProblem.entries.map { it.code }
         private val schemaRules=setOf("schema.name","schema.nodes","schema.structuredNodes","schema.depth","schema.scalar",
             "schema.constructor","schema.type","object.keys","object.fields","list.keys","list.fields","list.maxItems","list.id",
             "list.field","array.keys","array.maxItems","state.fields","collections.count")

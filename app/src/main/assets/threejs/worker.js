@@ -45,6 +45,12 @@ self.addEventListener('message', ({data: {surface, port, assets}}) => {
     };
 
     surface.addEventListener('webglcontextlost', () => post({type: 'contextLost'}));
+    self.addEventListener('unhandledrejection', event => {
+        event.preventDefault();
+        if (closed) return;
+        closed = true;
+        post({type: 'fatal'});
+    });
     port.onmessage = async ({data}) => {
         if (data.type === 'asset') {
             const request = awaiting.get(data.request);
@@ -55,17 +61,22 @@ self.addEventListener('message', ({data: {surface, port, assets}}) => {
             return;
         }
         if (closed) return;
+        let code = 'invalid_response';
         try {
             if (data.type === 'init') {
                 setViewport(data.payload.viewport);
+                code = 'webgl_unavailable';
                 if (!surface.getContext('webgl2')) throw new Error('WebGL 2 is unavailable');
+                code = 'module_load';
                 const {createScene} = await import('./scene.js');
                 if (typeof createScene !== 'function') throw new Error('Export createScene(context)');
+                code = 'init_failed';
                 controller = checkedHandler(await createScene({
                     THREE, addons, canvas: surface, input, assets, readAsset,
                     state: data.payload.state, viewport
                 }));
             } else if (data.type === 'event') {
+                code = 'event_failed';
                 const event = data.payload;
                 if (event.type === 'viewport') setViewport(event);
                 if (event.type.startsWith('pointer')) {
@@ -73,21 +84,26 @@ self.addEventListener('message', ({data: {surface, port, assets}}) => {
                 }
                 await controller.event(event);
             } else if (data.type === 'frame') {
+                code = 'frame_failed';
                 await controller.frame(data.payload);
             } else if (data.type === 'dispose') {
                 closed = true;
+                code = 'snapshot_failed';
                 const snapshot = await controller.snapshot();
+                code = 'dispose_failed';
                 await controller.dispose();
+                code = 'snapshot_failed';
                 post({type: 'snapshot', sequence: data.sequence, snapshot});
                 return;
             } else {
                 throw new Error('Unsupported scene event');
             }
+            code = 'snapshot_failed';
             const snapshot = await controller.snapshot();
             post({type: 'snapshot', sequence: data.sequence, snapshot});
-        } catch (error) {
+        } catch {
             closed = true;
-            post({type: 'failed', sequence: data.sequence, message: String(error).slice(0, 280)});
+            post({type: 'failed', sequence: data.sequence, code});
         }
     };
 }, {once: true});
