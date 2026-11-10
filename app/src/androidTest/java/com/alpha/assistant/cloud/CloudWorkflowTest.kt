@@ -21,6 +21,7 @@ import com.alpha.assistant.surfaces.AssistContext
 import com.alpha.assistant.tools.ToolStore
 import com.alpha.assistant.tools.firstSelectorChoices
 import com.alpha.assistant.tools.replyWithFixturePlan
+import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
 import org.json.JSONArray
 import org.json.JSONObject
@@ -774,8 +775,107 @@ class CloudWorkflowTest {
         }
     }
 
+    @Test fun publicUpdatesReachTheChatBeforeTheGenerationResult() {
+        val robot = ShellRobot("model-public-update")
+        val first = "I will wire the \"Add\" button."
+        val second = "I will clarify the counter description."
+        val privateReasoning = "PRIVATE_GENERATION_REASONING"
+        val partial = CountDownLatch(1)
+        val finishNote = CountDownLatch(1)
+        val finishCreate = CountDownLatch(1)
+        val refineStreaming = CountDownLatch(1)
+        val finishRefine = CountDownLatch(1)
+        val calls = AtomicInteger()
+        val candidate = """{"formatVersion":3,"title":"Counter","description":"Local counter","capabilities":[],
+            "stateSchema":{"count":"number"},"initialState":{"count":0},
+            "ui":{"type":"column","children":[{"type":"text","text":"Count","bind":"count"},
+            {"type":"button","text":"Add","action":"add"}]},
+            "source":"if(input.event.type==='action')input.state.count++;return {state:input.state};"}"""
+        Server { request, output ->
+            val number = calls.getAndIncrement()
+            if (number == 0 || number == 3) {
+                assertTrue(request.classifying)
+                output.classification(decision("Ready.", if (number == 0) "create" else "refine", brief = "Prepare the counter."))
+            } else {
+                assertEquals("json_object", request.json.getJSONObject("response_format").getString("type"))
+                when (number) {
+                    1 -> output.answer("""{"publicUpdate":null,"wholeScreen":true,"language":"en"}""")
+                    2 -> {
+                        output.headers()
+                        output.event(JSONObject("""{"choices":[{"delta":{"reasoning_content":"$privateReasoning"}}]}"""))
+                        output.event(textChunk("{\"pub"))
+                        output.event(textChunk("licUpdate\":\"I will wire the \\u00"))
+                        output.event(textChunk("22Add\\u0022 button.\""))
+                        partial.countDown()
+                        check(finishNote.await(20, TimeUnit.SECONDS))
+                        output.event(textChunk(","))
+                        check(finishCreate.await(20, TimeUnit.SECONDS))
+                        output.event(textChunk(candidate.removePrefix("{")))
+                        output.event(end())
+                        output.write("data: [DONE]\n\n".toByteArray())
+                    }
+                    4 -> {
+                        output.headers()
+                        output.event(textChunk("{\"publicUpdate\":${JSONObject.quote(second)},"))
+                        refineStreaming.countDown()
+                        check(finishRefine.await(20, TimeUnit.SECONDS))
+                        output.event(textChunk(""""appLanguage":"en","fields":{"description":"Updated local counter"}}"""))
+                        output.event(end())
+                        output.write("data: [DONE]\n\n".toByteArray())
+                    }
+                    else -> error("Unexpected generation request $number")
+                }
+            }
+        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+            try {
+                fixture.submit("Build a counter with an Add button.")
+                assertTrue(server.failures.toString(), partial.await(15, TimeUnit.SECONDS))
+                assertEquals("generating", fixture.last.status)
+                assertEquals("", fixture.last.text)
+                assertNull(robot.find(first))
+                finishNote.countDown()
+                val note = robot.waitFor(first)
+                robot.diagnostics.capture("streaming-public-update", note)
+                assertEquals("", fixture.persisted().selected!!.messages.last().text)
+                assertTrue(robot.texts().none { privateReasoning in it || "publicUpdate" in it })
+                finishCreate.countDown()
+                fixture.idle()
+                assertEquals(fixture.last.error, "complete", fixture.last.status)
+                assertEquals("Ready.", fixture.last.text)
+                val toolId = checkNotNull(fixture.last.toolId)
+                assertEquals(1, fixture.last.toolRevision)
+                robot.waitGone(first)
+
+                fixture.submit("Update the counter description.")
+                assertTrue(server.failures.toString(), refineStreaming.await(10, TimeUnit.SECONDS))
+                robot.reveal(second, forward = null)
+                assertEquals("generating", fixture.last.status)
+                assertNull(robot.find(first))
+                finishRefine.countDown()
+                fixture.idle()
+                assertEquals(fixture.last.error, "complete", fixture.last.status)
+                assertEquals(toolId, fixture.last.toolId)
+                assertEquals(2, fixture.last.toolRevision)
+                assertEquals("Ready.", fixture.persisted().selected!!.messages.last().text)
+                robot.waitGone(second)
+                assertEquals(5, calls.get())
+                assertTrue(server.requests.filterNot { it.classifying }.all {
+                    it.json.getJSONArray("messages").getJSONObject(0).getString("content").contains("publicUpdate")
+                })
+                assertTrue(server.failures.toString(), server.failures.isEmpty())
+            } finally {
+                finishNote.countDown()
+                finishCreate.countDown()
+                finishRefine.countDown()
+            }
+        } }
+    }
+
     @Test fun discoveryContinuesThinkingWriterOnceWithoutLeakingIntermediateText() = kotlinx.coroutines.runBlocking {
         var round = 0
+        val checking = "I will check which device tools are available."
+        val writing = "I will connect the local controls."
+        val updateReceived = CountDownLatch(1)
         Server { request, output ->
             assertEquals("enabled", request.json.getJSONObject("thinking").getString("type"))
             if (round++ == 0) {
@@ -786,6 +886,8 @@ class CloudWorkflowTest {
                     output.event(JSONObject().put("choices", JSONArray().put(JSONObject().put("delta",
                         JSONObject().put("reasoning_content", fragment)))))
                 }
+                output.event(textChunk(JSONObject().put("publicUpdate", checking).toString()))
+                check(updateReceived.await(10, TimeUnit.SECONDS))
                 output.event(toolDelta(call(0, id = "discovery-id", name = "discover_capabilities", arguments = "{}")))
                 output.event(end("tool_calls"))
                 output.write("data: [DONE]\n\n".toByteArray())
@@ -797,7 +899,7 @@ class CloudWorkflowTest {
                 assertEquals("discovery-id", result.getString("tool_call_id"))
                 assertEquals("""{"caller":"miniApp"}""", result.getString("content"))
                 output.headers()
-                output.event(textChunk("""{"done":true}"""))
+                output.event(textChunk(JSONObject().put("publicUpdate", writing).put("done", true).toString()))
                 output.event(end())
                 output.write("data: [DONE]\n\n".toByteArray())
             }
@@ -805,9 +907,71 @@ class CloudWorkflowTest {
             val events = mutableListOf<CloudEvent>()
             DeepSeekProvider(server.url).respond("alpha-test-only", CloudRequest(listOf(CloudTurn("user", "Build an app.")),
                 search = false, jsonObject = true, generationStage = CloudGenerationStage.COMPLETE,
-                capabilityDiscovery = { JSONObject().put("caller", "miniApp") }), CloudSession()) { events += it }
+                capabilityDiscovery = { JSONObject().put("caller", "miniApp") }, publicUpdateContext = "Build an app."), CloudSession()) {
+                events += it
+                if (it == CloudEvent.PublicUpdate(checking)) updateReceived.countDown()
+            }
             assertEquals(2, round)
-            assertEquals(listOf("""{"done":true}"""), events.filterIsInstance<CloudEvent.Text>().map { it.value })
+            assertEquals(listOf(CloudEvent.PublicUpdate(checking), CloudEvent.PublicUpdate(writing)), events.filterIsInstance<CloudEvent.PublicUpdate>())
+            assertEquals(listOf(JSONObject().put("publicUpdate", writing).put("done", true).toString()),
+                events.filterIsInstance<CloudEvent.Text>().map { it.value })
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+        }
+    }
+
+    // Exercise wire and validation boundaries that the chat display cannot observe.
+    @Test fun publicUpdateMetadataPreservesStrictPayloads() = kotlinx.coroutines.runBlocking {
+        val sandbox = com.alpha.assistant.sandbox.SandboxContract
+        val depthLimit = "{\"levels\":" + "[".repeat(23) + "0" + "]".repeat(23) + "}"
+        val fullPayload = "{\"data\":\"" + "x".repeat(sandbox.MAX_BYTES - "{\"data\":\"\"}".length) + "\"}"
+        val exact = """{"number":1e2, "source":"escaped\\nline"}"""
+        val note = "Build the controls."
+        fun withNote(payload: String, metadata: String = JSONObject.quote(note)) =
+            "{\"publicUpdate\":$metadata," + payload.removePrefix("{")
+        val accepted = listOf(
+            Triple(withNote(exact), exact, listOf(note)),
+            Triple(exact, exact, emptyList()),
+            Triple(withNote(depthLimit), depthLimit, listOf(note)),
+            Triple(withNote(fullPayload, JSONObject.quote("🎛".repeat(240))), fullPayload, listOf("🎛".repeat(240))),
+            Triple(withNote(exact, "17"), exact, emptyList()),
+            Triple(withNote(exact, JSONObject.quote("x".repeat(241))), exact, emptyList()),
+            Triple(withNote(exact, "\"line\\nline\""), exact, emptyList()),
+        )
+        val malformed = listOf(
+            withNote("""{"publicUpdate":"duplicate","value":1}"""),
+            withNote("""{"value":1,"value":2}"""),
+            withNote(exact) + " trailing",
+            withNote("{\"levels\":" + "[".repeat(24) + "0" + "]".repeat(24) + "}"),
+            """{"publicUpdate":"Bad \q escape","value":1}""",
+        )
+        val oversized = listOf(
+            withNote(fullPayload.replaceFirst("xxx", "xxxx")),
+            withNote(exact, JSONObject.quote("x".repeat(4096))),
+        )
+        val outputs = accepted.map { it.first } + malformed + oversized
+        val calls = AtomicInteger()
+        Server { _, output -> output.answer(outputs[calls.getAndIncrement()]) }.use { server ->
+            val generator = com.alpha.assistant.tools.ToolGenerationService(DeepSeekProvider(server.url),
+                com.alpha.assistant.sandbox.SandboxClient(app))
+            val updates = mutableListOf<String>()
+            suspend fun response() = generator.response("alpha-test-only", listOf(CloudTurn("user", "Make a control.")),
+                CloudSession(), CloudGenerationStage.PLAN, originalRequest = "Make a control.", onPublicUpdate = { updates += it })
+            accepted.forEach { (_, expected, notes) ->
+                updates.clear()
+                val payload = response()
+                assertEquals(expected, payload)
+                assertEquals(notes, updates)
+                sandbox.objectFrom(payload)
+            }
+            malformed.forEach { invalid ->
+                val payload = response()
+                assertEquals(invalid, payload)
+                assertTrue(runCatching { sandbox.objectFrom(payload) }.isFailure)
+            }
+            oversized.forEach { _ ->
+                assertEquals("widget_response_size", (runCatching { response() }.exceptionOrNull() as? CloudFailure)?.code)
+            }
+            assertEquals(outputs.size, calls.get())
             assertTrue(server.failures.toString(), server.failures.isEmpty())
         }
     }

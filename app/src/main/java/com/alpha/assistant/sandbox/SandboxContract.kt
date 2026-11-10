@@ -16,6 +16,11 @@ internal object SandboxContract {
         return JSONObject(json)
     }
 
+    internal data class LeadingMember(val end: Int, val hasNext: Boolean, val text: String?)
+
+    fun leadingMember(json: String, name: String): LeadingMember? =
+        runCatching { StrictJson(json).leadingMember(name) }.getOrNull()
+
     /** Validate the strict grammar before Android's permissive parser can discard duplicate keys or comments. */
     private class StrictJson(private val input: String) {
         private var position=0
@@ -77,6 +82,19 @@ internal object SandboxContract {
             }
         }
         fun validate() { value(0); space(); require(position == input.length) { "Unexpected content after JSON." } }
+
+        fun leadingMember(name: String): LeadingMember? {
+            if (!take('{') || take('}') || string() != name) return null
+            require(take(':'))
+            space()
+            val text = if (input.getOrNull(position) == '"') string() else {
+                value(1)
+                null
+            }
+            val hasNext = take(',')
+            if (!hasNext) require(take('}'))
+            return LeadingMember(position, hasNext, text)
+        }
     }
 
     fun validateRequest(source: String, input: String) {

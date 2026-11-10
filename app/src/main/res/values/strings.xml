@@ -35,8 +35,6 @@
     <string name="chat_search_error">Ошибка веб-поиска</string>
     <string name="chat_request_location">Определяем примерное местоположение…</string>
     <string name="chat_request_responding">Отвечаю…</string>
-    <string name="chat_app_create_progress">Создаём мини-приложение…</string>
-    <string name="chat_app_update_progress">Обновляем мини-приложение…</string>
     <string name="chat_message_not_sent">Не отправлено · сохранённое локальное сообщение</string>
     <string name="chat_markdown_image_prefix">"[Изображение: "</string>
     <string name="chat_source_number">[%1$d]</string>

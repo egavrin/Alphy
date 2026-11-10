@@ -647,6 +647,7 @@ import kotlinx.coroutines.launch
                             ChatMessageCard(
                                 message,
                                 fragment = if (message.status == "streaming") model.activeAnswer(message.id) else null,
+                                publicUpdate = if (message.status == "generating") model.activePublicGenerationUpdate(message.id) else null,
                                 weatherLocationBusy = model.weatherLocationBusy && model.activeConversationId == chat.id,
                                 retry = if (canRetry) ({ model.retry(message.id) }) else null,
                                 retryEnabled = model.snapshot.selectedId == chat.id,

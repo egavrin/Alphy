@@ -33,6 +33,7 @@ import com.alpha.assistant.data.Source
 @Composable internal fun ChatMessageCard(
     message: Message,
     fragment: String?,
+    publicUpdate: String?,
     weatherLocationBusy: Boolean,
     retry: (() -> Unit)?,
     retryEnabled: Boolean,
@@ -43,7 +44,7 @@ import com.alpha.assistant.data.Source
     linkError: () -> Unit,
 ) {
     val user = message.role == "user"
-    val body = fragment ?: message.text
+    val body = publicUpdate ?: fragment ?: message.text
     val progress = when {
         user -> null
         message.status == "generating" -> null
@@ -90,7 +91,11 @@ import com.alpha.assistant.data.Source
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
                 if (body.isNotEmpty()) {
-                    val semantics = if (fragment != null) Modifier.semantics { hideFromAccessibility() } else Modifier
+                    val semantics = when {
+                        fragment != null -> Modifier.semantics { hideFromAccessibility() }
+                        publicUpdate != null -> PoliteLiveRegion
+                        else -> Modifier
+                    }
                     if (accepted) {
                         MarkdownText(body, semantics, announce = !user && fragment == null,
                             sources = if (user) emptyList() else message.sources.distinctBy { it.url }, linkError = linkError)

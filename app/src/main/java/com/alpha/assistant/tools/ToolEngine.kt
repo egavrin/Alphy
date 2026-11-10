@@ -235,17 +235,28 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
     }
 
     internal suspend fun response(key: String, turns: List<CloudTurn>, session: CloudSession, stage: CloudGenerationStage?,
-        instructions: String = "", expandedWriterOutput: Boolean = false, capabilityDiscovery: (() -> JSONObject)? = null): String {
+        instructions: String = "", expandedWriterOutput: Boolean = false, capabilityDiscovery: (() -> JSONObject)? = null,
+        originalRequest: String = "", onPublicUpdate: (suspend (String) -> Unit)? = null): String {
         val maxBytes = if (expandedWriterOutput) ToolSpec.MAX_DEFINITION_BYTES else SandboxContract.MAX_BYTES
+        val updateContext = if (onPublicUpdate != null && stage != null) originalRequest.take(256) else null
+        val maxResponseChars = maxBytes + if (updateContext != null) PublicGenerationUpdate.MAX_BYTES else 0
         val output = StringBuilder()
         fun tooLarge() = CloudFailure("widget_response_size", "The generator response exceeds the allowed size. Request a smaller tool.")
         session.checkActive(currentCoroutineContext())
         try {
             provider.respond(key, CloudRequest(turns, false, systemInstructions = instructions, jsonObject = true,
-                generationStage = stage, expandedWriterOutput = expandedWriterOutput, capabilityDiscovery = capabilityDiscovery), session) { event ->
-                if (event is CloudEvent.Text) {
-                    if (event.value.length > maxBytes - output.length) throw tooLarge()
-                    output.append(event.value)
+                generationStage = stage, expandedWriterOutput = expandedWriterOutput, capabilityDiscovery = capabilityDiscovery,
+                publicUpdateContext = updateContext), session) { event ->
+                when (event) {
+                    is CloudEvent.Text -> {
+                        if (event.value.length > maxResponseChars - output.length) throw tooLarge()
+                        output.append(event.value)
+                    }
+                    is CloudEvent.PublicUpdate -> if (updateContext != null) {
+                        session.checkActive(currentCoroutineContext())
+                        onPublicUpdate?.invoke(event.text)
+                    }
+                    else -> Unit
                 }
             }
         } catch (failure: java.io.IOException) {
@@ -254,7 +265,9 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             throw CloudFailure("widget_generation", "The tool generation connection failed. Retry the request.")
         }
         session.checkActive(currentCoroutineContext())
-        return output.toString().also { if (it.toByteArray(Charsets.UTF_8).size > maxBytes) throw tooLarge() }
+        val raw = output.toString()
+        val payload = if (updateContext == null) raw else PublicGenerationUpdate.payload(raw, maxBytes, ::tooLarge)
+        return payload.also { if (it.toByteArray(Charsets.UTF_8).size > maxBytes) throw tooLarge() }
     }
 
     private suspend fun repairResponse(
@@ -320,9 +333,10 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         privateState: Boolean, policy: ToolExecutionPolicy? = null, lessonTarget: CourseSlideKind? = null,
         progress: ((ToolGenerationProgress) -> Unit)? = null,
         draftPreview: ToolDraftPreviewPublisher?, trace: ToolGenerationTrace? = null,
-        originalRequest: String = prompt, sceneAssets: List<ThreeSceneAssetRef> = emptyList()): ToolPreview =
+        originalRequest: String = prompt, sceneAssets: List<ThreeSceneAssetRef> = emptyList(),
+        onPublicUpdate: (suspend (String) -> Unit)? = null): ToolPreview =
         generateCandidate(key, prompt, base, images, session, artifactId, privateState, policy, lessonTarget,
-            progress, draftPreview, allowedSourceIds = emptySet(), trace, originalRequest, sceneAssets).preview
+            progress, draftPreview, allowedSourceIds = emptySet(), trace, originalRequest, sceneAssets, onPublicUpdate).preview
 
     internal suspend fun generateLesson(
         key: String, prompt: String, session: CloudSession, artifactId: String, kind: CourseSlideKind,
@@ -338,11 +352,12 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         progress: ((ToolGenerationProgress) -> Unit)?, draftPreview: ToolDraftPreviewPublisher?, allowedSourceIds: Set<String>,
         trace: ToolGenerationTrace? = null, originalRequest: String = prompt,
         sceneAssets: List<ThreeSceneAssetRef> = emptyList(),
+        onPublicUpdate: (suspend (String) -> Unit)? = null,
     ): LessonToolPreview {
         val run = trace?.Run()
         return try {
             buildCandidate(key, prompt, base, images, session, artifactId, privateState, policy, lessonTarget,
-                progress, draftPreview, allowedSourceIds, run, originalRequest, sceneAssets).also { run?.finish() }
+                progress, draftPreview, allowedSourceIds, run, originalRequest, sceneAssets, onPublicUpdate).also { run?.finish() }
         } catch (failure: Throwable) {
             run?.finish(failure)
             throw failure
@@ -355,6 +370,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         progress: ((ToolGenerationProgress) -> Unit)?, draftPreview: ToolDraftPreviewPublisher?, allowedSourceIds: Set<String>,
         trace: ToolGenerationTrace.Run?, originalRequest: String,
         sceneAssets: List<ThreeSceneAssetRef>,
+        onPublicUpdate: (suspend (String) -> Unit)?,
     ): LessonToolPreview {
         val startedAt = SystemClock.elapsedRealtime()
         fun threeTimeLeft() = 600_000 - (SystemClock.elapsedRealtime() - startedAt)
@@ -455,7 +471,8 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                 }
                 try {
                     val plan = trace.timed(attemptNumber, ToolGenerationStage.PLAN, providerStage = CloudGenerationStage.PLAN) {
-                        suspend fun fetch() = response(key, turns, session, CloudGenerationStage.PLAN, instructions)
+                        suspend fun fetch() = response(key, turns, session, CloudGenerationStage.PLAN, instructions,
+                            originalRequest = originalRequest, onPublicUpdate = onPublicUpdate)
                         planText = if (edit == null) fetch().also { repair?.retain(it) }
                             else repairResponse(checkNotNull(repair), edit, CloudGenerationStage.PLAN, attemptNumber, trace) { fetch() }
                         session.checkActive(currentCoroutineContext())
@@ -554,7 +571,8 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                                         For type "choice", return {"id":"the ID","choice":"offered letter","confidence":0.9,"probabilities":{"A":0.9,"B":0.1}}.
                                         Include every offered letter with a numeric probability from 0 to 1. The probabilities must sum to 1.
                                         The chosen letter must have the sole highest probability. Use only offered letters.
-                                        For type "noul", return {"id":"the ID","probability":0.9} with a number from 0 to 1.""".trimIndent())
+                                        For type "noul", return {"id":"the ID","probability":0.9} with a number from 0 to 1.""".trimIndent(),
+                                    originalRequest = originalRequest, onPublicUpdate = onPublicUpdate)
                             }.also {
                                 observeAttempt(attemptNumber, ToolGenerationStage.SELECTOR, trace = trace,
                                     disposition = ToolGenerationDisposition.CONTINUE, selectorBatch = batch)
@@ -624,7 +642,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             val candidate = kotlinx.coroutines.withTimeoutOrNull(threeTimeLeft()) {
                 generateThreeScene(key, prompt, originalRequest, base, previous, images, session, artifactId,
                     checkNotNull(planned.scene), JSONObject(planText).getJSONObject("scene"), sceneAssets,
-                    appLanguage, iconId, ::reportProgress, trace)
+                    appLanguage, iconId, ::reportProgress, trace, onPublicUpdate)
             } ?: throw threeDeadline()
             return LessonToolPreview(candidate, emptyList())
         }
@@ -819,7 +837,7 @@ ${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by
                                 capabilityDiscovery = if (lessonTarget != null || partsOnly) null else ({
                                     AndroidCapabilities(sandbox.context).discover(CapabilityCaller.MINI_APP)
                                         .put("eligible", JSONArray(allowedCapabilities.toList()))
-                                }))
+                                }), originalRequest = originalRequest, onPublicUpdate = onPublicUpdate)
                             if (!selectLanguage) return output
                             val candidate = try {
                                 generatedObject(output)
@@ -1054,6 +1072,7 @@ ${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by
         images: List<String>, session: CloudSession, artifactId: String, scene: SceneRequirement, plan: JSONObject,
         sceneAssets: List<ThreeSceneAssetRef>, language: AppLanguage?, iconId: String?,
         progress: (ToolGenerationProgress) -> Unit, trace: ToolGenerationTrace.Run?,
+        onPublicUpdate: (suspend (String) -> Unit)?,
     ): ToolPreview {
         if (!kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) { ThreeSceneWebView.available() }) {
             throw CloudFailure("three_unavailable", "This Android WebView build is unavailable for Three.js scenes.")
@@ -1083,7 +1102,8 @@ ${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by
                 visualFrames = emptyList()
                 val instructions = if (request?.mode == GenerationRepair.Mode.PATCH) contract + GenerationRepair.FORMAT_OVERRIDE
                     else contract
-                suspend fun fetch() = response(key, turns, session, stage, instructions, expandedWriterOutput = true)
+                suspend fun fetch() = response(key, turns, session, stage, instructions, expandedWriterOutput = true,
+                    originalRequest = originalRequest, onPublicUpdate = onPublicUpdate)
                 val raw = if (request == null) fetch().also(repair::retain)
                     else repairResponse(repair, request, stage, attempt, trace) { fetch() }
                 val generated = generatedObject(raw)
@@ -1300,7 +1320,7 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
     internal suspend fun generate(draftId: String, key: String, images: List<String>, session: CloudSession,
         progress: ((ToolGenerationProgress) -> Unit)? = null, previewObserver: ToolDraftPreviewObserver?,
         trace: ToolGenerationTrace?, originalRequest: String? = null,
-        sceneAssets: List<ThreeSceneAssetRef> = emptyList()): ToolDraft {
+        sceneAssets: List<ThreeSceneAssetRef> = emptyList(), onPublicUpdate: (suspend (String) -> Unit)? = null): ToolDraft {
         val draftPreview=previewObserver?.let {ToolDraftPreviewPublisher(draftId,it)}
         val assetLease = if (sceneAssets.isEmpty()) null else ThreeSceneAssetCleanup(store.context).lease()
         try {
@@ -1308,7 +1328,7 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
             val preview = generation.generate(key, draft.prompt, base, images, session, draft.toolId ?: draft.id,
                 privateState = base?.let { store.privateResults(it.id) } == true, progress = progress, draftPreview = draftPreview,
                 trace = trace?.takeIf { it.operationId.toString() == draftId },
-                originalRequest = originalRequest ?: draft.prompt, sceneAssets = sceneAssets)
+                originalRequest = originalRequest ?: draft.prompt, sceneAssets = sceneAssets, onPublicUpdate = onPublicUpdate)
             session.checkActive(currentCoroutineContext())
             return mutex.withLock {
                 session.checkActive(currentCoroutineContext())

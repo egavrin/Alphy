@@ -648,6 +648,9 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     private var queueOrder = 0L
     private var answerFragment by mutableStateOf("")
     fun activeAnswer(messageId: String): String? = answerFragment.takeIf { active?.assistantId == messageId && it.isNotEmpty() }
+    private var publicGenerationUpdate by mutableStateOf<String?>(null)
+    internal fun activePublicGenerationUpdate(messageId: String): String? =
+        publicGenerationUpdate.takeIf { active?.assistantId == messageId }
     var weatherPermissionId by mutableStateOf<String?>(null); private set
     var weatherLocationBusy by mutableStateOf(false); private set
     private var weatherPermission: CompletableDeferred<Boolean>? = null
@@ -1594,6 +1597,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                                         raw.clear()
                                     }
                                     is CloudEvent.Search -> updateMessage(request, assistant.id) { it.copy(searchStatus = if (event.status == "empty" && it.sources.isNotEmpty()) "found" else event.status, sources = (it.sources + event.sources).distinctBy { source -> source.url }) }
+                                    is CloudEvent.PublicUpdate -> Unit
                                 }
                             }
                         }
@@ -1678,9 +1682,10 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 if(decoded.search == "required" && !assistant.search) throw CloudFailure("search_disabled","This request requires web search, but search is disabled.")
                 if(decoded.search == "required" && sources.isEmpty()) throw CloudFailure("search_required","No validated search sources were returned. The requested facts could not be verified.")
                 val operationId = assistant.toolOperationId ?: assistant.id
-                suspend fun prepareToolOperation(progress: Int) {
+                suspend fun prepareToolOperation(@StringRes progress: Int? = null) {
+                    val text = progress?.let { getApplication<Application>().getString(it) }.orEmpty()
                     updateMessage(request, assistant.id, persist = false) {
-                        it.copy(text = getApplication<Application>().getString(progress), status = "generating",
+                        it.copy(text = text, status = "generating",
                             toolOperationId = operationId, provenance = replyProvenance)
                     }
                     val pending = snapshot.conversations.find { it.id == conversationId } ?: throw CancellationException()
@@ -1689,7 +1694,9 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 }
                 val canCommit = {
                     isActive(request) && snapshot.conversations.any { c ->
-                        c.id == conversationId && c.messages.any { it.id == assistant.id && it.status == "generating" }
+                        c.id == conversationId && c.messages.any {
+                            it.id == assistant.id && it.toolOperationId == operationId && it.status == "generating"
+                        }
                     }
                 }
                 if (courseTopic != null) {
@@ -1755,10 +1762,8 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                         user.text,decoded.brief,decoded.text,sources,selectedText)
                     tools.generateAutomatic(prompt,target.takeIf { decoded.kind == "refine" },conversationId,operationId,key,images,request.session,
                         cancelRequest = ::cancelRequest, originalRequest = user.text, sceneAttachments = sceneAttachments,
-                        prepared = {
-                            val progress = if (decoded.kind == "refine") R.string.chat_app_update_progress else R.string.chat_app_create_progress
-                            prepareToolOperation(progress)
-                        },
+                        prepared = { prepareToolOperation() },
+                        onPublicUpdate = { note -> if (canCommit()) publicGenerationUpdate = note },
                         canCommit = canCommit,
                         committed = { tool -> updateMessage(request,assistant.id) {
                             it.copy(text = decoded.text,status = "complete",toolId = tool.id,toolRevision = tool.revision,
@@ -1840,6 +1845,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     }
     private fun clearActiveRequest() {
         answerFragment = ""
+        publicGenerationUpdate = null
         active = null
         activeConversationId = null
     }

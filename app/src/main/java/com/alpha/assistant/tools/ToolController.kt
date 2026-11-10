@@ -352,7 +352,8 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     /** Shell owns cancellation. The final guarded commit and message update run on Main without a suspension. */
     suspend fun generateAutomatic(prompt: String, target: ToolRecord?, conversationId: String, operationId: String,
         key: String, images: List<String>, call: CloudSession, cancelRequest: () -> Unit,
-        prepared: suspend () -> Unit, canCommit: () -> Boolean, committed: (ToolRecord) -> Unit,
+        prepared: suspend () -> Unit, onPublicUpdate: (String) -> Unit,
+        canCommit: () -> Boolean, committed: (ToolRecord) -> Unit,
         originalRequest: String = prompt, sceneAttachments: List<Attachment> = emptyList()) {
         if(busy || closing) throw CloudFailure("widget_busy","Another tool operation is active. Retry after it completes.")
         busy = true; error = null; errorCode = null; automaticCancel = cancelRequest; automaticJob = currentCoroutineContext()[Job]
@@ -371,8 +372,12 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                 engine.createDraft(prompt,target?.id,conversationId,operationId,target)
                 created = true
             }
-            withContext(Dispatchers.IO) { generateWithPreview(operationId,key,images,call,originalRequest,
-                ThreeSceneAssets.attachmentRefs(sceneAttachments)) }
+            withContext(Dispatchers.IO) {
+                generateWithPreview(operationId, key, images, call, originalRequest,
+                    ThreeSceneAssets.attachmentRefs(sceneAttachments), onPublicUpdate = { note ->
+                        withContext(Dispatchers.Main.immediate) { onPublicUpdate(note) }
+                    })
+            }
             currentCoroutineContext().ensureActive(); call.check()
             previews.clear(operationId)
             val result = engine.accept(operationId,retainReceipt = true,canCommit = canCommit)
@@ -467,13 +472,14 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     internal var generationTraceObserver: ((ToolGenerationTraceEvent) -> Unit)? = null
 
     private suspend fun generateWithPreview(id: String,key: String,images: List<String>,call: CloudSession,originalRequest: String? = null,
-        sceneAssets: List<ThreeSceneAssetRef> = emptyList()) {
+        sceneAssets: List<ThreeSceneAssetRef> = emptyList(), onPublicUpdate: (suspend (String) -> Unit)? = null) {
         check(!closing) {"The tool controller is closed."}
         val requestId=UUID.randomUUID().toString()
         val observer=previews.begin(id,requestId)
         try {
             val trace = generationTraceObserver?.let { ToolGenerationTrace(UUID.fromString(id), it) }
-            val completed=engine.generate(id,key,images,call,previewObserver=observer,trace=trace,originalRequest=originalRequest,sceneAssets=sceneAssets)
+            val completed = engine.generate(id, key, images, call, previewObserver = observer,
+                trace = trace, originalRequest = originalRequest, sceneAssets = sceneAssets, onPublicUpdate = onPublicUpdate)
             previews.complete(requestId,completed)
         } catch(failure: Throwable) {
             previews.clearRequest(requestId)

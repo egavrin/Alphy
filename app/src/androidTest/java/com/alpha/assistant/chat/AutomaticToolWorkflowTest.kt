@@ -472,17 +472,26 @@ class AutomaticToolWorkflowTest {
     }
 
     @Test fun normalChatAutomaticCreateInteractRefineAndRestart() {
-        // Failure cases: operation progress uses an English default or shows a second status in the card.
+        // Public updates must replace each other and leave no persisted progress text.
         val robot = ShellRobot("automatic-tool-progress")
         val requests = CopyOnWriteArrayList<CloudRequest>()
         var reply = decision(kind = "answer",text = "Hello.")
         var generated = spec()
+        val releasePlanning = CompletableDeferred<Unit>()
         var releaseGeneration = CompletableDeferred<Unit>()
+        val planning = "I will use a counter and an Add button."
+        val building = "I will connect Add to the count."
+        val refining = "I will rename the counter to Total."
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
+                if (request.generationStage == CloudGenerationStage.PLAN) {
+                    emit(CloudEvent.PublicUpdate(planning))
+                    releasePlanning.await()
+                }
                 if (request.replyWithFixturePlan(emit)) return
                 if(request.systemInstructions.isEmpty()) {
+                    emit(CloudEvent.PublicUpdate(if (request.generationStage == CloudGenerationStage.REFINE) refining else building))
                     releaseGeneration.await()
                     emit(CloudEvent.Text(request.patchSavedFixture(generated)))
                 }
@@ -492,9 +501,12 @@ class AutomaticToolWorkflowTest {
         Fixture(provider).use { f ->
             f.send("Hello"); f.idle(); assertEquals("Hello.",f.last.text); assertTrue(f.model.tools.tools.isEmpty())
             reply = decision(); f.send("Make an interactive counter", search = false)
-            robot.waitFor("Создаём мини-приложение…")
-            assertFalse(robot.texts().any { it.startsWith("Creating your ") })
+            robot.waitFor(planning)
+            releasePlanning.complete(Unit)
+            robot.waitFor(building)
+            assertNull(robot.find(planning))
             releaseGeneration.complete(Unit); f.idle()
+            robot.waitGone(building)
             assertEquals("complete",f.last.status); assertEquals("Ready.",f.last.text)
             val first = f.model.tools.tools.single()
             assertEquals(first.id,f.last.toolId); assertEquals(1,f.last.toolRevision); assertTrue(first.saved)
@@ -505,10 +517,8 @@ class AutomaticToolWorkflowTest {
             reply = decision("Rename the counter to Total",kind = "refine"); generated = spec("Total")
             releaseGeneration = CompletableDeferred()
             f.send("Rename the counter to Total", search = false)
-            val updateStatus = "Обновляем мини-приложение…"
-            if (robot.find(updateStatus) == null) robot.reveal(updateStatus)
-            assertEquals(1, robot.texts().count { it == updateStatus })
-            assertFalse(robot.texts().any { it.startsWith("Updating your ") || it.startsWith("Creating your ") })
+            if (robot.find(refining) == null) robot.reveal(refining)
+            assertEquals(1, robot.texts().count { it == refining })
             releaseGeneration.complete(Unit); f.idle()
             assertEquals("complete",f.last.status); assertEquals(first.id,f.last.toolId)
             val second = f.model.tools.tools.single()
@@ -520,6 +530,7 @@ class AutomaticToolWorkflowTest {
             waitUntil { f.store.load().conversations.single { it.id == f.model.snapshot.selectedId }.messages.last().toolRevision == 2 }
             val calls = requests.size; f.restart(); assertEquals(calls,requests.size)
             assertEquals(first.id,f.last.toolId); assertEquals(2,f.last.toolRevision); assertFalse(f.last.search)
+            robot.waitGone(refining)
         }
     }
     @Test fun invalidAndAmbiguousDecisionsNeverGenerateOrModifyTools() {
@@ -856,17 +867,30 @@ class AutomaticToolWorkflowTest {
         }
     }
     @Test fun twoInvalidCandidatesFailWithoutAcceptedStateOrRejectedOutput() {
+        val robot = ShellRobot("failed-public-update")
+        val update = "I will build the counter controls."
+        val release = CompletableDeferred<Unit>()
         var calls = 0
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 if (request.replyWithFixturePlan(emit)) return
                 if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
-                else { calls++; emit(CloudEvent.Text("REJECTED_OUTPUT_ONLY")) }
+                else {
+                    if (++calls == 1) {
+                        emit(CloudEvent.PublicUpdate(update))
+                        release.await()
+                    }
+                    emit(CloudEvent.Text("REJECTED_OUTPUT_ONLY"))
+                }
             }
         }
         Fixture(provider).use { f ->
-            f.send("Create a counter"); f.idle()
+            f.send("Create a counter")
+            try { robot.waitFor(update) } finally { release.complete(Unit) }
+            f.idle()
+            robot.waitGone(update)
             assertEquals(2,calls); assertEquals("error",f.last.status); assertEquals("widget_spec",f.last.errorCode)
+            assertEquals("", f.last.text)
             assertFalse(f.last.error.contains("REJECTED_OUTPUT_ONLY")); assertNull(f.last.toolId)
             assertTrue(f.toolStore.tools().isEmpty()); assertTrue(f.toolStore.drafts().isEmpty())
         }
@@ -1148,6 +1172,9 @@ class AutomaticToolWorkflowTest {
         }
     }
     @Test fun cancellationOrDeletionDuringRepairCannotCommitALateCandidate() {
+        val robot = ShellRobot("automatic-tool-repair-progress")
+        val repairing = "I will lower the record limit."
+        val lateUpdate = "I will continue the canceled repair."
         listOf(false,true).forEach { delete ->
             val entered = CountDownLatch(1); val release = CountDownLatch(1)
             var calls = 0
@@ -1157,18 +1184,25 @@ class AutomaticToolWorkflowTest {
                     if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
                     else if(++calls == 1) emit(CloudEvent.Text(boundedListSpec(200)))
                     else {
-                        entered.countDown(); check(release.await(10,TimeUnit.SECONDS))
-                        withContext(NonCancellable) { emit(CloudEvent.Text(boundedListSpec(100))) }
+                        emit(CloudEvent.PublicUpdate(repairing))
+                        entered.countDown(); check(release.await(20,TimeUnit.SECONDS))
+                        withContext(NonCancellable) {
+                            emit(CloudEvent.PublicUpdate(lateUpdate))
+                            emit(CloudEvent.Text(boundedListSpec(100)))
+                        }
                     }
                 }
             }
             Fixture(provider).use { f ->
                 try {
                     f.send("Create a counter"); assertTrue(entered.await(10,TimeUnit.SECONDS))
+                    robot.waitFor(repairing)
                     assertEquals("generating",f.last.status); assertTrue(f.toolStore.tools().isEmpty())
                     assertNull(f.toolStore.drafts().single().candidate)
                     main { if(delete) f.model.deleteConversation(f.model.snapshot.selectedId!!) else f.model.cancelRequest() }
                     release.countDown(); f.idle()
+                    robot.waitGone(repairing)
+                    robot.waitGone(lateUpdate)
                     assertEquals(2,calls); assertTrue(f.toolStore.tools().isEmpty()); assertTrue(f.toolStore.drafts().isEmpty())
                     if(delete) assertTrue(f.model.snapshot.conversations.isEmpty()) else assertEquals("cancelled",f.last.status)
                 } finally { release.countDown() }
