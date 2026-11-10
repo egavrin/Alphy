@@ -50,10 +50,14 @@ internal class SceneCheckEvidence private constructor(
 
     companion object {
         private const val FIELD = "$.scene.checkEvidence"
+        private val excerptSpacing = Regex("""[ \t\r\n]+""")
+
+        private fun normalizedExcerpt(text: String) = excerptSpacing.replace(text, " ").trim(' ')
         val guidance = """
             Include scene.checkEvidence with one row for every assert and every frames step with observe.
             Example: "checkEvidence":[{"step":1,"excerpt":"animate the orbit","purpose":"motion","scope":"whole"}].
-            Step is one-based. Excerpt is a verbatim substring of the original request. Use context to clarify that request.
+            Step is one-based. Quote the original request. Spaces, tabs, and line breaks are equivalent between words.
+            Keep wording, case, and punctuation exact. Use context to clarify the request.
             Purpose is outcome, motion, stability, periodic_return, or preservation.
             Use scope whole or selected for geometry; omit scope for other observations. Use the same scope for each use of a geometry slot.
             For unchanged or equals against a captured image, use stability or periodic_return. Capture the same output you compare.
@@ -73,6 +77,7 @@ internal class SceneCheckEvidence private constructor(
         """.trimIndent()
 
         fun read(scene: JSONObject, scenario: GenerationBehavior.Scenario, request: String, threeScene: Boolean): SceneCheckEvidence {
+            val normalizedRequest = normalizedExcerpt(request)
             val steps = scenario.steps
             val observed = steps.indices.filter { observedSlot(steps[it]) != null }
             val rows = scene.items("checkEvidence", observed.size..observed.size, FIELD)
@@ -90,7 +95,7 @@ internal class SceneCheckEvidence private constructor(
                 val at = "$FIELD[$index]"
                 val slot = checkNotNull(observedSlot(step))
                 val geometry = scenario.slots.getValue(slot).kind == Kind.GEOMETRY
-                excerpt(row.opt("excerpt"), request, at)
+                excerpt(row.opt("excerpt"), normalizedRequest, at)
                 val purpose = Purpose.entries.firstOrNull { it.wire == row.opt("purpose") }
                 requireParts(purpose != null, at, "a supported check purpose")
                 val scope = GeometryScope.entries.firstOrNull { it.wire == row.opt("scope") }
@@ -151,14 +156,15 @@ internal class SceneCheckEvidence private constructor(
             }
             val visual = if (scene.has("visualReview")) {
                 scene.items("visualReview", 1..8, "$.scene.visualReview")
-                    .map { excerpt(it, request, "$.scene.visualReview") }.distinct()
+                    .map { excerpt(it, normalizedRequest, "$.scene.visualReview") }.distinct()
             } else emptyList()
             return SceneCheckEvidence(scopes, relations, visual)
         }
 
-        private fun excerpt(value: Any?, request: String, path: String): String {
-            requireParts(value is String && value.length in 1..600 && value.isNotBlank() && value in request,
-                path, "a verbatim excerpt from the original request")
+        private fun excerpt(value: Any?, normalizedRequest: String, path: String): String {
+            requireParts(value is String && value.length in 1..600 && value.isNotBlank() &&
+                normalizedExcerpt(value) in normalizedRequest,
+                path, "an exact excerpt from the original request, with line breaks and spacing allowed to differ")
             return value as String
         }
 

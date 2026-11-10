@@ -1,0 +1,7 @@
+Refine this existing Solar System Observatory. Keep all UI controls, orbits,
+status schema, and camera focus options. Improve the Earth close-up only. The current Earth
+is very dark with the bright Sun in the shot. Add soft cool fill lighting from the camera side
+during Earth focus so blue oceans and green continents are clearly visible. Use a flattering
+close-up angle and keep the Sun outside the Earth close-up. Keep the background starfield.
+Preserve the
+supplied state at startup and make a focused source patch.

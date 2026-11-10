@@ -268,6 +268,57 @@ class ThreeSceneWorkflowTest {
         }
     }
 
+    @Test fun recordedEarthRefinementPassesWithoutModelRepairs() = runBlocking {
+        fun fixture(name: String) = instrumentation.context.assets.open("threejs/earth-replay/$name")
+            .bufferedReader().use { it.readText() }
+        val original = JSONObject(fixture("baseline.json"))
+        val definition = original.getJSONObject("spec")
+        val before = ToolRecord(UUID.randomUUID().toString(), original.getInt("revision"), original.getInt("stateVersion"),
+            definition.toString(), original.getJSONObject("state").toString(), definition.getJSONObject("ui").toString(),
+            null, true)
+        val calls = mutableListOf<CloudGenerationStage>()
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                calls += checkNotNull(request.generationStage)
+                check(request.publicUpdateContext != null)
+                val reply = when (calls.toList()) {
+                    listOf(CloudGenerationStage.PLAN) -> fixture("plan.json")
+                    listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE) -> fixture("refine.json")
+                    else -> error("Unexpected repair call: $calls")
+                }
+                emit(CloudEvent.Text(reply))
+            }
+        }
+        val database = "three-recorded-earth-${UUID.randomUUID()}.db"
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                ToolStore(context, database).use { store ->
+                    store.saveTool(before, revision = true)
+                    val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context)))
+                    try {
+                        val draft = engine.createDraft(fixture("prompt.txt"), before.id)
+                        val events = mutableListOf<ToolGenerationTraceEvent>()
+                        val trace = ToolGenerationTrace(UUID.fromString(draft.id), events::add)
+                        approvePreview {
+                            engine.generate(draft.id, "fixture", emptyList(), CloudSession(),
+                                previewObserver = null, trace = trace, onPublicUpdate = {})
+                        }
+                        val accepted = engine.accept(draft.id)
+                        assertEquals(4, accepted.revision)
+                        assertEquals(before.state, accepted.state)
+                        assertNotEquals(definition.getString("source"), JSONObject(accepted.spec).getString("source"))
+                        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE), calls)
+                        assertTrue(events.filterIsInstance<ToolGenerationTraceEvent.Attempt>()
+                            .none { it.outcome == ToolGenerationOutcome.REJECTED })
+                        assertEquals(ToolGenerationTraceOutcome.VALIDATED,
+                            events.filterIsInstance<ToolGenerationTraceEvent.Finished>().single().outcome)
+                        File(output, "earth-recorded-replay-trace.txt").writeText(events.joinToString("\n") + "\n")
+                    } finally { engine.closeArtifacts() }
+                }
+            }
+        } finally { context.deleteDatabase(database) }
+    }
+
     @Test fun earthLightingRejectsUnsupportedCheckAndRepairsOnlyItsBinding() = runBlocking {
         val original = generate("earth")
         val database = "three-check-policy-${UUID.randomUUID()}.db"

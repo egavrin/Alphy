@@ -785,7 +785,8 @@ ${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by
                 (if (it.liveInputs.isEmpty()) "" else " Bind these action slots to controls with inputMode live: ${it.liveInputs.joinToString()}.") +
                 " Draw the scene on preview, render, and open. Subscribe to required animation on open or its start control. Render must preserve state." +
                 " Include behaviorBindings ${if (mixed) "in fill" else "at the top level"} for these slots: $slots." +
-                " Use exactly these binding keys and value shapes, with IDs and indices from your actual candidate: $bindingExample." +
+                " Use these binding keys and value shapes, with IDs and indices from your actual candidate: $bindingExample." +
+                " ${GenerationBehavior.BUTTON_BINDING_GUIDANCE}" +
                 " Bind action and surface IDs as strings, value UI as zero-based child paths, geometry as {surface,path}." +
                 " ${SceneCheckEvidence.runtimeGuidance(threeScene = false)}" +
                 " The host will run this scene check and enforce its observation scope: ${JSONObject(planText).getJSONObject("scene")}."
@@ -1010,7 +1011,10 @@ ${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by
                             throw InvalidGeneratedOutput(GenerationProblem.SCENE, sceneFailure = "Use the required ${scene.placement} placement.")
                         }
                         val targets = try {
-                            GenerationBehavior.bindings(bindings, scene.checks.slots)
+                            val completed = if (bindings is JSONObject)
+                                GenerationBehavior.withSceneButtonBindings(bindings, scene.checks, spec.ui, scene.liveInputs)
+                            else bindings
+                            GenerationBehavior.bindings(completed, scene.checks.slots)
                         } catch (failure: GenerationBehavior.BindingFailure) {
                             val slot = failure.slotId?.let { " for slot $it" }.orEmpty()
                             throw InvalidGeneratedOutput(GenerationProblem.SCENE,
@@ -1135,7 +1139,9 @@ ${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by
                     throw ThreeSceneFailure(ThreeSceneProblem.INVALID_BINDING)
                 val candidate = ToolSpec.parse(envelope.toString())
                 if (!candidate.threeScene) throw ToolValidationFailure(ToolValidationCategory.FIELDS)
-                val bindings = threeSceneBindings(scene.checks, requestedBindings as? JSONObject ?: JSONObject())
+                val completed = GenerationBehavior.withSceneButtonBindings(requestedBindings as? JSONObject ?: JSONObject(),
+                    scene.checks, candidate.ui, scene.liveInputs)
+                val bindings = threeSceneBindings(scene.checks, completed)
                 scene.evidence?.validateBindings(scene.checks, bindings, threeScene = true)
                 val spec = candidate.withThreeAssets(assets).withAppLanguage(language?.tag ?: previous?.appLanguage).withIcon(iconId)
                 val state = if (previous == null) spec.initialState else ToolSpec.stateForRevision(previous, spec, checkNotNull(base).state)
@@ -1942,6 +1948,7 @@ private fun threeSceneWriterContract(scene: SceneRequirement, plan: JSONObject, 
         Replace example action IDs and state keys with actual IDs and keys. A UI path is a JSON array of
         zero-based child indices, not a state field name or a string. Use [] for the root UI node.
         The host supplies surface and audio bindings automatically.
+        ${GenerationBehavior.BUTTON_BINDING_GUIDANCE}
         ${SceneCheckEvidence.runtimeGuidance(threeScene = true)}
         Follow the checkEvidence scope for every geometry slot.
         Render the supplied state without changing any values in createScene or open. The host reopens in a new worker.

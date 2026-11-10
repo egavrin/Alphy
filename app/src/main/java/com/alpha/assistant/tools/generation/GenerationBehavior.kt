@@ -41,6 +41,8 @@ internal sealed interface GenerationBehavior {
         private const val FIELD = "$.behavior"
         private const val BINDINGS = "$.behaviorBindings"
         const val MAX_EVENTS = 64
+        const val BUTTON_BINDING_GUIDANCE = "The host can supply an omitted action binding when the slot ID exactly matches " +
+            "one ordinary button's action ID and every use is a press without a value."
         val workflowScopeGuidance = """
             The original request defines the feature set. Use the supplied context to clarify the request.
             Include only features the user requests or needs to complete the primary workflow.
@@ -250,6 +252,37 @@ internal sealed interface GenerationBehavior {
                 }, FIELD, "an exact result or observed change after the pointer action")
             }
             return Scenario(slots, steps)
+        }
+
+        fun withSceneButtonBindings(
+            proposed: JSONObject,
+            scenario: Scenario,
+            ui: JSONObject,
+            liveInputs: Set<String>,
+        ): JSONObject {
+            val missingPresses = scenario.steps.filterIsInstance<Step.Action>()
+                .filter { !proposed.has(it.slot) && it.slot !in liveInputs }
+                .groupBy { it.slot }
+                .filterValues { steps -> steps.all { it.value == null || it.value === JSONObject.NULL } }
+            if (missingPresses.isEmpty()) return proposed
+
+            val matches = mutableMapOf<String, Int>()
+            fun visit(node: JSONObject) {
+                if (node.optString("type") == "button") {
+                    val action = node.optString("action")
+                    if (action in missingPresses) matches[action] = (matches[action] ?: 0) + 1
+                }
+                node.optJSONArray("children")?.let { children ->
+                    for (index in 0 until children.length()) visit(children.getJSONObject(index))
+                }
+            }
+            visit(ui)
+
+            val inferred = matches.filterValues { it == 1 }.keys
+            if (inferred.isEmpty()) return proposed
+            return JSONObject(proposed, ToolValueSchema.keys(proposed).toTypedArray()).apply {
+                for (id in inferred) put(id, id)
+            }
         }
 
         fun bindings(raw: Any?, slots: Map<String, Slot>): Map<String, Binding> {
