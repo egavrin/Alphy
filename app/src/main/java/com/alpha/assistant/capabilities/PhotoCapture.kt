@@ -8,6 +8,7 @@ import android.graphics.Matrix
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.util.Size
+import android.view.Surface
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -118,7 +119,7 @@ internal fun PhotoCaptureDialog(request: PhotoCapture) = key(request) {
                         ResolutionStrategy(Size(1920, 1440), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER)
                     ).build()
                     val capture = ImageCapture.Builder().setResolutionSelector(resolution)
-                        .setTargetRotation(view.display?.rotation ?: 0).build()
+                        .setTargetRotation(view.display?.rotation ?: Surface.ROTATION_0).build()
                     var disposed = false
                     future.addListener({
                         if (!disposed && !request.finished) {
@@ -130,7 +131,7 @@ internal fun PhotoCaptureDialog(request: PhotoCapture) = key(request) {
                                 check(camera.cameraInfo.lensFacing == request.lens.facing)
                                 view.previewStreamState.observe(owner) { state ->
                                     take = if (state == PreviewView.StreamState.STREAMING) ({
-                                        capture.targetRotation = view.display?.rotation ?: 0
+                                        capture.targetRotation = view.display?.rotation ?: Surface.ROTATION_0
                                         capture.takePicture(Dispatchers.Default.asExecutor(), object : ImageCapture.OnImageCapturedCallback() {
                                             override fun onCaptureSuccess(image: ImageProxy) {
                                                 val result = runCatching { image.use(::boundedPhoto) }.getOrNull()

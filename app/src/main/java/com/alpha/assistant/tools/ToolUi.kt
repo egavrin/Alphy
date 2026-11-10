@@ -1081,8 +1081,8 @@ private fun hasLiveControl(node: JSONObject): Boolean {
     val view=androidx.compose.ui.platform.LocalView.current
     val lifecycle=androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     val activity=generateSequence(context) {(it as? android.content.ContextWrapper)?.baseContext}.filterIsInstance<android.app.Activity>().firstOrNull()
-    DisposableEffect(activity,view,lifecycle,enabled) {
-        val window=activity?.window
+    val window = (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window ?: activity?.window
+    DisposableEffect(window,view,lifecycle,enabled) {
         val controller=window?.let {androidx.core.view.WindowCompat.getInsetsController(it,view)}
         val insets=androidx.core.view.ViewCompat.getRootWindowInsets(view)
         val bars=androidx.core.view.WindowInsetsCompat.Type.systemBars()

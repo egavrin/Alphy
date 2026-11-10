@@ -8,6 +8,10 @@ import android.graphics.Rect
 import android.os.SystemClock
 import android.view.InputDevice
 import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
+import android.webkit.WebView
+import androidx.lifecycle.Lifecycle
 import androidx.core.content.FileProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -169,7 +173,7 @@ class ThreeSceneWorkflowTest {
                 ToolStore(context, "${fixture.store.databaseName}-tools.db").use { store ->
                     store.saveTool(tool, revision = true)
                     fixture.install(saveKey = false)
-                    fixture.launch().use {
+                    fixture.launch().use { activity ->
                         robot.click(robot.text(R.string.tool_open))
                         robot.waitFor("Pause")
                         fun state() = JSONObject(checkNotNull(store.tool(tool.id)).state)
@@ -177,6 +181,49 @@ class ThreeSceneWorkflowTest {
                             robot.waitUntil { state().getDouble("phase") > 0 }
                             robot.click("Pause")
                             robot.waitFor("Resume")
+                            robot.waitUntil { state().getBoolean("paused") }
+                            val paused = state().toString()
+                            fun findWebView(view: View): WebView? = when (view) {
+                                is WebView -> view
+                                is ViewGroup -> (0 until view.childCount).firstNotNullOfOrNull { findWebView(view.getChildAt(it)) }
+                                else -> null
+                            }
+                            var inlineView: WebView? = null
+                            activity.onActivity { inlineView = findWebView(it.window.decorView) }
+                            val retainedView = checkNotNull(inlineView)
+                            fun height(): Int {
+                                var result = 0
+                                activity.onActivity {
+                                    if (retainedView.isAttachedToWindow) result = retainedView.height
+                                }
+                                return result
+                            }
+                            val inlineHeight = height()
+                            assertTrue(inlineHeight > 0)
+                            val enter = robot.text(R.string.tool_full_screen_enter)
+                            val exit = robot.text(R.string.tool_full_screen_exit)
+                            fun enterFullscreen() {
+                                robot.click(enter)
+                                robot.waitFor(exit)
+                                robot.waitFor("Resume")
+                                robot.waitUntil { height() > inlineHeight }
+                                assertEquals(paused, state().toString())
+                            }
+                            enterFullscreen()
+                            robot.click(exit)
+                            robot.waitFor(enter)
+                            robot.waitUntil { height() == inlineHeight }
+                            enterFullscreen()
+                            robot.back()
+                            robot.waitFor(enter)
+                            robot.waitUntil { height() == inlineHeight }
+                            enterFullscreen()
+                            activity.moveToState(Lifecycle.State.STARTED)
+                            robot.waitUntil { height() == 0 }
+                            activity.moveToState(Lifecycle.State.RESUMED)
+                            robot.waitFor(enter)
+                            robot.waitFor("Resume")
+                            assertEquals(paused, state().toString())
                         } else {
                             val bounds = Rect()
                             robot.waitUntil {

@@ -323,6 +323,7 @@
     <string name="tool_archive_widgets">Привязки виджетов сохранятся, но управление отключится. Ярлыки будут недоступны. Элементы на рабочем столе Android сохранятся.</string>
     <string name="tool_no_matches">Ничего не найдено</string>
     <string name="tool_archive_empty">В архиве нет мини-приложений</string>
+    <string name="tool_full_screen_enter">На весь экран</string>
     <string name="tool_full_screen_exit">Выйти из полноэкранного режима</string>
     <string name="tool_controls">Управление мини-приложением</string>
     <string name="tool_library_back">К мини-приложениям</string>
