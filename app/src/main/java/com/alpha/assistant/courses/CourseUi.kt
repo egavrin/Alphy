@@ -69,6 +69,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -161,6 +162,10 @@ internal fun CourseLibraryScreen(
     val handleEntry by rememberUpdatedState(onEntryHandled)
     val slide = page as? CoursePage.Slide
     val nextRequest = slide?.nextRequest
+    val context = LocalContext.current
+    val imageGeneration = remember(context) { com.alpha.assistant.images.ImageGeneration(context.applicationContext) }
+    val imageDefinition = slide?.imageDefinition
+    var imageError by remember(slide?.course?.id, slide?.step?.slide?.id, slide?.course?.outlineRevision) { mutableStateOf<String?>(null) }
     var nextRetry by remember(presentation, nextRequest, nextGeneration) { mutableIntStateOf(0) }
     var nextPreparation by remember(presentation, nextRequest, nextGeneration, nextRetry) {
         mutableStateOf<CourseNextPreparation?>(null)
@@ -389,6 +394,48 @@ internal fun CourseLibraryScreen(
                 )
             }
             is CoursePage.Slide -> key(current.course.id, current.step.slide.id) {
+                LaunchedEffect(store, slide?.course?.id, slide?.step?.slide?.id, slide?.course?.outlineRevision, imageDefinition?.json, sceneCovered) {
+                    val reached = slide ?: return@LaunchedEffect
+                    val definition = imageDefinition ?: return@LaunchedEffect
+                    val intent = definition.lessonImageIntent ?: return@LaunchedEffect
+                    val selection = imageGeneration.settings.selection() ?: return@LaunchedEffect
+                    if (sceneCovered) return@LaunchedEffect
+                    val courseId = reached.course.id
+                    val slideId = reached.step.slide.id
+                    val revision = reached.course.outlineRevision
+                    val cleared = definition.withLessonImage(null)
+                    val lease = imageGeneration.lease()
+                    try {
+                        val claimed = withContext(Dispatchers.IO) {
+                            val job = kotlinx.coroutines.currentCoroutineContext()
+                            store.replaceReachedDefinition(courseId, revision, slideId, definition.json, cleared.json) {
+                                job.isActive && imageGeneration.settings.isCurrent(selection)
+                            }
+                        }
+                        if (!claimed) return@LaunchedEffect
+                        val image = imageGeneration.generate("learn:$courseId:$revision:$slideId", listOf(intent), selection, 1).single()
+                        val updated = definition.withLessonImage(null, image)
+                        val saved = withContext(Dispatchers.IO) {
+                            val job = kotlinx.coroutines.currentCoroutineContext()
+                            store.replaceReachedDefinition(courseId, revision, slideId, cleared.json, updated.json) {
+                                job.isActive && imageGeneration.settings.isCurrent(selection)
+                            }
+                        }
+                        if (saved) {
+                            val current = page as? CoursePage.Slide
+                            if (current?.course?.id == courseId && current.step.slide.id == slideId && current.course.outlineRevision == revision) {
+                                page = current.copy(imageDefinition = updated)
+                            }
+                        }
+                    } catch (cancel: kotlinx.coroutines.CancellationException) {
+                        throw cancel
+                    } catch (failure: Exception) {
+                        imageError = (failure as? com.alpha.assistant.images.ImageFailure)?.message
+                            ?: context.getString(R.string.image_provider_error)
+                    } finally {
+                        lease.close()
+                    }
+                }
                 val slideId = current.step.slide.id
                 val savedAnswer = current.feedback?.answer
                 fun currentText() = if (draftSlideId == slideId) draftText else (savedAnswer as? CourseAnswer.FillIn)?.text.orEmpty()
@@ -400,6 +447,7 @@ internal fun CourseLibraryScreen(
                 }
                 CourseSlidePlayer(
                     slide = current,
+                    imageError = imageError,
                     sceneHost = remember(controller, current.course.id, current.course.revision, current.step.slide.id, current.scene?.json) {
                         current.scene?.let { controller.sceneHost(current) }
                     },
@@ -993,6 +1041,7 @@ private fun CourseOutlineRefinementPanel(
 @Composable
 private fun CourseSlidePlayer(
     slide: CoursePage.Slide,
+    imageError: String?,
     sceneHost: CourseSceneHost?,
     busy: Boolean,
     sceneCovered: Boolean,
@@ -1053,6 +1102,10 @@ private fun CourseSlidePlayer(
                     Text(slide.step.lessonTitle, Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
                     if (sceneHost == null) ToolContent(ui = slide.ui, state = slide.state, enabled = false, embedded = true, event = { _, _ -> })
                     else CourseScene(sceneHost, !busy && !sceneCovered, canvasHeight) { sceneEditing = it }
+                    slide.imageDefinition?.generatedImages?.singleOrNull()?.let {
+                        com.alpha.assistant.images.GeneratedImageView(it)
+                    }
+                    imageError?.let { Text(it, color = colors.error) }
                     slide.prompt?.let {
                         Surface(shape = MaterialTheme.shapes.large, color = colors.surfaceContainerLow) {
                             Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

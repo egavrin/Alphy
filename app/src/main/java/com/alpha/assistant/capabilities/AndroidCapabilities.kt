@@ -73,7 +73,7 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
                 })
                 if (sensors.isNotEmpty()) put("sensors", JSONObject(sensors))
                 if (id == NetworkEffectContract.ID) put("miniAppGrantAndDestination", "checkedAtExecution")
-                if (id == MiniAppAi.ID) put("providerConsent", "checkedAtExecution")
+                if (id in setOf(MiniAppAi.ID, MiniAppImage.ID)) put("providerConsent", "checkedAtExecution")
             }
     }
     internal fun discover(caller: CapabilityCaller = CapabilityCaller.MINI_APP): JSONObject = CapabilityCatalog.discovery(caller).apply {
@@ -118,6 +118,7 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
             CapabilityAction.TILT_STREAM -> CapabilityResult("unavailable", "Tilt requires an active mini-app host.")
             CapabilityAction.DEVICE_READ -> CapabilityResult("unavailable","Чтение доступно только из открытого мини-приложения.")
             CapabilityAction.NETWORK_REQUEST -> CapabilityResult("unavailable","Сетевой запрос требует текущего сеанса мини-приложения.")
+            CapabilityAction.IMAGE_GENERATE -> CapabilityResult("unavailable", "Для генерации изображения откройте мини-приложение.")
             CapabilityAction.AI_ASK -> CapabilityResult("unavailable","Для запроса к DeepSeek откройте мини-приложение.")
             CapabilityAction.AUDIO_PLAYBACK -> CapabilityResult("unavailable","Воспроизведение доступно только из открытого мини-приложения.")
             CapabilityAction.VIDEO_PLAYBACK -> CapabilityResult("unavailable","Видео требует видимого элемента воспроизведения.")

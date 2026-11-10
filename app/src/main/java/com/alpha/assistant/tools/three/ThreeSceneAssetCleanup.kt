@@ -98,6 +98,13 @@ internal class ThreeSceneAssetCleanup(private val context: Context) {
                     buildSet { while (rows.moveToNext()) add(rows.getString(0)) }
                 }
                 if (name == "alpha.db" || "conversations" in tables) collectChat(db, referenced)
+                if ("courses" in tables && "slides" in tables) db.rawQuery("SELECT definition FROM slides", null).use { rows ->
+                    while (rows.moveToNext()) collectGenerated(JSONObject(rows.getString(0)), referenced)
+                }
+                for (table in listOf("capability_resources", "capability_acquisitions")) if (table in tables)
+                    db.rawQuery("SELECT locator FROM $table WHERE kind='generatedImage'", null).use { rows ->
+                        while (rows.moveToNext()) referenced += rows.getString(0).also { check(hash.matches(it)) }
+                    }
                 if (ToolLibraryStorage.logicalName(name) == ToolLibraryStorage.DEFAULT ||
                     tables.any { it in setOf("tools", "revisions", "drafts") }) collectTools(db, referenced)
             }
@@ -114,6 +121,10 @@ internal class ThreeSceneAssetCleanup(private val context: Context) {
                     val id = JSONObject(item.getString("contextText")).getString("id")
                     check(hash.matches(id) && item.getString("uri") == "alphy-three-asset:$id")
                     referenced += id
+                } else if (item.getString("mime") == com.alpha.assistant.images.GeneratedImage.ATTACHMENT) {
+                    val image = com.alpha.assistant.images.GeneratedImage.read(JSONObject(item.getString("contextText")))
+                    check(item.getString("uri") == "alphy-generated-image:${image.asset.id}")
+                    referenced += image.asset.id
                 }
             }
         }
@@ -138,11 +149,17 @@ internal class ThreeSceneAssetCleanup(private val context: Context) {
             "UNION ALL SELECT candidate FROM drafts WHERE candidate IS NOT NULL", null).use { rows ->
             while (rows.moveToNext()) {
                 val spec = JSONObject(rows.getString(0))
+                collectGenerated(spec, referenced)
                 if (spec.has("sceneAssets")) {
                     referenced += ThreeSceneAssets.read(spec.getJSONArray("sceneAssets")).map { it.id }
                 }
             }
         }
+    }
+
+    private fun collectGenerated(spec: JSONObject, referenced: MutableSet<String>) {
+        val field = com.alpha.assistant.images.GeneratedImage.FIELD
+        if (spec.has(field)) referenced += com.alpha.assistant.images.GeneratedImage.list(spec.getJSONArray(field)).map { it.asset.id }
     }
 
     private class Usage {

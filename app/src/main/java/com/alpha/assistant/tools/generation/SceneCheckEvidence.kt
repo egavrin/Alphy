@@ -52,7 +52,7 @@ internal class SceneCheckEvidence private constructor(
         private const val FIELD = "$.scene.checkEvidence"
         private val excerptSpacing = Regex("""[ \t\r\n]+""")
 
-        private fun normalizedExcerpt(text: String) = excerptSpacing.replace(text, " ").trim(' ')
+        internal fun normalizedExcerpt(text: String) = excerptSpacing.replace(text, " ").trim(' ')
         val guidance = """
             Include scene.checkEvidence with one row for every assert and every frames step with observe.
             Example: "checkEvidence":[{"step":1,"excerpt":"animate the orbit","purpose":"motion","scope":"whole"}].

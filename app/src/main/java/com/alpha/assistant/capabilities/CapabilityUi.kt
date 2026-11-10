@@ -88,6 +88,18 @@ import kotlinx.coroutines.CancellationException
                 Text(stringResource(R.string.cancel))
             } },
         )
+        is CapabilityPrompt.Image -> AlertDialog(
+            onDismissRequest = { controller.finishImage(prompt, false) },
+            title = { Text(stringResource(R.string.image_generate_confirm)) },
+            text = { Text("${prompt.selection.model.title}\n\n${prompt.intent.prompt}",
+                Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) },
+            confirmButton = { TextButton(onClick = { controller.finishImage(prompt, foreground()) }, enabled = !controller.busy) {
+                Text(stringResource(R.string.image_generate_now))
+            } },
+            dismissButton = { TextButton(onClick = { controller.finishImage(prompt, false) }, enabled = !controller.busy) {
+                Text(stringResource(R.string.cancel))
+            } },
+        )
         is CapabilityPrompt.Calendar -> key(controller, prompt.effectKey) {
             CalendarSelection(controller, prompt.effectKey, foreground)
         }

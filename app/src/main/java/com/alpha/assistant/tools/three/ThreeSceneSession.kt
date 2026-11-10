@@ -47,7 +47,7 @@ internal class ThreeSceneSession(
         try {
             val workerAssets = assets.workerAssets(spec.sceneAssets)
             audioIds = workerAssets.filter { it.mediaType.startsWith("audio/") }.map { it.id }.toSet()
-            web = ThreeSceneWebView(context, artifactId, revision, spec.source, workerAssets)
+            web = ThreeSceneWebView(context, artifactId, revision, spec.source, workerAssets, spec.generatedImages)
         } catch (failure: Throwable) {
             assetLease.close()
             throw failure

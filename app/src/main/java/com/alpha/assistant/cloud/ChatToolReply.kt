@@ -1,5 +1,8 @@
 package com.alpha.assistant.cloud
 
+import com.alpha.assistant.images.ImageAspect
+import com.alpha.assistant.images.ImageIntent
+
 import com.alpha.assistant.agent.PhoneActionEvidence
 import com.alpha.assistant.data.Source
 import com.alpha.assistant.tools.MAX_TOOL_PROMPT_LENGTH
@@ -27,11 +30,12 @@ object ChatToolReply {
     private val ordinaryKinds = setOf("answer", "create", "refine", "clarify")
     private val searchPolicies = setOf("none", "optional", "required")
 
-    internal fun decisionSchema(allowAutomation: Boolean, allowWeatherLocation: Boolean): JSONObject {
+    internal fun decisionSchema(allowAutomation: Boolean, allowWeatherLocation: Boolean, allowImage: Boolean = false): JSONObject {
         val kinds = ordinaryKinds.toMutableList()
         kinds += "weather_answer"
         if (allowAutomation) kinds += "automation"
         if (allowWeatherLocation) kinds += "weather_location"
+        val decisionKeys = if (allowImage) decisionKeys + "image" else decisionKeys
         val properties = JSONObject()
         decisionKeys.forEach { properties.put(it, JSONObject().put("type", "string")) }
         properties.getJSONObject("kind").put("enum", JSONArray(kinds))
@@ -41,7 +45,8 @@ object ChatToolReply {
     }
 
     data class Decision(val kind: String, val text: String, val brief: String, val search: String,
-        internal val devicePlanSteps: List<PhoneActionEvidence>? = null) {
+        internal val devicePlanSteps: List<PhoneActionEvidence>? = null,
+        internal val image: ImageIntent? = null, internal val imageRequired: Boolean = false) {
         internal val requiresCleanPreparation: Boolean get() = kind != "answer" && kind != "clarify"
         internal val isMiniApp: Boolean get() = kind == "create" || kind == "refine"
     }
@@ -52,7 +57,7 @@ object ChatToolReply {
 
     fun instructions(available: Boolean = true): String {
         return """
-Return exactly one JSON object with these four keys and no other keys:
+Return exactly one decision object with these four base keys. Include extra keys only when the current tool schema requires them:
 {"kind":"answer","text":"I can help.","brief":"","search":"none"}
 Use the example for the field names and types. Choose kind from answer, create, refine, clarify, and any extra kinds described below. Choose search from none, optional, required. Never output a marker, code fence, textual tool call, or protocol outside JSON.
 For a request to build a local checklist, a valid decision is {"kind":"create","text":"I can build a checklist.","brief":"Add items and mark them complete.","search":"none"}. Write text and brief in the language of the latest user-authored request. Follow an explicit requested output language. Earlier turns, examples, and device locale do not choose the language. Keep the four keys and enum values in English. Give a short, nonempty text for create and refine. Put all requested details in the brief as a single JSON string.
@@ -113,6 +118,7 @@ opens outline review. The user starts and saves the course from that review.
     fun decode(raw: String): Decision = decode(decisionObject(raw))
 
     internal fun decode(json: JsonObject): Decision {
+        val decisionKeys = if ("image" in json) decisionKeys + "image" else decisionKeys
         if (json.keys != decisionKeys) {
             val value = json["kind"]
             val kind = when {
@@ -141,7 +147,19 @@ opens outline review. The user starts and saves the course from that review.
         if (if (kind == "create" || kind == "refine") brief.isBlank() else brief.isNotEmpty())
             invalidDecision("decision.brief", "$.brief", "string")
         if (kind == "clarify" && search != "none") invalidDecision("decision.clarify_search", "$.search", "string")
-        return Decision(kind,text,brief,search)
+        val image = if ("image" in json) string("image") else ""
+        if (image.isBlank()) return Decision(kind, text, brief, search)
+        if (kind != "answer" || image.length > 4096) invalidDecision("decision.image", "$.image", "string")
+        val intent = try {
+            val fields = JSONObject(image)
+            val required = fields.remove("required") as? Boolean ?: error("Expected image requirement")
+            val intent = ImageIntent.read(fields)
+            require(intent.aspect != ImageAspect.EQUIRECTANGULAR)
+            intent to required
+        } catch (_: Exception) {
+            invalidDecision("decision.image", "$.image", "string")
+        }
+        return Decision(kind, text, brief, search, image = intent.first, imageRequired = intent.second)
     }
 
     private fun jsonType(value: JsonElement?): String = when (value) {
@@ -201,7 +219,9 @@ opens outline review. The user starts and saves the course from that review.
         return prompt.toString()
     }
     fun encode(decision: Decision): String = JSONObject().put("kind",decision.kind).put("text",decision.text)
-        .put("brief",decision.brief).put("search",decision.search).toString()
+        .put("brief",decision.brief).put("search",decision.search).apply {
+            decision.image?.let { put("image", it.json().put("required", decision.imageRequired).toString()) }
+        }.toString()
 
     private const val SOURCE_LIMITATION = "Источники не заменяют независимую проверку."
     private fun sourceLimitation(sources: List<Source>) =

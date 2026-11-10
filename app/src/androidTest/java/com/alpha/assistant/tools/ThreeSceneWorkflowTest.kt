@@ -80,6 +80,188 @@ class ThreeSceneWorkflowTest {
     private val context get() = instrumentation.targetContext
     private val output get() = File(context.getExternalFilesDir(null), "three-scene-evidence").apply { mkdirs() }
 
+    @Test fun texturedWorkerChecksActualSurfaceDrawAndLaterBindingChanges() = runBlocking {
+        val png = java.io.ByteArrayOutputStream().use { bytes ->
+            val bitmap = Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888)
+            try {
+                bitmap.eraseColor(android.graphics.Color.CYAN)
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, bytes))
+                bytes.toByteArray()
+            } finally { bitmap.recycle() }
+        }
+        val cleanup = ThreeSceneAssetCleanup(context)
+        cleanup.lease().use {
+            val asset = ThreeSceneAssets(context).importGenerated(png, "paint", "image/png")
+            val image = com.alpha.assistant.images.GeneratedImage("paint", "Cyan paint",
+                com.alpha.assistant.images.ImageAspect.SQUARE, asset, 16, 16, "fixture")
+            val setup = """
+                const {THREE, canvas, bindTexture} = context;
+                const renderer = new THREE.WebGLRenderer({canvas});
+                const scene = new THREE.Scene();
+                const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 10);
+                camera.position.z = 3;
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
+                scene.add(mesh);
+            """.trimIndent()
+            val bind = "await bindTexture('paint', mesh);"
+            val draw = "renderer.render(scene, camera);"
+            val offscreen = "renderer.setRenderTarget(new THREE.WebGLRenderTarget(16, 16)); $draw"
+            fun tool(start: String, update: String = ""): ToolRecord {
+                val raw = JSONObject("""{"formatVersion":3,"title":"Texture check","description":"A textured cube",
+                    "capabilities":[],"runtime":{"kind":"threejs-worker","version":1},"stateSchema":{"ready":"boolean"},"initialState":{"ready":true},
+                    "ui":{"type":"text","text":"Texture check"}}""")
+                    .put("source", """
+                        export async function createScene(context) {
+                            $setup
+                            $start
+                            return {
+                                event() {},
+                                frame() { $update },
+                                snapshot() { return {state:{ready:true}}; },
+                                dispose() { renderer.dispose(); }
+                            };
+                        }
+                    """.trimIndent())
+                val spec = ToolSpec.parse(raw.toString()).withThreeAssets(listOf(asset)).withGeneratedImages(listOf(image))
+                return ToolRecord(UUID.randomUUID().toString(), 1, 0, spec.json, spec.initialState,
+                    spec.ui.toString(), null, true)
+            }
+            ActivityScenario.launch(MainActivity::class.java).use {
+                for (start in listOf("$bind $draw", "$bind context.render(renderer, scene, camera);",
+                    "$offscreen renderer.setRenderTarget(null); $bind $draw")) {
+                    onScene(tool(start)) { session, _ -> session.frame(16) }
+                }
+                val rejected = listOf(draw, "$bind $bind $draw", "$bind $offscreen", "$bind renderer.render(scene, {});",
+                    "$bind renderer.render(scene, new THREE.ArrayCamera([]));",
+                    "mesh.geometry.deleteAttribute('uv'); $bind $draw",
+                    "$bind renderer.render(new THREE.Scene(), camera);",
+                    "$bind new THREE.WebGLRenderer({canvas:new OffscreenCanvas(16,16)}).render(scene,camera);")
+                for (start in rejected) {
+                    val failure = runCatching { onScene(tool(start)) { _, _ -> } }.exceptionOrNull()
+                    assertEquals(start, com.alpha.assistant.tools.three.ThreeSceneProblem.TEXTURE_BINDING,
+                        (failure as? com.alpha.assistant.tools.three.ThreeSceneFailure)?.problem)
+                }
+                for (update in listOf("mesh.material.map = null;", "mesh.material = mesh.material.clone();",
+                    "scene.remove(mesh);", "mesh.geometry.deleteAttribute('uv');")) {
+                    val failure = runCatching {
+                        onScene(tool("$bind $draw", update)) { session, _ -> session.frame(16) }
+                    }.exceptionOrNull()
+                    assertEquals(update, com.alpha.assistant.tools.three.ThreeSceneProblem.TEXTURE_BINDING,
+                        (failure as? com.alpha.assistant.tools.three.ThreeSceneFailure)?.problem)
+                }
+            }
+            cleanup.request()
+        }
+    }
+
+    @Test fun texturePlanRequiresExplicitConsistentArraysAndCurrentRequestEvidence() {
+        val request = "Generate a square map. Remove the old map."
+        val image = """{"slot":"paint","prompt":"A square map","alt":"Map","aspect":"1:1"}"""
+        fun plan(json: String) = com.alpha.assistant.images.ImagePlan.threeScene(JSONObject(json), request, setOf("old"))
+        assertEquals("paint", plan("""{"disposition":"generate","excerpt":"Generate a square map.",
+            "imageRequests":[$image],"removeImageSlots":[]}""").requests.single().slot)
+        assertEquals(setOf("old"), plan("""{"disposition":"remove","excerpt":"Remove the old map.",
+            "imageRequests":[],"removeImageSlots":["old"]}""").remove)
+        assertEquals(emptyList<Any>(), plan("""{"disposition":"unchanged","excerpt":"",
+            "imageRequests":[],"removeImageSlots":[]}""").requests)
+        for (bad in listOf(
+            """{"disposition":"generate","excerpt":"Generate a square map.","removeImageSlots":[]}""",
+            """{"disposition":"generate","excerpt":"Generate a square map.","imageRequests":[],"removeImageSlots":[]}""",
+            """{"disposition":"generate","excerpt":"A different request","imageRequests":[$image],"removeImageSlots":[]}""",
+            """{"disposition":"generate","excerpt":"Generate a square map.","imageRequests":[$image,$image],"removeImageSlots":[]}""",
+            """{"disposition":"unchanged","excerpt":"","imageRequests":[$image],"removeImageSlots":[]}""",
+            """{"disposition":"remove","excerpt":"Remove the old map.","imageRequests":[],"removeImageSlots":["unknown"]}""",
+            """{"disposition":"other","excerpt":"","imageRequests":[],"removeImageSlots":[]}""",
+        )) assertTrue(bad, runCatching { plan(bad) }.isFailure)
+    }
+
+    @Test fun texturePlanCorrectionAndWriterRepairShareOneImageSubmission() = runBlocking {
+        val request = "Generate a square texture for a Three.js cube."
+        val png = java.io.ByteArrayOutputStream().use { bytes ->
+            val bitmap = Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888)
+            try {
+                bitmap.eraseColor(android.graphics.Color.CYAN)
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, bytes))
+                bytes.toByteArray()
+            } finally { bitmap.recycle() }
+        }
+        val calls = AtomicInteger()
+        val settings = com.alpha.assistant.images.ImageSettings(context, "three-repair-${UUID.randomUUID()}")
+        val images = com.alpha.assistant.images.ImageGeneration(context, settings, mapOf("openrouter" to
+            com.alpha.assistant.images.ImageProvider { _, _, intent ->
+                assertEquals("paint", intent.slot)
+                calls.incrementAndGet()
+                com.alpha.assistant.images.ProviderImage(png, "image/png")
+            }))
+        val source = """
+            export async function createScene({THREE, canvas, bindTexture}) {
+                const renderer = new THREE.WebGLRenderer({canvas});
+                const scene = new THREE.Scene();
+                const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 10);
+                camera.position.z = 3;
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
+                scene.add(mesh);
+                const attach = false;
+                if (attach) await bindTexture('paint', mesh);
+                renderer.render(scene, camera);
+                return {event(){}, frame(){}, snapshot(){return {state:{ready:true}};}, dispose(){renderer.dispose();}};
+            }
+        """.trimIndent()
+        var texturePlans = 0
+        var writerRepairs = 0
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, call: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                val text = when {
+                    call.systemInstructions.startsWith("Plan only Three.js texture assets.") -> {
+                        assertEquals(0, calls.get())
+                        if (++texturePlans == 1) "{}" else
+                            """{"disposition":"generate","excerpt":"$request","removeImageSlots":[],
+                                "imageRequests":[{"slot":"paint","prompt":"Cyan paint","alt":"Cyan paint","aspect":"1:1"}]}"""
+                    }
+                    call.generationStage == CloudGenerationStage.PLAN -> """
+                        {"wholeScreen":true,"language":"en","runtime":"threejs-worker","scene":{"placement":"stage","brief":"A cyan cube",
+                        "checks":{"status":"checkable","scenario":{"slots":{"view":{"kind":"geometry"}},
+                        "steps":[{"op":"assert","slot":"view","test":"nonempty"}]}},
+                        "checkEvidence":[{"step":1,"excerpt":"$request","purpose":"outcome","scope":"whole"}]}}
+                    """.trimIndent()
+                    call.turns.last().text.contains("Return one JSON patch") -> {
+                        assertEquals(1, calls.get())
+                        writerRepairs++
+                        """{"sourceEdits":[{"search":"const attach = false;","replace":"const attach = true;"}]}"""
+                    }
+                    else -> JSONObject("""{"formatVersion":3,"title":"Painted cube","description":"A cyan cube",
+                        "capabilities":[],"runtime":{"kind":"threejs-worker","version":1},"stateSchema":{"ready":"boolean"},"initialState":{"ready":true},
+                        "ui":{"type":"text","text":"Painted cube"}}""").put("source", source).toString()
+                }
+                emit(CloudEvent.Text(text))
+            }
+        }
+        val database = "three-image-repair-${UUID.randomUUID()}.db"
+        try {
+            settings.saveKey("fixture-only").getOrThrow()
+            settings.setEnabled(true).getOrThrow()
+            ActivityScenario.launch(MainActivity::class.java).use {
+                ToolStore(context, database).use { store ->
+                    val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context), imageGeneration = images))
+                    try {
+                        val draft = engine.createDraft(request, null)
+                        approvePreview { engine.generate(draft.id, "fixture", emptyList(), CloudSession()) }
+                        val record = engine.accept(draft.id)
+                        assertEquals("paint", ToolSpec.parsePersisted(record.spec).generatedImages.single().slot)
+                        assertEquals(2, texturePlans)
+                        assertEquals(1, writerRepairs)
+                        assertEquals(1, calls.get())
+                        File(output, "texture-plan-and-repair.json").writeText(JSONObject(record.spec).toString(2))
+                    } finally { engine.closeArtifacts() }
+                }
+            }
+        } finally {
+            settings.clearKey()
+            context.deleteDatabase(database)
+            ThreeSceneAssetCleanup(context).request()
+        }
+    }
+
     @Test fun repairedOrbitSavesAndReopens() = runBlocking {
         val result = generate("earth", injectStatic = true)
         assertEquals(1, result.repairs)

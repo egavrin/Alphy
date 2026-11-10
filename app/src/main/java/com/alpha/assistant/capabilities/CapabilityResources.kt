@@ -28,7 +28,7 @@ class CapabilityResources(private val context: Context, private val store: ToolS
         private val lock = Any()
         private val random = SecureRandom()
         private val selectionCapabilities = mapOf("photo" to "photo.pick", "document" to "file.pick",
-            "cameraPhoto" to "camera.capture", AudioContract.RESOURCE_KIND to AudioContract.PICK, VideoContract.RESOURCE_KIND to VideoContract.PICK,
+            "cameraPhoto" to "camera.capture", MiniAppImage.RESOURCE to MiniAppImage.ID, AudioContract.RESOURCE_KIND to AudioContract.PICK, VideoContract.RESOURCE_KIND to VideoContract.PICK,
             VideoContract.CAPTURE_KIND to VideoContract.CAPTURE)
         internal fun resourceKind(capability: String) = selectionCapabilities.entries.firstOrNull { it.value == capability }?.key
     }
@@ -36,6 +36,10 @@ class CapabilityResources(private val context: Context, private val store: ToolS
     private fun token() = ByteArray(32).also(random::nextBytes).joinToString("") { "%02x".format(it.toInt() and 255) }
     private fun resource(owner: String, kind: String, locator: String, ownsGrant: Boolean) = CapabilityResource(
         token(),owner,kind,locator,"application/octet-stream",0,false,ownsGrant,ToolStore.processSession,System.currentTimeMillis()+30L*24*60*60*1000)
+    internal fun generatedImage(owner: String, image: com.alpha.assistant.images.GeneratedImage): CapabilityResource =
+        resource(owner, MiniAppImage.RESOURCE, image.asset.id, false).copy(mimeType = image.asset.mime,
+            sizeBytes = image.asset.size, persistent = true, expiresAt = Long.MAX_VALUE)
+
     private fun cameraFile(name: String): File {
         require(name.matches(Regex("capture-[0-9a-fA-F-]{36}\\.jpg")))
         return File(context.filesDir,name).canonicalFile.also { require(it.parentFile == context.filesDir.canonicalFile) }
@@ -228,7 +232,10 @@ class CapabilityResources(private val context: Context, private val store: ToolS
         if(selected.expiresAt <= System.currentTimeMillis() || (!selected.persistent && selected.session != ToolStore.processSession)) return@runCatching false
         val capability=selectionCapabilities[selected.kind] ?: return@runCatching false
         if(!permissionCheck(capability)) return@runCatching false
-        if (selected.kind == VideoContract.CAPTURE_KIND) {
+        if (selected.kind == MiniAppImage.RESOURCE) {
+            com.alpha.assistant.tools.three.ThreeSceneAssets(context).hasGeneratedImage(
+                com.alpha.assistant.tools.three.ThreeSceneAssetRef(selected.locator, "image", selected.mimeType, selected.sizeBytes))
+        } else if (selected.kind == VideoContract.CAPTURE_KIND) {
             val file = videoFile(File(selected.locator).name)
             file.path == selected.locator && file.isFile && file.length() == selected.sizeBytes
         } else if(selected.kind == "cameraPhoto") true else {
@@ -291,5 +298,6 @@ class CapabilityResources(private val context: Context, private val store: ToolS
             } else store.transferResourceGrant(siblings.first().id)
         }
         store.deleteAcquisition(journal.id)
+        if (journal.kind == MiniAppImage.RESOURCE) com.alpha.assistant.tools.three.ThreeSceneAssetCleanup(context).request()
     }
 }

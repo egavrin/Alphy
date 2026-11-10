@@ -1,5 +1,11 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.images.GeneratedImage
+import com.alpha.assistant.images.ImageFailure
+import com.alpha.assistant.images.ImageGeneration
+import com.alpha.assistant.images.ImageIntent
+import com.alpha.assistant.images.ImagePlan
+import com.alpha.assistant.images.ImageSettings
 import android.os.SystemClock
 
 import com.alpha.assistant.cloud.*
@@ -58,13 +64,13 @@ internal const val MAX_TOOL_PROMPT_LENGTH = 64_000
 internal fun isValidToolPrompt(prompt: String) = prompt.isNotBlank() && prompt.length <= MAX_TOOL_PROMPT_LENGTH
 
 data class ToolPreview(val spec: ToolSpec, val state: String, val ui: String, val effects: List<CapabilityRequest> = emptyList(), val records: JSONArray = JSONArray(), val surfaces: JSONObject? = null, val frames: Set<String>? = null, val timers: Map<String,Int>? = null, val playback: String? = null)
-internal data class LessonToolPreview(val preview: ToolPreview, val sourceIds: List<String>)
+internal data class LessonToolPreview(val preview: ToolPreview, val sourceIds: List<String>, val illustration: ImageIntent? = null)
 
 internal fun ToolSpec.requireGeneratedRefinement() {
     if(isSealedStandalone) throw StandaloneRefinementUnavailable()
 }
 internal class ToolForegroundAction(val tool: ToolRecord, val network: CapabilityRequest?)
-enum class ToolGenerationProgress { PLANNING, SELECTING, COMPLETING, REFINING, VALIDATING }
+enum class ToolGenerationProgress { PLANNING, SELECTING, COMPLETING, REFINING, VALIDATING, IMAGES }
 
 internal fun liveInputEvent(actionId: String, value: Any?): JSONObject =
     JSONObject().put("type",SandboxContract.LIVE_INPUT_EVENT).put("actionId",actionId)
@@ -77,8 +83,11 @@ class ToolExecutionPolicy internal constructor(
 )
 
 class ToolGenerationService internal constructor(private val provider: ChatProvider, private val sandbox: SandboxClient,
-    private val partClock: () -> PartClockSample) {
+    private val partClock: () -> PartClockSample,
+    internal val imageGeneration: ImageGeneration = ImageGeneration(sandbox.context)) {
     constructor(provider: ChatProvider, sandbox: SandboxClient): this(provider,sandbox,partClock = { localPartClock(sandbox.context) })
+    internal constructor(provider: ChatProvider, sandbox: SandboxClient, imageGeneration: ImageGeneration) :
+        this(provider, sandbox, partClock = { localPartClock(sandbox.context) }, imageGeneration)
     internal fun retainedSession()=sandbox.retainedSession()
     internal fun samplePartClock() = partClock()
     internal fun partClockFor(spec: ToolSpec): PartClockSample? =
@@ -340,9 +349,10 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         progress: ((ToolGenerationProgress) -> Unit)? = null,
         draftPreview: ToolDraftPreviewPublisher?, trace: ToolGenerationTrace? = null,
         originalRequest: String = prompt, sceneAssets: List<ThreeSceneAssetRef> = emptyList(),
-        onPublicUpdate: (suspend (String) -> Unit)? = null): ToolPreview =
+        onPublicUpdate: (suspend (String) -> Unit)? = null, imageOperation: String? = null,
+        imageSelection: ImageSettings.Selection? = null): ToolPreview =
         generateCandidate(key, prompt, base, images, session, artifactId, privateState, policy, lessonTarget,
-            progress, draftPreview, allowedSourceIds = emptySet(), trace, originalRequest, sceneAssets, onPublicUpdate).preview
+            progress, draftPreview, allowedSourceIds = emptySet(), trace, originalRequest, sceneAssets, onPublicUpdate, imageOperation, imageSelection).preview
 
     internal suspend fun generateLesson(
         key: String, prompt: String, session: CloudSession, artifactId: String, kind: CourseSlideKind,
@@ -359,11 +369,12 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         trace: ToolGenerationTrace? = null, originalRequest: String = prompt,
         sceneAssets: List<ThreeSceneAssetRef> = emptyList(),
         onPublicUpdate: (suspend (String) -> Unit)? = null,
+        imageOperation: String? = null, imageSelection: ImageSettings.Selection? = null,
     ): LessonToolPreview {
         val run = trace?.Run()
         return try {
             buildCandidate(key, prompt, base, images, session, artifactId, privateState, policy, lessonTarget,
-                progress, draftPreview, allowedSourceIds, run, originalRequest, sceneAssets, onPublicUpdate).also { run?.finish() }
+                progress, draftPreview, allowedSourceIds, run, originalRequest, sceneAssets, onPublicUpdate, imageOperation, imageSelection).also { run?.finish() }
         } catch (failure: Throwable) {
             run?.finish(failure)
             throw failure
@@ -377,6 +388,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         trace: ToolGenerationTrace.Run?, originalRequest: String,
         sceneAssets: List<ThreeSceneAssetRef>,
         onPublicUpdate: (suspend (String) -> Unit)?,
+        imageOperation: String?, imageSelection: ImageSettings.Selection?,
     ): LessonToolPreview {
         val startedAt = SystemClock.elapsedRealtime()
         fun threeTimeLeft() = 600_000 - (SystemClock.elapsedRealtime() - startedAt)
@@ -433,6 +445,20 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             If the request gives conflicting language instructions, ask which one to use.
             When supplied, literals is an array of exact user-request excerpts to keep in their original wording.
         """.trimIndent()
+        val oldImages = previous?.generatedImages.orEmpty()
+        val oldImageSlots = oldImages.map { it.slot }.toSet()
+        val imageLimit = when {
+            lessonTarget != null && imageGeneration.settings.selection() != null -> 1
+            imageOperation != null && imageSelection != null -> 4
+            else -> 0
+        }
+        val imagePlanning = if (imageLimit == 0) "" else """
+            For native apps and lessons, use the optional top-level imageRequests array for up to $imageLimit useful illustrations.
+            ${ImageIntent.GUIDANCE}
+            Use wholeScreen:true for a native mini-app that needs an image. Keep the normal lesson plan format.
+            A Three.js plan leaves imageRequests and removeImageSlots to the separate texture plan.
+            Saved image slots: ${JSONArray(oldImageSlots.toList())}. Keep existing slots unless asked to replace or remove them.
+        """.trimIndent()
         val needsThreeScene = lessonTarget == null && (previous?.threeScene == true ||
             sceneAssets.isNotEmpty() || originalRequest.contains("Three.js", ignoreCase = true))
         val savedButtons = previous?.takeIf { it.threeScene }?.ui?.let(GenerationBehavior::directButtons).orEmpty()
@@ -454,7 +480,8 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                 """.trimIndent().let { "\n$it" } + "\n\n" + GenerationBehavior.workflowScopeGuidance
             }) + "\n\n" + SceneRequirement.guidance + "\n\n" +
                 SceneCheckEvidence.runtimeGuidance(threeScene = true) + "\n\n" +
-                if (needsThreeScene) THREE_SCENE_PLAN else SceneCheckEvidence.runtimeGuidance(threeScene = false)
+                (if (needsThreeScene) THREE_SCENE_PLAN else SceneCheckEvidence.runtimeGuidance(threeScene = false)) +
+                "\n" + imagePlanning
             val planningText = if (lessonTarget != null) prompt else JSONObject().put("request", originalRequest).apply {
                 if (previous?.threeScene == true) {
                     put("savedRuntime", "threejs-worker")
@@ -467,7 +494,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                 if (prompt != originalRequest) put("context", prompt)
             }.toString()
             val planning = CloudTurn("user", planningText, images.toList())
-            val repair = if (patchNewApp) GenerationRepair.plan() else null
+            val repair = if (patchNewApp || needsThreeScene && imageLimit > 0) GenerationRepair.plan() else null
             suspend fun readPlan(
                 correction: String? = null,
                 rejectedPlan: String? = null,
@@ -491,7 +518,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                             else repairResponse(checkNotNull(repair), edit, CloudGenerationStage.PLAN, attemptNumber, trace) { fetch() }
                         session.checkActive(currentCoroutineContext())
                         needsText = planText
-                        val generation = NeedsPlan.parseResponse(planText, lessonTarget, allowedSourceIds, originalRequest)
+                        val generation = NeedsPlan.parseResponse(planText, lessonTarget, allowedSourceIds, originalRequest, imageLimit, oldImageSlots)
                         val chosenThree = (generation as? GenerationPlan.WholeScreen)?.threeScene == true
                         requireParts(!needsThreeScene || chosenThree,
                             "$.runtime", "wholeScreen:true, runtime threejs-worker and a stage scene check")
@@ -569,6 +596,50 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                 kotlinx.coroutines.withTimeoutOrNull(threeTimeLeft()) { readPlan() } ?: throw threeDeadline()
             } else readPlan()
         }
+        val threePlan = (planned as? GenerationPlan.WholeScreen)?.takeIf { it.threeScene }
+        if (threePlan != null &&
+            !kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) { ThreeSceneWebView.available() }) {
+            throw CloudFailure("three_unavailable", "This Android WebView build is unavailable for Three.js scenes.")
+        }
+        val imagePlan = when {
+            threePlan != null && imageLimit > 0 ->
+                kotlinx.coroutines.withTimeoutOrNull(threeTimeLeft()) {
+                    planThreeTextures(key, originalRequest, oldImages, session)
+                } ?: throw threeDeadline()
+            threePlan != null -> ImagePlan()
+            previous != null && imageLimit > 0 -> {
+                reportProgress(ToolGenerationProgress.PLANNING)
+                val raw = response(key, listOf(CloudTurn("user", originalRequest)), session, CloudGenerationStage.PLAN,
+                    "Plan only useful new images for this native app refinement. Return one JSON object with optional imageRequests and removeImageSlots. Return {} when no image change is needed.\n$imagePlanning")
+                try {
+                    val json = SandboxContract.objectFrom(raw, 16_384)
+                    ImagePlan.take(json, imageLimit, oldImageSlots).also { require(json.length() == 0) }
+                } catch (_: Exception) {
+                    throw CloudFailure("widget_plan", "The refinement returned an invalid image plan.")
+                }
+            }
+            else -> planned?.images ?: ImagePlan()
+        }
+        val illustration = imagePlan.requests.singleOrNull().takeIf { lessonTarget != null }
+        val requestedImages = if (lessonTarget == null) imagePlan.requests else emptyList()
+        val newImages = if (requestedImages.isEmpty()) emptyList() else {
+            reportProgress(ToolGenerationProgress.IMAGES)
+            suspend fun resolveImages(): List<GeneratedImage> = try {
+                imageGeneration.generate(checkNotNull(imageOperation), requestedImages, checkNotNull(imageSelection), 4)
+            } catch (failure: ImageFailure) {
+                throw CloudFailure("image_generation", failure.message.orEmpty())
+            }
+            if (threePlan != null) {
+                kotlinx.coroutines.withTimeoutOrNull(threeTimeLeft()) { resolveImages() } ?: throw threeDeadline()
+            } else resolveImages()
+        }
+        val generatedImages = oldImages.filter { old ->
+            old.slot !in imagePlan.remove && newImages.none { it.slot == old.slot }
+        } + newImages
+        val imageWriterGuidance = if (generatedImages.isEmpty() && imagePlan.remove.isEmpty()) "" else
+            "Image slots: ${JSONArray(generatedImages.map { JSONObject().put("slot", it.slot).put("alt", it.alt) })}. " +
+                "For a native image, use {type:'image',assetSlot:'slotId',text:'accessible description'}. " +
+                "Use every newly requested slot and remove references to removed slots. Keep existing image placements unless the user requested a change."
         val (selectedAssembly, sourceIds) = if (planned is GenerationPlan.Parts) {
             val plan = planned.needs
             reportProgress(ToolGenerationProgress.SELECTING)
@@ -653,10 +724,10 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         trace?.route = route
         trace?.partsOnly = partsOnly
         val sealStandalone = lessonTarget==null && partsOnly && assembly.requiresHostRuntime
-        if ((planned as? GenerationPlan.WholeScreen)?.threeScene == true) {
+        if (threePlan != null) {
             val candidate = kotlinx.coroutines.withTimeoutOrNull(threeTimeLeft()) {
                 generateThreeScene(key, prompt, originalRequest, base, previous, images, session, artifactId,
-                    checkNotNull(planned.scene), JSONObject(planText).getJSONObject("scene"), sceneAssets,
+                    checkNotNull(threePlan.scene), JSONObject(planText).getJSONObject("scene"), sceneAssets, generatedImages,
                     savedButtons.keys, appLanguage, iconId, ::reportProgress, trace, onPublicUpdate)
             } ?: throw threeDeadline()
             return LessonToolPreview(candidate, emptyList())
@@ -717,7 +788,8 @@ If video.pick and video.play appear in the shortlist, use video.pick for request
 When the request needs continuous updates, execute state changes through a frame or timer subscription. Derive drawing and input geometry from the same state. Verify visible changes and any requested terminal or reset behavior.
 
 Optional top-level collections declares up to 8 private native-owned record schemas, for example {"history":{"type":"object","fields":{"at":"number","note":"string"}}}. Collections start empty. For history beyond bounded state, use native collections and page results into state. Never discard prior history to fit an in-state list or array. Only action events may return records:[{id:'save',collection:'history',op:'put',key:'id',expectedToken:null,value:{at:Date.now(),note:'Observation'}}]. Create requires null expectedToken. Update and delete require the exact token from a prior result. Delete omits value. Get uses {id:'read',collection:'history',op:'get',key:'id'}. Page uses {id:'page',collection:'history',op:'page',order:'asc',limit:50,cursor:null}; order is asc or desc. Up to 8 operations and one page per action. No records with device effects. The host returns a local {type:'recordResults',deliveryId:'opaque',entries:[{requestId:'save',collection:'history',op:'put',status:'succeeded',record:{key:'id',token:'opaque',value:{...}}}]} event. Get can return notFound; page returns records and opaque cursor or null, and staleCursor after a change. Result handlers can update state/UI but cannot request records or effects. Keep each record/page within 8 KiB and the full result event within 15 KiB. Keep state plus event and envelope within 64 KiB. Collection limits are 10000 records each and 20000 records/20 MiB per artifact. Collection values, counts, cursors, result events, and live state remain local. Preserve every existing collection schema in refinement.
-${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by effects."""
+${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by effects.
+$imageWriterGuidance"""
         val savedEnvelope = previous?.providerDefinition()?.let { definition ->
             if (mixed) JSONObject().put("fill", JSONObject(definition)).toString() else definition
         }
@@ -925,7 +997,12 @@ ${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by
                                 "Declare only capabilities from the request shortlist."
                             }
                         }
-                        candidate.withAppLanguage(appLanguage?.tag ?: previous?.appLanguage).withIcon(iconId)
+                        val usedSlots = imageSlots(candidate.ui)
+                        require(generatedImages.map { it.slot }.containsAll(usedSlots)) { "Use only approved image slots." }
+                        val requiredSlots = newImages.map { it.slot } + previous?.let { imageSlots(it.ui) }.orEmpty() - imagePlan.remove
+                        require(usedSlots.containsAll(requiredSlots)) { "Place all requested and retained image slots in the native UI." }
+                        candidate.withGeneratedImages(generatedImages)
+                            .withAppLanguage(appLanguage?.tag ?: previous?.appLanguage).withIcon(iconId)
                     }
                 }
                 val languageCheck = appLanguage?.let { GenerationLanguage.Check(it) }
@@ -1094,29 +1171,67 @@ ${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by
                 return attempt(next)
             }
         }
-        return LessonToolPreview(attempt(edit = savedEnvelope?.let { checkNotNull(writerRepair).firstRefinement() }), sourceIds)
+        return LessonToolPreview(attempt(edit = savedEnvelope?.let { checkNotNull(writerRepair).firstRefinement() }), sourceIds, illustration)
+    }
+
+    private suspend fun planThreeTextures(key: String, originalRequest: String, saved: List<GeneratedImage>,
+        session: CloudSession): ImagePlan {
+        val savedSlots = saved.map { it.slot }.toSet()
+        val input = JSONObject().put("request", originalRequest).put("savedSlots", JSONArray(saved.map {
+            JSONObject().put("slot", it.slot).put("alt", it.alt).put("aspect", it.aspect.wire)
+        }))
+        val instructions = """
+            Plan only Three.js texture assets. Return one JSON object with exactly these keys:
+            {"disposition":"unchanged","excerpt":"","imageRequests":[],"removeImageSlots":[]}
+            Use generate for explicitly requested new maps or replacements. Include one request per target, up to four.
+            A replacement reuses the existing slot ID. Use remove only to remove requested saved slots without generating.
+            Use unchanged when the request does not ask for a texture change. Keep all other saved slots.
+            For generate or remove, quote an exact excerpt that authorizes the change from request.
+            For unchanged, leave the excerpt and both arrays empty.
+            ${ImageIntent.GUIDANCE}
+        """.trimIndent()
+        var correction = ""
+        while (true) {
+            session.checkActive(currentCoroutineContext())
+            val raw = response(key, listOf(CloudTurn("user", input.toString())), session, CloudGenerationStage.PLAN,
+                instructions + correction)
+            val plan = runCatching { ImagePlan.threeScene(SandboxContract.objectFrom(raw, 16_384), originalRequest, savedSlots) }.getOrNull()
+            if (plan != null) return plan
+            if (session.claimGenerationRepair(CloudGenerationStage.PLAN) == null)
+                throw CloudFailure("widget_plan", "The texture plan did not contain a valid disposition and image slots.")
+            correction = "\nThe last plan was invalid. Return the complete object with an exact request excerpt and consistent arrays."
+        }
     }
 
     private suspend fun generateThreeScene(
         key: String, prompt: String, originalRequest: String, base: ToolRecord?, previous: ToolSpec?,
         images: List<String>, session: CloudSession, artifactId: String, scene: SceneRequirement, plan: JSONObject,
-        sceneAssets: List<ThreeSceneAssetRef>, savedButtonIds: Set<String>, language: AppLanguage?, iconId: String?,
+        sceneAssets: List<ThreeSceneAssetRef>, generatedImages: List<GeneratedImage>, savedButtonIds: Set<String>, language: AppLanguage?, iconId: String?,
         progress: (ToolGenerationProgress) -> Unit, trace: ToolGenerationTrace.Run?,
         onPublicUpdate: (suspend (String) -> Unit)?,
     ): ToolPreview {
-        if (!kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) { ThreeSceneWebView.available() }) {
-            throw CloudFailure("three_unavailable", "This Android WebView build is unavailable for Three.js scenes.")
-        }
         val assets = ThreeSceneAssets.read(JSONArray(
-            (previous?.sceneAssets.orEmpty() + sceneAssets).distinctBy { it.id }.map { it.json() }))
+            (previous?.sceneAssets.orEmpty().filterNot { old ->
+                previous?.generatedImages.orEmpty().any { it.asset.id == old.id } && generatedImages.none { it.asset.id == old.id }
+            } + sceneAssets + generatedImages.map { it.asset }).distinctBy { it.id }.map { it.json() }))
         val planSteps = plan.getJSONObject("checks").getJSONObject("scenario").getJSONArray("steps")
         scene.checks.steps.forEachIndexed { index, step ->
             if (step is GenerationBehavior.Step.Action && step.slot in savedButtonIds && step.slot !in scene.liveInputs) {
                 planSteps.getJSONObject(index).remove("value")
             }
         }
-        val contract = threeSceneWriterContract(scene, plan,
-            ThreeSceneAssets(sandbox.context).workerAssets(assets).map { it.description() }) +
+        val textureHashes = generatedImages.map { it.asset.id }.toSet()
+        val textureGuidance = if (generatedImages.isEmpty()) "" else
+            "Required generated textures: " +
+                JSONArray(generatedImages.map { JSONObject().put("targetId", it.slot).put("description", it.alt) }) +
+                ". In async createScene, after constructing the meshes and before the first render, await " +
+                "context.bindTexture(targetId, mesh) once per listed target. Pass the exact targetId string, not a file hash or mesh name. " +
+                "Bind each image to its intended UV-mapped mesh. Draw the first frame to the supplied canvas using renderer.render(scene, camera). " +
+                "The host loads and disposes the maps. Do not catch binding failures or substitute procedural maps. " +
+                "For a patch, include all texture edits and requested behavior changes together. Use only fields and sourceEdits with exact, " +
+                "non-overlapping search blocks. Put behaviorBindings in fields with the exact planned check slot IDs.\n"
+        val contract = textureGuidance + threeSceneWriterContract(scene, plan,
+            ThreeSceneAssets(sandbox.context).workerAssets(assets.filterNot { it.id in textureHashes }).map { it.description() }) +
             (language?.tag ?: previous?.appLanguage)?.let { "\n" + GenerationLanguage.guidance(it) }.orEmpty()
         val fields = ToolSpec.generatedFields + "behaviorBindings"
         val stage = if (base == null) CloudGenerationStage.COMPLETE else CloudGenerationStage.REFINE
@@ -1163,6 +1278,7 @@ ${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by
                 val bindings = threeSceneBindings(scene.checks, completed)
                 scene.evidence?.validateBindings(scene.checks, bindings, threeScene = true)
                 val spec = candidate.withThreeAssets(assets).withAppLanguage(language?.tag ?: previous?.appLanguage).withIcon(iconId)
+                    .withGeneratedImages(generatedImages)
                 val state = if (previous == null) spec.initialState else ToolSpec.stateForRevision(previous, spec, checkNotNull(base).state)
                 val review: (suspend (List<String>) -> String?)? = if (provider.supportsSceneVision && assets.isEmpty()) { frames ->
                     visualFrames = frames
@@ -1379,16 +1495,26 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
         trace: ToolGenerationTrace?, originalRequest: String? = null,
         sceneAssets: List<ThreeSceneAssetRef> = emptyList(), onPublicUpdate: (suspend (String) -> Unit)? = null): ToolDraft {
         val draftPreview=previewObserver?.let {ToolDraftPreviewPublisher(draftId,it)}
-        val assetLease = if (sceneAssets.isEmpty()) null else ThreeSceneAssetCleanup(store.context).lease()
+        val imageSelection = generation.imageGeneration.settings.selection()
+        val assetLease = when {
+            imageSelection != null -> generation.imageGeneration.lease()
+            sceneAssets.isNotEmpty() -> ThreeSceneAssetCleanup(store.context).lease()
+            else -> null
+        }
         try {
             val (draft, base) = mutex.withLock { val d = checkNotNull(store.draft(draftId)); check(d.acceptedRevision == null); d to d.toolId?.let { current(it,d.baseRevision,d.baseStateVersion) } }
             val preview = generation.generate(key, draft.prompt, base, images, session, draft.toolId ?: draft.id,
                 privateState = base?.let { store.privateResults(it.id) } == true, progress = progress, draftPreview = draftPreview,
                 trace = trace?.takeIf { it.operationId.toString() == draftId },
-                originalRequest = originalRequest ?: draft.prompt, sceneAssets = sceneAssets, onPublicUpdate = onPublicUpdate)
+                originalRequest = originalRequest ?: draft.prompt, sceneAssets = sceneAssets, onPublicUpdate = onPublicUpdate,
+                imageOperation = "app:$draftId", imageSelection = imageSelection)
+            if (imageSelection != null && preview.spec.generatedImages.isNotEmpty())
+                generation.imageGeneration.ensureCurrent(imageSelection)
             session.checkActive(currentCoroutineContext())
             return mutex.withLock {
                 session.checkActive(currentCoroutineContext())
+                if (imageSelection != null && preview.spec.generatedImages.isNotEmpty())
+                    generation.imageGeneration.ensureCurrent(imageSelection)
                 val next = draft.copy(candidate = preview.spec.json, previewState = preview.state, previewUi = preview.ui,
                     previewSurfaces = preview.surfaces?.toString())
                 store.transaction {
@@ -1473,6 +1599,10 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
             saved
         }
         currentCoroutineContext().ensureActive()
+        check(ToolSpec.parsePersisted(tool.spec).generatedImages.isEmpty() &&
+            (!includeState || store.resources(tool.id).none { it.kind == com.alpha.assistant.capabilities.MiniAppImage.RESOURCE })) {
+            store.context.getString(com.alpha.assistant.R.string.image_export_unavailable)
+        }
         com.alpha.assistant.portability.MiniAppArchive.write(tool, includeState, output)
     }
 
@@ -1737,6 +1867,12 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
             invalidate()
             throw CloudFailure("ai_foreground_required", "Для запроса к DeepSeek откройте сохранённое мини-приложение с поддержкой результатов.")
         }
+        if (result.effects.any { it.capability == com.alpha.assistant.capabilities.MiniAppImage.ID } &&
+            (!acceptAi || !input.saved || !spec.capabilityResults || spec.threeScene || value != null ||
+                selected.optString("type") != "button" || selected.optString("action") != actionId)) {
+            invalidate()
+            throw CloudFailure("image_foreground_required", "Откройте сохранённое мини-приложение, чтобы создать изображение.")
+        }
         val old=if(widgetBase==null) input else {
             check(store.tool(id)==widgetBase) {"Saved data changed during widget evaluation. Reopen the mini-app."}
             // A flush may persist the captured live state and advance its token exactly once.
@@ -1983,7 +2119,7 @@ private fun threeSceneWriterContract(scene: SceneRequirement, plan: JSONObject, 
 }
 
 private val THREE_SCENE_PLAN = """
-    The host requires the Three.js runtime for this request. Use exactly this structure and the requested language.
+    The host requires the Three.js runtime for this request. Follow the example structure, language, and any separate imageRequests guidance.
     {"wholeScreen":true,"runtime":"threejs-worker","language":"en","scene":{"placement":"stage",
     "brief":"Describe the visible Three.js scene requested by the user.",
     "checks":{"status":"checkable","scenario":{"slots":{"view":{"kind":"surface"},"image":{"kind":"geometry"}},
@@ -2002,6 +2138,8 @@ private val THREE_SCENE_PLAN = """
     For requested persistence, use a state slot with {"kind":"state"}, then send a surface event "reopen" and
     assert the requested saved scalar value. For a static scene check nonempty geometry.
     For pause, capture geometry after the pause, advance frames without an observe field, then assert unchanged.
+    To check a visible change after a button press, use capture, action, and assert changed with one geometry slot and one action slot.
+    Use scope whole and purpose outcome for that assertion. Include only used slots and quote a verbatim excerpt.
     Keep placement stage. Do not select a native 2D plan for this request.
 """.trimIndent()
 

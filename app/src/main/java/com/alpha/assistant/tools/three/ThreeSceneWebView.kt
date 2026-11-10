@@ -49,6 +49,7 @@ internal class ThreeSceneWebView(
     private val revision: Int,
     private val source: String,
     assets: List<ThreeSceneAsset>,
+    private val textures: List<com.alpha.assistant.images.GeneratedImage> = emptyList(),
 ) {
     private val sessionId = UUID.randomUUID().toString()
     private val domain = "scene-$sessionId.invalid"
@@ -237,7 +238,11 @@ internal class ThreeSceneWebView(
             val (mime, stream) = when (path) {
                 "/session.js" -> "text/javascript" to ("export default " + JSONObject()
                     .put("artifactId", artifactId).put("revision", revision).put("sessionId", sessionId)
-                    .put("assets", JSONArray(assets.values.map { it.description() })).toString()).byteInputStream()
+                    .put("assets", JSONArray(assets.values.map { it.description() }))
+                    .put("textures", JSONArray(textures.map {
+                        JSONObject().put("target", it.slot).put("id", it.asset.id)
+                            .put("mime", it.asset.mime).put("wrap", it.aspect == com.alpha.assistant.images.ImageAspect.EQUIRECTANGULAR)
+                    })).toString()).byteInputStream()
                 "/scene.js" -> "text/javascript" to source.byteInputStream()
                 in localFiles -> localFiles.getValue(path) to context.assets.open("threejs$path")
                 else -> return blocked()

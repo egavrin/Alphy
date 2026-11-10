@@ -12,6 +12,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
+import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
@@ -30,13 +31,39 @@ internal class ThreeSceneAssets(private val context: Context) {
 
     private suspend fun importFile(uri: Uri, name: String, requestedMime: String): Attachment {
         require(uri.scheme == "content")
+        val ref = requireNotNull(context.contentResolver.openInputStream(uri)).use {
+            importStream(it, name, requestedMime)
+        }
+        return Attachment("alphy-three-asset:${ref.id}", ref.name, ATTACHMENT_MIME, ref.json().toString())
+    }
+
+    suspend fun importGenerated(bytes: ByteArray, name: String, mime: String): ThreeSceneAssetRef =
+        bytes.inputStream().use { importStream(it, name, mime) }
+
+    fun hasGeneratedImage(ref: ThreeSceneAssetRef): Boolean {
+        val source = file(ref.id)
+        return ref.mime in IMAGES && source.isFile && source.length() == ref.size
+    }
+
+    fun generatedBitmap(ref: ThreeSceneAssetRef): android.graphics.Bitmap? {
+        if (!hasGeneratedImage(ref)) return null
+        val source = file(ref.id)
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(source.path, options)
+        checkImage(options, ref.mime)
+        options.inJustDecodeBounds = false
+        options.inSampleSize = 1
+        while (maxOf(options.outWidth, options.outHeight) / options.inSampleSize > 1024) options.inSampleSize *= 2
+        return BitmapFactory.decodeFile(source.path, options)
+    }
+
+    private suspend fun importStream(input: InputStream, name: String, requestedMime: String): ThreeSceneAssetRef {
         check(directory.mkdirs() || directory.isDirectory)
         val temporary = File.createTempFile("import-", ".part", directory)
         try {
             val digest = MessageDigest.getInstance("SHA-256")
             var size = 0L
-            requireNotNull(context.contentResolver.openInputStream(uri)).use { input ->
-                temporary.outputStream().use { output ->
+            temporary.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
                         currentCoroutineContext().ensureActive()
@@ -47,7 +74,6 @@ internal class ThreeSceneAssets(private val context: Context) {
                         digest.update(buffer, 0, count)
                         output.write(buffer, 0, count)
                     }
-                }
             }
             require(size > 0) { "The 3D asset is empty." }
             val mime = when {
@@ -78,8 +104,7 @@ internal class ThreeSceneAssets(private val context: Context) {
             val id = digest.digest().joinToString("") { "%02x".format(it) }
             val file = file(id)
             if (!file.exists()) check(temporary.renameTo(file) || file.length() == size) { "Alphy could not store the 3D asset." }
-            val ref = ThreeSceneAssetRef(id, name.take(120).ifBlank { id }, mime, size)
-            return Attachment("alphy-three-asset:$id", ref.name, ATTACHMENT_MIME, ref.json().toString())
+            return ThreeSceneAssetRef(id, name.take(120).ifBlank { id }, mime, size)
         } finally {
             temporary.delete()
         }

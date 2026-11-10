@@ -28,6 +28,7 @@ internal object MiniAppArchive {
     fun write(tool: ToolRecord, includeState: Boolean, output: OutputStream) {
         require(artifactId.matches(tool.id))
         val spec = ToolSpec.parsePersisted(tool.spec)
+        require(spec.generatedImages.isEmpty()) { "Generated images cannot be included in this archive format." }
         val manifest = JSONObject().put("version", VERSION).put("id", tool.id).toString()
         val state = if (includeState) {
             require(spec.collections.length() == 0) { "Записи из отдельных коллекций нельзя добавить в этот файл." }
@@ -61,6 +62,7 @@ internal object MiniAppArchive {
             require(id != null && artifactId.matches(id))
             // The stored-artifact parser rebuilds and validates canonical host parts.
             val spec = ToolSpec.parsePersisted(read(DEFINITION))
+            require(spec.generatedImages.isEmpty() && spec.lessonImageIntent == null && com.alpha.assistant.tools.imageSlots(spec.ui).isEmpty())
             val state = if (STATE in entries) {
                 require(spec.collections.length() == 0)
                 spec.validateState(read(STATE)).toString()

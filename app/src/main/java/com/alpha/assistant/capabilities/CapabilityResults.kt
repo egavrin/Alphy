@@ -69,7 +69,7 @@ object CapabilityResultEvent {
                     require(event.getLong("end") >= event.getLong("start"))
                 }
             }
-            "photo.pick", "file.pick", "camera.capture", AudioContract.PICK, VideoContract.PICK, VideoContract.CAPTURE -> {
+            "photo.pick", "file.pick", "camera.capture", MiniAppImage.ID, AudioContract.PICK, VideoContract.PICK, VideoContract.CAPTURE -> {
                 require(keys(data) == setOf("resourceId","kind","mimeType","sizeBytes"))
                 require(data.getString("resourceId").matches(Regex("[0-9a-f]{64}")))
                 val kind=checkNotNull(CapabilityResources.resourceKind(capability))
@@ -77,6 +77,10 @@ object CapabilityResultEvent {
                 require(data.get("mimeType") is String && data.getString("mimeType").matches(Regex("[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+")) && data.getString("mimeType").length <= 100)
                 val size=data.get("sizeBytes")
                 val sizes = when(capability) {
+                    MiniAppImage.ID -> {
+                        require(data.getString("mimeType") in setOf("image/png", "image/jpeg", "image/webp"))
+                        1..CapabilityResources.MAX_FILE_BYTES
+                    }
                     AudioContract.PICK -> {require(AudioContract.isAudioMime(data.getString("mimeType"))); 1..MAX_MEDIA_BYTES}
                     VideoContract.PICK, VideoContract.CAPTURE -> {require(VideoContract.isVideoMime(data.getString("mimeType"))); 1..MAX_MEDIA_BYTES}
                     else -> 0..CapabilityResources.MAX_FILE_BYTES

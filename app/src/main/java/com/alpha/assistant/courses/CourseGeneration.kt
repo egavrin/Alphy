@@ -134,7 +134,7 @@ internal class CourseGeneration(
         key: String, input: Input, session: CloudSession, artifactId: String, kind: CourseSlideKind,
     ): CourseSlideContent {
         val checks = CourseExecutionChecks(kind)
-        val (preview, sourceIds) = try {
+        val (preview, sourceIds, illustration) = try {
             generateTool(key, input, session, artifactId, checks.policy, kind)
         } catch (cancel: CancellationException) {
             throw cancel
@@ -162,7 +162,7 @@ internal class CourseGeneration(
             courseFailure(CourseWorkflowError.INVALID_OUTPUT)
         }
         val sources = sourceIds.map { id -> input.sources[id] ?: courseFailure(CourseWorkflowError.INVALID_OUTPUT) }
-        return CourseSlideContent(spec.json, ui.toString(), state.toString(), sources)
+        return CourseSlideContent(spec.withLessonImage(illustration).json, ui.toString(), state.toString(), sources)
     }
 
     fun sceneHost(store: CourseStore, page: CoursePage.Slide): CourseSceneHost =
@@ -209,6 +209,13 @@ internal const val EXERCISE_FIELD = "courseExerciseV1"
 
 internal fun parseCourseSpec(content: CourseSlideContent, kind: CourseSlideKind? = null): ToolSpec = validateCourseOutput {
     ToolSpec.parsePersisted(content.definitionJson).also { checkCourseDefinition(JSONObject(it.json), kind) }
+}
+
+internal fun courseSceneDefinition(definition: String): String {
+    val json = JSONObject(definition)
+    val intent = json.remove("lessonImageIntent")
+    val images = json.remove(com.alpha.assistant.images.GeneratedImage.FIELD)
+    return if (intent == null && images == null) definition else json.toString()
 }
 
 private fun checkCourseDefinition(definition: JSONObject, kind: CourseSlideKind?): String? {

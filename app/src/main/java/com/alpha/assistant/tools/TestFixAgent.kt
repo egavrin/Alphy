@@ -131,7 +131,9 @@ internal class TestFixAgent(
                 val applied = repair.apply(output, restrictRemovals = true).text
                 val candidate = if (mixed) ToolComposition.refine(original, JSONObject(applied).getJSONObject("fill").toString())
                 else original.preserveNativePresentation(ToolSpec.parse(applied))
-                val spec = candidate.withAppLanguage(original.appLanguage).withIcon(original.iconId)
+                require(imageSlots(candidate.ui) == imageSlots(original.ui)) { "The repair changed generated image placements." }
+                val spec = candidate.withGeneratedImages(original.generatedImages)
+                    .withAppLanguage(original.appLanguage).withIcon(original.iconId)
                 val state = ToolSpec.stateForRevision(original, spec, base.state)
                 val nextRevision = Math.incrementExact(base.revision)
                 val outcome = inspect(spec, nextRevision, first.replay)

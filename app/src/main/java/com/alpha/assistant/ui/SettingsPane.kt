@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -67,6 +68,11 @@ import com.alpha.assistant.capabilities.AccessSettings
 import com.alpha.assistant.capabilities.AssistantSettingsRow
 import com.alpha.assistant.capabilities.HealthSettings
 import com.alpha.assistant.memory.MemoryScreen
+import com.alpha.assistant.images.ImageModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.compose.runtime.rememberCoroutineScope
 
 internal val SettingsSplitWidth = 700.dp
 private val SettingsRailWidth = 260.dp
@@ -74,6 +80,7 @@ internal val SettingsDetailWidth = 740.dp
 
 internal enum class SettingsSection(@StringRes val label: Int, val glyph: Glyph) {
     DeepSeek(R.string.settings_deepseek, Glyph.Cloud),
+    Images(R.string.settings_images, Glyph.Cloud),
     Voice(R.string.settings_voice, Glyph.Mic),
     Appearance(R.string.settings_appearance, Glyph.Screen),
     Access(R.string.access, Glyph.Shield),
@@ -83,7 +90,7 @@ internal enum class SettingsSection(@StringRes val label: Int, val glyph: Glyph)
 }
 
 private val settingsGroups = listOf(
-    R.string.settings_group_app to listOf(SettingsSection.DeepSeek, SettingsSection.Voice, SettingsSection.Appearance),
+    R.string.settings_group_app to listOf(SettingsSection.DeepSeek, SettingsSection.Images, SettingsSection.Voice, SettingsSection.Appearance),
     R.string.settings_group_data to listOf(SettingsSection.Access, SettingsSection.Health, SettingsSection.Memory),
     R.string.settings_group_maintenance to listOf(SettingsSection.Updates),
 )
@@ -136,6 +143,7 @@ private fun SettingsLayout(
                     key(section) {
                         when (section) {
                             SettingsSection.DeepSeek -> DeepSeekSettings(model)
+                            SettingsSection.Images -> ImageSettingsPane(model)
                             SettingsSection.Voice -> SettingsDetail(section) { SettingsPanel { VoiceControls(model, settingsDisclosure = true) } }
                             SettingsSection.Appearance -> SettingsDetail(section) { AppearanceSettings() }
                             SettingsSection.Access -> SettingsDetail(section) { AccessSettings(model.tools.networkAccessHost) }
@@ -286,6 +294,68 @@ private fun NameSettings(model: ShellViewModel) {
     OutlinedTextField(value = model.snapshot.userName, onValueChange = model::setUserName, label = { Text(label) },
         supportingText = { Text(stringResource(R.string.settings_name_hint)) }, singleLine = true,
         modifier = Modifier.fillMaxWidth().semantics { contentDescription = label })
+}
+
+@Composable
+private fun ImageSettingsPane(model: ShellViewModel) {
+    val settings = model.imageGeneration.settings
+    val scope = rememberCoroutineScope()
+    var key by remember { mutableStateOf("") }
+    var enabled by remember { mutableStateOf(settings.enabled && settings.hasKey) }
+    var hasKey by remember { mutableStateOf(settings.hasKey) }
+    var selected by remember { mutableStateOf(settings.model) }
+    var busy by remember { mutableStateOf(false) }
+    var failure by remember { mutableStateOf(false) }
+    fun change(action: () -> Result<Unit>, done: () -> Unit = {}) {
+        if (busy) return
+        busy = true
+        failure = false
+        scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) { action() }
+                enabled = settings.enabled && settings.hasKey
+                hasKey = settings.hasKey
+                failure = result.isFailure
+                if (result.isSuccess) done()
+            } finally { busy = false }
+        }
+    }
+    SettingsDetail(SettingsSection.Images, rememberScrollState()) {
+        SettingsPanel {
+            Text(stringResource(R.string.image_consent))
+            val label = stringResource(R.string.image_key)
+            OutlinedTextField(key, { key = it }, Modifier.fillMaxWidth().semantics { contentDescription = label },
+                enabled = !busy, label = { Text(label) }, singleLine = true,
+                visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+            Text(stringResource(if (hasKey) R.string.image_key_ready else R.string.image_key_missing))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { val value = key; change({ settings.saveKey(value) }) { key = "" } },
+                    enabled = !busy && key.isNotBlank()) { Text(stringResource(R.string.consent_and_save)) }
+                if (hasKey) TextButton(onClick = { change(settings::clearKey) }, enabled = !busy) {
+                    Text(stringResource(R.string.image_key_remove))
+                }
+            }
+            val enabledLabel = stringResource(R.string.image_enable)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(enabledLabel, Modifier.weight(1f))
+                Switch(checked = enabled, onCheckedChange = { value -> change({ settings.setEnabled(value) }) },
+                    enabled = hasKey && !busy, modifier = Modifier.semantics { contentDescription = enabledLabel })
+            }
+            Text(stringResource(R.string.image_model))
+            Column(Modifier.selectableGroup()) {
+                ImageModel.entries.forEach { choice ->
+                    Row(Modifier.fillMaxWidth().selectable(selected == choice, enabled = !busy, role = Role.RadioButton) {
+                        settings.select(choice)
+                        selected = choice
+                    }.heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected == choice, onClick = null)
+                        Text(choice.title, Modifier.padding(start = 8.dp))
+                    }
+                }
+            }
+            if (failure) Text(stringResource(R.string.key_save_failed), color = MaterialTheme.colorScheme.error)
+        }
+    }
 }
 
 @Composable

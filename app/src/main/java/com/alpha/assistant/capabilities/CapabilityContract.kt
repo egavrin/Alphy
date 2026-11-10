@@ -7,7 +7,7 @@ import org.json.JSONObject
 import java.net.URI
 
 /** Exhaustive native bindings keep validators and executors aligned. */
-enum class CapabilityAction { NOTIFICATION_POST, CALENDAR_READ, CALENDAR_CREATE, CALENDAR_OWNED, MEDICINE, LINK_OPEN, APP_OPEN, MAPS_OPEN, MAPS_MARK_REACHED, MAPS_ROUTE, VIBRATION_PLAY, FLASHLIGHT_SET, PHOTO_PICK, FILE_PICK, CAMERA_CAPTURE, DEVICE_READ, AUDIO_PICK, AUDIO_PLAYBACK, NETWORK_REQUEST, VIDEO_PICK, VIDEO_CAPTURE, VIDEO_PLAYBACK, AI_ASK, PHONE_DIAL, SHARE_TEXT, TILT_STREAM }
+enum class CapabilityAction { NOTIFICATION_POST, CALENDAR_READ, CALENDAR_CREATE, CALENDAR_OWNED, MEDICINE, LINK_OPEN, APP_OPEN, MAPS_OPEN, MAPS_MARK_REACHED, MAPS_ROUTE, VIBRATION_PLAY, FLASHLIGHT_SET, PHOTO_PICK, FILE_PICK, CAMERA_CAPTURE, DEVICE_READ, AUDIO_PICK, AUDIO_PLAYBACK, NETWORK_REQUEST, VIDEO_PICK, VIDEO_CAPTURE, VIDEO_PLAYBACK, AI_ASK, IMAGE_GENERATE, PHONE_DIAL, SHARE_TEXT, TILT_STREAM }
 data class CapabilityArgument(val type: String, val optional: Boolean = false, val maxLength: Int = 500,
     val minimum: Long = 0, val maximum: Long = 4102444800000L, val choices: Set<String> = emptySet(), val format: String? = null, val allowEmpty: Boolean = false) {
     fun schema() = JSONObject().put("type",if (type == "scalar") JSONArray(listOf("string", "number", "boolean")) else type).apply {
@@ -65,7 +65,7 @@ data class CapabilityDefinition(val id: String, val title: String, val action: C
         else capabilityArgumentSchema(parameters)
     fun json() = JSONObject().put("id",id).put("title",title).put("implementation","implemented").put("callable",true)
         .put("argumentSchema",argumentSchema).put("description",explanation).put("minApi",minApi)
-        .put("access",JSONObject().put("toolGrant",id==NetworkEffectContract.ID).put("confirmation",id=="share.text" || id==PHOTO_CAPTURE).put("androidPermission",permission ?: JSONObject.NULL)
+        .put("access",JSONObject().put("toolGrant",id==NetworkEffectContract.ID).put("confirmation",id in setOf("share.text", PHOTO_CAPTURE, MiniAppImage.ID)).put("androidPermission",permission ?: JSONObject.NULL)
             .put("manifestPermissions",JSONArray(when {
                 id == DeviceReadContract.STATUS -> listOf(Manifest.permission.ACCESS_NETWORK_STATE)
                 id == NetworkEffectContract.ID -> listOf(Manifest.permission.INTERNET,Manifest.permission.ACCESS_LOCAL_NETWORK)
@@ -109,7 +109,7 @@ data class CapabilityDefinition(val id: String, val title: String, val action: C
             CapabilityAction.MAPS_OPEN, CapabilityAction.VIBRATION_PLAY, CapabilityAction.FLASHLIGHT_SET,
             CapabilityAction.PHOTO_PICK, CapabilityAction.FILE_PICK, CapabilityAction.CAMERA_CAPTURE, CapabilityAction.DEVICE_READ,
             CapabilityAction.AUDIO_PICK, CapabilityAction.AUDIO_PLAYBACK, CapabilityAction.NETWORK_REQUEST,
-            CapabilityAction.VIDEO_PICK, CapabilityAction.VIDEO_CAPTURE, CapabilityAction.VIDEO_PLAYBACK, CapabilityAction.AI_ASK,
+            CapabilityAction.VIDEO_PICK, CapabilityAction.VIDEO_CAPTURE, CapabilityAction.VIDEO_PLAYBACK, CapabilityAction.AI_ASK, CapabilityAction.IMAGE_GENERATE,
             CapabilityAction.PHONE_DIAL, CapabilityAction.SHARE_TEXT, CapabilityAction.TILT_STREAM -> Unit
         }
     }
@@ -202,6 +202,12 @@ object CapabilityCatalog {
             "Send only the supplied text to DeepSeek from an explicit foreground action. Uses the host's existing key consent independently of the mini-app network grant. Set capabilityResults to true. No search or additional context.","succeeded",
             "A bounded plain-text answer. Missing consent or key returns denied. Results cannot request another call.",foreground = true,
             resultData = """{"text":{"type":"string","maxLength":${MiniAppAi.MAX_ANSWER}}}"""),
+        CapabilityDefinition(MiniAppImage.ID, "Генерация изображения", CapabilityAction.IMAGE_GENERATE,
+            mapOf("prompt" to text(1500), "alt" to text(160, format = "control-free"),
+                "aspect" to CapabilityArgument("string", choices = setOf("1:1", "3:2"))),
+            "Generate one image from a direct button action in a focused saved native mini-app. Use capabilityResults: true. The host reviews the exact prompt and selected model with the user before each paid call and handles waiting. Keep the button usable after an interruption.",
+            "succeeded", "Use the returned resourceId in a native image node owned by this app. Result callbacks cannot request new effects.",
+            foreground = true, resultData = """{"resourceId":{"type":"string","format":"opaque-owner-handle"},"kind":{"type":"string","const":"generatedImage"},"mimeType":{"type":"string"},"sizeBytes":{"type":"integer","maximum":10485760}}"""),
         CapabilityDefinition(PHOTO_CAPTURE,"Снимок с камеры",CapabilityAction.CAMERA_CAPTURE,
             mapOf("lens" to CapabilityArgument("string", optional = true, choices = PhotoLens.entries.map { it.wireName }.toSet())),
             "Take a still photo with the rear, back, or main camera, or take a selfie with the front camera. Use lens front or rear. Default rear. The user uses a visible shutter and confirms the photo.","awaitingUser",
@@ -289,7 +295,7 @@ object CapabilityCatalog {
         val ids = mutableSetOf<String>()
         return (0 until json.length()).map { request(json.getJSONObject(it)).also { r ->
             require(r.capability in declared) { "Инструмент не объявил эту системную функцию" }
-            require(r.capability !in setOf(NetworkEffectContract.ID, MiniAppAi.ID, TorchSequence.ID, "share.text", VideoContract.CAPTURE, TiltContract.ID) || json.length()==1) { "Запрос должен быть единственным эффектом действия." }
+            require(r.capability !in setOf(NetworkEffectContract.ID, MiniAppAi.ID, MiniAppImage.ID, TorchSequence.ID, "share.text", VideoContract.CAPTURE, TiltContract.ID) || json.length()==1) { "Запрос должен быть единственным эффектом действия." }
             require(ids.add(r.id)) { "Повторяется идентификатор системной операции" }
         } }
     }

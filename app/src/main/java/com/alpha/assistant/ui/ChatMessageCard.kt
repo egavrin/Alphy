@@ -1,5 +1,7 @@
 package com.alpha.assistant.ui
 
+import androidx.compose.runtime.remember
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.net.Uri
@@ -112,7 +114,14 @@ import com.alpha.assistant.data.Source
                     }
                 }
                 message.attachments.forEach {
-                    Text(stringResource(R.string.chat_attachment_history, it.name), style = MaterialTheme.typography.bodySmall)
+                    if (!user && it.mime == com.alpha.assistant.images.GeneratedImage.ATTACHMENT) {
+                        val image = remember(it) { runCatching {
+                            com.alpha.assistant.images.GeneratedImage.read(org.json.JSONObject(it.contextText.orEmpty()))
+                        }.getOrNull() }
+                        image?.let { com.alpha.assistant.images.GeneratedImageView(it) }
+                    } else {
+                        Text(stringResource(R.string.chat_attachment_history, it.name), style = MaterialTheme.typography.bodySmall)
+                    }
                 }
                 progress?.let { Text(stringResource(it), style = MaterialTheme.typography.labelSmall) }
                 if (message.sources.isNotEmpty()) {

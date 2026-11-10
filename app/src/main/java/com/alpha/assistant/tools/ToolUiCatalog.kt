@@ -91,7 +91,7 @@ object ToolUiCatalog {
         add(entry("timelineItem",setOf("bind","detail","time","detailBind","timeBind","action"),binding=scalar))
         for(type in listOf("progress","progressRing")) add(entry(type,setOf("bind","min","max","indeterminate"),Projection.TEXT,setOf("number")))
         add(entry("chart",setOf("kind","categories","series")))
-        add(entry("image",setOf("bind","resourceId","fit"),binding=setOf("string")))
+        add(entry("image",setOf("bind","resourceId","assetSlot","fit"),binding=setOf("string")))
         add(entry("video", setOf("bind", "action"), binding = setOf("string"), action = true)
             .let { it.copy(properties = it.properties - "interactions") })
         for(type in listOf("divider","skeleton","spinner")) add(entry(type,projection=Projection.OMIT))
@@ -498,9 +498,13 @@ object ToolUiCatalog {
                 "chart" -> validateChart(node,fields,state,trace,location,schemaOnly)
                 "image" -> {
                     trace?.at("image_handle",location,"opaque_resource_handle",node)
-                    require(node.has("bind") != node.has("resourceId"))
-                    val handle=if(node.has("bind")) value(state,node.getString("bind")) else node.get("resourceId")
-                    require(handle is String && ((node.has("bind") && handle.isEmpty()) || handle.matches(Regex("[0-9a-f]{64}")))) {"Images need an opaque resource handle."}
+                    require(listOf("bind", "resourceId", "assetSlot").count(node::has) == 1)
+                    if (node.has("assetSlot")) {
+                        require(node.get("assetSlot").let { it is String && it.matches(Regex("[A-Za-z][A-Za-z0-9_-]{0,39}")) })
+                    } else {
+                        val handle=if(node.has("bind")) value(state,node.getString("bind")) else node.get("resourceId")
+                        require(handle is String && ((node.has("bind") && handle.isEmpty()) || handle.matches(Regex("[0-9a-f]{64}")))) {"Images need an opaque resource handle."}
+                    }
                     if(node.has("fit")) require(node.get("fit") is String && node.getString("fit") in setOf("fit","crop"))
                 }
                 "video" -> if (!schemaOnly) {

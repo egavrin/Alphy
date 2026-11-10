@@ -48,7 +48,7 @@ internal object AudioContract {
 
 /** These operations need continuous native foreground authority through execution and result delivery. */
 internal object ForegroundCapabilityEffects {
-    val executionIds = DeviceReadContract.ids + AudioContract.playbackIds + NetworkEffectContract.ID + VideoContract.PLAY + MiniAppAi.ID
+    val executionIds = DeviceReadContract.ids + AudioContract.playbackIds + NetworkEffectContract.ID + VideoContract.PLAY + MiniAppAi.ID + MiniAppImage.ID
     val deliveryIds = executionIds + AudioContract.PICK + VideoContract.PICK + VideoContract.CAPTURE + TiltContract.ID + PHOTO_CAPTURE
     fun cancelled(id: String) = when (id) {
         in AudioContract.playbackIds -> AudioContract.cancelled()
@@ -56,6 +56,7 @@ internal object ForegroundCapabilityEffects {
         NetworkEffectContract.ID -> NetworkEffectContract.receiptResult("cancelled")
         VideoContract.PLAY -> VideoContract.cancelled()
         VideoContract.PICK, VideoContract.CAPTURE -> CapabilityResult("cancelled", "Выбор видеофайла отменён.")
+        MiniAppImage.ID -> CapabilityResult("cancelled", "Запрос изображения отменён.")
         MiniAppAi.ID -> MiniAppAi.cancelled()
         else -> DeviceReadContract.cancelled()
     }

@@ -1025,7 +1025,7 @@ private fun hasLiveControl(node: JSONObject): Boolean {
             }
         }
         if (spec?.capabilities.orEmpty().any {
-                it == com.alpha.assistant.capabilities.MiniAppAi.ID || it == com.alpha.assistant.capabilities.TiltContract.ID
+                it in setOf(com.alpha.assistant.capabilities.MiniAppAi.ID, com.alpha.assistant.capabilities.MiniAppImage.ID, com.alpha.assistant.capabilities.TiltContract.ID)
             }) {
             val view = LocalView.current
             DisposableEffect(controller, deviceHost, view) {
@@ -1081,7 +1081,18 @@ private fun hasLiveControl(node: JSONObject): Boolean {
         else ToolContent(current.ui,projected?.getOrNull() ?: current.state,enabled && !controller.settlingPhoto && (!needsProjection || projected != null),
             heading=heading,calendarHost=calendarHost,embedded=embedded,
             background=if(embedded) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
-            imageVersion=(tool.id to current.revision),imageLoader={controller.nativeImage(tool.id,it)},imageAvailable={controller.nativeImageAvailable(tool.id,it)},
+            imageVersion=(tool.id to current.revision),
+            imageLoader={ handle ->
+                if (handle.startsWith("slot:")) spec?.generatedImages?.firstOrNull { "slot:" + it.slot == handle }?.let {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.alpha.assistant.tools.three.ThreeSceneAssets(navigationContext).generatedBitmap(it.asset)
+                    }
+                } else controller.nativeImage(tool.id, handle)
+            },
+            imageAvailable={ handle ->
+                if (handle.startsWith("slot:")) spec?.generatedImages?.any { "slot:" + it.slot == handle } == true
+                else controller.nativeImageAvailable(tool.id, handle)
+            },
             routeSystemBackEnabled = routeSystemBackEnabled, presentation = presentation, liveInput = liveInput, videoHost = videoHost, timerHost = timerHost,
             onLiveInputState = onLiveInputState, appLanguage = spec?.appLanguage) {id,value ->
             if (value == null && visibleUi?.let { ToolUiCatalog.action(it, id)?.optString("type") } == "button") {

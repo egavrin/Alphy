@@ -1,5 +1,7 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.images.GeneratedImage
+import com.alpha.assistant.images.ImageIntent
 import com.alpha.assistant.sandbox.SandboxContract
 import com.alpha.assistant.tools.three.ThreeSceneAssetRef
 import com.alpha.assistant.tools.three.ThreeSceneAssets
@@ -63,7 +65,8 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     internal val hostControls: ArtifactHostControls,
     internal val composition: ToolComposition?, internal val nativePresentation: NativePresentation?,
     internal val appLanguage: String?, internal val iconId: String?,
-    internal val threeScene: Boolean, internal val sceneAssets: List<ThreeSceneAssetRef>) {
+    internal val threeScene: Boolean, internal val sceneAssets: List<ThreeSceneAssetRef>,
+    internal val generatedImages: List<GeneratedImage>, internal val lessonImageIntent: ImageIntent?) {
     internal val isSealedStandalone: Boolean get() = composition?.isSealedStandalone == true
     internal val canQueueLocalButtons: Boolean get() = !threeScene && capabilities.isEmpty() && collections.length() == 0 && surfaces.isEmpty()
 
@@ -80,6 +83,9 @@ data class ToolSpec private constructor(val json: String, val title: String, val
         return try {
             val catalogRoot = composition?.let { validateComposition { it.catalogUi(root,state) } } ?: root
             validateTool(ToolValidationCategory.UI_STRUCTURE) {ToolUiCatalog.validate(catalogRoot,schema,state,trace,capabilities)}
+            if (generatedImages.isNotEmpty()) validateTool(ToolValidationCategory.UI_STRUCTURE) {
+                require(generatedImages.map { it.slot }.containsAll(imageSlots(root))) { "Unknown generated image slot." }
+            }
             val placed = canvasSurfaceIds(root)
             if (placed.isNotEmpty() && (presentation != "app" || placed.size != surfaces.size || placed.toSet() != surfaces.keys ||
                     canvasSurfaceIds(ui).isEmpty())) {
@@ -101,12 +107,14 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     fun action(ui: JSONObject, id: String): JSONObject? = ToolUiCatalog.action(ui,id)
 
     internal fun providerDefinition(): String {
-        if (composition == null && nativePresentation == null && appLanguage == null && iconId == null && !threeScene) return json
+        if (composition == null && nativePresentation == null && appLanguage == null && iconId == null && !threeScene && generatedImages.isEmpty() && lessonImageIntent == null) return json
         val definition = composition?.fillDefinition(this) ?: JSONObject(json).apply { remove(NativePresentation.FIELD) }
         definition.remove(APP_LANGUAGE_FIELD)
         definition.remove(ICON_ID_FIELD)
         definition.remove("sceneAssets")
         definition.remove("threeLibrary")
+        definition.remove(GeneratedImage.FIELD)
+        definition.remove("lessonImageIntent")
         return definition.toString()
     }
 
@@ -114,6 +122,22 @@ data class ToolSpec private constructor(val json: String, val title: String, val
         require(threeScene)
         val definition = JSONObject(json).put("threeLibrary", THREE_LIBRARY)
             .put("sceneAssets", org.json.JSONArray(assets.map { it.json() }))
+        return parsePersisted(definition.toString())
+    }
+
+    internal fun withGeneratedImages(images: List<GeneratedImage>): ToolSpec {
+        if (images.isEmpty() && generatedImages.isEmpty()) return this
+        val definition = JSONObject(json)
+        if (images.isEmpty()) definition.remove(GeneratedImage.FIELD)
+        else definition.put(GeneratedImage.FIELD, org.json.JSONArray(images.map { it.json() }))
+        return parsePersisted(definition.toString())
+    }
+
+    internal fun withLessonImage(intent: ImageIntent?, image: GeneratedImage? = null): ToolSpec {
+        if (intent == lessonImageIntent && image == null) return this
+        val definition = JSONObject(json)
+        if (intent == null) definition.remove("lessonImageIntent") else definition.put("lessonImageIntent", intent.json())
+        if (image != null) definition.put(GeneratedImage.FIELD, org.json.JSONArray(listOf(image.json())))
         return parsePersisted(definition.toString())
     }
 
@@ -219,7 +243,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
             validateTool(ToolValidationCategory.FIELDS) {
                 val fields = j.keys().asSequence().toSet()
                 val optional = optionalGeneratedFields +
-                    (if (persisted) setOf("composition",NativePresentation.FIELD,APP_LANGUAGE_FIELD,ICON_ID_FIELD,"sceneAssets","threeLibrary") else emptySet())
+                    (if (persisted) setOf("composition",NativePresentation.FIELD,APP_LANGUAGE_FIELD,ICON_ID_FIELD,"sceneAssets","threeLibrary",GeneratedImage.FIELD,"lessonImageIntent") else emptySet())
                 require(fields.containsAll(requiredGeneratedFields) && fields.all { it in requiredGeneratedFields || it in optional })
                 require(!j.has("capabilityResults") || j.get("capabilityResults") is Boolean) { "Неверные поля инструмента" }
             }
@@ -308,12 +332,22 @@ data class ToolSpec private constructor(val json: String, val title: String, val
                     emptyList()
                 }
             }
+            val generatedImages = validateTool(ToolValidationCategory.FIELDS) {
+                GeneratedImage.list(j.optJSONArray(GeneratedImage.FIELD)).also { images ->
+                    require(!j.has(GeneratedImage.FIELD) || j.optJSONArray(GeneratedImage.FIELD) != null)
+                    require(!threeScene || images.all { image -> sceneAssets.any { it.id == image.asset.id && it.mime == image.asset.mime && it.size == image.asset.size } })
+                    if (j.has(GeneratedImage.FIELD)) require(images.map { it.slot }.containsAll(imageSlots(ui)))
+                }
+            }
+            val lessonImageIntent = validateTool(ToolValidationCategory.FIELDS) {
+                if (j.has("lessonImageIntent")) ImageIntent.read(j.getJSONObject("lessonImageIntent")) else null
+            }
             val encoded = j.toString()
             validateTool(ToolValidationCategory.JSON) {
                 require(encoded.toByteArray(Charsets.UTF_8).size <= MAX_DEFINITION_BYTES)
             }
             return ToolSpec(encoded, j.getString("title"), j.getString("description"), source, schema,
-                initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surfaces,presentation,hostControls,composition,nativePresentation,appLanguage,iconId,threeScene,sceneAssets).also {
+                initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surfaces,presentation,hostControls,composition,nativePresentation,appLanguage,iconId,threeScene,sceneAssets,generatedImages,lessonImageIntent).also {
                 validateTool(ToolValidationCategory.INITIAL_STATE) { it.validateState(it.initialState) }
                 it.validateUi(it.ui,JSONObject(it.initialState),ToolUiValidationStage.DEFINITION,observer)
             }
@@ -347,4 +381,18 @@ internal fun canvasSurfaceIds(node: JSONObject, state: JSONObject? = null): List
         if (active != null) addAll(canvasSurfaceIds(children.getJSONObject(active), state))
         else repeat(children.length()) { addAll(canvasSurfaceIds(children.getJSONObject(it), state)) }
     }
+}
+
+
+internal fun imageSlots(root: JSONObject): Set<String> = buildSet {
+    fun visit(value: Any?) {
+        when (value) {
+            is JSONObject -> {
+                if (value.optString("type") == "image" && value.has("assetSlot")) add(value.getString("assetSlot"))
+                value.keys().forEach { visit(value.opt(it)) }
+            }
+            is org.json.JSONArray -> repeat(value.length()) { visit(value.opt(it)) }
+        }
+    }
+    visit(root)
 }

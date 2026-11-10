@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools.generation
 
+import com.alpha.assistant.images.ImagePlan
 import com.alpha.assistant.courses.COURSE_EXERCISE_FEEDBACK_LIMIT
 import com.alpha.assistant.courses.CourseSlideKind
 import com.alpha.assistant.cloud.ResponseShape
@@ -273,8 +274,11 @@ internal data class PlanQuestion(val id: String, val ask: String, val options: L
 
 internal sealed interface GenerationPlan {
     val scene: SceneRequirement?
-    data class WholeScreen(override val scene: SceneRequirement?, val threeScene: Boolean = false) : GenerationPlan
-    data class Parts(val needs: NeedsPlan, override val scene: SceneRequirement? = null) : GenerationPlan
+    val images: ImagePlan
+    data class WholeScreen(override val scene: SceneRequirement?, val threeScene: Boolean = false,
+        override val images: ImagePlan = ImagePlan()) : GenerationPlan
+    data class Parts(val needs: NeedsPlan, override val scene: SceneRequirement? = null,
+        override val images: ImagePlan = ImagePlan()) : GenerationPlan
 }
 
 internal class NeedsPlan private constructor(
@@ -455,9 +459,12 @@ internal class NeedsPlan private constructor(
             """.trimIndent()
         }
 
-        fun parseResponse(raw: String, lessonTarget: CourseSlideKind?, allowedSourceIds: Set<String>, request: String? = null): GenerationPlan {
+        fun parseResponse(raw: String, lessonTarget: CourseSlideKind?, allowedSourceIds: Set<String>, request: String? = null,
+            imageLimit: Int = 0, existingImages: Set<String> = emptySet()): GenerationPlan {
             requireSourceAllowlist(lessonTarget, allowedSourceIds)
             val root = partsObject(raw, "$")
+            val images = try { ImagePlan.take(root, imageLimit, existingImages) }
+                catch (_: Exception) { throw PartsContractFailure("$.imageRequests", "bounded image requests and known removal slots") }
             if (root.has("wholeScreen")) {
                 requireParts(lessonTarget == null, "$.wholeScreen", "a new non-lesson app")
                 root.requireKeys("$", setOf("wholeScreen", "language"), setOf("literals", "iconId", "scene", "runtime"))
@@ -468,7 +475,7 @@ internal class NeedsPlan private constructor(
                 val scene = SceneRequirement.read(root.opt("scene"), threeScene, request)
                 requireParts(!threeScene || root.opt("runtime") == "threejs-worker" && scene?.placement == "stage",
                     "$.runtime", "threejs-worker with a stage scene check")
-                return GenerationPlan.WholeScreen(scene, threeScene)
+                return GenerationPlan.WholeScreen(scene, threeScene, images)
             }
             val scene = SceneRequirement.read(root.remove("scene"), request = request)
             val needs = parse(root, lessonTarget, allowedSourceIds, scene)
@@ -478,7 +485,8 @@ internal class NeedsPlan private constructor(
                 if (hasScene) lessonTarget.allowsScene && scene?.placement == "inline" else scene == null,
                 "$.scene", "an inline check for the requested lesson scene"
             )
-            return GenerationPlan.Parts(needs, scene)
+            requireParts(lessonTarget != null || images.requests.isEmpty(), "$.imageRequests", "wholeScreen:true when authoring image assets")
+            return GenerationPlan.Parts(needs, scene, images)
         }
 
         fun parse(raw: String, lessonTarget: CourseSlideKind? = null, allowedSourceIds: Set<String> = emptySet()): NeedsPlan {

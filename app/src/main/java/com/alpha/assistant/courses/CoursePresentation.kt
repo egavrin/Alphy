@@ -25,6 +25,7 @@ internal sealed interface CoursePage {
         val feedback: CourseAnswerFeedback?,
         val scene: ToolSpec? = null,
         val sceneRevision: Long = course.outlineRevision,
+        internal val imageDefinition: ToolSpec? = null,
     ) : CoursePage
 
     data class Unavailable(
@@ -291,6 +292,8 @@ internal class CoursePresentation(
         content.encodeSources()
         val spec = parseCourseSpec(content, step.slide.kind)
         val scene = spec.takeIf { step.slide.kind.allowsScene && it.surfaces.isNotEmpty() }
+            ?.let { if (it.lessonImageIntent == null && it.generatedImages.isEmpty()) it
+                else ToolSpec.parsePersisted(courseSceneDefinition(it.json)) }
         require(spec.composition == null || scene != null)
         val exercise = CourseExercise.read(spec, step.slide.kind)
         require(exercise?.actionId == null)
@@ -298,7 +301,8 @@ internal class CoursePresentation(
         val (ui, state) = checkedCourseUi(spec, content.uiJson, content.stateJson, exercise, step.slide.kind)
         val feedback = attempt?.let { CourseAnswerFeedback(it.answer, it.correct) }
         CoursePage.Slide(course, step, number, ui.toString(), state.toString(), exercise?.prompt,
-            content.sources, content.adaptationNote, feedback, scene)
+            content.sources, content.adaptationNote, feedback, scene,
+            imageDefinition = spec.takeIf { it.lessonImageIntent != null || it.generatedImages.isNotEmpty() })
     }
 
     private fun requireCourse(id: String): CourseSnapshot =

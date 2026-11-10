@@ -1170,7 +1170,11 @@ private fun courseSceneSlot(root: JSONObject): Int? {
         "chart" -> NativeChart(node,state,modifier,heading)
         "video" -> NativeVideo(node, state, enabled, modifier)
         "image" -> {
-            val handle=if(binding.isNotEmpty()) ToolUiCatalog.value(state,binding).toString() else node.getString("resourceId")
+            val handle = when {
+                node.has("assetSlot") -> "slot:" + node.getString("assetSlot")
+                binding.isNotEmpty() -> ToolUiCatalog.value(state,binding).toString()
+                else -> node.getString("resourceId")
+            }
             val loader by rememberUpdatedState(imageLoader)
             val available by rememberUpdatedState(imageAvailable)
             val lifecycle=LocalLifecycleOwner.current.lifecycle

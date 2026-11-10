@@ -2,6 +2,9 @@ package com.alpha.assistant.capabilities
 
 import android.content.Context
 import android.content.Intent
+import com.alpha.assistant.R
+import com.alpha.assistant.images.ImageFailure
+import com.alpha.assistant.images.ImageGeneration
 import com.alpha.assistant.surfaces.ToolWidgets
 import com.alpha.assistant.tools.ToolStore
 import kotlinx.coroutines.CancellationException
@@ -88,9 +91,41 @@ class CapabilityBroker(private val context: Context, private val store: ToolStor
             ask(effect.request.args.getString("prompt")) { active() && store.effectTargetValid(effect) }
         }
 
+    internal suspend fun executeImage(prompt: CapabilityPrompt.Image, hosts: DeviceReadHosts,
+        images: ImageGeneration): CapabilityResult? = images.lease().use {
+        val resources = CapabilityResources(context, store)
+        var resource: CapabilityResource? = null
+        executeForegroundEffect(prompt.effectKey, prompt.origin, hosts, setOf(MiniAppImage.ID),
+            requireFocus = true, requireOrigin = true, prepare = { true }, resource = { resource },
+            publishAllowed = { images.settings.isCurrent(prompt.selection) }) { effect, active, _ ->
+            if (MiniAppImage.intent(effect) != prompt.intent || !active() || !store.effectTargetValid(effect))
+                return@executeForegroundEffect ForegroundCapabilityEffects.cancelled(MiniAppImage.ID)
+            if (!images.settings.isCurrent(prompt.selection))
+                return@executeForegroundEffect CapabilityResult("denied", context.getString(R.string.image_disabled))
+            resources.reclaimUnavailable(effect.owner)
+            if (store.resources(effect.owner).size + store.acquisitions().count { it.owner == effect.owner } >= CapabilityResources.MAX_RESOURCES)
+                return@executeForegroundEffect CapabilityResult("unavailable", context.getString(R.string.image_resource_limit))
+            try {
+                val image = images.generate("runtime:${effect.key}", listOf(prompt.intent), prompt.selection, 1).single()
+                images.ensureCurrent(prompt.selection)
+                val acquired = resources.generatedImage(effect.owner, image)
+                resource = acquired
+                CapabilityResult("succeeded", "Изображение сохранено.", acquired.metadata())
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (failure: ImageFailure) {
+                CapabilityResult(if (failure.unknownOutcome) "unknownOutcome" else "failed",
+                    failure.message ?: context.getString(R.string.image_provider_error))
+            } catch (_: Exception) {
+                CapabilityResult("failed", context.getString(R.string.image_provider_error))
+            }
+        }
+    }
+
     /** The ledger owns claim and finish. Android preparation and playback run outside the effect mutex. */
     private suspend fun executeForegroundEffect(key: String, host: DeviceReadHost, hosts: DeviceReadHosts, ids: Set<String>,
-        requireFocus: Boolean = false,
+        requireFocus: Boolean = false, requireOrigin: Boolean = false,
+        resource: (() -> CapabilityResource?)? = null, publishAllowed: () -> Boolean = { true },
         prepare: suspend (CapabilityEffect) -> Boolean?,
         execute: suspend (CapabilityEffect, () -> Boolean, Boolean) -> CapabilityResult): CapabilityResult? {
         val effect = ToolStore.effectMutex.withLock {
@@ -101,12 +136,12 @@ class CapabilityBroker(private val context: Context, private val store: ToolStor
         }
         val cancelled = ForegroundCapabilityEffects.cancelled(effect.request.capability)
         suspend fun finish(result: CapabilityResult, active: () -> Boolean = { true }): CapabilityResult = ToolStore.effectMutex.withLock {
-            store.finishEffect(key, result, active)
+            store.finishEffect(key, result, { active() && (result.status != "succeeded" || publishAllowed()) }, resource?.invoke())
             store.effect(key)?.result ?: cancelled
         }
         try {
             val permitted = prepare(effect) ?: return finish(cancelled)
-            return hosts.whileVisible(host, requireFocus) { active ->
+            return hosts.whileVisible(host, requireFocus, requireOrigin) { active ->
                 val result = if (!active() || !store.effectTargetValid(effect)) cancelled else execute(effect,active,permitted)
                 currentCoroutineContext().ensureActive()
                 finish(result, active)

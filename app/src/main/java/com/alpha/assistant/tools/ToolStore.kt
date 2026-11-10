@@ -336,7 +336,7 @@ class ToolStore private constructor(internal val context: Context, internal val 
         if(c.moveToFirst()) effects(c.getString(0)).find { it.key == key } else null
     }
     /** Only the claimed native execution can publish its initial result. Terminal callbacks are immutable. */
-    fun finishEffect(key: String, result: CapabilityResult, canFinish: () -> Boolean = { true }) {
+    fun finishEffect(key: String, result: CapabilityResult, canFinish: () -> Boolean = { true }, resource: CapabilityResource? = null) {
         val permission=effect(key)?.let { it.request.capability in DeviceReadContract.ids || permissionGranted(it.request.capability) } ?: false
         transaction {
         val effect=effect(key) ?: return@transaction
@@ -367,7 +367,16 @@ class ToolStore private constructor(internal val context: Context, internal val 
             phase == "terminal" -> boundedResult(effect,result)
             else -> result
         }
-        updateEffect(key,safe,if(safe.status == "awaitingUser") phase else "terminal")
+        val committed = if (capability == com.alpha.assistant.capabilities.MiniAppImage.ID && safe.status == "succeeded") {
+            require(resource != null && resource.owner == effect.owner && safe.data.getString("resourceId") == resource.id)
+            if (resources(resource.owner).size >= CapabilityResources.MAX_RESOURCES)
+                CapabilityResult("unavailable", context.getString(com.alpha.assistant.R.string.image_resource_limit))
+            else {
+                insertResource(resource)
+                safe
+            }
+        } else safe
+        updateEffect(key,committed,if(committed.status == "awaitingUser") phase else "terminal")
         }
     }
     private fun boundedResult(effect: CapabilityEffect, result: CapabilityResult): CapabilityResult {
@@ -478,7 +487,9 @@ class ToolStore private constructor(internal val context: Context, internal val 
                 val interruptedEffect=effect(key)
                 if(interruptedEffect!=null && interruptedEffect.request.capability in ForegroundCapabilityEffects.deliveryIds) {
                     val capability=interruptedEffect.request.capability
-                    val result=if(capability==NetworkEffectContract.ID && phase=="running" &&
+                    val result=if (capability==com.alpha.assistant.capabilities.MiniAppImage.ID && phase=="running")
+                        CapabilityResult("unknownOutcome", context.getString(com.alpha.assistant.R.string.image_unknown))
+                    else if(capability==NetworkEffectContract.ID && phase=="running" &&
                         !com.alpha.assistant.network.NetworkMethod.valueOf(interruptedEffect.request.args.getString("method")).safe)
                         NetworkEffectContract.receiptResult("unknownOutcome") else ForegroundCapabilityEffects.cancelled(capability)
                     updateEffect(key,result,"terminal")

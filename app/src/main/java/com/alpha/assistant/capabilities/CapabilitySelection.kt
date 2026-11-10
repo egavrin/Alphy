@@ -18,6 +18,8 @@ internal sealed interface CapabilityPrompt {
     data class Camera(val launch: CapabilitySelectionLaunch, val capture: PhotoCapture, val origin: DeviceReadHost) : CapabilityPrompt
     data class Share(val effectKey: String, val text: String, val origin: DeviceReadHost,
         val launch: (Intent) -> Unit) : CapabilityPrompt
+    data class Image(val effectKey: String, val intent: com.alpha.assistant.images.ImageIntent, val origin: DeviceReadHost,
+        val selection: com.alpha.assistant.images.ImageSettings.Selection) : CapabilityPrompt
     data class Calendar(val effectKey: String) : CapabilityPrompt
     data class LocationPermission(val token: String, val effectKey: String, val host: DeviceReadHost) : CapabilityPrompt
 }

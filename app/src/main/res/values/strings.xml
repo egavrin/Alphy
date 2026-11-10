@@ -442,4 +442,22 @@
     <string name="tool_share_confirm">Поделиться</string>
     <string name="tool_stop_tilt">Остановить наклон</string>
     <string name="context_three_asset">Ресурс 3D-сцены</string>
+    <string name="settings_images">Изображения</string>
+    <string name="image_enable">Разрешить генерацию изображений</string>
+    <string name="image_consent">Alphy может отправлять запросы изображений в OpenRouter для чата, уроков и мини-приложений. OpenRouter может взимать плату. До четырёх изображений за создание или изменение мини-приложения.</string>
+    <string name="image_key">Ключ OpenRouter</string>
+    <string name="image_key_ready">Ключ OpenRouter сохранён</string>
+    <string name="image_key_missing">Добавьте ключ OpenRouter</string>
+    <string name="image_key_remove">Удалить ключ OpenRouter</string>
+    <string name="image_model">Модель изображений</string>
+    <string name="image_disabled">Генерация изображений отключена. Проверьте раздел «Изображения» в настройках.</string>
+    <string name="image_unknown">Результат запроса изображения неизвестен. Провайдер мог обработать запрос.</string>
+    <string name="image_invalid">Провайдер вернул неподдерживаемое изображение.</string>
+    <string name="image_duplicate">Этот запрос изображения уже был отправлен.</string>
+    <string name="image_generating">Создание изображения</string>
+    <string name="image_generate_confirm">Создать платное изображение</string>
+    <string name="image_generate_now">Создать изображение</string>
+    <string name="image_resource_limit">В мини-приложении достигнут предел сохранённых ресурсов.</string>
+    <string name="image_provider_error">Не удалось создать изображение.</string>
+    <string name="image_export_unavailable">Формат экспорта не включает изображения этого мини-приложения.</string>
 </resources>

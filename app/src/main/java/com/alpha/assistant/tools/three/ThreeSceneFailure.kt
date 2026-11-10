@@ -21,6 +21,7 @@ internal enum class ThreeSceneProblem(val guidance: String) {
     STARTUP_MUTATION("Keep every supplied state value unchanged through createScene and open."),
     INVALID_AUDIO("Request an authorized audio clip only after a foreground action or drop."),
     INVALID_BINDING("Bind the planned check to a supported scene control or observable output."),
+    TEXTURE_BINDING("Bind every approved texture to its intended UV-mapped mesh with await context.bindTexture, then render it on the supplied canvas. Keep the bound map attached."),
     ASSERTION_FAILED("The observed output did not match the planned check."),
     VISUAL_CHECK("The rendered scene did not pass visual review."),
     ;
@@ -32,6 +33,7 @@ internal enum class ThreeSceneProblem(val guidance: String) {
             "module_load" -> MODULE_LOAD
             "webgl_unavailable" -> WEBGL_UNAVAILABLE
             "init_failed" -> INIT_FAILED
+            "texture_binding" -> TEXTURE_BINDING
             "event_failed" -> EVENT_FAILED
             "frame_failed" -> FRAME_FAILED
             "snapshot_failed" -> SNAPSHOT_FAILED

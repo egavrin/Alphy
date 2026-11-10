@@ -103,6 +103,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     voiceFactory: ((Application, kotlinx.coroutines.CoroutineScope, (String) -> Unit) -> com.alpha.assistant.voice.VoiceSession)? = null,
     private val weatherLocator: WeatherLocator = AndroidWeatherLocator(application),
 ) : AndroidViewModel(application) {
+    internal val imageGeneration = com.alpha.assistant.images.ImageGeneration(application)
     internal val updates = AppUpdater.get(application)
     private data class VoiceOrigin(
         val destination: CourseComposerState?,
@@ -971,6 +972,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
             selectedId = snapshot.selectedId.takeUnless { it == id })
         writes.trySend {
             store.deleteConversation(id)
+            sceneAssetCleanup.request()
             com.alpha.assistant.automations.AutomationRuntime.refresh(getApplication())
         }
     }
@@ -984,6 +986,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         snapshot = snapshot.copy(conversations = emptyList(), selectedId = null)
         writes.trySend {
             store.clearHistory()
+            sceneAssetCleanup.request()
             com.alpha.assistant.automations.AutomationRuntime.refresh(getApplication())
         }
     }
@@ -1521,6 +1524,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                         throw ChooseRefinement(choices)
                     }
                 }
+                val chatImageSelection = imageGeneration.settings.selection()
                 val toolInstructions = ChatToolReply.instructions(available = knownTools != null)
                 updateMessage(request, assistant.id, persist = false) { it.copy(status = "pending", hostTargetId = targetId) }
                 val pending = snapshot.conversations.find { it.id == conversationId } ?: return@launch
@@ -1584,6 +1588,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                     val cloudRequest = CloudRequest(turns(history) + originalTurn,assistant.search,toolInstructions,
                         chatDecision = true,selectedText = selectedText,weatherLocation = { resolveWeatherPlace(request) },
                         validateOperation = ::validateOperation, allowCourseDecision = courseHost != null,
+                        allowChatImage = !assistant.requiresRefinement, chatImageEnabled = chatImageSelection != null,
                         decisionContext = ChatDecisionContext(originalTurn, turns(cleanHistory), toolInstructions, inputProvenance, memoryStore),
                         automationDraftChatId = draftChat, screenContext = user.screenContext, screenImages = screenImages,
                         allowDevicePlan = !assistant.requiresRefinement, allowMemoryFact = !assistant.requiresRefinement,
@@ -1777,9 +1782,40 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                                 }
                             })
                     }
-                } else if(decoded.kind != "create" && decoded.kind != "refine")
-                    updateMessage(request, assistant.id) { it.copy(text = decoded.text,status = "complete",provenance = replyProvenance) }
-                else {
+                } else if (decoded.kind != "create" && decoded.kind != "refine") {
+                    val intent = decoded.image
+                    if (intent == null || !decoded.imageRequired && chatImageSelection == null) {
+                        updateMessage(request, assistant.id) { it.copy(text = decoded.text, status = "complete", provenance = replyProvenance) }
+                    } else {
+                        val lease = imageGeneration.lease()
+                        var transferred = false
+                        try {
+                            val selection = chatImageSelection?.takeIf { inputProvenance == MessageProvenance.CLEAN }
+                                ?: throw com.alpha.assistant.images.ImageFailure(getApplication<Application>().getString(R.string.image_disabled))
+                            val image = imageGeneration.generate("chat:$conversationId:${assistant.id}", listOf(intent), selection, 1).single()
+                            imageGeneration.ensureCurrent(selection)
+                            if (isActive(request)) {
+                                val attachment = Attachment("alphy-generated-image:${image.asset.id}", image.alt,
+                                    com.alpha.assistant.images.GeneratedImage.ATTACHMENT, image.json().toString())
+                                transferred = updateMessage(request, assistant.id, assetLease = lease) {
+                                    it.copy(text = decoded.text, status = "complete", provenance = replyProvenance,
+                                        attachments = listOf(attachment))
+                                }
+                            }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (failure: Exception) {
+                            val detail = (failure as? com.alpha.assistant.images.ImageFailure)?.message
+                                ?: getApplication<Application>().getString(R.string.image_invalid)
+                            updateMessage(request, assistant.id) {
+                                it.copy(text = decoded.text, status = if (decoded.imageRequired) "error" else "complete",
+                                    provenance = replyProvenance, errorCode = "image_generation", error = detail)
+                            }
+                        } finally {
+                            if (!transferred) lease.close()
+                        }
+                    }
+                } else {
                     val prompt = ChatToolReply.generationPrompt(
                         user.text,decoded.brief,decoded.text,sources,selectedText)
                     tools.generateAutomatic(prompt,target.takeIf { decoded.kind == "refine" },conversationId,operationId,key,images,request.session,
@@ -1817,12 +1853,19 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
             }
         }
     }
-    private fun updateMessage(request: Active, messageId: String, persist: Boolean = true, transform: (Message) -> Message) {
-        if (active !== request) return
-        val conversation = snapshot.conversations.find { it.id == request.conversationId } ?: return
+    private fun updateMessage(request: Active, messageId: String, persist: Boolean = true, assetLease: Closeable? = null,
+        transform: (Message) -> Message): Boolean {
+        if (active !== request || request.cancelled) return false
+        val conversation = snapshot.conversations.find { it.id == request.conversationId } ?: return false
+        if (conversation.messages.none { it.id == messageId }) return false
         val updated = conversation.copy(messages = conversation.messages.map { if (it.id == messageId) transform(it) else it })
         replace(updated)
-        if (persist) writes.trySend { store.updateConversation(updated) }
+        if (assetLease != null) synchronized(unpublishedSceneAssets) { unpublishedSceneAssets += assetLease }
+        if (persist && writes.trySend {
+            store.updateConversation(updated)
+            if (assetLease != null) releaseSceneAssetWrites(listOf(assetLease))
+        }.isFailure) saveFailed = true
+        return true
     }
     fun cancelRequest() {
         val request = active ?: return

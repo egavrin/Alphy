@@ -175,6 +175,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     var effects by mutableStateOf<List<CapabilityEffect>>(emptyList()); private set
     private val selections = CapabilitySelectionState(store.artifactIdentity)
     private val deviceReadHosts = DeviceReadHosts(::inputDeviceActive)
+    private val images = com.alpha.assistant.images.ImageGeneration(app)
     private val tiltJobs = SupervisorJob(scope.coroutineContext[Job])
     @Volatile private var tilt: TiltRun? = null
     internal var tiltOwner by mutableStateOf<String?>(null); private set
@@ -548,6 +549,11 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                 require(handle.matches(Regex("[0-9a-f]{64}")))
                 val selected=CapabilityResources(app,store).resolve(owner,handle)
                 require(selected.mimeType.startsWith("image/") && selected.sizeBytes<=CapabilityResources.MAX_FILE_BYTES)
+                if (selected.kind == com.alpha.assistant.capabilities.MiniAppImage.RESOURCE) {
+                    return@withContext com.alpha.assistant.tools.three.ThreeSceneAssets(app).generatedBitmap(
+                        com.alpha.assistant.tools.three.ThreeSceneAssetRef(selected.locator, "image", selected.mimeType, selected.sizeBytes))
+                        .also { decoded = it }
+                }
                 val bytes=(if(selected.kind == "cameraPhoto") java.io.File(selected.locator).inputStream()
                     else checkNotNull(app.contentResolver.openInputStream(Uri.parse(selected.locator)))).use { input ->
                     val output=java.io.ByteArrayOutputStream(); val buffer=ByteArray(8192)
@@ -974,6 +980,23 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                             }
                         }
                     }
+                    capability == com.alpha.assistant.capabilities.MiniAppImage.ID -> {
+                        val selection = images.settings.selection()
+                        if (selection == null) store.rejectPendingEffect(effect.key,
+                            CapabilityResult("denied", app.getString(R.string.image_disabled)))
+                        else {
+                            deferredSelection = withContext(Dispatchers.Main.immediate) {
+                                if (closing || !foreground() || capabilityPrompt != null || deviceHost == null ||
+                                    !deviceReadHosts.initiating(deviceHost, requireFocus = true)) false
+                                else {
+                                    capabilityPrompt = CapabilityPrompt.Image(effect.key,
+                                        com.alpha.assistant.capabilities.MiniAppImage.intent(effect), deviceHost, selection)
+                                    true
+                                }
+                            }
+                            if (deferredSelection) null else broker.cancel(effect.key)
+                        }
+                    }
                     capability == MiniAppAi.ID -> {
                         if (deviceHost == null) broker.cancel(effect.key)
                         else broker.executeAi(effect.key, deviceHost, deviceReadHosts) { prompt, active ->
@@ -1046,7 +1069,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                 if(result?.status=="denied" && !store.permissionGranted(capability) && locationSettingsRequired) showDevicePermissionIssue(result.message)
             }
             if(foregroundEffects && !deferredSelection && deviceHost!=null) {
-                val requireFocus = batch.any { it.request.capability == MiniAppAi.ID }
+                val requireFocus = batch.any { it.request.capability in setOf(MiniAppAi.ID, com.alpha.assistant.capabilities.MiniAppImage.ID) }
                 deviceReadHosts.whileVisible(deviceHost, requireFocus) { active -> engine.deliverForegroundEffectResults(changed,active) }
             }
         } catch(failure: Exception) {
@@ -1072,6 +1095,33 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         }
     }
     internal suspend fun writableCalendars(): List<NativeOwnedCalendar> = withContext(Dispatchers.IO) {OwnedCalendarCapabilities(app,store).writableCalendars()}
+    internal fun finishImage(prompt: CapabilityPrompt.Image, confirmed: Boolean) {
+        if (capabilityPrompt !== prompt || busy || closing) return
+        capabilityPrompt = null
+        run {
+            val effect = store.effect(prompt.effectKey) ?: return@run
+            val tool = store.tool(effect.owner)
+            val host = prompt.origin
+            try {
+                // The confirmation dialog temporarily owns window focus.
+                val refocused = kotlinx.coroutines.withTimeoutOrNull(1000L) {
+                    while (deviceReadHosts.initiating(host) && !deviceReadHosts.initiating(host, requireFocus = true))
+                        kotlinx.coroutines.delay(20L)
+                    deviceReadHosts.initiating(host, requireFocus = true)
+                } == true
+                if (confirmed && refocused) broker.executeImage(prompt, deviceReadHosts, images)
+                else broker.cancel(prompt.effectKey)
+                if (tool != null) deviceReadHosts.whileVisible(host, requireFocus = true, requireOrigin = true) { active ->
+                    engine.deliverForegroundEffectResults(tool, active)
+                }
+            } finally {
+                store.rejectForegroundEffectDelivery(effect.owner, effect.revision, effect.stateVersion)
+                store.releaseRejectedResources(effect.owner)
+            }
+            refresh(deliverResults = false)
+        }
+    }
+
     internal fun finishShare(prompt: CapabilityPrompt.Share, confirmed: Boolean) {
         if (capabilityPrompt !== prompt || busy || closing) return
         capabilityPrompt = null
@@ -1332,6 +1382,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
             runCatching {
                 when(abandoned) {
                     is CapabilityPrompt.Share -> broker.cancel(abandoned.effectKey)
+                    is CapabilityPrompt.Image -> broker.cancel(abandoned.effectKey)
                     is CapabilityPrompt.Calendar -> broker.cancel(abandoned.effectKey)
                     is CapabilityPrompt.Picker -> abandonPicker(abandoned.launch,abandoned.origin)
                     is CapabilityPrompt.Reading -> abandonPicker(abandoned.launch,abandoned.origin)

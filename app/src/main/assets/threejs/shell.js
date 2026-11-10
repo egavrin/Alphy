@@ -5,7 +5,7 @@ const nativePost = AlphySceneHost.postMessage.bind(AlphySceneHost);
 const allowedAssets = new Map(session.assets.map(asset => [asset.id, asset.size]));
 const workerFailures = new Set([
     'module_load', 'webgl_unavailable', 'init_failed', 'event_failed',
-    'frame_failed', 'snapshot_failed', 'dispose_failed'
+    'frame_failed', 'snapshot_failed', 'dispose_failed', 'texture_binding'
 ]);
 const maxInFlightBytes = 64 * 1024 * 1024;
 const maxSessionBytes = 256 * 1024 * 1024;
@@ -118,7 +118,7 @@ try {
         }
     };
     port.onmessageerror = () => fail('invalid_response');
-    worker.postMessage({surface, port: channel.port2, assets: session.assets}, [surface, channel.port2]);
+    worker.postMessage({surface, port: channel.port2, assets: session.assets, textures: session.textures ?? []}, [surface, channel.port2]);
     window.alphySceneSend = raw => {
         if (failed) return;
         if (pending !== null) {

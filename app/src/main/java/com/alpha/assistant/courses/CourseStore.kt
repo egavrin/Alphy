@@ -13,6 +13,7 @@ import java.util.UUID
 /** Course storage is independent of the conversation and mini-app databases. */
 class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeable {
     private val helper = CourseDatabase(context.applicationContext, name)
+    private val imageCleanup = com.alpha.assistant.tools.three.ThreeSceneAssetCleanup(context.applicationContext)
     private val lifecycleLock = Any()
     @Volatile private var closeRequested = false
 
@@ -74,6 +75,18 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
         }
     }
 
+    internal fun replaceReachedDefinition(
+        courseId: String, outlineRevision: Long, slideId: String, expected: String, updated: String,
+        authorized: () -> Boolean,
+    ): Boolean = write {
+        val course = readCourse(courseId) ?: return@write false
+        if (course.outlineRevision != outlineRevision || course.progress.currentSlideId != slideId || !authorized())
+            return@write false
+        update("slides", ContentValues().apply { put("definition", updated) },
+            "course_id=? AND slide_id=? AND outline_revision=? AND definition=?",
+            arrayOf(courseId, slideId, outlineRevision.toString(), expected)) == 1
+    }
+
     internal data class SceneSettings(val version: Long, val values: String)
 
     internal fun sceneSettings(courseId: String, slideId: String, outlineRevision: Long, definitionHash: String): SceneSettings =
@@ -83,8 +96,11 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
         definition: String, definitionHash: String, expected: Long, values: String): SceneSettings = write {
         val course = requireRevision(courseId, courseRevision)
         require(course.requireReached(slideId).kind.allowsScene)
-        require(exists("SELECT 1 FROM slides WHERE course_id=? AND slide_id=? AND outline_revision=? AND definition=?",
-            courseId, slideId, outlineRevision.toString(), definition)) { "The slide definition changed." }
+        val scene = rawQuery("SELECT definition FROM slides WHERE course_id=? AND slide_id=? AND outline_revision=?",
+            arrayOf(courseId, slideId, outlineRevision.toString())).use { row ->
+            if (row.moveToFirst()) courseSceneDefinition(row.getString(0)) else null
+        }
+        require(scene == courseSceneDefinition(definition)) { "The slide definition changed." }
         validateCourseState(values)
         val old = readSceneSettings(courseId, slideId, outlineRevision, definitionHash)
         check(old.version == expected) { "The slide settings changed." }
@@ -240,7 +256,7 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
                 putNull("generation_id")
                 putNull("generation_failure")
             })
-        }
+        }.also { imageCleanup.request() }
     }
 
     private fun SQLiteDatabase.readCourse(id: String): CourseSnapshot? = rawQuery(
