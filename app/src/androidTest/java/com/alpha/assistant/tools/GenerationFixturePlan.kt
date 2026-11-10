@@ -25,8 +25,40 @@ internal suspend fun CloudRequest.replyWithFixturePlan(emit: suspend (CloudEvent
     if (generationStage == CloudGenerationStage.SELECTOR) error("The fixture plan must not require part selection")
     if (generationStage != CloudGenerationStage.PLAN) return false
     check(jsonObject && !search && !systemInstructions.contains("top-level \"behavior\"") && selectedText.isEmpty())
-    emit(CloudEvent.Text(if (scene == null) fixtureNeeds else JSONObject(fixtureNeeds).put("scene", scene).toString()))
+    emit(CloudEvent.Text(withFixtureCheckEvidence(
+        if (scene == null) fixtureNeeds else JSONObject(fixtureNeeds).put("scene", scene).toString())))
     return true
+}
+
+internal fun CloudRequest.withFixtureCheckEvidence(raw: String, scope: String = "whole"): String {
+    if (generationStage != CloudGenerationStage.PLAN) return raw
+    val plan = runCatching { JSONObject(raw) }.getOrNull() ?: return raw
+    val scene = plan.optJSONObject("scene") ?: return raw
+    if (scene.has("checkEvidence")) return raw
+    val scenario = scene.getJSONObject("checks").getJSONObject("scenario")
+    val steps = scenario.getJSONArray("steps")
+    val slots = scenario.getJSONObject("slots")
+    val input = turns.first().text
+    val excerpt = runCatching { JSONObject(input).getString("request") }.getOrDefault(input).take(600)
+    val rows = JSONArray()
+    for (index in 0 until steps.length()) {
+        val step = steps.getJSONObject(index)
+        val slot = when (step.getString("op")) {
+            "assert" -> step.getString("slot")
+            "frames" -> step.optString("observe").takeIf { it.isNotEmpty() } ?: continue
+            else -> continue
+        }
+        val row = JSONObject().put("step", index + 1).put("excerpt", excerpt)
+            .put("purpose", when {
+                step.getString("op") == "frames" -> "motion"
+                step.optString("test") == "unchanged" -> "stability"
+                else -> "outcome"
+            })
+        if (slots.getJSONObject(slot).getString("kind") == "geometry") row.put("scope", scope)
+        rows.put(row)
+    }
+    scene.put("checkEvidence", rows)
+    return plan.toString()
 }
 
 internal fun fixtureScene(placement: String = "stage", moving: Boolean = false, start: Boolean = false): JSONObject {

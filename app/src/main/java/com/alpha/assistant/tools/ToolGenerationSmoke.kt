@@ -6,6 +6,8 @@ import com.alpha.assistant.capabilities.OwnedCalendarContract
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.sandbox.SandboxContract
 import com.alpha.assistant.sandbox.SandboxResult
+import com.alpha.assistant.tools.generation.GeometryScope
+import com.alpha.assistant.tools.generation.framesSinceCapture
 import com.alpha.assistant.tools.generation.GenerationBehavior
 import com.alpha.assistant.tools.generation.GenerationBehavior.Binding
 import com.alpha.assistant.tools.generation.GenerationBehavior.Kind
@@ -159,7 +161,9 @@ internal class ToolGenerationSmoke(
                 precedingEvent = "$kind at step ${checkNotNull(stepIndex) + 1}, slot $slotNumber"
             }
             fun fail(reason: String, rule: BehaviorFailureRule, slot: String? = null,
-                nodeKind: String? = null, valueShape: BehaviorValueShape? = null): Nothing {
+                nodeKind: String? = null, valueShape: BehaviorValueShape? = null,
+                comparison: BehaviorComparison? = null, observation: BehaviorObservation? = null,
+                frames: Int? = null, requiredChanges: Int? = null, observedChanges: Int? = null): Nothing {
                 val bindingKind = slot?.let {
                     when (bindings[it]) {
                         is Binding.Id -> "id"
@@ -170,7 +174,9 @@ internal class ToolGenerationSmoke(
                 }
                 throw BehaviorCheckFailure(stepIndex, reason, BehaviorBindingDiagnostic(route, rule, stepIndex?.plus(1),
                     slot?.let { scenario.slots.keys.indexOf(it) + 1 }, scenario.slots[slot]?.kind,
-                    slot?.let { it in nativeSlots }, bindingKind, nodeKind, valueShape), precedingEvent)
+                    slot?.let { it in nativeSlots }, bindingKind, nodeKind, valueShape,
+                    (bindings[slot] as? Binding.Drawing)?.let { GeometryScope.of(it, threeScene = false) },
+                    comparison, observation, frames, requiredChanges, observedChanges), precedingEvent)
             }
             fun target(slot: String) = bindings[slot] ?: fail("missing binding", BehaviorFailureRule.BINDING_MISSING, slot)
             fun targetId(slot: String) = (target(slot) as Binding.Id).value
@@ -301,7 +307,9 @@ internal class ToolGenerationSmoke(
                                 }
                             }
                             recordEvent(if (isFrame) "frame advance" else "timer advance", step.slot)
-                            if (changes < step.changes) fail("assertion failed, repeated geometry change required", BehaviorFailureRule.ASSERTION_FAILED, step.observe)
+                            if (changes < step.changes) fail("assertion failed, repeated geometry change required", BehaviorFailureRule.ASSERTION_FAILED,
+                                step.observe, comparison = BehaviorComparison.MOTION, observation = BehaviorObservation.TOO_FEW_CHANGES,
+                                frames = step.count, requiredChanges = step.changes, observedChanges = changes)
                         }
                         else -> error("The shared checker handles observations.")
                     }
@@ -323,7 +331,10 @@ internal class ToolGenerationSmoke(
                             }
                         }
                         if (!passed && !allowAssertionFailure(index)) fail("assertion failed (${step.test})", BehaviorFailureRule.ASSERTION_FAILED,
-                            step.slot, valueShape = BehaviorValueShape.of(current))
+                            step.slot, valueShape = BehaviorValueShape.of(current), comparison = BehaviorComparison.from(step.test),
+                            observation = if (current is SurfaceGeometry && expected is SurfaceGeometry) {
+                                if (equal) BehaviorObservation.UNCHANGED else BehaviorObservation.CHANGED
+                            } else BehaviorObservation.COMPARISON_FAILED, frames = scenario.framesSinceCapture(index, step))
                 },
             )
         }

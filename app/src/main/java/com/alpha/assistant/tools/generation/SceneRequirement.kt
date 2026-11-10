@@ -7,16 +7,18 @@ internal data class SceneRequirement(
     val brief: String,
     val checks: GenerationBehavior.Scenario,
     val liveInputs: Set<String>,
+    val evidence: SceneCheckEvidence?,
 ) {
     companion object {
         val guidance = """
             Put "scene" at the TOP LEVEL beside "language", never inside a needs entry.
             A needs entry of type "scene" keeps the ordinary id, type, label, description, and optional reads fields.
-            Put placement, brief, and checks only inside the top-level scene.
+            Put placement, brief, checks, and checkEvidence only inside the top-level scene.
+            The examples use excerpts from example requests. Replace them with excerpts from the original request.
             For a full-window moving playfield use this complete plan shape with the requested language and brief:
-            {"wholeScreen":true,"language":"en","scene":{"placement":"immersive","brief":"A clear playfield with moving objects and visible feedback.","checks":{"status":"checkable","scenario":{"slots":{"surface":{"kind":"surface"},"object":{"kind":"geometry"}},"steps":[{"op":"frames","slot":"surface","count":4,"observe":"object","changes":3}]}}}}
+            {"wholeScreen":true,"language":"en","scene":{"placement":"immersive","brief":"A clear playfield with moving objects and visible feedback.","checks":{"status":"checkable","scenario":{"slots":{"surface":{"kind":"surface"},"object":{"kind":"geometry"}},"steps":[{"op":"frames","slot":"surface","count":4,"observe":"object","changes":3}]}},"checkEvidence":[{"step":1,"excerpt":"moving objects","purpose":"motion","scope":"whole"}]}}
             For an embedded scene use "inline". Example of the top-level scene value for a native numeric control:
-            {"placement":"inline","brief":"Show a clearly labeled shape that grows with the slider.","liveInputs":["slider"],"checks":{"status":"checkable","scenario":{"slots":{"slider":{"kind":"action"},"shape":{"kind":"geometry"}},"steps":[{"op":"capture","slot":"shape","as":"before"},{"op":"action","slot":"slider","value":5},{"op":"assert","slot":"shape","test":"changed","capture":"before"}]}}}
+            {"placement":"inline","brief":"Show a clearly labeled shape that grows with the slider.","liveInputs":["slider"],"checks":{"status":"checkable","scenario":{"slots":{"slider":{"kind":"action"},"shape":{"kind":"geometry"}},"steps":[{"op":"capture","slot":"shape","as":"before"},{"op":"action","slot":"slider","value":5},{"op":"assert","slot":"shape","test":"changed","capture":"before"}]}},"checkEvidence":[{"step":3,"excerpt":"grows with the slider","purpose":"outcome","scope":"whole"}]}
             Use "stage" for the existing standalone drawing above native controls. Every drawing needs a scene check.
             Include in liveInputs only action slots that require continuous input. For a native slider used by those slots set inputMode to "live" in inputs.
             Omit liveInputs when an ordinary Apply action meets the request.
@@ -25,12 +27,12 @@ internal data class SceneRequirement(
             Require visible geometry. For input use capture, the real action or pointer, and assert changed geometry.
             For continuous motion use frames and repeated geometry changes. Static scenes need no frame steps.
             Omit scene for ordinary forms and controls that need no drawing. Checks format:
-        """.trimIndent() + "\n" + GenerationBehavior.diagnosticGuidance
+        """.trimIndent() + "\n" + GenerationBehavior.diagnosticGuidance + "\n" + SceneCheckEvidence.guidance
 
-        fun read(raw: Any?, threeScene: Boolean = false): SceneRequirement? {
+        fun read(raw: Any?, threeScene: Boolean = false, request: String? = null): SceneRequirement? {
             if (raw == null) return null
             val scene = raw as? JSONObject ?: throw PartsContractFailure("$.scene", "a scene object")
-            scene.requireKeys("$.scene", setOf("placement", "brief", "checks"), setOf("liveInputs"))
+            scene.requireKeys("$.scene", setOf("placement", "brief", "checks"), setOf("liveInputs", "checkEvidence", "visualReview"))
             val placement = scene.opt("placement")
             requireParts(placement in setOf("inline", "stage", "immersive"), "$.scene.placement", "inline, stage, or immersive")
             val brief = scene.opt("brief")
@@ -48,7 +50,8 @@ internal data class SceneRequirement(
                 slot
             } else emptyList()
             requireParts(liveInputs.distinct().size == liveInputs.size, "$.scene.liveInputs", "distinct action slots")
-            return SceneRequirement(placement as String, brief as String, checks, liveInputs.toSet())
+            val evidence = request?.let { SceneCheckEvidence.read(scene, checks, it, threeScene) }
+            return SceneRequirement(placement as String, brief as String, checks, liveInputs.toSet(), evidence)
         }
     }
 }

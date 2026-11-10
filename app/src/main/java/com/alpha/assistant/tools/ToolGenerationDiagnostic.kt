@@ -7,6 +7,7 @@ import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.ResponseShape
 import com.alpha.assistant.tools.generation.GenerationBehavior.Kind
+import com.alpha.assistant.tools.generation.GeometryScope
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 import org.json.JSONObject
@@ -55,6 +56,18 @@ internal enum class BehaviorValueShape(val id: String) {
     }
 }
 
+internal enum class BehaviorComparison {
+    EQUALS, UNCHANGED, CHANGED, GREATER, LESS, NONEMPTY, MOTION;
+
+    val wire get() = name.lowercase(java.util.Locale.ROOT)
+
+    companion object {
+        fun from(test: String) = entries.first { it.wire == test }
+    }
+}
+
+internal enum class BehaviorObservation { CHANGED, UNCHANGED, COMPARISON_FAILED, TOO_FEW_CHANGES }
+
 /** Step and slot numbers start at one. Both follow the validated scenario order. */
 internal data class BehaviorBindingDiagnostic(
     val route: ToolGenerationRoute,
@@ -66,12 +79,21 @@ internal data class BehaviorBindingDiagnostic(
     val bindingKind: String? = null,
     val nodeKind: String? = null,
     val valueShape: BehaviorValueShape? = null,
+    val scope: GeometryScope? = null,
+    val comparison: BehaviorComparison? = null,
+    val observation: BehaviorObservation? = null,
+    val frames: Int? = null,
+    val requiredChanges: Int? = null,
+    val observedChanges: Int? = null,
 ) {
     fun report(): JSONObject = JSONObject().put("route", route.id).put("rule", rule.id)
         .put("step", step).put("slot", slot).put("slotKind", slotKind?.wire)
         .put("origin", native?.let { if (it) "native" else "writer" } ?: "unknown")
         .put("bindingKind", bindingKind).put("nodeKind", ToolUiCatalog.components[nodeKind]?.type)
         .put("valueShape", valueShape?.id)
+        .put("scope", scope?.wire).put("comparison", comparison?.wire)
+        .put("observation", observation?.name?.lowercase(java.util.Locale.ROOT))
+        .put("frames", frames).put("requiredChanges", requiredChanges).put("observedChanges", observedChanges)
 }
 
 /** Operation evidence contains no candidate data or diagnostic details from generated content. */
@@ -208,7 +230,7 @@ internal inline fun <T> ToolGenerationTrace.Run?.timed(
 
 private fun safeSelectorBatch(batch: String?) = batch?.takeIf { it == "sections" || it == "parts" }
 private val needsPlanPath = Regex(
-    """\$(?:\.(?:wholeScreen|behavior|scenario|steps|title|description|language|inputs|constants|needs|questions|id|label|type|value|uses|sourceIds|stops|bands|items|ideas|name|minutes|min|max|step|control|expression|example|unit|date|offsetDays|repeatDays|effort|ask|options)(?:\[\d{1,2}])?)*|\$\.behavior\.scenario\.slots\[\d{1,2}]"""
+    """\$(?:\.(?:wholeScreen|scene|checkEvidence|visualReview|behavior|scenario|steps|title|description|language|inputs|constants|needs|questions|id|label|type|value|uses|sourceIds|stops|bands|items|ideas|name|minutes|min|max|step|control|expression|example|unit|date|offsetDays|repeatDays|effort|ask|options)(?:\[\d{1,2}])?)*|\$\.behavior\.scenario\.slots\[\d{1,2}]"""
 )
 
 /** No candidate, exception message, private field name, or generated identifier enters this record.

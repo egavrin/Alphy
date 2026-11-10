@@ -268,6 +268,148 @@ class ThreeSceneWorkflowTest {
         }
     }
 
+    @Test fun earthLightingRejectsUnsupportedCheckAndRepairsOnlyItsBinding() = runBlocking {
+        val original = generate("earth")
+        val database = "three-check-policy-${UUID.randomUUID()}.db"
+        val prompt = """Refine this existing Solar System Observatory. Keep all UI controls, orbits,
+                status schema, and camera focus options. Improve the Earth close-up only. The current Earth
+                is very dark with the bright Sun in the shot. Add soft cool fill lighting from the camera side
+                during Earth focus so blue oceans and green continents are clearly visible. Use a flattering
+                close-up angle and keep the Sun outside the Earth close-up. Keep the background starfield.
+                Use only surface and geometry slots for the automated orbit motion check. Preserve the
+                supplied state at startup and make a focused source patch."""
+        val badPlan = """{"wholeScreen":true,"runtime":"threejs-worker","language":"en","scene":{"placement":"stage","brief":"Solar System Observatory with the existing UI controls, orbit paths, status readouts, camera focus options, and starfield background preserved. Orbits keep animating around the Sun. On Earth focus, the camera uses a flattering three-quarter close-up angle with the Sun kept outside the frame; a soft cool blue-white fill light positioned on the camera side brightens the Earth so deep blue oceans and green continents read clearly, with a modest emissive tint to avoid a dark limb, while the starfield stays visible behind. Startup state is unchanged and the fill light only affects the Earth focus view.","checks":{"status":"checkable","scenario":{"slots":{"view":{"kind":"surface"},"orbits":{"kind":"geometry"},"earth":{"kind":"geometry"}},"steps":[{"op":"capture","slot":"earth","as":"before"},{"op":"frames","slot":"view","count":8,"observe":"orbits","changes":3},{"op":"assert","slot":"earth","test":"unchanged","capture":"before"}]}}}}"""
+        val corrected = JSONObject(badPlan)
+        val scene = corrected.getJSONObject("scene")
+        val scenario = scene.getJSONObject("checks").getJSONObject("scenario")
+        scenario.getJSONObject("slots").remove("earth")
+        val frames = scenario.getJSONArray("steps").getJSONObject(1)
+        scenario.put("steps", JSONArray().put(frames))
+        scene.put("checkEvidence", JSONArray().put(JSONObject()
+            .put("step", 1).put("excerpt", "automated orbit motion check")
+            .put("purpose", "motion").put("scope", "whole")))
+        scene.put("visualReview", JSONArray().put("Improve the Earth close-up only."))
+        val requests = mutableListOf<CloudGenerationStage>()
+        val provider = object : ChatProvider by original.provider {
+            override val supportsSceneVision = false
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                requests += checkNotNull(request.generationStage)
+                val reply = when (requests.size) {
+                    1 -> badPlan
+                    2 -> {
+                        assertEquals(CloudGenerationStage.PLAN, request.generationStage)
+                        assertTrue(request.systemInstructions.contains("checkEvidence"))
+                        corrected.toString()
+                    }
+                    3 -> {
+                        assertEquals(CloudGenerationStage.REFINE, request.generationStage)
+                        JSONObject(sourcePatch("0x3180f4", "0x40a0f8")).put("fields", JSONObject()
+                            .put("behaviorBindings", JSONObject("""{"orbits":{"surface":"scene","path":[1]}}"""))).toString()
+                    }
+                    4 -> {
+                        assertEquals(CloudGenerationStage.REFINE, request.generationStage)
+                        assertTrue(request.turns.last().text.contains("only behaviorBindings"))
+                        """{"fields":{"behaviorBindings":{"orbits":{"surface":"scene","path":[0]}}}}"""
+                    }
+                    else -> error("Unexpected provider call")
+                }
+                emit(CloudEvent.Text(reply))
+            }
+        }
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                ToolStore(context, database).use { store ->
+                    store.saveTool(original.record, revision = true)
+                    val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context)))
+                    try {
+                        val draft = engine.createDraft(prompt, original.record.id)
+                        approvePreview { engine.generate(draft.id, "fixture", emptyList(), CloudSession()) }
+                        val accepted = engine.accept(draft.id)
+                        assertEquals(original.record.state, accepted.state)
+                        val oldSource = ToolSpec.parsePersisted(original.record.spec).source
+                        assertEquals(oldSource.replace("0x3180f4", "0x40a0f8"), ToolSpec.parsePersisted(accepted.spec).source)
+                        assertEquals(4, requests.size)
+                        File(output, "earth-lighting-check-replay.txt").writeText(requests.joinToString())
+                    } finally { engine.closeArtifacts() }
+                }
+            }
+        } finally { context.deleteDatabase(database) }
+    }
+
+    @Test fun periodicReturnAndPauseKeepTheirSeparateExpectations() = runBlocking {
+        val prompt = "Create a Three.js orbit that returns to its starting image after eight frames. Pause holds the image still."
+        val checks = """{"status":"checkable","scenario":{
+            "slots":{"view":{"kind":"surface"},"render":{"kind":"geometry"}},
+            "steps":[{"op":"capture","slot":"render","as":"start"},
+                     {"op":"frames","slot":"view","count":8,"observe":"render","changes":3},
+                     {"op":"assert","slot":"render","test":"unchanged","capture":"start"},
+                     {"op":"surface","slot":"view","event":"pause"},
+                     {"op":"capture","slot":"render","as":"paused"},
+                     {"op":"frames","slot":"view","count":4},
+                     {"op":"assert","slot":"render","test":"unchanged","capture":"paused"}]}}"""
+        val plan = """{"wholeScreen":true,"runtime":"threejs-worker","language":"en","scene":{
+            "placement":"stage","brief":"Render a short orbit with pause.","checks":$checks,
+            "checkEvidence":[{"step":2,"excerpt":"Three.js orbit","purpose":"motion","scope":"whole"},
+                {"step":3,"excerpt":"returns to its starting image after eight frames","purpose":"periodic_return","scope":"whole"},
+                {"step":7,"excerpt":"Pause holds the image still","purpose":"stability","scope":"whole"}]}}"""
+        val source = fixtureSource("earth").replace("Math.PI / 4000", "Math.PI / 200")
+        val correct = generate("earth", fixturePrompt = prompt, fixturePlan = plan, sourceOverride = source)
+        assertEquals(0, correct.repairs)
+        for ((expectedStep, broken) in listOf(
+            3 to source.replace("Math.PI / 200", "Math.PI / 400"),
+            7 to source.replace("enabled && !state.paused", "enabled"),
+        )) {
+            val failure = runCatching {
+                generate("earth", fixturePrompt = prompt, fixturePlan = plan, sourceOverride = broken,
+                    session = CloudSession().apply { repeat(3) { claimGenerationRepair(CloudGenerationStage.COMPLETE) } })
+            }.exceptionOrNull() as? CloudFailure
+            assertEquals("three_behavior", failure?.code)
+            assertTrue(failure?.message.orEmpty(), failure?.message.orEmpty().contains("step $expectedStep"))
+        }
+    }
+
+    @Test fun capturedChangeRequiresTheSameGeometryTarget() = runBlocking {
+        val prompt = "Create a Three.js view where refreshing the viewport changes the selected region."
+        val plan = """{"wholeScreen":true,"runtime":"threejs-worker","language":"en","scene":{
+            "placement":"stage","brief":"Refresh the selected region.","checks":{"status":"checkable","scenario":{
+            "slots":{"view":{"kind":"surface"},"before":{"kind":"geometry"},"after":{"kind":"geometry"}},
+            "steps":[{"op":"capture","slot":"before","as":"start"},
+                     {"op":"surface","slot":"view","event":"viewport"},
+                     {"op":"assert","slot":"after","test":"changed","capture":"start"}]}},
+            "checkEvidence":[{"step":3,"excerpt":"refreshing the viewport changes the selected region",
+                "purpose":"outcome","scope":"selected"}]}}"""
+        val fixture = Provider("earth", fixtureSource("earth"), false) {}
+        fun bindings(region: Int) = JSONObject("""{"before":{"surface":"scene","path":[1]},
+            "after":{"surface":"scene","path":[$region]}}""")
+        for ((region, expected) in listOf(3 to "same geometry target", 1 to "Observed unchanged")) {
+            var writerCalls = 0
+            val provider = object : ChatProvider {
+                override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                    val output = if (request.generationStage == CloudGenerationStage.PLAN) plan else when (++writerCalls) {
+                        1 -> JSONObject(fixture.candidate()).put("behaviorBindings", bindings(2)).toString()
+                        2 -> {
+                            assertTrue(request.turns.last().text.contains("only behaviorBindings"))
+                            JSONObject().put("fields", JSONObject().put("behaviorBindings", bindings(region))).toString()
+                        }
+                        else -> error("Unexpected writer call")
+                    }
+                    emit(CloudEvent.Text(output))
+                }
+            }
+            ActivityScenario.launch(MainActivity::class.java).use {
+                val session = CloudSession()
+                if (region == 1) repeat(2) { session.claimGenerationRepair(CloudGenerationStage.COMPLETE) }
+                val failure = runCatching {
+                    ToolGenerationService(provider, SandboxClient(context))
+                        .generate("fixture", prompt, null, emptyList(), session, UUID.randomUUID().toString())
+                }.exceptionOrNull() as? CloudFailure
+                assertEquals("three_behavior", failure?.code)
+                assertTrue(failure?.message.orEmpty(), failure?.message.orEmpty().contains(expected))
+                assertEquals(2, writerCalls)
+            }
+        }
+    }
+
     @Test fun aFailedRefinementKeepsTheAcceptedRevision() = runBlocking {
         val result = generate("earth")
         val name = "three-refinement-${UUID.randomUUID()}.db"
@@ -817,14 +959,18 @@ class ThreeSceneWorkflowTest {
 
     private data class Run(val record: ToolRecord, val provider: Provider, val repairs: Int)
 
-    private suspend fun generate(name: String, injectStatic: Boolean = false, onVisual: suspend () -> Unit = {}): Run {
-        val prompt = when (name) {
+    private suspend fun generate(
+        name: String, injectStatic: Boolean = false, onVisual: suspend () -> Unit = {},
+        fixturePrompt: String? = null, fixturePlan: String? = null, sourceOverride: String? = null,
+        session: CloudSession = CloudSession(),
+    ): Run {
+        val prompt = fixturePrompt ?: when (name) {
             "earth" -> "Create an Earth and Moon Three.js scene. The Moon orbits Earth every eight seconds. Add camera controls and pause."
             "workshop" -> "Создай 3D-мастерскую. Перетащи кубик М в ячейку. Проиграй локальный звук, покажи анимацию робота и сохрани прогресс."
             else -> "Create a Three.js torus knot with a moving custom shader."
         }
-        val source = instrumentation.context.assets.open("threejs/$name.js").bufferedReader().use { it.readText() }
-        val provider = Provider(name, source, injectStatic, onVisual)
+        val source = sourceOverride ?: fixtureSource(name)
+        val provider = Provider(name, source, injectStatic, fixturePlan, onVisual)
         val database = "three-generation-" + UUID.randomUUID() + ".db"
         try {
             return ActivityScenario.launch(MainActivity::class.java).use {
@@ -832,7 +978,7 @@ class ThreeSceneWorkflowTest {
                     val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context)))
                     try {
                         val draft = engine.createDraft(prompt, null)
-                        approvePreview { engine.generate(draft.id, "fixture", emptyList(), CloudSession()) }
+                        approvePreview { engine.generate(draft.id, "fixture", emptyList(), session) }
                         val record = engine.accept(draft.id)
                         File(output, "$name-generated.json").writeText(record.spec)
                         File(output, "$name-request.txt").writeText(prompt)
@@ -875,13 +1021,14 @@ class ThreeSceneWorkflowTest {
     }
 
     private inner class Provider(
-        val name: String, val source: String, val injectStatic: Boolean, val onVisual: suspend () -> Unit,
+        val name: String, val source: String, val injectStatic: Boolean,
+        val fixturePlan: String? = null, val onVisual: suspend () -> Unit,
     ) : ChatProvider {
         override val supportsSceneVision = true
         var repairs = 0
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
             val text = when {
-                request.generationStage == CloudGenerationStage.PLAN -> plan()
+                request.generationStage == CloudGenerationStage.PLAN -> request.withFixtureCheckEvidence(fixturePlan ?: plan())
                 request.generationStage == null -> {
                     val frames = request.turns.flatMap { it.images }
                     assertTrue(frames.isNotEmpty())
@@ -925,7 +1072,7 @@ class ThreeSceneWorkflowTest {
                     .put("brief", "Render the requested interactive 3D scene.").put("checks", checks)).toString()
         }
 
-        private fun candidate(): String {
+        fun candidate(): String {
             val data = JSONObject("""{"formatVersion":3,"capabilities":[],"runtime":{"kind":"threejs-worker","version":1},
                 "behaviorBindings":{"view":"scene","render":{"surface":"scene","path":[0]}}}""")
             data.put("title", if (name == "workshop") "Мастерская слов" else if (name == "earth") "Earth and Moon" else "Three.js shader")

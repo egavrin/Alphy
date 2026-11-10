@@ -380,7 +380,7 @@ class StaticDraftPreviewUiWorkflowTest {
                 }
                 else -> error("Unexpected provider stage: ${request.generationStage}")
             }
-            emit(CloudEvent.Text(response))
+            emit(CloudEvent.Text(request.withFixtureCheckEvidence(response)))
         }
     }
 

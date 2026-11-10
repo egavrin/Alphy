@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools.generation
 
+import com.alpha.assistant.tools.withFixtureCheckEvidence
 import androidx.javascriptengine.IsolateStartupParameters
 import androidx.javascriptengine.JavaScriptIsolate
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -48,7 +49,7 @@ class GenerationPolicyWorkflowTest {
                     scenario.getJSONObject("slots").put("input", JSONObject("""{"kind":"action"}"""))
                     val steps = scenario.getJSONArray("steps")
                     scenario.put("steps", JSONArray().put(JSONObject("""{"op":"action","slot":"input"}""")).put(steps.getJSONObject(0)))
-                    JSONObject(plan).put("scene", scene).toString()
+                    request.withFixtureCheckEvidence(JSONObject(plan).put("scene", scene).toString())
                 }
                 CloudGenerationStage.COMPLETE -> if (request.turns.last().text.contains("Return one JSON patch object only"))
                     JSONObject().put("fields", JSONObject().put("description", "Retry ${stages.size}")).toString()

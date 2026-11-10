@@ -754,7 +754,7 @@ class MiniAppPresentationWorkflowTest {
                 val result = if (request.generationStage == CloudGenerationStage.PLAN)
                     JSONObject("""{"wholeScreen":true,"language":"en"}""").put("scene", fixtureScene()).toString()
                 else JSONObject(RequestGameplayExamples.ticTacToeSpec()).withFixtureDrawingBinding("board").toString()
-                emit(CloudEvent.Text(result))
+                emit(CloudEvent.Text(request.withFixtureCheckEvidence(result)))
             }
         }
         val generated = kotlinx.coroutines.runBlocking {

@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools.generation
 
+import com.alpha.assistant.tools.withFixtureCheckEvidence
 import com.alpha.assistant.tools.patchSavedFixture
 import com.alpha.assistant.tools.fixtureScene
 import com.alpha.assistant.tools.withFixtureDrawingBinding
@@ -120,7 +121,7 @@ class GenerationRouteWorkflowTest {
             requests += request
             val output = fixture(request, session)
             emit(CloudEvent.Text(if (output.startsWith("{") && output.endsWith("}"))
-                request.withFixtureLanguage(output) else output))
+                request.withFixtureCheckEvidence(request.withFixtureLanguage(output)) else output))
         }
     }
 

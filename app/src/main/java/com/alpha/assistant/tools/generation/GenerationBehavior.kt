@@ -351,6 +351,14 @@ internal fun behaviorUiObservation(node: JSONObject, state: JSONObject, kind: Ge
 }
 
 
+internal fun GenerationBehavior.Scenario.framesSinceCapture(index: Int, assertion: GenerationBehavior.Step.Assert): Int? {
+    val capture = assertion.capture ?: return null
+    val start = steps.indexOfFirst { it is GenerationBehavior.Step.Capture && it.name == capture }
+    if (start !in 0 until index) return null
+    return steps.subList(start + 1, index).filterIsInstance<GenerationBehavior.Step.Advance>()
+        .filter { slots.getValue(it.slot).kind == GenerationBehavior.Kind.SURFACE }.sumOf { it.count }.takeIf { it > 0 }
+}
+
 /** Executes the frozen workflow. Renderers supply input delivery and observable output. */
 internal suspend fun GenerationBehavior.Scenario.execute(
     before: suspend (Int) -> Unit,

@@ -7,6 +7,12 @@ import android.widget.FrameLayout
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
+import com.alpha.assistant.tools.BehaviorBindingDiagnostic
+import com.alpha.assistant.tools.BehaviorCheckFailure
+import com.alpha.assistant.tools.BehaviorComparison
+import com.alpha.assistant.tools.BehaviorFailureRule
+import com.alpha.assistant.tools.BehaviorObservation
+import com.alpha.assistant.tools.ToolGenerationRoute
 import com.alpha.assistant.tools.ToolPreview
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolUiCatalog
@@ -14,8 +20,10 @@ import com.alpha.assistant.tools.generation.behaviorUiObservation
 import com.alpha.assistant.tools.generation.GenerationBehavior
 import com.alpha.assistant.tools.generation.GenerationBehavior.Binding
 import com.alpha.assistant.tools.generation.GenerationBehavior.Step
+import com.alpha.assistant.tools.generation.GeometryScope
 import com.alpha.assistant.tools.generation.sameToolJson
 import com.alpha.assistant.tools.generation.execute
+import com.alpha.assistant.tools.generation.framesSinceCapture
 import com.alpha.assistant.cloud.CloudFailure
 import java.io.ByteArrayOutputStream
 import kotlin.math.abs
@@ -41,6 +49,7 @@ internal suspend fun checkThreeScene(
     bindings: Map<String, Binding>,
     checkActive: suspend () -> Unit,
     visualReview: (suspend (List<String>) -> String?)?,
+    visualReviewItems: List<String> = emptyList(),
 ): ToolPreview = withContext(Dispatchers.Main.immediate) {
     val activity = ThreeSceneForeground.activity()
     var session = ThreeSceneSession(activity, spec, id, revision,
@@ -149,6 +158,25 @@ internal suspend fun checkThreeScene(
         }
         val activePointers = mutableSetOf<Int>()
         var stepIndex = 0
+        fun assertionFailed(slot: String, comparison: BehaviorComparison, observation: BehaviorObservation,
+            frames: Int? = null, requiredChanges: Int? = null, changes: Int? = null): Nothing {
+            val binding = bindings[slot] as? Binding.Drawing
+            val scope = binding?.let { GeometryScope.of(it, threeScene = true) }
+            val target = when (scope) {
+                GeometryScope.WHOLE -> "the full viewport"
+                GeometryScope.SELECTED -> "the selected viewport region"
+                null -> "the bound output"
+            }
+            val interval = frames?.let { " after $it frames" }.orEmpty()
+            val reason = if (requiredChanges == null) "Expected ${comparison.wire} for $target$interval. " +
+                "Observed ${observation.name.lowercase(java.util.Locale.ROOT).replace('_', ' ')}."
+            else "Expected at least $requiredChanges changes in $target$interval. Observed $changes."
+            throw BehaviorCheckFailure(stepIndex, reason, BehaviorBindingDiagnostic(ToolGenerationRoute.WHOLE_SCREEN,
+                BehaviorFailureRule.ASSERTION_FAILED, stepIndex + 1, scenario.slots.keys.indexOf(slot) + 1,
+                scenario.slots.getValue(slot).kind, bindingKind = if (binding != null) "drawing" else null,
+                scope = scope, comparison = comparison, observation = observation, frames = frames,
+                requiredChanges = requiredChanges, observedChanges = changes))
+        }
         try {
             scenario.execute(
                 before = { index ->
@@ -201,7 +229,8 @@ internal suspend fun checkThreeScene(
                                     previous = current
                                 }
                             }
-                            if (changes < step.changes) throw ThreeSceneFailure(ThreeSceneProblem.ASSERTION_FAILED)
+                            if (changes < step.changes) assertionFailed(checkNotNull(step.observe), BehaviorComparison.MOTION,
+                                BehaviorObservation.TOO_FEW_CHANGES, step.count, step.changes, changes)
                         }
                         else -> error("The shared checker handles observations.")
                     }
@@ -222,12 +251,17 @@ internal suspend fun checkThreeScene(
                             }
                             else -> false
                         }
-                        if (!passed) throw ThreeSceneFailure(ThreeSceneProblem.ASSERTION_FAILED)
+                        if (!passed) assertionFailed(step.slot, BehaviorComparison.from(step.test),
+                            if (observed is ScenePixels && expected is ScenePixels) {
+                                if (equal) BehaviorObservation.UNCHANGED else BehaviorObservation.CHANGED
+                            } else BehaviorObservation.COMPARISON_FAILED, frames = scenario.framesSinceCapture(stepIndex, step))
                 },
             )
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (failure: CloudFailure) {
+            throw failure
+        } catch (failure: BehaviorCheckFailure) {
             throw failure
         } catch (failure: ThreeSceneFailure) {
             throw failure.atStep(stepIndex + 1)
@@ -260,7 +294,12 @@ internal suspend fun checkThreeScene(
             for (pointer in session.pointerEvents(event)) input.trySend(pointer)
             true
         }
-        dialog.setMessage("Planned checks passed (${scenario.steps.size} steps). Try the scene and review details the checks did not cover.")
+        val visual = visualReviewItems.firstOrNull()?.let { item ->
+            val excerpt = item.replace(Regex("\\s+"), " ").take(180)
+            val more = if (visualReviewItems.size > 1) " (${visualReviewItems.size - 1} more)" else ""
+            "\nVisual review: $excerpt$more"
+        } ?: "\nTry the scene and review its appearance."
+        dialog.setMessage("Planned checks passed (${scenario.steps.size} steps).$visual")
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
         var lastFrame = android.os.SystemClock.uptimeMillis()
         while (!accepted.isCompleted) {

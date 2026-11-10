@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools.generation
 
+import com.alpha.assistant.tools.withFixtureCheckEvidence
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.ChatProvider
@@ -79,7 +80,7 @@ class StaticDraftPreviewWorkflowTest {
                 }
                 else -> error("Unexpected generation stage.")
             }
-            emit(CloudEvent.Text(response))
+            emit(CloudEvent.Text(request.withFixtureCheckEvidence(response)))
         }
     }
 

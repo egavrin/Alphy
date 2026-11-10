@@ -29,7 +29,7 @@ class CanvasGenerationWorkflowTest {
                 override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                     val output = if (request.generationStage?.name == "PLAN") """{"wholeScreen":true,"language":"en"}"""
                     else candidate.toString()
-                    emit(CloudEvent.Text(output))
+                    emit(CloudEvent.Text(request.withFixtureCheckEvidence(output)))
                 }
             }
             val name = "canvas-plan-${UUID.randomUUID()}.db"
@@ -76,7 +76,7 @@ class CanvasGenerationWorkflowTest {
                             JSONObject().put("fields", JSONObject().put("description", "Retry ${++repairs}")).toString()
                         else -> candidate.toString()
                     }
-                    emit(CloudEvent.Text(output))
+                    emit(CloudEvent.Text(request.withFixtureCheckEvidence(output)))
                 }
             }
             val result = runCatching { ToolGenerationService(provider, SandboxClient(context))
@@ -169,7 +169,7 @@ class CanvasGenerationWorkflowTest {
                     else JSONObject().put("sourceEdits", JSONArray().put(JSONObject()
                         .put("search", blank.getString("source")).put("replace", valid.getString("source")))).toString()
                 }
-                emit(CloudEvent.Text(result))
+                emit(CloudEvent.Text(request.withFixtureCheckEvidence(result)))
             }
         }
         val context = InstrumentationRegistry.getInstrumentation().targetContext

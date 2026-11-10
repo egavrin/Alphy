@@ -34,7 +34,7 @@ internal class GenerationRepair private constructor(
         val feedback get() = "The previous patch could not apply (${problem.wire}). ${problem.guidance}"
     }
 
-    data class Request(val mode: Mode, val repairNumber: Int, val instructions: String, val base: String?)
+    data class Request(val mode: Mode, val repairNumber: Int, val instructions: String, val base: String?, val bindingsOnly: Boolean = false)
     data class Applied(val text: String, val changes: Int, val sourceEdits: Int)
     private data class Candidate(val text: String, val json: JsonObject)
     private data class SourceEdit(val start: Int, val end: Int, val replacement: String)
@@ -76,6 +76,14 @@ internal class GenerationRepair private constructor(
         return patch(number, feedback, candidate)
     }
 
+    fun correctBindings(feedback: String, claim: () -> Int?): Request? {
+        val candidate = base ?: return null
+        val number = claim() ?: return null
+        return Request(Mode.PATCH, number, "$feedback\nReturn one JSON patch object only. " +
+            "Set only behaviorBindings inside fields. Keep source, controls, state, and the planned check unchanged.",
+            candidate.text, bindingsOnly = true)
+    }
+
     private fun patch(number: Int, feedback: String, candidate: Candidate): Request {
         val allowedFields = if (prependBase != null) editableFields + "prependText" else editableFields
         val structure = "Use fields, a JSON object, to set named fields in ${targetField ?: "the candidate root"}. " +
@@ -102,7 +110,7 @@ internal class GenerationRepair private constructor(
             candidate.text)
     }
 
-    fun apply(raw: String, restrictRemovals: Boolean = false): Applied {
+    fun apply(raw: String, restrictRemovals: Boolean = false, bindingsOnly: Boolean = false): Applied {
         if (byteSize(raw) > maxBytes) reject(Problem.SIZE)
         val patch = strictObject(raw, maxBytes) ?: reject()
         val sections = buildSet {
@@ -111,6 +119,8 @@ internal class GenerationRepair private constructor(
         }
         if (patch.keys.any { it !in sections }) reject()
         val values = patch["fields"]?.let { it as? JsonObject ?: reject() }.orEmpty()
+        if (bindingsOnly && (patch.keys != setOf("fields") || values.keys != setOf("behaviorBindings") ||
+                values["behaviorBindings"] !is JsonObject)) reject()
         val removals = patch["removeFields"]?.let { value ->
             (value as? JsonArray ?: reject()).map { string(it) ?: reject() }
         }.orEmpty()

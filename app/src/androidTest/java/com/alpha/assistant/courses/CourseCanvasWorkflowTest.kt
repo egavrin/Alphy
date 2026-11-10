@@ -6,6 +6,7 @@ import com.alpha.assistant.ui.SavedCourseShellWorkflowTest
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import android.os.ParcelFileDescriptor
+import com.alpha.assistant.tools.withFixtureCheckEvidence
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.ChatProvider
@@ -209,7 +210,7 @@ class CourseCanvasWorkflowTest {
                 """.trimIndent()
                 else -> error("Unexpected stage ${request.generationStage}")
             }
-            emit(CloudEvent.Text(output))
+            emit(CloudEvent.Text(request.withFixtureCheckEvidence(output, scope = "selected")))
         }
     }
 }

@@ -455,7 +455,7 @@ internal class NeedsPlan private constructor(
             """.trimIndent()
         }
 
-        fun parseResponse(raw: String, lessonTarget: CourseSlideKind?, allowedSourceIds: Set<String>): GenerationPlan {
+        fun parseResponse(raw: String, lessonTarget: CourseSlideKind?, allowedSourceIds: Set<String>, request: String? = null): GenerationPlan {
             requireSourceAllowlist(lessonTarget, allowedSourceIds)
             val root = partsObject(raw, "$")
             if (root.has("wholeScreen")) {
@@ -465,12 +465,12 @@ internal class NeedsPlan private constructor(
                     "$.language", "a lowercase two- or three-letter language tag")
                 requireParts(root.opt("wholeScreen") == true, "$.wholeScreen", "the Boolean true")
                 val threeScene = root.has("runtime")
-                val scene = SceneRequirement.read(root.opt("scene"), threeScene)
+                val scene = SceneRequirement.read(root.opt("scene"), threeScene, request)
                 requireParts(!threeScene || root.opt("runtime") == "threejs-worker" && scene?.placement == "stage",
                     "$.runtime", "threejs-worker with a stage scene check")
                 return GenerationPlan.WholeScreen(scene, threeScene)
             }
-            val scene = SceneRequirement.read(root.remove("scene"))
+            val scene = SceneRequirement.read(root.remove("scene"), request = request)
             val needs = parse(root, lessonTarget, allowedSourceIds, scene)
             val hasScene = needs.needs.any { it.type == NeedType.SCENE }
             requireParts(!hasScene || scene != null, "$.scene", "a behavior check for the declared scene")
