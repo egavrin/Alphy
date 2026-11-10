@@ -88,5 +88,18 @@
       "1/2",
       "3/4"
     ]
+  },
+  "rectangle-area": {
+    "request": "Teach rectangle area in English to a beginner. Use exactly one lesson with three slides in this order: EXAMPLE, CHOICE, SUMMARY. For the example, put a short instruction first. Draw a canvas labeled Rectangle illustration, with exactly one solid rectangle on the default background and no labels, border, or other graphics. Keep its left edge and height fixed. Use a native live slider labeled Width from 1 to 10, starting at 2, to change the rectangle's drawn width during the drag. For the choice, ask the area when width is 4 and height is 3. Use exactly two option labels, 7 and 12. Give a retry hint to multiply instead of adding, and explain briefly that 4 times 3 is 12. End with a short summary.",
+    "cards": [],
+    "kind": "CHOICE",
+    "scene": "Rectangle illustration",
+    "control": "Width",
+    "wrong": [
+      "7"
+    ],
+    "right": [
+      "12"
+    ]
   }
 }

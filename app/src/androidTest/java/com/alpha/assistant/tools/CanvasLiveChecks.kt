@@ -14,14 +14,20 @@ internal class CanvasLiveChecks(
     private val evidence: JSONObject,
     private val screenshot: (String) -> Unit,
 ) {
-    fun slider(label: String, scene: String): Float {
-        val slider = sliderNode(label, reveal = true)
+    fun slider(label: String, scene: String, expandsHorizontally: Boolean = false): Float {
+        sliderNode(label, reveal = true)
+        robot.waitUntil { sliderNode(label).isEnabled }
+        val slider = sliderNode(label)
         val drawing = bounds(visible(scene))
         val initial = progress(label)
         val track = bounds(slider)
-        check(drawing.top < track.top)
+        check(drawing.top < track.top || drawing.right <= track.left || track.right <= drawing.left)
         val x = track.left + track.width() * (0.06f + 0.88f * fraction(slider))
         val y = track.exactCenterY()
+        var widthBefore = 0
+        if (expandsHorizontally) {
+            robot.waitUntil { horizontalExtent(drawing).also { widthBefore = it } > 0 }
+        }
         val before = pixels(drawing)
         screenshot("scene-before")
         val down = SystemClock.uptimeMillis()
@@ -30,6 +36,11 @@ internal class CanvasLiveChecks(
         try {
             touch(down, MotionEvent.ACTION_MOVE, track.left + track.width() * 0.55f, y)
             robot.waitUntil { progress(label) != initial && pixels(drawing) != before }
+            if (expandsHorizontally) {
+                robot.waitUntil { horizontalExtent(drawing) > widthBefore }
+                evidence.put("drawing_width_px", JSONObject().put("before", widthBefore)
+                    .put("during", horizontalExtent(drawing)))
+            }
             middle = progress(label)
             screenshot("scene-during-drag")
             touch(down, MotionEvent.ACTION_MOVE, track.left + track.width() * 0.82f, y)
@@ -186,6 +197,27 @@ internal class CanvasLiveChecks(
                 for (x in clipped.left until clipped.right step 12) hash = 31 * hash + bitmap.getPixel(x, y)
             }
             return hash
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    private fun horizontalExtent(area: Rect): Int {
+        val bitmap = checkNotNull(robot.automation.takeScreenshot())
+        try {
+            check(Rect(0, 0, bitmap.width, bitmap.height).contains(area))
+            val background = bitmap.getPixel(area.left, area.top)
+            var left = area.right
+            var right = area.left
+            for (y in area.top until area.bottom step 4) {
+                for (x in area.left until area.right step 4) {
+                    if (bitmap.getPixel(x, y) != background) {
+                        left = minOf(left, x)
+                        right = maxOf(right, x)
+                    }
+                }
+            }
+            return (right - left).coerceAtLeast(0)
         } finally {
             bitmap.recycle()
         }

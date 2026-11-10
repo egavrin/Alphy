@@ -414,11 +414,13 @@ private val LocalMiniAppControlsLanguage = staticCompositionLocalOf<String?> { n
     videoHost: NativeVideoUiHost? = null,
     timerHost: com.alpha.assistant.timer.ForegroundTimerUiHost? = null,
     appLanguage: String? = null,
+    courseSceneLayout: Boolean = false,
     event: (String,Any?) -> Unit) {
     val root=remember(ui) {JSONObject(ui)}
     val values=remember(state) {JSONObject(state)}
     val withinLimits=remember(ui,state) {runCatching {ToolUiCatalog.validateRenderedWork(root,values)}.isSuccess}
     if(!withinLimits) {Text(stringResource(R.string.tool_render_limit)); return}
+    val sceneSlot = remember(root, courseSceneLayout) { if (courseSceneLayout) courseSceneSlot(root) else null }
     val recipe = remember(root, presentation) {
         presentation?.takeIf { runCatching { it.focalNode(root) }.isSuccess }
     }
@@ -482,7 +484,7 @@ private val LocalMiniAppControlsLanguage = staticCompositionLocalOf<String?> { n
             val render: @Composable () -> Unit = {
                 Column(Modifier.fillMaxWidth()) {
                     edits.notice?.let { NativeLiveMessage(it) }
-                    NativeNode(root,values,enabled,imageVersion,imageLoader,imageAvailable,guardedCalendar,false,heading,presentation=recipe) { id,payload ->
+                    NativeNode(root,values,enabled,imageVersion,imageLoader,imageAvailable,guardedCalendar,false,heading,presentation=recipe,courseSceneSlot=sceneSlot) { id,payload ->
                         if(enabled && runCatching {ToolUiCatalog.validateAction(root,id,payload,values)}.isSuccess && edits.allowAction()) event(id,payload)
                     }
                 }
@@ -654,10 +656,62 @@ private fun verticalArrangement(style: JSONObject?,gap: Dp): Arrangement.Vertica
     }
     if(selectable) SelectionContainer(modifier=modifier) {content()} else content()
 }
+private val courseSceneControls = setOf("slider", "numberInput", "toggle", "checkbox", "button", "select", "segmented")
+
+private fun courseSceneSlot(root: JSONObject): Int? {
+    if (root.optString("type") != "column" || root.has("layout") ||
+        root.optJSONObject("style")?.keys()?.asSequence()?.any { it in setOf("align", "arrangement") } == true
+    ) return null
+    val children = root.optJSONArray("children") ?: return null
+    val items = List(children.length(), children::getJSONObject)
+    val index = items.indices.singleOrNull { canvasSurfaceIds(items[it]).isNotEmpty() } ?: return null
+
+    fun canvasOnly(node: JSONObject): Boolean {
+        if (node.has("action")) return false
+        if (node.getString("type") == "canvas") return true
+        if (node.getString("type") !in setOf("column", "row", "box")) return false
+        val nested = node.optJSONArray("children") ?: return false
+        return (0 until nested.length()).all { canvasOnly(nested.getJSONObject(it)) }
+    }
+
+    val trailing = items.drop(index + 1)
+    return index.takeIf {
+        canvasOnly(items[index]) &&
+            items.none { it.has("layout") } &&
+            items.take(index).none { it.getString("type") in courseSceneControls } &&
+            trailing.isNotEmpty() && trailing.all { it.getString("type") in courseSceneControls }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable private fun CourseSceneSlots(
+    modifier: Modifier, sceneSlot: Int, count: Int, gap: Dp,
+    renderChild: @Composable (Int, Modifier) -> Unit,
+) {
+    BoxWithConstraints(modifier) {
+        val density = LocalDensity.current
+        val pair = maxWidth >= 640.dp && density.fontScale <= 1.3f &&
+            LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val panel = if (pair) Modifier.width(with(density) { ((constraints.maxWidth - gap.roundToPx()) / 2).toDp() })
+            else Modifier.fillMaxWidth()
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(gap), verticalArrangement = Arrangement.spacedBy(gap)) {
+            if (sceneSlot > 0) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
+                    repeat(sceneSlot) { renderChild(it, Modifier) }
+                }
+            }
+            Box(panel) { renderChild(sceneSlot, Modifier) }
+            Column(panel, verticalArrangement = Arrangement.spacedBy(gap)) {
+                for (index in sceneSlot + 1 until count) renderChild(index, Modifier)
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class,ExperimentalMaterial3Api::class)
 @Composable private fun NativeNode(node: JSONObject, state: JSONObject, parentEnabled: Boolean, imageVersion: Any?,
     imageLoader: suspend (String) -> Bitmap?, imageAvailable: suspend (String) -> Boolean, calendarHost: OwnedCalendarUiHost?, compact: Boolean, heading: String?, placement: Modifier = Modifier,
-    secondaryButton: Boolean = false, presentation: NativePresentation? = null, event: (String,Any?) -> Unit) {
+    secondaryButton: Boolean = false, presentation: NativePresentation? = null, courseSceneSlot: Int? = null, event: (String,Any?) -> Unit) {
     if(!ToolUiCatalog.visible(node,state)) return
     val type=node.getString("type")
     val definition=ToolUiCatalog.component(type)
@@ -762,7 +816,8 @@ private fun verticalArrangement(style: JSONObject?,gap: Dp): Arrangement.Vertica
                     if (usesColumnPlacement) column(containerModifier)
                     else WorkspaceSlots(containerModifier, items, state, style, gap, renderChild)
                 }
-                else -> column(containerModifier)
+                else -> if (courseSceneSlot == null) column(containerModifier)
+                    else CourseSceneSlots(containerModifier, courseSceneSlot, items.length(), gap, renderChild)
             }
         }
         "box" -> Box(modifier,contentAlignment=boxAlignment(style?.optString("align"))) {

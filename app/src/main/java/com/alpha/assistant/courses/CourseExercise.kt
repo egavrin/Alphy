@@ -6,12 +6,18 @@ import com.alpha.assistant.tools.ToolUiCatalog
 import org.json.JSONArray
 import org.json.JSONObject
 
+internal const val COURSE_EXERCISE_FEEDBACK_LIMIT = 160
+internal val COURSE_EXERCISE_FEEDBACK_FIELDS = setOf("wrongHint", "correctFeedback")
+private val OPTIONAL_EXERCISE_FIELDS = COURSE_EXERCISE_FEEDBACK_FIELDS + "actionId"
+
 internal data class CourseExerciseOption(val id: String, val label: String)
 
 internal data class CourseExercisePrompt(
     val kind: CourseSlideKind,
     val question: String,
     val options: List<CourseExerciseOption>,
+    val wrongHint: String?,
+    val correctFeedback: String?,
 )
 
 /** The player receives the prompt. Only the controller reads the key from the immutable definition. */
@@ -110,7 +116,7 @@ internal class CourseExercise private constructor(
             }
             val required = kindFields + setOf("kind", "question")
             val fields = data.keys().asSequence().toSet()
-            require(fields == required || fields == required + "actionId")
+            require(fields.containsAll(required) && (fields - required).all { it in OPTIONAL_EXERCISE_FIELDS })
             require(data.get("kind") == kind.name)
             val question = data.text("question", 512)
             val actionId = if (data.has("actionId")) data.text("actionId", 48).also {
@@ -139,7 +145,9 @@ internal class CourseExercise private constructor(
                     require(it.toSet() == options.map { option -> option.id }.toSet())
                 }
             }
-            CourseExercise(CourseExercisePrompt(kind, question, options), actionId, key)
+            val wrongHint = if (data.has("wrongHint")) data.text("wrongHint", COURSE_EXERCISE_FEEDBACK_LIMIT) else null
+            val correctFeedback = if (data.has("correctFeedback")) data.text("correctFeedback", COURSE_EXERCISE_FEEDBACK_LIMIT) else null
+            CourseExercise(CourseExercisePrompt(kind, question, options, wrongHint, correctFeedback), actionId, key)
         }
 
         private fun JSONObject.text(name: String, maxLength: Int): String =

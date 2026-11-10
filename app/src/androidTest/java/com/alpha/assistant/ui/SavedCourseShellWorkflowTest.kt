@@ -3,6 +3,7 @@ package com.alpha.assistant.ui
 import androidx.test.core.app.ActivityScenario
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
+import com.alpha.assistant.courses.CourseAnswer
 import com.alpha.assistant.courses.CourseLessonPlan
 import com.alpha.assistant.courses.CourseOutline
 import com.alpha.assistant.courses.CourseSetup
@@ -10,6 +11,8 @@ import com.alpha.assistant.courses.CourseSlideContent
 import com.alpha.assistant.courses.CourseSlideKind
 import com.alpha.assistant.courses.CourseSlidePlan
 import com.alpha.assistant.courses.CourseStore
+import com.alpha.assistant.courses.EXERCISE_FIELD
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -72,6 +75,48 @@ class SavedCourseShellWorkflowTest {
         CourseStore(fixture.context, databaseName(fixture)).use {
             assertEquals(listOf(COURSE_TITLE), it.courses().map { course -> course.setup.topic })
         }
+    }
+
+    @Test fun finalChoiceFeedbackSurvivesRecreationUntilFinish() = withFixture { fixture ->
+        val saved = CourseStore(fixture.context, databaseName(fixture)).use { store ->
+            val course = store.create(CourseSetup(COURSE_TITLE, "Beginner", "Practice saved examples"),
+                CourseOutline(listOf(CourseLessonPlan("lesson", "Saved lesson", listOf(
+                    CourseSlidePlan("choice", CourseSlideKind.CHOICE, "Choose the next letter"),
+                )))))
+            val exercise = """{"kind":"CHOICE","question":"Which letter follows A?","options":[
+                {"id":"b","label":"B"},{"id":"c","label":"C"}],"correct":"b"}"""
+            val state = JSONObject().put(EXERCISE_FIELD, exercise)
+            val ui = """{"type":"text","text":"$SLIDE_TEXT"}"""
+            val definition = JSONObject("""{"formatVersion":3,"title":"Saved course fixture","description":"",
+                "capabilities":[],"ui":$ui,"source":"return {state:input.state};"}""")
+                .put("stateSchema", JSONObject().put(EXERCISE_FIELD, "string"))
+                .put("initialState", state)
+            store.commitGeneration(store.beginGeneration(course.id, course.revision, "choice"),
+                CourseSlideContent(definition.toString(), ui, state.toString()))
+        }
+        fixture.install(saveKey = false)
+        fixture.launch().use { scenario ->
+            openCourses(scenario)
+            robot.click(COURSE_TITLE)
+            robot.click(robot.text(R.string.course_open))
+            robot.click("B")
+            val correct = robot.text(R.string.course_answer_correct)
+            robot.waitFor(correct)
+            assertTrue(fixture.model?.courseStore?.course(saved.id)?.progress?.isComplete == true)
+            assertFalse(robot.text(R.string.course_complete) in robot.texts())
+
+            scenario.recreate()
+            robot.waitFor(SLIDE_TEXT)
+            robot.waitFor(correct)
+            assertFalse(robot.text(R.string.course_next) in robot.texts())
+            val store = checkNotNull(fixture.model).courseStore
+            assertEquals(listOf(CourseAnswer.Choice("b")), store.answers(saved.id).map { it.answer })
+            robot.diagnostics.capture("restored-final-choice-feedback")
+            robot.click("Завершить")
+            robot.waitFor(robot.text(R.string.course_complete))
+            assertEquals(1, store.answers(saved.id).size)
+        }
+        assertEquals(0, fixture.provider.calls)
     }
 
     @Test fun aSecondShellShowsItsOwnEmptyCourseLibrary() = withFixture { seeded ->

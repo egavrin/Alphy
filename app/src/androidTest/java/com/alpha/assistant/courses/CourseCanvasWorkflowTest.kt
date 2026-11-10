@@ -1,5 +1,11 @@
 package com.alpha.assistant.courses
 
+import com.alpha.assistant.R
+import com.alpha.assistant.tools.CanvasLiveChecks
+import com.alpha.assistant.ui.SavedCourseShellWorkflowTest
+import com.alpha.assistant.ui.ShellFixture
+import com.alpha.assistant.ui.ShellRobot
+import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.ChatProvider
@@ -35,6 +41,83 @@ class CourseCanvasWorkflowTest {
             } finally {
                 context.deleteDatabase(name)
             }
+        }
+    }
+
+    @Test fun sceneAndControlsReflowWithAcceptedSettingsAndLessonMap() {
+        val fixture = ShellFixture("course-scene-layout")
+        val robot = ShellRobot("course-scene-layout")
+        val database = SavedCourseShellWorkflowTest.databaseName(fixture)
+        val topic = "Saved moving circle"
+        val instruction = "Change the position with the slider."
+        val tools = ToolGenerationService(provider(CourseSlideKind.EXAMPLE, animated = false), SandboxClient(fixture.context))
+        fun shell(command: String) = ParcelFileDescriptor.AutoCloseInputStream(robot.automation.executeShellCommand(command))
+            .bufferedReader().use { it.readText() }
+        val ignoresOrientation = shell("wm get-ignore-orientation-request").contains("Request true")
+        try {
+            shell("wm set-ignore-orientation-request false")
+            val saved = CourseStore(fixture.context, database).use { store ->
+                val course = store.create(CourseSetup(topic, "Beginner", "Explore a shape"),
+                    CourseOutline(listOf(CourseLessonPlan("lesson", "Shape", listOf(
+                        CourseSlidePlan("slide", CourseSlideKind.EXAMPLE, "Move a circle"),
+                    )))))
+                runBlocking {
+                    CourseController(store, tools).generate(course.id, course.revision, "slide", "offline", CloudSession())
+                }
+            }
+            fixture.install(saveKey = false)
+            fixture.launch().use { scenario ->
+                robot.rotate(scenario, landscape = false)
+                robot.openDrawer(scenario)
+                robot.click(robot.text(R.string.course_learning))
+                robot.awaitDrawerClosed(scenario)
+                robot.click(topic)
+                robot.click(robot.text(R.string.course_open))
+                val finish = robot.text(R.string.course_finish)
+                val map = robot.text(R.string.course_lessons)
+                val canvas = "Diagram. "
+                val slider = "Speed"
+                robot.waitFor(finish)
+                robot.diagnostics.capture("portrait-initial")
+                assertTrue("The lesson map must be closed at the initial position", robot.find("1. Shape") == null)
+                robot.assertScreenshotShows(canvas)
+                assertTrue(robot.bounds(instruction).bottom <= robot.bounds(canvas).top)
+                assertTrue(robot.bounds(canvas).bottom <= robot.bounds(slider).top)
+                val wideBounds = robot.bounds(canvas)
+                assertTrue(kotlin.math.abs(wideBounds.width() - wideBounds.height()) <= 2)
+                assertTrue(robot.bounds(slider).bottom <= robot.bounds(finish).top)
+                robot.diagnostics.capture("portrait-initial")
+
+                val checker = CanvasLiveChecks(robot, JSONObject()) { robot.diagnostics.capture(it) }
+                val accepted = checker.slider(slider, canvas.trimEnd())
+                assertEquals(saved, fixture.model?.courseStore?.course(saved.id))
+                assertTrue(checkNotNull(fixture.model).courseStore.answers(saved.id).isEmpty())
+
+                robot.rotate(scenario, landscape = true)
+                robot.waitFor(instruction)
+                robot.assertScreenshotShows(canvas)
+                robot.diagnostics.capture("landscape-initial")
+                val scene = robot.bounds(canvas)
+                val control = robot.bounds(slider)
+                assertTrue("The safe landscape pane must place the scene and slider side by side: $scene / $control",
+                    scene.right <= control.left && control.top < scene.bottom)
+                assertEquals(accepted, checker.progress(slider), 0f)
+                assertTrue(robot.bounds(finish).top >= control.bottom)
+                assertTrue(robot.find("1. Shape") == null)
+                robot.click(map)
+                robot.waitFor("1. Shape")
+                robot.diagnostics.capture("landscape-lesson-map")
+                robot.back()
+                robot.waitGone("1. Shape")
+                robot.assertScreenshotShows(canvas)
+                assertEquals(accepted, checker.progress(slider), 0f)
+                assertEquals(saved, fixture.model?.courseStore?.course(saved.id))
+                assertEquals(0, fixture.provider.calls)
+            }
+        } finally {
+            shell("wm set-ignore-orientation-request $ignoresOrientation")
+            fixture.remove()
+            fixture.context.deleteDatabase(database)
         }
     }
 
@@ -102,7 +185,7 @@ class CourseCanvasWorkflowTest {
 
     private fun x(surfaces: JSONObject) = surfaces.getJSONObject("fill_diagram").getJSONArray("commands").getJSONObject(0).getDouble("x")
 
-    private fun provider(kind: CourseSlideKind) = object : ChatProvider {
+    private fun provider(kind: CourseSlideKind, animated: Boolean = true) = object : ChatProvider {
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
             val contentType = kind.name.lowercase(java.util.Locale.ROOT)
             val output = when (request.generationStage) {
@@ -121,7 +204,7 @@ class CourseCanvasWorkflowTest {
                     {"holes":["diagram"],"fill":{"capabilities":[],"stateSchema":{"fill_phase":"number"},"initialState":{"fill_phase":0},
                     "surfaces":[{"id":"fill_diagram","width":64,"height":64}],
                     "ui":{"type":"column","children":[{"type":"canvas","text":"Diagram","surfaces":["fill_diagram"]}]},
-                    "source":"const state=input.state, type=input.event.type; if(type==='frame') state.fill_phase++; const result={state,surfaces:{fill_diagram:{commands:[{type:'circle',x:input.ports.speed,y:20,radius:2,color:'accent'}]}}}; if(type==='open') result.frames=['fill_diagram']; return result;",
+                    "source":"const state=input.state, type=input.event.type; if(type==='frame') state.fill_phase++; const result={state,surfaces:{fill_diagram:{commands:[{type:'circle',x:input.ports.speed,y:20,radius:2,color:'accent'}]}}}; if($animated && type==='open') result.frames=['fill_diagram']; return result;",
                     "behaviorBindings":{"slider":"p5_speed_edit","shape":{"surface":"fill_diagram","path":[0]}}}}
                 """.trimIndent()
                 else -> error("Unexpected stage ${request.generationStage}")

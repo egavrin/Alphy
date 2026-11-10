@@ -1,6 +1,8 @@
 package com.alpha.assistant.courses
 
 import android.database.sqlite.SQLiteDatabase
+import android.view.View
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -101,7 +103,7 @@ class CoursePlayerGenerationUiWorkflowTest {
             waitFor(R.string.course_outline)
             click(R.string.course_resume)
             robot.waitFor(generatedFuture)
-            click(R.string.course_next)
+            click(R.string.course_finish)
             waitFor(R.string.course_complete)
             assertEquals(1, runtime.requests.size)
             assertEquals(1, runtime.preparations.size)
@@ -145,7 +147,7 @@ class CoursePlayerGenerationUiWorkflowTest {
                 error("Private preparation failure")
             }
         }
-        withPlayer(runtime, prefetch = true, startAtPractice = true) { store, saved ->
+        withPlayer(runtime, prefetch = true, startAtPractice = CourseSlideKind.FILL_IN) { store, saved ->
             robot.click("Fractions")
             click(R.string.course_open)
             val answer = robot.text(R.string.course_answer_label)
@@ -176,6 +178,110 @@ class CoursePlayerGenerationUiWorkflowTest {
             assertTrue(runtime.prompts.first().contains("\"correct\":false"))
             assertTrue(runtime.prompts.first().contains("\"correct\":true"))
             assertTrue(runtime.requests.isEmpty())
+        }
+    }
+
+    @Test fun choiceTapSavesOneAttemptAndKeepsFeedbackUntilNext() {
+        val release = CompletableDeferred<Unit>()
+        val retry = CompletableDeferred<Unit>()
+        val runtime = Runtime { attempt ->
+            when (attempt) {
+                1 -> {
+                    release.await()
+                    error("Fixture preparation failure")
+                }
+                2 -> retry.await()
+            }
+        }
+        withPlayer(runtime, prefetch = true, startAtPractice = CourseSlideKind.CHOICE) { store, saved ->
+            robot.click("Fractions")
+            click(R.string.course_open)
+            robot.click("Whole")
+            waitFor(R.string.course_answer_wrong)
+            assertNull(robot.find(robot.text(R.string.course_check)))
+            assertEquals(saved.progress, store.course(saved.id)?.progress)
+            assertEquals(listOf(CourseAnswer.Choice("whole")), store.answers(saved.id).map { it.answer })
+            assertTrue(runtime.preparations.isEmpty())
+
+            val option = generateSequence(robot.waitFor("Half")) { it.parent }.first { it.isClickable }
+            assertEquals("android.widget.Button", option.className.toString())
+            robot.click("Half")
+            val feedback = robot.waitFor(robot.text(R.string.course_answer_correct))
+            assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE, feedback.liveRegion)
+            waitFor(R.string.course_next_preparing)
+            val committed = checkNotNull(store.course(saved.id))
+            assertEquals("explanation", committed.progress.currentSlideId)
+            assertEquals(1, committed.progress.completedSlides)
+            assertNull(robot.find(robot.text(R.string.course_next)))
+            assertTrue(option.refresh())
+            assertFalse(option.isEnabled)
+            assertFalse(option.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            assertEquals(listOf(false, true), store.answers(saved.id).map { it.correct })
+            robot.diagnostics.capture("choice-feedback-during-preparation")
+
+            release.complete(Unit)
+            waitFor(R.string.course_next_failed)
+            waitFor(R.string.course_answer_correct)
+            assertNull(store.slide(saved.id, "explanation"))
+            click(R.string.course_generation_retry)
+            waitFor(R.string.course_next_preparing)
+            waitFor(R.string.course_answer_correct)
+            assertEquals(committed, store.course(saved.id))
+
+            retry.complete(Unit)
+            waitFor(R.string.course_next)
+            waitFor(R.string.course_answer_correct)
+            click(R.string.course_next)
+            robot.waitFor(generatedText)
+            assertEquals(committed.progress, store.course(saved.id)?.progress)
+            assertEquals(listOf(CourseAnswer.Choice("whole"), CourseAnswer.Choice("half")), store.answers(saved.id).map { it.answer })
+        }
+    }
+
+    @Test fun choiceShowsOnlyTheAcceptedAnswerFeedback() {
+        val hint = "Look for one of the two equal parts."
+        val explanation = "A half is one of two equal parts."
+        val runtime = Runtime {}
+        withPlayer(runtime, prefetch = true, startAtPractice = CourseSlideKind.CHOICE,
+            practiceFeedback = hint to explanation) { store, saved ->
+            robot.click("Fractions")
+            click(R.string.course_open)
+            val practice = robot.text(R.string.course_slide_position, 1, 3)
+            robot.waitFor("Whole")
+            assertNull(robot.find(hint))
+            assertNull(robot.find(explanation))
+            robot.click("Whole")
+            waitFor(R.string.course_answer_wrong)
+            assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE, robot.waitFor(hint).liveRegion)
+            assertNull(robot.find(explanation))
+            assertEquals(saved.progress, store.course(saved.id)?.progress)
+            assertNull(robot.find(robot.text(R.string.course_next)))
+
+            robot.click("Half")
+            waitFor(R.string.course_answer_correct)
+            assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE, robot.waitFor(explanation).liveRegion)
+            assertNull(robot.find(hint))
+            waitFor(R.string.course_next)
+            robot.waitFor(practice)
+            assertEquals(listOf(false, true), store.answers(saved.id).map { it.correct })
+            robot.diagnostics.capture("choice-explanation-before-next")
+            click(R.string.course_next)
+            robot.waitFor(generatedText)
+        }
+    }
+
+    @Test fun firstChoicePrecedesSecondaryLessonDetailsAtTheInitialPosition() {
+        withPlayer(Runtime {}, startAtPractice = CourseSlideKind.CHOICE, practiceSources = listOf(
+            CourseSourceReference("Fixture practice source", "https://example.org/practice"),
+        )) { _, _ ->
+            robot.click("Fractions")
+            click(R.string.course_open)
+            val question = robot.bounds("Name the part.")
+            val firstChoice = robot.bounds("Whole")
+            val source = robot.bounds("Fixture practice source")
+            robot.diagnostics.capture("initial-choice-and-source")
+            assertTrue("The question must appear above the first choice", question.bottom <= firstChoice.top)
+            assertTrue("The first choice must appear before the source", firstChoice.bottom <= source.top)
         }
     }
 
@@ -417,7 +523,9 @@ class CoursePlayerGenerationUiWorkflowTest {
         provideHost: Boolean = true,
         search: (suspend (String) -> List<Source>)? = null,
         prefetch: Boolean = false,
-        startAtPractice: Boolean = false,
+        startAtPractice: CourseSlideKind? = null,
+        practiceSources: List<CourseSourceReference> = emptyList(),
+        practiceFeedback: Pair<String, String>? = null,
         run: File.(CourseStore, CourseSnapshot) -> Unit,
     ) {
         val fixture = ShellFixture("course-player-generation")
@@ -425,7 +533,7 @@ class CoursePlayerGenerationUiWorkflowTest {
         try {
             fixture.install(saveKey = false)
             CourseStore(fixture.context, database).use { store ->
-                val saved = seed(store, startAtPractice)
+                val saved = seed(store, startAtPractice, practiceSources, practiceFeedback)
                 val controller = CourseController(store, runtime.generation)
                 val host = CourseSlideGenerationHost { request ->
                     runtime.requests += request
@@ -464,19 +572,29 @@ class CoursePlayerGenerationUiWorkflowTest {
         }
     }
 
-    private fun seed(store: CourseStore, startAtPractice: Boolean): CourseSnapshot {
+    private fun seed(
+        store: CourseStore, startAtPractice: CourseSlideKind?, practiceSources: List<CourseSourceReference>,
+        practiceFeedback: Pair<String, String>?,
+    ): CourseSnapshot {
+        val kind = startAtPractice ?: CourseSlideKind.FILL_IN
         val course = store.create(CourseSetup("Fractions", "Beginner", "Compare fractions"),
             CourseOutline(listOf(CourseLessonPlan("lesson", "Compare fractions", listOf(
-                CourseSlidePlan("practice", CourseSlideKind.FILL_IN, "Name the part"),
+                CourseSlidePlan("practice", kind, "Name the part"),
                 CourseSlidePlan("explanation", CourseSlideKind.EXPLANATION, goal),
                 CourseSlidePlan("future", CourseSlideKind.SUMMARY, "Review the result"),
             )))))
-        val practice = JSONObject().put("kind", "FILL_IN").put("question", "Name the part.")
+        val practice = if (kind == CourseSlideKind.CHOICE) JSONObject(
+            """{"kind":"CHOICE","question":"Name the part.","options":[{"id":"whole","label":"Whole"},
+                {"id":"half","label":"Half"}],"correct":"half"}""",
+        ) else JSONObject().put("kind", "FILL_IN").put("question", "Name the part.")
             .put("accepted", JSONArray(listOf("half")))
+        practiceFeedback?.let { (hint, explanation) ->
+            practice.put("wrongHint", hint).put("correctFeedback", explanation)
+        }
         val spec = fixtureSpec("Saved practice", practice)
         var saved = store.commitGeneration(store.beginGeneration(course.id, course.revision, "practice"),
-            CourseSlideContent(spec.json, spec.ui.toString(), spec.initialState))
-        if (startAtPractice) return saved
+            CourseSlideContent(spec.json, spec.ui.toString(), spec.initialState, sources = practiceSources))
+        if (startAtPractice != null) return saved
         saved = store.commitAnswer(course.id, CourseAnswerSubmission("wrong", saved.revision, "practice",
             CourseAnswer.FillIn("whole"), false, spec.initialState))
         return store.commitAnswer(course.id, CourseAnswerSubmission("correct", saved.revision, "practice",

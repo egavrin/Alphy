@@ -66,7 +66,7 @@ class DesktopCourseWorkflowTest {
             robot.waitFor(slideText(chosen, 2))
             robot.waitFor(robot.text(R.string.course_slide_position, 2, 2))
             assertEquals(0, fixture.provider.calls)
-            click(R.string.course_next)
+            click(R.string.course_finish)
             robot.waitFor(robot.text(R.string.course_complete))
             backToDesktop()
             reveal(robot.text(R.string.desktop_now_course_detail, older.setup.topic, 2, 2))

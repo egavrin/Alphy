@@ -1,9 +1,12 @@
 package com.alpha.assistant.courses
 
+import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -21,14 +24,13 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -40,12 +42,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
-import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffold
 import androidx.compose.material3.adaptive.layout.PaneAdaptedValue
 import androidx.compose.material3.adaptive.layout.PaneScaffoldDirective
 import androidx.compose.material3.adaptive.layout.SupportingPaneScaffold
@@ -57,6 +57,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -67,6 +68,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -74,8 +76,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -335,7 +339,7 @@ internal fun CourseLibraryScreen(
         else -> R.string.course_exit
     }
     @Composable
-    fun PageContent() {
+    fun PageContent(sceneCovered: Boolean = false) {
         when (val current = page) {
             null -> LinearProgressIndicator(Modifier.fillMaxWidth())
             CoursePage.LoadFailed -> CourseRecovery(R.string.course_load_failed) { refresh++ }
@@ -387,20 +391,23 @@ internal fun CourseLibraryScreen(
             is CoursePage.Slide -> key(current.course.id, current.step.slide.id) {
                 val slideId = current.step.slide.id
                 val savedAnswer = current.feedback?.answer
-                fun currentText() = if (draftSlideId == slideId) draftText else when (savedAnswer) {
-                    is CourseAnswer.Choice -> savedAnswer.optionId
-                    is CourseAnswer.FillIn -> savedAnswer.text
-                    else -> ""
-                }
+                fun currentText() = if (draftSlideId == slideId) draftText else (savedAnswer as? CourseAnswer.FillIn)?.text.orEmpty()
                 fun currentOrder() = if (draftSlideId == slideId) draftOrder else (savedAnswer as? CourseAnswer.Order)?.optionIds.orEmpty()
+                fun submit(answer: CourseAnswer) {
+                    if (page !== current) return
+                    val requestId = UUID.randomUUID().toString()
+                    update(requestId) { presentation.submit(current, requestId, answer) }
+                }
                 CourseSlidePlayer(
                     slide = current,
                     sceneHost = remember(controller, current.course.id, current.course.revision, current.step.slide.id, current.scene?.json) {
                         current.scene?.let { controller.sceneHost(current) }
                     },
                     busy = busy,
+                    sceneCovered = sceneCovered,
                     text = currentText(),
                     order = currentOrder(),
+                    onChoice = { submit(CourseAnswer.Choice(it)) },
                     onText = {
                         draftSlideId = slideId
                         draftText = it
@@ -412,11 +419,8 @@ internal fun CourseLibraryScreen(
                         draftOrder = ArrayList(it)
                     },
                     onSubmit = {
-                        // A selection can change before the button recomposes.
-                        if (page === current) current.prompt?.answerFor(currentText(), currentOrder())?.let { answer ->
-                            val requestId = UUID.randomUUID().toString()
-                            update(requestId) { presentation.submit(current, requestId, answer) }
-                        }
+                        // A draft can change before the button recomposes.
+                        current.prompt?.answerFor(currentText(), currentOrder())?.let(::submit)
                     },
                     nextPreparation = nextPreparation,
                     onRetryNext = {
@@ -449,14 +453,14 @@ internal fun CourseLibraryScreen(
                     backLabel = backLabel,
                     busy = busy,
                     onBack = ::back,
-                    slidePane = {
+                    slidePane = { sceneCovered ->
                         if (slide == null) {
                             CoursePageFrame(Modifier.fillMaxSize(), backLabel, busy, notice, ::back) { PageContent() }
                         } else {
                             Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
                                 if (notice != 0) Text(stringResource(notice),
                                     Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-                                PageContent()
+                                PageContent(sceneCovered)
                             }
                         }
                     },
@@ -493,13 +497,16 @@ private fun CoursePlayerLayout(
     backLabel: Int,
     busy: Boolean,
     onBack: () -> Unit,
-    slidePane: @Composable () -> Unit,
+    slidePane: @Composable (Boolean) -> Unit,
 ) {
+    var mapOpen by rememberSaveable(slide?.course?.id) { mutableStateOf(false) }
+    val currentPane = rememberUpdatedState(slidePane)
+    val pane = remember { movableContentOf<Boolean> { covered -> currentPane.value(covered) } }
     val insets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
     AdaptiveShellLayout(immersive = false, pairApp = slide != null, systemInsets = insets, minimumPairWidth = 640.dp) { layout ->
         val safe = Modifier.fillMaxSize().windowInsetsPadding(insets)
         if (slide == null) {
-            Box(safe.imePadding()) { slidePane() }
+            Box(safe.imePadding()) { pane(false) }
             return@AdaptiveShellLayout
         }
 
@@ -511,6 +518,9 @@ private fun CoursePlayerLayout(
                 }
                 Text(slide.course.setup.topic, Modifier.weight(1f).padding(horizontal = 8.dp),
                     maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge)
+                TextButton(onClick = { mapOpen = true }, enabled = !busy) {
+                    Text(stringResource(R.string.course_lessons))
+                }
                 FilledTonalButton(
                     onClick = { if (session.open) session.close() else session.show() },
                     enabled = !busy || session.open,
@@ -526,50 +536,57 @@ private fun CoursePlayerLayout(
             CourseTutorPanel(session, composerModel, slide.step.lessonTitle, modifier)
         }
 
+        @Composable fun Lesson(covered: Boolean = false, modifier: Modifier = Modifier.fillMaxSize()) {
+            Column(modifier) {
+                Toolbar()
+                Box(Modifier.fillMaxWidth().weight(1f)) { pane(mapOpen || covered) }
+            }
+        }
+
         val tabletopGap = layout.tabletopGap
         if (tabletopGap != null) {
             val density = LocalDensity.current
             Column(safe) {
-                Column(Modifier.height(with(density) { tabletopGap.first.toDp() })) {
-                    Toolbar()
-                    slidePane()
-                }
+                Lesson(modifier = Modifier.fillMaxWidth().height(with(density) { tabletopGap.first.toDp() }))
                 if (session.open) {
                     Spacer(Modifier.height(with(density) { (tabletopGap.last - tabletopGap.first + 1).toDp() }))
                     Chat(Modifier.weight(1f).imePadding())
                 }
             }
+        } else if (layout.wide && (session.open || layout.verticalHinge != null)) {
+            val directive = PaneScaffoldDirective(
+                maxHorizontalPartitions = 2,
+                horizontalPartitionSpacerSize = 16.dp,
+                maxVerticalPartitions = 1,
+                verticalPartitionSpacerSize = 0.dp,
+                defaultPanePreferredWidth = 280.dp,
+                defaultPanePreferredHeight = 320.dp,
+                excludedBounds = listOfNotNull(layout.verticalHinge),
+                shouldAutoFocusCurrentDestination = false,
+            )
+            val value = ThreePaneScaffoldValue(PaneAdaptedValue.Expanded, PaneAdaptedValue.Expanded, PaneAdaptedValue.Hidden)
+            SupportingPaneScaffold(directive = directive, value = value, mainPane = { Lesson() },
+                supportingPane = { if (session.open) Chat(Modifier.fillMaxSize()) else Box(Modifier.fillMaxSize()) },
+                modifier = safe.imePadding())
         } else {
-            Column(safe.imePadding()) {
-                Toolbar()
-                if (layout.wide) {
-                    val directive = PaneScaffoldDirective(
-                        maxHorizontalPartitions = 2,
-                        horizontalPartitionSpacerSize = 16.dp,
-                        maxVerticalPartitions = 1,
-                        verticalPartitionSpacerSize = 0.dp,
-                        defaultPanePreferredWidth = 280.dp,
-                        defaultPanePreferredHeight = 320.dp,
-                        excludedBounds = listOfNotNull(layout.verticalHinge),
-                        shouldAutoFocusCurrentDestination = false,
-                    )
-                    val value = ThreePaneScaffoldValue(PaneAdaptedValue.Expanded, PaneAdaptedValue.Expanded, PaneAdaptedValue.Hidden)
-                    if (session.open) {
-                        SupportingPaneScaffold(directive = directive, value = value, mainPane = { slidePane() },
-                            supportingPane = { Chat(Modifier.fillMaxSize()) }, modifier = Modifier.fillMaxSize())
-                    } else {
-                        ListDetailPaneScaffold(directive = directive, value = value,
-                            listPane = { CourseLessonIndex(slide) }, detailPane = { slidePane() },
-                            modifier = Modifier.fillMaxSize())
-                    }
-                } else {
-                    slidePane()
-                    if (session.open) {
-                        ModalBottomSheet(
-                            onDismissRequest = session::close,
-                            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                        ) {
-                            Chat(Modifier.fillMaxHeight(0.85f))
+            Lesson(covered = session.open, modifier = safe.imePadding())
+            if (session.open) {
+                ModalBottomSheet(
+                    onDismissRequest = session::close,
+                    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                ) {
+                    Chat(Modifier.fillMaxHeight(0.85f))
+                }
+            }
+        }
+        if (mapOpen) {
+            Dialog(onDismissRequest = { mapOpen = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+                AdaptiveShellLayout(immersive = false, pairApp = false, systemInsets = insets) {
+                    Box(safe.padding(16.dp), contentAlignment = Alignment.Center) {
+                        Surface(Modifier.widthIn(max = 520.dp).fillMaxWidth().fillMaxHeight(0.8f),
+                            shape = MaterialTheme.shapes.large) {
+                            CourseLessonIndex(slide) { mapOpen = false }
                         }
                     }
                 }
@@ -579,12 +596,21 @@ private fun CoursePlayerLayout(
 }
 
 @Composable
-private fun CourseLessonIndex(slide: CoursePage.Slide) {
+private fun CourseLessonIndex(slide: CoursePage.Slide, onClose: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val course = slide.course
     val currentIndex = course.outline.lessons.indexOfFirst { it.id == slide.step.lessonId }
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item { CourseHeading(stringResource(R.string.course_lessons)) }
+        item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.course_lessons), Modifier.weight(1f).semantics { heading() },
+                    style = MaterialTheme.typography.titleLarge)
+                val close = stringResource(R.string.course_lessons_close)
+                IconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = close }) {
+                    AlphaIcon(Glyph.Close)
+                }
+            }
+        }
         itemsIndexed(course.outline.lessons, key = { _, lesson -> lesson.id }) { index, lesson ->
             val current = index == currentIndex
             Surface(shape = MaterialTheme.shapes.medium,
@@ -969,8 +995,10 @@ private fun CourseSlidePlayer(
     slide: CoursePage.Slide,
     sceneHost: CourseSceneHost?,
     busy: Boolean,
+    sceneCovered: Boolean,
     text: String,
     order: List<String>,
+    onChoice: (String) -> Unit,
     onText: (String) -> Unit,
     onOrder: (List<String>) -> Unit,
     onSubmit: () -> Unit,
@@ -982,8 +1010,31 @@ private fun CourseSlidePlayer(
     val colors = MaterialTheme.colorScheme
     var sceneEditing by remember(sceneHost) { mutableStateOf(false) }
     val lessonIndex = slide.course.outline.lessons.indexOfFirst { it.id == slide.step.lessonId }
+    val landscapeScene = sceneHost != null && LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val nextBeforeDetails = sceneHost == null && slide.prompt == null &&
+        (slide.adaptationNote != null || slide.sources.isNotEmpty())
+    @Composable fun NextAction() {
+        when {
+            slide.nextRequest == null || nextPreparation is CourseNextPreparation.Ready ->
+                Button(onClick = onNext, enabled = !busy && !sceneEditing, modifier = Modifier.fillMaxWidth()) {
+                    val action = if (slide.number == slide.course.progress.totalSlides) R.string.course_finish else R.string.course_next
+                    Text(stringResource(action))
+                }
+            nextPreparation == null -> CourseNextNotice(R.string.course_next_preparing)
+            nextPreparation == CourseNextPreparation.Unavailable -> CourseNextNotice(R.string.course_next_unavailable)
+            else -> {
+                val stale = nextPreparation == CourseNextPreparation.Stale
+                if (nextPreparation is CourseNextPreparation.SceneFailed) {
+                    Text(nextPreparation.detail, Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                } else CourseNextNotice(if (stale) R.string.course_next_changed else R.string.course_next_failed)
+                TextButton(onClick = onRetryNext, enabled = !busy) {
+                    Text(stringResource(if (stale) R.string.course_reload else R.string.course_generation_retry))
+                }
+            }
+        }
+    }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        Column(Modifier.widthIn(max = 680.dp).fillMaxSize().padding(top = 14.dp, bottom = 12.dp),
+        Column(Modifier.widthIn(max = if (landscapeScene) 960.dp else 680.dp).fillMaxSize().padding(top = 14.dp, bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(stringResource(R.string.course_lesson_position, lessonIndex + 1, slide.course.outline.lessons.size),
@@ -996,69 +1047,64 @@ private fun CourseSlidePlayer(
                 modifier = Modifier.fillMaxWidth(),
             )
             val correct = slide.feedback?.correct
-            Column(Modifier.weight(1f).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(slide.step.lessonTitle, Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
-                if (sceneHost == null) ToolContent(ui = slide.ui, state = slide.state, enabled = false, embedded = true, event = { _, _ -> })
-                else CourseScene(sceneHost, !busy, onEditing = { sceneEditing = it })
-                slide.adaptationNote?.let {
-                    CourseHeading(stringResource(R.string.course_adaptation))
-                    Text(it)
-                }
-                if (slide.sources.isNotEmpty()) {
-                    CourseHeading(stringResource(R.string.course_sources))
-                    slide.sources.forEach {
-                        Text(it.title)
-                        Text(it.url, style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                slide.prompt?.let {
-                    Surface(shape = MaterialTheme.shapes.large, color = colors.surfaceContainerLow) {
-                        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            CourseExerciseControls(it, !busy && correct != true, text, order, onText, onOrder, onSubmit)
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                val canvasHeight = maxHeight * 0.60f
+                Column(Modifier.fillMaxWidth().verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(slide.step.lessonTitle, Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
+                    if (sceneHost == null) ToolContent(ui = slide.ui, state = slide.state, enabled = false, embedded = true, event = { _, _ -> })
+                    else CourseScene(sceneHost, !busy && !sceneCovered, canvasHeight) { sceneEditing = it }
+                    slide.prompt?.let {
+                        Surface(shape = MaterialTheme.shapes.large, color = colors.surfaceContainerLow) {
+                            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                val selectedChoice = (slide.feedback?.answer as? CourseAnswer.Choice)?.optionId
+                                CourseExerciseControls(it, !busy && correct != true, selectedChoice, text, order,
+                                    onChoice, onText, onOrder, onSubmit)
+                            }
                         }
                     }
-                }
-                if (correct != null) {
-                    Surface(shape = MaterialTheme.shapes.medium, color = if (correct) colors.secondaryContainer else colors.errorContainer) {
-                        Text(stringResource(if (correct) R.string.course_answer_correct else R.string.course_answer_wrong),
-                            Modifier.fillMaxWidth().padding(12.dp).semantics { liveRegion = LiveRegionMode.Polite })
-                    }
-                }
-            }
-            if (slide.prompt == null || correct == true) {
-                when {
-                    slide.nextRequest == null || nextPreparation is CourseNextPreparation.Ready ->
-                        Button(onClick = onNext, enabled = !busy && !sceneEditing, modifier = Modifier.fillMaxWidth()) {
-                            Text(stringResource(R.string.course_next))
+                    if (correct != null) {
+                        val message = if (correct) slide.prompt?.correctFeedback else slide.prompt?.wrongHint
+                        val announcement = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                        Surface(shape = MaterialTheme.shapes.medium, color = if (correct) colors.secondaryContainer else colors.errorContainer) {
+                            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(stringResource(if (correct) R.string.course_answer_correct else R.string.course_answer_wrong),
+                                    if (message == null) announcement else Modifier)
+                                if (message != null) Text(message, announcement)
+                            }
                         }
-                    nextPreparation == null -> CourseNextNotice(R.string.course_next_preparing)
-                    nextPreparation == CourseNextPreparation.Unavailable -> CourseNextNotice(R.string.course_next_unavailable)
-                    else -> {
-                        val stale = nextPreparation == CourseNextPreparation.Stale
-                        if (nextPreparation is CourseNextPreparation.SceneFailed) {
-                            Text(nextPreparation.detail, Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-                        } else CourseNextNotice(if (stale) R.string.course_next_changed else R.string.course_next_failed)
-                        TextButton(onClick = onRetryNext, enabled = !busy) {
-                            Text(stringResource(if (stale) R.string.course_reload else R.string.course_generation_retry))
+                    }
+                    if (nextBeforeDetails) NextAction()
+                    slide.adaptationNote?.let {
+                        CourseHeading(stringResource(R.string.course_adaptation))
+                        Text(it)
+                    }
+                    if (slide.sources.isNotEmpty()) {
+                        CourseHeading(stringResource(R.string.course_sources))
+                        slide.sources.forEach {
+                            Text(it.title)
+                            Text(it.url, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
             }
+            if (!nextBeforeDetails && (slide.prompt == null || correct == true)) NextAction()
         }
     }
 }
 
 @Composable
-private fun CourseScene(host: CourseSceneHost, enabled: Boolean, onEditing: (Boolean) -> Unit) {
+private fun CourseScene(
+    host: CourseSceneHost, enabled: Boolean, canvasHeight: Dp, onEditing: (Boolean) -> Unit,
+) {
     var snapshot by remember(host) { mutableStateOf<ArtifactSnapshot?>(null) }
     val scope = rememberCoroutineScope()
     DisposableEffect(host) {
         onDispose { host.dispose() }
     }
-    NativeToolSurface(host.initial, host.spec, true, 360.dp, host, covered = !enabled, content = {
+    NativeToolSurface(host.initial, host.spec, true, canvasHeight, host, covered = !enabled, content = {
         val accepted = snapshot
         val record = accepted?.tool ?: host.initial
-        ToolContent(record.ui, record.state, enabled && accepted != null, embedded = true,
+        ToolContent(record.ui, record.state, enabled && accepted != null, embedded = true, courseSceneLayout = true,
             liveInput = accepted?.let { NativeLiveInput.automatic(host, it, enabled) },
             onLiveInputState = { unfinished, _ -> onEditing(unfinished) }) { action, value ->
             scope.launch {
@@ -1084,8 +1130,10 @@ private fun CourseNextNotice(label: Int) {
 private fun CourseExerciseControls(
     prompt: CourseExercisePrompt,
     enabled: Boolean,
+    selectedChoice: String?,
     text: String,
     order: List<String>,
+    onChoice: (String) -> Unit,
     onText: (String) -> Unit,
     onOrder: (List<String>) -> Unit,
     onSubmit: () -> Unit,
@@ -1093,24 +1141,21 @@ private fun CourseExerciseControls(
     CourseHeading(prompt.question)
     when (prompt.kind) {
         CourseSlideKind.CHOICE -> {
-            Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 prompt.options.forEach { option ->
-                    val selected = text == option.id
+                    val chosen = selectedChoice == option.id
                     val colors = MaterialTheme.colorScheme
                     Surface(shape = MaterialTheme.shapes.medium,
-                        color = if (selected) colors.primaryContainer else colors.surface,
-                        contentColor = if (selected) colors.onPrimaryContainer else colors.onSurface) {
-                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                            .selectable(selected, enabled = enabled, role = Role.RadioButton) { onText(option.id) }
-                            .padding(horizontal = 12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(selected = selected, onClick = null, enabled = enabled)
-                            Text(option.label)
-                        }
+                        color = if (chosen) colors.primaryContainer else colors.surface,
+                        contentColor = if (chosen) colors.onPrimaryContainer else colors.onSurface) {
+                        Text(option.label, Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                            .clickable(enabled = enabled, role = Role.Button) { onChoice(option.id) }
+                            .semantics { if (chosen) selected = true }
+                            .wrapContentHeight().padding(horizontal = 12.dp, vertical = 8.dp))
                     }
                 }
             }
+            return
         }
         CourseSlideKind.FILL_IN -> {
             OutlinedTextField(value = text, onValueChange = { onText(it.take(4096)) }, enabled = enabled,
@@ -1138,11 +1183,10 @@ private fun CourseExerciseControls(
 }
 
 private fun CourseExercisePrompt.answerFor(text: String, order: List<String>): CourseAnswer? = when (kind) {
-    CourseSlideKind.CHOICE -> text.takeIf { value -> options.any { it.id == value } }?.let { CourseAnswer.Choice(it) }
     CourseSlideKind.FILL_IN -> text.takeIf(String::isNotBlank)?.let { CourseAnswer.FillIn(it) }
     CourseSlideKind.ORDER -> order.filter { id -> options.any { it.id == id } }
         .takeIf { it.size == options.size }?.let { CourseAnswer.Order(it) }
-    else -> error("The slide does not accept an answer.")
+    else -> error("The slide does not accept a draft.")
 }
 
 @Composable

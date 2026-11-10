@@ -2,6 +2,8 @@ package com.alpha.assistant.tools.generation
 
 import android.icu.lang.UCharacter
 import android.icu.lang.UProperty
+import com.alpha.assistant.courses.COURSE_EXERCISE_FEEDBACK_FIELDS
+import com.alpha.assistant.courses.COURSE_EXERCISE_FEEDBACK_LIMIT
 import com.alpha.assistant.courses.CourseSlideKind
 import com.alpha.assistant.courses.EXERCISE_FIELD
 import com.alpha.assistant.tools.ToolValueSchema
@@ -364,6 +366,9 @@ internal object ToolParts {
             }
             else -> throw PartsContractFailure(slots.path, "a course exercise")
         }
+        for (role in COURSE_EXERCISE_FEEDBACK_FIELDS) {
+            if (slots.has(role)) config.put(role, slots.text(role, COURSE_EXERCISE_FEEDBACK_LIMIT))
+        }
         return courseExercise(builder, label, partId, config, slots.path)
     }
 
@@ -388,7 +393,7 @@ internal object ToolParts {
         }
         val kind = when (partId) {
             "course_choice" -> {
-                config.requireKeys(path, setOf("label", "options", "correct"))
+                config.requireKeys(path, setOf("label", "options", "correct"), COURSE_EXERCISE_FEEDBACK_FIELDS)
                 val ids = options()
                 val correct = integer(config.opt("correct"), 1..ids.size, "$path.correct")
                 canonical.put("correct", correct)
@@ -396,12 +401,12 @@ internal object ToolParts {
                 CourseSlideKind.CHOICE
             }
             "course_fill_in" -> {
-                config.requireKeys(path, setOf("label", "accepted"))
+                config.requireKeys(path, setOf("label", "accepted"), COURSE_EXERCISE_FEEDBACK_FIELDS)
                 definition.put("accepted", jsonArray(textList("accepted", 1..4, 500)))
                 CourseSlideKind.FILL_IN
             }
             "course_order" -> {
-                config.requireKeys(path, setOf("label", "options", "order"))
+                config.requireKeys(path, setOf("label", "options", "order"), COURSE_EXERCISE_FEEDBACK_FIELDS)
                 val ids = options()
                 val positions = config.items("order", ids.size..ids.size, "$path.order").mapIndexed { index, item ->
                     integer(item, 1..ids.size, "$path.order[$index]")
@@ -412,6 +417,13 @@ internal object ToolParts {
                 CourseSlideKind.ORDER
             }
             else -> error("Unknown course part.")
+        }
+        for (field in COURSE_EXERCISE_FEEDBACK_FIELDS) {
+            if (config.has(field)) {
+                val value = planText(config.get(field), "$path.$field", COURSE_EXERCISE_FEEDBACK_LIMIT)
+                canonical.put(field, value)
+                definition.put(field, value)
+            }
         }
         val metadata = definition.put("kind", kind.name).toString()
         requireParts(metadata.length <= 2048, path, "exercise metadata within 2048 characters")

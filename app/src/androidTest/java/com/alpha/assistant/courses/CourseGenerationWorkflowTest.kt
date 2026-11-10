@@ -346,6 +346,45 @@ class CourseGenerationWorkflowTest {
         }
     }
 
+    @Test fun generatesAndReopensFeedbackForFourOrderedOptions(): Unit = runBlocking {
+        withDatabase { context, name ->
+            val kind = CourseSlideKind.ORDER
+            val hint = "Start with the shortest side."
+            val correctFeedback = "The sides are in increasing order."
+            val provider = LessonProvider().apply {
+                plan = lessonPlan(kind)
+                val constants = plan.getJSONArray("constants")
+                val uses = plan.getJSONArray("needs").getJSONObject(0).getJSONObject("uses")
+                mapOf("option3" to "third", "option4" to "fourth", "position3" to 3, "position4" to 4,
+                    "wrongHint" to hint, "correctFeedback" to correctFeedback).forEach { (role, value) ->
+                    constants.put(JSONObject().put("id", role).put("value", value))
+                    uses.put(role, role)
+                }
+            }
+            val tools = ToolGenerationService(provider, SandboxClient(context))
+            val step = CourseSlidePlan("order", kind, "Order four sides")
+            val outline = CourseOutline(listOf(CourseLessonPlan("lesson", "Compare sides", listOf(step))))
+            val id = CourseStore(context, name).use { store ->
+                val course = store.create(setup, outline)
+                CourseController(store, tools).generate(course.id, course.revision, step.id, key, CloudSession())
+                course.id
+            }
+            CourseStore(context, name).use { store ->
+                val saved = checkNotNull(store.slide(id, step.id))
+                val state = JSONObject(parseCourseSpec(saved.content, kind).initialState)
+                val exercise = JSONObject(state.getString(EXERCISE_FIELD))
+                assertEquals(hint, exercise.getString("wrongHint"))
+                assertEquals(correctFeedback, exercise.getString("correctFeedback"))
+                val player = CoursePresentation(store, CourseController(store, tools))
+                val slide = player.player(id) as CoursePage.Slide
+                val options = checkNotNull(slide.prompt).options.map { it.id }
+                val result = player.submit(slide, "ordered", CourseAnswer.Order(listOf(options[1], options[0], options[2], options[3])))
+                assertEquals(true, ((result as CoursePlayerUpdate.Open).page as CoursePage.Slide).feedback?.correct)
+            }
+            assertEquals(lessonStages, provider.requests.map { it.generationStage })
+        }
+    }
+
     @Test fun keepsCompletedWorkWhenTheLessonRouteRejectsOrCancelsTheNextSlide(): Unit = runBlocking {
         withDatabase { context, name ->
             val provider = LessonProvider()

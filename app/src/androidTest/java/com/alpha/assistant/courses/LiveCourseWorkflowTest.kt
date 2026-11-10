@@ -2,6 +2,7 @@ package com.alpha.assistant.courses
 
 import com.alpha.assistant.tools.CanvasLiveChecks
 import android.os.SystemClock
+import android.view.View
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -36,7 +37,9 @@ class LiveCourseWorkflowTest {
         require(runId.matches(Regex("course-[a-f0-9]{12}")))
         val case = requireNotNull(args.getString("courseScenario"))
         val baseline = args.getString("courseBaseline") == "true"
-        val canvasWorkflow = case == "moon-canvas"
+        val moonWorkflow = case == "moon-canvas"
+        val rectangleWorkflow = case == "rectangle-area"
+        val canvasWorkflow = moonWorkflow || rectangleWorkflow
         val robot = ShellRobot(runId)
         val fixture = ShellFixture(runId)
         val cases = robot.instrumentation.context.assets.open("course-scenarios.json").bufferedReader().use { it.readText() }
@@ -144,14 +147,15 @@ class LiveCourseWorkflowTest {
                 val kind = CourseSlideKind.valueOf(input.getString("kind"))
                 val cardCount = if (cards.length() == 0) 1 else cards.length()
                 val exercises = steps.map { it.slide.kind }.filter { it.requiresAnswer }
-                if (canvasWorkflow) check(steps.take(2).map { it.slide.kind } == listOf(CourseSlideKind.EXPLANATION, CourseSlideKind.EXAMPLE))
+                if (moonWorkflow) check(steps.take(2).map { it.slide.kind } == listOf(CourseSlideKind.EXPLANATION, CourseSlideKind.EXAMPLE))
+                if (rectangleWorkflow) check(steps.map { it.slide.kind } ==
+                    listOf(CourseSlideKind.EXAMPLE, CourseSlideKind.CHOICE, CourseSlideKind.SUMMARY))
                 if (!baseline && !canvasWorkflow) check(steps.size == cardCount + 2 && exercises == listOf(kind)) {
                     "Unexpected outline slide count or exercise kinds: ${steps.map { it.slide.kind }}"
                 }
                 var nextTappedAt: Long? = null
                 var retriedNext = false
-                val next = robot.text(R.string.course_next)
-                fun waitForNext() {
+                fun waitForNext(next: String) {
                     val retry = robot.text(R.string.course_generation_retry)
                     if (canvasWorkflow && !retriedNext) {
                         robot.waitUntil(240_000) { robot.find(next)?.isEnabled == true || robot.find(retry)?.isEnabled == true }
@@ -168,6 +172,7 @@ class LiveCourseWorkflowTest {
                     }
                 }
                 for ((index, step) in steps.withIndex()) {
+                    val next = robot.text(if (index == steps.lastIndex) R.string.course_finish else R.string.course_next)
                     checkpoint = "slide-${index + 1}-${step.slide.kind}"
                     robot.waitUntil(240_000) {
                         store.slide(course.id, step.slide.id) != null ||
@@ -183,17 +188,22 @@ class LiveCourseWorkflowTest {
                     if (index == 0) event(JSONObject().put("first_visible_ms", visibleAt - started))
                     nextTappedAt?.let { event(JSONObject().put("visible_slide", index + 1).put("tap_to_visible_ms", visibleAt - it)) }
                     fun recordReadiness(eligibleAt: Long) {
-                        waitForNext()
+                        waitForNext(next)
                         event(JSONObject().put("from_slide", index + 1)
                             .put("until_next_ready_ms", SystemClock.elapsedRealtime() - eligibleAt))
                     }
                     if (!baseline && index != 0 && exercise == null) recordReadiness(visibleAt)
                     screenshot("slide-${index + 1}")
-                    if (canvasWorkflow && index < 2) {
+                    if (moonWorkflow && index < 2 || rectangleWorkflow && index == 0) {
                         val proof = JSONObject()
                         val checker = CanvasLiveChecks(robot, proof) { screenshot("slide-${index + 1}-$it") }
-                        val accepted = checker.slider(if (index == 0) "Speed" else "Orbit radius", "Orbit illustration")
-                        check(store.course(course.id)?.progress?.currentSlideId == step.slide.id)
+                        val label = if (rectangleWorkflow) input.getString("control") else if (index == 0) "Speed" else "Orbit radius"
+                        val scene = if (rectangleWorkflow) input.getString("scene") else "Orbit illustration"
+                        val progress = checkNotNull(store.course(course.id)).progress
+                        val accepted = checker.slider(label, scene, expandsHorizontally = rectangleWorkflow)
+                        check(store.course(course.id)?.progress == progress)
+                        check(progress.currentSlideId == step.slide.id)
+                        if (rectangleWorkflow) check(store.answers(course.id).isEmpty())
                         val definition = parseCourseSpec(slide.content, step.slide.kind).json
                         val hash = MessageDigest.getInstance("SHA-256").digest(definition.toByteArray()).joinToString("") { "%02x".format(it) }
                         val savedSettings = store.sceneSettings(course.id, step.slide.id, slide.outlineRevision, hash)
@@ -202,12 +212,11 @@ class LiveCourseWorkflowTest {
                         robot.back()
                         click(R.string.shell_course_continue)
                         robot.waitFor(position)
-                        val label = if (index == 0) "Speed" else "Orbit radius"
                         checker.progress(label, reveal = true)
                         robot.waitUntil { checker.progress(label) == accepted }
                         event(JSONObject().put("scene_reopened", true).put("slide", step.slide.id))
-                        if (index == 1) {
-                            checker.captureCompact("Orbit illustration") {
+                        if (moonWorkflow && index == 1) {
+                            checker.captureCompact(scene) {
                                 checker.progress(label, reveal = true)
                                 robot.waitUntil { checker.progress(label) == accepted }
                             }
@@ -238,10 +247,19 @@ class LiveCourseWorkflowTest {
                     if (baseline) break
                     if (exercise != null) {
                         check(exercise.prompt.kind == kind)
+                        val progressBefore = checkNotNull(store.course(course.id)).progress
+                        if (rectangleWorkflow) {
+                            check(robot.find(robot.text(R.string.course_check)) == null)
+                            check(store.answers(course.id).isEmpty())
+                        }
                         for ((answer, feedback) in listOf("wrong" to R.string.course_answer_wrong, "right" to R.string.course_answer_correct)) {
                             val values = input.getJSONArray(answer)
                             when (kind) {
-                                CourseSlideKind.CHOICE -> robot.click(values.getString(0))
+                                CourseSlideKind.CHOICE -> {
+                                    val option = values.getString(0)
+                                    reveal(option)
+                                    robot.click(option)
+                                }
                                 CourseSlideKind.FILL_IN -> robot.edit(robot.text(R.string.course_answer_label), values.getString(0))
                                 CourseSlideKind.ORDER -> {
                                     val reset = robot.text(R.string.course_order_reset)
@@ -258,9 +276,24 @@ class LiveCourseWorkflowTest {
                                 }
                                 else -> error("Unexpected exercise")
                             }
-                            reveal(robot.text(R.string.course_check))
-                            click(R.string.course_check)
+                            if (kind != CourseSlideKind.CHOICE) {
+                                reveal(robot.text(R.string.course_check))
+                                click(R.string.course_check)
+                            }
                             reveal(robot.text(feedback))
+                            if (rectangleWorkflow) {
+                                val correct = answer == "right"
+                                val message = checkNotNull(if (correct) exercise.prompt.correctFeedback else exercise.prompt.wrongHint)
+                                reveal(message)
+                                check(robot.waitFor(message).liveRegion == View.ACCESSIBILITY_LIVE_REGION_POLITE)
+                                check(robot.find(position)?.isVisibleToUser == true)
+                                check(store.answers(course.id).map { it.correct } == if (correct) listOf(false, true) else listOf(false))
+                                if (!correct) {
+                                    check(store.course(course.id)?.progress == progressBefore)
+                                    check(robot.find(next) == null)
+                                }
+                                event(JSONObject().put("accepted_choice", answer).put("feedback", message).put("slide", step.slide.id))
+                            }
                             if (answer == "right") recordReadiness(SystemClock.elapsedRealtime())
                             screenshot(answer)
                         }
