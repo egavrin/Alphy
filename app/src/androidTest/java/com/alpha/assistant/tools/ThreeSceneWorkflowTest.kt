@@ -268,25 +268,97 @@ class ThreeSceneWorkflowTest {
         }
     }
 
-    @Test fun recordedEarthRefinementPassesWithoutModelRepairs() = runBlocking {
+    @Test fun recordedEarthRefinementPassesWithoutModelRepairs() =
+        replayEarth("earth-recorded-replay") { request, fixture, _ ->
+            when (request.generationStage) {
+                CloudGenerationStage.PLAN -> fixture("plan.json")
+                CloudGenerationStage.REFINE -> fixture("refine.json")
+                else -> error("Unexpected provider stage")
+            }
+        }
+
+    @Test fun recordedEarthAliasUsesTheRealButton() =
+        replayEarth("earth-alias-replay", planRejections = 1) { request, fixture, _ ->
+            when (request.generationStage) {
+                CloudGenerationStage.PLAN -> {
+                    val planning = JSONObject(request.turns.first().text)
+                    val buttons = planning.getJSONArray("savedButtons")
+                    assertEquals(fixture("prompt.txt"), planning.getString("request"))
+                    assertEquals(listOf("focusEarth", "focusJupiter", "focusSaturn", "systemView"),
+                        List(buttons.length()) { buttons.getJSONObject(it).getString("action") })
+                    assertEquals("Focus Earth", buttons.getJSONObject(0).getString("text"))
+                    if (request.turns.size == 1) fixture("alias-invalid-plan.json") else fixture("alias-plan.json")
+                }
+                CloudGenerationStage.REFINE -> fixture("alias-refine.json")
+                else -> error("Unexpected provider stage")
+            }
+        }
+
+    @Test fun earthRewriteReceivesTheOriginalScene() =
+        replayEarth("earth-original-rewrite", writerCalls = 4, savedState = """{"status":"Jupiter"}""") { request, fixture, before ->
+            when (request.generationStage) {
+                CloudGenerationStage.PLAN -> JSONObject(fixture("plan.json")).apply {
+                    getJSONObject("scene").getJSONObject("checks").getJSONObject("scenario")
+                        .getJSONArray("steps").getJSONObject(2).put("value", "Earth")
+                }.toString()
+                CloudGenerationStage.REFINE -> {
+                    val writerCheck = request.systemInstructions.substringAfter("Host-owned check: ")
+                    val steps = JSONObject(writerCheck.substringBefore(".\nBinding entries"))
+                        .getJSONObject("checks").getJSONObject("scenario").getJSONArray("steps")
+                    assertFalse(steps.getJSONObject(2).has("value"))
+                    val original = ToolSpec.parsePersisted(before.spec).providerDefinition()
+                    if (request.turns.last().text.contains("original saved definition")) {
+                        assertEquals(original, request.turns.single { it.role == "assistant" }.text)
+                        assertTrue(request.turns.last().text.contains("control IDs"))
+                        JSONObject(original).apply {
+                            put("source", getString("source") + "\n// Earth refinement")
+                        }.toString()
+                    } else """{"unexpected":true}"""
+                }
+                else -> error("Unexpected provider stage")
+            }
+        }
+
+    @Test fun longSavedButtonIdsUseAShortPlanAlias() =
+        replayEarth("earth-long-button", earthAction = "focusEarthCloseUpWithFillLight") { request, fixture, _ ->
+            when (request.generationStage) {
+                CloudGenerationStage.PLAN -> {
+                    assertTrue(request.systemInstructions.contains("use a short alias"))
+                    assertTrue(request.turns.first().text.contains("focusEarthCloseUpWithFillLight"))
+                    fixture("alias-plan.json")
+                }
+                CloudGenerationStage.REFINE -> {
+                    assertTrue(request.systemInstructions.contains("full saved action ID"))
+                    fixture("alias-refine.json").replace("\"focusEarth\"", "\"focusEarthCloseUpWithFillLight\"")
+                }
+                else -> error("Unexpected provider stage")
+            }
+        }
+
+    private fun replayEarth(
+        name: String,
+        planRejections: Int = 0,
+        writerCalls: Int = 1,
+        savedState: String? = null,
+        earthAction: String = "focusEarth",
+        reply: (CloudRequest, (String) -> String, ToolRecord) -> String,
+    ) = runBlocking {
         fun fixture(name: String) = instrumentation.context.assets.open("threejs/earth-replay/$name")
             .bufferedReader().use { it.readText() }
         val original = JSONObject(fixture("baseline.json"))
-        val definition = original.getJSONObject("spec")
+        val definition = JSONObject(original.getJSONObject("spec").toString().replace("focusEarth", earthAction))
         val before = ToolRecord(UUID.randomUUID().toString(), original.getInt("revision"), original.getInt("stateVersion"),
-            definition.toString(), original.getJSONObject("state").toString(), definition.getJSONObject("ui").toString(),
+            definition.toString(), savedState ?: original.getJSONObject("state").toString(), definition.getJSONObject("ui").toString(),
             null, true)
         val calls = mutableListOf<CloudGenerationStage>()
+        val expected = List(planRejections + 1) { CloudGenerationStage.PLAN } +
+            List(writerCalls) { CloudGenerationStage.REFINE }
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 calls += checkNotNull(request.generationStage)
                 check(request.publicUpdateContext != null)
-                val reply = when (calls.toList()) {
-                    listOf(CloudGenerationStage.PLAN) -> fixture("plan.json")
-                    listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE) -> fixture("refine.json")
-                    else -> error("Unexpected repair call: $calls")
-                }
-                emit(CloudEvent.Text(reply))
+                assertEquals(expected.take(calls.size), calls)
+                emit(CloudEvent.Text(reply(request, ::fixture, before)))
             }
         }
         val database = "three-recorded-earth-${UUID.randomUUID()}.db"
@@ -307,12 +379,12 @@ class ThreeSceneWorkflowTest {
                         assertEquals(4, accepted.revision)
                         assertEquals(before.state, accepted.state)
                         assertNotEquals(definition.getString("source"), JSONObject(accepted.spec).getString("source"))
-                        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE), calls)
-                        assertTrue(events.filterIsInstance<ToolGenerationTraceEvent.Attempt>()
-                            .none { it.outcome == ToolGenerationOutcome.REJECTED })
+                        assertEquals(expected, calls)
+                        assertEquals(planRejections + writerCalls - 1, events.filterIsInstance<ToolGenerationTraceEvent.Attempt>()
+                            .count { it.outcome == ToolGenerationOutcome.REJECTED })
                         assertEquals(ToolGenerationTraceOutcome.VALIDATED,
                             events.filterIsInstance<ToolGenerationTraceEvent.Finished>().single().outcome)
-                        File(output, "earth-recorded-replay-trace.txt").writeText(events.joinToString("\n") + "\n")
+                        File(output, "$name-trace.txt").writeText(events.joinToString("\n") + "\n")
                     } finally { engine.closeArtifacts() }
                 }
             }

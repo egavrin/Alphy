@@ -50,6 +50,7 @@ internal suspend fun checkThreeScene(
     checkActive: suspend () -> Unit,
     visualReview: (suspend (List<String>) -> String?)?,
     visualReviewItems: List<String> = emptyList(),
+    liveInputs: Set<String> = emptySet(),
 ): ToolPreview = withContext(Dispatchers.Main.immediate) {
     val activity = ThreeSceneForeground.activity()
     var session = ThreeSceneSession(activity, spec, id, revision,
@@ -193,7 +194,12 @@ internal suspend fun checkThreeScene(
                                 sceneNode(JSONObject(session.snapshot.ui), JSONObject(session.snapshot.state), binding.path)
                                     .getString("action")
                             }
-                            session.action(action, step.value.takeUnless { it == JSONObject.NULL })
+                            val value = step.value.takeUnless { it == JSONObject.NULL }
+                            val button = if (value != null && step.slot !in liveInputs)
+                                ToolUiCatalog.action(JSONObject(session.snapshot.ui), action)
+                            else null
+                            val press = button?.optString("type") == "button" && button.optString("action") == action
+                            session.action(action, if (press) null else value)
                         }
                         is Step.Surface -> {
                             require((bindings.getValue(step.slot) as? Binding.Id)?.value == "scene")

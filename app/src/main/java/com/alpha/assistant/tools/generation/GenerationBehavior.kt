@@ -41,6 +41,7 @@ internal sealed interface GenerationBehavior {
         private const val FIELD = "$.behavior"
         private const val BINDINGS = "$.behaviorBindings"
         const val MAX_EVENTS = 64
+        const val MAX_SLOT_ID_LENGTH = 24
         const val BUTTON_BINDING_GUIDANCE = "The host can supply an omitted action binding when the slot ID exactly matches " +
             "one ordinary button's action ID and every use is a press without a value."
         val workflowScopeGuidance = """
@@ -254,31 +255,37 @@ internal sealed interface GenerationBehavior {
             return Scenario(slots, steps)
         }
 
-        fun withSceneButtonBindings(
-            proposed: JSONObject,
-            scenario: Scenario,
-            ui: JSONObject,
-            liveInputs: Set<String>,
-        ): JSONObject {
-            val missingPresses = scenario.steps.filterIsInstance<Step.Action>()
-                .filter { !proposed.has(it.slot) && it.slot !in liveInputs }
-                .groupBy { it.slot }
-                .filterValues { steps -> steps.all { it.value == null || it.value === JSONObject.NULL } }
-            if (missingPresses.isEmpty()) return proposed
-
-            val matches = mutableMapOf<String, Int>()
+        fun directButtons(ui: JSONObject): Map<String, JSONObject> {
+            val matches = mutableMapOf<String, MutableList<JSONObject>>()
             fun visit(node: JSONObject) {
                 if (node.optString("type") == "button") {
                     val action = node.optString("action")
-                    if (action in missingPresses) matches[action] = (matches[action] ?: 0) + 1
+                    matches.getOrPut(action, ::mutableListOf).add(node)
                 }
                 node.optJSONArray("children")?.let { children ->
                     for (index in 0 until children.length()) visit(children.getJSONObject(index))
                 }
             }
             visit(ui)
+            return matches.mapNotNull { (id, nodes) -> nodes.singleOrNull()?.let { id to it } }.toMap()
+        }
 
-            val inferred = matches.filterValues { it == 1 }.keys
+        fun withSceneButtonBindings(
+            proposed: JSONObject,
+            scenario: Scenario,
+            ui: JSONObject,
+            liveInputs: Set<String>,
+            savedButtonIds: Set<String> = emptySet(),
+        ): JSONObject {
+            val missingPresses = scenario.steps.filterIsInstance<Step.Action>()
+                .filter { !proposed.has(it.slot) && it.slot !in liveInputs }
+                .groupBy { it.slot }
+                .filter { (id, steps) ->
+                    id in savedButtonIds || steps.all { it.value == null || it.value === JSONObject.NULL }
+                }
+            if (missingPresses.isEmpty()) return proposed
+
+            val inferred = directButtons(ui).keys intersect missingPresses.keys
             if (inferred.isEmpty()) return proposed
             return JSONObject(proposed, ToolValueSchema.keys(proposed).toTypedArray()).apply {
                 for (id in inferred) put(id, id)
@@ -332,7 +339,7 @@ internal sealed interface GenerationBehavior {
         private fun fraction(raw: Any?, path: String): Double = planNumber(raw, path).also {
             requireParts(it in 0.0..1.0, path, "a normalized coordinate")
         }
-        private fun identifier(raw: Any?, path: String, limit: Int = 24): String = planText(raw, path, limit).also {
+        private fun identifier(raw: Any?, path: String, limit: Int = MAX_SLOT_ID_LENGTH): String = planText(raw, path, limit).also {
             requireParts(it.matches(Regex("[A-Za-z][A-Za-z0-9_]*")), path, "a valid identifier")
         }
         private fun actionValue(raw: Any, slot: Slot, path: String): Any {
