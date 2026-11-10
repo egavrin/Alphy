@@ -377,6 +377,10 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                 generateWithPreview(operationId, key, images, call, originalRequest,
                     ThreeSceneAssets.attachmentRefs(sceneAttachments), onPublicUpdate = { note ->
                         withContext(Dispatchers.Main.immediate) { onPublicUpdate(note) }
+                    }, checkOwner = {
+                        withContext(Dispatchers.Main.immediate) {
+                            if (!canCommit()) throw CancellationException("The mini-app operation is no longer active.")
+                        }
                     })
             }
             currentCoroutineContext().ensureActive(); call.check()
@@ -473,14 +477,16 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     internal var generationTraceObserver: ((ToolGenerationTraceEvent) -> Unit)? = null
 
     private suspend fun generateWithPreview(id: String,key: String,images: List<String>,call: CloudSession,originalRequest: String? = null,
-        sceneAssets: List<ThreeSceneAssetRef> = emptyList(), onPublicUpdate: (suspend (String) -> Unit)? = null) {
+        sceneAssets: List<ThreeSceneAssetRef> = emptyList(), onPublicUpdate: (suspend (String) -> Unit)? = null,
+        checkOwner: suspend () -> Unit = {}) {
         check(!closing) {"The tool controller is closed."}
         val requestId=UUID.randomUUID().toString()
         val observer=previews.begin(id,requestId)
         try {
             val trace = generationTraceObserver?.let { ToolGenerationTrace(UUID.fromString(id), it) }
             val completed = engine.generate(id, key, images, call, previewObserver = observer,
-                trace = trace, originalRequest = originalRequest, sceneAssets = sceneAssets, onPublicUpdate = onPublicUpdate)
+                trace = trace, originalRequest = originalRequest, sceneAssets = sceneAssets, onPublicUpdate = onPublicUpdate,
+                checkOwner = checkOwner)
             previews.complete(requestId,completed)
         } catch(failure: Throwable) {
             previews.clearRequest(requestId)

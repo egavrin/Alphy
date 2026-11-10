@@ -23,8 +23,8 @@ internal object ThreeSceneForeground {
 
     fun resumed(activity: Activity) { current = WeakReference(activity) }
     fun paused(activity: Activity) { if (current.get() === activity) current.clear() }
-    fun activity(): Activity = current.get()?.takeUnless { it.isFinishing || it.isDestroyed }
-        ?: throw ThreeSceneFailure(ThreeSceneProblem.FOREGROUND)
+    fun activeActivity(): Activity? = current.get()?.takeUnless { it.isFinishing || it.isDestroyed }
+    fun activity(): Activity = activeActivity() ?: throw ThreeSceneFailure(ThreeSceneProblem.FOREGROUND)
 }
 
 internal data class ThreeSceneSnapshot(val state: String, val ui: String)

@@ -52,6 +52,8 @@ internal suspend fun checkThreeScene(
     visualReview: (suspend (List<String>) -> String?)?,
     visualReviewItems: List<String> = emptyList(),
     liveInputs: Set<String> = emptySet(),
+    approval: Boolean = scenario != null,
+    approvalMessage: String? = null,
 ): ToolPreview = withContext(Dispatchers.Main.immediate) {
     val activity = ThreeSceneForeground.activity()
     var session = ThreeSceneSession(activity, spec, id, revision,
@@ -71,7 +73,12 @@ internal suspend fun checkThreeScene(
     }
     val dialog = AlertDialog.Builder(activity).setTitle(spec.title).setView(preview)
         .setNegativeButton("Cancel") { _, _ -> decline() }
-        .apply { if (scenario != null) setPositiveButton("Save scene", null) }
+        .apply {
+            if (approval) {
+                setMessage("Checking the scene.")
+                setPositiveButton("Save scene", null)
+            }
+        }
         .setOnCancelListener { decline() }.create()
     dialog.setOnDismissListener { decline() }
     try {
@@ -102,7 +109,7 @@ internal suspend fun checkThreeScene(
         start()
         val initial = session.snapshot
         val crops = mutableListOf<String>()
-        var collectCrops = scenario != null && visualReview != null
+        var collectCrops = visualReview != null
         suspend fun checkOpen() {
             checkActive()
             if (accepted.isCompleted && !accepted.await() ||
@@ -134,149 +141,152 @@ internal suspend fun checkThreeScene(
             if (!firstFrame.visible) throw ThreeSceneFailure(ThreeSceneProblem.BLANK_FRAME)
         }
         ensureVisible()
-        if (scenario == null) return@withContext ToolPreview(spec, initial.state, initial.ui)
-
-        suspend fun read(slot: String): Any = when (val binding = bindings.getValue(slot)) {
-            is Binding.Drawing -> {
-                require(binding.surface == "scene" && binding.path.size == 1 && binding.path[0] in 0..4)
-                capture(binding.path[0])
-            }
-            is Binding.Ui -> {
-                val state = JSONObject(session.snapshot.state)
-                val node = sceneNode(JSONObject(session.snapshot.ui), state, binding.path)
-                behaviorUiObservation(node, state, scenario.slots.getValue(slot).kind) { _, _ ->
-                    throw ThreeSceneFailure(ThreeSceneProblem.INVALID_BINDING)
-                } ?: throw ThreeSceneFailure(ThreeSceneProblem.INVALID_BINDING)
-            }
-            is Binding.Id -> when (scenario.slots.getValue(slot).kind) {
-                GenerationBehavior.Kind.AUDIO -> session.lastAudio ?: JSONObject.NULL
-                GenerationBehavior.Kind.STATE -> {
-                    val value = JSONObject(session.snapshot.state).opt(binding.value)
-                    require(value is String || value is Boolean || value is Number) { "Bind the check to a saved scalar state key." }
-                    value
+        if (scenario != null) {
+            suspend fun read(slot: String): Any = when (val binding = bindings.getValue(slot)) {
+                is Binding.Drawing -> {
+                    require(binding.surface == "scene" && binding.path.size == 1 && binding.path[0] in 0..4)
+                    capture(binding.path[0])
                 }
-                else -> throw ThreeSceneFailure(ThreeSceneProblem.INVALID_BINDING)
-            }
-        }
-        val activePointers = mutableSetOf<Int>()
-        var stepIndex = 0
-        fun assertionFailed(slot: String, comparison: BehaviorComparison, observation: BehaviorObservation,
-            frames: Int? = null, requiredChanges: Int? = null, changes: Int? = null): Nothing {
-            val binding = bindings[slot] as? Binding.Drawing
-            val scope = binding?.let { GeometryScope.of(it, threeScene = true) }
-            val target = when (scope) {
-                GeometryScope.WHOLE -> "the full viewport"
-                GeometryScope.SELECTED -> "the selected viewport region"
-                null -> "the bound output"
-            }
-            val interval = frames?.let { " after $it frames" }.orEmpty()
-            val reason = if (requiredChanges == null) "Expected ${comparison.wire} for $target$interval. " +
-                "Observed ${observation.name.lowercase(java.util.Locale.ROOT).replace('_', ' ')}."
-            else "Expected at least $requiredChanges changes in $target$interval. Observed $changes."
-            throw BehaviorCheckFailure(stepIndex, reason, BehaviorBindingDiagnostic(ToolGenerationRoute.WHOLE_SCREEN,
-                BehaviorFailureRule.ASSERTION_FAILED, stepIndex + 1, scenario.slots.keys.indexOf(slot) + 1,
-                scenario.slots.getValue(slot).kind, bindingKind = if (binding != null) "drawing" else null,
-                scope = scope, comparison = comparison, observation = observation, frames = frames,
-                requiredChanges = requiredChanges, observedChanges = changes))
-        }
-        try {
-            scenario.execute(
-                before = { index ->
-                    stepIndex = index
-                    checkOpen()
-                },
-                read = ::read,
-                perform = { step ->
-                    when (step) {
-                        is Step.Action -> {
-                            val binding = bindings.getValue(step.slot)
-                            val action = if (binding is Binding.Id) binding.value else {
-                                require(binding is Binding.Ui)
-                                sceneNode(JSONObject(session.snapshot.ui), JSONObject(session.snapshot.state), binding.path)
-                                    .getString("action")
-                            }
-                            val value = step.value.takeUnless { it == JSONObject.NULL }
-                            val button = if (value != null && step.slot !in liveInputs)
-                                ToolUiCatalog.action(JSONObject(session.snapshot.ui), action)
-                            else null
-                            val press = button?.optString("type") == "button" && button.optString("action") == action
-                            session.action(action, if (press) null else value)
-                        }
-                        is Step.Surface -> {
-                            require((bindings.getValue(step.slot) as? Binding.Id)?.value == "scene")
-                            when (step.event) {
-                                "viewport" -> session.viewport()
-                                "reopen" -> {
-                                    activePointers.clear()
-                                    reopen(session.snapshot)
-                                }
-                                "pointer" -> {
-                                    val phase = checkNotNull(step.phase)
-                                    require(when (phase) {
-                                        "down" -> activePointers.add(0)
-                                        "move" -> 0 in activePointers
-                                        else -> activePointers.remove(0)
-                                    }) { "The pointer sequence is invalid." }
-                                    session.event(session.pointer("pointer$phase", 0, checkNotNull(step.x), checkNotNull(step.y)))
-                                }
-                                "start", "pause", "resume", "restart" -> session.event(JSONObject().put("type", step.event))
-                                else -> error("Unsupported 3D scene action.")
-                            }
-                        }
-                        is Step.Advance -> {
-                            require((bindings.getValue(step.slot) as? Binding.Id)?.value == "scene")
-                            var previous = step.observe?.let { read(it) as ScenePixels }
-                            var changes = 0
-                            repeat(step.count) {
-                                checkOpen()
-                                session.frame(50)
-                                step.observe?.let {
-                                    val current = read(it) as ScenePixels
-                                    if (current.changedFrom(checkNotNull(previous))) changes++
-                                    previous = current
-                                }
-                            }
-                            if (changes < step.changes) assertionFailed(checkNotNull(step.observe), BehaviorComparison.MOTION,
-                                BehaviorObservation.TOO_FEW_CHANGES, step.count, step.changes, changes)
-                        }
-                        else -> error("The shared checker handles observations.")
+                is Binding.Ui -> {
+                    val state = JSONObject(session.snapshot.state)
+                    val node = sceneNode(JSONObject(session.snapshot.ui), state, binding.path)
+                    behaviorUiObservation(node, state, scenario.slots.getValue(slot).kind) { _, _ ->
+                        throw ThreeSceneFailure(ThreeSceneProblem.INVALID_BINDING)
+                    } ?: throw ThreeSceneFailure(ThreeSceneProblem.INVALID_BINDING)
+                }
+                is Binding.Id -> when (scenario.slots.getValue(slot).kind) {
+                    GenerationBehavior.Kind.AUDIO -> session.lastAudio ?: JSONObject.NULL
+                    GenerationBehavior.Kind.STATE -> {
+                        val value = JSONObject(session.snapshot.state).opt(binding.value)
+                        require(value is String || value is Boolean || value is Number) { "Bind the check to a saved scalar state key." }
+                        value
                     }
-                },
-                assert = { _, step, observed, expected ->
-                        val equal = if (observed is ScenePixels && expected is ScenePixels) !observed.changedFrom(expected)
-                            else sameToolJson(observed, expected)
-                        val passed = when (step.test) {
-                            "equals", "unchanged" -> equal
-                            "changed" -> !equal
-                            "greater" -> (observed as Number).toDouble() > (expected as Number).toDouble()
-                            "less" -> (observed as Number).toDouble() < (expected as Number).toDouble()
-                            "nonempty" -> when (observed) {
-                                is ScenePixels -> observed.visible
-                                is String -> observed.isNotBlank()
-                                is Number -> observed.toLong() > 0
+                    else -> throw ThreeSceneFailure(ThreeSceneProblem.INVALID_BINDING)
+                }
+            }
+            val activePointers = mutableSetOf<Int>()
+            var stepIndex = 0
+            fun assertionFailed(slot: String, comparison: BehaviorComparison, observation: BehaviorObservation,
+                frames: Int? = null, requiredChanges: Int? = null, changes: Int? = null): Nothing {
+                val binding = bindings[slot] as? Binding.Drawing
+                val scope = binding?.let { GeometryScope.of(it, threeScene = true) }
+                val target = when (scope) {
+                    GeometryScope.WHOLE -> "the full viewport"
+                    GeometryScope.SELECTED -> "the selected viewport region"
+                    null -> "the bound output"
+                }
+                val interval = frames?.let { " after $it frames" }.orEmpty()
+                val reason = if (requiredChanges == null) "Expected ${comparison.wire} for $target$interval. " +
+                    "Observed ${observation.name.lowercase(java.util.Locale.ROOT).replace('_', ' ')}."
+                else "Expected at least $requiredChanges changes in $target$interval. Observed $changes."
+                throw BehaviorCheckFailure(stepIndex, reason, BehaviorBindingDiagnostic(ToolGenerationRoute.WHOLE_SCREEN,
+                    BehaviorFailureRule.ASSERTION_FAILED, stepIndex + 1, scenario.slots.keys.indexOf(slot) + 1,
+                    scenario.slots.getValue(slot).kind, bindingKind = if (binding != null) "drawing" else null,
+                    scope = scope, comparison = comparison, observation = observation, frames = frames,
+                    requiredChanges = requiredChanges, observedChanges = changes))
+            }
+            try {
+                scenario.execute(
+                    before = { index ->
+                        stepIndex = index
+                        checkOpen()
+                    },
+                    read = ::read,
+                    perform = { step ->
+                        when (step) {
+                            is Step.Action -> {
+                                val binding = bindings.getValue(step.slot)
+                                val action = if (binding is Binding.Id) binding.value else {
+                                    require(binding is Binding.Ui)
+                                    sceneNode(JSONObject(session.snapshot.ui), JSONObject(session.snapshot.state), binding.path)
+                                        .getString("action")
+                                }
+                                val value = step.value.takeUnless { it == JSONObject.NULL }
+                                val button = if (value != null && step.slot !in liveInputs)
+                                    ToolUiCatalog.action(JSONObject(session.snapshot.ui), action)
+                                else null
+                                val press = button?.optString("type") == "button" && button.optString("action") == action
+                                session.action(action, if (press) null else value)
+                            }
+                            is Step.Surface -> {
+                                require((bindings.getValue(step.slot) as? Binding.Id)?.value == "scene")
+                                when (step.event) {
+                                    "viewport" -> session.viewport()
+                                    "reopen" -> {
+                                        activePointers.clear()
+                                        reopen(session.snapshot)
+                                    }
+                                    "pointer" -> {
+                                        val phase = checkNotNull(step.phase)
+                                        require(when (phase) {
+                                            "down" -> activePointers.add(0)
+                                            "move" -> 0 in activePointers
+                                            else -> activePointers.remove(0)
+                                        }) { "The pointer sequence is invalid." }
+                                        session.event(session.pointer("pointer$phase", 0, checkNotNull(step.x), checkNotNull(step.y)))
+                                    }
+                                    "pause", "resume", "restart" -> session.event(JSONObject().put("type", step.event))
+                                    else -> error("Unsupported 3D scene action.")
+                                }
+                            }
+                            is Step.Advance -> {
+                                require((bindings.getValue(step.slot) as? Binding.Id)?.value == "scene")
+                                var previous = step.observe?.let { read(it) as ScenePixels }
+                                var changes = 0
+                                repeat(step.count) {
+                                    checkOpen()
+                                    session.frame(step.frameMs ?: GenerationBehavior.FRAME_MS)
+                                    step.observe?.let {
+                                        val current = read(it) as ScenePixels
+                                        if (current.changedFrom(checkNotNull(previous))) changes++
+                                        previous = current
+                                    }
+                                }
+                                if (changes < step.changes) assertionFailed(checkNotNull(step.observe), BehaviorComparison.MOTION,
+                                    BehaviorObservation.TOO_FEW_CHANGES, step.count, step.changes, changes)
+                            }
+                            else -> error("The shared checker handles observations.")
+                        }
+                    },
+                    completionFailed = { step, frames ->
+                        assertionFailed(step.observe, BehaviorComparison.EQUALS, BehaviorObservation.COMPARISON_FAILED, frames)
+                    },
+                    assert = { _, step, observed, expected ->
+                            val equal = if (observed is ScenePixels && expected is ScenePixels) !observed.changedFrom(expected)
+                                else sameToolJson(observed, expected)
+                            val passed = when (step.test) {
+                                "equals", "unchanged" -> equal
+                                "changed" -> !equal
+                                "greater" -> (observed as Number).toDouble() > (expected as Number).toDouble()
+                                "less" -> (observed as Number).toDouble() < (expected as Number).toDouble()
+                                "nonempty" -> when (observed) {
+                                    is ScenePixels -> observed.visible
+                                    is String -> observed.isNotBlank()
+                                    is Number -> observed.toLong() > 0
+                                    else -> false
+                                }
                                 else -> false
                             }
-                            else -> false
-                        }
-                        if (!passed) assertionFailed(step.slot, BehaviorComparison.from(step.test),
-                            if (observed is ScenePixels && expected is ScenePixels) {
-                                if (equal) BehaviorObservation.UNCHANGED else BehaviorObservation.CHANGED
-                            } else BehaviorObservation.COMPARISON_FAILED, frames = scenario.framesSinceCapture(stepIndex, step))
-                },
-            )
-        } catch (cancel: CancellationException) {
-            throw cancel
-        } catch (failure: CloudFailure) {
-            throw failure
-        } catch (failure: BehaviorCheckFailure) {
-            throw failure
-        } catch (failure: ThreeSceneFailure) {
-            throw failure.atStep(stepIndex + 1)
-        } catch (_: Exception) {
-            throw ThreeSceneFailure(ThreeSceneProblem.INVALID_BINDING, step = stepIndex + 1)
+                            if (!passed) assertionFailed(step.slot, BehaviorComparison.from(step.test),
+                                if (observed is ScenePixels && expected is ScenePixels) {
+                                    if (equal) BehaviorObservation.UNCHANGED else BehaviorObservation.CHANGED
+                                } else BehaviorObservation.COMPARISON_FAILED, frames = scenario.framesSinceCapture(stepIndex, step))
+                    },
+                )
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (failure: CloudFailure) {
+                throw failure
+            } catch (failure: BehaviorCheckFailure) {
+                throw failure
+            } catch (failure: ThreeSceneFailure) {
+                throw failure.atStep(stepIndex + 1)
+            } catch (_: Exception) {
+                throw ThreeSceneFailure(ThreeSceneProblem.INVALID_BINDING, step = stepIndex + 1)
+            }
         }
         collectCrops = false
-        val committed = try {
+        val committed = if (scenario == null) initial else try {
             reopen(ThreeSceneSnapshot(initialState, spec.ui.toString()), interactive = true)
             session.snapshot.also { ensureVisible() }
         } catch (failure: ThreeSceneFailure) {
@@ -296,6 +306,7 @@ internal suspend fun checkThreeScene(
             checkOpen()
             if (issue != null) throw ThreeSceneFailure(ThreeSceneProblem.VISUAL_CHECK)
         }
+        if (!approval) return@withContext ToolPreview(spec, committed.state, committed.ui)
         val input = Channel<JSONObject>(32)
         session.web.view.setOnTouchListener { _, event ->
             for (pointer in session.pointerEvents(event)) input.trySend(pointer)
@@ -306,7 +317,7 @@ internal suspend fun checkThreeScene(
             val more = if (visualReviewItems.size > 1) " (${visualReviewItems.size - 1} more)" else ""
             "\nVisual review: $excerpt$more"
         } ?: "\nTry the scene and review its appearance."
-        dialog.setMessage("Planned checks passed (${scenario.steps.size} steps).$visual")
+        dialog.setMessage((approvalMessage ?: "Planned checks passed (${checkNotNull(scenario).steps.size} steps).") + visual)
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
         var lastFrame = android.os.SystemClock.uptimeMillis()
         while (!accepted.isCompleted) {

@@ -8,6 +8,7 @@ import com.alpha.assistant.tools.three.ThreeSceneAssets
 import com.alpha.assistant.tools.generation.NativePresentation
 import com.alpha.assistant.tools.generation.PartsContractFailure
 import com.alpha.assistant.tools.generation.ToolComposition
+import org.json.JSONArray
 import org.json.JSONObject
 
 internal enum class ToolValidationCategory(val id: String, val guidance: String) {
@@ -130,6 +131,26 @@ data class ToolSpec private constructor(val json: String, val title: String, val
         val definition = JSONObject(json)
         if (images.isEmpty()) definition.remove(GeneratedImage.FIELD)
         else definition.put(GeneratedImage.FIELD, org.json.JSONArray(images.map { it.json() }))
+        return parsePersisted(definition.toString())
+    }
+
+    internal fun withHostPolish(preset: String?, images: List<GeneratedImage>): ToolSpec {
+        val definition = JSONObject(json)
+        val root = definition.getJSONObject("ui")
+        val children = root.getJSONArray("children")
+        val existingSlots = generatedImages.map { it.slot }.toSet()
+        val content = (0 until children.length()).map(children::getJSONObject).filterNot {
+            it.optString("type") == "image" && it.optString("assetSlot") in existingSlots
+        }
+        root.put("children", JSONArray(content + images.map(::hostGeneratedImageNode)))
+        if (images.isNotEmpty()) definition.put(GeneratedImage.FIELD, JSONArray(images.map { it.json() }))
+        else definition.remove(GeneratedImage.FIELD)
+        if (preset != null) {
+            val recipe = nativePresentation
+            definition.put(NativePresentation.FIELD, NativePresentation.json(
+                recipe?.profile ?: com.alpha.assistant.tools.generation.NativePresentationProfile.FOCUS,
+                preset, recipe?.focalPosition ?: 0, recipe?.primaryActionId))
+        }
         return parsePersisted(definition.toString())
     }
 
@@ -383,6 +404,9 @@ internal fun canvasSurfaceIds(node: JSONObject, state: JSONObject? = null): List
     }
 }
 
+
+internal fun hostGeneratedImageNode(image: GeneratedImage): JSONObject =
+    JSONObject().put("type", "image").put("assetSlot", image.slot).put("text", image.alt)
 
 internal fun imageSlots(root: JSONObject): Set<String> = buildSet {
     fun visit(value: Any?) {

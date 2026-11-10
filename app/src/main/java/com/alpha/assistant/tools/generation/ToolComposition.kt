@@ -1,6 +1,8 @@
 package com.alpha.assistant.tools.generation
 
+import com.alpha.assistant.images.GeneratedImage
 import com.alpha.assistant.tools.ToolSpec
+import com.alpha.assistant.tools.hostGeneratedImageNode
 import com.alpha.assistant.tools.ToolUiCatalog
 import com.alpha.assistant.tools.ToolUiDiagnostic
 import com.alpha.assistant.tools.ToolValueSchema
@@ -12,7 +14,8 @@ internal class StandaloneRefinementUnavailable : IllegalStateException(
 )
 
 /** The host owns part state and UI. The sandbox receives only the fill partition. */
-internal class ToolComposition private constructor(private val layout: Layout, private val fillSchema: JSONObject) {
+internal class ToolComposition private constructor(private val layout: Layout, private val fillSchema: JSONObject,
+    private val standaloneImages: List<JSONObject>) {
     private data class FixedPart(val position: Int, val needId: String, val part: PartCandidate) {
         val instanceId = partInstanceId(needId)
         val root: JSONObject = JSONObject(part.fragment.full.toString())
@@ -202,8 +205,9 @@ internal class ToolComposition private constructor(private val layout: Layout, p
                 "the existing state schema and action IDs")
             FixedPart(current.position, current.needId, next)
         }
-        return sealStandalone(Layout(fixed, emptyList()), title, description, previous.nativePresentation, observer)
+        val updated = sealStandalone(Layout(fixed, emptyList()), title, description, previous.nativePresentation, observer)
             .withAppLanguage(previous.appLanguage)
+        return if (previous.generatedImages.isEmpty()) updated else updated.withHostPolish(null, previous.generatedImages)
     }
 
     internal fun requireNativePresentation(recipe: NativePresentation) {
@@ -227,7 +231,10 @@ internal class ToolComposition private constructor(private val layout: Layout, p
     }
 
     private fun checkedChildren(fullUi: JSONObject): List<JSONObject> =
-        columnChildren(fullUi, layout.size, "$.ui").also { children ->
+        columnChildren(fullUi, layout.size + standaloneImages.size, "$.ui").also { children ->
+            requireParts(standaloneImages.indices.all { index ->
+                sameToolJson(children[layout.size + index], standaloneImages[index])
+            }, "$.ui.children", "the approved host image bindings")
             layout.fixed.forEach { (position, fixed) ->
                 requireParts(sameToolJson(children[position], fixed.root), "$.ui.children[$position]", "the canonical part root")
             }
@@ -367,7 +374,9 @@ internal class ToolComposition private constructor(private val layout: Layout, p
             }
             requireParts(surfaceIds.all(::isFillId), "$.surfaces", "fill-owned surface IDs")
             val fillSchema = JSONObject().apply { fillFields.forEach { put(it, schema.get(it)) } }
-            return ToolComposition(Layout(parts, fill, readPorts), fillSchema)
+            val images = if (standalone) GeneratedImage.list(definition.optJSONArray(GeneratedImage.FIELD))
+                .map(::hostGeneratedImageNode) else emptyList()
+            return ToolComposition(Layout(parts, fill, readPorts), fillSchema, images)
         }
 
         private fun position(value: Any?, path: String): Int {

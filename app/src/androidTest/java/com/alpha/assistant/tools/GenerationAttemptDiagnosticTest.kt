@@ -78,7 +78,7 @@ class GenerationAttemptDiagnosticTest {
             "fields" to JSONObject(valid).put(secret, secret),
             "steps_count" to JSONObject(valid).apply {
                 getJSONObject("scenario").put("steps", JSONArray().apply {
-                    repeat(17) { put(JSONObject("""{"op":"assert","slot":"result","test":"nonempty"}""")) }
+                    repeat(65) { put(JSONObject("""{"op":"assert","slot":"result","test":"nonempty"}""")) }
                 })
             },
             "slots_or_events" to JSONObject(valid).apply {

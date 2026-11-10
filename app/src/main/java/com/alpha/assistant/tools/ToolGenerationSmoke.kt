@@ -185,7 +185,7 @@ internal class ToolGenerationSmoke(
                 ?: fail("missing surface", BehaviorFailureRule.SURFACE_UNAVAILABLE, slot)
             suspend fun send(event: JSONObject) {
                 if (fenced) fail("native or record result required", BehaviorFailureRule.EXTERNAL_RESULT_REQUIRED)
-                if (++sent > GenerationBehavior.MAX_EVENTS) fail("event limit reached", BehaviorFailureRule.EVENT_LIMIT)
+                if (event.optString("type") != "frame" && ++sent > GenerationBehavior.MAX_EVENTS) fail("event limit reached", BehaviorFailureRule.EVENT_LIMIT)
                 val path = stepIndex?.let { "\$.behavior.scenario.steps[$it]" } ?: "\$.behavior"
                 this.event(event, path)
             }
@@ -256,7 +256,7 @@ internal class ToolGenerationSmoke(
                                 fail("the planned scene control requires live input", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot)
                             }
                             val event = try {
-                                controlEvent(root, JSONObject(state), action, value, liveInput)
+                                controlEvent(root, displayState(), action, value, liveInput)
                             } catch (_: IllegalArgumentException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot) }
                               catch (_: IllegalStateException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot) }
                             send(event)
@@ -299,7 +299,7 @@ internal class ToolGenerationSmoke(
                             repeat(step.count) {
                                 if (playback.value != "playing" || (if (isFrame) id !in frames else id !in timers))
                                     fail("active subscription unavailable", BehaviorFailureRule.SUBSCRIPTION_UNAVAILABLE, step.slot)
-                                send(if (isFrame) GraphicsContract.event("frame", dt = 16, surfaceId = id)
+                                send(if (isFrame) GraphicsContract.event("frame", dt = step.frameMs ?: 16, surfaceId = id)
                                     else JSONObject().put("type", "timer").put("timerId", id))
                                 step.observe?.let {
                                     val current = read(it) as SurfaceGeometry
@@ -314,6 +314,11 @@ internal class ToolGenerationSmoke(
                         }
                         else -> error("The shared checker handles observations.")
                     }
+                },
+                completionFailed = { step, frames ->
+                    val reason = if (frames == 0) "terminal result was already present" else "terminal result was not reached"
+                    fail(reason, BehaviorFailureRule.ASSERTION_FAILED, step.observe, comparison = BehaviorComparison.EQUALS,
+                        observation = BehaviorObservation.COMPARISON_FAILED, frames = frames)
                 },
                 assert = { index, step, current, expected ->
                         val equal = if (current is SurfaceGeometry && expected is SurfaceGeometry) {

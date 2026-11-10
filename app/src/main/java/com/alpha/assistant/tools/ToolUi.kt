@@ -43,6 +43,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.alpha.assistant.R
 import com.alpha.assistant.capabilities.DeviceReadHost
 import com.alpha.assistant.capabilities.ForegroundCapabilityEffects
@@ -307,8 +309,15 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
     val canvas: @Composable (List<String>, String, Modifier, Boolean) -> Unit = { ids, label, modifier, _ ->
         StaticDraftDrawing(spec, drawing, drawingHeight, ids, label, modifier, roundInlineViewport)
     }
+    val context = LocalContext.current
+    val assets = remember(context) { com.alpha.assistant.tools.three.ThreeSceneAssets(context) }
+    val generated = spec.generatedImages.associateBy { "slot:" + it.slot }
     CompositionLocalProvider(LocalToolCanvas provides canvas) {
         ToolContent(ui, projected?.getOrNull() ?: state, false, heading = spec.title, embedded = true,
+            imageVersion = spec.generatedImages.map { it.asset.id },
+            imageLoader = { handle -> generated[handle]?.let { image ->
+                withContext(kotlinx.coroutines.Dispatchers.IO) { assets.generatedBitmap(image.asset) }
+            } }, imageAvailable = generated::containsKey,
             presentation = spec.nativePresentation, appLanguage = spec.appLanguage) { _, _ -> }
     }
 }
@@ -327,6 +336,50 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
         }
     }
 }
+
+internal suspend fun approveNativeGeneration(preview: ToolPreview, message: String, checkActive: suspend () -> Unit) =
+    withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+        val activity = com.alpha.assistant.tools.three.ThreeSceneForeground.activity() as androidx.activity.ComponentActivity
+        val choice = kotlinx.coroutines.CompletableDeferred<Boolean>()
+        val view = androidx.compose.ui.platform.ComposeView(activity).apply {
+            setContent {
+                com.alpha.assistant.ui.AlphaTheme {
+                    Surface {
+                        Column(Modifier.padding(16.dp).heightIn(max = 280.dp).verticalScroll(rememberScrollState())) {
+                            DraftPreviewContent(preview.spec, preview.ui, preview.state, preview.surfaces?.toString()).Render(150.dp)
+                        }
+                    }
+                }
+            }
+        }
+        val dialog = android.app.AlertDialog.Builder(activity).setTitle(preview.spec.title)
+            .setMessage(message)
+            .setView(view)
+            .setNegativeButton("Cancel") { _, _ -> choice.complete(false) }
+            .setPositiveButton("Save") { _, _ -> choice.complete(true) }
+            .setOnDismissListener { choice.complete(false) }.create()
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) choice.complete(false)
+        }
+        try {
+            checkActive()
+            activity.lifecycle.addObserver(observer)
+            checkNotNull(dialog.window).decorView.apply {
+                setViewTreeLifecycleOwner(activity)
+                setViewTreeSavedStateRegistryOwner(activity)
+            }
+            dialog.show()
+            while (!choice.isCompleted) {
+                checkActive()
+                delay(50)
+            }
+            if (!choice.await()) throw com.alpha.assistant.cloud.CloudFailure("widget_declined", "The verified mini-app was declined.")
+            checkActive()
+        } finally {
+            activity.lifecycle.removeObserver(observer)
+            dialog.dismiss()
+        }
+    }
 
 @Composable private fun MiniAppMenuItems(
     controller: ToolController,

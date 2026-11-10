@@ -16,6 +16,7 @@ internal class GenerationRepair private constructor(
     private val writer: Boolean,
     private val refinement: Boolean = false,
     private val protectedUi: Boolean = false,
+    private val allowSourceEdits: Boolean = writer,
 ) {
     enum class Mode(val wire: String) { PATCH("patch"), REWRITE("rewrite") }
 
@@ -89,7 +90,7 @@ internal class GenerationRepair private constructor(
         val structure = "Use fields, a JSON object, to set named fields in ${targetField ?: "the candidate root"}. " +
             "Allowed fields: ${allowedFields.joinToString()}. " +
             "Use removeFields, an array of strings, to delete existing fields. Do not set and remove the same field."
-        val source = if (writer) {
+        val source = if (allowSourceEdits) {
             " Use sourceEdits, an array of objects, for JavaScript. Each object has exactly search and replace strings. " +
                 "Copy a short, unique search fragment exactly from the decoded source. Use nonoverlapping edits. " +
                 "Keep source outside fields and removeFields. " +
@@ -115,7 +116,7 @@ internal class GenerationRepair private constructor(
         val patch = strictObject(raw, maxBytes) ?: reject()
         val sections = buildSet {
             addAll(planPatchKeys)
-            if (writer) add("sourceEdits")
+            if (allowSourceEdits) add("sourceEdits")
         }
         if (patch.keys.any { it !in sections }) reject()
         val values = patch["fields"]?.let { it as? JsonObject ?: reject() }.orEmpty()
@@ -190,12 +191,13 @@ internal class GenerationRepair private constructor(
         private val protectedFields = setOf("source")
         private val sourceEditKeys = setOf("search", "replace")
         private val mixedKeys = setOf("holes", "fill")
-        private val planFields = setOf("wholeScreen", "title", "description", "language", "inputs", "constants", "needs", "questions", "literals", "iconId", "scene", "runtime", "imageRequests", "removeImageSlots")
+        private val planFields = setOf("wholeScreen", "title", "description", "language", "inputs", "constants", "needs", "questions", "literals", "iconId", "scene", "runtime", "imageRequests", "removeImageSlots", "behavior", "visualReview", "assetRequest")
 
         fun plan() = GenerationRepair(planFields, null, null, false)
 
-        fun writer(fields: Set<String>, holes: List<String>?) =
-            GenerationRepair(fields - protectedFields, "fill".takeIf { holes != null }, holes, true)
+        fun writer(fields: Set<String>, holes: List<String>?, allowSourceEdits: Boolean = true) =
+            GenerationRepair(fields - protectedFields, "fill".takeIf { holes != null }, holes, true,
+                allowSourceEdits = allowSourceEdits)
 
         fun refinement(fields: Set<String>, mixed: Boolean, saved: String,
             protectedUi: Boolean = false, allowPrepend: Boolean = false) =

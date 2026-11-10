@@ -1,5 +1,7 @@
 package com.alpha.assistant.tools.generation
 
+import com.alpha.assistant.tools.nativeFixtureBehavior
+
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.*
@@ -28,9 +30,14 @@ class ClockPartsWorkflowTest {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 stages += request.generationStage
                 val output = when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"title":"Stopwatch","description":"","language":"en","inputs":[],
+                    CloudGenerationStage.PLAN -> JSONObject("""{"title":"Stopwatch","description":"","language":"en","inputs":[],
                         "constants":[],"needs":[{"id":"clock","type":"stopwatch","label":"Elapsed","description":"Start, pause, and reset"}],
-                        "questions":[]}"""
+                        "questions":[]}""").put("behavior", nativeFixtureBehavior(
+                            """"start":{"kind":"action","part":"clock","member":"start"},"pause":{"kind":"action","part":"clock","member":"pause"},
+                                "reset":{"kind":"action","part":"clock","member":"reset"},"elapsed":{"kind":"value","part":"clock","member":"value"}""",
+                            """{"op":"action","slot":"start"},{"op":"action","slot":"pause"},{"op":"action","slot":"reset"},
+                                {"op":"assert","slot":"elapsed","test":"equals","value":0}"""
+                        )).toString()
                     CloudGenerationStage.SELECTOR -> {
                         val body = JSONObject(request.turns.single().text)
                         batches += body.getString("stage")
@@ -104,10 +111,18 @@ class ClockPartsWorkflowTest {
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 val output = when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"title":"Clocks","description":"","language":"en","inputs":[],
+                    CloudGenerationStage.PLAN -> JSONObject("""{"title":"Clocks","description":"","language":"en","inputs":[],
                         "constants":[{"id":"seconds","value":10}],"needs":[
                         {"id":"down","type":"countdown","label":"Countdown","description":"Ten seconds","uses":{"length":"seconds"}},
-                        {"id":"up","type":"stopwatch","label":"Stopwatch","description":"Measure elapsed seconds"}],"questions":[]}"""
+                        {"id":"up","type":"stopwatch","label":"Stopwatch","description":"Measure elapsed seconds"}],"questions":[]}""")
+                        .put("behavior", nativeFixtureBehavior(
+                            """"resetDown":{"kind":"action","part":"down","member":"reset"},
+                                "resetUp":{"kind":"action","part":"up","member":"reset"},
+                                "down":{"kind":"value","part":"down","member":"value"},
+                                "up":{"kind":"value","part":"up","member":"value"}""",
+                            """{"op":"action","slot":"resetDown"},{"op":"assert","slot":"down","test":"equals","value":10},
+                                {"op":"action","slot":"resetUp"},{"op":"assert","slot":"up","test":"equals","value":0}"""
+                        )).toString()
                     CloudGenerationStage.SELECTOR -> selectorAnswer(JSONObject(request.turns.single().text))
                     else -> error("Native clocks must not call the writer.")
                 }

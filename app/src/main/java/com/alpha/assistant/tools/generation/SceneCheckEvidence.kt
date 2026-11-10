@@ -54,8 +54,8 @@ internal class SceneCheckEvidence private constructor(
 
         internal fun normalizedExcerpt(text: String) = excerptSpacing.replace(text, " ").trim(' ')
         val guidance = """
-            Include scene.checkEvidence with one row for every assert and every frames step with observe.
-            Example: "checkEvidence":[{"step":1,"excerpt":"animate the orbit","purpose":"motion","scope":"whole"}].
+            Include scene.checkEvidence with one row for each assert, complete, and frames step with observe.
+            Each row has step, excerpt, and purpose.
             Step is one-based. Quote the original request. Spaces, tabs, and line breaks are equivalent between words.
             Keep wording, case, and punctuation exact. Use context to clarify the request.
             Purpose is outcome, motion, stability, periodic_return, or preservation.
@@ -79,6 +79,38 @@ internal class SceneCheckEvidence private constructor(
         fun read(scene: JSONObject, scenario: GenerationBehavior.Scenario, request: String, threeScene: Boolean): SceneCheckEvidence {
             val normalizedRequest = normalizedExcerpt(request)
             val steps = scenario.steps
+            val terminal: Pair<Int, String>? = scene.opt("outcome")?.let { raw ->
+                val path = "$.scene.outcome"
+                val outcome = raw as? JSONObject ?: throw PartsContractFailure(path, "an outcome object")
+                when (outcome.opt("kind") as? String) {
+                    "static", "continuous" -> {
+                        outcome.requireKeys(path, setOf("kind"))
+                        requireParts(steps.none { it is Step.Complete }, path, "a finite outcome for a completion step")
+                        null
+                    }
+                    "finite" -> {
+                        outcome.requireKeys(path, setOf("kind", "step", "excerpt"))
+                        val index = (outcome.opt("step") as? Int)?.minus(1)
+                        val step = index?.let(steps::getOrNull)
+                        val typedAssert = step is Step.Assert && step.test == "equals" &&
+                            step.value != null && step.value !== JSONObject.NULL &&
+                            scenario.slots.getValue(step.slot).kind in setOf(Kind.VALUE, Kind.STATE, Kind.COLLECTION)
+                        if (typedAssert) {
+                            val preceding = steps.take(checkNotNull(index))
+                            val initial = preceding.indexOfLast {
+                                it is Step.Assert && it.slot == step.slot && it.test == "equals" &&
+                                    it.value != null && it.value !== JSONObject.NULL && !sameToolJson(it.value, step.value)
+                            }
+                            requireParts(initial >= 0 && preceding.drop(initial + 1).any {
+                                it is Step.Action || it is Step.Surface || it is Step.Advance
+                            }, path, "a distinct initial value followed by a workflow interaction")
+                        }
+                        requireParts(step is Step.Complete || typedAssert, path, "a typed terminal result after running the workflow")
+                        checkNotNull(index) to normalizedExcerpt(excerpt(outcome.opt("excerpt"), normalizedRequest, path))
+                    }
+                    else -> throw PartsContractFailure(path, "a static, continuous, or finite outcome")
+                }
+            }
             val observed = steps.indices.filter { observedSlot(steps[it]) != null }
             val rows = scene.items("checkEvidence", observed.size..observed.size, FIELD)
             val scopes = mutableMapOf<Int, GeometryScope>()
@@ -95,9 +127,13 @@ internal class SceneCheckEvidence private constructor(
                 val at = "$FIELD[$index]"
                 val slot = checkNotNull(observedSlot(step))
                 val geometry = scenario.slots.getValue(slot).kind == Kind.GEOMETRY
-                excerpt(row.opt("excerpt"), normalizedRequest, at)
+                val quote = excerpt(row.opt("excerpt"), normalizedRequest, at)
                 val purpose = Purpose.entries.firstOrNull { it.wire == row.opt("purpose") }
                 requireParts(purpose != null, at, "a supported check purpose")
+                if (terminal?.first == index) {
+                    requireParts(purpose == Purpose.OUTCOME && normalizedExcerpt(quote) == terminal.second, at,
+                        "outcome evidence for the requested terminal result")
+                }
                 val scope = GeometryScope.entries.firstOrNull { it.wire == row.opt("scope") }
                 requireParts(if (geometry) scope != null else !row.has("scope"), at, "a scope only for geometry")
                 if (scope != null) {
@@ -107,6 +143,10 @@ internal class SceneCheckEvidence private constructor(
                 }
                 if (step is Step.Advance) {
                     requireParts(purpose == Purpose.MOTION, at, "motion purpose for observed frame steps")
+                    continue
+                }
+                if (step is Step.Complete) {
+                    requireParts(purpose == Purpose.OUTCOME, at, "outcome purpose for a completion step")
                     continue
                 }
                 check(step is Step.Assert)
@@ -146,7 +186,7 @@ internal class SceneCheckEvidence private constructor(
                         "pause" -> paused = true
                         "start", "resume", "restart" -> paused = false
                     }
-                    requireParts(step !is Step.Advance || !paused, FIELD, "active playback for 2D frame and timer steps")
+                    requireParts(step !is Step.Advance && step !is Step.Complete || !paused, FIELD, "active playback for 2D frame and timer steps")
                 }
             }
             for (relation in relations.filter { it.same }) {
@@ -154,14 +194,17 @@ internal class SceneCheckEvidence private constructor(
                 val b = slotScopes[relation.other]
                 requireParts(a == null || b == null || a == b, FIELD, "the same geometry scope for a captured comparison")
             }
-            val visual = if (scene.has("visualReview")) {
-                scene.items("visualReview", 1..8, "$.scene.visualReview")
-                    .map { excerpt(it, normalizedRequest, "$.scene.visualReview") }.distinct()
-            } else emptyList()
-            return SceneCheckEvidence(scopes, relations, visual)
+            return SceneCheckEvidence(scopes, relations, readVisual(scene, request))
         }
 
-        private fun excerpt(value: Any?, normalizedRequest: String, path: String): String {
+        fun readVisual(root: JSONObject, request: String): List<String> {
+            if (!root.has("visualReview")) return emptyList()
+            val normalizedRequest = normalizedExcerpt(request)
+            return root.items("visualReview", 1..8, "$.visualReview")
+                .map { excerpt(it, normalizedRequest, "$.visualReview") }.distinct()
+        }
+
+        fun excerpt(value: Any?, normalizedRequest: String, path: String): String {
             requireParts(value is String && value.length in 1..600 && value.isNotBlank() &&
                 normalizedExcerpt(value) in normalizedRequest,
                 path, "an exact excerpt from the original request, with line breaks and spacing allowed to differ")
@@ -170,6 +213,7 @@ internal class SceneCheckEvidence private constructor(
 
         private fun observedSlot(step: Step): String? = when (step) {
             is Step.Advance -> step.observe
+            is Step.Complete -> step.observe
             is Step.Assert -> step.slot
             else -> null
         }

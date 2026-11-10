@@ -24,7 +24,7 @@ private const val fixtureNeeds = """{"title":"Fixture","description":"Local test
 internal suspend fun CloudRequest.replyWithFixturePlan(emit: suspend (CloudEvent) -> Unit, scene: JSONObject? = null): Boolean {
     if (generationStage == CloudGenerationStage.SELECTOR) error("The fixture plan must not require part selection")
     if (generationStage != CloudGenerationStage.PLAN) return false
-    check(jsonObject && !search && !systemInstructions.contains("top-level \"behavior\"") && selectedText.isEmpty())
+    check(jsonObject && !search && selectedText.isEmpty())
     emit(CloudEvent.Text(withFixtureCheckEvidence(
         if (scene == null) fixtureNeeds else JSONObject(fixtureNeeds).put("scene", scene).toString())))
     return true
@@ -33,11 +33,25 @@ internal suspend fun CloudRequest.replyWithFixturePlan(emit: suspend (CloudEvent
 internal fun CloudRequest.withFixtureCheckEvidence(raw: String, scope: String = "whole"): String {
     if (generationStage != CloudGenerationStage.PLAN) return raw
     val plan = runCatching { JSONObject(raw) }.getOrNull() ?: return raw
-    val scene = plan.optJSONObject("scene") ?: return raw
-    if (scene.has("checkEvidence")) return raw
+    val envelope = plan.optJSONObject("fields") ?: plan
+    val scene = envelope.optJSONObject("scene")
+    val stagedApp = systemInstructions.contains("Plan the functional core first.")
+    if (scene == null) {
+        if (!stagedApp) return raw
+        if (envelope.has("runtime") || envelope.has("behavior") ||
+            !envelope.has("needs") && envelope.opt("wholeScreen") != true) return raw
+        // These fixture plans test another generation contract. Full checks have their own workflow fixtures.
+        envelope.put("behavior", JSONObject("""{"status":"unchecked","reason":"unsupported_observation"}"""))
+        return plan.toString()
+    }
     val scenario = scene.getJSONObject("checks").getJSONObject("scenario")
     val steps = scenario.getJSONArray("steps")
     val slots = scenario.getJSONObject("slots")
+    if (stagedApp && !scene.has("outcome")) {
+        val animated = (0 until steps.length()).any { steps.getJSONObject(it).optString("op") == "frames" }
+        scene.put("outcome", JSONObject().put("kind", if (animated) "continuous" else "static"))
+    }
+    if (scene.has("checkEvidence")) return plan.toString()
     val input = turns.first().text
     val excerpt = runCatching { JSONObject(input).getString("request") }.getOrDefault(input).take(600)
     val rows = JSONArray()
@@ -45,6 +59,7 @@ internal fun CloudRequest.withFixtureCheckEvidence(raw: String, scope: String = 
         val step = steps.getJSONObject(index)
         val slot = when (step.getString("op")) {
             "assert" -> step.getString("slot")
+            "complete" -> step.getString("observe")
             "frames" -> step.optString("observe").takeIf { it.isNotEmpty() } ?: continue
             else -> continue
         }
@@ -60,6 +75,9 @@ internal fun CloudRequest.withFixtureCheckEvidence(raw: String, scope: String = 
     scene.put("checkEvidence", rows)
     return plan.toString()
 }
+
+internal fun nativeFixtureBehavior(slots: String, steps: String): JSONObject =
+    JSONObject("""{"status":"checkable","scenario":{"slots":{$slots},"steps":[$steps]}}""")
 
 internal fun fixtureScene(placement: String = "stage", moving: Boolean = false, start: Boolean = false): JSONObject {
     val slots = JSONObject("""{"drawing":{"kind":"geometry"}}""")

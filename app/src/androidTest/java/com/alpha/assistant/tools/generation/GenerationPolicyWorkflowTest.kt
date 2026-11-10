@@ -35,7 +35,7 @@ class GenerationPolicyWorkflowTest {
     private val plan = """
         {"title":"Policy fixture","description":"","language":"en","inputs":[],"constants":[],"needs":[
           {"id":"custom","type":"other","label":"Local","description":"Show one local button"}
-        ],"questions":[]}
+        ],"questions":[],"behavior":{"status":"unchecked","reason":"external_outcome"}}
     """.trimIndent()
 
     private inner class Provider(var definition: JSONObject) : ChatProvider {
@@ -49,7 +49,7 @@ class GenerationPolicyWorkflowTest {
                     scenario.getJSONObject("slots").put("input", JSONObject("""{"kind":"action"}"""))
                     val steps = scenario.getJSONArray("steps")
                     scenario.put("steps", JSONArray().put(JSONObject("""{"op":"action","slot":"input"}""")).put(steps.getJSONObject(0)))
-                    request.withFixtureCheckEvidence(JSONObject(plan).put("scene", scene).toString())
+                    request.withFixtureCheckEvidence(JSONObject(plan).apply { remove("behavior"); put("scene", scene) }.toString())
                 }
                 CloudGenerationStage.COMPLETE -> if (request.turns.last().text.contains("Return one JSON patch object only"))
                     JSONObject().put("fields", JSONObject().put("description", "Retry ${stages.size}")).toString()

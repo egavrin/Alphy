@@ -29,10 +29,12 @@ internal data class SceneRequirement(
             Omit scene for ordinary forms and controls that need no drawing. Checks format:
         """.trimIndent() + "\n" + GenerationBehavior.diagnosticGuidance + "\n" + SceneCheckEvidence.guidance
 
-        fun read(raw: Any?, threeScene: Boolean = false, request: String? = null): SceneRequirement? {
+        fun read(raw: Any?, threeScene: Boolean = false, request: String? = null,
+            requireOutcome: Boolean = false): SceneRequirement? {
             if (raw == null) return null
             val scene = raw as? JSONObject ?: throw PartsContractFailure("$.scene", "a scene object")
-            scene.requireKeys("$.scene", setOf("placement", "brief", "checks"), setOf("liveInputs", "checkEvidence", "visualReview"))
+            scene.requireKeys("$.scene", setOf("placement", "brief", "checks"), setOf("liveInputs", "checkEvidence", "visualReview", "outcome"))
+            requireParts(!requireOutcome || scene.has("outcome"), "$.scene.outcome", "the scene outcome declaration")
             val placement = scene.opt("placement")
             requireParts(placement in setOf("inline", "stage", "immersive"), "$.scene.placement", "inline, stage, or immersive")
             val brief = scene.opt("brief")

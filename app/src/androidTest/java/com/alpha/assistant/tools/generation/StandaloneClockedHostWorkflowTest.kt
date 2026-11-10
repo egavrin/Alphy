@@ -1,5 +1,7 @@
 package com.alpha.assistant.tools.generation
 
+import com.alpha.assistant.tools.nativeFixtureBehavior
+
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.automations.AutomationTools
@@ -189,10 +191,23 @@ class StandaloneClockedHostWorkflowTest {
 
     private fun event(type: String) = JSONObject().put("type",type)
 
-    private fun plan(needs: String): String {
+    private fun plan(needs: String, checkWorkflow: Boolean = false): String {
         val constants = if (due in needs) """[{"id":"days","value":3}]""" else "[]"
-        return """{"title":"Clocked fixture","description":"","language":"en","inputs":[],"questions":[],
+        val raw = """{"title":"Clocked fixture","description":"","language":"en","inputs":[],"questions":[],
             "constants":$constants,"needs":[$needs]}"""
+        if (!checkWorkflow) return raw
+        val dueSlots = """"dueMark":{"kind":"action","part":"due","member":"complete"},
+            "upcoming":{"kind":"value","part":"due","member":"upcoming"}"""
+        val dueSteps = """{"op":"assert","slot":"upcoming","test":"equals","value":1},
+            {"op":"action","slot":"dueMark","value":"due1@0"},
+            {"op":"assert","slot":"upcoming","test":"equals","value":0}"""
+        val ideaSlots = """"ideaMark":{"kind":"action","part":"ideas","member":"complete"},
+            "completed":{"kind":"value","part":"ideas","member":"completed"}"""
+        val ideaSteps = """{"op":"action","slot":"ideaMark","value":"idea1@${today.localDate}#0"},
+            {"op":"assert","slot":"completed","test":"equals","value":1}"""
+        val slots = listOfNotNull(dueSlots.takeIf { due in needs }, ideaSlots.takeIf { ideas in needs }).joinToString(",")
+        val steps = listOfNotNull(dueSteps.takeIf { due in needs }, ideaSteps.takeIf { ideas in needs }).joinToString(",")
+        return JSONObject(raw).put("behavior", nativeFixtureBehavior(slots, steps)).toString()
     }
 
     private fun selectorAnswer(body: String): String {
@@ -229,7 +244,7 @@ class StandaloneClockedHostWorkflowTest {
                 val stage = checkNotNull(request.generationStage)
                 stages += stage
                 val answer = when(stage) {
-                    CloudGenerationStage.PLAN -> plan(needs)
+                    CloudGenerationStage.PLAN -> plan(needs, checkWorkflow = true)
                     CloudGenerationStage.SELECTOR -> selectorAnswer(request.turns.single().text)
                     else -> error("A complete clocked app requested generated code.")
                 }

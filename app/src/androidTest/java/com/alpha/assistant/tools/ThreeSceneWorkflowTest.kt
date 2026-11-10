@@ -176,7 +176,38 @@ class ThreeSceneWorkflowTest {
     }
 
     @Test fun texturePlanCorrectionAndWriterRepairShareOneImageSubmission() = runBlocking {
-        val request = "Generate a square texture for a Three.js cube."
+        stagedTexture()
+    }
+
+    @Test fun failedTexturePolishOffersOnlyTheVerifiedScene() = runBlocking {
+        stagedTexture(failPolish = true)
+    }
+
+    @Test fun cancelingFailedTexturePolishLeavesNoCandidate() = runBlocking {
+        stagedTexture(failPolish = true, cancel = true)
+    }
+
+    @Test fun revokingImageConsentBeforeSaveRejectsTheDraft() = runBlocking {
+        stagedTexture(revokeConsent = true)
+    }
+
+    @Test fun requestedTextureInVisualEvidenceTriggersTheImageStage() = runBlocking {
+        stagedTexture(visualEvidenceOnly = true)
+    }
+
+    @Test fun confirmedTextureWithoutConsentOffersTheVerifiedCore() = runBlocking {
+        stagedTexture(visualEvidenceOnly = true, consent = false)
+    }
+
+    @Test fun unchangedTexturePlanCannotSilentlyDropAnExplicitAssetRequest() = runBlocking {
+        stagedTexture(imagePlanUnchanged = true)
+    }
+
+    private suspend fun stagedTexture(failPolish: Boolean = false, cancel: Boolean = false,
+        revokeConsent: Boolean = false, visualEvidenceOnly: Boolean = false, consent: Boolean = true,
+        imagePlanUnchanged: Boolean = false) {
+        val request = "Generate a fresh square color texture of orange and blue geometric tile art for the cube."
+        val fallback = failPolish || !consent || imagePlanUnchanged
         val png = java.io.ByteArrayOutputStream().use { bytes ->
             val bitmap = Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888)
             try {
@@ -208,30 +239,47 @@ class ThreeSceneWorkflowTest {
             }
         """.trimIndent()
         var texturePlans = 0
-        var writerRepairs = 0
+        var writerAttempts = 0
+        var coreWrites = 0
+        val reference = "data:image/png;base64,texture-reference"
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, call: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 val text = when {
                     call.systemInstructions.startsWith("Plan only Three.js texture assets.") -> {
                         assertEquals(0, calls.get())
-                        if (++texturePlans == 1) "{}" else
+                        assertEquals(1, coreWrites)
+                        assertEquals(listOf(reference), call.turns.single().images)
+                        assertEquals(request, JSONObject(call.turns.single().text).getString("request"))
+                        texturePlans++
+                        if (imagePlanUnchanged)
+                            """{"disposition":"unchanged","excerpt":"","imageRequests":[],"removeImageSlots":[]}"""
+                        else if (texturePlans == 1) "{}" else
                             """{"disposition":"generate","excerpt":"$request","removeImageSlots":[],
                                 "imageRequests":[{"slot":"paint","prompt":"Cyan paint","alt":"Cyan paint","aspect":"1:1"}]}"""
                     }
                     call.generationStage == CloudGenerationStage.PLAN -> """
-                        {"wholeScreen":true,"language":"en","runtime":"threejs-worker","scene":{"placement":"stage","brief":"A cyan cube",
+                        {"wholeScreen":true,"language":"en","runtime":"threejs-worker","scene":{"placement":"stage","brief":"A cyan cube","outcome":{"kind":"static"},
                         "checks":{"status":"checkable","scenario":{"slots":{"view":{"kind":"geometry"}},
                         "steps":[{"op":"assert","slot":"view","test":"nonempty"}]}},
                         "checkEvidence":[{"step":1,"excerpt":"$request","purpose":"outcome","scope":"whole"}]}}
-                    """.trimIndent()
+                    """.trimIndent().let(::JSONObject).apply {
+                        if (visualEvidenceOnly) getJSONObject("scene").put("visualReview", JSONArray().put(request))
+                        else put("assetRequest", request)
+                    }.toString()
                     call.turns.last().text.contains("Return one JSON patch") -> {
                         assertEquals(1, calls.get())
-                        writerRepairs++
-                        """{"sourceEdits":[{"search":"const attach = false;","replace":"const attach = true;"}]}"""
+                        assertTrue(call.turns.any { reference in it.images && request in it.text })
+                        if (++writerAttempts == 1)
+                            """{"sourceEdits":[{"search":"const attach = false;","replace":"const attach = 0;"}]}"""
+                        else if (failPolish) "{}"
+                        else """{"sourceEdits":[{"search":"const attach = 0;","replace":"const attach = true;"}]}"""
                     }
                     else -> JSONObject("""{"formatVersion":3,"title":"Painted cube","description":"A cyan cube",
                         "capabilities":[],"runtime":{"kind":"threejs-worker","version":1},"stateSchema":{"ready":"boolean"},"initialState":{"ready":true},
-                        "ui":{"type":"text","text":"Painted cube"}}""").put("source", source).toString()
+                        "ui":{"type":"text","text":"Painted cube"}}""").put("source", source).toString().also {
+                            assertEquals(0, calls.get())
+                            coreWrites++
+                        }
                 }
                 emit(CloudEvent.Text(text))
             }
@@ -239,19 +287,49 @@ class ThreeSceneWorkflowTest {
         val database = "three-image-repair-${UUID.randomUUID()}.db"
         try {
             settings.saveKey("fixture-only").getOrThrow()
-            settings.setEnabled(true).getOrThrow()
+            settings.setEnabled(consent).getOrThrow()
             ActivityScenario.launch(MainActivity::class.java).use {
                 ToolStore(context, database).use { store ->
                     val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context), imageGeneration = images))
                     try {
                         val draft = engine.createDraft(request, null)
-                        approvePreview { engine.generate(draft.id, "fixture", emptyList(), CloudSession()) }
-                        val record = engine.accept(draft.id)
-                        assertEquals("paint", ToolSpec.parsePersisted(record.spec).generatedImages.single().slot)
-                        assertEquals(2, texturePlans)
-                        assertEquals(1, writerRepairs)
-                        assertEquals(1, calls.get())
-                        File(output, "texture-plan-and-repair.json").writeText(JSONObject(record.spec).toString(2))
+                        val generated = runCatching {
+                            respondToPreview(if (cancel) "Cancel" else "Save scene",
+                                requiredMessage = "Missing: requested images or textures".takeIf { fallback }) {
+                                engine.generate(draft.id, "fixture", listOf(reference), CloudSession())
+                            }
+                        }
+                        if (cancel) {
+                            assertEquals("three_declined", (generated.exceptionOrNull() as? CloudFailure)?.code)
+                            assertNull(store.draft(draft.id)?.candidate)
+                            assertNull(store.tool(draft.id))
+                            engine.reject(draft.id)
+                        } else {
+                            generated.getOrThrow()
+                            if (revokeConsent) {
+                                settings.setEnabled(false).getOrThrow()
+                                assertEquals("image_generation", (runCatching { engine.accept(draft.id) }.exceptionOrNull() as? CloudFailure)?.code)
+                                assertNull(store.tool(draft.id))
+                                engine.reject(draft.id)
+                            } else {
+                                val record = engine.accept(draft.id)
+                                val spec = ToolSpec.parsePersisted(record.spec)
+                                assertEquals(if (fallback) emptyList<String>() else listOf("paint"),
+                                    spec.generatedImages.map { it.slot })
+                                if (!fallback) {
+                                    onScene(record) { scene, _ -> assertEquals(record.state, scene.snapshot.state) }
+                                }
+                                File(output, "staged-texture-${if (fallback) "fallback" else "saved"}.json")
+                                    .writeText(JSONObject(record.spec).toString(2))
+                            }
+                        }
+                        assertEquals(if (imagePlanUnchanged) 1 else 2, texturePlans)
+                        assertEquals(when {
+                            imagePlanUnchanged || !consent -> 0
+                            failPolish -> 4
+                            else -> 2
+                        }, writerAttempts)
+                        assertEquals(if (imagePlanUnchanged || !consent) 0 else 1, calls.get())
                     } finally { engine.closeArtifacts() }
                 }
             }
@@ -260,6 +338,180 @@ class ThreeSceneWorkflowTest {
             context.deleteDatabase(database)
             ThreeSceneAssetCleanup(context).request()
         }
+    }
+
+    @Test fun aFiniteSceneRequiresTypedTerminalEvidence() {
+        val request = "Create a moving scene. Reach the final result."
+        val plan = JSONObject("""{"wholeScreen":true,"language":"en","runtime":"threejs-worker","scene":{
+            "placement":"stage","brief":"Move the visible object.",
+            "outcome":{"kind":"finite","step":1,"excerpt":"Reach the final result."},
+            "checks":{"status":"checkable","scenario":{"slots":{"view":{"kind":"surface"},"object":{"kind":"geometry"}},
+                "steps":[{"op":"frames","slot":"view","count":8,"observe":"object","changes":3}]}},
+            "checkEvidence":[{"step":1,"excerpt":"Reach the final result.","purpose":"motion","scope":"whole"}]}}""")
+        fun parse(candidate: JSONObject = plan, originalRequest: String = request) =
+            com.alpha.assistant.tools.generation.NeedsPlan.parseResponse(candidate.toString(), null, emptySet(),
+                originalRequest, requireSceneOutcome = true)
+        assertTrue(runCatching { parse() }.isFailure)
+        val continuousRequest = "Keep the object moving continuously."
+        val continuous = JSONObject(plan.toString()).apply {
+            getJSONObject("scene").put("outcome", JSONObject("""{"kind":"continuous"}"""))
+                .getJSONArray("checkEvidence").getJSONObject(0).put("excerpt", continuousRequest)
+        }
+        assertNotNull(parse(continuous, continuousRequest))
+
+        val scene = plan.getJSONObject("scene")
+        val scenario = scene.getJSONObject("checks").getJSONObject("scenario")
+        scenario.getJSONObject("slots").put("result", JSONObject("""{"kind":"state"}"""))
+        scenario.getJSONArray("steps").put(JSONObject("""{"op":"assert","slot":"result","test":"equals","value":true}"""))
+        scene.put("outcome", JSONObject("""{"kind":"finite","step":2,"excerpt":"Reach the final result."}"""))
+        scene.getJSONArray("checkEvidence").put(JSONObject("""{"step":2,"excerpt":"Reach the final result.","purpose":"outcome"}"""))
+        assertTrue(runCatching { parse() }.isFailure)
+
+        val steps = scenario.getJSONArray("steps")
+        scenario.put("steps", JSONArray().put(JSONObject("""{"op":"assert","slot":"result","test":"equals","value":false}"""))
+            .put(steps.getJSONObject(0)).put(steps.getJSONObject(1)))
+        scene.getJSONObject("outcome").put("step", 3)
+        scene.put("checkEvidence", JSONArray("""[{"step":1,"excerpt":"Reach the final result.","purpose":"outcome"},
+            {"step":2,"excerpt":"moving scene","purpose":"motion","scope":"whole"},
+            {"step":3,"excerpt":"Reach the final result.","purpose":"outcome"}]"""))
+        assertNotNull(parse())
+    }
+
+    @Test fun aPointerCanLeadDirectlyToATypedTerminalResult() {
+        val request = "Tap the scene to start, then reach the final result."
+        val plan = JSONObject("""{"wholeScreen":true,"language":"en","runtime":"threejs-worker","scene":{
+            "placement":"stage","brief":"A visible playfield.",
+            "outcome":{"kind":"finite","step":4,"excerpt":"reach the final result."},
+            "checks":{"status":"checkable","scenario":{"slots":{"view":{"kind":"surface"},"object":{"kind":"geometry"},
+                "result":{"kind":"state"}},"steps":[
+                {"op":"assert","slot":"object","test":"nonempty"},
+                {"op":"surface","slot":"view","event":"pointer","phase":"down","x":0.2,"y":0.5},
+                {"op":"surface","slot":"view","event":"pointer","phase":"up","x":0.2,"y":0.5},
+                {"op":"complete","slot":"view","observe":"result","value":true,"maxFrames":100}]}},
+            "checkEvidence":[{"step":1,"excerpt":"scene","purpose":"outcome","scope":"whole"},
+                {"step":4,"excerpt":"reach the final result.","purpose":"outcome"}]}}""")
+        assertNotNull(com.alpha.assistant.tools.generation.NeedsPlan.parseResponse(plan.toString(), null, emptySet(), request))
+    }
+
+    @Test fun boundedRaceChecksTouchPauseFinishRestartAndReopen() = runBlocking {
+        val request = "Create a Three.js race with steering, pause, a finish, and restart."
+        val fixturePlan = """
+            {"wholeScreen":true,"language":"en","runtime":"threejs-worker","scene":{
+              "placement":"stage","brief":"A moving race car with visible progress.",
+              "outcome":{"kind":"finite","step":18,"excerpt":"$request"},
+              "checks":{"status":"checkable","scenario":{
+                "slots":{"track":{"kind":"surface"},"drawing":{"kind":"geometry"},"distance":{"kind":"state"},
+                         "steered":{"kind":"state"},"finished":{"kind":"state"},"start":{"kind":"action"},"pause":{"kind":"action"},
+                         "resume":{"kind":"action"},"restart":{"kind":"action"}},
+                "steps":[
+                  {"op":"action","slot":"start"},
+                  {"op":"capture","slot":"distance","as":"initial"},
+                  {"op":"capture","slot":"drawing","as":"before"},
+                  {"op":"surface","slot":"track","event":"pointer","phase":"down","x":0.2,"y":0.5},
+                  {"op":"frames","slot":"track","count":8},
+                  {"op":"surface","slot":"track","event":"pointer","phase":"up","x":0.2,"y":0.5},
+                  {"op":"assert","slot":"steered","test":"equals","value":true},
+                  {"op":"assert","slot":"distance","test":"greater","capture":"initial"},
+                  {"op":"assert","slot":"drawing","test":"changed","capture":"before"},
+                  {"op":"action","slot":"pause"},
+                  {"op":"capture","slot":"distance","as":"paused"},
+                  {"op":"frames","slot":"track","count":8},
+                  {"op":"assert","slot":"distance","test":"unchanged","capture":"paused"},
+                  {"op":"surface","slot":"track","event":"reopen"},
+                  {"op":"frames","slot":"track","count":8},
+                  {"op":"assert","slot":"distance","test":"unchanged","capture":"paused"},
+                  {"op":"action","slot":"resume"},
+                  {"op":"complete","slot":"track","observe":"finished","value":true,"maxFrames":360},
+                  {"op":"assert","slot":"distance","test":"equals","value":300},
+                  {"op":"surface","slot":"track","event":"reopen"},
+                  {"op":"assert","slot":"finished","test":"equals","value":true},
+                  {"op":"action","slot":"restart"},
+                  {"op":"assert","slot":"finished","test":"equals","value":false},
+                  {"op":"assert","slot":"distance","test":"equals","value":0}
+                ]}}}}
+        """.trimIndent()
+        val race = """
+            export async function createScene({THREE, canvas, state}) {
+                const renderer = new THREE.WebGLRenderer({canvas});
+                const scene = new THREE.Scene();
+                const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 10);
+                camera.position.z = 3;
+                const car = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial({color:0xee4444}));
+                scene.add(car);
+                let steer = false;
+                function draw() { car.position.x = state.steered ? -0.5 : 0; renderer.render(scene,camera); }
+                draw();
+                return {
+                    event(e) {
+                        if (e.type==='action' && (e.actionId==='start' || e.actionId==='resume')) state.playing=true;
+                        if (e.type==='action' && e.actionId==='pause') state.playing=false;
+                        if (e.type==='pointerdown') steer=true;
+                        if (e.type==='pointerup') steer=false;
+                        if (e.type==='action' && e.actionId==='restart') Object.assign(state,{playing:false,distance:0,finished:false,steered:false});
+                        draw();
+                    },
+                    frame() {
+                        if (state.playing && !state.finished) {
+                            if (steer) state.steered=true;
+                            state.distance++;
+                            if (state.distance===300) { state.playing=false; state.finished=true; }
+                        }
+                        draw();
+                    },
+                    snapshot(){return {state};},
+                    dispose(){renderer.dispose();}
+                };
+            }
+        """.trimIndent()
+        val bindings = """{"track":"scene","drawing":{"surface":"scene","path":[0]},"distance":"distance","steered":"steered","finished":"finished"}"""
+        val seed = """{"playing":false,"distance":0,"steered":false,"finished":false}"""
+        val definition = JSONObject("""{"formatVersion":3,"title":"Race","description":"","capabilities":[],
+            "runtime":{"kind":"threejs-worker","version":1},
+            "stateSchema":{"playing":"boolean","distance":"number","steered":"boolean","finished":"boolean"},
+            "initialState":$seed,"ui":{"type":"column","children":[
+              {"type":"button","text":"Start race","action":"start"},
+              {"type":"button","text":"Pause race","action":"pause"},
+              {"type":"button","text":"Resume race","action":"resume"},
+              {"type":"button","text":"Restart race","action":"restart"}]}}""")
+        val database = "three-race-workflow-${UUID.randomUUID()}.db"
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                ToolStore(context, database).use { store ->
+                    for (source in listOf(race.replace("if (steer) state.steered=true;", "if (steer) state.steered=false;"),
+                        race.replace("state.finished=true;", "state.finished=false;"),
+                        race.replace("if (e.type==='action' && e.actionId==='pause')",
+                            "if (e.type==='open') state.distance=0; if (e.type==='action' && e.actionId==='pause')"), race)) {
+                        val provider = object : ChatProvider {
+                            override suspend fun respond(key: String, call: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                                val response = when {
+                                    call.generationStage == CloudGenerationStage.PLAN -> call.withFixtureCheckEvidence(fixturePlan)
+                                    call.turns.last().text.contains("Return one JSON patch") -> "{}"
+                                    else -> JSONObject(definition.toString()).put("source", source)
+                                        .put("behaviorBindings", JSONObject(bindings)).toString()
+                                }
+                                emit(CloudEvent.Text(response))
+                            }
+                        }
+                        val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context)))
+                        try {
+                            val draft = engine.createDraft(request, null)
+                            val result = runCatching { approvePreview { engine.generate(draft.id, "fixture", emptyList(), CloudSession()) } }
+                            if (source == race) {
+                                result.getOrThrow()
+                                val record = engine.accept(draft.id)
+                                assertEquals(JSONObject(seed).toString(), record.state)
+                                onScene(record) { session, _ -> assertEquals(record.state, session.snapshot.state) }
+                                File(output, "bounded-race-verified.json").writeText(record.spec)
+                            } else {
+                                assertEquals("three_behavior", (result.exceptionOrNull() as? CloudFailure)?.code)
+                                assertNull(store.draft(draft.id)?.candidate)
+                                engine.reject(draft.id)
+                            }
+                        } finally { engine.closeArtifacts() }
+                    }
+                }
+            }
+        } finally { context.deleteDatabase(database) }
     }
 
     @Test fun repairedOrbitSavesAndReopens() = runBlocking {
@@ -763,7 +1015,8 @@ class ThreeSceneWorkflowTest {
     @Test fun capturedChangeRequiresTheSameGeometryTarget() = runBlocking {
         val prompt = "Create a Three.js view where refreshing the viewport changes the selected region."
         val plan = """{"wholeScreen":true,"runtime":"threejs-worker","language":"en","scene":{
-            "placement":"stage","brief":"Refresh the selected region.","checks":{"status":"checkable","scenario":{
+            "placement":"stage","brief":"Refresh the selected region.","outcome":{"kind":"continuous"},
+            "checks":{"status":"checkable","scenario":{
             "slots":{"view":{"kind":"surface"},"before":{"kind":"geometry"},"after":{"kind":"geometry"}},
             "steps":[{"op":"capture","slot":"before","as":"start"},
                      {"op":"surface","slot":"view","event":"viewport"},
@@ -865,6 +1118,11 @@ class ThreeSceneWorkflowTest {
                 override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                     assertFalse(request.systemInstructions.contains(marker))
                     assertTrue(request.turns.none { it.text.contains(marker) || it.images.isNotEmpty() })
+                    if (request.generationStage == CloudGenerationStage.PLAN) {
+                        val payload = JSONObject(request.turns.single().text)
+                        assertEquals(refs.single().id, payload.getJSONArray("local3dAssets").getJSONObject(0).getString("id"))
+                        assertTrue(request.systemInstructions.contains("require a Three.js plan"))
+                    }
                     if (request.turns.last().text.contains("Return one JSON patch")) {
                         val previous = injected[repairs++]
                         emit(CloudEvent.Text(sourcePatch(previous, injected.getOrElse(repairs) { "" })))
@@ -875,7 +1133,7 @@ class ThreeSceneWorkflowTest {
                 ToolStore(context, database).use { store ->
                     val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context)))
                     try {
-                        val draft = engine.createDraft("Create a Three.js orbit and read the selected asset.", null)
+                        val draft = engine.createDraft("Create a 3D view and read the selected asset.", null)
                         val events = mutableListOf<ToolGenerationTraceEvent>()
                         val trace = ToolGenerationTrace(UUID.fromString(draft.id), onEvent = { events += it })
                         approvePreview {
@@ -911,6 +1169,10 @@ class ThreeSceneWorkflowTest {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 assertFalse(request.systemInstructions.contains(marker))
                 assertTrue(request.turns.none { it.text.contains(marker) })
+                if (request.generationStage == CloudGenerationStage.PLAN) {
+                    assertEquals("threejs-worker", JSONObject(request.turns.single().text).getString("savedRuntime"))
+                    assertTrue(request.systemInstructions.contains("require a Three.js plan"))
+                }
                 if (request.generationStage != CloudGenerationStage.REFINE) {
                     result.provider.respond(key, request, session, emit)
                     return
@@ -935,7 +1197,7 @@ class ThreeSceneWorkflowTest {
                     store.saveTool(completed, revision = true)
                     val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context)))
                     try {
-                        val draft = engine.createDraft("Change the appearance of the Three.js Workshop.", completed.id)
+                        val draft = engine.createDraft("Change the appearance of the workshop.", completed.id)
                         approvePreview { engine.generate(draft.id, "fixture", emptyList(), CloudSession()) }
                         assertEquals(3, patches)
                         val saved = engine.accept(draft.id)
@@ -1178,11 +1440,14 @@ class ThreeSceneWorkflowTest {
         val plan = JSONObject(fixture.plan())
         val steps = plan.getJSONObject("scene").getJSONObject("checks").getJSONObject("scenario").getJSONArray("steps")
         val motion = steps.getJSONObject(0)
-        steps.put(0, JSONObject("""{"op":"surface","slot":"view","event":"control","direction":"left"}"""))
         steps.put(motion)
-        assertTrue(runCatching {
-            com.alpha.assistant.tools.generation.NeedsPlan.parseResponse(plan.toString(), null, emptySet())
-        }.isFailure)
+        for (event in listOf("""{"op":"surface","slot":"view","event":"control","direction":"left"}""",
+            """{"op":"surface","slot":"view","event":"start"}""")) {
+            steps.put(0, JSONObject(event))
+            assertTrue(runCatching {
+                com.alpha.assistant.tools.generation.NeedsPlan.parseResponse(plan.toString(), null, emptySet())
+            }.isFailure)
+        }
     }
 
     private fun sourcePatch(search: String, replacement: String) = JSONObject()
@@ -1205,19 +1470,23 @@ class ThreeSceneWorkflowTest {
         }.array()
     }
 
-    private suspend fun <T> approvePreview(block: suspend () -> T): T = coroutineScope {
-        val approval = launch(Dispatchers.IO) {
-            while (true) {
-                val root = instrumentation.uiAutomation.rootInActiveWindow
-                if (root?.findAccessibilityNodeInfosByText("Save scene").orEmpty().any {
-                        it.isClickable && it.isEnabled &&
-                            it.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
-                    }) break
-                delay(100)
+    private suspend fun <T> approvePreview(block: suspend () -> T): T = respondToPreview("Save scene", block = block)
+
+    private suspend fun <T> respondToPreview(label: String, requiredMessage: String? = null, block: suspend () -> T): T =
+        withTimeout(if (requiredMessage == null) 600_000 else 60_000) {
+            val approval = launch(Dispatchers.IO) {
+                while (true) {
+                    val root = instrumentation.uiAutomation.rootInActiveWindow
+                    val ready = requiredMessage == null || root?.findAccessibilityNodeInfosByText(requiredMessage).orEmpty().isNotEmpty()
+                    if (ready && root?.findAccessibilityNodeInfosByText(label).orEmpty().any {
+                            it.isClickable && it.isEnabled &&
+                                it.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                        }) break
+                    delay(100)
+                }
             }
+            try { block() } finally { approval.cancelAndJoin() }
         }
-        try { block() } finally { approval.cancelAndJoin() }
-    }
 
     @Test fun cancelingThePreviewStopsAnInFlightVisualReview() = runBlocking {
         val reviewing = CompletableDeferred<Unit>()
@@ -1268,6 +1537,47 @@ class ThreeSceneWorkflowTest {
                         assertEquals("three_declined", failure?.code)
                         assertEquals(0, fixture.repairs)
                         assertNull(store.draft(draft.id)?.candidate)
+                    } finally { engine.closeArtifacts() }
+                }
+            }
+        } finally { context.deleteDatabase(database) }
+    }
+
+    @Test fun threeWriterReceivesTheOriginalRequestAndContextSeparately() = runBlocking {
+        val original = "Create a 3D shape with a moving shader. Exclude scoreboards."
+        val brief = "$original\nSuggested implementation: add a scoreboard."
+        val reference = "data:image/png;base64,three-reference"
+        val fixture = Provider("shader", fixtureSource("shader"), false) {}
+        var writerCalls = 0
+        val provider = object : ChatProvider by fixture {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (request.generationStage == CloudGenerationStage.COMPLETE) {
+                    writerCalls++
+                    assertTrue(request.systemInstructions.contains(com.alpha.assistant.tools.generation.GenerationBehavior.workflowScopeGuidance))
+                    val user = request.turns.first()
+                    val payload = JSONObject(user.text)
+                    assertEquals(original, payload.getString("request"))
+                    assertEquals(brief, payload.getString("context"))
+                    assertEquals(listOf(reference), user.images)
+                }
+                fixture.respond(key, request, session, emit)
+            }
+        }
+        val database = "three-context-${UUID.randomUUID()}.db"
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                ToolStore(context, database).use { store ->
+                    val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context)))
+                    try {
+                        val draft = engine.createDraft(brief, null)
+                        approvePreview {
+                            engine.generate(draft.id, "fixture", listOf(reference), CloudSession(),
+                                previewObserver = null, trace = null, originalRequest = original)
+                        }
+                        val saved = engine.accept(draft.id)
+                        assertEquals(1, writerCalls)
+                        assertTrue(ToolSpec.parsePersisted(saved.spec).threeScene)
+                        onScene(saved) { scene, _ -> assertEquals(saved.state, scene.snapshot.state) }
                     } finally { engine.closeArtifacts() }
                 }
             }

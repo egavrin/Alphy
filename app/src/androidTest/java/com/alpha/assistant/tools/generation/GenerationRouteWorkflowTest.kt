@@ -3,6 +3,7 @@ package com.alpha.assistant.tools.generation
 import com.alpha.assistant.tools.withFixtureCheckEvidence
 import com.alpha.assistant.tools.patchSavedFixture
 import com.alpha.assistant.tools.fixtureScene
+import com.alpha.assistant.tools.nativeFixtureBehavior
 import com.alpha.assistant.tools.withFixtureDrawingBinding
 import com.alpha.assistant.tools.withFixtureLanguage
 import com.alpha.assistant.tools.ToolRecord
@@ -46,8 +47,16 @@ class GenerationRouteWorkflowTest {
     private val counterState = "p5_count_value"
     private val counterAction = "p5_count_add"
 
-    private fun plan(needs: String, questions: String = "[]") =
-        """{"title":"Route fixture","description":"Local provider fixtures","language":"en","inputs":[],"constants":[],"needs":[$needs],"questions":$questions}"""
+    private fun plan(needs: String, questions: String = "[]"): String {
+        val raw = """{"title":"Route fixture","description":"Local provider fixtures","language":"en","inputs":[],"constants":[],"needs":[$needs],"questions":$questions}"""
+        if (needs != count || questions != "[]") return raw
+        val behavior = nativeFixtureBehavior(
+            """"add":{"kind":"action","part":"count","member":"add"},"reset":{"kind":"action","part":"count","member":"reset"},
+                "value":{"kind":"value","part":"count","member":"value"}""",
+            """{"op":"action","slot":"add"},{"op":"assert","slot":"value","test":"equals","value":1},
+                {"op":"action","slot":"reset"},{"op":"assert","slot":"value","test":"equals","value":0}""")
+        return JSONObject(raw).put("behavior", behavior).toString()
+    }
 
     private fun answer(request: CloudRequest, selections: Map<String, String> = emptyMap()): String {
         val questions = JSONObject(request.turns.single().text).getJSONArray("questions")
@@ -157,6 +166,57 @@ class GenerationRouteWorkflowTest {
         return failure
     }
 
+    @Test fun partsWithoutAWorkflowCannotGenerateImagesOrSave(): Unit = runBlocking {
+        val prompt = "Add one to a counter and generate a square illustration."
+        val database = "parts-missing-workflow-${UUID.randomUUID()}.db"
+        val settings = com.alpha.assistant.images.ImageSettings(context, database)
+        var imagePlans = 0
+        var imageCalls = 0
+        val images = com.alpha.assistant.images.ImageGeneration(context, settings, mapOf("openrouter" to
+            com.alpha.assistant.images.ImageProvider { _, _, _ ->
+                imageCalls++
+                error("An unchecked core reached the image provider.")
+            }))
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                val response = when {
+                    request.systemInstructions.startsWith("Plan only native mini-app illustrations") -> {
+                        imagePlans++
+                        """{"disposition":"generate","excerpt":"generate a square illustration","removeImageSlots":[],
+                            "imageRequests":[{"slot":"art","prompt":"A bright square","alt":"A square","aspect":"1:1"}]}"""
+                    }
+                    request.generationStage == CloudGenerationStage.PLAN && request.turns.size > 1 -> "{}"
+                    request.generationStage == CloudGenerationStage.PLAN -> JSONObject(plan(count)).apply {
+                        remove("behavior")
+                        put("assetRequest", "generate a square illustration")
+                    }.toString()
+                    request.generationStage == CloudGenerationStage.SELECTOR -> answer(request)
+                    else -> error("Unexpected provider call.")
+                }
+                emit(CloudEvent.Text(response))
+            }
+        }
+        try {
+            settings.saveKey("fixture-only").getOrThrow()
+            settings.setEnabled(true).getOrThrow()
+            ToolStore(context, database).use { store ->
+                val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context), imageGeneration = images))
+                try {
+                    val draft = engine.createDraft(prompt, null)
+                    failure("widget_patch") { engine.generate(draft.id, "fixture", emptyList(), CloudSession()) }
+                    assertEquals(0, imagePlans)
+                    assertEquals(0, imageCalls)
+                    assertNull(store.draft(draft.id)?.candidate)
+                    assertTrue(runCatching { engine.accept(draft.id) }.isFailure)
+                    assertNull(store.tool(draft.id))
+                } finally { engine.closeArtifacts() }
+            }
+        } finally {
+            settings.clearKey()
+            context.deleteDatabase(database)
+        }
+    }
+
     @Test fun completePartsSkipCodeAndPublishAfterSmoke(): Unit = runBlocking {
         val provider = FixtureProvider { turn, _ ->
             when (turn.generationStage) {
@@ -182,7 +242,7 @@ class GenerationRouteWorkflowTest {
             val starts = events.filterIsInstance<ToolGenerationTraceEvent.Stage>().filter { it.started }
             assertEquals(listOf(ToolGenerationStage.PLAN, ToolGenerationStage.ASSEMBLY,
                 ToolGenerationStage.SELECTOR, ToolGenerationStage.SELECTOR, ToolGenerationStage.AVAILABILITY, ToolGenerationStage.DEFINITION,
-                ToolGenerationStage.STATE, ToolGenerationStage.SMOKE), starts.map { it.stage })
+                ToolGenerationStage.STATE, ToolGenerationStage.SMOKE, ToolGenerationStage.BEHAVIOR), starts.map { it.stage })
             assertEquals(listOf("sections", "parts"), starts.mapNotNull { it.selectorBatch })
             val finished = events.last() as ToolGenerationTraceEvent.Finished
             assertEquals(ToolGenerationTraceOutcome.VALIDATED, finished.outcome)
@@ -671,7 +731,10 @@ class GenerationRouteWorkflowTest {
         val response = JSONObject(plan(needs)).put("inputs", JSONArray("""
             [{"id":"amount","label":"Amount","type":"number","value":4,"max":100},
              {"id":"divisor","label":"Divisor","type":"number","value":2,"min":0,"step":1}]
-        """.trimIndent())).toString()
+        """.trimIndent())).put("behavior", nativeFixtureBehavior(
+            """"amount":{"kind":"action","part":"amount","member":"edit"},"share":{"kind":"value","part":"share","member":"value"}""",
+            """{"op":"action","slot":"amount","value":12},{"op":"assert","slot":"share","test":"equals","value":12}"""
+        )).toString()
         val provider = FixtureProvider { turn, _ ->
             when (turn.generationStage) {
                 CloudGenerationStage.PLAN -> response
@@ -808,7 +871,14 @@ class GenerationRouteWorkflowTest {
             {"id":"total","type":"figure","label":"Total","description":"Sum the recorded amounts",
             "expression":{"aggregate":"sum","need":"$id","field":"$id"}}"""
         val provider = FixtureProvider { turn, _ -> when (turn.generationStage) {
-            CloudGenerationStage.PLAN -> plan(needs)
+            CloudGenerationStage.PLAN -> JSONObject(plan(needs)).put("behavior", nativeFixtureBehavior(
+                """"name":{"kind":"action","part":"$id","member":"edit_1"},
+                    "amount":{"kind":"action","part":"$id","member":"edit_2"},
+                    "add":{"kind":"action","part":"$id","member":"add"},
+                    "total":{"kind":"value","part":"total","member":"value"}""",
+                """{"op":"action","slot":"name","value":"Coffee"},{"op":"action","slot":"amount","value":3.5},
+                    {"op":"action","slot":"add"},{"op":"assert","slot":"total","test":"equals","value":3.5}"""
+            )).toString()
             CloudGenerationStage.SELECTOR -> answer(turn)
             else -> error("Record totals must use native parts.")
         } }

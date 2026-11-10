@@ -64,7 +64,8 @@ data class ImageIntent(val slot: String, val prompt: String, val alt: String, va
     }
 }
 
-internal data class ImagePlan(val requests: List<ImageIntent> = emptyList(), val remove: Set<String> = emptySet()) {
+internal data class ImagePlan(val requests: List<ImageIntent> = emptyList(), val remove: Set<String> = emptySet(),
+    val requestExcerpt: String? = null) {
     companion object {
         fun threeScene(root: JSONObject, originalRequest: String, existing: Set<String>): ImagePlan {
             require(root.keys().asSequence().toSet() == setOf("disposition", "excerpt", "imageRequests", "removeImageSlots"))
@@ -83,7 +84,7 @@ internal data class ImagePlan(val requests: List<ImageIntent> = emptyList(), val
                     else -> error("Unknown Three.js texture disposition.")
                 }
             }
-            return plan
+            return plan.copy(requestExcerpt = excerpt.takeIf(String::isNotEmpty))
         }
 
         fun take(root: JSONObject, limit: Int, existing: Set<String>): ImagePlan {

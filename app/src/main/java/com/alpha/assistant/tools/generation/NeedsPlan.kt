@@ -275,10 +275,15 @@ internal data class PlanQuestion(val id: String, val ask: String, val options: L
 internal sealed interface GenerationPlan {
     val scene: SceneRequirement?
     val images: ImagePlan
+    val behavior: GenerationBehavior?
+    val visualReview: List<String>
+    val assetRequest: String?
     data class WholeScreen(override val scene: SceneRequirement?, val threeScene: Boolean = false,
-        override val images: ImagePlan = ImagePlan()) : GenerationPlan
+        override val images: ImagePlan = ImagePlan(), override val behavior: GenerationBehavior? = null,
+        override val visualReview: List<String> = emptyList(), override val assetRequest: String? = null) : GenerationPlan
     data class Parts(val needs: NeedsPlan, override val scene: SceneRequirement? = null,
-        override val images: ImagePlan = ImagePlan()) : GenerationPlan
+        override val images: ImagePlan = ImagePlan(), override val behavior: GenerationBehavior? = null,
+        override val visualReview: List<String> = emptyList(), override val assetRequest: String? = null) : GenerationPlan
 }
 
 internal class NeedsPlan private constructor(
@@ -460,11 +465,18 @@ internal class NeedsPlan private constructor(
         }
 
         fun parseResponse(raw: String, lessonTarget: CourseSlideKind?, allowedSourceIds: Set<String>, request: String? = null,
-            imageLimit: Int = 0, existingImages: Set<String> = emptySet()): GenerationPlan {
+            imageLimit: Int = 0, existingImages: Set<String> = emptySet(), requireSceneOutcome: Boolean = false): GenerationPlan {
             requireSourceAllowlist(lessonTarget, allowedSourceIds)
             val root = partsObject(raw, "$")
             val images = try { ImagePlan.take(root, imageLimit, existingImages) }
                 catch (_: Exception) { throw PartsContractFailure("$.imageRequests", "bounded image requests and known removal slots") }
+            val behaviorData = if (lessonTarget == null) root.remove("behavior") else null
+            val visualReview = if (lessonTarget == null && root.has("visualReview"))
+                SceneCheckEvidence.readVisual(root, checkNotNull(request)) else emptyList()
+            if (lessonTarget == null) root.remove("visualReview")
+            val assetRequest = if (lessonTarget == null) root.remove("assetRequest")?.let {
+                SceneCheckEvidence.excerpt(it, SceneCheckEvidence.normalizedExcerpt(checkNotNull(request)), "$.assetRequest")
+            } else null
             if (root.has("wholeScreen")) {
                 requireParts(lessonTarget == null, "$.wholeScreen", "a new non-lesson app")
                 root.requireKeys("$", setOf("wholeScreen", "language"), setOf("literals", "iconId", "scene", "runtime"))
@@ -472,12 +484,14 @@ internal class NeedsPlan private constructor(
                     "$.language", "a lowercase two- or three-letter language tag")
                 requireParts(root.opt("wholeScreen") == true, "$.wholeScreen", "the Boolean true")
                 val threeScene = root.has("runtime")
-                val scene = SceneRequirement.read(root.opt("scene"), threeScene, request)
+                val scene = SceneRequirement.read(root.opt("scene"), threeScene, request, requireSceneOutcome)
                 requireParts(!threeScene || root.opt("runtime") == "threejs-worker" && scene?.placement == "stage",
                     "$.runtime", "threejs-worker with a stage scene check")
-                return GenerationPlan.WholeScreen(scene, threeScene, images)
+                requireParts(behaviorData == null || scene == null, "$.behavior", "one executable workflow")
+                val behavior = behaviorData?.let { GenerationBehavior.parse(it, emptySet()) }
+                return GenerationPlan.WholeScreen(scene, threeScene, images, behavior, visualReview, assetRequest)
             }
-            val scene = SceneRequirement.read(root.remove("scene"), request = request)
+            val scene = SceneRequirement.read(root.remove("scene"), request = request, requireOutcome = requireSceneOutcome)
             val needs = parse(root, lessonTarget, allowedSourceIds, scene)
             val hasScene = needs.needs.any { it.type == NeedType.SCENE }
             requireParts(!hasScene || scene != null, "$.scene", "a behavior check for the declared scene")
@@ -486,7 +500,11 @@ internal class NeedsPlan private constructor(
                 "$.scene", "an inline check for the requested lesson scene"
             )
             requireParts(lessonTarget != null || images.requests.isEmpty(), "$.imageRequests", "wholeScreen:true when authoring image assets")
-            return GenerationPlan.Parts(needs, scene, images)
+            requireParts(behaviorData == null || scene == null, "$.behavior", "one executable workflow")
+            val behavior = behaviorData?.let {
+                GenerationBehavior.parse(it, (needs.needs.map { need -> need.id } + needs.inputs.map { input -> input.id }).toSet())
+            }
+            return GenerationPlan.Parts(needs, scene, images, behavior, visualReview, assetRequest)
         }
 
         fun parse(raw: String, lessonTarget: CourseSlideKind? = null, allowedSourceIds: Set<String> = emptySet()): NeedsPlan {
