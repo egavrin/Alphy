@@ -15,6 +15,7 @@ import com.alpha.assistant.tools.generation.GenerationBehavior.Step
 import com.alpha.assistant.tools.generation.behaviorUiObservation
 import com.alpha.assistant.tools.generation.sameToolJson
 import com.alpha.assistant.tools.generation.execute
+import com.alpha.assistant.tools.generation.visibleBehaviorNode
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 import org.json.JSONObject
@@ -194,7 +195,7 @@ internal class ToolGenerationSmoke(
                 return when (val binding = target(slot)) {
                     is Binding.Ui -> {
                         val values = displayState()
-                        val node = visibleNode(JSONObject(ui), values, binding.path) { rule, type ->
+                        val node = visibleBehaviorNode(JSONObject(ui), values, binding.path) { rule, type ->
                             fail("visible output unavailable", rule, slot, type)
                         }
                         val type = node.getString("type")
@@ -239,7 +240,7 @@ internal class ToolGenerationSmoke(
                             val action = when (val binding = target(step.slot)) {
                                 is Binding.Id -> binding.value
                                 is Binding.Ui -> {
-                                    val node = visibleNode(root, displayState(), binding.path) { rule, type ->
+                                    val node = visibleBehaviorNode(root, displayState(), binding.path) { rule, type ->
                                         fail("action binding path is unavailable", rule, step.slot, type)
                                     }
                                     node.optString("action").takeIf(String::isNotEmpty)
@@ -339,31 +340,6 @@ internal class ToolGenerationSmoke(
             )
         }
 
-    }
-
-    private fun visibleNode(root: JSONObject, state: JSONObject, path: List<Int>,
-        unavailable: (BehaviorFailureRule, String?) -> Nothing): JSONObject {
-        var node = root
-        fun hidden(): Nothing = unavailable(BehaviorFailureRule.TARGET_HIDDEN, node.getString("type"))
-        for (index in path) {
-            if (!ToolUiCatalog.visible(node, state)) hidden()
-            when (node.getString("type")) {
-                "transition" -> if (ToolUiCatalog.value(state, node.getString("bind")) != true) hidden()
-                "pager" -> if ((ToolUiCatalog.value(state, node.getString("bind")) as Number).toInt() != index) hidden()
-                "transform" -> {
-                    val pose = NativeLayerMath.target(node, state)
-                    if (pose[7] == 0.0 || node.optBoolean("solid") && kotlin.math.cos(pose[0] * Math.PI / 180) *
-                        kotlin.math.cos(pose[1] * Math.PI / 180) < 0) hidden()
-                }
-                "routeStack" -> {
-                    val route = ToolUiCatalog.routeStack(node, state).last()
-                    if (node.getJSONArray("routes").optString(index) != route) hidden()
-                }
-            }
-            node = node.optJSONArray("children")?.optJSONObject(index) ?: unavailable(BehaviorFailureRule.TARGET_MISSING, null)
-        }
-        if (!ToolUiCatalog.visible(node, state)) hidden()
-        return node
     }
 
     suspend fun run(): ToolPreview {

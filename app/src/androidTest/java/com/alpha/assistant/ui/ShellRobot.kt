@@ -365,15 +365,19 @@ internal class ShellRobot(fixture: String) {
             }
         } == true }
     /** The window bounds of the composed node with [tag] and the width of its Compose root, in pixels. */
-    fun composedBounds(scenario: ActivityScenario<*>, tag: String): Pair<Rect, Int> {
+    fun composedBounds(scenario: ActivityScenario<*>, tag: String): Pair<Rect, Int> =
+        checkNotNull(composedBoundsOrNull(scenario, tag)) { "Expected one composed node with tag $tag" }
+
+    fun composedBoundsOrNull(scenario: ActivityScenario<*>, tag: String): Pair<Rect, Int>? {
         var result: Pair<Rect, Int>? = null
         scenario.onActivity { activity ->
-            val node = nodes(activity).single { it.config.getOrNull(SemanticsProperties.TestTag) == tag }
+            val node = nodes(activity).singleOrNull { it.config.getOrNull(SemanticsProperties.TestTag) == tag }
+                ?: return@onActivity
             val bounds = node.boundsInWindow
             result = Rect(bounds.left.roundToInt(), bounds.top.roundToInt(), bounds.right.roundToInt(), bounds.bottom.roundToInt()) to
                 node.layoutInfo.coordinates.findRootCoordinates().size.width
         }
-        return checkNotNull(result)
+        return result
     }
     // The OPPO device blocks shell grants, so the helper answers the permission dialog.
     fun allowMicrophone(scenario: ActivityScenario<*>) {

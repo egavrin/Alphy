@@ -24,6 +24,7 @@ import com.alpha.assistant.tools.generation.GeometryScope
 import com.alpha.assistant.tools.generation.sameToolJson
 import com.alpha.assistant.tools.generation.execute
 import com.alpha.assistant.tools.generation.framesSinceCapture
+import com.alpha.assistant.tools.generation.visibleBehaviorNode
 import com.alpha.assistant.cloud.CloudFailure
 import java.io.ByteArrayOutputStream
 import kotlin.math.abs
@@ -333,15 +334,8 @@ internal suspend fun checkThreeScene(
     }
 }
 
-private fun sceneNode(root: JSONObject, state: JSONObject, path: List<Int>): JSONObject {
-    var node = root
-    require(ToolUiCatalog.visible(node, state))
-    for (index in path) {
-        node = node.getJSONArray("children").getJSONObject(index)
-        require(ToolUiCatalog.visible(node, state))
-    }
-    return node
-}
+private fun sceneNode(root: JSONObject, state: JSONObject, path: List<Int>): JSONObject =
+    visibleBehaviorNode(root, state, path) { _, _ -> throw ThreeSceneFailure(ThreeSceneProblem.INVALID_BINDING) }
 
 private fun Bitmap.dataUrl() = ByteArrayOutputStream().use { out ->
     compress(Bitmap.CompressFormat.PNG, 100, out)

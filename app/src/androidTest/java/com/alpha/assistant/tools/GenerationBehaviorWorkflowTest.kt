@@ -82,6 +82,34 @@ class GenerationBehaviorWorkflowTest {
         check(fixture.getJSONObject("scenario").toString(), fixture.getJSONObject("candidate").toString())
     }
 
+    @Test fun visibleSingleChoicesReportTheirChangedSelection(): Unit = runBlocking {
+        val scenario = """{"slots":{"choose":{"kind":"action"},"selection":{"kind":"value"}},"steps":[
+            {"op":"capture","slot":"selection","as":"before"},{"op":"action","slot":"choose","value":"week"},
+            {"op":"assert","slot":"selection","test":"changed","capture":"before"},
+            {"op":"assert","slot":"selection","test":"equals","value":"week"}]}"""
+        val bindings = """{"choose":"period","selection":[0]}"""
+        val dashboard = JSONObject("""{"formatVersion":3,"title":"Activity dashboard","description":"","capabilities":[],
+            "stateSchema":{"period":"string"},"initialState":{"period":"day"},"ui":{"type":"column","children":[
+            {"type":"segmented","text":"Period","bind":"period","action":"period",
+            "options":[{"text":"Day","value":"day"},{"text":"Week","value":"week"}]}]}}""")
+        val select = "if(input.event.actionId==='period')input.state.period=input.event.value;"
+        val ignored = "return {state:input.state};"
+        val hidden = """return {state:input.state,ui:{type:'column',children:[{type:'segmented',text:'Period',
+            bind:'period',action:'period',visible:input.state.period!=='week',
+            options:[{text:'Day',value:'day'},{text:'Week',value:'week'}]}]}};"""
+        val choice = dashboard.getJSONObject("ui").getJSONArray("children").getJSONObject(0)
+        for (type in ToolUiCatalog.choiceTypes - "multiChoice") {
+            choice.put("type", type)
+            check(scenario, candidate(dashboard.put("source", select + ignored).toString(), bindings))
+        }
+        choice.put("type", "segmented")
+        val ignoredFailure = runCatching { check(scenario, candidate(dashboard.put("source", ignored).toString(), bindings)) }.exceptionOrNull()
+        assertTrue("A static selection fails its assertion", (ignoredFailure as? BehaviorCheckFailure)?.detail.orEmpty().contains("assertion failed"))
+        val hiddenFailure = runCatching { check(scenario, candidate(dashboard.put("source", select + hidden).toString(), bindings)) }.exceptionOrNull()
+        assertTrue("A hidden selection cannot satisfy the assertion",
+            (hiddenFailure as? BehaviorCheckFailure)?.detail.orEmpty().contains("visible output unavailable"))
+    }
+
     @Test fun malformedBindingsAndUnavailableControlsFailIndependently(): Unit = runBlocking {
         val wrongType = JSONObject(appBindings).put("apply", true).toString()
         val missing = JSONObject(appBindings).put("apply", "missing").toString()

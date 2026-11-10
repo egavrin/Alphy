@@ -35,6 +35,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -226,11 +227,13 @@ internal class MiniAppActions {
     }
 }
 
+internal val InlineToolViewportCornerRadius = 16.dp
+
 @Composable internal fun CoveredToolSurface(
     tool: ToolRecord, spec: ToolSpec, enabled: Boolean, maxCanvasHeight: Dp, host: ArtifactUiHost,
-    actions: MiniAppActions, immersive: Boolean = false, covered: Boolean = false,
+    actions: MiniAppActions, immersive: Boolean = false, covered: Boolean = false, roundInlineViewport: Boolean = false,
     onCoverReady: (Boolean) -> Unit = {}, topControls: @Composable () -> Unit = {},
-    content: @Composable () -> Unit = {},
+    stageAvailableHeight: Dp? = null, content: @Composable () -> Unit = {},
     onSnapshot: (ArtifactSnapshot) -> Unit = {},
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -258,11 +261,13 @@ internal class MiniAppActions {
     key(host) {
         NativeToolSurface(tool, spec, enabled, maxCanvasHeight, host, immersive,
             covered = covered || actions.covers(tool.id),
+            roundInlineViewport = roundInlineViewport,
             onCoverReady = { ready ->
                 actions.surfacePaused(handle, latestSnapshot.takeIf { ready })
                 onCoverReady(ready)
             },
             topControls = topControls,
+            stageAvailableHeight = stageAvailableHeight,
             content = content,
             onSnapshot = {
                 latestSnapshot = it
@@ -291,16 +296,16 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
         }
     }
 
-@Composable private fun DraftPreviewContent.Render(drawingHeight: Dp) {
+@Composable private fun DraftPreviewContent.Render(drawingHeight: Dp, roundInlineViewport: Boolean = false) {
     val projected = if(spec.isSealedStandalone) clockedToolState(spec,ui,state,LocalMiniAppLiveAllowed.current) else null
     if(spec.isSealedStandalone && projected?.isSuccess != true) {
         if(projected?.isFailure == true) Text(stringResource(R.string.tool_closed_format))
         else LinearProgressIndicator(Modifier.fillMaxWidth())
         return
     }
-    if (canvasSurfaceIds(spec.ui).isEmpty()) StaticDraftDrawing(spec, drawing, drawingHeight)
+    if (canvasSurfaceIds(spec.ui).isEmpty()) StaticDraftDrawing(spec, drawing, drawingHeight, roundInlineViewport = roundInlineViewport)
     val canvas: @Composable (List<String>, String, Modifier, Boolean) -> Unit = { ids, label, modifier, _ ->
-        StaticDraftDrawing(spec, drawing, drawingHeight, ids, label, modifier)
+        StaticDraftDrawing(spec, drawing, drawingHeight, ids, label, modifier, roundInlineViewport)
     }
     CompositionLocalProvider(LocalToolCanvas provides canvas) {
         ToolContent(ui, projected?.getOrNull() ?: state, false, heading = spec.title, embedded = true,
@@ -585,7 +590,9 @@ catch (cancel: CancellationException) { throw cancel }
 catch (_: Exception) { null }
 
 @Composable internal fun ToolsPane(controller: ToolController, conversationId: String?, actions: MiniAppActions,
-    requests: MutableState<Map<String, String>>, accept: (String) -> Unit, refine: (String) -> Unit, immersive: Boolean=false, alignDetailStart: Boolean = false, exitImmersive: () -> Unit = {}, settings: () -> Unit, close: () -> Unit) {
+    requests: MutableState<Map<String, String>>, accept: (String) -> Unit, refine: (String) -> Unit, immersive: Boolean,
+    alignDetailStart: Boolean, standalone: Boolean, exitImmersive: () -> Unit, settings: () -> Unit,
+    close: () -> Unit, goToChat: () -> Unit) {
     val draft=controller.drafts.find {it.id == controller.selectedDraftId}
     val tool=controller.tools.find {it.id == (controller.selectedId ?: draft?.toolId)}
     val contextId=tool?.id ?: draft?.toolId ?: "new"
@@ -601,8 +608,8 @@ catch (_: Exception) { null }
         controller.generate(prompt,tool?.id,conversationId,emptyList())
     }
     if (tool != null || draft != null) key(tool?.id, draft?.id) {
-        FocusedToolPane(controller,tool,draft,prompt,edit,submit,accept,{archiveConfirm=true},actions,refine,immersive,exitImmersive,settings,close,
-            hostCovered = archiveConfirm, alignDetailStart = alignDetailStart)
+        FocusedToolPane(controller,tool,draft,prompt,edit,submit,accept,{archiveConfirm=true},actions,refine,immersive,exitImmersive,settings,close,goToChat,
+            hostCovered = archiveConfirm, alignDetailStart = alignDetailStart, standalone = standalone)
     }
     if(archiveConfirm && tool != null && !tool.archived) AlertDialog(onDismissRequest = { archiveConfirm = false },
         title = { Text(stringResource(R.string.tool_archive_title, ToolSpec.storedTitle(tool.spec))) },text = {
@@ -622,7 +629,8 @@ catch (_: Exception) { null }
 @OptIn(ExperimentalMaterial3Api::class,ExperimentalLayoutApi::class)
 @Composable private fun FocusedToolPane(controller: ToolController, tool: ToolRecord?, draft: ToolDraft?,
     prompt: String, edit: (String) -> Unit, submit: () -> Unit, accept: (String) -> Unit, archive: () -> Unit, actions: MiniAppActions, refine: (String) -> Unit,
-    immersive: Boolean, exitImmersive: () -> Unit, settings: () -> Unit, close: () -> Unit, hostCovered: Boolean, alignDetailStart: Boolean) {
+    immersive: Boolean, exitImmersive: () -> Unit, settings: () -> Unit, close: () -> Unit, goToChat: () -> Unit,
+    hostCovered: Boolean, alignDetailStart: Boolean, standalone: Boolean) {
     val spec=remember(tool?.spec,tool?.ui,tool?.state) { tool?.let { ToolSpec.availablePersisted(it) } }
     val graphicsHost = if (tool != null && spec != null && !spec.threeScene && (spec.surfaces.isNotEmpty() || immersive)) {
         // The outgoing presentation can close after the incoming one has opened.
@@ -680,15 +688,18 @@ catch (_: Exception) { null }
         }
         return
     }
-    val libraryBackLabel = stringResource(R.string.tool_library_back)
+    val backLabel = stringResource(R.string.tool_library_back)
     val optionsLabel = stringResource(R.string.tool_options)
     val contentLabel = stringResource(R.string.tool_content)
     val refinementLabel = stringResource(R.string.tool_refinement)
+    val title = candidate?.title ?: spec?.title ?: tool?.let { ToolSpec.storedTitle(it.spec) } ?: stringResource(R.string.tool_new)
     val savedDraft = draft?.takeIf { tool?.saved == true }
     val canEditRequest = tool == null || (!tool.saved && !tool.archived && spec != null)
     val scroll=rememberScrollState()
     LaunchedEffect(details,candidate?.json) {scroll.scrollTo(0)}
-    BackHandler {if(details != null) details=null else controller.select(null)}
+    fun back() { if (details != null) details = null else close() }
+    // The detail owns Back while NavDisplay changes between paired and single-pane scenes.
+    BackHandler(onBack = ::back)
     if (menu) {
         val dismiss = { menu = false }
         val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -713,7 +724,7 @@ catch (_: Exception) { null }
                             MiniAppActionRow(label, glyph, enabled, action)
                         }, archive = archive, archiveEnabled = draft == null, dismiss = dismiss)
                     }
-                    MiniAppActionRow(R.string.tool_chat, Glyph.Back) { dismiss(); close() }
+                    MiniAppActionRow(R.string.tool_chat, Glyph.Back) { dismiss(); goToChat() }
                 }
             }
         }
@@ -721,15 +732,25 @@ catch (_: Exception) { null }
     BoxWithConstraints(Modifier.fillMaxSize(),
         contentAlignment = if (alignDetailStart) Alignment.TopStart else Alignment.TopCenter) {
     val refinementHeight=minOf(240.dp,maxHeight*0.45f)
+    val standaloneStage = standalone && draft == null && tool?.archived == false && spec != null &&
+        (spec.threeScene || (spec.surfaces.isNotEmpty() && canvasSurfaceIds(spec.ui).isEmpty()))
     val detailGutter = if (alignDetailStart) 28.dp else 20.dp
     val showPreviewIcons = LocalConfiguration.current.fontScale <= 1.3f && maxWidth >= 360.dp
-    Column(Modifier.widthIn(max = if (alignDetailStart) 780.dp else 640.dp).fillMaxSize().padding(top = 8.dp)) {
+    Column(Modifier.then(if (standaloneStage) Modifier else Modifier.widthIn(max = if (alignDetailStart) 780.dp else 640.dp))
+        .fillMaxSize().padding(top = 8.dp)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = detailGutter - 8.dp),verticalAlignment=Alignment.CenterVertically) {
-            IconButton(onClick={controller.select(null)},modifier=Modifier.semantics {contentDescription=libraryBackLabel}) {AlphaIcon(Glyph.Back)}
-            val header = if (preview != null) R.string.tool_preview_changes else R.string.mini_apps
-            if (alignDetailStart && preview == null) Spacer(Modifier.weight(1f))
-            else Text(stringResource(header), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-            IconButton(onClick={menu=true},modifier=Modifier.semantics {contentDescription=optionsLabel}) {AlphaIcon(Glyph.MoreVertical)}
+            IconButton(onClick = ::back,
+                modifier = Modifier.size(48.dp).semantics { contentDescription = backLabel }) { AlphaIcon(Glyph.Back) }
+            Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (tool != null && spec != null && tool.saved && !tool.archived && draft == null) {
+                TextButton(onClick = { refine(tool.id) }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp)) {
+                    Text(stringResource(R.string.tool_refine), maxLines = 1)
+                }
+            }
+            IconButton(onClick = { menu = true },
+                modifier = Modifier.size(48.dp).semantics { contentDescription = optionsLabel }) { AlphaIcon(Glyph.MoreVertical) }
         }
         if(controller.busy) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -751,25 +772,28 @@ catch (_: Exception) { null }
             }
         }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-        // Reserve the metadata, status, two native control rows, saved summary, and pane spacing.
-        val canvasHeight=(maxHeight-330.dp).coerceAtLeast(120.dp)
+        val canvasHeight = (maxHeight * 0.65f).coerceIn(120.dp, 560.dp)
+        val stageAvailableHeight = (maxHeight - 40.dp).coerceAtLeast(0.dp).takeIf { standaloneStage }
+        @Composable fun AccessAndEffects() {
+            if (tool != null && spec != null && draft == null) {
+                controller.effects.lastOrNull()?.let { effect ->
+                    Text(effect.result.message, style = MaterialTheme.typography.bodySmall,
+                        color = if (effect.result.status in setOf("failed", "denied", "revoked", "unavailable"))
+                            MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                com.alpha.assistant.capabilities.ToolCapabilityPanel(controller, tool, showDetails = details == "access")
+            }
+        }
         Column(Modifier.fillMaxSize().verticalScroll(scroll).semantics {contentDescription=contentLabel}
             .padding(horizontal = detailGutter, vertical = 20.dp),verticalArrangement=Arrangement.spacedBy(20.dp)) {
-            val title = candidate?.title ?: spec?.title ?: tool?.let { ToolSpec.storedTitle(it.spec) } ?: stringResource(R.string.tool_new)
             val description = candidate?.description ?: spec?.description
             val showBadge = preview != null || tool?.archived == true
             val descriptionAfterContent = preview == null && tool?.saved == true && !tool.archived
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (showBadge) MiniAppBadge(candidate?.iconId ?: spec?.iconId, size = 56.dp, draft = preview != null)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
-                    if (showBadge && !description.isNullOrBlank()) {
+            if (showBadge) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    MiniAppBadge(candidate?.iconId ?: spec?.iconId, size = 56.dp, draft = preview != null)
+                    if (!description.isNullOrBlank()) {
                         Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                if (tool != null && spec != null && tool.saved && !tool.archived && draft == null) {
-                    TextButton(onClick = { refine(tool.id) }, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Text(stringResource(R.string.tool_refine))
                     }
                 }
             }
@@ -792,13 +816,8 @@ catch (_: Exception) { null }
                     if(!tool.saved && !tool.archived) Button(onClick={controller.save(tool.id)},enabled=!controller.busy) {Text(stringResource(R.string.tool_save_library))}
                 }
             }
-            if(tool != null && spec != null && draft == null) {
-                controller.effects.lastOrNull()?.let {effect ->
-                    Text(effect.result.message,style=MaterialTheme.typography.bodySmall,color=if(effect.result.status in setOf("failed","denied","revoked","unavailable")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                com.alpha.assistant.capabilities.ToolCapabilityPanel(controller,tool,showDetails=details == "access")
-            }
-            if(preview != null) preview.Render(canvasHeight)
+            if (!standaloneStage || details != null) AccessAndEffects()
+            if(preview != null) preview.Render(canvasHeight, roundInlineViewport = true)
             else if(tool != null) {
                 if(tool.archived) {
                     Text(stringResource(R.string.tool_archived_detail), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -819,15 +838,16 @@ catch (_: Exception) { null }
                             openNonGraphics = draft == null, allowVideo = true,
                             liveAllowed = draft == null && details == null && !menu && !hostCovered && !actions.covers(tool.id))
                     }
-                    if (spec.threeScene) ThreeScenePane(tool, spec,
+                    if (spec.threeScene) ThreeScenePane(controller, tool, spec, canvasHeight, stageAvailableHeight,
                         draft == null && !controller.busy && !tool.archived && !menu &&
-                            !hostCovered && details == null && !actions.covers(tool.id), controller::saveThreeScene)
+                            !hostCovered && details == null && !actions.covers(tool.id))
                     else if (draft == null && graphicsHost != null) CoveredToolSurface(tool, spec, !tool.archived,
-                        canvasHeight, graphicsHost, actions, covered = details != null || menu || hostCovered,
-                        content = content) { artifactSnapshot = it }
+                        canvasHeight, graphicsHost, actions, covered = details != null || menu || hostCovered, roundInlineViewport = true,
+                        stageAvailableHeight = stageAvailableHeight, content = content) { artifactSnapshot = it }
                     else content()
                 }
             } else Text(draft?.prompt.orEmpty(),style=MaterialTheme.typography.bodyLarge)
+            if (standaloneStage && details == null) AccessAndEffects()
             if (tool != null && spec != null && draft == null && tool.saved && !tool.archived) {
                 SourceRefreshControl(controller, tool)
             }

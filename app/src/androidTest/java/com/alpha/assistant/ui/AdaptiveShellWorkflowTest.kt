@@ -24,6 +24,7 @@ import com.alpha.assistant.data.Conversation
 import com.alpha.assistant.data.Message
 import com.alpha.assistant.sandbox.SurfaceFrameMetrics
 import com.alpha.assistant.tools.ArkanoidFixture
+import com.alpha.assistant.tools.ToolDraft
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
@@ -114,51 +115,80 @@ class AdaptiveShellWorkflowTest {
         val session = awaitSession()
 
         scenario.onActivity { size.value = 900 }
-        awaitPanes(scenario)
-        assertEquals("Chat draft survives", robot.field(composer).text.toString())
-        robot.waitGone(refinement)
+        awaitSingleApp(scenario)
         robot.reveal("Increment item")
         robot.click("Increment item")
         robot.waitUntil { count(tools) == 1 }
-        robot.edit(composer, "Chat edit in the wide pane")
-        assertEquals(1, robot.texts().count { it == "Increment item" })
-        val versionSummary = robot.text(R.string.tool_details_versions, 1, checkNotNull(tools.tool(TOOL_ID)).stateVersion)
-        val cardMenu = robot.text(R.string.tool_card_actions, "Adaptive fixture")
-        robot.waitFor(cardMenu)
-        assertNull(robot.find(versionSummary))
-        robot.click(cardMenu)
-        robot.click(robot.text(R.string.tool_versions))
-        robot.waitFor(versionSummary)
-        robot.click(robot.text(R.string.tool_dialog_close))
         assertSession(session)
         robot.diagnostics.capture("wide-after-action")
 
         scenario.onActivity { size.value = 420 }
-        robot.waitGone(composer)
-        robot.waitGone(refinement)
+        awaitSingleApp(scenario)
         assertEquals(1, count(tools))
         assertSession(session)
         robot.back()
-        robot.waitFor(robot.text(R.string.tool_library_content))
-        robot.back()
-        assertEquals("Chat edit in the wide pane", robot.field(composer).text.toString())
+        assertEquals("Chat draft survives", robot.field(composer).text.toString())
         openFromChat(scenario)
         robot.click(robot.text(R.string.tool_refine))
         robot.waitUntil { fixture.model?.snapshot?.selected?.refinementTargetId == TOOL_ID }
         assertEquals("", robot.field(composer).text.toString())
         robot.edit(composer, "App change draft")
-        assertEquals("Chat edit in the wide pane", fixture.model?.snapshot?.selected?.draft?.text)
+        assertEquals("Chat draft survives", fixture.model?.snapshot?.selected?.draft?.text)
         assertEquals("App change draft", fixture.model?.snapshot?.selected?.refinementDraft?.text)
         assertEquals(0, fixture.provider.calls)
     }
 
-    @Test fun librarySelectionKeepsItsCatalogOnWideWindows() = withTool { fixture, tools, scenario ->
+    @Test fun delayedRefinementKeepsTheNewShellDestination() = withTool { fixture, tools, scenario ->
+        val model = checkNotNull(fixture.model)
+        val original = checkNotNull(tools.tool(TOOL_ID))
+        tools.saveTool(original.copy(lastConversationId = "missing-chat"), revision = false)
+        openFromChat(scenario)
+
+        val db = fixture.store.writableDatabase
+        db.beginTransactionNonExclusive()
+        val pendingChat = try {
+            robot.click(robot.text(R.string.tool_refine))
+            robot.waitUntil { model.snapshot.conversations.any { it.refinementTargetId == TOOL_ID } }
+            val pending = model.snapshot.conversations.single { it.refinementTargetId == TOOL_ID }.id
+            assertTrue(fixture.store.load().conversations.none { it.id == pending })
+
+            robot.click(robot.text(R.string.tool_options))
+            robot.reveal(robot.text(R.string.tool_chat))
+            robot.click(robot.text(R.string.tool_chat))
+            robot.waitFor(composer)
+            robot.openDrawer(scenario)
+            robot.click(robot.text(R.string.settings))
+            robot.awaitDrawerClosed(scenario)
+            robot.waitUntil { robot.composed(scenario, "settings-pane") }
+            assertEquals("chat", model.snapshot.selectedId)
+            pending
+        } finally {
+            db.endTransaction()
+        }
+        robot.waitUntil { tools.tool(TOOL_ID)?.lastConversationId == pendingChat }
+        robot.awaitFrames(15)
+        assertEquals("The delayed Edit must preserve the origin chat", "chat", model.snapshot.selectedId)
+        assertTrue("The delayed Edit must leave Settings visible", robot.composed(scenario, "settings-pane"))
+        assertFalse(robot.composed(scenario, "mini-app"))
+        assertEquals(TOOL_ID, fixture.store.load().conversations.single { it.id == pendingChat }.refinementTargetId)
+        assertEquals(0, fixture.provider.calls)
+    }
+
+    @Test fun libraryOpenRestoresSearchAfterWideWindowAndHinge() = withTool { fixture, tools, scenario ->
         val size = constrain(scenario, fixture, 420)
         robot.openDrawer(scenario)
         robot.click(robot.text(R.string.mini_apps))
         robot.awaitDrawerClosed(scenario)
         val library = robot.text(R.string.tool_library_content)
         val search = robot.text(R.string.tool_search)
+        fun awaitPairedPreview() {
+            robot.waitFor(robot.text(R.string.tool_preview_label))
+            robot.waitUntil {
+                val catalog = robot.composedBoundsOrNull(scenario, "mini-app-library")?.first ?: return@waitUntil false
+                val app = robot.composedBoundsOrNull(scenario, "mini-app")?.first ?: return@waitUntil false
+                catalog.width() > 0 && app.width() > 0 && !Rect.intersects(catalog, app)
+            }
+        }
         robot.waitFor(library)
         robot.edit(search, "Adaptive")
         robot.click("Adaptive fixture")
@@ -168,38 +198,72 @@ class AdaptiveShellWorkflowTest {
         val session = awaitSession()
 
         scenario.onActivity { size.value = 900 }
-        robot.waitFor(library)
-        assertEquals("Adaptive", robot.field(search).text.toString())
-        robot.waitGone(composer)
-        robot.waitUntil { !robot.composed(scenario, "chat") }
+        awaitSingleApp(scenario)
+        robot.waitGone(library)
         assertSession(session)
         robot.click(robot.text(R.string.tool_options))
         robot.waitFor(robot.text(R.string.tool_versions))
         robot.back()
         robot.waitGone(robot.text(R.string.tool_versions))
-        robot.waitFor(robot.text(R.string.tool_library_back))
         assertSession(session)
         robot.reveal("Increment item")
         robot.click("Increment item")
         robot.waitUntil { count(tools) == 1 }
 
-        val book = publishHinge(scenario, FoldingFeature.Orientation.VERTICAL, 450)
+        val book = publishHinge(scenario, FoldingFeature.Orientation.VERTICAL, 360)
         robot.waitUntil {
-            val catalog = robot.composedBounds(scenario, "mini-app-library").first
-            val app = robot.composedBounds(scenario, "mini-app").first
-            catalog.width() > 0 && app.width() > 0 && catalog.right <= book.left && app.left >= book.right
+            val app = robot.composedBoundsOrNull(scenario, "mini-app")?.first ?: return@waitUntil false
+            app.width() > 0 && app.left >= book.right
         }
+        robot.waitGone(library)
         assertSession(session)
         robot.back()
         robot.waitFor(library)
         robot.waitGone(robot.text(R.string.tool_library_back))
         assertEquals("Adaptive", robot.field(search).text.toString())
+
+        folds.overrideWindowLayoutInfo(TestWindowLayoutInfo(emptyList()))
+        val saved = checkNotNull(tools.tool(TOOL_ID))
+        val prompt = "Adaptive draft preview"
+        tools.saveDraft(ToolDraft("adaptive-preview", saved.id, saved.revision, saved.stateVersion,
+            prompt, saved.spec, saved.state, saved.ui, saved.conversationId))
+        robot.click(prompt)
+        awaitPairedPreview()
+        robot.back()
+        robot.waitUntil { !robot.composed(scenario, "mini-app") }
+        assertNotNull(tools.draft("adaptive-preview"))
+        assertEquals("Adaptive", robot.field(search).text.toString())
+        robot.click(prompt)
+        robot.click(robot.text(R.string.tool_discard_preview))
+        awaitSingleApp(scenario)
+        robot.waitGone(library)
+        assertEquals(saved, tools.tool(TOOL_ID))
+
+        robot.back()
+        robot.waitFor(library)
+        val applyPrompt = "Adaptive draft to apply"
+        val revisedSpec = JSONObject(saved.spec).put("title", "Applied adaptive fixture").toString()
+        tools.saveDraft(ToolDraft("adaptive-apply", saved.id, saved.revision, saved.stateVersion,
+            applyPrompt, revisedSpec, saved.state, saved.ui, conversationId = null))
+        robot.click(applyPrompt)
+        awaitPairedPreview()
+        robot.click(robot.text(R.string.tool_apply_changes))
+        robot.waitUntil { tools.tool(TOOL_ID)?.revision == saved.revision + 1 && tools.draft("adaptive-apply") == null }
+        awaitSingleApp(scenario)
+        robot.waitGone(library)
+        robot.waitGone(robot.text(R.string.tool_preview_label))
+        robot.waitFor("Applied adaptive fixture")
+        robot.back()
+        robot.waitFor(library)
+        assertEquals("Adaptive", robot.field(search).text.toString())
     }
 
-    @Test fun tabletopAndVerticalHingeKeepControlsInTheirPanels() = withTool { fixture, tools, scenario ->
+    @Test fun tabletopAndVerticalHingeKeepControlsInTheirPanels() = withTool(refinementChat = "other") { fixture, tools, scenario ->
         constrain(scenario, fixture, 900, fontScale = 1.5f)
         openFromChat(scenario)
+        robot.click(robot.text(R.string.tool_refine))
         awaitPanes(scenario)
+        robot.waitUntil { fixture.model?.snapshot?.selectedId == "other" }
         val session = awaitSession()
 
         val tabletop = publishHinge(scenario, FoldingFeature.Orientation.HORIZONTAL, 390)
@@ -208,7 +272,6 @@ class AdaptiveShellWorkflowTest {
             val chat = robot.composedBounds(scenario, "chat").first
             app.height() > 0 && chat.height() > 0 && app.bottom <= tabletop.top && chat.top >= tabletop.bottom
         }
-        robot.assertTarget(robot.text(R.string.tool_library_back))
         robot.assertTarget(robot.text(R.string.composer_add_context))
         robot.click(robot.text(R.string.composer_add_context))
         robot.waitFor(robot.text(R.string.context_title))
@@ -245,10 +308,14 @@ class AdaptiveShellWorkflowTest {
         robot.diagnostics.capture("vertical-hinge-large-font")
 
         val narrowBook = publishHinge(scenario, FoldingFeature.Orientation.VERTICAL, 280)
-        robot.waitGone(composer)
-        val app = robot.composedBounds(scenario, "mini-app").first
-        assertTrue(app.width() > 0 && app.left >= narrowBook.right)
-        assertSession(session)
+        robot.waitFor(composer)
+        robot.waitUntil { !robot.composed(scenario, "mini-app") }
+        val chat = robot.composedBounds(scenario, "chat").first
+        assertTrue(chat.width() > 0 && chat.left >= narrowBook.right)
+        robot.back()
+        robot.waitFor(composer)
+        assertNull(fixture.model?.tools?.selectedId)
+        assertEquals("chat", fixture.model?.snapshot?.selectedId)
     }
 
     @Test fun openAppSurvivesActivityRecreationAndProtectedActionStaysDenied() = withTool { fixture, tools, scenario ->
@@ -294,10 +361,7 @@ class AdaptiveShellWorkflowTest {
         constrain(scenario, fixture, 900)
         robot.edit(composer, "New chat draft")
         scenario.onActivity { checkNotNull(fixture.model).openSurface(TOOL_ID) }
-        awaitPanes(scenario)
-        assertEquals("New chat draft", robot.field(composer).text.toString())
-        robot.back()
-        robot.waitFor(robot.text(R.string.tool_library_content))
+        awaitSingleApp(scenario)
         robot.back()
         robot.waitUntil { robot.composed(scenario, "desktop") }
         assertEquals("New chat draft", robot.field(composer).text.toString())
@@ -315,13 +379,18 @@ class AdaptiveShellWorkflowTest {
     private fun openFromChat(scenario: ActivityScenario<CloudTestActivity>) {
         robot.reveal(robot.text(R.string.tool_open))
         robot.click(robot.text(R.string.tool_open))
-        robot.waitFor(robot.text(R.string.tool_library_back))
+        robot.waitUntil { robot.composed(scenario, "mini-app") }
         robot.awaitFrames(30)
         assertTrue(robot.composed(scenario, "mini-app"))
     }
 
+    private fun awaitSingleApp(scenario: ActivityScenario<CloudTestActivity>) {
+        robot.waitUntil { robot.composed(scenario, "mini-app") }
+        robot.waitGone(composer)
+        robot.waitUntil { !robot.composed(scenario, "chat") }
+    }
+
     private fun awaitPanes(scenario: ActivityScenario<CloudTestActivity>) {
-        robot.waitFor(robot.text(R.string.tool_library_back))
         robot.waitFor(composer)
         robot.waitUntil {
             val app = robot.composedBounds(scenario, "mini-app").first
@@ -388,7 +457,7 @@ class AdaptiveShellWorkflowTest {
 
     private fun count(tools: ToolStore) = JSONObject(checkNotNull(tools.tool(TOOL_ID)).state).getInt("count")
 
-    private fun withTool(selectedChat: Boolean = true, immersive: Boolean = false,
+    private fun withTool(selectedChat: Boolean = true, immersive: Boolean = false, refinementChat: String = "chat",
         block: (ShellFixture, ToolStore, ActivityScenario<CloudTestActivity>) -> Unit) {
         val fixture = ShellFixture("adaptive")
         val tools = ToolStore(fixture.context, "${fixture.name}.db-tools.db")
@@ -408,9 +477,13 @@ class AdaptiveShellWorkflowTest {
                     return {state,effects,surfaces:{main:{commands:[{type:'rect',x:0,y:0,width:320,height:420,color:'#123456'}]}}};
                 """.trimIndent())
             val spec = ToolSpec.parse(json.toString())
-            tools.saveTool(ToolRecord(TOOL_ID, 1, 1, spec.json, spec.initialState, spec.ui.toString(), "chat", true), true)
+            tools.saveTool(ToolRecord(TOOL_ID, 1, 1, spec.json, spec.initialState, spec.ui.toString(), "chat",
+                true, lastConversationId = refinementChat), true)
             fixture.store.saveConversation(Conversation("chat", "Adaptive discussion", 1, 1,
                 messages = listOf(Message("app", "assistant", "A mini-app for this discussion.", 1, "complete", toolId = TOOL_ID, toolRevision = 1))))
+            if (refinementChat != "chat") {
+                fixture.store.saveConversation(Conversation(refinementChat, "Refinement discussion", 2, 2))
+            }
             if (selectedChat) fixture.store.seedOpenChat("chat")
             fixture.install()
             fixture.launch().use { scenario ->

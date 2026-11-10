@@ -589,6 +589,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     var surfaceSequence by mutableStateOf(0); private set
     internal var surfaceDestination by mutableStateOf<ShellDestination?>(null); private set
     internal var surfaceAutomationRuleId by mutableStateOf<String?>(null); private set
+    internal var surfaceRefinementToolId by mutableStateOf<String?>(null); private set
     internal var surfaceFromShare by mutableStateOf(false); private set
     /** The model outlives each activity, so it holds the entry until a shell applies it. */
     var surfacePending by mutableStateOf(false); private set
@@ -614,11 +615,14 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     internal fun openAutomationSurface(id: String) {
         queueSurface(ShellDestination.Automations, automationRuleId = id)
     }
-    private fun queueSurface(destination: ShellDestination?, automationRuleId: String? = null, fromShare: Boolean = false) {
+    private fun queueSurface(destination: ShellDestination?, automationRuleId: String? = null, fromShare: Boolean = false,
+        refinementToolId: String? = null) {
+        invalidateRefinementHandoff()
         pendingChatEntry = null
         if (!fromShare && destination != ShellDestination.Courses && courseEntry?.inChat == false) courseEntry = null
         surfaceDestination = destination
         surfaceAutomationRuleId = automationRuleId
+        surfaceRefinementToolId = refinementToolId
         surfaceFromShare = fromShare
         surfacePending = true
         surfaceSequence++
@@ -626,6 +630,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     fun consumeSurface() {
         surfacePending = false
         surfaceAutomationRuleId = null
+        surfaceRefinementToolId = null
         surfaceFromShare = false
     }
     var snapshot by mutableStateOf(ShellSnapshot()); private set
@@ -983,6 +988,11 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         }
     }
     private var openingRefinement = false
+    private var refinementNavigationGeneration = 0
+
+    internal fun invalidateRefinementHandoff() {
+        refinementNavigationGeneration++
+    }
     internal var nativeRefinementTarget by mutableStateOf<ToolRecord?>(null); private set
 
     internal fun dismissNativeRefinement() {
@@ -993,12 +1003,19 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         if(loading || loadFailed || openingRefinement || nativeRefinementTarget != null) return
         val controller = tools
         val displayed = controller.tools.find { it.id == id }
+        val sourceConversation = snapshot.selectedId
+        val sourceGeneration = refinementNavigationGeneration
+        val fromOpenApp = controller.selectedId == id
+        fun stillCurrent() = refinementNavigationGeneration == sourceGeneration &&
+            snapshot.selectedId == sourceConversation && controller === tools && (!fromOpenApp || controller.selectedId == id)
+
         openingRefinement = true
         viewModelScope.launch {
             try {
-                val tool = controller.referencedTools(listOf(id)).singleOrNull() ?: unavailableTool()
-                if (controller !== tools || (displayed != null &&
-                        (displayed.revision != tool.revision || displayed.createdAt != tool.createdAt))) {
+                val found = controller.referencedTools(listOf(id)).singleOrNull()
+                if (!stillCurrent()) return@launch
+                val tool = found ?: unavailableTool()
+                if (displayed != null && (displayed.revision != tool.revision || displayed.createdAt != tool.createdAt)) {
                     requestError = getApplication<Application>().getString(R.string.tool_refinement_current_version)
                     return@launch
                 }
@@ -1024,16 +1041,21 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 if(active?.weatherDraft != null) cancelRequest()
                 voice.stop()
                 replace(updated)
-                snapshot = snapshot.copy(selectedId = updated.id)
                 val newDraft = snapshot.newDraft
                 if(!persist { store.createFromNewDraft(updated, newDraft) }.await()) return@launch
                 if(snapshot.conversations.none { it.id == updated.id }) return@launch
                 if(updated.id != tool.lastConversationId) tools.recordLastConversation(tool, updated.id)
-                if(snapshot.selectedId == updated.id) queueSurface(null)
+                if (stillCurrent()) {
+                    snapshot = snapshot.copy(selectedId = updated.id)
+                    if (fromOpenApp) queueSurface(ShellDestination.MiniApps, refinementToolId = id)
+                    else queueSurface(null)
+                }
             } catch(cancel: CancellationException) {
                 throw cancel
             } catch(failure: Exception) {
-                requestError = (failure as? CloudFailure)?.message ?: "Не удалось открыть чат мини-приложения."
+                if (stillCurrent()) {
+                    requestError = (failure as? CloudFailure)?.message ?: "Не удалось открыть чат мини-приложения."
+                }
             } finally {
                 openingRefinement = false
             }

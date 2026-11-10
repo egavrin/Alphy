@@ -101,6 +101,10 @@ class RouteStackWorkflowTest {
                     robot.click(robot.text(R.string.tool_dismiss))
 
                     robot.click(robot.text(R.string.tool_library_back))
+                    robot.waitFor(robot.text(R.string.composer_label))
+                    robot.openDrawer(scenario)
+                    robot.click(robot.text(R.string.mini_apps))
+                    robot.awaitDrawerClosed(scenario)
                     robot.waitFor(robot.text(R.string.tool_library_content))
                     robot.reveal(title)
                     robot.click(title)

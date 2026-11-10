@@ -4,7 +4,11 @@ export async function createScene({THREE, addons, canvas, input, state, viewport
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0b1220);
     const camera = new THREE.PerspectiveCamera(40, viewport.width / viewport.height, .1, 50);
-    camera.position.set(0, 4, 8);
+    function setCamera() {
+        if (state.camera === 'close') camera.position.set(2, 1.5, 3.5);
+        else camera.position.set(0, 4, 8);
+    }
+    setCamera();
     const controls = new addons.OrbitControls(camera, input);
     controls.update();
     const earth = new THREE.Mesh(new THREE.SphereGeometry(.92, 24, 16),
@@ -26,6 +30,11 @@ export async function createScene({THREE, addons, canvas, input, state, viewport
     return {
         event(event) {
             if (event.type === 'viewport') size(event.width, event.height);
+            if (event.type === 'action' && event.actionId === 'camera') {
+                state.camera = event.value;
+                setCamera();
+                controls.update();
+            }
             if (event.type === 'pause') state.paused = true;
             if (event.type === 'resume' || event.type === 'start') state.paused = false;
             if (event.type === 'restart') {

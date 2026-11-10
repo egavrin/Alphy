@@ -1946,6 +1946,8 @@ private fun threeSceneWriterContract(scene: SceneRequirement, plan: JSONObject, 
         State types are strings "number", "string", "boolean", or the native bounded object, array, and list types.
         A minimal ui is {"type":"column","children":[{"type":"text","text":"Instructions"}]}.
         The native UI appears below the Three.js viewport. Never include any canvas node in ui.
+        For mutually exclusive camera views, use a root singleChoice with variant:"scene" and a localized group label.
+        Bind it to the current camera value. Handle its one action with the scalar option value in event.value.
         Use the UI catalog only for native text and controls below the viewport:
         $ui
         Source is an ES module, not a function body. Export async function createScene(context).

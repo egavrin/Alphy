@@ -34,10 +34,13 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -49,6 +52,7 @@ import androidx.compose.ui.res.stringResource
 import com.alpha.assistant.R
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -67,6 +71,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.disabled
@@ -74,6 +79,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -725,7 +731,13 @@ private fun courseSceneSlot(root: JSONObject): Int? {
     val action=node.optString("action")
     val children=node.optJSONArray("children")
     val renderChildren: @Composable () -> Unit = {
-        if(children != null) repeat(children.length()) { NativeNode(children.getJSONObject(it),state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,event=event) }
+        if (children != null) {
+            val secondary = if (type == "section" || type == "card") secondaryButtons(children, state, enabled) else emptySet()
+            repeat(children.length()) { index ->
+                NativeNode(children.getJSONObject(index),state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,
+                    secondaryButton = index in secondary,event=event)
+            }
+        }
     }
     val content: @Composable () -> Unit = {
         if (type in ToolUiCatalog.modalTypes) {
@@ -782,13 +794,15 @@ private fun courseSceneSlot(root: JSONObject): Int? {
         "stage" -> NativeStage(node,state,modifier) {leaf -> NativeNode(leaf,state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,event=event)}
         "column","form" -> TonedContainer(modifier, tone) { containerModifier ->
             val items = checkNotNull(children)
+            val secondary = secondaryButtons(items, state, enabled)
             val renderChild: @Composable (Int, Modifier) -> Unit = { index, slot ->
                 val child = items.getJSONObject(index)
                 val focal = presentation?.profile == NativePresentationProfile.FOCUS && index == presentation.focalPosition
                 if (focal) CompositionLocalProvider(LocalPresentationFocus provides true) {
                     NativeNode(child,state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,
                         placement=slot.focalAccent(MaterialTheme.colorScheme.primary),event=event)
-                } else NativeNode(child,state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,placement=slot,event=event)
+                } else NativeNode(child,state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,
+                    placement=slot,secondaryButton = index in secondary,event=event)
             }
             val column: @Composable (Modifier) -> Unit = { position ->
                 Column(position,verticalArrangement=verticalArrangement(style,gap),horizontalAlignment=alignment(style)) {
@@ -1054,7 +1068,8 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 Text("$text: ${range.start} – ${range.endInclusive}")
                 RangeSlider(value=((range.start-low)/(high-low)).toFloat().coerceIn(0f,1f)..((range.endInclusive-low)/(high-low)).toFloat().coerceIn(0f,1f),
                     onValueChange={range=nativeSliderValue(node,it.start)..nativeSliderValue(node,it.endInclusive)},enabled=enabled,modifier=Modifier.semantics {contentDescription=text})
-                TextButton(onClick={event(action,JSONArray().put(range.start).put(range.endInclusive))},enabled=enabled && (range.start!=original.getDouble(0) || range.endInclusive!=original.getDouble(1))) {Text(miniAppEditorAction(R.string.tool_generated_apply, text))}
+                TextButton(onClick={event(action,JSONArray().put(range.start).put(range.endInclusive))},
+                    modifier=Modifier.heightIn(min=48.dp),enabled=enabled && (range.start!=original.getDouble(0) || range.endInclusive!=original.getDouble(1))) {Text(miniAppEditorAction(R.string.tool_generated_apply, text))}
             }
         }
         "dateRangeInput" -> NativeDateRange(node,state,enabled,modifier,event)
@@ -1099,7 +1114,9 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 },onValueChangeFinished=editor?.takeIf { it.automatic }?.let { live -> { live.finish(explicit = false) } },
                     enabled=editor?.canEdit ?: enabled,modifier=Modifier.semantics {contentDescription=text})
                 if (editor == null) {
-                    TextButton(onClick={event(action,value)},enabled=enabled && value != original) {Text(miniAppEditorAction(R.string.tool_generated_apply, text))}
+                    TextButton(onClick={event(action,value)},modifier=Modifier.heightIn(min=48.dp),enabled=enabled && value != original) {
+                        Text(miniAppEditorAction(R.string.tool_generated_apply, text))
+                    }
                 } else NativeLiveActions(editor, text, finishButton = false)
             }
         }
@@ -1400,7 +1417,7 @@ private class NativeLiveEditor(private val ui: NativeLiveUi, val draft: NativeLi
         )
     val label = node.getString("text")
     @Composable fun ApplyDraft() {
-        TextButton(onClick = apply, enabled = enabled && valid && (changed || search)) {
+        TextButton(onClick = apply, modifier = Modifier.heightIn(min = 48.dp), enabled = enabled && valid && (changed || search)) {
             Text(miniAppEditorAction(if (search) R.string.tool_generated_search else R.string.tool_generated_apply, label))
         }
     }
@@ -1739,11 +1756,17 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
         if(type != "multiChoice")event(action,value)
         else {val array=current as JSONArray;val next=JSONArray();repeat(array.length()){if(!scalarEqual(array.get(it),value))next.put(array.get(it))};if(!selected(value))next.put(value);event(action,next)}
     }
+    if (ToolUiCatalog.isSceneChoice(node)) {
+        NativeSceneChoices(node.getString("text"), values, enabled, modifier, ::selected, ::choose)
+        return
+    }
     Column(modifier,verticalArrangement=Arrangement.spacedBy(6.dp)) {
         Text(node.getString("text"),style=MaterialTheme.typography.labelLarge)
         when(type) {
             "segmented" -> SingleChoiceSegmentedButtonRow(Modifier.horizontalScroll(rememberScrollState())) {
-                values.forEachIndexed {index,option -> SegmentedButton(selected(option.get("value")),{choose(option.get("value"))},SegmentedButtonDefaults.itemShape(index,values.size),enabled=enabled) {Text(option.getString("text"))} }
+                values.forEachIndexed {index,option -> SegmentedButton(selected(option.get("value")),{choose(option.get("value"))},
+                    SegmentedButtonDefaults.itemShape(index,values.size),modifier=Modifier.sizeIn(minWidth=48.dp,minHeight=48.dp),
+                    enabled=enabled) {Text(option.getString("text"))} }
             }
             "navigationBar" -> NavigationBar(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                 values.forEach {option -> NavigationBarItem(selected(option.get("value")),{choose(option.get("value"))},icon={AlphaIcon(Glyph.Grid, color = LocalContentColor.current)},label={Text(option.getString("text"))},enabled=enabled)}
@@ -1754,7 +1777,9 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
             "menu" -> {
                 var expanded by remember {mutableStateOf(false)}
                 Box {
-                    OutlinedButton(onClick={expanded=true},enabled=enabled) {Text(values.first {selected(it.get("value"))}.getString("text"))}
+                    OutlinedButton(onClick={expanded=true},enabled=enabled,modifier=Modifier.heightIn(min=48.dp)) {
+                        Text(values.first {selected(it.get("value"))}.getString("text"))
+                    }
                     DropdownMenu(expanded && enabled,{expanded=false}) {
                         values.forEach { option ->
                             DropdownMenuItem(text={Text(option.getString("text"))},onClick={expanded=false;choose(option.get("value"))},
@@ -1764,11 +1789,74 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
                 }
             }
             "multiChoice" -> FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                values.forEach {option->FilterChip(selected(option.get("value")),{choose(option.get("value"))},label={Text(option.getString("text"))},enabled=enabled)}
+                values.forEach {option->FilterChip(selected(option.get("value")),{choose(option.get("value"))},label={Text(option.getString("text"))},
+                    modifier=Modifier.sizeIn(minWidth=48.dp,minHeight=48.dp),enabled=enabled)}
             }
             else -> values.forEach {option->Row(Modifier.fillMaxWidth().heightIn(min=48.dp).clickable(enabled=enabled,role=Role.RadioButton){choose(option.get("value"))},verticalAlignment=Alignment.CenterVertically) {
                 RadioButton(selected(option.get("value")),onClick=null,enabled=enabled);Text(option.getString("text"),Modifier.padding(start=8.dp))
             }}
+        }
+    }
+}
+
+@Composable
+private fun NativeSceneChoices(
+    label: String,
+    options: List<JSONObject>,
+    enabled: Boolean,
+    modifier: Modifier,
+    selected: (Any) -> Boolean,
+    choose: (Any) -> Unit,
+) {
+    val style = MaterialTheme.typography.labelLarge
+    val colors = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(12.dp)
+    val cellGap = 8.dp
+    val horizontalPadding = 8.dp
+    val checkSize = 16.dp
+    val labelGap = 4.dp
+    val measurer = rememberTextMeasurer(cacheSize = options.size)
+    val textWidth = remember(options, style, measurer) {
+        options.maxOf { measurer.measure(it.getString("text"), style = style, softWrap = false).size.width }
+    }
+    val density = LocalDensity.current
+    BoxWithConstraints(modifier.selectableGroup().semantics {
+        contentDescription = label
+        isTraversalGroup = true
+    }) {
+        val columns = with(density) {
+            val minWidth = maxOf(48.dp.roundToPx(),
+                textWidth + horizontalPadding.roundToPx() * 2 + checkSize.roundToPx() + labelGap.roundToPx())
+            val gap = cellGap.roundToPx()
+            if (constraints.hasBoundedWidth) ((constraints.maxWidth + gap) / (minWidth + gap)).coerceIn(1, options.size)
+            else 1
+        }
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(cellGap)) {
+            for (row in options.chunked(columns)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(cellGap)) {
+                    for (option in row) {
+                        val value = option.get("value")
+                        val active = selected(value)
+                        val foreground = if (active) Color(0xFF17283E) else colors.onSurface
+                        val textColor = if (enabled) foreground else foreground.copy(alpha = 0.38f)
+                        val decoration = if (active) Modifier.background(Color(0xFFC7DFFF))
+                            else Modifier.border(1.dp, colors.outline, shape)
+                        Row(
+                            Modifier.weight(1f).heightIn(min = 48.dp).clip(shape).then(decoration)
+                                .selectable(active, enabled = enabled, role = Role.RadioButton) { choose(value) }
+                                .padding(horizontal = horizontalPadding, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(labelGap, Alignment.CenterHorizontally),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(Modifier.size(checkSize)) {
+                                if (active) AlphaIcon(Glyph.Check, Modifier.fillMaxSize(), color = textColor)
+                            }
+                            Text(option.getString("text"), color = textColor, style = style, textAlign = TextAlign.Center)
+                        }
+                    }
+                    repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
         }
     }
 }

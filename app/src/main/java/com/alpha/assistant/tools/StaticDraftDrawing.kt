@@ -6,12 +6,14 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
@@ -24,7 +26,7 @@ import com.alpha.assistant.R
 import org.json.JSONObject
 
 @Composable internal fun StaticDraftDrawing(spec: ToolSpec, surfacesJson: String?, maxHeight: Dp, ids: List<String> = spec.surfaces.keys.toList(),
-    label: String? = null, modifier: Modifier = Modifier) {
+    label: String? = null, modifier: Modifier = Modifier, roundInlineViewport: Boolean = false) {
     if (spec.surfaces.isEmpty()) return
     if (surfacesJson == null) {
         Text(stringResource(R.string.tool_preview_drawing_unavailable), style = MaterialTheme.typography.bodySmall)
@@ -52,7 +54,8 @@ import org.json.JSONObject
     val roleColors = remember(scheme) { ToolUiCatalog.tones.associateWith { scheme.toolInk(it, canvasBackground).toArgb() } }
 
     BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.width(minOf(maxWidth, maxHeight * ratio)).aspectRatio(ratio).clipToBounds()
+        val clip = if (roundInlineViewport) Modifier.clip(RoundedCornerShape(InlineToolViewportCornerRadius)) else Modifier.clipToBounds()
+        Canvas(Modifier.width(minOf(maxWidth, maxHeight * ratio)).aspectRatio(ratio).then(clip)
             .background(canvasBackground).semantics { contentDescription = description }) {
             val canvas = drawContext.canvas.nativeCanvas
             val stage = canvas.save()

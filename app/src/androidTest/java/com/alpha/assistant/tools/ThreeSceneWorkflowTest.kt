@@ -4,6 +4,7 @@ import android.app.AlertDialog
 import android.app.Application
 import android.content.ContextWrapper
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.Rect
 import android.os.SystemClock
 import android.view.InputDevice
@@ -30,12 +31,16 @@ import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.ShellStore
 import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.tools.generation.GenerationBehavior
 import com.alpha.assistant.tools.three.ThreeSceneAsset
 import com.alpha.assistant.tools.three.ThreeSceneAssetCleanup
 import com.alpha.assistant.tools.three.ThreeSceneAssets
 import com.alpha.assistant.tools.three.ThreeSceneForeground
+import com.alpha.assistant.tools.three.ThreeSceneFailure
+import com.alpha.assistant.tools.three.ThreeSceneProblem
 import com.alpha.assistant.tools.three.ThreeSceneSession
 import com.alpha.assistant.tools.three.ThreeSceneWebView
+import com.alpha.assistant.tools.three.checkThreeScene
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.seedOpenChat
@@ -175,14 +180,11 @@ class ThreeSceneWorkflowTest {
                     fixture.install(saveKey = false)
                     fixture.launch().use { activity ->
                         robot.click(robot.text(R.string.tool_open))
-                        robot.waitFor("Pause")
+                        val pause = robot.text(R.string.tool_game_pause)
+                        val resume = robot.text(R.string.tool_game_resume)
                         fun state() = JSONObject(checkNotNull(store.tool(tool.id)).state)
                         if (name == "earth") {
                             robot.waitUntil { state().getDouble("phase") > 0 }
-                            robot.click("Pause")
-                            robot.waitFor("Resume")
-                            robot.waitUntil { state().getBoolean("paused") }
-                            val paused = state().toString()
                             fun findWebView(view: View): WebView? = when (view) {
                                 is WebView -> view
                                 is ViewGroup -> (0 until view.childCount).firstNotNullOfOrNull { findWebView(view.getChildAt(it)) }
@@ -202,29 +204,75 @@ class ThreeSceneWorkflowTest {
                             assertTrue(inlineHeight > 0)
                             val enter = robot.text(R.string.tool_full_screen_enter)
                             val exit = robot.text(R.string.tool_full_screen_exit)
-                            fun enterFullscreen() {
+                            val viewport = Rect()
+                            activity.onActivity {
+                                val position = IntArray(2).also(retainedView::getLocationOnScreen)
+                                viewport.set(position[0], position[1], position[0] + retainedView.width, position[1] + retainedView.height)
+                            }
+                            File(output, "shared-inline-earth.png").outputStream().use { stream ->
+                                val bitmap = checkNotNull(robot.automation.takeScreenshot())
+                                try { bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream) } finally { bitmap.recycle() }
+                            }
+                            println("THREE_INLINE_VIEWPORT viewport=$viewport")
+                            val expand = robot.assertTarget(enter)
+                            assertTrue("The fullscreen action $expand is inside the inline viewport $viewport", viewport.contains(expand))
+                            assertNull(robot.find("На паузе"))
+                            robot.click(pause)
+                            robot.waitFor(resume)
+                            robot.waitFor("На паузе")
+                            robot.waitUntil { state().getBoolean("paused") }
+                            fun waitForSelectedTab(label: String) {
+                                robot.reveal(label, forward = null)
+                                robot.waitUntil {
+                                    var tab = robot.find(label)
+                                    while (tab != null && !tab.isSelected && !tab.isClickable) tab = tab.parent
+                                    tab?.let { it.isVisibleToUser && it.isSelected } == true
+                                }
+                            }
+                            val closeUp = "Earth close-up"
+                            waitForSelectedTab("Orbit view")
+                            robot.reveal(closeUp)
+                            robot.click(closeUp)
+                            robot.waitUntil { state().getString("camera") == "close" }
+                            waitForSelectedTab(closeUp)
+                            val paused = state().toString()
+                            val cameraTransitions = JSONArray()
+                            fun assertPausedCamera(location: String) {
+                                robot.reveal(resume, forward = null)
+                                robot.waitFor("На паузе")
+                                waitForSelectedTab(closeUp)
+                                val saved = state()
+                                assertEquals("Saved camera and phase $location", paused, saved.toString())
+                                cameraTransitions.put(JSONObject().put("location", location)
+                                    .put("selectedTab", closeUp).put("pausedLabel", "На паузе")
+                                    .put("state", saved).put("originalWebViewHeightPx", height()))
+                            }
+                            fun enterFullscreen(exitPath: String) {
+                                robot.reveal(enter, forward = false)
                                 robot.click(enter)
                                 robot.waitFor(exit)
-                                robot.waitFor("Resume")
                                 robot.waitUntil { height() > inlineHeight }
-                                assertEquals(paused, state().toString())
+                                assertPausedCamera("in fullscreen before $exitPath")
                             }
-                            enterFullscreen()
+                            enterFullscreen("explicit exit")
+                            robot.reveal(exit, forward = false)
                             robot.click(exit)
-                            robot.waitFor(enter)
                             robot.waitUntil { height() == inlineHeight }
-                            enterFullscreen()
+                            assertPausedCamera("after explicit exit")
+                            enterFullscreen("Android Back")
                             robot.back()
-                            robot.waitFor(enter)
                             robot.waitUntil { height() == inlineHeight }
-                            enterFullscreen()
+                            assertPausedCamera("after Android Back")
+                            enterFullscreen("background")
                             activity.moveToState(Lifecycle.State.STARTED)
                             robot.waitUntil { height() == 0 }
                             activity.moveToState(Lifecycle.State.RESUMED)
-                            robot.waitFor(enter)
-                            robot.waitFor("Resume")
-                            assertEquals(paused, state().toString())
+                            assertPausedCamera("after reopen")
+                            File(output, "shared-earth-camera-transitions.json").writeText(
+                                JSONObject().put("inlineViewport", viewport.toShortString())
+                                    .put("transitions", cameraTransitions).toString(2))
                         } else {
+                            robot.waitFor(pause)
                             val bounds = Rect()
                             robot.waitUntil {
                                 robot.find("3D scene")?.getBoundsInScreen(bounds)
@@ -233,13 +281,14 @@ class ThreeSceneWorkflowTest {
                             robot.waitUntil {
                                 val frame = checkNotNull(robot.automation.takeScreenshot())
                                 try {
-                                    val bg = frame.getPixel(bounds.left + 5, bounds.top + 5)
-                                    (1..7).any { column ->
-                                        (1..7).any { row ->
-                                            frame.getPixel(bounds.left + bounds.width() * column / 8,
-                                                bounds.top + bounds.height() * row / 8) != bg
-                                        }
-                                    }
+                                    fun pixel(x: Float, y: Float) = frame.getPixel(
+                                        bounds.left + (bounds.width() * x).toInt(),
+                                        bounds.top + (bounds.height() * y).toInt())
+                                    // Sample the pale tile face and the green background inside the viewport.
+                                    val background = pixel(.15f, .42f)
+                                    val tile = pixel(.25f, .42f)
+                                    Color.red(tile) - Color.red(background) > 128 &&
+                                        Color.green(tile) - Color.green(background) > 128
                                 } finally { frame.recycle() }
                             }
                             val down = SystemClock.uptimeMillis()
@@ -457,6 +506,44 @@ class ThreeSceneWorkflowTest {
                 }
             }
         } finally { context.deleteDatabase(database) }
+    }
+
+    @Test fun sceneChoiceMustRemainVisibleAfterSelection() = runBlocking {
+        val scenario = GenerationBehavior.parse(JSONObject("""{"status":"checkable","scenario":{
+            "slots":{"choose":{"kind":"action"},"choice":{"kind":"value"}},
+            "steps":[{"op":"capture","slot":"choice","as":"before"},
+                     {"op":"action","slot":"choose","value":"close"},
+                     {"op":"assert","slot":"choice","test":"changed","capture":"before"},
+                     {"op":"assert","slot":"choice","test":"equals","value":"close"}]}}"""),
+            emptySet(), threeScene = true) as GenerationBehavior.Scenario
+        val bindings = GenerationBehavior.bindings(JSONObject("""{"choose":"camera","choice":[0]}"""), scenario.slots)
+        val source = fixtureSource("earth").replace("if (event.type === 'viewport')", """
+            if (event.type === 'action' && event.actionId === 'camera') {
+                state.camera = event.value;
+                if (state.hideAfterSelection) state.showCamera = false;
+            }
+            if (event.type === 'viewport')
+        """.trimIndent())
+        val definition = JSONObject(Provider("earth", source, false) {}.candidate()).apply {
+            remove("behaviorBindings")
+            getJSONObject("stateSchema").put("camera", "string").put("showCamera", "boolean").put("hideAfterSelection", "boolean")
+            getJSONObject("initialState").put("camera", "orbit").put("showCamera", true)
+            put("ui", JSONObject("""{"type":"transition","preset":"fade","bind":"showCamera","children":[
+                {"type":"segmented","text":"Camera","bind":"camera","action":"camera",
+                "options":[{"text":"Orbit","value":"orbit"},{"text":"Close-up","value":"close"}]}]}"""))
+        }
+        ActivityScenario.launch(MainActivity::class.java).use {
+            suspend fun check(hideAfterSelection: Boolean) {
+                definition.getJSONObject("initialState").put("hideAfterSelection", hideAfterSelection)
+                val spec = ToolSpec.parse(definition.toString())
+                approvePreview { checkThreeScene(spec, "visible-scene-choice", 1, spec.initialState, scenario, bindings, {}, null) }
+            }
+            check(hideAfterSelection = false)
+            val failure = runCatching { check(hideAfterSelection = true) }.exceptionOrNull()
+            assertTrue("A choice hidden after selection must fail at the observation, observed $failure", failure is ThreeSceneFailure)
+            assertEquals(ThreeSceneProblem.INVALID_BINDING, (failure as ThreeSceneFailure).problem)
+            assertEquals(3, failure.step)
+        }
     }
 
     @Test fun periodicReturnAndPauseKeepTheirSeparateExpectations() = runBlocking {
@@ -1206,6 +1293,12 @@ class ThreeSceneWorkflowTest {
                 data.put("initialState", JSONObject("""{"placed":false,"status":"Перетащи М"}"""))
                 data.put("ui", JSONObject("""{"type":"column","children":[{"type":"text","text":"Задание","bind":"status"}]}"""))
                 data.getJSONObject("behaviorBindings").put("message", JSONArray().put(0)).put("saved", "placed")
+            } else if (name == "earth") {
+                data.put("stateSchema", JSONObject("""{"phase":"number","paused":"boolean","camera":"string"}"""))
+                data.put("initialState", JSONObject("""{"phase":0,"paused":false,"camera":"orbit"}"""))
+                data.put("ui", JSONObject("""{"type":"column","children":[
+                    {"type":"tabs","text":"Camera","bind":"camera","action":"camera",
+                     "options":[{"text":"Orbit view","value":"orbit"},{"text":"Earth close-up","value":"close"}]}]}"""))
             } else {
                 data.put("stateSchema", JSONObject("""{"phase":"number","paused":"boolean"}"""))
                 data.put("initialState", JSONObject("""{"phase":0,"paused":false}"""))

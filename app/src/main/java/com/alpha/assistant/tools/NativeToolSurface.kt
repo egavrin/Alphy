@@ -7,16 +7,19 @@ import android.os.SystemClock
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -31,6 +34,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -62,7 +66,8 @@ internal val LocalToolCanvas = compositionLocalOf<(@Composable (List<String>, St
 private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
 
 @OptIn(ExperimentalLayoutApi::class)
-@Composable internal fun NativeToolSurface(tool: ToolRecord,spec: ToolSpec,enabled: Boolean,maxCanvasHeight: Dp,host: ArtifactUiHost,immersive: Boolean=false,covered: Boolean=false,onCoverReady: (Boolean)->Unit = {},topControls: @Composable () -> Unit = {},content: @Composable () -> Unit = {},onSnapshot: (ArtifactSnapshot) -> Unit = {}) {
+@Composable internal fun NativeToolSurface(tool: ToolRecord,spec: ToolSpec,enabled: Boolean,maxCanvasHeight: Dp,host: ArtifactUiHost,immersive: Boolean=false,covered: Boolean=false,roundInlineViewport: Boolean=false,onCoverReady: (Boolean)->Unit = {},topControls: @Composable () -> Unit = {},stageAvailableHeight: Dp? = null,
+    content: @Composable () -> Unit = {},onSnapshot: (ArtifactSnapshot) -> Unit = {}) {
     val context=LocalContext.current
     val view=LocalView.current
     val lifecycle=LocalLifecycleOwner.current.lifecycle
@@ -252,15 +257,16 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
                 var measuredSize by remember { mutableStateOf(IntSize.Zero) }
                 val ratio=stageWidth.toFloat()/stageHeight
                 val canvasModifier=if(viewportSurface!=null) {
-                    val measured=if(immersive)Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(maxCanvasHeight)
+                    val measured=if(immersive)Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(if (stageAvailableHeight != null) maxHeight else maxCanvasHeight)
                     measured
-                } else Modifier.width(minOf(maxWidth,(if(immersive)maxHeight else minOf(maxCanvasHeight,maxHeight))*ratio)).aspectRatio(ratio)
+                } else Modifier.width(minOf(maxWidth,(if(immersive)maxHeight else minOf(stageAvailableHeight ?: maxCanvasHeight,maxHeight))*ratio)).aspectRatio(ratio)
                 Canvas(canvasModifier.onSizeChanged {
                     measuredSize = it
                     if (viewportSurface != null && it.width > 0 && it.height > 0) {
                         requestedViewport = surfaceViewport(viewportSurface,it.width,it.height,density)
                     }
-                }.background(canvasBackground)
+                }.then(if (roundInlineViewport) Modifier.clip(RoundedCornerShape(InlineToolViewportCornerRadius)) else Modifier)
+                    .background(canvasBackground)
                     .semantics {contentDescription="$description. $labels"}
                     .pointerInput(ids,measuredSize,interactive,enabled,snapshot?.playback in setOf("ready","playing"),error==null,attempt,acceptedViewport,requestedViewport,covered) {
                         if(!interactive || !enabled || covered || snapshot?.playback !in setOf("ready","playing") || error!=null || viewportSurface!=null && acceptedViewport!=requestedViewport)return@pointerInput
@@ -301,20 +307,9 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
         }
     }
     val playbackControls: @Composable () -> Unit = {
-        val event = ArtifactPlayback.primaryControl(snapshot?.playback)
-        if (event != null) TextButton(onClick = {
+        ToolPlaybackControls(ArtifactPlayback.primaryControl(snapshot?.playback), enabled && !covered,
+            restartEnabled = snapshot != null) { event ->
             for (id in spec.surfaces.keys) enqueue(GraphicsContract.event(event, surfaceId = id))
-        }, enabled = enabled && !covered, modifier = Modifier.heightIn(min = 48.dp)) {
-            Text(stringResource(when (event) {
-                "start" -> R.string.tool_game_start
-                "resume" -> R.string.tool_game_resume
-                else -> R.string.tool_game_pause
-            }))
-        }
-        TextButton(onClick = {
-            for (id in spec.surfaces.keys) enqueue(GraphicsContract.event("restart", surfaceId = id))
-        }, enabled = enabled && !covered && snapshot != null, modifier = Modifier.heightIn(min = 48.dp)) {
-            Text(stringResource(R.string.tool_game_restart))
         }
     }
     val recovery: @Composable (Int) -> Unit = { failure ->
@@ -343,31 +338,112 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
                 topControls()
                 val failure = error
                 if (failure != null) recovery(failure)
-                else if (movementSurfaces.isNotEmpty() || spec.hostControls.playback) FlowRow(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(4.dp)) {
-                    for(surface in movementSurfaces)movementControls(Modifier.widthIn(min=48.dp),surface)
+                else {
+                    if (movementSurfaces.isNotEmpty()) FlowRow(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(4.dp)) {
+                        for(surface in movementSurfaces)movementControls(Modifier.widthIn(min=48.dp),surface)
+                    }
                     if (spec.hostControls.playback) playbackControls()
                 }
             }
         }
-    } else Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+    } else {
         val inline = canvasSurfaceIds(spec.ui).isNotEmpty()
-        if (!inline) stage(spec.surfaces.keys.toList(), spec.title, Modifier, true)
-        val failure = error
-        if (failure != null) recovery(failure)
-        else {
-            for(surface in movementSurfaces)Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {movementControls(Modifier.weight(1f),surface)}
-            if (spec.hostControls.playback) {
-                val (icon, label) = when(snapshot?.playback) {
-                    "ready" -> Glyph.Check to R.string.tool_game_ready
-                    "playing" -> Glyph.Arrow to R.string.tool_game_playing
-                    "paused" -> Glyph.Stop to R.string.tool_game_paused
-                    "ended" -> Glyph.Stop to R.string.tool_game_ended
-                    else -> Glyph.History to R.string.tool_game_starting
+        val playback: @Composable () -> Unit = {
+            val failure = error
+            if (failure != null) recovery(failure)
+            else {
+                for(surface in movementSurfaces)Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {movementControls(Modifier.weight(1f),surface)}
+                if (spec.hostControls.playback) {
+                    val (icon, label) = when(snapshot?.playback) {
+                        "ready" -> Glyph.Check to R.string.tool_game_ready
+                        "playing" -> Glyph.Arrow to R.string.tool_game_playing
+                        "paused" -> Glyph.Stop to R.string.tool_game_paused
+                        "ended" -> Glyph.Stop to R.string.tool_game_ended
+                        else -> Glyph.History to R.string.tool_game_starting
+                    }
+                    StatusLine(icon, LocalContentColor.current, stringResource(label))
+                    playbackControls()
                 }
-                StatusLine(icon, LocalContentColor.current, stringResource(label))
-                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {playbackControls()}
             }
         }
-        CompositionLocalProvider(LocalToolCanvas provides stage, content = content)
+        val appControls: @Composable () -> Unit = {
+            CompositionLocalProvider(LocalToolCanvas provides stage, content = content)
+        }
+        if (!inline && stageAvailableHeight != null) {
+            ToolStageLayout(stageAvailableHeight,
+                stage = { stage(spec.surfaces.keys.toList(), spec.title, Modifier, true) },
+                controls = {
+                    Box(Modifier.widthIn(max = 640.dp).fillMaxWidth()) { appControls() }
+                    playback()
+                })
+        } else Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!inline) stage(spec.surfaces.keys.toList(), spec.title, Modifier, true)
+            playback()
+            appControls()
+        }
+    }
+}
+
+@Composable
+internal fun ToolPlaybackControls(
+    primary: String?,
+    enabled: Boolean = true,
+    restartEnabled: Boolean = true,
+    onControl: (String) -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val target = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        HorizontalDivider()
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (primary != null) {
+                val label = when (primary) {
+                    "start" -> R.string.tool_game_start
+                    "resume" -> R.string.tool_game_resume
+                    else -> R.string.tool_game_pause
+                }
+                Button(onClick = { onControl(primary) }, modifier = target, enabled = enabled,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.surfaceContainerHighest, contentColor = colors.onSurface)) {
+                    AlphaIcon(if (primary == "pause") Glyph.Pause else Glyph.Play, color = LocalContentColor.current)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(label))
+                }
+            }
+            TextButton(onClick = { onControl("restart") }, modifier = target, enabled = enabled && restartEnabled,
+                colors = ButtonDefaults.textButtonColors(contentColor = colors.onSurfaceVariant)) {
+                AlphaIcon(Glyph.Refresh, color = LocalContentColor.current)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.tool_game_restart))
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ToolStageLayout(
+    availableHeight: Dp?,
+    stage: @Composable () -> Unit,
+    controls: @Composable () -> Unit,
+) {
+    Layout(
+        modifier = Modifier.fillMaxWidth(),
+        content = {
+            Box { stage() }
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) { controls() }
+        },
+    ) { children, constraints ->
+        val loose = constraints.copy(minHeight = 0)
+        val controlsPlaceable = children[1].measure(loose)
+        val gap = 8.dp.roundToPx()
+        val stageHeight = availableHeight?.let {
+            (it.roundToPx() - controlsPlaceable.height - gap)
+                .coerceAtLeast(160.dp.roundToPx()).coerceAtMost(loose.maxHeight)
+        } ?: loose.maxHeight
+        val stagePlaceable = children[0].measure(loose.copy(maxHeight = stageHeight))
+        layout(constraints.maxWidth, constraints.constrainHeight(stagePlaceable.height + gap + controlsPlaceable.height)) {
+            stagePlaceable.placeRelative(0, 0)
+            controlsPlaceable.placeRelative(0, stagePlaceable.height + gap)
+        }
     }
 }

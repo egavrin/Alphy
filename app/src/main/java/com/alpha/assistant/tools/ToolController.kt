@@ -488,34 +488,50 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     }
     internal class ManualChatSave(val canCommit: () -> Boolean, val finish: suspend (ToolRecord?) -> Unit)
 
-    internal fun accept(id: String, prepareChat: suspend (ToolDraft) -> ManualChatSave? = { null }) { run {
-        previews.clear(id)
-        val draft = checkNotNull(store.draft(id))
-        val result = withContext(Dispatchers.Main.immediate) {
-            val chat = prepareChat(draft) ?: return@withContext null
-            val accepted = try {
-                engine.accept(id,retainReceipt = true,canCommit = chat.canCommit)
-            } catch (cancel: CancellationException) {
-                if (!closing) withContext(NonCancellable) { chat.finish(null) }
-                throw cancel
-            } catch (failure: Exception) {
-                chat.finish(null)
-                throw failure
+    internal fun accept(id: String, prepareChat: suspend (ToolDraft) -> ManualChatSave? = { null }) {
+        val selection = selectedId to selectedDraftId
+        run {
+            previews.clear(id)
+            val draft = checkNotNull(store.draft(id))
+            val result = withContext(Dispatchers.Main.immediate) {
+                val chat = prepareChat(draft) ?: return@withContext null
+                val accepted = try {
+                    engine.accept(id,retainReceipt = true,canCommit = chat.canCommit)
+                } catch (cancel: CancellationException) {
+                    if (!closing) withContext(NonCancellable) { chat.finish(null) }
+                    throw cancel
+                } catch (failure: Exception) {
+                    chat.finish(null)
+                    throw failure
+                }
+                chat.finish(accepted)
+                accepted
+            } ?: engine.accept(id)
+            withContext(Dispatchers.Main) {
+                if ((selectedId to selectedDraftId) == selection) {
+                    selectedId = result.id
+                    selectedDraftId = null
+                }
             }
-            chat.finish(accepted)
-            accepted
-        } ?: engine.accept(id)
-        withContext(Dispatchers.Main) {selectedId=result.id;selectedDraftId=null}
-        if(result.revision>1 && store.primaryLibrary) AutomationRuntime.refresh(app)
-        refresh()
-    } }
-    fun reject(id: String) { run {
-        previews.clear(id)
-        val owner=drafts.find {it.id==id}?.toolId
-        engine.reject(id)
-        withContext(Dispatchers.Main) {selectedDraftId=null;selectedId=owner}
-        refresh()
-    } }
+            if(result.revision>1 && store.primaryLibrary) AutomationRuntime.refresh(app)
+            refresh()
+        }
+    }
+    fun reject(id: String) {
+        val selection = selectedId to selectedDraftId
+        run {
+            previews.clear(id)
+            val owner = drafts.find { it.id == id }?.toolId
+            engine.reject(id)
+            withContext(Dispatchers.Main) {
+                if ((selectedId to selectedDraftId) == selection) {
+                    selectedDraftId = null
+                    selectedId = owner
+                }
+            }
+            refresh()
+        }
+    }
     /** Metadata-only recheck for visible cached images, including expiry, removal, and Android URI access. */
     suspend fun nativeImageAvailable(owner: String, handle: String): Boolean = withContext(Dispatchers.IO) {
         try {CapabilityResources(app,store).resolve(owner,handle).mimeType.startsWith("image/")}
@@ -569,6 +585,14 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     private var waitingDiscreteInput: Job?=null
     private fun inputDeviceActive() = !closing && !app.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked &&
         app.getSystemService(android.os.PowerManager::class.java).isInteractive
+
+    internal val threeSceneLifetime = kotlinx.coroutines.sync.Mutex()
+
+    internal suspend fun loadThreeScene(expected: ToolRecord): ToolRecord = withContext(Dispatchers.IO) {
+        val current = checkNotNull(store.tool(expected.id))
+        check(!current.archived && current.revision == expected.revision) { "This 3D scene revision changed." }
+        current
+    }
 
     internal suspend fun saveThreeScene(expected: ToolRecord, snapshot: ThreeSceneSnapshot): ToolRecord =
         withContext(Dispatchers.IO) {

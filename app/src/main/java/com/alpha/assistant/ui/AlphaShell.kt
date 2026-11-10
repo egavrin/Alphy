@@ -5,9 +5,6 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -59,11 +56,7 @@ import androidx.lifecycle.compose.rememberLifecycleOwner
 import androidx.navigation3.runtime.NavEntryDecorator
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
-import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.NavDisplay
-import androidx.navigation3.ui.defaultPopTransitionSpec
-import androidx.navigation3.ui.defaultPredictivePopTransitionSpec
-import androidx.navigation3.ui.defaultTransitionSpec
 import androidx.navigationevent.NavigationEventDispatcher
 import androidx.navigationevent.NavigationEventHandler
 import androidx.navigationevent.NavigationEventInfo
@@ -86,6 +79,14 @@ import com.alpha.assistant.tools.ToolsPane
 import com.alpha.assistant.tools.miniAppDeviceUnlocked
 import kotlinx.coroutines.launch
 
+private data class MiniAppOrigin(
+    val destination: ShellDestination?,
+    val conversationId: String?,
+    val settingsSection: SettingsSection?,
+    val settingsFromMenu: Boolean,
+    val automationRuleId: String?,
+) : java.io.Serializable
+
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable fun AlphaShell(model: ShellViewModel) {
     val context = LocalContext.current
@@ -100,7 +101,11 @@ import kotlinx.coroutines.launch
     var contextPaneTop by remember { mutableFloatStateOf(0f) }
     var automationRuleId by rememberSaveable { mutableStateOf<String?>(null) }
     val miniAppActions = remember { MiniAppActions() }
-    var libraryOrigin by rememberSaveable { mutableStateOf(false) }
+    var miniAppOrigin by rememberSaveable { mutableStateOf<MiniAppOrigin?>(null) }
+    var refinementToolId by rememberSaveable { mutableStateOf<String?>(null) }
+    val libraryOrigin = miniAppOrigin?.destination == ShellDestination.MiniApps
+    fun captureMiniAppOrigin() = MiniAppOrigin(destination, model.snapshot.selectedId,
+        settingsSection, settingsFromMenu, automationRuleId)
     var libraryArchive by rememberSaveable { mutableStateOf(false) }
     val miniAppRequests = rememberSaveable(destination == ShellDestination.MiniApps) {
         mutableStateOf(emptyMap<String, String>())
@@ -141,11 +146,24 @@ import kotlinx.coroutines.launch
             if (destination == ShellDestination.Courses && model.surfaceDestination != ShellDestination.Courses) {
                 model.cancelCourseRequests()
             }
-            libraryOrigin = false
-            destination = model.surfaceDestination
-            settingsSection = SettingsSection.DeepSeek
-            settingsFromMenu = false
-            automationRuleId = model.surfaceAutomationRuleId
+            val target = model.surfaceDestination
+            val refinement = model.surfaceRefinementToolId
+            if (target == ShellDestination.MiniApps && model.tools.selectedId != null) {
+                if (refinement != null && miniAppOrigin == null) {
+                    destination = null
+                } else {
+                    if (miniAppOrigin == null) miniAppOrigin = captureMiniAppOrigin()
+                    refinementToolId = refinement
+                    destination = target
+                }
+            } else {
+                miniAppOrigin = null
+                refinementToolId = null
+                destination = target
+                settingsSection = SettingsSection.DeepSeek
+                settingsFromMenu = false
+                automationRuleId = model.surfaceAutomationRuleId
+            }
             model.consumeSurface()
             contextSheet = false
             drawerState.snapTo(DrawerValue.Closed)
@@ -169,6 +187,7 @@ import kotlinx.coroutines.launch
     val compact = imeVisible && window.containerSize.height < with(density) { 480.dp.roundToPx() }
     val scope = rememberCoroutineScope()
     fun navigate(target: ShellDestination?) {
+        model.invalidateRefinementHandoff()
         model.dismissCourseSetup()
         if (target != null) model.dismissAutomationSetup()
         model.closeChatCourse()
@@ -176,11 +195,17 @@ import kotlinx.coroutines.launch
         if (destination == ShellDestination.Courses && target != ShellDestination.Courses) model.cancelCourseRequests()
         contextSheet = false
         automationRuleId = null
-        libraryOrigin = false
+        miniAppOrigin = null
+        refinementToolId = null
         destination = target
         settingsSection = null
         settingsFromMenu = true
         focus.clearFocus()
+    }
+    fun openMiniApp() {
+        val origin = miniAppOrigin ?: captureMiniAppOrigin()
+        navigate(ShellDestination.MiniApps)
+        miniAppOrigin = origin
     }
     fun openSettings(section: SettingsSection) {
         navigate(ShellDestination.Settings)
@@ -213,10 +238,32 @@ import kotlinx.coroutines.launch
     val dispatcherOwner = checkNotNull(LocalNavigationEventDispatcherOwner.current)
     val dispatcher = dispatcherOwner.navigationEventDispatcher
     DisposableEffect(dispatcher) { dispatcher.addHandler(handler, NavigationEventDispatcher.PRIORITY_OVERLAY); onDispose { handler.remove() } }
-    val focusedMiniApp = destination == ShellDestination.MiniApps && (model.tools.selectedId != null || model.tools.selectedDraftId != null)
+    fun hasMiniAppDetail() = destination == ShellDestination.MiniApps &&
+        (model.tools.selectedId != null || model.tools.selectedDraftId != null)
+    val focusedMiniApp = hasMiniAppDetail()
+    val editingMiniApp = focusedMiniApp && refinementToolId != null && refinementToolId == model.tools.selectedId
+    fun closeMiniApp() {
+        if (!hasMiniAppDetail()) return
+        model.invalidateRefinementHandoff()
+        val origin = miniAppOrigin
+        model.tools.select(null)
+        miniAppOrigin = null
+        refinementToolId = null
+        if (origin != null) {
+            destination = origin.destination
+            settingsSection = origin.settingsSection
+            settingsFromMenu = origin.settingsFromMenu
+            automationRuleId = origin.automationRuleId
+            val current = model.snapshot
+            if (current.selectedId != origin.conversationId) {
+                model.select(origin.conversationId?.takeIf { id -> current.conversations.any { it.id == id } })
+            }
+        }
+        focus.clearFocus()
+    }
     fun back() {
         when {
-            focusedMiniApp -> model.tools.select(null)
+            focusedMiniApp -> closeMiniApp()
             destination == ShellDestination.Settings && settingsFromMenu && settingsSection != null -> selectSettings(null)
             destination != null -> navigate(null)
             else -> model.select(null)
@@ -225,20 +272,15 @@ import kotlinx.coroutines.launch
     val selectedTool = model.tools.tools.find { it.id == model.tools.selectedId }
     val hasArchive = model.tools.tools.any { it.saved && it.archived }
     val libraryLoaded = !model.tools.busy && !model.tools.storageUnavailable
-    LaunchedEffect(libraryOrigin, selectedTool?.id, selectedTool?.archived, hasArchive, libraryLoaded) {
-        if (libraryOrigin && selectedTool != null) libraryArchive = selectedTool.archived
-        else if (!hasArchive && libraryLoaded) libraryArchive = false
+    LaunchedEffect(hasArchive, libraryLoaded) {
+        if (!hasArchive && libraryLoaded) libraryArchive = false
     }
     val selectedSpec = remember(selectedTool?.spec) { selectedTool?.let { com.alpha.assistant.tools.ToolSpec.availablePersisted(it.spec) } }
     var immersiveExited by rememberSaveable(selectedTool?.id, selectedTool?.revision, destination == ShellDestination.MiniApps) { mutableStateOf(false) }
-    val immersive = focusedMiniApp && model.tools.selectedDraftId == null && selectedTool?.archived == false &&
+    val previewingMiniApp = focusedMiniApp && model.tools.selectedDraftId != null
+    val immersive = focusedMiniApp && !previewingMiniApp && !editingMiniApp && selectedTool?.archived == false &&
         selectedSpec?.presentation == "immersive" && !immersiveExited
     val libraryVisible = destination == ShellDestination.MiniApps && !model.tools.storageUnavailable
-    val libraryRoute = ShellRoute.MiniAppLibrary.takeIf { libraryVisible && (!focusedMiniApp || libraryOrigin) }
-    val chatRoute = snapshot.selected?.let { ShellRoute.Chat(it.id) }
-        ?: ShellRoute.NewChat.takeIf { focusedMiniApp && !libraryOrigin }
-    val detailRoute = destination.takeUnless { libraryVisible && !focusedMiniApp }
-    val backStack = listOfNotNull(ShellRoute.Desktop, chatRoute, libraryRoute, detailRoute)
     val systemInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
     VoiceVisibility(model.voice)
     WeatherLocationAccess(model)
@@ -252,10 +294,27 @@ import kotlinx.coroutines.launch
                 Button(onClick = model::load) { Text(stringResource(R.string.retry)) }
             }
         } else AdaptiveShellLayout(
-            immersive, focusedMiniApp && !immersive, systemInsets,
+            immersive, previewingMiniApp || editingMiniApp, systemInsets,
             splitAutomations = destination == ShellDestination.Automations && !model.tools.storageUnavailable,
             pairSettings = destination == ShellDestination.Settings,
         ) { paneLayout ->
+            val narrowRefinement = editingMiniApp && !paneLayout.paired
+            val chatVisible = destination == null || narrowRefinement
+            val detailVisible = focusedMiniApp && !narrowRefinement
+            val pairedLibrary = paneLayout.paired && libraryOrigin && !editingMiniApp
+            val pairedChat = paneLayout.paired && !pairedLibrary
+            val refinementChat = snapshot.selectedId.takeIf { editingMiniApp }?.let { ShellRoute.Chat(it) }
+            val originChat = (if (focusedMiniApp && miniAppOrigin != null) miniAppOrigin?.conversationId else snapshot.selectedId)
+                ?.let { ShellRoute.Chat(it) }?.takeUnless { it == refinementChat }
+            val backStack = listOfNotNull(
+                ShellRoute.Desktop,
+                originChat,
+                miniAppOrigin?.destination?.takeUnless { it == ShellDestination.MiniApps || !focusedMiniApp },
+                ShellRoute.MiniAppLibrary.takeIf { libraryVisible && (!focusedMiniApp || libraryOrigin) },
+                ShellRoute.NewChat.takeIf { pairedChat && previewingMiniApp && originChat == null && refinementChat == null },
+                refinementChat,
+                destination.takeUnless { narrowRefinement || (libraryVisible && !focusedMiniApp) },
+            )
             val sceneStrategies = shellSceneStrategies(paneLayout)
             ShellModalDrawer({
                 ShellDrawerSheet(drawerState, snapshot.conversations, snapshot.selectedId, destination, snapshot.userName.ifBlank { stringResource(R.string.profile) },
@@ -270,10 +329,10 @@ import kotlinx.coroutines.launch
                     else -> Modifier.windowInsetsPadding(systemInsets).imePadding()
                 }
                 Column(Modifier.fillMaxSize().then(drawingInsets).onGloballyPositioned {
-                    if (destination == null) contextPaneTop = it.boundsInWindow().top
+                    if (chatVisible) contextPaneTop = it.boundsInWindow().top
                 }) {
-                    if (!focusedMiniApp && !compact && !libraryVisible && destination != ShellDestination.Search) {
-                        val title = stringResource(if (destination == ShellDestination.Settings) R.string.app_name else destination?.title ?: R.string.app_name)
+                    if (!detailVisible && !compact && (!libraryVisible || narrowRefinement) && destination != ShellDestination.Search) {
+                        val title = stringResource(if (chatVisible || destination == ShellDestination.Settings) R.string.app_name else destination?.title ?: R.string.app_name)
                         ShellTopBar(title, onMenu = { focus.clearFocus(); scope.launch { drawerState.open() } },
                             onNewChat = if (destination == null && snapshot.selectedId != null) ::newChat else null)
                     }
@@ -291,10 +350,10 @@ import kotlinx.coroutines.launch
                     UpdateNotice(model.updates, visible = !immersive && !compact && destination != ShellDestination.Settings) {
                         openSettings(SettingsSection.Updates)
                     }
-                    if (model.saveFailed && !immersive && !compact && (!paneLayout.paired || libraryOrigin)) SaveFailure()
+                    if (model.saveFailed && !immersive && !compact && !pairedChat) SaveFailure()
                     Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.TopCenter) {
                         // A session continues while the shell shows a composer or VoiceControls.
-                        val voiceShown = destination == null || (paneLayout.paired && !libraryOrigin) ||
+                        val voiceShown = chatVisible || pairedChat ||
                             (destination == ShellDestination.Settings && settingsSection == SettingsSection.Voice)
                         LaunchedEffect(voiceShown) { if (!voiceShown) model.voice.stop() }
                         // Navigation 3 retains each entry by content key when the scene changes.
@@ -303,24 +362,27 @@ import kotlinx.coroutines.launch
                         val currentImmersive by rememberUpdatedState(immersive)
                         val currentCompact by rememberUpdatedState(compact)
                         val currentLibraryOrigin by rememberUpdatedState(libraryOrigin)
+                        val currentPairedLibrary by rememberUpdatedState(pairedLibrary)
+                        val currentPairedChat by rememberUpdatedState(pairedChat)
+                        val currentChatVisible by rememberUpdatedState(chatVisible)
                         val currentLibraryArchive by rememberUpdatedState(libraryArchive && hasArchive)
                         val currentHasArchive by rememberUpdatedState(hasArchive)
                         @Composable fun ChatEntry(conversation: Conversation?) {
                             BoxWithConstraints(Modifier.fillMaxSize().clipToBounds().testTag("chat").then(
                                 if (currentLayout.tabletopGap != null) Modifier.imePadding() else Modifier,
                             )) {
-                                val paired = currentLayout.paired && !currentLibraryOrigin && destination == ShellDestination.MiniApps
+                                val paired = currentPairedChat
                                 val compactComposer = currentCompact || (imeVisible && maxHeight < 250.dp)
                                 Column(Modifier.fillMaxSize().onGloballyPositioned {
                                     if (paired) contextPaneTop = it.boundsInWindow().top
                                 }, horizontalAlignment = Alignment.CenterHorizontally) {
                                     if (paired && model.saveFailed && !compactComposer) SaveFailure()
-                                    ChatPane(model, conversation, { navigate(ShellDestination.MiniApps) },
+                                    ChatPane(model, conversation, ::openMiniApp,
                                         settings = { openSettings(SettingsSection.DeepSeek) }, modifier = Modifier.weight(1f).testTag("chat-content"),
                                         actions = miniAppActions, openAutomation = ::openAutomation,
-                                        pairedToolId = model.tools.selectedId.takeIf { destination == ShellDestination.MiniApps },
-                                        pairedDraftId = model.tools.selectedDraftId.takeIf { destination == ShellDestination.MiniApps },
-                                        showLivePreviews = paired || destination != ShellDestination.MiniApps,
+                                        pairedToolId = model.tools.selectedId.takeIf { paired },
+                                        pairedDraftId = model.tools.selectedDraftId.takeIf { paired },
+                                        showLivePreviews = paired || currentChatVisible,
                                         resumeCourse = if (destination == null) model::resumeChatCourse else null)
                                     if (paired) Composer(model, { contextSheet = true }, Modifier.widthIn(max = 620.dp).testTag("composer"),
                                         compact = compactComposer, onContextAnchorChanged = { contextAnchor = it })
@@ -348,25 +410,8 @@ import kotlinx.coroutines.launch
                         } }
                         // NavDisplay gives each entry fixed constraints. The Box loosens them, so a pane keeps its maximum width and stays centered.
                         val centerEntry = remember { NavEntryDecorator<ShellRoute> { entry -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) { entry.Content() } } }
-                        fun Scene<ShellRoute>.hasMiniAppPane() = entries.last().contentKey in
-                            setOf(ShellDestination.MiniApps.toString(), ShellRoute.MiniAppLibrary.toString())
                         NavDisplay(backStack, Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter, onBack = ::back,
                             sceneStrategies = sceneStrategies,
-                            transitionSpec = {
-                                if (initialState.hasMiniAppPane() || targetState.hasMiniAppPane()) {
-                                    EnterTransition.None togetherWith ExitTransition.None
-                                } else defaultTransitionSpec<ShellRoute>().invoke(this)
-                            },
-                            popTransitionSpec = {
-                                if (initialState.hasMiniAppPane() || targetState.hasMiniAppPane()) {
-                                    EnterTransition.None togetherWith ExitTransition.None
-                                } else defaultPopTransitionSpec<ShellRoute>().invoke(this)
-                            },
-                            predictivePopTransitionSpec = { edge ->
-                                if (initialState.hasMiniAppPane() || targetState.hasMiniAppPane()) {
-                                    EnterTransition.None togetherWith ExitTransition.None
-                                } else defaultPredictivePopTransitionSpec<ShellRoute>().invoke(this, edge)
-                            },
                             entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), keepShellLifecycle, centerEntry), entryProvider = entryProvider {
                             entry<ShellRoute.Desktop>(clazzContentKey = { it.toString() }) {
                                 Box(Modifier.testTag("desktop")) {
@@ -389,11 +434,11 @@ import kotlinx.coroutines.launch
                                             libraryArchive = it
                                             model.tools.select(null)
                                         }
-                                    }, onOpen = { libraryOrigin = true }, onMenu = {
+                                    }, onOpen = ::openMiniApp, onMenu = {
                                         focus.clearFocus()
                                         scope.launch { drawerState.open() }
                                     }, settings = { navigate(ShellDestination.Settings) })
-                                    if (currentLibraryOrigin && currentLayout.wide) {
+                                    if (currentPairedLibrary && currentLayout.wide) {
                                         VerticalDivider(Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
                                             color = MaterialTheme.colorScheme.outlineVariant)
                                     }
@@ -411,9 +456,11 @@ import kotlinx.coroutines.launch
                                             ToolsPane(model.tools, currentSnapshot.selectedId.takeUnless { currentLibraryOrigin }, miniAppActions, miniAppRequests,
                                                 accept = model::acceptToolDraft,
                                                 refine = model::refineTool, immersive = currentImmersive,
-                                                alignDetailStart = currentLibraryOrigin && currentLayout.wide,
+                                                alignDetailStart = currentPairedLibrary && currentLayout.wide,
+                                                standalone = !currentLayout.paired,
                                                 exitImmersive = { immersiveExited = true },
-                                                settings = { openSettings(SettingsSection.DeepSeek) }) { navigate(null) }
+                                                settings = { openSettings(SettingsSection.DeepSeek) },
+                                                close = ::closeMiniApp, goToChat = { navigate(null) })
                                         }
                                     }
                                     ShellDestination.Search -> SearchPane(
@@ -448,7 +495,7 @@ import kotlinx.coroutines.launch
                         Text(stringResource(R.string.semantic_preparing), Modifier.padding(horizontal = 16.dp))
                         LinearProgressIndicator(progress = { bytes.toFloat() / com.alpha.assistant.semantic.MODEL_BYTES }, modifier = Modifier.fillMaxWidth())
                     }
-                    if (destination == null) Composer(model, { contextSheet = true },
+                    if (chatVisible) Composer(model, { contextSheet = true },
                         Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp).fillMaxWidth().testTag("composer"),
                         compact = compact, onContextAnchorChanged = { contextAnchor = it },
                         destination = model.courseSetup?.composer)
@@ -480,7 +527,7 @@ import kotlinx.coroutines.launch
             contextSheet = false
         }
     }
-    if (destination == null) ChatSetupDialogs(model)
+    if (destination == null || editingMiniApp) ChatSetupDialogs(model)
 }
 
 @Composable internal fun ChatSetupDialogs(model: ShellViewModel) {

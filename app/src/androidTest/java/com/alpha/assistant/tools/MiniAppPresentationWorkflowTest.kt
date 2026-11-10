@@ -12,6 +12,8 @@ import android.os.SystemClock
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.inspector.WindowInspector
+import androidx.core.view.allViews
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,8 +23,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.getAllSemanticsNodes
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
@@ -114,7 +122,7 @@ class MiniAppPresentationWorkflowTest {
             node=find(label)
             if(node?.isVisibleToUser == true)return@waitUntil true
             if(node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id) != true) {
-                if(label in setOf("Выйти из полноэкранного режима","Управление мини-приложением","Начать","Пауза","Продолжить","Начать заново","Влево","Вправо")) {
+                if(label in setOf("Выйти из полноэкранного режима","Управление мини-приложением","Начать","Пауза","Продолжить","Сначала","Влево","Вправо")) {
                     var handle=find("Показать управление игрой")
                     if (handle?.isVisibleToUser == true) {
                         while (handle?.isClickable == false) handle = handle.parent
@@ -173,13 +181,14 @@ class MiniAppPresentationWorkflowTest {
     }
     private fun fixture(candidate: Boolean=false, provider: ChatProvider?=null, specJson: String=ItineraryFixture.spec(), secondReference: Boolean=false, candidateJson: String=ItineraryFixture.spec("Revised lake day"),
         repeatInChat: Boolean=false, previousJson: String?=null, showChat: Boolean=true, pendingPrompt: String?=null,
+        initialState: String?=null, revision: Int=1, stateVersion: Int=1,
         block: (ShellViewModel,ToolStore,ActivityScenario<CloudTestActivity>) -> Unit) {
         val app=instrumentation.targetContext
         val name="presentation-${UUID.randomUUID()}"
         val shell=ShellStore(app,"$name.db"); val tools=ToolStore(app,"$name.db-tools.db")
         val keys=SecureKeyStore(app,name,name)
-        val spec=ToolSpec.parse(specJson)
-        val seed=ToolRecord("lake",1,1,spec.json,spec.initialState,spec.ui.toString(),"chat",true)
+        val spec=if (initialState == null) ToolSpec.parse(specJson) else ToolSpec.parsePersisted(specJson)
+        val seed=ToolRecord("lake",revision,stateVersion,spec.json,initialState ?: spec.initialState,spec.ui.toString(),"chat",true)
         val previous=previousJson?.let(ToolSpec::parse)
         val tool=if(previous==null) seed else seed.copy(revision=2,stateVersion=2)
         if(previous!=null) tools.saveTool(seed.copy(spec=previous.json,state=previous.initialState,ui=previous.ui.toString()),true)
@@ -189,7 +198,7 @@ class MiniAppPresentationWorkflowTest {
             tools.saveDraft(ToolDraft("candidate",tool.id,1,1,pendingPrompt ?: "Make the day shorter",
                 next?.json,next?.initialState,next?.ui?.toString(),"chat"))
         }
-        val artifact=Message("artifact","assistant","Your day plan is ready.",1,"complete",toolId=tool.id,toolRevision=1)
+        val artifact=Message("artifact","assistant","Your day plan is ready.",1,"complete",toolId=tool.id,toolRevision=seed.revision)
         val cards=if(repeatInChat) listOf(artifact,artifact.copy(id="duplicate-artifact")) else listOf(artifact)
         shell.saveConversation(Conversation("chat","Plan discussion",1,1,messages=cards))
         if(secondReference) shell.saveConversation(Conversation("other","Second discussion",2,2,
@@ -216,6 +225,342 @@ class MiniAppPresentationWorkflowTest {
             java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null); deleteEntry(name)}
         }
     }
+    @Test fun savedObservatoryUsesOnePaneAndKeepsCameraThroughFullscreenAndRotation() = savedObservatory(4)
+
+    /** Failure cases: clipped labels, moved targets, wrong saved choice, stale paused frames, or a replaced fullscreen scene. */
+    @Test fun savedObservatorySceneChoicesAdaptAndKeepCameraThroughPlayback() = savedObservatory(5)
+
+    private fun savedObservatory(revision: Int) {
+        val sceneChoices = revision == 5
+        val evidence = if (sceneChoices) "observatory-v5" else "observatory"
+        val robot = ShellRobot(evidence)
+        val saved = instrumentation.context.assets.open("threejs/observatory-v$revision.json")
+            .bufferedReader().use { JSONObject(it.readText()) }
+        assertEquals(revision, saved.getInt("revision"))
+        val options = listOf("Earth" to "Земля", "Jupiter" to "Юпитер", "Saturn" to "Сатурн", "System View" to "Общий вид")
+        fun label(value: String): String = if (sceneChoices) options.first { it.first == value }.second
+            else if (value == "System View") value else "Focus $value"
+        val arguments = InstrumentationRegistry.getArguments()
+        val nightMode = robot.shell("cmd uimode night").trim().substringAfterLast(": ")
+        val dark = arguments.getString("observatoryNight") == "true"
+        val fontScale = arguments.getString("observatoryFontScale", "2.0")
+        require(fontScale == "1.0" || fontScale == "2.0")
+        val originalScale = if (sceneChoices) robot.shell("settings get system font_scale") else null
+        try {
+            if (dark) robot.shell("cmd uimode night yes")
+            if (sceneChoices) robot.shell("settings put system font_scale $fontScale")
+            fixture(specJson = saved.getJSONObject("spec").toString(), initialState = saved.getJSONObject("state").toString(),
+                revision = if (sceneChoices) revision else 1,
+                stateVersion = if (sceneChoices) saved.getInt("stateVersion") else 1) { _, store, scenario ->
+                val enter = robot.text(R.string.tool_full_screen_enter)
+                val exit = robot.text(R.string.tool_full_screen_exit)
+                val pause = robot.text(R.string.tool_game_pause)
+                val resume = robot.text(R.string.tool_game_resume)
+                val paused = robot.text(R.string.tool_scene_paused)
+                val restart = robot.text(R.string.tool_game_restart)
+                fun state() = JSONObject(checkNotNull(store.tool("lake")).state).getString("status")
+                fun webView(fullscreen: Boolean = false): android.webkit.WebView? {
+                    fun findWeb(view: android.view.View): android.webkit.WebView? = when (view) {
+                        is android.webkit.WebView -> view.takeIf { it.isAttachedToWindow && it.width > 0 && it.height > 0 }
+                        is android.view.ViewGroup -> (0 until view.childCount).firstNotNullOfOrNull { findWeb(view.getChildAt(it)) }
+                        else -> null
+                    }
+                    var web: android.webkit.WebView? = null
+                    scenario.onActivity { activity ->
+                        web = if (fullscreen) WindowInspector.getGlobalWindowViews()
+                            .filter { it !== activity.window.decorView }
+                            .firstNotNullOfOrNull(::findWeb)
+                        else findWeb(activity.window.decorView)
+                    }
+                    return web
+                }
+                fun stage(): Rect {
+                    val web = checkNotNull(webView())
+                    var bounds = Rect()
+                    scenario.onActivity {
+                        val location = IntArray(2).also(web::getLocationOnScreen)
+                        bounds = Rect(location[0], location[1], location[0] + web.width, location[1] + web.height)
+                    }
+                    return bounds
+                }
+                fun stageForCapture(): Rect {
+                    while (robot.scrollBackward()) {
+                        // Return to the top before sampling the scene after a control scroll.
+                    }
+                    robot.reveal(enter, forward = false)
+                    val bounds = stage()
+                    val pane = robot.composedBounds(scenario, "mini-app").first
+                    assertTrue("The scene is visible for capture", pane.contains(bounds))
+                    return bounds
+                }
+                fun pixels(bounds: Rect): IntArray {
+                    val bitmap = checkNotNull(automation.takeScreenshot())
+                    try {
+                        return IntArray(48 * 48) { index ->
+                            bitmap.getPixel(bounds.left + (index % 48 + 1) * bounds.width() / 49,
+                                bounds.top + (index / 48 + 1) * bounds.height() / 49)
+                        }
+                    } finally { bitmap.recycle() }
+                }
+                fun changed(first: IntArray, next: IntArray): Int = first.indices.count { index ->
+                    val a = first[index]
+                    val b = next[index]
+                    kotlin.math.abs(android.graphics.Color.red(a) - android.graphics.Color.red(b)) +
+                        kotlin.math.abs(android.graphics.Color.green(a) - android.graphics.Color.green(b)) +
+                        kotlin.math.abs(android.graphics.Color.blue(a) - android.graphics.Color.blue(b)) > 45
+                }
+                fun rendered(samples: IntArray): Boolean =
+                    samples.count { it == android.graphics.Color.rgb(2, 5, 26) } > samples.size / 100
+                fun systemFrame(samples: IntArray): Boolean = rendered(samples) &&
+                    listOf(23, 24).all { y -> listOf(23, 24).all { x ->
+                        val pixel = samples[y * 48 + x]
+                        android.graphics.Color.red(pixel) > 240 && android.graphics.Color.green(pixel) > 190 &&
+                            android.graphics.Color.blue(pixel) in 80..180
+                    } }
+                fun radioOption(text: String): AccessibilityNodeInfo? =
+                    generateSequence(robot.find(text)) { it.parent }.firstOrNull { it.isCheckable }
+                fun selected(value: String) {
+                    val text = label(value)
+                    robot.reveal(text, forward = null)
+                    robot.waitUntil { radioOption(text)?.isChecked == true }
+                }
+                fun cameraBounds(value: String): List<Rect> {
+                    robot.reveal("Камера", forward = null)
+                    robot.reveal(label("System View"), forward = null)
+                    val group = checkNotNull(robot.find("Камера"))
+                    scenario.onActivity { activity ->
+                        val nodes = activity.window.decorView.allViews.filterIsInstance<ViewRootForTest>()
+                            .flatMap { it.semanticsOwner.getAllSemanticsNodes(mergingEnabled = false) }
+                            .toList()
+                        for ((_, text) in options) {
+                            val node = nodes.single { it.config.getOrNull(SemanticsProperties.Text)?.singleOrNull()?.text == text }
+                            val layouts = mutableListOf<TextLayoutResult>()
+                            assertTrue(checkNotNull(node.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action)(layouts))
+                            val layout = layouts.single()
+                            // Compose can retain the available paragraph width in a text node that fits its ink.
+                            val allLinesFit = (0 until layout.lineCount).all { line ->
+                                !layout.isLineEllipsized(line) &&
+                                    layout.getLineRight(line) - layout.getLineLeft(line) <= layout.size.width + 1f
+                            }
+                            assertTrue("Full camera label $text: widthOverflow=${layout.didOverflowWidth} " +
+                                "heightOverflow=${layout.didOverflowHeight} size=${layout.size} " +
+                                "paragraph=${layout.multiParagraph.width}x${layout.multiParagraph.height} " +
+                                "lines=${layout.lineCount} constraints=${layout.layoutInput.constraints}",
+                                !layout.didOverflowHeight && allLinesFit &&
+                                    layout.getLineEnd(layout.lineCount - 1, visibleEnd = true) == text.length)
+                        }
+                    }
+                    val viewport = robot.composedBounds(scenario, "mini-app").first
+                    val minTarget = (48 * instrumentation.targetContext.resources.displayMetrics.density).roundToInt()
+                    val bounds = options.map { (name, text) ->
+                        val option = checkNotNull(radioOption(text)) { "Missing accessible radio option $text" }
+                        // Compose can expose the role on a child of the selectable target.
+                        val classes = listOf(option.className) + (0 until option.childCount).map { option.getChild(it)?.className }
+                        assertTrue("Radio role of $text: $classes", classes.any { it.toString() == "android.widget.RadioButton" })
+                        val active = name == value
+                        assertEquals("Selection state of $text", active, option.isChecked)
+                        assertTrue("$text belongs to the Camera group",
+                            generateSequence(option.parent) { it.parent }.any { it == group })
+                        val target = Rect().also(option::getBoundsInScreen)
+                        // Compose omits the accessibility click action for the selected radio option.
+                        assertTrue("Visible and enabled radio option $text", option.isVisibleToUser && option.isEnabled && viewport.contains(target))
+                        assertTrue("48dp radio option $text: $target", target.width() >= minTarget && target.height() >= minTarget)
+                        if (!active) assertEquals("Touch bounds of the radio option $text", target, robot.assertTarget(text))
+                        target
+                    }
+                    val first = bounds.first()
+                    return bounds.map { Rect(it).apply { offset(0, -first.top) } }
+                }
+                click(robot.text(R.string.tool_open))
+                robot.waitUntil { webView() != null }
+                robot.waitGone(robot.text(R.string.composer_label))
+                val inline = checkNotNull(webView())
+                val scene = stage()
+                val pane = robot.composedBounds(scenario, "mini-app").first
+                var density = 0f
+                scenario.onActivity {
+                    density = it.resources.displayMetrics.density
+                    if (sceneChoices) {
+                        assertEquals(fontScale.toFloat(), it.resources.configuration.fontScale, 0f)
+                        assertEquals("Сначала", restart)
+                        if (dark) assertEquals(android.content.res.Configuration.UI_MODE_NIGHT_YES,
+                            it.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                    }
+                }
+                val gutter = (20 * density).roundToInt()
+                assertTrue("The scene uses the pane width with standard gutters",
+                    kotlin.math.abs(pane.width() - gutter * 2 - scene.width()) <= 2)
+                val fullscreenBounds = robot.assertTarget(enter)
+                assertTrue("Fullscreen is inside the top-right of the scene", scene.contains(fullscreenBounds))
+                waitUntil("The first observatory frame did not show the centered Sun") { systemFrame(pixels(scene)) }
+                screenshot("$evidence-open")
+                if (sceneChoices) robot.reveal(pause, forward = null)
+                val camera = robot.bounds(if (sceneChoices) "Камера" else "Camera status: System View")
+                val systemButton = robot.bounds(label("System View"))
+                val pauseBounds = robot.bounds(pause)
+                val restartBounds = robot.bounds(restart)
+                scenario.onActivity {
+                    val configuration = it.resources.configuration
+                    println("OBSERVATORY v=$revision font=${configuration.fontScale} night=${configuration.uiMode and 0x30} orientation=${configuration.orientation} pane=$pane scene=$scene camera=$camera system=$systemButton pause=$pauseBounds restart=$restartBounds fullscreen=$fullscreenBounds")
+                }
+                assertTrue("App controls start below the scene", camera.top >= stage().bottom)
+                assertTrue("Playback follows the camera controls", pauseBounds.top >= systemButton.bottom)
+                val originalCameraBounds = if (sceneChoices) {
+                    assertEquals("System View", state())
+                    val bounds = cameraBounds(state())
+                    val rows = bounds.groupBy { it.top }.values.toList()
+                    if (pane.width() >= 720 * density) assertEquals("Tablet camera row", 4, rows.single().size)
+                    if (pane.width() < 480 * density) assertTrue("Narrow camera rows wrap", rows.size > 1)
+                    assertTrue("Equal camera cells", bounds.maxOf { it.width() } - bounds.minOf { it.width() } <= 1)
+                    assertEquals("First row fills the viewport", scene.left, rows.first().first().left)
+                    assertEquals("First row fills the viewport", scene.right, rows.first().last().right)
+                    for (row in rows) {
+                        assertEquals("Camera column alignment", rows.first().take(row.size).map { it.left }, row.map { it.left })
+                        assertTrue("Camera cells have 8dp gaps", row.zipWithNext().all { (left, right) ->
+                            kotlin.math.abs(right.left - left.right - (8 * density).roundToInt()) <= 1
+                        })
+                    }
+                    robot.reveal(restart, forward = null)
+                    robot.assertTarget(restart)
+                    robot.reveal(pause, forward = null)
+                    robot.assertTarget(pause)
+                    println("OBSERVATORY v=$revision state=${state()} cameraBounds=$bounds playbackVisible=true")
+                    screenshot("$evidence-controls")
+                    bounds
+                } else null
+                if (!sceneChoices && pane.height() >= 480 * density) {
+                    val controls = listOf("Focus Earth", "Focus Jupiter", "Focus Saturn", "System View", pause, restart)
+                    for (control in controls) {
+                        assertTrue("The initial pane contains $control", pane.contains(robot.assertTarget(control)))
+                    }
+                } else if (!sceneChoices) {
+                    if (!pane.contains(restartBounds)) {
+                        assertTrue("A short pane scrolls to the playback controls", robot.scrollForward())
+                    }
+                    robot.reveal(restart)
+                    assertTrue("Restart is fully visible after scrolling", pane.contains(robot.assertTarget(restart)))
+                    screenshot("$evidence-short-controls")
+                }
+
+                click(pause)
+                val pausedScene = stageForCapture()
+                val badge = robot.bounds(paused)
+                assertTrue("Paused status is inside the top-left of the scene",
+                    pausedScene.contains(badge) && badge.centerX() < pausedScene.centerX())
+                assertFalse(shown(paused).isClickable)
+                val system = pixels(pausedScene)
+                val cameras = mutableListOf(system)
+                for (name in listOf("Earth", "Jupiter", "Saturn")) {
+                    click(label(name))
+                    waitUntil { state() == name }
+                    if (sceneChoices) {
+                        selected(name)
+                        assertEquals("Choice does not move the camera targets", originalCameraBounds, cameraBounds(name))
+                        println("OBSERVATORY v=$revision selected=$name state=${state()}")
+                    }
+                    val focusedScene = stageForCapture()
+                    var next = pixels(focusedScene)
+                    waitUntil("The $name camera did not render a distinct frame") {
+                        next = pixels(focusedScene)
+                        rendered(next) && cameras.all { changed(it, next) > 24 }
+                    }
+                    cameras += next
+                    screenshot("$evidence-${name.lowercase()}-paused")
+                }
+                assertArrayEquals(cameras.last(), pixels(stageForCapture()))
+                click(enter)
+                shown(exit)
+                robot.waitUntil { webView() == null && webView(fullscreen = true) === inline }
+                screenshot("$evidence-fullscreen")
+                robot.back()
+                robot.waitGone(exit)
+                robot.waitUntil { webView() === inline }
+                click(enter)
+                robot.waitUntil { webView(fullscreen = true) === inline }
+                click(exit)
+                robot.waitUntil { webView() === inline }
+                assertEquals("Saturn", state())
+                shown(paused)
+
+                var orientation = 0
+                scenario.onActivity {
+                    orientation = it.resources.configuration.orientation
+                    it.requestedOrientation = if (orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT)
+                        android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                }
+                robot.waitUntil {
+                    var rotated = false
+                    scenario.onActivity { rotated = it.resources.configuration.orientation != orientation }
+                    rotated && webView() != null
+                }
+                val rotatedPaused = stageForCapture()
+                shown(paused)
+                assertEquals("Saturn", state())
+                waitUntil("The paused observatory frame did not render after rotation") { rendered(pixels(rotatedPaused)) }
+                screenshot("$evidence-rotated-paused")
+                if (sceneChoices) selected("Saturn")
+                click(resume)
+                val rotated = stageForCapture()
+                val beforeDrag = pixels(rotated)
+                val down = SystemClock.uptimeMillis()
+                for ((action, x, y) in listOf(Triple(android.view.MotionEvent.ACTION_DOWN, 0.30f, 0.50f),
+                    Triple(android.view.MotionEvent.ACTION_MOVE, 0.66f, 0.68f),
+                    Triple(android.view.MotionEvent.ACTION_UP, 0.66f, 0.68f))) {
+                    val event = android.view.MotionEvent.obtain(down, SystemClock.uptimeMillis(), action,
+                        rotated.left + x * rotated.width(), rotated.top + y * rotated.height(), 0)
+                    event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                    try { assertTrue(injectTouch(event)) } finally { event.recycle() }
+                }
+                waitUntil("The camera drag did not reach a visible frame") {
+                    val next = pixels(rotated)
+                    rendered(next) && changed(beforeDrag, next) > 24
+                }
+                click(pause)
+                val afterDrag = pixels(stageForCapture())
+                assertTrue("Touch changed the visible camera", changed(beforeDrag, afterDrag) > 24)
+                assertEquals("Saturn", state())
+                if (sceneChoices) {
+                    robot.reveal(restart, forward = null)
+                    robot.assertTarget(restart)
+                    screenshot("$evidence-rotated-controls")
+                    click(restart)
+                    robot.reveal(pause, forward = null)
+                    shown(pause)
+                    assertEquals("Restart preserves the camera", "Saturn", state())
+                    selected("Saturn")
+                    val restarted = stageForCapture()
+                    waitUntil("Restart did not advance the rendered Saturn view") {
+                        val next = pixels(restarted)
+                        rendered(next) && changed(afterDrag, next) > 24
+                    }
+                    click(pause)
+                }
+                click(label("System View"))
+                waitUntil { state() == "System View" }
+                if (sceneChoices) {
+                    robot.rotate(scenario, landscape = orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
+                    robot.waitUntil { webView() != null }
+                    selected("System View")
+                    assertEquals("System View", state())
+                }
+                val restored = stageForCapture()
+                if (sceneChoices) {
+                    shown(paused)
+                    waitUntil("The restored system view did not show the centered Sun") { systemFrame(pixels(restored)) }
+                }
+                screenshot("$evidence-system-restored")
+                assertTrue(store.effects("lake").isEmpty())
+            }
+        } finally {
+            if (dark && nightMode in setOf("auto", "yes", "no", "custom")) robot.shell("cmd uimode night $nightMode")
+            if (originalScale != null) {
+                if (originalScale == "null") robot.shell("settings delete system font_scale")
+                else robot.shell("settings put system font_scale $originalScale")
+                assertEquals(originalScale, robot.shell("settings get system font_scale"))
+            }
+        }
+    }
+
     /** Failure cases: wide split/chrome in immersive play, wrong touch transform, missing cancel,
      * stale dimensions after rotation, inaccessible controls, lost state on exit, and hidden bars after exit.
      */
@@ -375,7 +720,7 @@ class MiniAppPresentationWorkflowTest {
             waitUntil("Ready-to-playing transition lost pointer ownership") {kotlin.math.abs(state().getDouble("pointerX")-240.0)<3.0}
             touch(android.view.MotionEvent.ACTION_UP,0.75f)
             click("Пауза");shown("Продолжить");mode("paused");still()
-            click("Начать заново");mode("playing");shown("Пауза");advances()
+            click("Сначала");mode("playing");shown("Пауза");advances()
             touch();waitUntil {state().getInt("downs")==2}
             openGameMenu()
             controls();mode("playing");still()
@@ -633,7 +978,7 @@ class MiniAppPresentationWorkflowTest {
                 waitUntil {canvas()?.let {it.getBoundsInScreen(bounds);(bounds.width()>bounds.height())==(orientation==android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)}==true}
                 val window=Rect().also {checkNotNull(diagnostics.freshRoot()).getBoundsInScreen(it)}
                 assertEquals("$file orientation=$orientation full-window canvas",window,bounds)
-                click("Начать заново");shown("Пауза")
+                click("Сначала");shown("Пауза")
                 click("Пауза");shown("Продолжить")
                 click("Влево");waitUntil {state().getDouble("paddle")<0.49}
                 click("Вправо");waitUntil {kotlin.math.abs(state().getDouble("paddle")-0.5)<0.03}
@@ -710,7 +1055,7 @@ class MiniAppPresentationWorkflowTest {
                 waitUntil("CANCEL must release the consumed pointer") {kotlin.math.abs(state().getDouble("paddle")-0.6)<0.03}
                 touch(android.view.MotionEvent.ACTION_UP,0.6f)
                 click("Пауза");shown("Продолжить")
-                click("Начать заново");shown("Пауза")
+                click("Сначала");shown("Пауза")
                 waitUntil {state().getInt("score")==0 && state().getInt("lives")==3}
                 screenshot("$stem-controls-expanded")
                 println("SAVED_GAME_TOUCH file=$file orientation=$orientation density=${instrumentation.targetContext.resources.displayMetrics.density} fontScale=${instrumentation.targetContext.resources.configuration.fontScale} beforePx=$before downPx=$down movePx=$moved fullWindow=PASS down=PASS move=PASS upRelease=PASS cancelRelease=PASS nativeControls=PASS restart=PASS")
@@ -739,10 +1084,14 @@ class MiniAppPresentationWorkflowTest {
             val drawing = checkNotNull(findVisible(diagnostics.freshRoot()) {
                 it.contentDescription?.startsWith("Illustration.") == true
             })
+            val drawingBounds = Rect().also(drawing::getBoundsInScreen)
+            println("NATIVE_INLINE_VIEWPORT viewport=$drawingBounds")
+            screenshot("shared-inline-drawing")
+            shown("Скорость")
             val slider = checkNotNull(findVisible(diagnostics.freshRoot()) { it.className == "android.widget.SeekBar" })
             fun top(node: AccessibilityNodeInfo) = Rect().also(node::getBoundsInScreen).top
-            assertTrue(top(before) < top(drawing))
-            assertTrue(top(drawing) < top(slider))
+            assertTrue(top(before) < drawingBounds.top)
+            assertTrue(top(findVisible(diagnostics.freshRoot()) { it.contentDescription?.startsWith("Illustration.") == true } ?: drawing) < top(slider))
         }
     }
 
@@ -781,7 +1130,7 @@ class MiniAppPresentationWorkflowTest {
             }
             click("Открыть"); shown("Статус: Ваш ход")
             waitUntil { canvases(diagnostics.freshRoot()).size == 1 }
-            for (label in listOf("Влево", "Вправо", "Игра идёт", "Пауза", "Начать заново")) {
+            for (label in listOf("Влево", "Вправо", "Игра идёт", "Пауза", "Сначала")) {
                 assertNull("Unexpected host control: $label", find(label))
             }
             assertEquals(1, canvases(diagnostics.freshRoot()).size)
@@ -827,7 +1176,7 @@ class MiniAppPresentationWorkflowTest {
             waitUntil { find(instrumentation.targetContext.getString(R.string.retry)) == null }
             shown("Крестики-нолики. ")
             assertEquals(original, checkNotNull(store.tool("lake")).state)
-            assertNull(find("Начать заново"))
+            assertNull(find("Сначала"))
         }
     }
 
@@ -871,14 +1220,14 @@ class MiniAppPresentationWorkflowTest {
         scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
         shown("Игра идёт")
         paddle(128)
-        click("Начать заново")
+        click("Сначала")
         paddle(128)
         assertEquals(0,JSONObject(store.tool("lake")!!.state).getInt("score"))
         assertEquals(3,JSONObject(store.tool("lake")!!.state).getInt("lives"))
         screenshot("graphics-resumed")
         automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
         waitUntil {surface()==null}
-        shown(instrumentation.targetContext.getString(R.string.tool_library_content))
+        shown(instrumentation.targetContext.getString(R.string.composer_label))
         assertTrue(store.effects("lake").isEmpty())
         println("GRAPHICS_NATIVE touch=PASS durableState=PASS backgroundRelease=PASS back=PASS stateVersion=${saved.stateVersion}")
     }
@@ -1215,11 +1564,82 @@ class MiniAppPresentationWorkflowTest {
         assertTrue(automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
         robot.waitUntil {model.snapshot.selectedId == null}
     }
+    @Test fun detailTitleAndActionsShareOneRowFromChatAndLibrary() {
+        val robot = ShellRobot("shared-detail-bar")
+        val title = "Lake day with a longer title for a narrow detail pane"
+        val previousFont = robot.shell("settings get system font_scale")
+        val library = robot.text(R.string.mini_apps)
+        val back = robot.text(R.string.tool_library_back)
+        val edit = robot.text(R.string.tool_refine)
+        val options = robot.text(R.string.tool_options)
+        fun assertBar(scenario: ActivityScenario<CloudTestActivity>, origin: String) {
+            val backLabelBounds = robot.bounds(back)
+            val editLabelBounds = robot.bounds(edit)
+            val optionsLabelBounds = robot.bounds(options)
+            val pane = robot.composedBounds(scenario, "mini-app").first
+            scenario.onActivity { activity ->
+                val windowOrigin = IntArray(2).also(activity.window.decorView::getLocationOnScreen)
+                pane.offset(windowOrigin[0], windowOrigin[1])
+            }
+            fun titleInPane(node: AccessibilityNodeInfo?): Rect? {
+                if (node == null) return null
+                if (node.isHeading && node.isVisibleToUser &&
+                    (node.text?.toString() == title || node.contentDescription?.toString() == title)) {
+                    val bounds = Rect().also(node::getBoundsInScreen)
+                    if (pane.contains(bounds.centerX(), bounds.centerY())) return bounds
+                }
+                return (0 until node.childCount).firstNotNullOfOrNull { titleInPane(node.getChild(it)) }
+            }
+            val titleBounds = titleInPane(diagnostics.freshRoot())
+            println("SHARED_DETAIL_BAR origin=$origin pane=$pane title=$titleBounds back=$backLabelBounds edit=$editLabelBounds overflow=$optionsLabelBounds")
+            screenshot("shared-detail-from-$origin-font-200")
+            assertNotNull("The detail pane exposes the full title as a visible heading", titleBounds)
+            val backBounds = robot.assertTarget(back)
+            val editBounds = robot.assertTarget(edit)
+            val optionsBounds = robot.assertTarget(options)
+            assertTrue("The detail title shares the Back row", checkNotNull(titleBounds).contains(titleBounds.centerX(), backBounds.centerY()))
+            assertTrue("The edit action shares the Back row", editBounds.contains(editBounds.centerX(), backBounds.centerY()))
+            assertTrue("The overflow action shares the Back row", optionsBounds.contains(optionsBounds.centerX(), backBounds.centerY()))
+            assertTrue("The detail actions leave room for the title",
+                backBounds.right <= titleBounds.left && titleBounds.right <= editBounds.left && editBounds.right <= optionsBounds.left)
+        }
+        try {
+            robot.shell("settings put system font_scale 2.0")
+            fixture(specJson = ItineraryFixture.spec(title)) { model, _, scenario ->
+                scenario.onActivity { assertEquals(2f, it.resources.configuration.fontScale) }
+                assertNull("The chat card has no detail Back action", find(back))
+                assertNull("The chat card has no detail edit action", find(edit))
+                click(robot.text(R.string.tool_open))
+                assertBar(scenario, "chat")
+                click(options)
+                val details = robot.text(R.string.tool_details_desktop)
+                shown(details)
+                robot.back()
+                robot.waitGone(details)
+                click(back)
+                waitUntil { model.tools.selectedId == null }
+                shown(robot.text(R.string.composer_label))
+                robot.openDrawer(scenario)
+                click(library)
+                robot.awaitDrawerClosed(scenario)
+                click(title)
+                assertBar(scenario, "library")
+            }
+        } finally {
+            if (previousFont == "null") robot.shell("settings delete system font_scale")
+            else robot.shell("settings put system font_scale $previousFont")
+        }
+    }
+
     @Test fun candidateIsExplicitAndDiscardReturnsToSavedApp() = fixture(true) {model,store,_ ->
         instrumentation.runOnMainSync {model.tools.selectDraft("candidate"); model.openSurface("lake")}
         waitUntil {!model.tools.busy}
         instrumentation.runOnMainSync {model.tools.selectDraft("candidate")}
         shown("Предпросмотр · управление станет доступно после сохранения"); shown("Применить изменения"); shown("Удалить предпросмотр")
+        val back = Rect().also(shown(instrumentation.targetContext.getString(R.string.tool_library_back))::getBoundsInScreen)
+        val title = Rect().also(shown("Revised lake day")::getBoundsInScreen)
+        assertTrue("The candidate title shares the Back row", back.centerY() in title.top until title.bottom)
+        assertNull("A candidate cannot be edited before acceptance", find("Изменить"))
         screenshot("candidate-preview")
         assertEquals(1,store.tool("lake")!!.revision)
         click("Удалить предпросмотр")
@@ -1253,10 +1673,14 @@ class MiniAppPresentationWorkflowTest {
             }
         }
         val prompt = "Keep the lake walk"
-        fixture(provider=provider, pendingPrompt=prompt) {model,store,_ ->
+        fixture(provider=provider, pendingPrompt=prompt) {model,store,scenario ->
+            val robot = ShellRobot("pending-preview")
             click("Открыть")
             val original=store.tool("lake")!!
-            click(instrumentation.targetContext.getString(R.string.tool_library_back))
+            click(robot.text(R.string.tool_library_back))
+            robot.openDrawer(scenario)
+            click(robot.text(R.string.mini_apps))
+            robot.awaitDrawerClosed(scenario)
             click(prompt)
             shown(prompt)
             assertNull(find("Опишите изменения"))

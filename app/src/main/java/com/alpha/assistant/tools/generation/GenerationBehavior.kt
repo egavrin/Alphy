@@ -3,6 +3,7 @@ package com.alpha.assistant.tools.generation
 import com.alpha.assistant.cloud.ResponseShape
 import com.alpha.assistant.tools.BehaviorFailureRule
 import com.alpha.assistant.tools.BehaviorValueShape
+import com.alpha.assistant.tools.NativeLayerMath
 import com.alpha.assistant.tools.ToolUiCatalog
 import com.alpha.assistant.tools.ToolValueSchema
 import org.json.JSONArray
@@ -359,7 +360,8 @@ internal sealed interface GenerationBehavior {
     }
 }
 
-private val behaviorScalarNodes = setOf("text", "button", "metric", "badge", "fact", "timelineItem", "progress", "progressRing")
+private val behaviorScalarNodes = setOf("text", "button", "metric", "badge", "fact", "timelineItem", "progress", "progressRing") +
+    (ToolUiCatalog.choiceTypes - "multiChoice")
 private val behaviorCollectionNodes = setOf("list", "table", "groupedList", "lazyList", "lazyGrid")
 
 private val nativeInputObservationNodes = setOf("input", "numberInput", "slider", "toggle")
@@ -368,6 +370,31 @@ internal fun supportsBehaviorObservation(type: String, kind: GenerationBehavior.
     GenerationBehavior.Kind.COLLECTION -> type in behaviorCollectionNodes
     GenerationBehavior.Kind.VALUE -> type in behaviorScalarNodes || native && type in nativeInputObservationNodes
     else -> false
+}
+
+internal fun visibleBehaviorNode(root: JSONObject, state: JSONObject, path: List<Int>,
+    unavailable: (BehaviorFailureRule, String?) -> Nothing): JSONObject {
+    var node = root
+    fun hidden(): Nothing = unavailable(BehaviorFailureRule.TARGET_HIDDEN, node.getString("type"))
+    for (index in path) {
+        if (!ToolUiCatalog.visible(node, state)) hidden()
+        when (node.getString("type")) {
+            "transition" -> if (ToolUiCatalog.value(state, node.getString("bind")) != true) hidden()
+            "pager" -> if ((ToolUiCatalog.value(state, node.getString("bind")) as Number).toInt() != index) hidden()
+            "transform" -> {
+                val pose = NativeLayerMath.target(node, state)
+                if (pose[7] == 0.0 || node.optBoolean("solid") && kotlin.math.cos(pose[0] * Math.PI / 180) *
+                    kotlin.math.cos(pose[1] * Math.PI / 180) < 0) hidden()
+            }
+            "routeStack" -> {
+                val route = ToolUiCatalog.routeStack(node, state).last()
+                if (node.getJSONArray("routes").optString(index) != route) hidden()
+            }
+        }
+        node = node.optJSONArray("children")?.optJSONObject(index) ?: unavailable(BehaviorFailureRule.TARGET_MISSING, null)
+    }
+    if (!ToolUiCatalog.visible(node, state)) hidden()
+    return node
 }
 
 internal fun behaviorUiObservation(node: JSONObject, state: JSONObject, kind: GenerationBehavior.Kind, native: Boolean = false,

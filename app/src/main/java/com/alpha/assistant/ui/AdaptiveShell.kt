@@ -76,8 +76,11 @@ internal data class ShellPaneLayout(
         val safeWidth = if (hinges.isNotEmpty() || immersive) maxWidth else with(density) {
             maxWidth - (systemInsets.getLeft(density, layoutDirection) + systemInsets.getRight(density, layoutDirection)).toDp()
         }
+        val safeHeight = if (hinges.isNotEmpty() || immersive) maxHeight else with(density) {
+            maxHeight - (systemInsets.getTop(density) + systemInsets.getBottom(density)).toDp()
+        }
         val placement = density.shellPaneLayout(
-            safeWidth, viewport, posture, pairApp, splitAutomations, pairSettings, minimumPairWidth,
+            safeWidth, viewport, posture, pairApp && safeHeight >= 260.dp, splitAutomations, pairSettings, minimumPairWidth,
         )
         val padding = placement.singlePanePadding
         Box(Modifier.fillMaxSize().onGloballyPositioned { coordinates ->

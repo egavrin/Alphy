@@ -324,7 +324,7 @@
     <string name="tool_full_screen_enter">На весь экран</string>
     <string name="tool_full_screen_exit">Выйти из полноэкранного режима</string>
     <string name="tool_controls">Управление мини-приложением</string>
-    <string name="tool_library_back">К мини-приложениям</string>
+    <string name="tool_library_back">Назад</string>
     <string name="tool_header">Alphy · Мини-приложение</string>
     <string name="tool_options">Действия мини-приложения</string>
     <string name="tool_access_history">Доступ и история</string>
@@ -395,12 +395,13 @@
     <string name="tool_game_start">Начать</string>
     <string name="tool_game_pause">Пауза</string>
     <string name="tool_game_resume">Продолжить</string>
-    <string name="tool_game_restart">Начать заново</string>
+    <string name="tool_game_restart">Сначала</string>
     <string name="tool_game_left">Влево</string>
     <string name="tool_game_right">Вправо</string>
     <string name="tool_game_ready">Игра готова</string>
     <string name="tool_game_playing">Игра идёт</string>
     <string name="tool_game_paused">Игра на паузе</string>
+    <string name="tool_scene_paused">На паузе</string>
     <string name="tool_game_ended">Игра завершена</string>
     <string name="tool_game_starting">Запуск игры…</string>
     <string name="tool_library_empty">Сохранённых мини-приложений пока нет.</string>
