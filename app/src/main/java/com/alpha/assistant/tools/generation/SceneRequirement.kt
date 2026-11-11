@@ -13,12 +13,12 @@ internal data class SceneRequirement(
         val guidance = """
             Put "scene" at the TOP LEVEL beside "language", never inside a needs entry.
             A needs entry of type "scene" keeps the ordinary id, type, label, description, and optional reads fields.
-            Put placement, brief, checks, and checkEvidence only inside the top-level scene.
+            Put placement, brief, checks, checkEvidence, and outcome only inside the top-level scene.
             The examples use excerpts from example requests. Replace them with excerpts from the original request.
             For a full-window moving playfield use this complete plan shape with the requested language and brief:
-            {"wholeScreen":true,"language":"en","scene":{"placement":"immersive","brief":"A clear playfield with moving objects and visible feedback.","checks":{"status":"checkable","scenario":{"slots":{"surface":{"kind":"surface"},"object":{"kind":"geometry"}},"steps":[{"op":"frames","slot":"surface","count":4,"observe":"object","changes":3}]}},"checkEvidence":[{"step":1,"excerpt":"moving objects","purpose":"motion","scope":"whole"}]}}
+            {"wholeScreen":true,"language":"en","scene":{"placement":"immersive","brief":"A clear playfield with moving objects and visible feedback.","outcome":{"kind":"continuous"},"checks":{"status":"checkable","scenario":{"slots":{"surface":{"kind":"surface"},"object":{"kind":"geometry"}},"steps":[{"op":"frames","slot":"surface","count":4,"observe":"object","changes":3}]}},"checkEvidence":[{"step":1,"excerpt":"moving objects","purpose":"motion","scope":"whole"}]}}
             For an embedded scene use "inline". Example of the top-level scene value for a native numeric control:
-            {"placement":"inline","brief":"Show a clearly labeled shape that grows with the slider.","liveInputs":["slider"],"checks":{"status":"checkable","scenario":{"slots":{"slider":{"kind":"action"},"shape":{"kind":"geometry"}},"steps":[{"op":"capture","slot":"shape","as":"before"},{"op":"action","slot":"slider","value":5},{"op":"assert","slot":"shape","test":"changed","capture":"before"}]}},"checkEvidence":[{"step":3,"excerpt":"grows with the slider","purpose":"outcome","scope":"whole"}]}
+            {"placement":"inline","brief":"Show a clearly labeled shape that grows with the slider.","outcome":{"kind":"continuous"},"liveInputs":["slider"],"checks":{"status":"checkable","scenario":{"slots":{"slider":{"kind":"action"},"shape":{"kind":"geometry"}},"steps":[{"op":"capture","slot":"shape","as":"before"},{"op":"action","slot":"slider","value":5},{"op":"assert","slot":"shape","test":"changed","capture":"before"}]}},"checkEvidence":[{"step":3,"excerpt":"grows with the slider","purpose":"outcome","scope":"whole"}]}
             Use "stage" for the existing standalone drawing above native controls. Every drawing needs a scene check.
             Include in liveInputs only action slots that require continuous input. For a native slider used by those slots set inputMode to "live" in inputs.
             Omit liveInputs when an ordinary Apply action meets the request.

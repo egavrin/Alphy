@@ -22,7 +22,7 @@ class ToolCompositionWorkflowTest {
           "constants":[{"id":"step","value":2},{"id":"first","value":"comí"},{"id":"second","value":"comía"},{"id":"right","value":2}],
           "needs":[
             {"id":"count","type":"counter","label":"Попытки","description":"Счёт с шагом два","uses":{"step":"step"}},
-            {"id":"custom","type":"action","label":"Другой раздел","description":"Раздел с отдельным действием"},
+            {"id":"custom","type":"action","writes":[],"label":"Другой раздел","description":"Раздел с отдельным действием"},
             {"id":"notes","type":"entries","label":"Заметки","description":"Короткие записи"},
             {"id":"choice","type":"choice_exercise","label":"Выберите форму","description":"Задание с проверкой",
              "uses":{"option1":"first","option2":"second","correct":"right"}}

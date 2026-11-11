@@ -26,6 +26,18 @@ class ClockPartsWorkflowTest {
         fun clock() = PartClockSample.from(Instant.EPOCH, ZoneId.of("UTC")).copy(elapsedMillis = elapsed, bootCount = 1)
         val stages = mutableListOf<CloudGenerationStage?>()
         val batches = mutableListOf<String>()
+        val immediate = """{"op":"capture","slot":"elapsed","as":"initial"},{"op":"action","slot":"start"},
+            {"op":"assert","slot":"elapsed","test":"changed","capture":"initial"},
+            {"op":"action","slot":"pause"},{"op":"action","slot":"reset"},
+            {"op":"assert","slot":"elapsed","test":"equals","value":0}"""
+        val verified = """{"op":"action","slot":"start"},{"op":"clock","slot":"elapsed","milliseconds":3000},
+            {"op":"assert","slot":"elapsed","test":"equals","value":3},
+            {"op":"action","slot":"pause"},{"op":"clock","slot":"elapsed","milliseconds":2000},
+            {"op":"assert","slot":"elapsed","test":"equals","value":3},
+            {"op":"action","slot":"start"},{"op":"clock","slot":"elapsed","milliseconds":1000},
+            {"op":"assert","slot":"elapsed","test":"equals","value":4},
+            {"op":"action","slot":"reset"},{"op":"assert","slot":"elapsed","test":"equals","value":0}"""
+        var steps = immediate
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 stages += request.generationStage
@@ -35,8 +47,7 @@ class ClockPartsWorkflowTest {
                         "questions":[]}""").put("behavior", nativeFixtureBehavior(
                             """"start":{"kind":"action","part":"clock","member":"start"},"pause":{"kind":"action","part":"clock","member":"pause"},
                                 "reset":{"kind":"action","part":"clock","member":"reset"},"elapsed":{"kind":"value","part":"clock","member":"value"}""",
-                            """{"op":"action","slot":"start"},{"op":"action","slot":"pause"},{"op":"action","slot":"reset"},
-                                {"op":"assert","slot":"elapsed","test":"equals","value":0}"""
+                            steps
                         )).toString()
                     CloudGenerationStage.SELECTOR -> {
                         val body = JSONObject(request.turns.single().text)
@@ -55,10 +66,17 @@ class ClockPartsWorkflowTest {
         }
         val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context), ::clock))
         try {
+            val rejected = engine.createDraft("A simple stopwatch", null)
+            val failure = runCatching { engine.generate(rejected.id, "fixture", emptyList(), CloudSession()) }.exceptionOrNull()
+            assertEquals("widget_behavior", (failure as? CloudFailure)?.code)
+            assertFalse(stages.contains(CloudGenerationStage.COMPLETE))
+            stages.clear()
+            batches.clear()
+            steps = verified
             val draft = engine.createDraft("A simple stopwatch", null)
             engine.generate(draft.id, "fixture", emptyList(), CloudSession())
-            assertEquals(listOf("sections", "parts"), batches)
-            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR), stages)
+            assertEquals(listOf("parts"), batches)
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR), stages)
             var saved = engine.accept(draft.id)
             val spec = ToolSpec.parsePersisted(saved.spec)
             assertNull(spec.nativePresentation)
@@ -116,11 +134,14 @@ class ClockPartsWorkflowTest {
                         {"id":"down","type":"countdown","label":"Countdown","description":"Ten seconds","uses":{"length":"seconds"}},
                         {"id":"up","type":"stopwatch","label":"Stopwatch","description":"Measure elapsed seconds"}],"questions":[]}""")
                         .put("behavior", nativeFixtureBehavior(
-                            """"resetDown":{"kind":"action","part":"down","member":"reset"},
+                            """"startDown":{"kind":"action","part":"down","member":"start"},
+                                "resetDown":{"kind":"action","part":"down","member":"reset"},
                                 "resetUp":{"kind":"action","part":"up","member":"reset"},
                                 "down":{"kind":"value","part":"down","member":"value"},
                                 "up":{"kind":"value","part":"up","member":"value"}""",
-                            """{"op":"action","slot":"resetDown"},{"op":"assert","slot":"down","test":"equals","value":10},
+                            """{"op":"action","slot":"startDown"},{"op":"clock","slot":"down","milliseconds":10000},
+                                {"op":"assert","slot":"down","test":"equals","value":0},
+                                {"op":"action","slot":"resetDown"},{"op":"assert","slot":"down","test":"equals","value":10},
                                 {"op":"action","slot":"resetUp"},{"op":"assert","slot":"up","test":"equals","value":0}"""
                         )).toString()
                     CloudGenerationStage.SELECTOR -> selectorAnswer(JSONObject(request.turns.single().text))

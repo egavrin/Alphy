@@ -168,7 +168,7 @@ class MixedClockHostWorkflowTest {
              "constants":[{"id":"days","value":3}],
              "needs":[{"id":"due","type":"due_items","label":"Сроки","description":"Track filter replacements.",
                "uses":{"window":"days"},"items":[{"name":"Фильтр","offsetDays":1,"repeatDays":14}]},
-               {"id":"help","type":"action","label":"Help","description":"Custom help"}]}
+               {"id":"help","type":"action","writes":[],"label":"Help","description":"Custom help"}]}
         """.trimIndent())
         val assembly = PartsGeneration.build(plan, null, false, sample) { body ->
             val questions = JSONObject(body).getJSONArray("questions")

@@ -75,7 +75,7 @@ internal object JevSelector {
         val seen = mutableSetOf<String>()
         val answers = mutableMapOf<String, JevAnswer>()
         var presentationFailure: PartsContractFailure? = null
-        root.items("answers", (questions.size - presentationIds.size)..questions.size, "$path.answers").forEachIndexed { index, item ->
+        root.items("answers", (questions.size - presentationIds.size)..(questions.size + presentationIds.size), "$path.answers").forEachIndexed { index, item ->
             val at = "$path.answers[$index]"
             val row = item as? JSONObject ?: throw PartsContractFailure(at, "an answer object")
             val id = row.opt("id") as? String

@@ -277,7 +277,8 @@ internal data class ToolGenerationAttemptDiagnostic(
         }
     companion object {
         private val codes=setOf("none","unknown","auth","cancelled","empty_response","incomplete","provider","quota","rate_limit",
-            "response_length","response_size","stream_invalid","unavailable","tool_invalid","tool_limit","widget_generation","widget_response_size",
+            "response_length","response_size","stream_invalid","stream_timeout","stream_io","source_attribution","decision_language",
+            "unavailable","tool_invalid","tool_limit","widget_generation","widget_response_size",
             "widget_request","widget_plan","widget_selector","widget_questions","widget_incomplete",
             "three_behavior","three_declined","three_deadline","three_unavailable",
             "widget_spec","widget_state","widget_behavior","widget_patch","widget_preview","widget_preview_state","widget_preview_effects",

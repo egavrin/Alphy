@@ -34,7 +34,7 @@ import java.util.UUID
 @RunWith(AndroidJUnit4::class)
 class StaticDraftPreviewWorkflowTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
-    private val scene = """{"id":"scene","type":"scene","label":"Dot","description":"Draw and move a dot"}"""
+    private val scene = """{"id":"scene","type":"scene","writes":[],"label":"Dot","description":"Draw and move a dot"}"""
     private val counter = """{"id":"count","type":"counter","label":"Count","description":"Increase and reset"}"""
 
     private fun plan(mixed: Boolean) = """

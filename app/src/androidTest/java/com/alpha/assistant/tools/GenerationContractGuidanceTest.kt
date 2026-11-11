@@ -4,6 +4,7 @@ import com.alpha.assistant.courses.CourseSlideKind
 import com.alpha.assistant.tools.generation.GenerationPlan
 import com.alpha.assistant.tools.generation.NeedsPlan
 import com.alpha.assistant.tools.generation.PartsContractFailure
+import com.alpha.assistant.tools.generation.SceneRequirement
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -115,6 +116,24 @@ class GenerationContractGuidanceTest {
         assertEquals("component_text", diagnostic.rule)
         assertTrue(diagnostic.correction.contains("Observed count: 0."))
         assertFalse(diagnostic.correction.contains(secret))
+    }
+
+    @Test fun stagedPromptExamplesContainTheirRequiredChecks() {
+        val prompt = NeedsPlan.appPrompt(stagedApp = true)
+        val packing = prompt.substringAfter("Use these fields:\n").substringBefore("\nUse the language")
+        val counter = prompt.substringAfter("Complete example with a reference:\n").substringBefore("\nReference rules:")
+        val whole = prompt.substringAfter("Example for a custom control with a visible result:\n").lineSequence().first()
+        for (example in listOf(packing, counter, whole)) {
+            val plan = NeedsPlan.parseResponse(example, null, emptySet(), "Build an app", requireSceneOutcome = true)
+            assertNotNull(plan.behavior)
+        }
+        val scene = SceneRequirement.guidance.lineSequence().first { it.startsWith("{\"wholeScreen\"") }
+        val scenePlan = NeedsPlan.parseResponse(scene, null, emptySet(), "Show moving objects", requireSceneOutcome = true)
+        assertNotNull(scenePlan.scene)
+        val inline = SceneRequirement.guidance.lineSequence().first { it.startsWith("{\"placement\":\"inline\"") }
+        assertNotNull(SceneRequirement.read(JSONObject(inline), request = "Show a shape that grows with the slider",
+            requireOutcome = true))
+        assertFalse(NeedsPlan.promptFor(CourseSlideKind.EXPLANATION).contains("A whole-screen app plan"))
     }
 
     @Test fun wholeScreenMarkerIsExactAndUnavailableToLessonPlans() {

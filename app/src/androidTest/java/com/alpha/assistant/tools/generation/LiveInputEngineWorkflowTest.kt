@@ -95,7 +95,7 @@ class LiveInputEngineWorkflowTest {
         val plan = NeedsPlan.parse("""
             {"title":"Mixed","description":"","language":"en","inputs":[],"constants":[],"needs":[
               {"id":"count","type":"counter","label":"Count","description":"Increase and reset"},
-              {"id":"custom","type":"action","label":"Editor","description":"Independent live input"}],"questions":[]}
+              {"id":"custom","type":"action","writes":[],"label":"Editor","description":"Independent live input"}],"questions":[]}
         """.trimIndent())
         val assembly = PartsGeneration.build(plan) { body ->
             val id = JSONObject(body).getJSONArray("questions").getJSONObject(0).getString("id")

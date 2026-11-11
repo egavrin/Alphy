@@ -1,5 +1,7 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.cloud.CloudFailure
+
 import com.alpha.assistant.capabilities.MedicineContract
 import com.alpha.assistant.capabilities.NavigationContract
 import com.alpha.assistant.capabilities.OwnedCalendarContract
@@ -23,14 +25,25 @@ import org.json.JSONObject
 /** Only event kinds and structural indices can leave this local workflow. */
 internal class ToolSmokeFailure(val event: String, val path: String, cause: Exception,
     val replay: List<String>? = null) : Exception(null, cause) {
-    val correction get()="Smoke event: $event. Path: $path. Return valid state, UI, drawing, and subscriptions for this event."
+    val correction get() = "Smoke event: $event. Path: $path. Return valid state, UI, drawing, and subscriptions for this event." +
+        when ((cause as? CloudFailure)?.code) {
+            "javascript_script_error" -> " Read the event from input.event. Declare local variables before use."
+            "javascript_invalid_result" -> if (event == "action")
+                " If the action requests effects, check their capability schemas. Effect IDs must match [A-Za-z][A-Za-z0-9_]{0,47}." else ""
+            else -> ""
+        }
 }
 
 internal class BehaviorCheckFailure(val step: Int?, val reason: String,
     val bindingDiagnostic: BehaviorBindingDiagnostic? = null, val precedingEvent: String? = null) : IllegalStateException() {
     val detail get() = if (step == null) reason else "step ${step + 1}: $reason"
     val correction get() = (bindingDiagnostic?.let { "$detail. Binding diagnostic: ${it.report()}" } ?: detail) +
-        precedingEvent?.let { ". Preceding $it" }.orEmpty()
+        precedingEvent?.let { ". Preceding $it" }.orEmpty() +
+        when (bindingDiagnostic?.takeUnless { it.native == true }?.rule) {
+            BehaviorFailureRule.TARGET_MISSING -> ". Resolve the target path from the full composed UI root in this workflow state."
+            BehaviorFailureRule.ACTION_UNAVAILABLE -> ". Bind a visible, enabled control that accepts the exact planned value. An ordinary button takes no value."
+            else -> ""
+        }
 }
 
 /** No store, broker, launcher, permission, grant, scheduler, or native result producer is available here. */
@@ -49,7 +62,8 @@ internal class ToolGenerationSmoke(
     private val observeReplay: ((List<String>) -> Unit)? = null,
 ) {
     private data class Control(val event: JSONObject,val path: String)
-    private inner class Branch(private val execute: suspend (String,String)->SandboxResult,initialUi: String, seedState: String) {
+    private inner class Branch(private val execute: suspend (String,String)->SandboxResult,initialUi: String, seedState: String,
+        private val freezeClock: Boolean) {
         var state=seedState
         var ui=initialUi
         var surfaces=JSONObject()
@@ -61,6 +75,10 @@ internal class ToolGenerationSmoke(
         private var clock = clockSample ?: generation.partClockFor(spec)
         private val replay = observeReplay?.let { mutableListOf<String>() }
         fun displayState(): JSONObject = projectToolState(spec, JSONObject(state), clock)
+        fun advanceClock(milliseconds: Int) {
+            val sample = checkNotNull(clock)
+            clock = sample.copy(elapsedMillis = sample.elapsedMillis + milliseconds)
+        }
         suspend fun event(event: JSONObject,path: String): ToolPreview {
             checkActive()
             replay?.add(event.toString())
@@ -71,7 +89,7 @@ internal class ToolGenerationSmoke(
                     if(type=="frame") require(event.getString("surfaceId") in frames)
                     if(type=="timer") require(event.getString("timerId") in timers)
                 }
-                clock = clockSample ?: generation.partClockFor(spec)
+                if (!freezeClock) clock = clockSample ?: generation.partClockFor(spec)
                 val result=generation.executeEvent(spec,id,revision,state,event,ui,policy,clock) { source,input ->
                     execute(source,input.toString())
                 }
@@ -142,9 +160,10 @@ internal class ToolGenerationSmoke(
             }
         }
     }
-    private suspend fun <T> branch(initialUi: String=spec.ui.toString(), seedState: String=initialState, block: suspend Branch.()->T): T =
-        if(spec.isSealedStandalone) Branch({ _, _ -> error("A sealed standalone app has no executor.") },initialUi,seedState).block()
-        else sandbox.disposable {execute -> Branch(execute,initialUi,seedState).block()}
+    private suspend fun <T> branch(initialUi: String=spec.ui.toString(), seedState: String=initialState,
+        freezeClock: Boolean = false, block: suspend Branch.()->T): T =
+        if(spec.isSealedStandalone) Branch({ _, _ -> error("A sealed standalone app has no executor.") },initialUi,seedState,freezeClock).block()
+        else sandbox.disposable {execute -> Branch(execute,initialUi,seedState,freezeClock).block()}
 
     suspend fun checkBehavior(scenario: GenerationBehavior.Scenario, bindings: Map<String, Binding>, preview: ToolPreview,
         route: ToolGenerationRoute, nativeSlots: Set<String>,
@@ -153,7 +172,7 @@ internal class ToolGenerationSmoke(
         val freshUi = if (initialState == spec.initialState) preview.ui else branch(seedState = spec.initialState) {
             event(JSONObject().put("type", "preview"), "$.ui").ui
         }
-        branch(initialUi = freshUi, seedState = spec.initialState) {
+        branch(initialUi = freshUi, seedState = spec.initialState, freezeClock = true) {
             var stepIndex: Int? = null
             var precedingEvent: String? = null
             var sent = 0
@@ -289,6 +308,12 @@ internal class ToolGenerationSmoke(
                             }
                             recordEvent("surface event", step.slot)
                         }
+                        is Step.Clock -> {
+                            checkActive()
+                            advanceClock(step.milliseconds)
+                            send(JSONObject().put("type", "render"))
+                            recordEvent("clock advance", step.slot)
+                        }
                         is Step.Advance -> {
                             val id = targetId(step.slot)
                             val isFrame = scenario.slots.getValue(step.slot).kind == Kind.SURFACE
@@ -366,24 +391,27 @@ internal class ToolGenerationSmoke(
         }
         fun identity(control: Control) = control.event.getString("type") to control.event.getString("actionId")
         val initialIds=initialControls.map(::identity).toSet()
-        for(control in initialControls) {
-            val revealed=branch(preview.ui) {
-                event(JSONObject().put("type","open"),"$.ui")
-                event(control.event,control.path)
-                // A request has no result in preview. Native work fences autonomous events in production too.
-                if(!fenced) {
-                    event(JSONObject().put("type","render"),control.path)
-                    surfaces();subscriptions()
-                    controls(JSONObject(ui),JSONObject(state)).filter {identity(it) !in initialIds}
-                } else emptyList()
-            }
-            // One bounded reveal step covers a newly opened modal or page without an unbounded action graph.
-            for(next in revealed) branch(preview.ui) {
-                event(JSONObject().put("type","open"),"$.ui")
-                event(control.event,control.path)
-                if(!fenced) {
-                    event(next.event,next.path)
-                    if(!fenced)event(JSONObject().put("type","render"),next.path)
+        fun currentControl(available: List<Control>, sample: Control, index: Int): Control =
+            available.filter { identity(it) == identity(sample) }.getOrNull(index) ?: sample
+        suspend fun Branch.reveal(sample: Control, index: Int): List<Control> {
+            event(JSONObject().put("type","open"),"$.ui")
+            val control = currentControl(controls(JSONObject(ui), JSONObject(state)), sample, index)
+            event(control.event, control.path)
+            // A request has no result in preview. Native work fences autonomous events in production too.
+            if (fenced) return emptyList()
+            event(JSONObject().put("type","render"), control.path)
+            surfaces();subscriptions()
+            return controls(JSONObject(ui), JSONObject(state)).filter { identity(it) !in initialIds }
+        }
+        for (samples in initialControls.groupBy(::identity).values) for ((index, sample) in samples.withIndex()) {
+            val revealed = branch(preview.ui) { reveal(sample, index) }
+            // Rebuild each sample in its own branch so a row key belongs to the state that receives it.
+            for (targets in revealed.groupBy(::identity).values) for ((ordinal, target) in targets.withIndex()) branch(preview.ui) {
+                val current = reveal(sample, index)
+                if (!fenced) {
+                    val next = currentControl(current, target, ordinal)
+                    event(next.event, next.path)
+                    if (!fenced) event(JSONObject().put("type","render"), next.path)
                 }
             }
         }

@@ -196,6 +196,11 @@ class CloudWorkflowTest {
                 "blank" -> output.answer("   ")
                 "truncated" -> { output.headers(); output.event(textChunk("{\"count\":")); output.event(end("length")); output.write("data: [DONE]\n\n".toByteArray()) }
                 "disconnect" -> { output.headers(); output.event(textChunk("{")) }
+                "stream_io" -> {
+                    output.write(("HTTP/1.1 200 Test\r\nContent-Type: text/event-stream\r\n" +
+                        "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n100\r\ndata: {").toByteArray())
+                    output.flush()
+                }
                 "malformed" -> { output.headers(); output.write("data: not-json\n\n".toByteArray()) }
                 "plan" -> {
                     output.headers()
@@ -254,14 +259,139 @@ class CloudWorkflowTest {
             mode = "refine"
             assertEquals(largePatch, request(true, stage = CloudGenerationStage.REFINE, expanded = true))
             assertEquals(131_072, server.requests.last().json.getInt("max_tokens"))
-            listOf("blank" to "empty_response","truncated" to "incomplete","disconnect" to "incomplete","malformed" to "stream_invalid","auth" to "auth").forEach { (response,code) ->
+            listOf("blank" to "empty_response","truncated" to "incomplete","disconnect" to "incomplete",
+                "stream_io" to "stream_io","malformed" to "stream_invalid","auth" to "auth").forEach { (response,code) ->
                 mode = response
                 val failure = runCatching { request(true) }.exceptionOrNull()
                 assertTrue(response,failure is CloudFailure); assertEquals(code,(failure as CloudFailure).code)
             }
-            assertEquals(12, server.requests.size)
+            assertEquals(13, server.requests.size)
             assertEquals(server.requests.size, httpCalls.get())
             assertTrue(server.failures.toString(),server.failures.isEmpty())
+        }
+    }
+
+    @Test fun clarificationForAShortEnglishFragmentRepairsOnlyItsLanguage() = kotlinx.coroutines.runBlocking {
+        var calls = 0
+        Server { request, output ->
+            assertTrue(request.classifying)
+            val messages = request.json.getJSONArray("messages")
+            assertEquals("a timer", messages.getJSONObject(messages.length() - 1).getString("content"))
+            val text = when (++calls) {
+                1 -> "حسب الطلب: مؤقت. كم المدة المطلوبة؟"
+                2 -> {
+                    assertTrue(request.json.toString().contains("decision.clarification_language"))
+                    "Do you want a phone timer or an interactive mini-app?"
+                }
+                else -> error("Unexpected clarification retry")
+            }
+            output.classification(decision(text, kind = "clarify"))
+        }.use { server ->
+            val events = mutableListOf<CloudEvent>()
+            DeepSeekProvider(server.url).respond("alpha-test-only",
+                CloudRequest(listOf(CloudTurn("user", "a timer")), false, ChatToolReply.instructions(), chatDecision = true),
+                CloudSession()) { events += it }
+            val result = ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text)
+            assertEquals("clarify", result.kind)
+            assertEquals("none", result.search)
+            assertEquals("Do you want a phone timer or an interactive mini-app?", result.text)
+            assertEquals(2, calls)
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+        }
+    }
+
+    @Test fun successfulHeadersThenAStalledBodyReportStreamTimeout() = kotlinx.coroutines.runBlocking {
+        val release = CountDownLatch(1)
+        Server { _, output ->
+            output.headers()
+            check(release.await(75, TimeUnit.SECONDS))
+        }.use { server ->
+            try {
+                val failure = runCatching {
+                    DeepSeekProvider(server.url).respond("alpha-test-only",
+                        CloudRequest(listOf(CloudTurn("user", "Return a plan.")), false,
+                            jsonObject = true, generationStage = CloudGenerationStage.PLAN), CloudSession()) {}
+                }.exceptionOrNull()
+                assertEquals("stream_timeout", (failure as? CloudFailure)?.code)
+                assertEquals(1, server.requests.size)
+            } finally {
+                release.countDown()
+            }
+        }
+    }
+
+    @Test fun explicitAppVersionsOfAmbiguousRequestsReachCreateOffline() = kotlinx.coroutines.runBlocking {
+        val cases = listOf(
+            "Build a mini-app to convert litres to US gallons at 0.264 gallons per litre.",
+            "Build a mini-app to calculate a discount, starting at £80 and 25 percent.",
+            "Build a mini-app to split a dinner bill, starting at 2400 rupees and six people.",
+            "Build a mini-app to calculate a daily water target at 35 ml per kg.",
+            "Build a mini-app to calculate a protein goal at 1.6 g per kg.",
+            "Build a mini-app with a pasta countdown starting at 11 minutes.",
+            "Build a mini-app to calculate months to a savings target at £200 per month.",
+            "Build an interactive timer mini-app with start, pause, and reset.",
+            "Build a mini-app with an adjustable countdown for a soft-boiled egg.",
+        )
+        Server { request, output ->
+            assertTrue(request.classifying)
+            val messages = request.json.getJSONArray("messages")
+            assertTrue(messages.getJSONObject(0).getString("content").contains("Choose create for an explicit request to build"))
+            val text = messages.getJSONObject(messages.length() - 1).getString("content")
+            assertTrue(text in cases)
+            output.classification(decision("I can build that.", "create", "none", text))
+        }.use { server ->
+            for (text in cases) {
+                val events = mutableListOf<CloudEvent>()
+                DeepSeekProvider(server.url).respond("alpha-test-only",
+                    cleanChatRequest(text).copy(search = false), CloudSession()) { events += it }
+                val result = ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text)
+                assertEquals("create", result.kind)
+                assertEquals(text, result.brief)
+            }
+            assertEquals(cases.size, server.requests.size)
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+        }
+    }
+
+    @Test fun searchForThreeEntitiesStillRejectsAThirdCall() = kotlinx.coroutines.runBlocking {
+        Server { request, output ->
+            when {
+                request.classifying -> output.classification(decision("I will look that up.", "answer", "required"))
+                request.searching -> output.calls(call(0), call(1), call(2))
+                else -> error("A rejected search plan must not reach the search endpoint.")
+            }
+        }.use { server ->
+            val failure = runCatching {
+                DeepSeekProvider(server.url).respond("alpha-test-only",
+                    cleanChatRequest("Find the current prices of Bitcoin, Ethereum, and Solana.").copy(search = true),
+                    CloudSession()) {}
+            }.exceptionOrNull()
+            assertEquals("tool_limit", (failure as? CloudFailure)?.code)
+            assertEquals(2, server.requests.size)
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+        }
+    }
+
+    @Test fun captureDeadlineKeepsUnfinishedChatUnresolved() {
+        val entered = java.util.concurrent.atomic.AtomicBoolean()
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                entered.set(true)
+                kotlinx.coroutines.awaitCancellation()
+            }
+        }
+        Fixture(provider).use { fixture ->
+            fixture.submit("Build a local timer.")
+            waitUntil { entered.get() }
+            lateinit var checkpoint: JSONObject
+            main { checkpoint = com.alpha.assistant.tools.captureChatState(fixture.model) }
+            assertFalse(checkpoint.getBoolean("terminal"))
+            assertFalse(checkpoint.getBoolean("idle"))
+            assertFalse(checkpoint.isNull("active_conversation"))
+            main { fixture.model.cancelRequest() }
+            fixture.idle()
+            main { assertTrue(com.alpha.assistant.tools.captureChatState(fixture.model).getBoolean("idle")) }
+            assertFalse(checkpoint.getBoolean("terminal"))
         }
     }
 
@@ -1782,12 +1912,17 @@ class CloudWorkflowTest {
         val url = "https://example.com/docs?a=1&b=2"
         val brief = "Show [Add] and the Verified status. Two plus three is 5. Use [Docs](https://example.com/docs?a=1&amp;b=2) [1]."
         val rejected = "Rejected brief [2]."
-        val plan = """{"wholeScreen":true,"language":"en"}"""
+        val plan = """
+            {"wholeScreen":true,"language":"en","behavior":{"status":"checkable","scenario":{
+              "slots":{"add":{"kind":"action"},"count":{"kind":"value"}},
+              "steps":[{"op":"action","slot":"add"},{"op":"assert","slot":"count","test":"equals","value":1}]}}}
+        """.trimIndent()
         val candidate = """
             {"formatVersion":3,"title":"Counter","description":"Local counter","capabilities":[],
             "stateSchema":{"count":"number"},"initialState":{"count":0},
             "ui":{"type":"column","children":[{"type":"metric","text":"Count","bind":"count"},
             {"type":"button","text":"Add","action":"add"}]},
+            "behaviorBindings":{"add":"add","count":[0]},
             "source":"if(input.event.type==='action' && input.event.actionId==='add')input.state.count++;return {state:input.state};"}
         """.trimIndent()
         val classification = AtomicInteger()

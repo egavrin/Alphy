@@ -839,6 +839,12 @@ object ToolUiCatalog {
         }
         return validateActionValue(node,id,currentPayload,currentState)
     }
+    internal fun acceptsNumericInput(node: JSONObject, payload: Any?): Boolean {
+        val value = (payload as? Number)?.toDouble() ?: return false
+        val (minimum, maximum) = bounds(node)
+        return value.isFinite() && value in minimum..maximum
+    }
+
     private fun validateActionValue(node: JSONObject,id: String,payload: Any?,state: JSONObject): JSONObject {
         val type=node.getString("type"); component(type)
         if(node.optString("dismissAction") == id || id in interactionActions(node).values) {
@@ -870,7 +876,7 @@ object ToolUiCatalog {
             "toggle","checkbox","chip" -> payload is Boolean
             "timeInput" -> validTime(payload)
             "dateInput" -> validDate(payload)
-            "numberInput","slider" -> payload is Number && payload.toDouble().isFinite() && payload.toDouble() in bounds(node).first..bounds(node).second
+            "numberInput","slider" -> acceptsNumericInput(node, payload)
             in choiceTypes -> validChoice(node,payload)
             "rangeSlider","dateRangeInput" -> validRange(node,payload)
             "pager" -> validPage(payload,node.getJSONArray("children").length())

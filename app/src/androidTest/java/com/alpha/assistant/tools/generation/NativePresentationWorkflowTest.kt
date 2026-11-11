@@ -34,7 +34,7 @@ class NativePresentationWorkflowTest {
 
     private fun needsWithHole(): String = JSONObject(needs).apply {
         getJSONArray("needs").put(JSONObject().put("id", "custom").put("type", "action")
-            .put("label", "Другой раздел").put("description", "Отдельная область"))
+            .put("writes", JSONArray()).put("label", "Другой раздел").put("description", "Отдельная область"))
     }.toString()
 
     private fun selector(
@@ -116,6 +116,7 @@ class NativePresentationWorkflowTest {
         val presentationErrors = mapOf<String, (JSONArray) -> Unit>(
             "missing style answer" to { it.remove(2) },
             "duplicate style answer" to { it.put(2, it.getJSONObject(3)) },
+            "extra focal answer" to { it.put(it.getJSONObject(4)) },
             "invalid style distribution" to { it.getJSONObject(2).remove("probabilities") },
         )
         for ((name, change) in presentationErrors) {
@@ -132,7 +133,7 @@ class NativePresentationWorkflowTest {
             "non-object row" to { it.put(2, "invalid") },
             "unidentifiable row" to { it.getJSONObject(2).remove("id") },
             "unknown style ID" to { it.getJSONObject(2).put("id", "v_unknown") },
-            "too many rows" to { it.put(it.getJSONObject(2)) },
+            "too many rows" to { rows -> repeat(4) { rows.put(rows.getJSONObject(2)) } },
         )
         for ((name, change) in batchErrors) {
             val result = withAnswers(change)
@@ -147,6 +148,21 @@ class NativePresentationWorkflowTest {
             })
         }.exceptionOrNull()
         assertTrue(canceled is CancellationException)
+    }
+
+    @Test fun capturedTipSelectionKeepsSixFunctionalAnswers(): Unit = runBlocking {
+        // bench:tip:candidate:3, PLAN call 2 and SELECTOR call 7.
+        val plan = """{"title":"Tip calculator","description":"Split a bill with a tip and see the tip, total, and each person's share.","language":"en","inputs":[{"id":"bill","label":"Bill amount","type":"number","value":0},{"id":"tipPercent","label":"Tip percent","type":"number","value":15,"control":"slider","min":0,"max":30,"step":1},{"id":"people","label":"Number of people","type":"number","value":1,"min":1,"step":1}],"constants":[],"needs":[{"id":"tip","type":"figure","label":"Tip amount","description":"Bill amount multiplied by the tip percent divided by 100.","expression":{"op":"multiply","args":[{"ref":"bill"},{"op":"divide","args":[{"ref":"tipPercent"},{"number":100}]}]}},{"id":"total","type":"figure","label":"Total","description":"Bill amount plus the tip.","expression":{"op":"add","args":[{"ref":"bill"},{"ref":"tip"}]}},{"id":"perPerson","type":"figure","label":"Per person","description":"Total divided by the number of people, never fewer than one person.","expression":{"op":"divide","args":[{"ref":"total"},{"op":"max","args":[{"ref":"people"},{"number":1}]}]}}],"questions":[]}"""
+        val duplicateFocal = """{"answers":[{"id":"p_bill","choice":"A","confidence":0.95,"probabilities":{"A":0.95,"B":0.05}},{"id":"p_tipPercent","choice":"A","confidence":0.95,"probabilities":{"A":0.95,"B":0.05}},{"id":"p_people","choice":"A","confidence":0.95,"probabilities":{"A":0.95,"B":0.05}},{"id":"p_tip","choice":"A","confidence":0.95,"probabilities":{"A":0.95,"B":0.05}},{"id":"p_total","choice":"A","confidence":0.95,"probabilities":{"A":0.95,"B":0.05}},{"id":"p_perPerson","choice":"A","confidence":0.95,"probabilities":{"A":0.95,"B":0.05}},{"id":"v_profile","choice":"A","confidence":0.8,"probabilities":{"A":0.8,"B":0.12,"C":0.08}},{"id":"v_preset","choice":"A","confidence":0.55,"probabilities":{"A":0.55,"B":0.1,"C":0.1,"D":0.1,"E":0.1,"F":0.05}},{"id":"v_focal","choice":"E","confidence":0.5,"probabilities":{"A":0.1,"B":0.08,"C":0.05,"D":0.15,"E":0.5,"F":0.12}},{"id":"v_focal","choice":"E","confidence":0.5,"probabilities":{"A":0.1,"B":0.08,"C":0.05,"D":0.15,"E":0.5,"F":0.12}}]}"""
+        val chooseSections = selector()
+        val result = generate(plan) { raw ->
+            if (JSONObject(raw).getString("stage") == "parts") duplicateFocal else chooseSections(raw)
+        }
+        assertEquals(setOf("bill", "tipPercent", "people", "tip", "total", "perPerson"),
+            result.parts.map { it.needId }.toSet())
+        assertTrue(result.holes.isEmpty())
+        assertNull(result.preview.nativePresentation)
+        assertEquals(1, result.selectorFailures.size)
     }
 
     @Test fun persistedRecipeSurvivesRefinementAndRejectsStaleFocalUi(): Unit = runBlocking {

@@ -38,6 +38,24 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.FutureTask
 import java.util.concurrent.atomic.AtomicInteger
 
+private val terminalChatStatuses = setOf("complete", "error", "cancelled", "interrupted")
+
+/** Read on the main thread before any capture cleanup can change the app state. */
+internal fun captureChatState(vm: ShellViewModel): JSONObject {
+    val conversation = vm.snapshot.selected
+    val assistant = conversation?.messages?.lastOrNull()?.takeIf { it.role == "assistant" }
+    val busy = vm.tools.busy
+    val active = vm.activeConversationId
+    return JSONObject().put("at_ns", SystemClock.elapsedRealtimeNanos())
+        .put("conversation", conversation?.id ?: JSONObject.NULL)
+        .put("active_conversation", active ?: JSONObject.NULL)
+        .put("assistant_status", assistant?.status ?: JSONObject.NULL)
+        .put("operation_id", assistant?.toolOperationId ?: JSONObject.NULL)
+        .put("tool_busy", busy)
+        .put("idle", !busy && active == null)
+        .put("terminal", assistant?.status in terminalChatStatuses)
+}
+
 /** Captures real chat checkpoints. A saved artifact or accessibility label does not establish runtime usability. */
 class ComparisonChatCaptureTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -292,7 +310,10 @@ class ComparisonChatCaptureTest {
             }
             failureAt = "send"
             robot.edit(robot.text(R.string.composer_label), request)
-            val draft = onMain { vm.snapshot.draft }
+            val draft = onMain {
+                check(!vm.tools.busy && vm.activeConversationId == null)
+                vm.snapshot.draft
+            }
             check(draft.text == request && draft.attachments.isEmpty())
             report.put("fresh_draft", draft.id)
             val send = checkNotNull(visible(R.string.composer_send))
@@ -302,8 +323,7 @@ class ComparisonChatCaptureTest {
             save("sent")
             failureAt = "chat-terminal"
             var previewObserved = false
-            var sawAssistant = false
-            await(240_000) {
+            val settled = waitFor(240_000) {
                 if (!previewObserved && visible(R.string.tool_preview_provisional) != null) {
                     previewObserved = true
                     report.put("provisional_visible_elapsed_ns", SystemClock.elapsedRealtimeNanos())
@@ -312,9 +332,24 @@ class ComparisonChatCaptureTest {
                 }
                 onMain {
                     val assistant = vm.snapshot.selected?.messages?.lastOrNull()?.takeIf { it.role == "assistant" }
-                    if (assistant != null) sawAssistant = true
-                    sawAssistant && !vm.tools.busy && vm.activeConversationId == null &&
-                        assistant?.status in setOf("complete", "error", "cancelled", "interrupted")
+                    !vm.tools.busy && vm.activeConversationId == null && assistant?.status in terminalChatStatuses
+                }
+            }
+            if (!settled) {
+                val deadline = onMain {
+                    captureChatState(vm).apply {
+                        val at = getLong("at_ns")
+                        val last = generationEvents.lastOrNull { it.atNanos <= at }
+                        put("generation_last", last?.let(::traceEvent) ?: JSONObject.NULL)
+                        put("provider_http_calls", providerHttpCalls.get())
+                    }
+                }
+                report.put("capture_deadline", deadline)
+                if (!deadline.getBoolean("terminal") || !deadline.getBoolean("idle")) {
+                    terminal = "unresolved"
+                    report.put("failure_stage", failureAt)
+                    report.put("deadline_screen", screenshot("deadline"))
+                    return
                 }
             }
             val chat = onMain { checkNotNull(vm.snapshot.selected) }
@@ -324,6 +359,10 @@ class ComparisonChatCaptureTest {
             report.put("fresh_conversation", chat.id).put("assistant_message", assistant.id)
                 .put("assistant_status", assistant.status).put("operation_id", assistant.toolOperationId ?: JSONObject.NULL)
                 .put("provisional_label_observed", previewObserved)
+            acceptedOperations.lastOrNull()?.optString("kind")?.let { report.put("chat_decision", it) }
+            generationEvents.filterIsInstance<ToolGenerationTraceEvent.Attempt>().lastOrNull {
+                it.operationId.toString() == assistant.toolOperationId && it.disposition == ToolGenerationDisposition.FINISH
+            }?.let { report.put("terminal_attempt", traceEvent(it)) }
             val artifact = assistant.toolId
             report.put("chat_outcome", when {
                 assistant.status != "complete" -> "request-failed"
@@ -463,7 +502,7 @@ class ComparisonChatCaptureTest {
                     databases.forEach(app::deleteDatabase)
                 }
             } catch (failure: Exception) {
-                terminal = "failed"
+                if (terminal != "unresolved") terminal = "failed"
                 report.put("cleanup_failure_type", failure.javaClass.simpleName)
             } finally {
                 CloudTestActivity.factory = null
@@ -488,7 +527,10 @@ class ComparisonChatCaptureTest {
         robot.reveal(refine, null)
         robot.click(refine)
         robot.edit(robot.text(R.string.composer_label), request)
-        val messagesBefore = onMain { checkNotNull(vm.snapshot.selected).messages.size }
+        val messagesBefore = onMain {
+            check(!vm.tools.busy && vm.activeConversationId == null)
+            checkNotNull(vm.snapshot.selected).messages.size
+        }
         robot.click(robot.text(R.string.composer_send))
         await(300_000) {
             onMain {
@@ -720,12 +762,16 @@ class ComparisonChatCaptureTest {
     }
 
     private fun await(timeoutMs: Long, condition: () -> Boolean) {
+        check(waitFor(timeoutMs, condition)) { "The capture checkpoint timed out." }
+    }
+
+    private fun waitFor(timeoutMs: Long, condition: () -> Boolean): Boolean {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         while (SystemClock.uptimeMillis() < deadline) {
-            if (condition()) return
+            if (condition()) return true
             SystemClock.sleep(30)
         }
-        error("The capture checkpoint timed out.")
+        return false
     }
 
     private fun <T> onMain(block: () -> T): T {

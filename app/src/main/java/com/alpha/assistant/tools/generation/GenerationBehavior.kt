@@ -25,6 +25,7 @@ internal sealed interface GenerationBehavior {
         data class Action(val slot: String, val value: Any?) : Step
         data class Surface(val slot: String, val event: String, val phase: String?, val x: Double?, val y: Double?, val direction: String?) : Step
         data class Advance(val slot: String, val count: Int, val observe: String?, val changes: Int, val frameMs: Int? = null) : Step
+        data class Clock(val slot: String, val milliseconds: Int) : Step
         data class Complete(val slot: String, val observe: String, val value: Any, val maxFrames: Int) : Step
         data class Capture(val slot: String, val name: String) : Step
         data class Assert(val slot: String, val test: String, val value: Any?, val capture: String?) : Step
@@ -45,6 +46,7 @@ internal sealed interface GenerationBehavior {
         const val MAX_EVENTS = 64
         private const val MAX_FRAMES = 1_200
         private const val MAX_STEPS = 64
+        private const val MAX_CLOCK_MS = 86_400_000
         const val FRAME_MS = 50
         const val MAX_SLOT_ID_LENGTH = 24
         const val BUTTON_BINDING_GUIDANCE = "The host can supply an omitted action binding when the slot ID exactly matches " +
@@ -66,6 +68,7 @@ internal sealed interface GenerationBehavior {
             Specify kind for each slot. Use only the controls and outputs that the runtime supports.
             Use every slot. Use at most 64 steps. Start from the saved definition's initial state.
             An action is {"op":"action","slot":"actionSlot"}. Add a scalar value for an input and omit value for a button.
+            Use a keyed row payload only for a declared native member that accepts it. For writer actions use the supported scalar value or a plain press.
             To compare an observable result with its earlier value, use {"op":"capture","slot":"result","as":"before"}.
             Then use {"op":"assert","slot":"result","test":"changed|unchanged|equals","capture":"before"}.
             To test an explicit expected result, use equals with a typed scalar value instead of capture.
@@ -85,6 +88,10 @@ internal sealed interface GenerationBehavior {
             {"op":"surface","slot":"surface","event":"control","direction":"left|right"}.
             Use {"op":"frames","slot":"surface","count":4,"observe":"geometry","changes":3} for motion or
             {"op":"timers","slot":"timer","count":1} for a timer. End with a check of the requested result.
+            For a native clock need with ID "timer", declare "elapsed":{"kind":"value","part":"timer","member":"value"} in slots.
+            After Start, use {"op":"clock","slot":"elapsed","milliseconds":1000} with that same declared value slot ID.
+            Native elapsed time only advances on clock steps. Use timers and timer slots only for custom timer subscriptions.
+            Use action input values within the control's declared bounds. An out-of-range value cannot drive a workflow step.
             Use {"status":"unchecked","reason":"external_outcome"} only for a real external outcome.
             Use {"status":"unchecked","reason":"unsupported_observation"} only if these checks cannot express the result.
         """.trimIndent() + "\n" + scenarioLimits
@@ -171,6 +178,7 @@ internal sealed interface GenerationBehavior {
             // Reserve open and up to four startup events for the host.
             var events = 5
             var framesTotal = 0
+            var clockTotal = 0L
             fun use(row: JSONObject, field: String, kinds: Set<Kind>, at: String): String {
                 val id = identifier(row.opt(field), at)
                 requireParts(slots[id]?.kind in kinds, at, "a compatible declared slot")
@@ -220,6 +228,17 @@ internal sealed interface GenerationBehavior {
                         val changes = if (withObservation) integer(row.opt("changes"), 2..count, at) else 0
                         if (frames) framesTotal += count else events += count
                         Step.Advance(slot(if (frames) Kind.SURFACE else Kind.TIMER), count, observe, changes)
+                    }
+                    "clock" -> {
+                        row.requireKeys(at, setOf("op", "slot", "milliseconds"))
+                        val id = slot(Kind.VALUE)
+                        val target = slots.getValue(id)
+                        requireParts(!threeScene && target.part != null && target.member == "value", at, "a native clock value slot")
+                        val milliseconds = integer(row.opt("milliseconds"), 1..MAX_CLOCK_MS, at)
+                        clockTotal += milliseconds
+                        requireParts(clockTotal <= MAX_CLOCK_MS, at, "at most 24 hours of clock advancement")
+                        events++
+                        Step.Clock(id, milliseconds)
                     }
                     "complete" -> {
                         row.requireKeys(at, setOf("op", "slot", "observe", "value", "maxFrames"))

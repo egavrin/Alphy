@@ -46,7 +46,7 @@ class MixedRetainedArtifactWorkflowTest {
         val plan=NeedsPlan.parse("""
             {"title":"Counter and scene","description":"","language":"en","inputs":[],"constants":[],"needs":[
               {"id":"count","type":"counter","label":"Count","description":"Increase and reset"},
-              {"id":"board","type":"scene","label":"Board","description":"Move a dot"}
+              {"id":"board","type":"scene","writes":[],"label":"Board","description":"Move a dot"}
             ],"questions":[]}
         """.trimIndent())
         val assembly=PartsGeneration.build(plan) { raw ->

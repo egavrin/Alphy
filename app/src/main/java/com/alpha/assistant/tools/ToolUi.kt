@@ -153,7 +153,7 @@ internal class MiniAppActions {
         "widget_preview_state" -> R.string.tool_generation_preview_state
         "widget_preview_effects" -> R.string.tool_generation_preview_effects
         "widget_response_size" -> R.string.tool_generation_size
-        "widget_generation" -> R.string.tool_generation_connection
+        "widget_generation", "stream_io", "stream_timeout" -> R.string.tool_generation_connection
         "javascript_unavailable" -> R.string.tool_javascript_unavailable
         "javascript_timeout" -> R.string.tool_javascript_timeout
         "javascript_busy" -> R.string.tool_javascript_busy

@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools.generation
 
+import com.alpha.assistant.tools.BehaviorValueShape
 import com.alpha.assistant.tools.generation.GenerationBehavior.Binding
 import com.alpha.assistant.tools.generation.GenerationBehavior.Kind
 import com.alpha.assistant.tools.generation.NativeObservation.*
@@ -60,7 +61,7 @@ internal object NativeBehaviorCatalog {
         "numeric_figure" to Family("figure", observations = listOf(VALUE)),
         "notes" to Family("entries without fields", listOf("edit", "add", "remove"), listOf(RECORDS)),
         "record_log" to Family("entries with fields", listOf("edit_1", "edit_2", "edit_3", "edit_4", "add", "remove"),
-            listOf(RECORDS), "Edit members follow the declared fields in order."),
+            listOf(RECORDS), "Edit the required fields in their declared order before pressing Add."),
         "quick_log" to Family("quick_log", listOf("add", "add_alternate", "undo", "remove"), listOf(TODAY, COUNT, YESTERDAY, HISTORY),
             "Use add_alternate only with alternateAmount."),
         "points_ledger" to Family("points_ledger", listOf("select", "post1", "post2", "post3", "undo"),
@@ -108,6 +109,19 @@ internal object NativeBehaviorCatalog {
 }
 
 internal fun PartCandidate.behaviorTargets(needId: String): NativeBehaviorTargets = NativeBehaviorCatalog.targets(this, needId)
+
+internal fun PartCandidate.nativeObservationShape(kind: Kind, binding: Binding.Ui): BehaviorValueShape? {
+    if (kind == Kind.COLLECTION) return BehaviorValueShape.NUMBER
+    val node = binding.path.fold(fragment.full) { parent, index -> parent.getJSONArray("children").getJSONObject(index) }
+    val field = node.optString("bind")
+    if (field.isEmpty()) return BehaviorValueShape.of(node.opt("text"))?.takeIf { it == BehaviorValueShape.STRING }
+    return when (fragment.schema.opt(field)) {
+        "number" -> BehaviorValueShape.NUMBER
+        "string" -> BehaviorValueShape.STRING
+        "boolean" -> BehaviorValueShape.BOOLEAN
+        else -> null
+    }
+}
 
 internal fun nativeObservationPaths(
     root: JSONObject,

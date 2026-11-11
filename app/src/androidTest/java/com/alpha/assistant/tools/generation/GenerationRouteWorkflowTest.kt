@@ -42,7 +42,7 @@ class GenerationRouteWorkflowTest {
     private val request = "Build a count and keep every requested control."
     private val count = """{"id":"count","type":"counter","label":"Count","description":"Add one and reset"}"""
     private val custom = """{"id":"custom","type":"other","label":"Custom","description":"Save a copy of the current count"}"""
-    private val scene = """{"id":"scene","type":"scene","label":"Scene","description":"Move a dot on each frame"}"""
+    private val scene = """{"id":"scene","type":"scene","writes":[],"label":"Scene","description":"Move a dot on each frame"}"""
     private val surface = "fill_dot"
     private val counterState = "p5_count_value"
     private val counterAction = "p5_count_add"
@@ -203,7 +203,7 @@ class GenerationRouteWorkflowTest {
                 val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context), imageGeneration = images))
                 try {
                     val draft = engine.createDraft(prompt, null)
-                    failure("widget_patch") { engine.generate(draft.id, "fixture", emptyList(), CloudSession()) }
+                    failure("widget_plan") { engine.generate(draft.id, "fixture", emptyList(), CloudSession()) }
                     assertEquals(0, imagePlans)
                     assertEquals(0, imageCalls)
                     assertNull(store.draft(draft.id)?.candidate)
@@ -395,7 +395,7 @@ class GenerationRouteWorkflowTest {
     }
 
     @Test fun wholeScreenSceneKeepsItsSurfaceAndChangesDrawingOnAFrame(): Unit = runBlocking {
-        val scene = """{"id":"scene","type":"scene","label":"Scene","description":"Move a dot on each frame and reset it on restart"}"""
+        val scene = """{"id":"scene","type":"scene","writes":[],"label":"Scene","description":"Move a dot on each frame and reset it on restart"}"""
         val source = """
             const state = input.state;
             if (input.event.type === "frame") state.fill_value = (state.fill_value + 1) % 32;
@@ -546,8 +546,8 @@ class GenerationRouteWorkflowTest {
     }
 
     @Test fun mixedWriterExampleKeepsTheHostFillPositionsWithoutTestBindings(): Unit = runBlocking {
-        val first = """{"id":"first","type":"other","label":"Total","description":"Show a total","reads":[]}"""
-        val last = """{"id":"last","type":"other","label":"Rows","description":"Show a list","reads":[]}"""
+        val first = """{"id":"first","type":"other","label":"Total","description":"Show a total","writes":[],"reads":[]}"""
+        val last = """{"id":"last","type":"other","label":"Rows","description":"Show a list","writes":[],"reads":[]}"""
         val counter = count.replace("\"count\"", "\"second\"")
         val fill = """{"holes":["first","last"],"fill":{"capabilities":[],
             "stateSchema":{"fill_value":"number","fill_rows":{"type":"list","maxItems":4,"fields":{"id":"string","text":"string"}}},
@@ -721,6 +721,153 @@ class GenerationRouteWorkflowTest {
         }
     }
 
+    @Test fun incompatibleNativeBindingReturnsToPlanningBeforeTheWriter(): Unit = runBlocking {
+        val valid = plan(count)
+        val invalidPlans = listOf(
+            valid.replace("\"member\":\"add\"", "\"member\":\"unknown\""),
+            valid.replace("\"kind\":\"value\",\"part\":\"count\",\"member\":\"value\"", "\"kind\":\"value\""),
+        )
+        for (invalid in invalidPlans) {
+            check(invalid != valid)
+            var plans = 0
+            val provider = FixtureProvider { turn, _ ->
+                when (turn.generationStage) {
+                    CloudGenerationStage.PLAN -> if (plans++ == 0) invalid else JSONObject().put("fields",
+                        JSONObject().put("behavior", JSONObject(valid).getJSONObject("behavior"))).toString()
+                    CloudGenerationStage.SELECTOR -> answer(turn)
+                    else -> error("Only planning can correct a native binding.")
+                }
+            }
+            withEngine(provider) { _, engine, _ ->
+                val draft = engine.createDraft("Build a count with Add and Reset.", null)
+                engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+                assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR,
+                    CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR), provider.stages)
+                val saved = engine.accept(draft.id)
+                val after = engine.interact(saved.id, saved.revision, saved.stateVersion, counterAction, null)
+                assertEquals(1, JSONObject(after.state).getInt(counterState))
+            }
+        }
+    }
+
+    @Test fun outOfRangeNativeInputReturnsToPlanning(): Unit = runBlocking {
+        fun behavior(value: Int) = nativeFixtureBehavior(
+            """"edit":{"kind":"action","part":"people","member":"edit"},
+                "value":{"kind":"value","part":"people","member":"value"}""",
+            """{"op":"action","slot":"edit","value":$value},{"op":"assert","slot":"value","test":"equals","value":4}"""
+        )
+        val raw = JSONObject(plan("")).put("inputs", JSONArray("""
+            [{"id":"people","label":"People","type":"number","value":1,"min":1,"max":12}]
+        """.trimIndent())).put("behavior", behavior(0)).toString()
+        var plans = 0
+        val provider = FixtureProvider { turn, _ ->
+            when (turn.generationStage) {
+                CloudGenerationStage.PLAN -> if (plans++ == 0) raw else JSONObject().put("fields",
+                    JSONObject().put("behavior", behavior(4))).toString()
+                CloudGenerationStage.SELECTOR -> answer(turn)
+                else -> error("A native input must not call the writer.")
+            }
+        }
+        withEngine(provider) { _, engine, _ ->
+            val draft = engine.createDraft("Let me enter the number of people, from one to twelve.", null)
+            engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+            assertEquals(2, plans)
+            assertTrue(engine.accept(draft.id).saved)
+        }
+    }
+
+    @Test fun failedNativeAssertionDoesNotRetryTheMixedWriter(): Unit = runBlocking {
+        val local = """{"id":"note","type":"action","label":"Note","description":"An independent action","writes":[]}"""
+        val raw = JSONObject(plan("$count,$local")).put("behavior", nativeFixtureBehavior(
+            """"add":{"kind":"action","part":"count","member":"add"},
+                "value":{"kind":"value","part":"count","member":"value"}""",
+            """{"op":"action","slot":"add"},{"op":"assert","slot":"value","test":"equals","value":2}"""
+        )).toString()
+        val provider = FixtureProvider { turn, _ ->
+            when (turn.generationStage) {
+                CloudGenerationStage.PLAN -> raw
+                CloudGenerationStage.SELECTOR -> answer(turn)
+                CloudGenerationStage.COMPLETE -> """{"holes":["note"],"fill":{"capabilities":[],
+                    "stateSchema":{"fill_value":"number"},"initialState":{"fill_value":0},
+                    "ui":{"type":"column","children":[{"type":"button","text":"Note","action":"fill_note"}]},
+                    "source":"return {state:input.state};"}}"""
+                else -> error("Unexpected generation stage.")
+            }
+        }
+        withEngine(provider) { store, engine, _ ->
+            val draft = engine.createDraft("Add one to a count and include a separate Note button.", null)
+            failure("widget_behavior") { engine.generate(draft.id, "fixture", emptyList(), CloudSession()) }
+            assertEquals(1, provider.stages.count { it == CloudGenerationStage.COMPLETE })
+            assertNull(store.tool(draft.id))
+        }
+    }
+
+    @Test fun crossOwnerResetReachesAWriterThatCanResetTheInputs(): Unit = runBlocking {
+        val detail = "Calculate the tip, total, and share from the three editable values. " +
+            "Keep the input values editable and recalculate the amounts after each change. ".repeat(9).trimEnd()
+        check(detail.length in 501..2_000)
+        val dependency = JSONObject("""
+            {"title":"Tip calculator","description":"","language":"en",
+             "inputs":[{"id":"bill","label":"Bill","type":"number","value":0},
+             {"id":"percent","label":"Tip percent","type":"number","value":15},
+             {"id":"people","label":"People","type":"number","value":1}],"constants":[],
+             "needs":[{"id":"reset","type":"action","label":"Reset","description":"Restore the three inputs","writes":["bill","percent","people"]},
+               {"id":"result","type":"other","label":"Totals","description":${JSONObject.quote(detail)},"reads":["bill","percent","people"],"writes":[]}],"questions":[]}
+        """.trimIndent()).put("behavior", nativeFixtureBehavior(
+            """"bill":{"kind":"action","part":"bill","member":"edit"},
+                "percent":{"kind":"action","part":"percent","member":"edit"},
+                "people":{"kind":"action","part":"people","member":"edit"},
+                "reset":{"kind":"action","part":"reset"},"total":{"kind":"value"}""",
+            """{"op":"action","slot":"bill","value":80},{"op":"action","slot":"percent","value":20},
+                {"op":"action","slot":"people","value":4},{"op":"assert","slot":"total","test":"equals","value":96},
+                {"op":"action","slot":"reset"},{"op":"assert","slot":"total","test":"equals","value":0}"""
+        )).toString()
+        val provider = FixtureProvider { turn, _ ->
+            when (turn.generationStage) {
+                CloudGenerationStage.PLAN -> dependency
+                CloudGenerationStage.SELECTOR -> answer(turn)
+                CloudGenerationStage.COMPLETE -> {
+                    assertTrue(turn.turns.single().text.contains("The hole covers the whole screen."))
+                    assertFalse(turn.turns.single().text.contains("Selected need IDs:"))
+                    """{"formatVersion":3,"title":"Tip calculator","description":"","capabilities":[],
+                        "behaviorBindings":{"bill":"bill","percent":"percent","people":"people","reset":"reset","total":[4]},
+                        "stateSchema":{"bill":"number","percent":"number","people":"number","tip":"number","total":"number","share":"number"},
+                        "initialState":{"bill":0,"percent":15,"people":1,"tip":0,"total":0,"share":0},
+                        "ui":{"type":"column","children":[
+                          {"type":"numberInput","text":"Bill","bind":"bill","action":"bill","min":0,"max":1000},
+                          {"type":"slider","text":"Tip percent","bind":"percent","action":"percent","min":0,"max":100},
+                          {"type":"numberInput","text":"People","bind":"people","action":"people","min":1,"max":100},
+                          {"type":"text","text":"Tip","bind":"tip"},{"type":"text","text":"Total","bind":"total"},
+                          {"type":"text","text":"Each person pays","bind":"share"},
+                          {"type":"button","text":"Reset","action":"reset"}]},
+                        "source":"const s=input.state,e=input.event;if(e.type==='action'){if(e.actionId==='reset'){s.bill=0;s.percent=15;s.people=1;}else if(typeof e.value==='number'){s[e.actionId]=e.value;}s.tip=s.bill*s.percent/100;s.total=s.bill+s.tip;s.share=s.total/Math.max(1,s.people);}return {state:s};"}"""
+                }
+                else -> error("Unexpected request stage.")
+            }
+        }
+        withEngine(provider) { store, engine, _ ->
+            val draft = engine.createDraft("Build a tip calculator with a bill, tip slider, people, totals, and Reset to 0, 15 and 1.", null)
+            engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR,
+                CloudGenerationStage.COMPLETE), provider.stages)
+            var saved = engine.accept(draft.id)
+            assertNull(ToolSpec.parsePersisted(saved.spec).composition)
+            for ((action,value) in listOf("bill" to 80,"percent" to 20,"people" to 4)) {
+                saved = engine.interact(saved.id,saved.revision,saved.stateVersion,action,value)
+            }
+            val reopened = JSONObject(checkNotNull(store.tool(saved.id)).state)
+            assertEquals(16.0,reopened.getDouble("tip"),0.0)
+            assertEquals(96.0,reopened.getDouble("total"),0.0)
+            assertEquals(24.0,reopened.getDouble("share"),0.0)
+            saved = engine.interact(saved.id, saved.revision, saved.stateVersion, "reset", null)
+            val reset = JSONObject(saved.state)
+            assertEquals(0.0, reset.getDouble("bill"), 0.0)
+            assertEquals(15.0, reset.getDouble("percent"), 0.0)
+            assertEquals(1.0, reset.getDouble("people"), 0.0)
+            assertEquals(0.0, reset.getDouble("total"), 0.0)
+        }
+    }
+
     @Test fun connectedFiguresUseNativePartsAndRecomputeAfterReopen(): Unit = runBlocking {
         val needs = """
           {"id":"twice","type":"figure","label":"Double","description":"Twice the amount",
@@ -802,7 +949,7 @@ class GenerationRouteWorkflowTest {
         val needs = """
           {"id":"twice","type":"figure","label":"Double","description":"Twice the amount",
            "expression":{"op":"multiply","args":[{"ref":"amount"},{"number":2}]}},
-          {"id":"message","type":"other","label":"Summary","description":"Show a summary of the double", "reads":["twice"]}
+          {"id":"message","type":"other","label":"Summary","description":"Show a summary of the double", "writes":[],"reads":["twice"]}
         """.trimIndent()
         val response = JSONObject(plan(needs)).put("inputs", JSONArray("""
             [{"id":"amount","label":"Amount","type":"number","value":3}]

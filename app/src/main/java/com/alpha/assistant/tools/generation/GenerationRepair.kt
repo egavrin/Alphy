@@ -48,7 +48,7 @@ internal class GenerationRepair private constructor(
     private val seen = mutableListOf<JsonObject>()
     private var rewritten = false
 
-    fun retain(raw: String) {
+    fun retain(raw: String, rejectRepeated: Boolean = false) {
         val json = strictObject(raw, maxBytes) ?: return
         if (!writer && json.keys.none { it in editableFields }) return
         if (writer) {
@@ -58,6 +58,7 @@ internal class GenerationRepair private constructor(
             val definition = if (targetField == null) json else json[targetField] as? JsonObject ?: return
             if (string(definition["source"]).isNullOrBlank()) return
         }
+        if (rejectRepeated && json in seen) reject(Problem.REPEATED_CANDIDATE)
         base = Candidate(raw, json)
         seen += json
     }
@@ -66,15 +67,25 @@ internal class GenerationRepair private constructor(
 
     fun testPatch(number: Int, feedback: String): Request? = base?.let { patch(number, feedback, it) }
 
-    fun next(feedback: String, rewriteInstructions: String, claim: () -> Int?): Request? {
+    fun next(feedback: String, rewriteInstructions: String, finalPlanRewrite: Boolean = false, claim: () -> Int?): Request? {
         val candidate = base
         if (candidate == null && (rewritten || protectedUi)) return null
         val number = claim() ?: return null
-        if (candidate == null || refinement && !protectedUi && number == 3) {
+        val replacePlan = !writer && !rewritten && finalPlanRewrite && number == 3
+        if (candidate == null || refinement && !protectedUi && number == 3 || replacePlan) {
+            if (replacePlan) base = null
             rewritten = true
             return Request(Mode.REWRITE, number, rewriteInstructions, null)
         }
         return patch(number, feedback, candidate)
+    }
+
+    fun planRemovalGuidance(): String {
+        val keys = base?.json?.keys ?: return ""
+        val partsOnly = keys.intersect(setOf("title", "description", "inputs", "constants", "needs", "questions"))
+        if (partsOnly.isEmpty()) return ""
+        return " If the corrected plan uses wholeScreen, remove these fields present in the current candidate: " +
+            partsOnly.sorted().joinToString() + "."
     }
 
     fun correctBindings(feedback: String, claim: () -> Int?): Request? {
