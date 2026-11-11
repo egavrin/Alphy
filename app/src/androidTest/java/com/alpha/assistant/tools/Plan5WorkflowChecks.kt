@@ -562,10 +562,12 @@ internal class Plan5WorkflowChecks(
         }
 
         val countLabel = "(?:число |количество )?касани[йя]"
-        fun verifyMark(fractionX: Float, fractionY: Float, count: Double) {
+        fun verifyMark(fractionX: Float, fractionY: Float, count: Double): String {
             val touched = canvas()
             touch(touched, fractionX, fractionY)
-            visibleValue(countLabel, count)
+            actions.put(JSONObject().put("step", "touch").put("action", "canvasTap")
+                .put("x", fractionX.toDouble()).put("y", fractionY.toDouble()))
+            val shown = visibleValue(countLabel, count)
             robot.waitUntil {
                 val visible = canvas()
                 val mark = inspect(visible).marks.singleOrNull()
@@ -575,21 +577,23 @@ internal class Plan5WorkflowChecks(
                 mark != null && kotlin.math.abs(mark.exactCenterX() - x) <= tolerance &&
                     kotlin.math.abs(mark.exactCenterY() - y) <= tolerance
             }
+            return shown
         }
         step("initial") {
-            check(inspect(canvas()).blank)
-            visibleValue(countLabel, 0.0)
+            robot.waitUntil { inspect(canvas()).blank }
+            visibleValue(countLabel, 0.0).also { check(screenshot("drawing-initial")) }
         }
         step("touch") {
-            verifyMark(.27f, .32f, 1.0)
-            verifyMark(.71f, .64f, 2.0)
+            val first = verifyMark(.27f, .32f, 1.0)
+            check(screenshot("drawing-first-touch"))
+            val second = verifyMark(.71f, .64f, 2.0)
             check(screenshot("drawing-second-touch"))
-            "One orange mark at the latest touch"
+            JSONArray().put(first).put(second)
         }
         step("reset") {
             button("^сброс")
             robot.waitUntil { inspect(canvas()).blank }
-            visibleValue(countLabel, 0.0)
+            visibleValue(countLabel, 0.0).also { check(screenshot("drawing-reset")) }
         }
     }
 

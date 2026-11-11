@@ -1,0 +1,334 @@
+{
+  "cases": [
+    {
+      "id": "fresh:unit-1",
+      "group": "editable-input",
+      "request": "how many miles is a run if I type in the distance in kilometres",
+      "route": "create",
+      "text": "I can build a distance converter.",
+      "app": "conversion",
+      "brief": "Enter kilometres and display miles.",
+      "requestSha256": "b94d6e442400a3b6f4d0d2bb8ebe05a8b02c37921c548b06edf460d97c6ec2d6"
+    },
+    {
+      "id": "fresh:goals-1",
+      "group": "editable-input",
+      "request": "savings goal of 5000, I enter how much I've saved so far and see percent and what's left",
+      "route": "create",
+      "text": "I can build a savings tracker.",
+      "app": "savings",
+      "brief": "Enter the saved amount, show percent and remaining amount against 5000.",
+      "requestSha256": "2966c759dfde3f31a9541c2970f70f7e70952d470c5f1fc80ad0ca963636589d"
+    },
+    {
+      "id": "fresh:money-3",
+      "group": "one-off",
+      "request": "what do I pay after a 25% discount on something that costs £80",
+      "route": "answer",
+      "text": "You pay £60.",
+      "requestSha256": "89d7ee4d50fb099db344ee43000953cab351d3842d85c28db972ed8ea08b6797"
+    },
+    {
+      "id": "fresh:money-8",
+      "group": "one-off",
+      "request": "dinner was 2400 rupees and six of us are sharing, what is each share",
+      "route": "answer",
+      "text": "Each person pays 400 rupees.",
+      "requestSha256": "04a90875b675bfcd90f87f276640cc93d7f2b4235eb3a39884e5cbe579d0fa03"
+    },
+    {
+      "id": "fresh:cooking-3",
+      "group": "direct-timer",
+      "request": "pasta timer 11 min",
+      "route": "device_plan",
+      "text": "Review the Android Clock timer.",
+      "anchor": "11 min",
+      "seconds": 660,
+      "requestSha256": "dc8568fdd839ec8700cd3f539c23cfebb789700a04b0e8dc0d72a83efb82261d"
+    },
+    {
+      "id": "fresh:terse-1",
+      "group": "ambiguous",
+      "request": "a timer",
+      "route": "clarify",
+      "text": "Do you want a device timer or a mini-app?",
+      "requestSha256": "3d3ef8d2e46ec0a7b30a3f3cdceae07af0b6340cad5d2ae6ed95c1eccf65cbb9"
+    },
+    {
+      "id": "fresh:terse-3",
+      "group": "ambiguous",
+      "request": "km to miles",
+      "route": "answer",
+      "text": "Multiply kilometres by 0.621371.",
+      "requestSha256": "be60e4e9909bbbc25a4533ea4f6e9f0b4b3dceeefb6fa118e352b5ad28408ef5"
+    },
+    {
+      "id": "fresh:goals-2",
+      "group": "ambiguous",
+      "request": "reading challenge: 24 books this year, how far along am I",
+      "route": "clarify",
+      "text": "How many books have you finished?",
+      "requestSha256": "6218f3408a1433c842cbcb9ed1eb5c043060e655d717963c870378838ab25b80"
+    },
+    {
+      "id": "variant:terse-3-converter",
+      "parent": "fresh:terse-3",
+      "group": "explicit-app-variant",
+      "request": "Build a mini-app where I enter kilometres and see the distance in miles.",
+      "route": "create",
+      "text": "I can build that mini-app.",
+      "app": "conversion",
+      "brief": "Enter kilometres and display miles.",
+      "requestSha256": "2a3dcda4be34b870c030a96e9befce5082949df84c4ab719ede319aa657619cc"
+    },
+    {
+      "id": "variant:goals-2-reading-tracker",
+      "parent": "fresh:goals-2",
+      "group": "explicit-app-variant",
+      "request": "Build a reading tracker mini-app where I enter books finished and see progress towards 24 books.",
+      "route": "create",
+      "text": "I can build that mini-app.",
+      "app": "reading",
+      "brief": "Enter books finished, show progress towards 24 books.",
+      "requestSha256": "3503b82ac7072000c7571e688d4628094eec68828ecff0715382a6797efdbd5a"
+    }
+  ],
+  "apps": {
+    "conversion": {
+      "plan": {
+        "wholeScreen": true,
+        "language": "en",
+        "behavior": {
+          "status": "checkable",
+          "scenario": {
+            "slots": {
+              "enter": {
+                "kind": "action"
+              },
+              "miles": {
+                "kind": "value",
+                "valueType": "number"
+              }
+            },
+            "steps": [
+              {
+                "op": "action",
+                "slot": "enter",
+                "value": 10
+              },
+              {
+                "op": "assert",
+                "slot": "miles",
+                "test": "equals",
+                "value": 6.21
+              }
+            ]
+          }
+        }
+      },
+      "writer": {
+        "formatVersion": 3,
+        "title": "Distance Converter",
+        "description": "Distance Converter",
+        "capabilities": [],
+        "stateSchema": {
+          "amount": "number",
+          "miles": "number"
+        },
+        "initialState": {
+          "amount": 0,
+          "miles": 0
+        },
+        "ui": {
+          "type": "column",
+          "children": [
+            {
+              "type": "numberInput",
+              "text": "Kilometres",
+              "bind": "amount",
+              "action": "enter",
+              "min": 0,
+              "max": 10000
+            },
+            {
+              "type": "metric",
+              "text": "Miles",
+              "bind": "miles"
+            }
+          ]
+        },
+        "behaviorBindings": {
+          "enter": "enter",
+          "miles": [
+            1
+          ]
+        },
+        "source": "const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='enter'){s.amount=e.value;s.miles=Math.round(s.amount*62.1371)/100;}return {state:s};"
+      }
+    },
+    "savings": {
+      "plan": {
+        "wholeScreen": true,
+        "language": "en",
+        "behavior": {
+          "status": "checkable",
+          "scenario": {
+            "slots": {
+              "enter": {
+                "kind": "action"
+              },
+              "percent": {
+                "kind": "value",
+                "valueType": "number"
+              },
+              "remaining": {
+                "kind": "value",
+                "valueType": "number"
+              }
+            },
+            "steps": [
+              {
+                "op": "action",
+                "slot": "enter",
+                "value": 1250
+              },
+              {
+                "op": "assert",
+                "slot": "percent",
+                "test": "equals",
+                "value": 25
+              },
+              {
+                "op": "assert",
+                "slot": "remaining",
+                "test": "equals",
+                "value": 3750
+              }
+            ]
+          }
+        }
+      },
+      "writer": {
+        "formatVersion": 3,
+        "title": "Savings Tracker",
+        "description": "Savings Tracker",
+        "capabilities": [],
+        "stateSchema": {
+          "amount": "number",
+          "percent": "number",
+          "remaining": "number"
+        },
+        "initialState": {
+          "amount": 0,
+          "percent": 0,
+          "remaining": 5000
+        },
+        "ui": {
+          "type": "column",
+          "children": [
+            {
+              "type": "numberInput",
+              "text": "Saved",
+              "bind": "amount",
+              "action": "enter",
+              "min": 0,
+              "max": 5000
+            },
+            {
+              "type": "metric",
+              "text": "Percent saved",
+              "bind": "percent"
+            },
+            {
+              "type": "metric",
+              "text": "Remaining",
+              "bind": "remaining"
+            }
+          ]
+        },
+        "behaviorBindings": {
+          "enter": "enter",
+          "percent": [
+            1
+          ],
+          "remaining": [
+            2
+          ]
+        },
+        "source": "const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='enter'){s.amount=e.value;s.percent=s.amount/50;s.remaining=5000-s.amount;}return {state:s};"
+      }
+    },
+    "reading": {
+      "plan": {
+        "wholeScreen": true,
+        "language": "en",
+        "behavior": {
+          "status": "checkable",
+          "scenario": {
+            "slots": {
+              "enter": {
+                "kind": "action"
+              },
+              "percent": {
+                "kind": "value",
+                "valueType": "number"
+              }
+            },
+            "steps": [
+              {
+                "op": "action",
+                "slot": "enter",
+                "value": 6
+              },
+              {
+                "op": "assert",
+                "slot": "percent",
+                "test": "equals",
+                "value": 25
+              }
+            ]
+          }
+        }
+      },
+      "writer": {
+        "formatVersion": 3,
+        "title": "Reading Tracker",
+        "description": "Reading Tracker",
+        "capabilities": [],
+        "stateSchema": {
+          "amount": "number",
+          "percent": "number"
+        },
+        "initialState": {
+          "amount": 0,
+          "percent": 0
+        },
+        "ui": {
+          "type": "column",
+          "children": [
+            {
+              "type": "numberInput",
+              "text": "Books finished",
+              "bind": "amount",
+              "action": "enter",
+              "min": 0,
+              "max": 24
+            },
+            {
+              "type": "metric",
+              "text": "Percent read",
+              "bind": "percent"
+            }
+          ]
+        },
+        "behaviorBindings": {
+          "enter": "enter",
+          "percent": [
+            1
+          ]
+        },
+        "source": "const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='enter'){s.amount=e.value;s.percent=s.amount/24*100;}return {state:s};"
+      }
+    }
+  }
+}

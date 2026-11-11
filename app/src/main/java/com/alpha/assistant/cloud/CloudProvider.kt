@@ -43,6 +43,13 @@ class CloudFailure internal constructor(val code: String, override val message: 
 }
 data class CloudTurn(val role: String, val text: String, val images: List<String> = emptyList())
 enum class CloudGenerationStage { PLAN, SELECTOR, COMPLETE, REFINE }
+internal enum class GenerationTransportPhase(val wire: String) {
+    BEFORE_HEADERS("before_headers"), RESPONSE_BODY("response_body"),
+}
+internal data class GenerationTransportFailure(
+    val stage: CloudGenerationStage, val httpAttempt: Int, val phase: GenerationTransportPhase,
+    val code: String, val retryRequested: Boolean,
+)
 /** The host assembles this independently from any personalized decision inputs. */
 class ChatDecisionContext internal constructor(
     val originalUserTurn: CloudTurn,
@@ -101,6 +108,7 @@ class CloudSession {
     private val canceled = AtomicBoolean(false)
     private val chatCorrectionUsed = AtomicBoolean(false)
     private val generationCorrectionUsed = AtomicBoolean(false)
+    private val generationTransportRetryUsed = AtomicBoolean(false)
     private val capabilityDiscoveryUsed = AtomicBoolean(false)
     private val planRepairs = AtomicInteger()
     private val completeRepairs = AtomicInteger()
@@ -110,10 +118,12 @@ class CloudSession {
     internal val generationAttempt: Int get() = if (generationCorrectionUsed.get()) 2 else 1
     internal var beforeHttp: (() -> Unit)? = null
     internal var decisionRejectionObserver: ((DecisionRejection) -> Unit)? = null
+    internal var generationTransportObserver: ((GenerationTransportFailure) -> Unit)? = null
     internal val canDiscoverCapabilities get() = !capabilityDiscoveryUsed.get()
     internal fun claimCapabilityDiscovery(): Boolean = claimCorrection(capabilityDiscoveryUsed)
     internal fun claimChatCorrection(): Boolean = claimCorrection(chatCorrectionUsed)
     internal fun claimGenerationCorrection(): Boolean = claimCorrection(generationCorrectionUsed)
+    internal fun claimGenerationTransportRetry(): Boolean = claimCorrection(generationTransportRetryUsed)
 
     internal fun claimGenerationRepair(stage: CloudGenerationStage): Int? {
         check()
@@ -203,6 +213,7 @@ object ImageInput {
 class DeepSeekProvider internal constructor(
     private val baseUrl: String,
     private val onHttpCall: (() -> Unit)? = null,
+    private val responseReadTimeoutMillis: Int = 60_000,
     private val recordEmptyCompletion: (String) -> Unit,
 ) : ChatProvider, CloudSearchProvider {
     @JvmOverloads constructor(baseUrl: String = "https://api.deepseek.com") : this(baseUrl, recordEmptyCompletion = {
@@ -265,19 +276,47 @@ class DeepSeekProvider internal constructor(
             if (offerDiscovery) {
                 body.put("tools", JSONArray().put(discoveryTool(strict = false))).put("tool_choice", "auto")
             }
+            var httpAttempt = 0
             suspend fun complete(allowTools: Boolean, retainReasoning: Boolean): Completion {
-                val updates = updateContext?.let { PublicGenerationUpdate() }
-                return stream(key, body, session, {
-                    updates?.read(it)?.let { note -> emit(CloudEvent.PublicUpdate(note)) }
-                    if (discovery == null && !request.scheduledAgent && !request.agentPlan) emit(CloudEvent.Text(it))
-                }, maxText = when {
-                    request.agentPlan -> ChatToolReply.MAX_REPLY
-                    request.scheduledAgent -> ChatToolReply.MAX_TEXT
-                    else -> 2 * 1024 * 1024
-                }, allowTools = allowTools, reportLength = request.generationStage != null,
-                    stage = if (request.generationStage == null) CompletionStage.GENERAL else CompletionStage.GENERATION,
-                    maxWireChars = if (think || request.expandedWriterOutput) 64 * 1024 * 1024 else 2 * 1024 * 1024,
-                    retainReasoning = retainReasoning)
+                val bytes = body.utf8()
+                val stage = request.generationStage
+                while (true) {
+                    val updates = updateContext?.let { PublicGenerationUpdate() }
+                    var outputStarted = false
+                    try {
+                        httpAttempt++
+                        return stream(key, bytes, session, {
+                            if (it.isNotEmpty()) outputStarted = true
+                            updates?.read(it)?.let { note ->
+                                emit(CloudEvent.PublicUpdate(note))
+                            }
+                            if (discovery == null && !request.scheduledAgent && !request.agentPlan) {
+                                emit(CloudEvent.Text(it))
+                            }
+                        }, maxText = when {
+                            request.agentPlan -> ChatToolReply.MAX_REPLY
+                            request.scheduledAgent -> ChatToolReply.MAX_TEXT
+                            else -> 2 * 1024 * 1024
+                        }, allowTools = allowTools, reportLength = stage != null,
+                            stage = if (stage == null) CompletionStage.GENERAL else CompletionStage.GENERATION,
+                            maxWireChars = if (think || request.expandedWriterOutput) 64 * 1024 * 1024 else 2 * 1024 * 1024,
+                            retainReasoning = retainReasoning)
+                    } catch (failure: CloudFailure) {
+                        val phase = when (failure.code) {
+                            "pre_headers_io", "pre_headers_timeout" -> GenerationTransportPhase.BEFORE_HEADERS
+                            "stream_io", "stream_timeout" -> GenerationTransportPhase.RESPONSE_BODY
+                            else -> throw failure
+                        }
+                        if (stage == null) throw failure
+                        session.checkActive(currentCoroutineContext())
+                        val retry = !outputStarted && (stage == CloudGenerationStage.PLAN || stage == CloudGenerationStage.COMPLETE) &&
+                            session.claimGenerationTransportRetry()
+                        runCatching {
+                            session.generationTransportObserver?.invoke(GenerationTransportFailure(stage, httpAttempt, phase, failure.code, retry))
+                        }
+                        if (!retry) throw failure
+                    }
+                }
             }
             var completion = complete(if (discovery == null) !request.agentPlan else offerDiscovery, offerDiscovery && think)
             if (discovery != null && completion.calls.isNotEmpty()) {
@@ -583,6 +622,8 @@ Example: for "Find the Eiffel Tower on the map. Then open https://example.com/ i
 use "Eiffel Tower" and "https://example.com/" as anchors in their respective verb clauses.
 Start an immediate countdown or set a one-time Android Clock alarm with prepare_device_plan. For
 "Set a five-minute timer.", return one step with the full clause as context and "five-minute" as anchor.
+For an immediate timer fragment with a fixed duration and no requested app controls, the context can omit the verb.
+For "laundry timer 35 min", use the full fragment as context and "35 min" as anchor.
 Use prepare_device_plan for a requested still photo or selfie. For "Take a selfie.", use that clause
 and the anchor "selfie". For a photo with an explicit lens, anchor the camera phrase.
 Use automation for future reminders or recurring rules, such as "Remind me in five minutes to call Sam".
@@ -1087,11 +1128,12 @@ The user reviews and approves the plan before any device action.
                 ?: throw CloudFailure("stream_invalid", "Сервис вернул неверный поток ответа")
         }
         val path = if (stage.strictDecision) "/beta/chat/completions" else "/chat/completions"
-        val connection = open(path, key, body, session)
-        var responseStarted = false
+        var opened: HttpURLConnection? = null
+        var headersReceived = false
         try {
+            val connection = open(path, key, body, session).also { opened = it }
             checkStatus(connection, false)
-            responseStarted = true
+            headersReceived = true
             val text = StringBuilder()
             val ids = mutableMapOf<Int, StringBuilder>(); val names = mutableMapOf<Int, StringBuilder>(); val arguments = mutableMapOf<Int, StringBuilder>()
             var finish: String? = null
@@ -1181,11 +1223,17 @@ The user reviews and approves the plan before any device action.
             throw CloudFailure("stream_invalid", "Сервис вернул неверный поток ответа")
         } catch (failure: IOException) {
             session.checkActive(currentCoroutineContext())
-            if (!responseStarted || failure is CloudFailure) throw failure
+            if (failure is CloudFailure) throw failure
+            if (!headersReceived) {
+                if (stage != CompletionStage.GENERATION) throw failure
+                if (failure is SocketTimeoutException)
+                    throw CloudFailure("pre_headers_timeout", "DeepSeek did not return response headers in time. Retry the request.")
+                throw CloudFailure("pre_headers_io", "The DeepSeek connection failed before response headers. Retry the request.")
+            }
             if (failure is SocketTimeoutException)
                 throw CloudFailure("stream_timeout", "DeepSeek did not finish the response in time. Retry the request.")
             throw CloudFailure("stream_io", "The DeepSeek response stream was interrupted. Retry the request.")
-        } finally { session.detach(connection) }
+        } finally { opened?.let(session::detach) }
     }
     private fun JSONObject?.hasText(field: String): Boolean = (this?.opt(field) as? String)?.isNotBlank() == true
 
@@ -1196,7 +1244,7 @@ The user reviews and approves the plan before any device action.
         val connection = URL(baseUrl + path).openConnection() as HttpURLConnection
         session.attach(connection)
         try {
-            connection.requestMethod = "POST"; connection.connectTimeout = 20000; connection.readTimeout = 60000
+            connection.requestMethod = "POST"; connection.connectTimeout = 20000; connection.readTimeout = responseReadTimeoutMillis
             connection.instanceFollowRedirects = false; connection.doOutput = true
             connection.setRequestProperty("Authorization", "Bearer $key")
             connection.setRequestProperty("Content-Type", "application/json")
@@ -1204,7 +1252,7 @@ The user reviews and approves the plan before any device action.
             connection.setFixedLengthStreamingMode(bytes.size)
             session.checkActive(currentCoroutineContext())
             session.beforeHttp?.invoke()
-            session.check()
+            session.checkActive(currentCoroutineContext())
             onHttpCall?.invoke()
             connection.outputStream.use { it.write(bytes) }
             return connection

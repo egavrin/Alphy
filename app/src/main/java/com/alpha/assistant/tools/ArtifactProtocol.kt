@@ -40,7 +40,9 @@ object ArtifactProtocol {
     fun validateSurfaces(surfaces: JSONObject) {
         require(surfaces.toString().toByteArray(Charsets.UTF_8).size<=GraphicsContract.FRAME_BYTES)
         val budget=GraphicsContract.Budget()
-        surfaces.keys().forEach {id -> GraphicsContract.frame(surfaces.getJSONObject(id).toString(),"frame",budget)}
+        surfaces.keys().asSequence().forEachIndexed { index, id ->
+            GraphicsContract.frame(surfaces.getJSONObject(id).toString(),"frame",budget,"$.surfaces[$index]")
+        }
     }
     /** Reads handle IDs from validated drawing commands. This lookup does not resolve resources. */
     internal fun bitmapHandles(surfaces: JSONObject): Set<String> = buildSet {

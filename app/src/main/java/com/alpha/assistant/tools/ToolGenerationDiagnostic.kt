@@ -5,6 +5,7 @@ import com.alpha.assistant.tools.three.ThreeSceneProblem
 import android.os.SystemClock
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudGenerationStage
+import com.alpha.assistant.cloud.GenerationTransportFailure
 import com.alpha.assistant.cloud.ResponseShape
 import com.alpha.assistant.tools.generation.GenerationBehavior.Kind
 import com.alpha.assistant.tools.generation.GeometryScope
@@ -57,7 +58,7 @@ internal enum class BehaviorValueShape(val id: String) {
 }
 
 internal enum class BehaviorComparison {
-    EQUALS, UNCHANGED, CHANGED, GREATER, LESS, NONEMPTY, MOTION;
+    EQUALS, UNCHANGED, CHANGED, GREATER, LESS, NONEMPTY, EMPTY, MOTION, AVAILABILITY;
 
     val wire get() = name.lowercase(java.util.Locale.ROOT)
 
@@ -145,6 +146,13 @@ internal sealed interface ToolGenerationTraceEvent {
         val durationNanos: Long,
     ) : ToolGenerationTraceEvent
 
+    data class Transport(
+        override val operationId: UUID,
+        override val attempt: Int,
+        override val atNanos: Long,
+        val failure: GenerationTransportFailure,
+    ) : ToolGenerationTraceEvent
+
     /** VALIDATED marks the candidate boundary. The caller owns publication. */
     data class Finished(
         override val operationId: UUID,
@@ -196,6 +204,10 @@ internal class ToolGenerationTrace(
                 responseBytes, candidateBytes, changes, sourceEdits, durationNanos) }
         }
 
+        fun transport(failure: GenerationTransportFailure) {
+            emit { ToolGenerationTraceEvent.Transport(operationId, lastAttempt, it, failure) }
+        }
+
         fun finish(failure: Throwable? = null) {
             val cloudCode = (failure as? CloudFailure)?.code
             val outcome = when {
@@ -230,7 +242,7 @@ internal inline fun <T> ToolGenerationTrace.Run?.timed(
 
 private fun safeSelectorBatch(batch: String?) = batch?.takeIf { it == "sections" || it == "parts" }
 private val needsPlanPath = Regex(
-    """\$(?:\.(?:wholeScreen|scene|checkEvidence|visualReview|behavior|scenario|steps|title|description|language|inputs|constants|needs|questions|id|label|type|value|uses|sourceIds|stops|bands|items|ideas|name|minutes|min|max|step|control|expression|example|unit|date|offsetDays|repeatDays|effort|ask|options)(?:\[\d{1,2}])?)*|\$\.behavior\.scenario\.slots\[\d{1,2}]"""
+    """\$(?:\.(?:wholeScreen|scene|checks|checkEvidence|visualReview|behavior|scenario|steps|title|description|language|inputs|constants|needs|questions|id|label|type|value|uses|sourceIds|stops|bands|items|ideas|name|minutes|min|max|step|control|expression|example|unit|date|offsetDays|repeatDays|effort|ask|options|count|maxFrames|milliseconds)(?:\[\d{1,2}])?)*|\$\.(?:behavior|scene\.checks)\.scenario\.slots\[\d{1,2}](?:\.valueType)?"""
 )
 
 /** No candidate, exception message, private field name, or generated identifier enters this record.
@@ -277,11 +289,12 @@ internal data class ToolGenerationAttemptDiagnostic(
         }
     companion object {
         private val codes=setOf("none","unknown","auth","cancelled","empty_response","incomplete","provider","quota","rate_limit",
-            "response_length","response_size","stream_invalid","stream_timeout","stream_io","source_attribution","decision_language",
+            "response_length","response_size","stream_invalid","stream_timeout","stream_io","pre_headers_io",
+            "pre_headers_timeout","source_attribution","decision_language",
             "unavailable","tool_invalid","tool_limit","widget_generation","widget_response_size",
             "widget_request","widget_plan","widget_selector","widget_questions","widget_incomplete",
             "three_behavior","three_declined","three_deadline","three_unavailable",
-            "widget_spec","widget_state","widget_behavior","widget_patch","widget_preview","widget_preview_state","widget_preview_effects",
+            "widget_spec","widget_state","widget_behavior","widget_patch","widget_preview","widget_preview_state","widget_preview_effects","drawing.command_fields",
             "javascript_unavailable","javascript_busy","javascript_sandbox_died","javascript_closed","javascript_memory_limit",
             "javascript_script_error","javascript_timeout","javascript_invalid_request","javascript_invalid_result") +
             ThreeSceneProblem.entries.map { it.code }
@@ -289,7 +302,7 @@ internal data class ToolGenerationAttemptDiagnostic(
             "schema.constructor","schema.type","object.keys","object.fields","list.keys","list.fields","list.maxItems","list.id",
             "list.field","array.keys","array.maxItems","state.fields","collections.count")
         private val smokeEvents=setOf("preview","render","open","action","liveInput","viewport","frame","timer","start","pointer","control","pause","resume","restart","stop")
-        private val smokeLocation=Regex("\\$\\.(?:ui(?:\\.(?:children|rowActions)\\[[0-9]{1,3}\\]|\\.rowTemplate)*|(?:surfaces|timers)\\[[0-9]{1,3}\\])")
+        private val smokeLocation=Regex("\\$\\.(?:ui(?:\\.(?:children|rowActions)\\[[0-9]{1,3}\\]|\\.rowTemplate)*|timers\\[[0-9]{1,3}\\]|surfaces\\[[0-9]{1,3}\\](?:\\.commands\\[[0-9]{1,3}\\](?:\\.children\\[[0-9]{1,3}\\])*(?:\\.stroke)?)?)")
         internal fun safeCode(code: String)=code.takeIf {it in codes || it.matches(Regex("http_[0-9]{3}"))} ?: "unknown"
     }
 }

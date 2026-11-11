@@ -1,0 +1,470 @@
+{
+  "revision": "e515700abc5d2271f70261999203a4a9d2b705e2",
+  "cases": {
+    "fresh:unit-3": {
+      "request": "Convert inches to centimetres. I'd like a stepper for the inches please",
+      "context": "User request: Convert inches to centimetres. I'd like a stepper for the inches please\nWidget brief: A single-purpose unit converter app. Input: inches, controlled by a stepper (minus/plus buttons) with a step of 1 inch and a default of 0. Also allow direct typed entry of the inch value. Live output: centimetres, using 1 inch = 2.54 cm, shown rounded to 2 decimal places. Optionally show a smaller secondary readout in millimetres. Interface language: English. Clean, minimal layout with a large result display.\nExcerpts below may be truncated. Preserve the complete request, brief, and source URLs above.\nReply excerpt: I'll build a live inches-to-centimetres converter with a stepper for the inches.",
+      "wirePath": "evidence/alphy-ui/generation-full-134-after-reliability/captures/fresh:unit-3:candidate:1/provider.jsonl",
+      "wireSha256": "d9e6dad53a554f12ab58aba3d69309ed85a54069230251ad769c85ab706de45e",
+      "terminalAttempt": {
+        "operation_id": "59cd5ad0-7273-4a97-8cad-dd98ec5e72b8",
+        "attempt": 4,
+        "at_ns": 5323739974538,
+        "kind": "attempt",
+        "stage": "behavior",
+        "outcome": "rejected",
+        "disposition": "finish",
+        "failure_code": "widget_behavior",
+        "behavior_binding": {
+          "route": "whole_screen",
+          "rule": "assertion_failed",
+          "step": 4,
+          "slot": 4,
+          "slotKind": "value",
+          "origin": "writer",
+          "bindingKind": "ui",
+          "valueShape": "number",
+          "comparison": "nonempty",
+          "observation": "comparison_failed"
+        }
+      },
+      "replies": [
+        {
+          "stage": "PLAN",
+          "call": 2,
+          "line": 6,
+          "contentSha256": "4b5769385201fa19d706587f715a82686f5377c8d76992fa49168cf8277bd32e",
+          "content": "{\"wholeScreen\":true,\"language\":\"en\",\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"inc\":{\"kind\":\"action\"},\"dec\":{\"kind\":\"action\"},\"cm\":{\"kind\":\"value\"},\"inches\":{\"kind\":\"value\"}},\"steps\":[{\"op\":\"capture\",\"slot\":\"cm\",\"as\":\"before\"},{\"op\":\"action\",\"slot\":\"inc\"},{\"op\":\"assert\",\"slot\":\"cm\",\"test\":\"changed\",\"capture\":\"before\"},{\"op\":\"assert\",\"slot\":\"inches\",\"test\":\"nonempty\"},{\"op\":\"action\",\"slot\":\"dec\"},{\"op\":\"assert\",\"slot\":\"cm\",\"test\":\"unchanged\",\"capture\":\"before\"}]}}}"
+        },
+        {
+          "stage": "COMPLETE",
+          "call": 3,
+          "line": 9,
+          "contentSha256": "002d8a33b25af33fc5718ffd8be223ac5bdb774fe8d24d20388beabb49f68548",
+          "content": "{\"formatVersion\":3,\"title\":\"Inches to Centimetres\",\"description\":\"Convert inches to centimetres with a one-inch stepper or a typed value.\",\"capabilities\":[],\"capabilityResults\":false,\"stateSchema\":{\"inches\":\"number\",\"cm\":\"number\",\"mm\":\"number\"},\"initialState\":{\"inches\":0,\"cm\":0,\"mm\":0},\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"metric\",\"text\":\"Centimetres\",\"bind\":\"cm\",\"format\":\"number\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"text\",\"text\":\"Millimetres\",\"bind\":\"mm\",\"format\":\"number\",\"style\":{\"tone\":\"muted\"}},{\"type\":\"row\",\"style\":{\"gap\":\"small\"},\"children\":[{\"type\":\"button\",\"text\":\"-1 in\",\"action\":\"dec\",\"variant\":\"outlined\"},{\"type\":\"numberInput\",\"text\":\"Inches\",\"bind\":\"inches\",\"action\":\"setInches\",\"min\":0,\"max\":1000000,\"layout\":{\"weight\":2}},{\"type\":\"button\",\"text\":\"+1 in\",\"action\":\"inc\",\"variant\":\"filled\"}]},{\"type\":\"text\",\"text\":\"Step by whole inches, or type a value and tap Apply.\",\"style\":{\"tone\":\"muted\"}}]},\"behaviorBindings\":{\"inc\":\"inc\",\"dec\":\"dec\",\"cm\":[0],\"inches\":[2,1]},\"source\":\"const event = input.event;\\nconst MAX = 1000000;\\n\\nfunction round2(n) {\\n  return Math.round(n * 100) / 100;\\n}\\n\\nfunction derive(inches) {\\n  return { cm: round2(inches * 2.54), mm: round2(inches * 25.4) };\\n}\\n\\nlet state = input.state;\\n\\nif (event && event.type === 'action') {\\n  let inches = Number(state.inches);\\n  if (!isFinite(inches)) {\\n    inches = 0;\\n  }\\n\\n  if (event.actionId === 'inc') {\\n    inches = inches + 1;\\n  } else if (event.actionId === 'dec') {\\n    inches = inches - 1;\\n  } else if (event.actionId === 'setInches') {\\n    const typed = Number(event.value);\\n    if (isFinite(typed)) {\\n      inches = typed;\\n    }\\n  }\\n\\n  if (!isFinite(inches)) {\\n    inches = Number(state.inches);\\n  }\\n  if (inches > MAX) {\\n    inches = MAX;\\n  }\\n  if (inches < 0) {\\n    inches = 0;\\n  }\\n  inches = round2(inches);\\n\\n  const result = derive(inches);\\n  state = Object.assign({}, state, {\\n    inches: inches,\\n    cm: result.cm,\\n    mm: result.mm\\n  });\\n}\\n\\nreturn { state: state };\"}"
+        },
+        {
+          "stage": "COMPLETE",
+          "call": 4,
+          "line": 12,
+          "contentSha256": "64794eb88593551d9a0a176fe70724499ce407fe3d7f7678caf08b694d78b2d0",
+          "content": "{\"fields\":{\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"metric\",\"text\":\"Centimetres\",\"bind\":\"cm\",\"format\":\"number\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"text\",\"text\":\"Millimetres\",\"bind\":\"mm\",\"format\":\"number\",\"style\":{\"tone\":\"muted\"}},{\"type\":\"row\",\"style\":{\"gap\":\"small\"},\"children\":[{\"type\":\"button\",\"text\":\"Minus 1 inch\",\"action\":\"dec\",\"variant\":\"outlined\"},{\"type\":\"numberInput\",\"text\":\"Inch value\",\"bind\":\"inches\",\"action\":\"setInches\",\"min\":0,\"max\":1000000},{\"type\":\"button\",\"text\":\"Plus 1 inch\",\"action\":\"inc\",\"variant\":\"filled\"}]},{\"type\":\"text\",\"text\":\"Step by whole inches, or type a value and tap Apply.\",\"style\":{\"tone\":\"muted\"}}]}}}"
+        },
+        {
+          "stage": "COMPLETE",
+          "call": 5,
+          "line": 15,
+          "contentSha256": "99fd4d1be950378c231aa11924db971500fa957934606cc66cf46fbb18b324f4",
+          "content": "{\"fields\":{\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"metric\",\"text\":\"Inches\",\"bind\":\"inches\",\"format\":\"number\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"metric\",\"text\":\"Centimetres\",\"bind\":\"cm\",\"format\":\"number\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"text\",\"text\":\"Millimetres\",\"bind\":\"mm\",\"format\":\"number\",\"style\":{\"tone\":\"muted\"}},{\"type\":\"row\",\"style\":{\"gap\":\"small\"},\"children\":[{\"type\":\"button\",\"text\":\"Minus 1 inch\",\"action\":\"dec\",\"variant\":\"outlined\"},{\"type\":\"numberInput\",\"text\":\"Inch value\",\"bind\":\"inches\",\"action\":\"setInches\",\"min\":0,\"max\":1000000},{\"type\":\"button\",\"text\":\"Plus 1 inch\",\"action\":\"inc\",\"variant\":\"filled\"}]},{\"type\":\"text\",\"text\":\"Step by whole inches, or type a value and tap Apply.\",\"style\":{\"tone\":\"muted\"}}]},\"behaviorBindings\":{\"inc\":\"inc\",\"dec\":\"dec\",\"cm\":[1],\"inches\":[0]}}}"
+        },
+        {
+          "stage": "COMPLETE",
+          "call": 6,
+          "line": 18,
+          "contentSha256": "bdc71163bb45232c99dac5a67abccd846800623ed1280d6339a4f7d77dfd5235",
+          "content": "{\"fields\":{\"behaviorBindings\":{\"inc\":\"inc\",\"dec\":\"dec\",\"cm\":[2],\"inches\":[1]}}}"
+        }
+      ]
+    },
+    "fresh:home-5": {
+      "request": "wallpaper rolls, each roll covers 5.3 m2, enter the wall area",
+      "context": "User request: wallpaper rolls, each roll covers 5.3 m2, enter the wall area\nWidget brief: {\"app\":\"Wallpaper roll calculator\",\"language\":\"English\",\"inputs\":[{\"label\":\"Wall area\",\"unit\":\"m²\",\"type\":\"number\",\"initial\":\"\",\"min\":0}],\"constants\":[{\"label\":\"Coverage per roll\",\"value\":5.3,\"unit\":\"m²\"}],\"behavior\":[\"Compute rolls = wall area / 5.3, rounded up to a whole number\",\"Show area covered by that number of rolls and how much spare/leftover area remains\",\"Show an error/hint when the wall area is empty, zero, or negative\"],\"optional\":[{\"label\":\"Extra allowance\",\"type\":\"percentage or m²\",\"default\":\"none\",\"note\":\"allow the user to add an optional waste/pattern-match allowance before rounding\"}],\"ui\":\"Single clear card calculator: wall area field, live result showing number of rolls needed, plus small breakdown line. No network access needed.\"}\nExcerpts below may be truncated. Preserve the complete request, brief, and source URLs above.\nReply excerpt: I'll build a wallpaper roll calculator — enter the wall area and it works out how many 5.3 m² rolls you need.",
+      "wirePath": "evidence/alphy-ui/generation-full-134-after-reliability/captures/fresh:home-5:candidate:1/provider.jsonl",
+      "wireSha256": "f1c1261cf7a382ac14f3c93f0c649118f85c7acc21a4bc9c915d2171b6b5151d",
+      "terminalAttempt": {
+        "operation_id": "050d878e-acfd-457b-a91a-e817d5aef0e1",
+        "attempt": 4,
+        "at_ns": 7566261957982,
+        "kind": "attempt",
+        "stage": "behavior",
+        "outcome": "rejected",
+        "disposition": "finish",
+        "failure_code": "widget_behavior",
+        "behavior_binding": {
+          "route": "whole_screen",
+          "rule": "assertion_failed",
+          "step": 3,
+          "slot": 3,
+          "slotKind": "value",
+          "origin": "writer",
+          "bindingKind": "ui",
+          "valueShape": "number",
+          "comparison": "nonempty",
+          "observation": "comparison_failed"
+        }
+      },
+      "replies": [
+        {
+          "stage": "PLAN",
+          "call": 2,
+          "line": 6,
+          "contentSha256": "2ee7bd1cf702557ed1a4de51a3709ea44d3ff019fcdc5aef55d1da3af8a1e6b1",
+          "content": "{\"title\":\"Wallpaper roll calculator\",\"description\":\"Enter the wall area and see how many 5.3 m² wallpaper rolls you need, plus the area those rolls cover and how much spare area is left. An optional extra allowance adds a waste or pattern-match margin before rounding up. Empty, zero, or negative areas show a hint instead of a result.\",\"language\":\"en\",\"inputs\":[{\"id\":\"area\",\"label\":\"Wall area\",\"type\":\"number\",\"value\":0,\"min\":0},{\"id\":\"allowance\",\"label\":\"Extra allowance\",\"type\":\"number\",\"value\":0,\"min\":0}],\"constants\":[{\"id\":\"coverage\",\"value\":5.3}],\"needs\":[{\"id\":\"effArea\",\"type\":\"figure\",\"label\":\"Area incl. allowance\",\"description\":\"Wall area plus the optional extra allowance percentage.\",\"expression\":{\"op\":\"multiply\",\"args\":[{\"ref\":\"area\"},{\"op\":\"add\",\"args\":[{\"number\":1},{\"op\":\"divide\",\"args\":[{\"ref\":\"allowance\"},{\"number\":100}]}]}]}},{\"id\":\"rolls\",\"type\":\"figure\",\"label\":\"Rolls needed\",\"description\":\"Area including allowance divided by coverage per roll, rounded up to a whole roll.\",\"expression\":{\"op\":\"ceil\",\"args\":[{\"op\":\"divide\",\"args\":[{\"ref\":\"effArea\"},{\"ref\":\"coverage\"}]}]},\"uses\":{\"step\":\"coverage\"}},{\"id\":\"covered\",\"type\":\"figure\",\"label\":\"Area covered\",\"description\":\"Total area covered by the whole number of rolls purchased.\",\"expression\":{\"op\":\"multiply\",\"args\":[{\"ref\":\"rolls\"},{\"ref\":\"coverage\"}]},\"uses\":{\"step\":\"coverage\"}},{\"id\":\"spare\",\"type\":\"figure\",\"label\":\"Spare area\",\"description\":\"Covered area minus the area you need, showing leftover wallpaper.\",\"expression\":{\"op\":\"subtract\",\"args\":[{\"ref\":\"covered\"},{\"ref\":\"effArea\"}]}}],\"questions\":[],\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"area\":{\"kind\":\"action\",\"part\":\"area\",\"member\":\"edit\"},\"rolls\":{\"kind\":\"value\",\"part\":\"rolls\",\"member\":\"value\"},\"covered\":{\"kind\":\"value\",\"part\":\"covered\",\"member\":\"value\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"area\",\"value\":20},{\"op\":\"assert\",\"slot\":\"rolls\",\"test\":\"equals\",\"value\":4},{\"op\":\"assert\",\"slot\":\"covered\",\"test\":\"nonempty\"}]}}}"
+        },
+        {
+          "stage": "SELECTOR",
+          "call": 3,
+          "line": 9,
+          "contentSha256": "94527d6b34cd9c38eea4572029493040212b443ecec0c8327d39991df4130978",
+          "content": "{\"answers\":[{\"id\":\"s_area\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_allowance\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_effArea\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_spare\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}}]}"
+        },
+        {
+          "stage": "SELECTOR",
+          "call": 4,
+          "line": 12,
+          "contentSha256": "c2314841418c6948cb6a6dc25c4c0d89159847276d92ba6a2f77a7d7693fca96",
+          "content": "{\"answers\":[{\"id\":\"p_area\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"p_allowance\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"p_effArea\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"p_spare\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"v_profile\",\"choice\":\"A\",\"confidence\":0.55,\"probabilities\":{\"A\":0.55,\"B\":0.3,\"C\":0.15}},{\"id\":\"v_preset\",\"choice\":\"A\",\"confidence\":0.45,\"probabilities\":{\"A\":0.45,\"B\":0.1,\"C\":0.15,\"D\":0.05,\"E\":0.15,\"F\":0.1}},{\"id\":\"v_focal\",\"choice\":\"A\",\"confidence\":0.6,\"probabilities\":{\"A\":0.6,\"B\":0.1,\"C\":0.2,\"D\":0.1,\"E\":0}}]}"
+        },
+        {
+          "stage": "COMPLETE",
+          "call": 5,
+          "line": 15,
+          "contentSha256": "771d6062c2e4969658bfee5536a25e10584129300477c5fa9847a76b085621cf",
+          "content": "{\"formatVersion\":3,\"title\":\"Wallpaper roll calculator\",\"description\":\"Work out how many 5.3 m² wallpaper rolls you need for a wall area, with an optional extra allowance and the area left spare.\",\"capabilities\":[],\"capabilityResults\":false,\"stateSchema\":{\"area\":\"number\",\"allowance\":\"number\",\"effArea\":\"number\",\"rolls\":\"number\",\"covered\":\"number\",\"spare\":\"number\",\"showHint\":\"boolean\"},\"initialState\":{\"area\":0,\"allowance\":0,\"effArea\":0,\"rolls\":0,\"covered\":0,\"spare\":0,\"showHint\":true},\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"form\",\"text\":\"Wallpaper quantities\",\"children\":[{\"type\":\"numberInput\",\"text\":\"Wall area (m²)\",\"bind\":\"area\",\"action\":\"applyArea\",\"min\":0,\"max\":1000000},{\"type\":\"numberInput\",\"text\":\"Extra allowance (%)\",\"bind\":\"allowance\",\"action\":\"applyAllowance\",\"min\":0,\"max\":1000}]},{\"type\":\"card\",\"text\":\"Result\",\"children\":[{\"type\":\"metric\",\"text\":\"Rolls needed\",\"bind\":\"rolls\",\"format\":\"number\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"facts\",\"children\":[{\"type\":\"fact\",\"text\":\"Area incl. allowance (m²)\",\"bind\":\"effArea\"},{\"type\":\"fact\",\"text\":\"Area covered (m²)\",\"bind\":\"covered\"},{\"type\":\"fact\",\"text\":\"Spare area (m²)\",\"bind\":\"spare\"}]},{\"type\":\"text\",\"text\":\"Enter a wall area greater than zero to see the result.\",\"visibleBind\":\"showHint\"}]}]},\"behaviorBindings\":{\"area\":\"applyArea\",\"rolls\":[1,0],\"covered\":[1,1,1]},\"source\":\"const event = input.event;\\nconst state = input.state;\\nconst COVERAGE = 5.3;\\nconst MAXSAFE = 9007199254740991;\\nfunction round2(n) {\\n  return Math.round(n * 100) / 100;\\n}\\nfunction compute(area, allowance) {\\n  let a = Number(area);\\n  let p = Number(allowance);\\n  if (!isFinite(a) || a < 0) { a = 0; }\\n  if (!isFinite(p) || p < 0) { p = 0; }\\n  const hasArea = a > 0;\\n  if (!hasArea) {\\n    return { area: a, allowance: p, effArea: 0, rolls: 0, covered: 0, spare: 0, showHint: true };\\n  }\\n  const rawEff = a * (1 + p / 100);\\n  if (!isFinite(rawEff) || rawEff > MAXSAFE) {\\n    return { area: a, allowance: p, effArea: 0, rolls: 0, covered: 0, spare: 0, showHint: true };\\n  }\\n  const rolls = Math.ceil(rawEff / COVERAGE);\\n  if (!isFinite(rolls) || rolls > MAXSAFE) {\\n    return { area: a, allowance: p, effArea: 0, rolls: 0, covered: 0, spare: 0, showHint: true };\\n  }\\n  const covered = round2(rolls * COVERAGE);\\n  const spare = Math.max(0, round2(covered - rawEff));\\n  return { area: a, allowance: p, effArea: round2(rawEff), rolls: rolls, covered: covered, spare: spare, showHint: false };\\n}\\nif (event.type === 'preview' || event.type === 'render') {\\n  return { state: state };\\n}\\nif (event.type === 'action') {\\n  if (event.actionId === 'applyArea') {\\n    return { state: compute(event.value, state.allowance) };\\n  }\\n  if (event.actionId === 'applyAllowance') {\\n    return { state: compute(state.area, event.value) };\\n  }\\n}\\nreturn { state: state };\"}"
+        },
+        {
+          "stage": "COMPLETE",
+          "call": 6,
+          "line": 18,
+          "contentSha256": "c9963641ee43fef0ede07a4105a56134ed41b445c999336b82d9d1737becd7e6",
+          "content": "{\"fields\":{\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"form\",\"text\":\"Wallpaper quantities\",\"children\":[{\"type\":\"numberInput\",\"text\":\"Wall area (m²)\",\"bind\":\"area\",\"action\":\"applyArea\",\"min\":0,\"max\":1000000},{\"type\":\"numberInput\",\"text\":\"Extra allowance (%)\",\"bind\":\"allowance\",\"action\":\"applyAllowance\",\"min\":0,\"max\":1000}]},{\"type\":\"metric\",\"text\":\"Rolls needed\",\"bind\":\"rolls\",\"format\":\"number\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"metric\",\"text\":\"Area covered (m²)\",\"bind\":\"covered\",\"format\":\"number\"},{\"type\":\"facts\",\"children\":[{\"type\":\"fact\",\"text\":\"Area incl. allowance (m²)\",\"bind\":\"effArea\",\"format\":\"number\"},{\"type\":\"fact\",\"text\":\"Spare area (m²)\",\"bind\":\"spare\",\"format\":\"number\"}]},{\"type\":\"text\",\"text\":\"Enter a wall area greater than zero to see the result.\",\"visibleBind\":\"showHint\"}]},\"behaviorBindings\":{\"area\":\"applyArea\",\"rolls\":[1],\"covered\":[2]}}}"
+        },
+        {
+          "stage": "COMPLETE",
+          "call": 7,
+          "line": 21,
+          "contentSha256": "cb3da467cc145197d5f018056e2b2055642f745747751a9d7967cfcb3d702d2b",
+          "content": "{\"fields\":{\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"metric\",\"text\":\"Rolls needed\",\"bind\":\"rolls\",\"format\":\"number\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"metric\",\"text\":\"Area covered (m²)\",\"bind\":\"covered\",\"format\":\"number\"},{\"type\":\"form\",\"text\":\"Wallpaper quantities\",\"children\":[{\"type\":\"numberInput\",\"text\":\"Wall area (m²)\",\"bind\":\"area\",\"action\":\"applyArea\",\"min\":0,\"max\":1000000},{\"type\":\"numberInput\",\"text\":\"Extra allowance (%)\",\"bind\":\"allowance\",\"action\":\"applyAllowance\",\"min\":0,\"max\":1000}]},{\"type\":\"facts\",\"children\":[{\"type\":\"fact\",\"text\":\"Area incl. allowance (m²)\",\"bind\":\"effArea\",\"format\":\"number\"},{\"type\":\"fact\",\"text\":\"Spare area (m²)\",\"bind\":\"spare\",\"format\":\"number\"}]},{\"type\":\"text\",\"text\":\"Enter a wall area greater than zero to see the result.\",\"visibleBind\":\"showHint\"}]},\"behaviorBindings\":{\"area\":\"applyArea\",\"rolls\":[0],\"covered\":[1]}},\"sourceEdits\":[{\"search\":\"  const covered = round2(rolls * COVERAGE);\",\"replace\":\"  const covered = round2(rolls * COVERAGE) || 0;\"}]}"
+        },
+        {
+          "stage": "COMPLETE",
+          "call": 8,
+          "line": 24,
+          "contentSha256": "cba3fb976df0c80d2070c6b0900a847352022594c895c43ce7c95a86f9db384f",
+          "content": "{\"fields\":{\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"metric\",\"text\":\"Rolls needed\",\"bind\":\"rolls\",\"format\":\"number\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"text\",\"text\":\"Area covered (m²)\",\"bind\":\"covered\"},{\"type\":\"form\",\"text\":\"Wallpaper quantities\",\"children\":[{\"type\":\"numberInput\",\"text\":\"Wall area (m²)\",\"bind\":\"area\",\"action\":\"applyArea\",\"min\":0,\"max\":1000000},{\"type\":\"numberInput\",\"text\":\"Extra allowance (%)\",\"bind\":\"allowance\",\"action\":\"applyAllowance\",\"min\":0,\"max\":1000}]},{\"type\":\"facts\",\"children\":[{\"type\":\"fact\",\"text\":\"Area incl. allowance (m²)\",\"bind\":\"effArea\",\"format\":\"number\"},{\"type\":\"fact\",\"text\":\"Spare area (m²)\",\"bind\":\"spare\",\"format\":\"number\"}]},{\"type\":\"text\",\"text\":\"Enter a wall area greater than zero to see the result.\",\"visibleBind\":\"showHint\"}]},\"behaviorBindings\":{\"area\":\"applyArea\",\"rolls\":[0],\"covered\":[1]}},\"sourceEdits\":[{\"search\":\"  const covered = round2(rolls * COVERAGE) || 0;\",\"replace\":\"  const covered = Math.max(0, round2(rolls * COVERAGE));\"}]}"
+        }
+      ]
+    },
+    "fresh:beyond-1": {
+      "request": "dice roller for board games",
+      "context": "User request: dice roller for board games\nWidget brief: Interactive dice roller for board games. Controls: buttons for d4, d6, d8, d10, d12, d20, and d100; a quantity selector (1-10 dice) per roll; a \"Roll\" action with animated dice results; display each die result and the sum of the current roll. History list of recent rolls with total, plus a clear-history button. Optional quick presets such as 2d6. UI language: English. No network needed.\nExcerpts below may be truncated. Preserve the complete request, brief, and source URLs above.\nReply excerpt: Here's a dice roller for your board games — roll standard dice and keep a running total of results.",
+      "wirePath": "evidence/alphy-ui/generation-full-134-after-reliability/captures/fresh:beyond-1:candidate:1/provider.jsonl",
+      "wireSha256": "e4a40888c36df5c15681fd3badb4a7856f4110d238d8a06a11bc19ab26f29a3c",
+      "terminalAttempt": {
+        "operation_id": "0e39ba2d-9f86-4ff2-b915-8dc1c59f95dd",
+        "attempt": 4,
+        "at_ns": 9698309060790,
+        "kind": "attempt",
+        "stage": "behavior",
+        "outcome": "rejected",
+        "disposition": "finish",
+        "failure_code": "widget_behavior",
+        "behavior_binding": {
+          "route": "whole_screen",
+          "rule": "assertion_failed",
+          "step": 4,
+          "slot": 5,
+          "slotKind": "value",
+          "origin": "writer",
+          "bindingKind": "ui",
+          "valueShape": "number",
+          "comparison": "nonempty",
+          "observation": "comparison_failed"
+        }
+      },
+      "replies": [
+        {
+          "stage": "PLAN",
+          "call": 2,
+          "line": 6,
+          "contentSha256": "92ad3df35d530e969e85a6e560404bf247f6e12d2978a79d68249c56fd0feb44",
+          "content": "{\"wholeScreen\":true,\"language\":\"en\",\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"d20\":{\"kind\":\"action\"},\"quantity\":{\"kind\":\"action\"},\"roll\":{\"kind\":\"action\"},\"preset2d6\":{\"kind\":\"action\"},\"total\":{\"kind\":\"value\"},\"history\":{\"kind\":\"collection\"},\"clear\":{\"kind\":\"action\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"quantity\",\"value\":3},{\"op\":\"action\",\"slot\":\"d20\"},{\"op\":\"action\",\"slot\":\"roll\"},{\"op\":\"assert\",\"slot\":\"total\",\"test\":\"nonempty\"},{\"op\":\"assert\",\"slot\":\"history\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"preset2d6\"},{\"op\":\"assert\",\"slot\":\"history\",\"test\":\"equals\",\"value\":2},{\"op\":\"action\",\"slot\":\"clear\"},{\"op\":\"assert\",\"slot\":\"history\",\"test\":\"equals\",\"value\":0}]}}}"
+        },
+        {
+          "stage": "COMPLETE",
+          "call": 3,
+          "line": 9,
+          "contentSha256": "6af90b7f58ab4716c9259ed42345469beb3cbdcb9185e64303d5564f1fbce8db",
+          "content": "{\"formatVersion\":3,\"title\":\"Dice Roller\",\"description\":\"Roll standard board-game dice, see the total, and keep recent rolls.\",\"capabilities\":[],\"capabilityResults\":false,\"stateSchema\":{\"die\":\"number\",\"quantity\":\"number\",\"rolls\":{\"type\":\"array\",\"maxItems\":10,\"items\":\"number\"},\"total\":\"number\",\"summary\":\"string\",\"dieLabel\":\"string\",\"history\":{\"type\":\"list\",\"maxItems\":50,\"fields\":{\"id\":\"string\",\"label\":\"string\",\"total\":\"number\"}},\"seq\":\"number\"},\"initialState\":{\"die\":6,\"quantity\":1,\"rolls\":[],\"total\":0,\"summary\":\"Pick a die, set the quantity, then roll.\",\"dieLabel\":\"d6 · 1 die\",\"history\":[],\"seq\":0},\"ui\":{\"type\":\"column\",\"style\":{\"gap\":\"medium\",\"padding\":\"medium\"},\"children\":[{\"type\":\"metric\",\"text\":\"Total\",\"bind\":\"total\",\"format\":\"number\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"text\",\"text\":\"Latest roll\",\"bind\":\"summary\"},{\"type\":\"section\",\"text\":\"Choose a die\",\"children\":[{\"type\":\"text\",\"text\":\"Selected die\",\"bind\":\"dieLabel\"},{\"type\":\"grid\",\"columns\":4,\"minCellWidth\":48,\"children\":[{\"type\":\"button\",\"text\":\"d4\",\"action\":\"die4\"},{\"type\":\"button\",\"text\":\"d6\",\"action\":\"die6\"},{\"type\":\"button\",\"text\":\"d8\",\"action\":\"die8\"},{\"type\":\"button\",\"text\":\"d10\",\"action\":\"die10\"},{\"type\":\"button\",\"text\":\"d12\",\"action\":\"die12\"},{\"type\":\"button\",\"text\":\"d20\",\"action\":\"die20\"},{\"type\":\"button\",\"text\":\"d100\",\"action\":\"die100\"}]}]},{\"type\":\"section\",\"text\":\"Quantity\",\"children\":[{\"type\":\"numberInput\",\"text\":\"Number of dice (1-10)\",\"bind\":\"quantity\",\"action\":\"quantity\",\"min\":1,\"max\":10,\"step\":1}]},{\"type\":\"row\",\"children\":[{\"type\":\"button\",\"text\":\"Roll\",\"action\":\"roll\",\"variant\":\"filled\"},{\"type\":\"button\",\"text\":\"Quick 2d6\",\"action\":\"preset2d6\"}]},{\"type\":\"list\",\"text\":\"Recent rolls\",\"bind\":\"history\",\"columns\":[{\"text\":\"Roll\",\"field\":\"label\"},{\"text\":\"Total\",\"field\":\"total\"}],\"emptyText\":\"No rolls yet. Pick a die and roll.\"},{\"type\":\"button\",\"text\":\"Clear history\",\"action\":\"clear\"}]},\"behaviorBindings\":{\"d20\":\"die20\",\"quantity\":\"quantity\",\"roll\":\"roll\",\"preset2d6\":\"preset2d6\",\"total\":[0],\"history\":[5],\"clear\":\"clear\"},\"source\":\"const event = input.event;\\nif (!event || event.type !== 'action') return { state: input.state };\\nconst state = input.state;\\nconst label = function (die, count) {\\n  return 'd' + die + ' · ' + count + (count === 1 ? ' die' : ' dice');\\n};\\nconst clampInt = function (v, lo, hi) {\\n  let n = Math.round(Number(v));\\n  if (!isFinite(n)) n = lo;\\n  if (n < lo) n = lo;\\n  if (n > hi) n = hi;\\n  return n;\\n};\\nconst rollDice = function (faces, count) {\\n  const out = [];\\n  for (let i = 0; i < count; i += 1) out.push(1 + Math.floor(Math.random() * faces));\\n  return out;\\n};\\nconst doRoll = function (s, faces, count) {\\n  const rolls = rollDice(faces, count);\\n  let total = 0;\\n  for (let i = 0; i < rolls.length; i += 1) total += rolls[i];\\n  const seq = s.seq + 1;\\n  const nextHistory = [{ id: 'roll-' + seq, label: count + 'd' + faces, total: total }].concat(s.history).slice(0, 50);\\n  return {\\n    die: faces,\\n    quantity: count,\\n    rolls: rolls,\\n    total: total,\\n    summary: count + 'd' + faces + ': ' + rolls.join(' + ') + ' = ' + total,\\n    dieLabel: label(faces, count),\\n    history: nextHistory,\\n    seq: seq\\n  };\\n};\\nconst facesById = { die4: 4, die6: 6, die8: 8, die10: 10, die12: 12, die20: 20, die100: 100 };\\nconst faces = facesById[event.actionId];\\nif (faces) {\\n  return { state: Object.assign({}, state, { die: faces, dieLabel: label(faces, state.quantity) }) };\\n}\\nif (event.actionId === 'quantity') {\\n  const q = clampInt(event.value, 1, 10);\\n  return { state: Object.assign({}, state, { quantity: q, dieLabel: label(state.die, q) }) };\\n}\\nif (event.actionId === 'roll') {\\n  return { state: doRoll(state, state.die, state.quantity) };\\n}\\nif (event.actionId === 'preset2d6') {\\n  return { state: doRoll(state, 6, 2) };\\n}\\nif (event.actionId === 'clear') {\\n  return { state: Object.assign({}, state, { history: [] }) };\\n}\\nreturn { state: input.state };\"}"
+        },
+        {
+          "stage": "COMPLETE",
+          "call": 4,
+          "line": 12,
+          "contentSha256": "48aa0ac21ec044ced5089cafd0634ed60b0f13c838a49a275586f744a33ddd21",
+          "content": "{\"fields\":{\"stateSchema\":{\"die\":\"number\",\"quantity\":\"number\",\"rolls\":{\"type\":\"array\",\"maxItems\":10,\"items\":\"number\"},\"total\":\"number\",\"summary\":\"string\",\"dieLabel\":\"string\",\"history\":{\"type\":\"list\",\"maxItems\":50,\"fields\":{\"id\":\"string\",\"label\":\"string\",\"total\":\"number\"}},\"seq\":\"number\",\"seed\":\"number\"},\"initialState\":{\"die\":6,\"quantity\":1,\"rolls\":[],\"total\":0,\"summary\":\"Pick a die, set the quantity, then roll.\",\"dieLabel\":\"d6 · 1 die\",\"history\":[],\"seq\":0,\"seed\":1}},\"sourceEdits\":[{\"search\":\"  let n = Math.round(Number(v));\",\"replace\":\"  let n = Number(v);\\n  if (!isFinite(n)) n = lo;\\n  n = n < 0 ? -((-n + 0.5) | 0) : ((n + 0.5) | 0);\"},{\"search\":\"const rollDice = function (faces, count) {\\n  const out = [];\\n  for (let i = 0; i < count; i += 1) out.push(1 + Math.floor(Math.random() * faces));\\n  return out;\\n};\",\"replace\":\"const rollDice = function (faces, count, seed) {\\n  const out = [];\\n  let s = Number(seed);\\n  if (!isFinite(s) || s <= 0) s = 1;\\n  s = s % 2147483647;\\n  if (s <= 0) s = 1;\\n  for (let i = 0; i < count; i += 1) {\\n    s = (s * 48271) % 2147483647;\\n    out.push(1 + (s % faces));\\n  }\\n  return { rolls: out, seed: s };\\n};\"},{\"search\":\"  const rolls = rollDice(faces, count);\",\"replace\":\"  const rolled = rollDice(faces, count, s.seed);\\n  const rolls = rolled.rolls;\"},{\"search\":\"    seq: seq\\n  };\",\"replace\":\"    seq: seq,\\n    seed: rolled.seed\\n  };\"}]}"
+        },
+        {
+          "stage": "COMPLETE",
+          "call": 5,
+          "line": 15,
+          "contentSha256": "1311a2964260dae3ceae23c1bad0ad4cdf90fd2dcbdf7574b4de79168f5a7e1d",
+          "content": "{\"sourceEdits\":[{\"search\":\"const event = input.event;\\nif (!event || event.type !== 'action') return { state: input.state };\\nconst state = input.state;\\nconst label = function (die, count) {\\n  return 'd' + die + ' · ' + count + (count === 1 ? ' die' : ' dice');\\n};\\nconst clampInt = function (v, lo, hi) {\\n  let n = Number(v);\\n  if (!isFinite(n)) n = lo;\\n  n = n < 0 ? -((-n + 0.5) | 0) : ((n + 0.5) | 0);\\n  if (!isFinite(n)) n = lo;\\n  if (n < lo) n = lo;\\n  if (n > hi) n = hi;\\n  return n;\\n};\\nconst rollDice = function (faces, count, seed) {\\n  const out = [];\\n  let s = Number(seed);\\n  if (!isFinite(s) || s <= 0) s = 1;\\n  s = s % 2147483647;\\n  if (s <= 0) s = 1;\\n  for (let i = 0; i < count; i += 1) {\\n    s = (s * 48271) % 2147483647;\\n    out.push(1 + (s % faces));\\n  }\\n  return { rolls: out, seed: s };\\n};\\nconst doRoll = function (s, faces, count) {\\n  const rolled = rollDice(faces, count, s.seed);\\n  const rolls = rolled.rolls;\\n  let total = 0;\\n  for (let i = 0; i < rolls.length; i += 1) total += rolls[i];\\n  const seq = s.seq + 1;\\n  const nextHistory = [{ id: 'roll-' + seq, label: count + 'd' + faces, total: total }].concat(s.history).slice(0, 50);\\n  return {\\n    die: faces,\\n    quantity: count,\\n    rolls: rolls,\\n    total: total,\\n    summary: count + 'd' + faces + ': ' + rolls.join(' + ') + ' = ' + total,\\n    dieLabel: label(faces, count),\\n    history: nextHistory,\\n    seq: seq,\\n    seed: rolled.seed\\n  };\\n};\\nconst facesById = { die4: 4, die6: 6, die8: 8, die10: 10, die12: 12, die20: 20, die100: 100 };\\nconst faces = facesById[event.actionId];\\nif (faces) {\\n  return { state: Object.assign({}, state, { die: faces, dieLabel: label(faces, state.quantity) }) };\\n}\\nif (event.actionId === 'quantity') {\\n  const q = clampInt(event.value, 1, 10);\\n  return { state: Object.assign({}, state, { quantity: q, dieLabel: label(state.die, q) }) };\\n}\\nif (event.actionId === 'roll') {\\n  return { state: doRoll(state, state.die, state.quantity) };\\n}\\nif (event.actionId === 'preset2d6') {\\n  return { state: doRoll(state, 6, 2) };\\n}\\nif (event.actionId === 'clear') {\\n  return { state: Object.assign({}, state, { history: [] }) };\\n}\\nreturn { state: input.state };\",\"replace\":\"const st = input.state;\\nconst ev = input.event || {};\\nif (ev.type !== 'action') return { state: st };\\nconst action = ev.actionId;\\nconst dieSizes = { die4: 4, die6: 6, die8: 8, die10: 10, die12: 12, die20: 20, die100: 100 };\\nconst labelFor = function (faces, count) {\\n  return 'd' + faces + ' x ' + count + (count === 1 ? ' die' : ' dice');\\n};\\nconst copyState = function (base, patch) {\\n  const out = {};\\n  const keys = Object.keys(base);\\n  for (let i = 0; i < keys.length; i += 1) out[keys[i]] = base[keys[i]];\\n  const pkeys = Object.keys(patch);\\n  for (let j = 0; j < pkeys.length; j += 1) out[pkeys[j]] = patch[pkeys[j]];\\n  return out;\\n};\\nconst readHistory = function (source) {\\n  const out = [];\\n  if (source && typeof source.length === 'number') {\\n    for (let i = 0; i < source.length; i += 1) {\\n      const item = source[i];\\n      if (item && typeof item === 'object' && typeof item.id === 'string' && item.id.length > 0) {\\n        const lbl = typeof item.label === 'string' ? item.label : '';\\n        const tot = typeof item.total === 'number' && isFinite(item.total) ? item.total : 0;\\n        out.push({ id: item.id, label: lbl, total: tot });\\n      }\\n    }\\n  }\\n  return out;\\n};\\nconst makeRoll = function (base, faces, count) {\\n  let q = Math.round(Number(count));\\n  if (!(q >= 1)) q = 1;\\n  if (q > 10) q = 10;\\n  let f = Math.round(Number(faces));\\n  if (!(f >= 2)) f = 6;\\n  if (f > 100) f = 100;\\n  const results = [];\\n  let sum = 0;\\n  for (let i = 0; i < q; i += 1) {\\n    const value = 1 + Math.floor(Math.random() * f);\\n    results.push(value);\\n    sum += value;\\n  }\\n  const prevSeq = typeof base.seq === 'number' && isFinite(base.seq) ? base.seq : 0;\\n  const seq = prevSeq + 1;\\n  const history = [];\\n  history.push({ id: 'roll-' + seq, label: q + 'd' + f, total: sum });\\n  const previous = readHistory(base.history);\\n  for (let i = 0; i < previous.length && history.length < 50; i += 1) history.push(previous[i]);\\n  return copyState(base, {\\n    die: f,\\n    quantity: q,\\n    rolls: results,\\n    total: sum,\\n    summary: q + 'd' + f + ': ' + results.join(' + ') + ' = ' + sum,\\n    dieLabel: labelFor(f, q),\\n    history: history,\\n    seq: seq,\\n    seed: seq\\n  });\\n};\\nconst pickedSize = dieSizes[action];\\nif (pickedSize) {\\n  const q = typeof st.quantity === 'number' ? st.quantity : 1;\\n  return { state: copyState(st, { die: pickedSize, dieLabel: labelFor(pickedSize, q) }) };\\n}\\nif (action === 'quantity') {\\n  let q = Math.round(Number(ev.value));\\n  if (!(q >= 1)) q = 1;\\n  if (q > 10) q = 10;\\n  const d = typeof st.die === 'number' ? st.die : 6;\\n  return { state: copyState(st, { quantity: q, dieLabel: labelFor(d, q) }) };\\n}\\nif (action === 'roll') {\\n  return { state: makeRoll(st, st.die, st.quantity) };\\n}\\nif (action === 'preset2d6') {\\n  return { state: makeRoll(st, 6, 2) };\\n}\\nif (action === 'clear') {\\n  return { state: copyState(st, { history: [] }) };\\n}\\nreturn { state: st };\"}]}"
+        },
+        {
+          "stage": "COMPLETE",
+          "call": 6,
+          "line": 18,
+          "contentSha256": "02e5657d9ed04fb3521bd484fb93310f2b224975a99ddafc3d9dcdc9317244cd",
+          "content": "{\"sourceEdits\":[{\"search\":\"  const results = [];\\n  let sum = 0;\\n  for (let i = 0; i < q; i += 1) {\\n    const value = 1 + Math.floor(Math.random() * f);\\n    results.push(value);\\n    sum += value;\\n  }\",\"replace\":\"  const results = [];\\n  let sum = 0;\\n  let rng = typeof base.seed === 'number' && isFinite(base.seed) ? Math.floor(base.seed) : 1;\\n  rng = rng % 2147483647;\\n  if (!(rng > 0)) rng = 1;\\n  for (let i = 0; i < q; i += 1) {\\n    rng = (rng * 16807) % 2147483647;\\n    if (!(rng > 0)) rng = 1;\\n    const value = 1 + (rng % f);\\n    results.push(value);\\n    sum += value;\\n  }\\n  if (!isFinite(sum) || sum < 1) sum = q;\"},{\"search\":\"    seq: seq,\\n    seed: seq\",\"replace\":\"    seq: seq,\\n    seed: rng\"}]}"
+        }
+      ]
+    },
+    "compose:shopping": {
+      "request": "Shopping list where I can add items and remove them",
+      "context": "User request: Shopping list where I can add items and remove them\nWidget brief: Interactive shopping list app. Add items via a text input with an Add button (submit on Enter too). Each item shows a remove/delete button to delete it. Optionally allow checking items off as done, with a \"clear completed\" option. Show a count of remaining items and an empty state message. Keep the list in memory during the session. UI language: English.\nExcerpts below may be truncated. Preserve the complete request, brief, and source URLs above.\nReply excerpt: I'll build a shopping list where you can add and remove items.",
+      "wirePath": "evidence/alphy-ui/generation-full-134-after-reliability/captures/compose:shopping:candidate:1/provider.jsonl",
+      "wireSha256": "4512bf839b6731eb273205bd68a763201340028813a73ff66d346c0dfb94d8dd",
+      "terminalAttempt": {
+        "operation_id": "28b4c9df-8f2b-4b0c-b6ce-30f691f47e42",
+        "attempt": 1,
+        "at_ns": 11668507858355,
+        "kind": "attempt",
+        "stage": "behavior",
+        "outcome": "rejected",
+        "disposition": "finish",
+        "failure_code": "widget_behavior",
+        "behavior_binding": {
+          "route": "native",
+          "rule": "action_unavailable",
+          "step": 2,
+          "slot": 1,
+          "slotKind": "action",
+          "origin": "native",
+          "bindingKind": "id"
+        }
+      },
+      "replies": [
+        {
+          "stage": "PLAN",
+          "call": 2,
+          "line": 6,
+          "contentSha256": "d402bbcd084220df63b3d62611a65803643a21e36881b18a663334141c4310a5",
+          "content": "{\"title\":\"Shopping list\",\"description\":\"Add items to a shopping list and remove them when no longer needed.\",\"language\":\"en\",\"inputs\":[],\"constants\":[],\"needs\":[{\"id\":\"items\",\"type\":\"entries\",\"label\":\"Shopping list\",\"description\":\"Add shopping items and remove them from the list.\"}],\"questions\":[],\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"add\":{\"kind\":\"action\",\"part\":\"items\",\"member\":\"add\"},\"remove\":{\"kind\":\"action\",\"part\":\"items\",\"member\":\"remove\"},\"list\":{\"kind\":\"collection\",\"part\":\"items\",\"member\":\"records\"}},\"steps\":[{\"op\":\"assert\",\"slot\":\"list\",\"test\":\"equals\",\"value\":0},{\"op\":\"action\",\"slot\":\"add\",\"value\":\"Milk\"},{\"op\":\"assert\",\"slot\":\"list\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"remove\"},{\"op\":\"assert\",\"slot\":\"list\",\"test\":\"equals\",\"value\":0}]}}}"
+        },
+        {
+          "stage": "SELECTOR",
+          "call": 3,
+          "line": 9,
+          "contentSha256": "a8aa28b5d161635a64ddc98aa9c1a66823f104ee3f3efdd70f74352bb8cb836e",
+          "content": "{\"answers\":[{\"id\":\"s_items\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}}]}"
+        },
+        {
+          "stage": "SELECTOR",
+          "call": 4,
+          "line": 12,
+          "contentSha256": "b3918d81665b64b0b7b3ea0647842f5af09627effd2fb0a3e504cc51cfc49b1a",
+          "content": "{\"answers\":[{\"id\":\"p_items\",\"choice\":\"A\",\"confidence\":0.62,\"probabilities\":{\"A\":0.62,\"B\":0.38}},{\"id\":\"v_profile\",\"choice\":\"C\",\"confidence\":0.7,\"probabilities\":{\"A\":0.2,\"B\":0.1,\"C\":0.7}},{\"id\":\"v_preset\",\"choice\":\"A\",\"confidence\":0.5,\"probabilities\":{\"A\":0.5,\"B\":0.15,\"C\":0.1,\"D\":0.1,\"E\":0.1,\"F\":0.05}},{\"id\":\"v_focal\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}}]}"
+        }
+      ]
+    },
+    "fresh:cooking-2": {
+      "request": "egg timer with a dropdown, soft 6 minutes, medium 8, hard 10",
+      "context": "User request: egg timer with a dropdown, soft 6 minutes, medium 8, hard 10\nWidget brief: Build a local egg timer mini-app. Controls: a dropdown (select) labeled \"Egg doneness\" with options: Soft — 6 minutes, Medium — 8 minutes, Hard — 10 minutes. Default selection: Soft (6 minutes). Show the selected duration as mm:ss. Buttons: Start/Pause toggle, Reset. Display a countdown that updates each second while running, with a progress indicator (e.g., circular ring or progress bar). When the countdown reaches zero, show a clear \"Done!\" state with a visual highlight and, if supported, a sound/vibration; stop the countdown. Changing the dropdown while idle updates the displayed duration immediately; changing it while running should stop/reset and update the duration (with a brief confirm behavior noted in the UI). Keep the layout simple, large, and touch-friendly for kitchen use. Interface language: English. No network access needed.\nExcerpts below may be truncated. Preserve the complete request, brief, and source URLs above.\nReply excerpt: I'll build an egg timer with a soft/medium/hard dropdown (6, 8, 10 minutes).",
+      "wirePath": "evidence/alphy-ui/generation-full-134-after-reliability/captures/fresh:cooking-2:candidate:1/provider.jsonl",
+      "wireSha256": "81220d99bf96f753652be18606cd4ce828d47d43c945cbc9e0f0a53e4abab46d",
+      "terminalAttempt": {
+        "operation_id": "926118e0-0f97-44d2-afab-d522463ea618",
+        "attempt": 4,
+        "at_ns": 6298055072919,
+        "kind": "attempt",
+        "stage": "plan",
+        "outcome": "rejected",
+        "disposition": "finish",
+        "failure_code": "widget_plan",
+        "plan_path": "$.behavior.scenario.steps[26]",
+        "plan_rule": "behavior.integer",
+        "plan_observed_type": "unknown"
+      },
+      "replies": [
+        {
+          "stage": "PLAN",
+          "call": 2,
+          "line": 6,
+          "contentSha256": "a8dc0edf10dfcbe9d61b175896ecb7c96d57359aa65cc8e65806bab0168586f0",
+          "content": "{\"wholeScreen\":true,\"language\":\"en\",\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"duration\":{\"kind\":\"value\"},\"remaining\":{\"kind\":\"value\"},\"progress\":{\"kind\":\"value\"},\"done\":{\"kind\":\"value\"},\"doneness\":{\"kind\":\"action\"},\"start\":{\"kind\":\"action\"},\"pause\":{\"kind\":\"action\"},\"reset\":{\"kind\":\"action\"},\"timer\":{\"kind\":\"timer\"}},\"steps\":[{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"06:00\"},{\"op\":\"action\",\"slot\":\"doneness\",\"value\":\"Hard\"},{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"10:00\"},{\"op\":\"action\",\"slot\":\"doneness\",\"value\":\"Soft\"},{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"06:00\"},{\"op\":\"capture\",\"slot\":\"remaining\",\"as\":\"idle\"},{\"op\":\"capture\",\"slot\":\"progress\",\"as\":\"p0\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":1},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"changed\",\"capture\":\"idle\"},{\"op\":\"assert\",\"slot\":\"progress\",\"test\":\"changed\",\"capture\":\"p0\"},{\"op\":\"action\",\"slot\":\"doneness\",\"value\":\"Medium\"},{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"08:00\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"08:00\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":1},{\"op\":\"action\",\"slot\":\"pause\"},{\"op\":\"capture\",\"slot\":\"remaining\",\"as\":\"paused\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":2},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"unchanged\",\"capture\":\"paused\"},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"08:00\"},{\"op\":\"action\",\"slot\":\"doneness\",\"value\":\"Soft\"},{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"06:00\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"06:00\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":360},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"00:00\"},{\"op\":\"assert\",\"slot\":\"done\",\"test\":\"equals\",\"value\":\"Done!\"},{\"op\":\"capture\",\"slot\":\"done\",\"as\":\"finished\"},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"done\",\"test\":\"changed\",\"capture\":\"finished\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"06:00\"}]}}}"
+        },
+        {
+          "stage": "PLAN",
+          "call": 3,
+          "line": 9,
+          "contentSha256": "9d7d6f861b0d451a9e60dbf75f9b590e9adf16dce88cf4db3a80d3e7c6d0b776",
+          "content": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"duration\":{\"kind\":\"value\"},\"remaining\":{\"kind\":\"value\"},\"progress\":{\"kind\":\"value\"},\"done\":{\"kind\":\"value\"},\"doneness\":{\"kind\":\"action\"},\"start\":{\"kind\":\"action\"},\"pause\":{\"kind\":\"action\"},\"reset\":{\"kind\":\"action\"},\"timer\":{\"kind\":\"timer\"}},\"steps\":[{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"06:00\"},{\"op\":\"action\",\"slot\":\"doneness\",\"value\":\"Hard\"},{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"10:00\"},{\"op\":\"action\",\"slot\":\"doneness\",\"value\":\"Soft\"},{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"06:00\"},{\"op\":\"capture\",\"slot\":\"remaining\",\"as\":\"idle\"},{\"op\":\"capture\",\"slot\":\"progress\",\"as\":\"p0\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":1},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"changed\",\"capture\":\"idle\"},{\"op\":\"assert\",\"slot\":\"progress\",\"test\":\"changed\",\"capture\":\"p0\"},{\"op\":\"action\",\"slot\":\"doneness\",\"value\":\"Medium\"},{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"08:00\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"08:00\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":1},{\"op\":\"action\",\"slot\":\"pause\"},{\"op\":\"capture\",\"slot\":\"remaining\",\"as\":\"paused\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":2},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"unchanged\",\"capture\":\"paused\"},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"08:00\"},{\"op\":\"action\",\"slot\":\"doneness\",\"value\":\"Soft\"},{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"06:00\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"06:00\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":60},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":60},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":60},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":60},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":60},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":60},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"00:00\"},{\"op\":\"assert\",\"slot\":\"done\",\"test\":\"equals\",\"value\":\"Done!\"},{\"op\":\"capture\",\"slot\":\"done\",\"as\":\"finished\"},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"done\",\"test\":\"changed\",\"capture\":\"finished\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"06:00\"}]}}}}"
+        },
+        {
+          "stage": "PLAN",
+          "call": 4,
+          "line": 12,
+          "contentSha256": "5d8e44c7e093fc42a5ec513d8e8f1d0087d7c2e6fc8da2c24038334a3e5688ca",
+          "content": "{\"type\":\"json_object\",\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"duration\":{\"kind\":\"value\"},\"remaining\":{\"kind\":\"value\"},\"done\":{\"kind\":\"value\"},\"doneness\":{\"kind\":\"action\"},\"start\":{\"kind\":\"action\"},\"pause\":{\"kind\":\"action\"},\"reset\":{\"kind\":\"action\"},\"timer\":{\"kind\":\"timer\"}},\"steps\":[{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"06:00\"},{\"op\":\"action\",\"slot\":\"doneness\",\"value\":\"Hard\"},{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"10:00\"},{\"op\":\"action\",\"slot\":\"doneness\",\"value\":\"Soft\"},{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"06:00\"},{\"op\":\"capture\",\"slot\":\"remaining\",\"as\":\"idle\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"changed\",\"capture\":\"idle\"},{\"op\":\"action\",\"slot\":\"pause\"},{\"op\":\"capture\",\"slot\":\"remaining\",\"as\":\"paused\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"unchanged\",\"capture\":\"paused\"},{\"op\":\"action\",\"slot\":\"doneness\",\"value\":\"Medium\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"08:00\"},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"08:00\"},{\"op\":\"action\",\"slot\":\"doneness\",\"value\":\"Soft\"},{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"06:00\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"06:00\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"00:00\"},{\"op\":\"assert\",\"slot\":\"done\",\"test\":\"equals\",\"value\":\"Done!\"},{\"op\":\"capture\",\"slot\":\"done\",\"as\":\"finished\"},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"done\",\"test\":\"changed\",\"capture\":\"finished\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"06:00\"}]}}}}"
+        },
+        {
+          "stage": "PLAN",
+          "call": 5,
+          "line": 15,
+          "contentSha256": "9e6cb4bb089184401158089bd42697f3b8173d73e665e0d953b36d1c79769e41",
+          "content": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"duration\":{\"kind\":\"value\"},\"remaining\":{\"kind\":\"value\"},\"progress\":{\"kind\":\"value\"},\"done\":{\"kind\":\"value\"},\"doneness\":{\"kind\":\"action\"},\"start\":{\"kind\":\"action\"},\"pause\":{\"kind\":\"action\"},\"reset\":{\"kind\":\"action\"},\"timer\":{\"kind\":\"timer\"}},\"steps\":[{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"06:00\"},{\"op\":\"action\",\"slot\":\"doneness\",\"value\":\"Hard\"},{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"10:00\"},{\"op\":\"action\",\"slot\":\"doneness\",\"value\":\"Soft\"},{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"06:00\"},{\"op\":\"capture\",\"slot\":\"remaining\",\"as\":\"idle\"},{\"op\":\"capture\",\"slot\":\"progress\",\"as\":\"p0\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":1},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"changed\",\"capture\":\"idle\"},{\"op\":\"assert\",\"slot\":\"progress\",\"test\":\"changed\",\"capture\":\"p0\"},{\"op\":\"action\",\"slot\":\"doneness\",\"value\":\"Medium\"},{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"08:00\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"08:00\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":1},{\"op\":\"action\",\"slot\":\"pause\"},{\"op\":\"capture\",\"slot\":\"remaining\",\"as\":\"paused\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":2},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"unchanged\",\"capture\":\"paused\"},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"08:00\"},{\"op\":\"action\",\"slot\":\"doneness\",\"value\":\"Soft\"},{\"op\":\"assert\",\"slot\":\"duration\",\"test\":\"equals\",\"value\":\"06:00\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"06:00\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":30},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":30},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":30},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":30},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":30},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":30},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":30},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":30},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":30},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":30},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":30},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":30},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"00:00\"},{\"op\":\"assert\",\"slot\":\"done\",\"test\":\"equals\",\"value\":\"Done!\"},{\"op\":\"capture\",\"slot\":\"done\",\"as\":\"finished\"},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"done\",\"test\":\"changed\",\"capture\":\"finished\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"06:00\"}]}}}}"
+        }
+      ]
+    },
+    "compose:tea": {
+      "request": "Tea steeping timer with green, black and herbal tea, vibrate when ready",
+      "context": "User request: Tea steeping timer with green, black and herbal tea, vibrate when ready\nWidget brief: Tea steeping timer mini-app. Presets: Green tea (2–3 min, default 3:00), Black tea (3–5 min, default 4:00), Herbal tea (5–7 min, default 5:00). User picks a tea type, then can adjust the time before starting. Large countdown display with start/pause/reset controls. On finish: play a short sound and trigger device vibration (via the supported foreground vibration effect) plus a visible \"Ready\" state; if vibration is unavailable, show a clear message instead. Show basic steeping tips per tea type. App interface in English.\nExcerpts below may be truncated. Preserve the complete request, brief, and source URLs above.\nReply excerpt: I'll build a tea steeping timer with presets for green, black, and herbal tea that vibrates when time's up.",
+      "wirePath": "evidence/alphy-ui/generation-full-134-after-reliability/captures/compose:tea:candidate:1/provider.jsonl",
+      "wireSha256": "dfd264ec3f808f8f201aa2407fc509ff1fe4c6817cefba6c11b705327c15cfb4",
+      "terminalAttempt": {
+        "operation_id": "c99d42b8-c594-465c-afeb-801053df91e9",
+        "attempt": 4,
+        "at_ns": 10911037092160,
+        "kind": "attempt",
+        "stage": "plan",
+        "outcome": "rejected",
+        "disposition": "finish",
+        "failure_code": "widget_plan",
+        "plan_path": "$.behavior",
+        "plan_rule": "behavior.slots_or_events",
+        "plan_observed_type": "unknown"
+      },
+      "replies": [
+        {
+          "stage": "PLAN",
+          "call": 2,
+          "line": 6,
+          "contentSha256": "8baedf02e13cc42eaf6b81dd03394700ddcab24daa25a481a60a54e542cc4f34",
+          "content": "{\"wholeScreen\":true,\"language\":\"en\",\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"teaHerbal\":{\"kind\":\"action\"},\"tips\":{\"kind\":\"value\"},\"remaining\":{\"kind\":\"value\"},\"teaGreen\":{\"kind\":\"action\"},\"minutes\":{\"kind\":\"action\"},\"start\":{\"kind\":\"action\"},\"timer\":{\"kind\":\"timer\"},\"pause\":{\"kind\":\"action\"},\"ready\":{\"kind\":\"value\"},\"reset\":{\"kind\":\"action\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"teaHerbal\"},{\"op\":\"assert\",\"slot\":\"tips\",\"test\":\"nonempty\"},{\"op\":\"capture\",\"slot\":\"tips\",\"as\":\"herbalTips\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"5:00\"},{\"op\":\"action\",\"slot\":\"teaGreen\"},{\"op\":\"assert\",\"slot\":\"tips\",\"test\":\"changed\",\"capture\":\"herbalTips\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"3:00\"},{\"op\":\"action\",\"slot\":\"minutes\",\"value\":2},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"2:00\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":30},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"1:30\"},{\"op\":\"capture\",\"slot\":\"remaining\",\"as\":\"before\"},{\"op\":\"action\",\"slot\":\"pause\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":30},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"unchanged\",\"capture\":\"before\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":90},{\"op\":\"assert\",\"slot\":\"ready\",\"test\":\"equals\",\"value\":\"Ready\"},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"2:00\"},{\"op\":\"assert\",\"slot\":\"ready\",\"test\":\"equals\",\"value\":\"Idle\"}]}}}"
+        },
+        {
+          "stage": "PLAN",
+          "call": 3,
+          "line": 9,
+          "contentSha256": "3c9c3a9b91f45a863219bb3ac2ae1c01333565069e392946cab92ceccc6eb2b3",
+          "content": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"teaHerbal\":{\"kind\":\"action\"},\"tips\":{\"kind\":\"value\"},\"remaining\":{\"kind\":\"value\"},\"teaGreen\":{\"kind\":\"action\"},\"minutes\":{\"kind\":\"action\"},\"start\":{\"kind\":\"action\"},\"timer\":{\"kind\":\"timer\"},\"pause\":{\"kind\":\"action\"},\"ready\":{\"kind\":\"value\"},\"reset\":{\"kind\":\"action\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"teaHerbal\"},{\"op\":\"assert\",\"slot\":\"tips\",\"test\":\"nonempty\"},{\"op\":\"capture\",\"slot\":\"tips\",\"as\":\"herbalTips\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"5:00\"},{\"op\":\"action\",\"slot\":\"teaGreen\"},{\"op\":\"assert\",\"slot\":\"tips\",\"test\":\"changed\",\"capture\":\"herbalTips\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"3:00\"},{\"op\":\"action\",\"slot\":\"minutes\",\"value\":1},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"1:00\"},{\"op\":\"capture\",\"slot\":\"remaining\",\"as\":\"beforeStart\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"changed\",\"capture\":\"beforeStart\"},{\"op\":\"capture\",\"slot\":\"remaining\",\"as\":\"paused\"},{\"op\":\"action\",\"slot\":\"pause\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"unchanged\",\"capture\":\"paused\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"assert\",\"slot\":\"ready\",\"test\":\"equals\",\"value\":\"Ready\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"0:00\"},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"1:00\"},{\"op\":\"assert\",\"slot\":\"ready\",\"test\":\"equals\",\"value\":\"Idle\"}]}}}}"
+        },
+        {
+          "stage": "PLAN",
+          "call": 4,
+          "line": 12,
+          "contentSha256": "9c613837d14a36f9010979583d8967ec4c74f266f48b5270f47c5b5eb59f5fb5",
+          "content": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"teaHerbal\":{\"kind\":\"action\"},\"tips\":{\"kind\":\"value\"},\"remaining\":{\"kind\":\"value\"},\"teaGreen\":{\"kind\":\"action\"},\"minutes\":{\"kind\":\"action\"},\"start\":{\"kind\":\"action\"},\"timer\":{\"kind\":\"timer\"},\"pause\":{\"kind\":\"action\"},\"reset\":{\"kind\":\"action\"},\"ready\":{\"kind\":\"value\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"teaHerbal\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"5:00\"},{\"op\":\"assert\",\"slot\":\"tips\",\"test\":\"nonempty\"},{\"op\":\"action\",\"slot\":\"teaGreen\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"3:00\"},{\"op\":\"action\",\"slot\":\"minutes\",\"value\":1},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"1:00\"},{\"op\":\"capture\",\"slot\":\"remaining\",\"as\":\"before\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":2},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"changed\",\"capture\":\"before\"},{\"op\":\"capture\",\"slot\":\"remaining\",\"as\":\"paused\"},{\"op\":\"action\",\"slot\":\"pause\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":1},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"unchanged\",\"capture\":\"paused\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":60},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"0:00\"},{\"op\":\"assert\",\"slot\":\"ready\",\"test\":\"equals\",\"value\":\"Ready\"},{\"op\":\"capture\",\"slot\":\"ready\",\"as\":\"readyState\"},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"1:00\"},{\"op\":\"assert\",\"slot\":\"ready\",\"test\":\"changed\",\"capture\":\"readyState\"}]}}}}"
+        },
+        {
+          "stage": "PLAN",
+          "call": 5,
+          "line": 15,
+          "contentSha256": "be5a9520a8aa9e4b7ee61d6e04f8a53601d844d25401c2df4c98859df25a7d67",
+          "content": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"teaHerbal\":{\"kind\":\"action\"},\"tips\":{\"kind\":\"value\"},\"remaining\":{\"kind\":\"value\"},\"teaGreen\":{\"kind\":\"action\"},\"minutes\":{\"kind\":\"action\"},\"start\":{\"kind\":\"action\"},\"timer\":{\"kind\":\"timer\"},\"pause\":{\"kind\":\"action\"},\"reset\":{\"kind\":\"action\"},\"ready\":{\"kind\":\"value\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"teaHerbal\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"5:00\"},{\"op\":\"assert\",\"slot\":\"tips\",\"test\":\"nonempty\"},{\"op\":\"action\",\"slot\":\"teaGreen\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"3:00\"},{\"op\":\"action\",\"slot\":\"minutes\",\"value\":1},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"1:00\"},{\"op\":\"capture\",\"slot\":\"remaining\",\"as\":\"before\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":2},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"changed\",\"capture\":\"before\"},{\"op\":\"capture\",\"slot\":\"remaining\",\"as\":\"paused\"},{\"op\":\"action\",\"slot\":\"pause\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":1},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"unchanged\",\"capture\":\"paused\"},{\"op\":\"action\",\"slot\":\"start\"},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"timers\",\"slot\":\"timer\",\"count\":10},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"0:00\"},{\"op\":\"assert\",\"slot\":\"ready\",\"test\":\"equals\",\"value\":\"Ready\"},{\"op\":\"capture\",\"slot\":\"ready\",\"as\":\"readyState\"},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":\"1:00\"},{\"op\":\"assert\",\"slot\":\"ready\",\"test\":\"changed\",\"capture\":\"readyState\"}]}}}}"
+        }
+      ]
+    },
+    "fresh:math-2": {
+      "request": "monthly mortgage payment for a 30 year loan",
+      "context": "User request: monthly mortgage payment for a 30 year loan\nWidget brief: Interactive monthly mortgage payment calculator. Inputs: loan amount (starting amount left unspecified), annual interest rate (%), and loan term preset to 30 years (allow editing in years, supporting 10/15/20/30 presets). Optional inputs: annual property tax, annual home insurance, monthly HOA dues, and down payment. Outputs: monthly principal and interest payment (standard amortization formula), monthly total including tax/insurance/HOA when provided, total interest over the life of the loan, total amount paid, and number of payments. Include a principal-vs-interest breakdown (e.g. donut or bar chart) and an optional amortization summary showing first-year interest vs principal and remaining balance after 5, 10, 20, 30 years. Validate inputs and show clear messages for missing or invalid values. Currency unspecified — display amounts without forcing a symbol, but format numbers with thousand separators and two decimals. Interface language: English. Local calculation only, no network.\nExcerpts below may be truncated. Preserve the complete request, brief, and source URLs above.\nReply excerpt: I'll build a mortgage payment calculator with a 30-year term preset.",
+      "wirePath": "evidence/alphy-ui/generation-full-134-after-reliability/captures/fresh:math-2:candidate:1/provider.jsonl",
+      "wireSha256": "63f47e1addc51e09517d5b0e39ac00c5afa02b23d1d8183bd9660437f962b8fb",
+      "terminalAttempt": {
+        "operation_id": "4402c502-65f8-40ad-b7e6-3af4ab7aadb7",
+        "attempt": 4,
+        "at_ns": 10205732728741,
+        "kind": "attempt",
+        "stage": "plan",
+        "outcome": "rejected",
+        "disposition": "finish",
+        "failure_code": "widget_plan",
+        "plan_path": "$.behavior",
+        "plan_rule": "behavior.slots_or_events",
+        "plan_observed_type": "unknown"
+      },
+      "replies": [
+        {
+          "stage": "PLAN",
+          "call": 2,
+          "line": 6,
+          "contentSha256": "542dc4bd2ebfe412de49119b3366ef24af657eb3c1c7283c0da151fa20a252a8",
+          "content": "{\"title\":\"Mortgage payment calculator\",\"description\":\"Estimate the monthly payment on a fixed-rate mortgage. Enter the loan amount, annual interest rate, and term (30 years by default, editable in years). Optional annual property tax, annual home insurance, and monthly HOA dues are added to the monthly total. Figures show the monthly principal-and-interest payment, the monthly total including tax, insurance, and HOA, the total interest over the life of the loan, the total amount paid, and the number of payments. All amounts are shown as numbers with thousand separators and two decimals and no currency symbol, and everything is calculated locally. The requested principal-versus-interest breakdown chart and multi-year amortization summary are not drawn by this numeric layout; the same split and balance information is conveyed through the total interest and total paid figures.\",\"language\":\"en\",\"inputs\":[{\"id\":\"loanAmount\",\"label\":\"Loan amount\",\"type\":\"number\",\"value\":0},{\"id\":\"annualRate\",\"label\":\"Annual interest rate (%)\",\"type\":\"number\",\"value\":0},{\"id\":\"years\",\"label\":\"Loan term (years)\",\"type\":\"number\",\"value\":30,\"min\":1,\"max\":50},{\"id\":\"propertyTax\",\"label\":\"Annual property tax\",\"type\":\"number\",\"value\":0},{\"id\":\"insurance\",\"label\":\"Annual home insurance\",\"type\":\"number\",\"value\":0},{\"id\":\"hoa\",\"label\":\"Monthly HOA dues\",\"type\":\"number\",\"value\":0}],\"constants\":[],\"needs\":[{\"id\":\"monthlyPI\",\"type\":\"figure\",\"label\":\"Monthly principal and interest\",\"description\":\"Standard amortization payment: principal times the monthly rate divided by one minus (1 plus the monthly rate) raised to the negative number of payments. A zero rate falls back to principal divided by the number of payments.\",\"expression\":{\"op\":\"if\",\"args\":[{\"op\":\"equal\",\"args\":[{\"op\":\"divide\",\"args\":[{\"ref\":\"annualRate\"},{\"number\":1200}]},{\"number\":0}]},{\"op\":\"divide\",\"args\":[{\"ref\":\"loanAmount\"},{\"op\":\"multiply\",\"args\":[{\"ref\":\"years\"},{\"number\":12}]}]},{\"op\":\"divide\",\"args\":[{\"op\":\"multiply\",\"args\":[{\"ref\":\"loanAmount\"},{\"op\":\"divide\",\"args\":[{\"ref\":\"annualRate\"},{\"number\":1200}]}]},{\"op\":\"subtract\",\"args\":[{\"number\":1},{\"op\":\"power\",\"args\":[{\"op\":\"add\",\"args\":[{\"number\":1},{\"op\":\"divide\",\"args\":[{\"ref\":\"annualRate\"},{\"number\":1200}]}]},{\"op\":\"multiply\",\"args\":[{\"op\":\"multiply\",\"args\":[{\"ref\":\"years\"},{\"number\":12}]},{\"number\":-1}]}]}]}]}]}},{\"id\":\"monthlyTotal\",\"type\":\"figure\",\"label\":\"Monthly total\",\"description\":\"Principal and interest plus one twelfth of annual property tax and annual insurance plus the monthly HOA dues.\",\"expression\":{\"op\":\"add\",\"args\":[{\"ref\":\"monthlyPI\"},{\"op\":\"divide\",\"args\":[{\"ref\":\"propertyTax\"},{\"number\":12}]},{\"op\":\"divide\",\"args\":[{\"ref\":\"insurance\"},{\"number\":12}]},{\"ref\":\"hoa\"}]}},{\"id\":\"totalInterest\",\"type\":\"figure\",\"label\":\"Total interest\",\"description\":\"Total of all principal-and-interest payments minus the original loan amount.\",\"expression\":{\"op\":\"subtract\",\"args\":[{\"op\":\"multiply\",\"args\":[{\"ref\":\"monthlyPI\"},{\"op\":\"multiply\",\"args\":[{\"ref\":\"years\"},{\"number\":12}]}]},{\"ref\":\"loanAmount\"}]}},{\"id\":\"totalPaid\",\"type\":\"figure\",\"label\":\"Total amount paid\",\"description\":\"Monthly total multiplied by the number of payments over the full term.\",\"expression\":{\"op\":\"multiply\",\"args\":[{\"ref\":\"monthlyTotal\"},{\"op\":\"multiply\",\"args\":[{\"ref\":\"years\"},{\"number\":12}]}]}},{\"id\":\"payments\",\"type\":\"figure\",\"label\":\"Number of payments\",\"description\":\"Loan term in years multiplied by twelve monthly payments.\",\"expression\":{\"op\":\"multiply\",\"args\":[{\"ref\":\"years\"},{\"number\":12}]}}],\"questions\":[],\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"loanAmount\":{\"kind\":\"action\",\"part\":\"loanAmount\",\"member\":\"edit\"},\"annualRate\":{\"kind\":\"action\",\"part\":\"annualRate\",\"member\":\"edit\"},\"years\":{\"kind\":\"action\",\"part\":\"years\",\"member\":\"edit\"},\"hoa\":{\"kind\":\"action\",\"part\":\"hoa\",\"member\":\"edit\"},\"monthlyPI\":{\"kind\":\"value\",\"part\":\"monthlyPI\",\"member\":\"value\"},\"monthlyTotal\":{\"kind\":\"value\",\"part\":\"monthlyTotal\",\"member\":\"value\"},\"payments\":{\"kind\":\"value\",\"part\":\"payments\",\"member\":\"value\"},\"totalInterest\":{\"kind\":\"value\",\"part\":\"totalInterest\",\"member\":\"value\"}},\"steps\":[{\"op\":\"capture\",\"slot\":\"monthlyPI\",\"as\":\"before\"},{\"op\":\"action\",\"slot\":\"loanAmount\",\"value\":300000},{\"op\":\"action\",\"slot\":\"annualRate\",\"value\":6},{\"op\":\"action\",\"slot\":\"years\",\"value\":30},{\"op\":\"assert\",\"slot\":\"monthlyPI\",\"test\":\"changed\",\"capture\":\"before\"},{\"op\":\"capture\",\"slot\":\"monthlyTotal\",\"as\":\"base\"},{\"op\":\"action\",\"slot\":\"hoa\",\"value\":100},{\"op\":\"assert\",\"slot\":\"monthlyTotal\",\"test\":\"changed\",\"capture\":\"base\"},{\"op\":\"capture\",\"slot\":\"payments\",\"as\":\"first\"},{\"op\":\"action\",\"slot\":\"years\",\"value\":15},{\"op\":\"assert\",\"slot\":\"payments\",\"test\":\"changed\",\"capture\":\"first\"},{\"op\":\"assert\",\"slot\":\"totalInterest\",\"test\":\"nonempty\"}]}}}"
+        },
+        {
+          "stage": "PLAN",
+          "call": 3,
+          "line": 9,
+          "contentSha256": "c1a935e7ce4941abdbb73d15efdc361dad16d84a1e3b12dcfafd362044e77d86",
+          "content": "{\"fields\":{\"description\":\"Estimate a fixed-rate mortgage payment. Enter loan amount, annual interest rate, and term (30 years by default, editable). Optional annual property tax, annual insurance, and monthly HOA add to the monthly total. Figures: monthly principal and interest, monthly total, total interest, total paid, and number of payments, formatted with thousand separators and two decimals, no currency symbol. The principal-versus-interest chart and amortization summary are not drawn here.\"}}"
+        },
+        {
+          "stage": "PLAN",
+          "call": 4,
+          "line": 12,
+          "contentSha256": "0745e53765b9fb260e855f102d28516338ad364a240c3e0dba4e83fe77bd9507",
+          "content": "{\"fields\":{\"needs\":[{\"id\":\"monthlyPI\",\"type\":\"figure\",\"label\":\"Monthly principal and interest\",\"description\":\"Standard amortization payment: principal times the monthly rate divided by one minus (1 plus the monthly rate) raised to the negative number of payments. A zero rate falls back to principal divided by the number of payments.\",\"expression\":{\"op\":\"if\",\"args\":[{\"op\":\"equal\",\"args\":[{\"op\":\"divide\",\"args\":[{\"ref\":\"annualRate\"},{\"number\":1200}]},{\"number\":0}]},{\"op\":\"divide\",\"args\":[{\"ref\":\"loanAmount\"},{\"op\":\"multiply\",\"args\":[{\"ref\":\"years\"},{\"number\":12}]}]},{\"op\":\"divide\",\"args\":[{\"op\":\"multiply\",\"args\":[{\"ref\":\"loanAmount\"},{\"op\":\"divide\",\"args\":[{\"ref\":\"annualRate\"},{\"number\":1200}]}]},{\"op\":\"subtract\",\"args\":[{\"number\":1},{\"op\":\"power\",\"args\":[{\"op\":\"add\",\"args\":[{\"number\":1},{\"op\":\"divide\",\"args\":[{\"ref\":\"annualRate\"},{\"number\":1200}]}]},{\"op\":\"multiply\",\"args\":[{\"op\":\"multiply\",\"args\":[{\"ref\":\"years\"},{\"number\":12}]},{\"number\":-1}]}]}]}]}]}},{\"id\":\"monthlyTotal\",\"type\":\"figure\",\"label\":\"Monthly total\",\"description\":\"Principal and interest plus one twelfth of annual property tax and annual insurance plus the monthly HOA dues.\",\"expression\":{\"op\":\"add\",\"args\":[{\"op\":\"add\",\"args\":[{\"op\":\"add\",\"args\":[{\"ref\":\"monthlyPI\"},{\"op\":\"divide\",\"args\":[{\"ref\":\"propertyTax\"},{\"number\":12}]}]},{\"op\":\"divide\",\"args\":[{\"ref\":\"insurance\"},{\"number\":12}]}]},{\"ref\":\"hoa\"}]}},{\"id\":\"totalInterest\",\"type\":\"figure\",\"label\":\"Total interest\",\"description\":\"Total of all principal-and-interest payments minus the original loan amount.\",\"expression\":{\"op\":\"subtract\",\"args\":[{\"op\":\"multiply\",\"args\":[{\"ref\":\"monthlyPI\"},{\"op\":\"multiply\",\"args\":[{\"ref\":\"years\"},{\"number\":12}]}]},{\"ref\":\"loanAmount\"}]}},{\"id\":\"totalPaid\",\"type\":\"figure\",\"label\":\"Total amount paid\",\"description\":\"Monthly total multiplied by the number of payments over the full term.\",\"expression\":{\"op\":\"multiply\",\"args\":[{\"ref\":\"monthlyTotal\"},{\"op\":\"multiply\",\"args\":[{\"ref\":\"years\"},{\"number\":12}]}]}},{\"id\":\"payments\",\"type\":\"figure\",\"label\":\"Number of payments\",\"description\":\"Loan term in years multiplied by twelve monthly payments.\",\"expression\":{\"op\":\"multiply\",\"args\":[{\"ref\":\"years\"},{\"number\":12}]}}]}}"
+        },
+        {
+          "stage": "SELECTOR",
+          "call": 5,
+          "line": 15,
+          "contentSha256": "d710a2e0ad2f75d97fd418e48474430fec2dbe0f5a31576124c0901f03ef851b",
+          "content": "{\"answers\":[{\"id\":\"s_loanAmount\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_annualRate\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_years\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_propertyTax\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_insurance\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_hoa\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_monthlyPI\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_monthlyTotal\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_totalInterest\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_totalPaid\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_payments\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}}]}"
+        },
+        {
+          "stage": "SELECTOR",
+          "call": 6,
+          "line": 18,
+          "contentSha256": "3199a70703b5bf2169b76cddb2c8af401294d781d04b239d88fb77b36449eb12",
+          "content": "{\"answers\":[{\"id\":\"p_loanAmount\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"p_annualRate\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"p_years\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"p_propertyTax\",\"choice\":\"A\",\"confidence\":0.93,\"probabilities\":{\"A\":0.93,\"B\":0.07}},{\"id\":\"p_insurance\",\"choice\":\"A\",\"confidence\":0.93,\"probabilities\":{\"A\":0.93,\"B\":0.07}},{\"id\":\"p_hoa\",\"choice\":\"A\",\"confidence\":0.93,\"probabilities\":{\"A\":0.93,\"B\":0.07}},{\"id\":\"p_monthlyPI\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"p_monthlyTotal\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"p_totalInterest\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"p_totalPaid\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"p_payments\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"v_profile\",\"choice\":\"B\",\"confidence\":0.6,\"probabilities\":{\"A\":0.3,\"B\":0.6,\"C\":0.1}},{\"id\":\"v_preset\",\"choice\":\"A\",\"confidence\":0.6,\"probabilities\":{\"A\":0.6,\"B\":0.1,\"C\":0.05,\"D\":0.05,\"E\":0.1,\"F\":0.1}},{\"id\":\"v_focal\",\"choice\":\"H\",\"confidence\":0.5,\"probabilities\":{\"A\":0.15,\"B\":0.1,\"C\":0.05,\"D\":0.02,\"E\":0.02,\"F\":0.02,\"G\":0.06,\"H\":0.5,\"I\":0.03,\"J\":0.03,\"K\":0.01,\"L\":0.01}}]}"
+        },
+        {
+          "stage": "PLAN",
+          "call": 7,
+          "line": 21,
+          "contentSha256": "13118e8c4ab9ae77d1823c1d7f7a66bd0eefcbcf63bbf88ddd7175401b1cd45d",
+          "content": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"loanAmount\":{\"kind\":\"action\",\"part\":\"loanAmount\",\"member\":\"edit\"},\"annualRate\":{\"kind\":\"action\",\"part\":\"annualRate\",\"member\":\"edit\"},\"years\":{\"kind\":\"action\",\"part\":\"years\",\"member\":\"edit\"},\"hoa\":{\"kind\":\"action\",\"part\":\"hoa\",\"member\":\"edit\"},\"monthlyPI\":{\"kind\":\"value\",\"part\":\"monthlyPI\",\"member\":\"value\"},\"monthlyTotal\":{\"kind\":\"value\",\"part\":\"monthlyTotal\",\"member\":\"value\"},\"payments\":{\"kind\":\"value\",\"part\":\"payments\",\"member\":\"value\"},\"totalInterest\":{\"kind\":\"value\",\"part\":\"totalInterest\",\"member\":\"value\"}},\"steps\":[{\"op\":\"capture\",\"slot\":\"monthlyPI\",\"as\":\"before\"},{\"op\":\"action\",\"slot\":\"loanAmount\",\"value\":300000},{\"op\":\"action\",\"slot\":\"annualRate\",\"value\":6},{\"op\":\"action\",\"slot\":\"years\",\"value\":30},{\"op\":\"assert\",\"slot\":\"monthlyPI\",\"test\":\"changed\",\"capture\":\"before\"},{\"op\":\"capture\",\"slot\":\"monthlyTotal\",\"as\":\"base\"},{\"op\":\"action\",\"slot\":\"hoa\",\"value\":100},{\"op\":\"assert\",\"slot\":\"monthlyTotal\",\"test\":\"changed\",\"capture\":\"base\"},{\"op\":\"capture\",\"slot\":\"payments\",\"as\":\"first\"},{\"op\":\"action\",\"slot\":\"years\",\"value\":15},{\"op\":\"assert\",\"slot\":\"payments\",\"test\":\"changed\",\"capture\":\"first\"},{\"op\":\"assert\",\"slot\":\"payments\",\"test\":\"equals\",\"value\":180}]}}}}"
+        }
+      ]
+    },
+    "extra:reference-reading-status": {
+      "request": "Сделай журнал оборотов тестового вентилятора. Первая запись — 1200 об/мин. Мои метки: ниже 1000 — «Медленно», от 1000 до 1499 — «Рабочий режим», от 1500 — «Быстро». Покажи последнее значение и метку, историю от новых к старым и график, если записей две или больше. Дай удалять записи.",
+      "context": "User request: Сделай журнал оборотов тестового вентилятора. Первая запись — 1200 об/мин. Мои метки: ниже 1000 — «Медленно», от 1000 до 1499 — «Рабочий режим», от 1500 — «Быстро». Покажи последнее значение и метку, историю от новых к старым и график, если записей две или больше. Дай удалять записи.\nWidget brief: Локальный мини-приложение «Журнал оборотов тестового вентилятора». Интерфейс на русском. Данные: список записей оборотов (об/мин) с датой/временем добавления, хранить локально. Стартовая запись: 1200 об/мин.\nДобавление новой записи: числовое поле для оборотов (об/мин) и кнопка «Добавить». Записи сохраняются локально.\nМетки по значению: ниже 1000 — «Медленно»; от 1000 до 1499 включительно — «Рабочий режим»; от 1500 и выше — «Быстро».\nСверху показывать последнее значение (с единицей «об/мин») и его метку.\nИстория: список от новых к старым, у каждой записи значение, метка, время; кнопка удаления записи (и, при желании, подтверждение).\nГрафик: линейный график значений по времени, показывать только если записей 2 и более; при 0–1 записи вместо графика показывать пояснение. Обновлять график при добавлении и удалении.\nПустое состояние: если все записи удалены, показывать приглашение добавить первую запись.\nВалидация: принимать только неотрицательные числа; некорректный ввод не добавлять и показывать подсказку.\nНе добавлять лишних функций сверх перечисленных.\nExcerpts below may be truncated. Preserve the complete request, brief, and source URLs above.\nReply excerpt: Сделаю журнал оборотов вентилятора с метками, историей и графиком.",
+      "wirePath": "evidence/alphy-ui/generation-full-134-after-reliability/captures/extra:reference-reading-status:candidate:1/provider.jsonl",
+      "wireSha256": "8e4241882cf5ebe352c779dedb96ad5fa3df8714224a3b960b75e6eb6b27c8d0",
+      "terminalAttempt": {
+        "operation_id": "9bdc998f-e60c-4015-98df-9f4f766ed658",
+        "attempt": 4,
+        "at_ns": 13414007968562,
+        "kind": "attempt",
+        "stage": "plan",
+        "outcome": "rejected",
+        "disposition": "finish",
+        "failure_code": "widget_plan",
+        "plan_path": "$.needs[0]"
+      },
+      "replies": [
+        {
+          "stage": "PLAN",
+          "call": 2,
+          "line": 6,
+          "contentSha256": "47a60e478ef0bbeab6d10c2e7b20614d7ffa4a46d3ac31a6925d78f2afc5a0c8",
+          "content": "{\"title\":\"Журнал оборотов вентилятора\",\"description\":\"Журнал оборотов тестового вентилятора с метками по значению. Сверху показывается последнее значение в об/мин и его метка: ниже 1000 — «Медленно», от 1000 до 1499 — «Рабочий режим», от 1500 — «Быстро». История выводится от новых записей к старым, у каждой записи видны значение, метка и время; любую запись можно удалить. Первая запись — 1200 об/мин. Записи хранятся локально. Линейный график значений по времени показывается, когда записей две или больше; при 0–1 записи вместо графика выводится пояснение. График обновляется при добавлении и удалении записей. Если все записи удалены, показывается приглашение добавить первую запись. Принимаются только неотрицательные числа: некорректный ввод не добавляется, вместо этого появляется подсказка.\",\"language\":\"ru\",\"inputs\":[],\"constants\":[],\"needs\":[{\"id\":\"log\",\"type\":\"reading_status\",\"label\":\"Журнал оборотов\",\"description\":\"Хранит записи оборотов в об/мин. Метки: ниже 1000 — «Медленно», от 1000 до 1499 — «Рабочий режим», от 1500 — «Быстро». Показывает последнее значение с единицей об/мин и его метку, историю от новых к старым с временем добавления и кнопкой удаления. Пустое состояние предлагает добавить первую запись.\",\"bands\":[{\"label\":\"Медленно\"},{\"label\":\"Рабочий режим\",\"min\":1000},{\"label\":\"Быстро\",\"min\":1500}],\"unit\":\"об/мин\",\"initial\":1200}],\"questions\":[],\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"edit\":{\"kind\":\"action\",\"part\":\"log\",\"member\":\"edit\"},\"add\":{\"kind\":\"action\",\"part\":\"log\",\"member\":\"add\"},\"remove\":{\"kind\":\"action\",\"part\":\"log\",\"member\":\"remove\"},\"latest\":{\"kind\":\"value\",\"part\":\"log\",\"member\":\"latest\"},\"status\":{\"kind\":\"value\",\"part\":\"log\",\"member\":\"status\"},\"history\":{\"kind\":\"collection\",\"part\":\"log\",\"member\":\"history\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"edit\",\"value\":850},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"status\",\"test\":\"equals\",\"value\":\"Медленно\"},{\"op\":\"action\",\"slot\":\"edit\",\"value\":1600},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"status\",\"test\":\"equals\",\"value\":\"Быстро\"},{\"op\":\"capture\",\"slot\":\"latest\",\"as\":\"before\"},{\"op\":\"action\",\"slot\":\"remove\"},{\"op\":\"assert\",\"slot\":\"latest\",\"test\":\"changed\",\"capture\":\"before\"},{\"op\":\"assert\",\"slot\":\"history\",\"test\":\"nonempty\"}]}}}"
+        },
+        {
+          "stage": "PLAN",
+          "call": 3,
+          "line": 9,
+          "contentSha256": "569bb679e8144f2cfe8951c117346d4947a5bf6feaaeb0b01b15fe3cf41406a5",
+          "content": "{\"fields\":{\"description\":\"Журнал оборотов вентилятора. Сверху — последнее значение в об/мин и метка: ниже 1000 — «Медленно», 1000–1499 — «Рабочий режим», от 1500 — «Быстро». История от новых к старым: значение, метка, время, удаление записи. Стартовая запись 1200 об/мин. График значений по времени при двух и более записях, иначе пояснение; обновляется при добавлении и удалении. Пустой журнал предлагает добавить первую запись. Принимаются только неотрицательные числа, иначе подсказка.\"}}"
+        },
+        {
+          "stage": "PLAN",
+          "call": 4,
+          "line": 12,
+          "contentSha256": "8043a08a04dcc9e0f819305f0110693de5dbe7ead61456508f68980cb148cfb0",
+          "content": "{\"fields\":{\"needs\":[{\"id\":\"log\",\"type\":\"reading_status\",\"label\":\"Журнал оборотов\",\"description\":\"Хранит записи оборотов в об/мин. Метки: ниже 1000 — «Медленно», от 1000 до 1499 — «Рабочий режим», от 1500 — «Быстро». Показывает последнее значение с единицей об/мин и его метку, историю от новых к старым с временем добавления и кнопкой удаления. График значений по времени показывается только при двух и более записях, иначе пояснение. Пустое состояние предлагает добавить первую запись. Принимаются только неотрицательные числа, иначе подсказка.\",\"fields\":[{\"id\":\"rpm\",\"label\":\"Обороты, об/мин\",\"type\":\"number\"}],\"bands\":[{\"label\":\"Медленно\"},{\"label\":\"Рабочий режим\",\"min\":1000},{\"label\":\"Быстро\",\"min\":1500}],\"unit\":\"об/мин\",\"initial\":1200}]}}"
+        },
+        {
+          "stage": "PLAN",
+          "call": 5,
+          "line": 15,
+          "contentSha256": "7759e2967247bb9b76a4533b3270806d3105c2a813c79eba8686a6587d065a08",
+          "content": "{\"fields\":{\"needs\":[{\"id\":\"log\",\"type\":\"reading_status\",\"label\":\"Журнал оборотов\",\"description\":\"Хранит записи оборотов в об/мин. Метки: ниже 1000 — «Медленно», от 1000 до 1499 — «Рабочий режим», от 1500 — «Быстро». Показывает последнее значение с единицей об/мин и его метку, историю от новых к старым с временем добавления и кнопкой удаления. График значений по времени показывается только при двух и более записях, иначе пояснение. Обновляется при добавлении и удалении. Пустое состояние предлагает добавить первую запись. Принимаются только неотрицательные числа, иначе подсказка без добавления записи.\",\"bands\":[{\"label\":\"Медленно\"},{\"label\":\"Рабочий режим\",\"min\":1000},{\"label\":\"Быстро\",\"min\":1500}],\"unit\":\"об/мин\",\"initial\":1200}]}}"
+        }
+      ]
+    }
+  }
+}

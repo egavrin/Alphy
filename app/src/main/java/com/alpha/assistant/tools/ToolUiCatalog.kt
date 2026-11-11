@@ -151,11 +151,12 @@ object ToolUiCatalog {
     }
     fun records(node: JSONObject, state: JSONObject) = value(state,node.getString("bind")) as JSONArray
     fun stableKey(record: JSONObject): String = if(record.has("key") && record.has("token") && record.has("value")) record.getString("key") else record.getString("id")
+    private fun validStableKey(key: Any?): Boolean = key is String && key.isNotBlank() && key.length <= 128
     private fun stableRecords(rows: JSONArray) {
         val keys=mutableSetOf<String>()
         repeat(rows.length()) {
             val row=rows.getJSONObject(it); val key=stableKey(row)
-            require(key.isNotBlank() && key.length <= 128 && keys.add(key)) {"Record keys must be present and unique."}
+            require(validStableKey(key) && keys.add(key)) {"Record keys must be present and unique."}
             if(row.has("key") && row.has("token") && row.has("value")) require(row.get("token") is String && row.getString("token").isNotBlank() && row.get("value") is JSONObject)
         }
     }
@@ -766,16 +767,37 @@ object ToolUiCatalog {
     internal fun routeChild(node: JSONObject, id: String): JSONObject =
         node.getJSONArray("children").getJSONObject(routeIds(node).indexOf(id))
 
-    fun action(root: JSONObject, id: String): JSONObject? {
-        if(!visible(root) || !enabled(root)) return null
-        if(root.optString("action") == id || root.optString("dismissAction") == id || root.optJSONObject("reorder")?.optString("action") == id || id in interactionActions(root).values || textLink(root,id) != null) return root
+    fun action(root: JSONObject, id: String): JSONObject? = findAction(root, id, activeOnly = true)?.node
+
+    private data class ActionTarget(val node: JSONObject, val inRowTemplate: Boolean = false)
+
+    private fun findAction(root: JSONObject, id: String, activeOnly: Boolean): ActionTarget? {
+        if(activeOnly && (!visible(root) || !enabled(root))) return null
+        if(root.optString("action") == id || root.optString("dismissAction") == id || root.optJSONObject("reorder")?.optString("action") == id || id in interactionActions(root).values || textLink(root,id) != null) return ActionTarget(root)
         root.optJSONArray("rowActions")?.let {actions ->
-            if((0 until actions.length()).any {actions.getJSONObject(it).getString("action") == id}) return root
+            if((0 until actions.length()).any {actions.getJSONObject(it).getString("action") == id}) return ActionTarget(root)
         }
-        root.optJSONObject("rowTemplate")?.let {action(it,id)?.let {found -> return found}}
-        root.optJSONArray("children")?.let {children -> repeat(children.length()) {action(children.getJSONObject(it),id)?.let {found -> return found}}}
+        root.optJSONObject("rowTemplate")?.let {template ->
+            findAction(template, id, activeOnly)?.let { return it.copy(inRowTemplate = true) }
+        }
+        root.optJSONArray("children")?.let {children ->
+            repeat(children.length()) {findAction(children.getJSONObject(it), id, activeOnly)?.let { return it }}
+        }
         return null
     }
+
+    internal fun actionPayloadRequirement(root: JSONObject, id: String, payload: Any?): String? {
+        val target = findAction(root, id, activeOnly = false) ?: return "a declared native action"
+        val value = if (target.inRowTemplate) {
+            if (!isRowPayload(payload)) return "an object with a string row key and value"
+            (payload as JSONObject).get("value").takeUnless { it === JSONObject.NULL }
+        } else payload
+        return invalidActionPayload(target.node, id, value)
+    }
+
+    private fun isRowPayload(payload: Any?): Boolean =
+        payload is JSONObject && ToolValueSchema.keys(payload) == setOf("key","value") && validStableKey(payload.get("key"))
+
     fun validateAction(root: JSONObject, id: String, payload: Any?, state: JSONObject): JSONObject =
         validateAction(root, id, payload, state, ActionDelivery.Ordinary)
 
@@ -792,7 +814,13 @@ object ToolUiCatalog {
 
     private enum class ActionDelivery { Ordinary, LiveInput, Video, ForegroundTimer }
 
-    private fun validateAction(root: JSONObject, id: String, payload: Any?, state: JSONObject, delivery: ActionDelivery): JSONObject {
+    internal fun ordinaryButtonAvailability(root: JSONObject, id: String, state: JSONObject): Boolean? {
+        val target = findAction(root, id, activeOnly = false) ?: return null
+        if (target.inRowTemplate || target.node.optString("type") != "button" || target.node.optString("action") != id) return null
+        return resolveAction(root, id, null, state) != null
+    }
+
+    private fun resolveAction(root: JSONObject, id: String, payload: Any?, state: JSONObject): Triple<JSONObject, JSONObject, Any?>? {
         fun resolve(node: JSONObject, values: JSONObject, raw: Any?): Triple<JSONObject,JSONObject,Any?>? {
             if(!visible(node,values) || !enabled(node,values)) return null
             if(node.optString("type") == "transform") {
@@ -801,11 +829,12 @@ object ToolUiCatalog {
             }
             node.optJSONObject("rowTemplate")?.let {template ->
                 if(action(template,id) != null) {
-                    require(raw is JSONObject && ToolValueSchema.keys(raw) == setOf("key","value") && raw.get("key") is String) {"Row action needs key and value."}
+                    require(isRowPayload(raw)) {"Row action needs key and value."}
+                    val rowPayload = raw as JSONObject
                     val rows=records(node,values)
-                    val row=(0 until rows.length()).map {rows.getJSONObject(it)}.firstOrNull {stableKey(it) == raw.getString("key")}
+                    val row=(0 until rows.length()).map {rows.getJSONObject(it)}.firstOrNull {stableKey(it) == rowPayload.getString("key")}
                         ?: error("Row action is unavailable.")
-                    return resolve(template,row,raw.get("value").takeUnless {it == JSONObject.NULL})
+                    return resolve(template,row,rowPayload.get("value").takeUnless {it == JSONObject.NULL})
                 }
             }
             if(node.optString("type") == "transition" && value(values,node.getString("bind")) != true) return null
@@ -822,7 +851,11 @@ object ToolUiCatalog {
             }
             return null
         }
-        val (node,currentState,currentPayload)=checkNotNull(resolve(root,state,payload)) {"Action is unavailable."}
+        return resolve(root, state, payload)
+    }
+
+    private fun validateAction(root: JSONObject, id: String, payload: Any?, state: JSONObject, delivery: ActionDelivery): JSONObject {
+        val (node,currentState,currentPayload)=checkNotNull(resolveAction(root,id,payload,state)) {"Action is unavailable."}
         val video = node.getString("type") == "video"
         when (delivery) {
             ActionDelivery.Ordinary -> {
@@ -839,25 +872,61 @@ object ToolUiCatalog {
         }
         return validateActionValue(node,id,currentPayload,currentState)
     }
-    internal fun acceptsNumericInput(node: JSONObject, payload: Any?): Boolean {
+    private fun acceptsNumericInput(node: JSONObject, payload: Any?): Boolean {
         val value = (payload as? Number)?.toDouble() ?: return false
         val (minimum, maximum) = bounds(node)
         return value.isFinite() && value in minimum..maximum
     }
 
+    private fun invalidActionPayload(node: JSONObject, id: String, payload: Any?): String? {
+        if(node.optString("dismissAction") == id || id in interactionActions(node).values) {
+            return if(interactionActions(node)["focus"] == id) "a Boolean input".takeUnless { payload is Boolean }
+            else "a press without a value".takeUnless { payload == null }
+        }
+        if (node.optJSONObject("reorder")?.optString("action") == id) {
+            val source = (payload as? JSONObject)?.opt("sourceKey")
+            val destination = (payload as? JSONObject)?.opt("destinationKey")
+            return "distinct valid source and destination row keys".takeUnless {
+                validStableKey(source) && validStableKey(destination) && source != destination &&
+                    payload is JSONObject && ToolValueSchema.keys(payload) == setOf("sourceKey", "destinationKey")
+            }
+        }
+        return when (node.getString("type")) {
+            "button","actionChip","icon","listItem","timelineItem","snackbar","navigation","calendar","medicine" ->
+                "a press without a value".takeUnless { payload == null }
+            "video" -> "a video resource ID".takeUnless { payload is String && videoHandle.matches(payload) }
+            "text" -> "the link URL".takeUnless { payload is String && payload == textLink(node,id)?.getString("url") }
+            "input","search" -> {
+                val limit = node.optInt("maxLength", 2048)
+                "a string of at most $limit characters".takeUnless { payload is String && payload.length <= limit }
+            }
+            "toggle","checkbox","chip" -> "a Boolean input".takeUnless { payload is Boolean }
+            "timeInput" -> "an integer between 0 and 1439 minutes".takeUnless { validTime(payload) }
+            "dateInput" -> "a valid ISO date".takeUnless { validDate(payload) }
+            "numberInput","slider" -> if (acceptsNumericInput(node, payload)) null else {
+                val (minimum, maximum) = bounds(node)
+                "a numeric input between $minimum and $maximum"
+            }
+            in choiceTypes -> "a declared choice value".takeUnless { validChoice(node,payload) }
+            "rangeSlider","dateRangeInput" -> "an ordered range within the input bounds".takeUnless { validRange(node,payload) }
+            "pager" -> "a page index within the declared pages".takeUnless { validPage(payload,node.getJSONArray("children").length()) }
+            "routeStack" -> "a route stack array".takeUnless { payload is JSONArray }
+            "list","table","groupedList","lazyList","lazyGrid" ->
+                "a string row key with 1 to 128 characters".takeUnless { validStableKey(payload) }
+            else -> "a supported action payload"
+        }
+    }
+
     private fun validateActionValue(node: JSONObject,id: String,payload: Any?,state: JSONObject): JSONObject {
         val type=node.getString("type"); component(type)
+        require(invalidActionPayload(node, id, payload) == null) {"Invalid action value."}
         if(node.optString("dismissAction") == id || id in interactionActions(node).values) {
-            require(if(interactionActions(node)["focus"] == id) payload is Boolean else payload == null) {"Invalid interaction value."}
             return node
         }
         node.optJSONObject("reorder")?.takeIf { it.getString("action") == id }?.let { reorder ->
-            require(payload is JSONObject && ToolValueSchema.keys(payload) == setOf("sourceKey", "destinationKey")) {
-                "Reorder needs source and destination keys."
-            }
-            val source = payload.get("sourceKey")
-            val destination = payload.get("destinationKey")
-            require(source is String && destination is String && source != destination) { "Reorder keys must be distinct strings." }
+            val keys = payload as JSONObject
+            val source = keys.getString("sourceKey")
+            val destination = keys.getString("destinationKey")
             val rows = records(node, state)
             fun availableKey(key: String) = (0 until rows.length()).any { index ->
                 val row = rows.getJSONObject(index)
@@ -869,17 +938,7 @@ object ToolUiCatalog {
             return node
         }
         require(when(type) {
-            "button","actionChip","icon","listItem","timelineItem","snackbar","navigation","calendar","medicine" -> payload == null
-            "video" -> payload is String && videoHandle.matches(payload) && payload == value(state, node.getString("bind"))
-            "text" -> textLink(node,id)?.let {payload is String && payload == it.getString("url")} == true
-            "input","search" -> payload is String && payload.length <= node.optInt("maxLength",2048)
-            "toggle","checkbox","chip" -> payload is Boolean
-            "timeInput" -> validTime(payload)
-            "dateInput" -> validDate(payload)
-            "numberInput","slider" -> acceptsNumericInput(node, payload)
-            in choiceTypes -> validChoice(node,payload)
-            "rangeSlider","dateRangeInput" -> validRange(node,payload)
-            "pager" -> validPage(payload,node.getJSONArray("children").length())
+            "video" -> payload == value(state, node.getString("bind"))
             "routeStack" -> {
                 val stack = routeStack(node, state)
                 stack.size > 1 && payload is JSONArray && payload.length() == stack.size &&
@@ -893,7 +952,7 @@ object ToolUiCatalog {
                 }
                 row != null && (rowAction == null || rowActionEnabled(rowAction,row))
             }
-            else -> false
+            else -> true
         }) {"Invalid action value."}
         return node
     }

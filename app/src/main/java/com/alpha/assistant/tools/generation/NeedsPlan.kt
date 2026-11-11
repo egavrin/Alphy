@@ -411,7 +411,9 @@ internal class NeedsPlan private constructor(
             Use reading_status for a reading history with user-supplied labels and thresholds.
             Give it an ordered bands array. The first object has label only. Later objects have label and inclusive numeric min.
             Use the stated labels and boundaries. Use other if the requested bands do not fit this form.
-            Use unit for the stated unit and initial only for a reading the user explicitly provided.
+            In a reading_status need, uses.unit and uses.initial reference declared constants for the supplied unit and initial reading.
+            For example, use constants [{"id":"unitText","value":"rpm"},{"id":"seedReading","value":1200}] and "uses":{"unit":"unitText","initial":"seedReading"}.
+            Omit a role when the user supplied no value for it.
             Use due_items for supplied deadlines with a local day view.
             Give it an items array. Each item has name and either an ISO date or whole offsetDays relative to today.
             Use positive repeatDays only for a stated interval. Use window for the requested number of upcoming days.
@@ -599,6 +601,9 @@ internal class NeedsPlan private constructor(
                 }
                 if (!row.has("description"))
                     planShapeFailure(path, "the declared fields", "plan.description.missing", null)
+                if (readingStatus && (row.has("unit") || row.has("initial")))
+                    planShapeFailure(path, "uses.unit and uses.initial that reference declared constants for the supplied values",
+                        "plan.reading_status.references", row)
                 val figureFields = if (row.opt("type") == NeedType.FIGURE.wire) setOf("expression", "unit") else emptySet()
                 val readFields = if (row.opt("type") in setOf(NeedType.OTHER.wire, NeedType.SCENE.wire)) setOf("reads") else emptySet()
                 val recordKeys = if (row.opt("type") == NeedType.ENTRIES.wire) setOf("fields") else emptySet()

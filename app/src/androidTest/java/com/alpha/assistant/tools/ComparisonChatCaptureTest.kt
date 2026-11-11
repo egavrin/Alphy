@@ -747,6 +747,11 @@ class ComparisonChatCaptureTest {
                     put("response_bytes", event.responseBytes).put("candidate_bytes", event.candidateBytes)
                     put("changes", event.changes).put("source_edits", event.sourceEdits).put("duration_ns", event.durationNanos)
                 }
+                is ToolGenerationTraceEvent.Transport -> event.failure.let { failure ->
+                    put("kind", "transport").put("provider_stage", failure.stage.name)
+                    put("http_attempt", failure.httpAttempt).put("phase", failure.phase.wire)
+                    put("failure_code", failure.code).put("retry_requested", failure.retryRequested)
+                }
                 is ToolGenerationTraceEvent.Finished -> {
                     put("kind", "finished").put("outcome", event.outcome.name).put("failure_code", event.failureCode)
                     put("parts_only", event.partsOnly)

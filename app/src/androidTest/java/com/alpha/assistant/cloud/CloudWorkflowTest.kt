@@ -16,8 +16,10 @@ import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
+import com.alpha.assistant.agent.AgentPhase
 import com.alpha.assistant.data.*
 import com.alpha.assistant.surfaces.AssistContext
+import com.alpha.assistant.tools.ToolGenerationTraceEvent
 import com.alpha.assistant.tools.ToolStore
 import com.alpha.assistant.tools.firstSelectorChoices
 import com.alpha.assistant.tools.replyWithFixturePlan
@@ -302,20 +304,168 @@ class CloudWorkflowTest {
 
     @Test fun successfulHeadersThenAStalledBodyReportStreamTimeout() = kotlinx.coroutines.runBlocking {
         val release = CountDownLatch(1)
+        val calls = AtomicInteger()
+        val failures = mutableListOf<GenerationTransportFailure>()
+        val session = CloudSession().apply { generationTransportObserver = { failures += it } }
         Server { _, output ->
-            output.headers()
-            check(release.await(75, TimeUnit.SECONDS))
+            if (calls.incrementAndGet() == 1) {
+                output.headers()
+                check(release.await(15, TimeUnit.SECONDS))
+            } else output.answer("{}")
         }.use { server ->
             try {
-                val failure = runCatching {
-                    DeepSeekProvider(server.url).respond("alpha-test-only",
-                        CloudRequest(listOf(CloudTurn("user", "Return a plan.")), false,
-                            jsonObject = true, generationStage = CloudGenerationStage.PLAN), CloudSession()) {}
-                }.exceptionOrNull()
-                assertEquals("stream_timeout", (failure as? CloudFailure)?.code)
-                assertEquals(1, server.requests.size)
+                val received = mutableListOf<String>()
+                DeepSeekProvider(server.url, responseReadTimeoutMillis = 1500, recordEmptyCompletion = {}).respond("alpha-test-only",
+                    CloudRequest(listOf(CloudTurn("user", "Return a plan.")), false,
+                        jsonObject = true, generationStage = CloudGenerationStage.PLAN), session) {
+                    if (it is CloudEvent.Text) received += it.value
+                }
+                assertEquals(listOf("{}"), received)
+                assertEquals(listOf(GenerationTransportFailure(CloudGenerationStage.PLAN, 1,
+                    GenerationTransportPhase.RESPONSE_BODY, "stream_timeout", true)), failures)
+                assertEquals(2, server.requests.size)
             } finally {
                 release.countDown()
+            }
+        }
+    }
+
+    // A declared body larger than the delivered bytes causes an I/O error instead of a normal SSE EOF.
+    private fun OutputStream.interruptedGeneration(partial: String? = null) {
+        write("HTTP/1.1 200 Test\r\nContent-Type: text/event-stream\r\nContent-Length: 4096\r\nConnection: close\r\n\r\n".toByteArray())
+        if (partial == null) write(": fixture\n\n".toByteArray()) else event(textChunk(partial))
+        flush()
+    }
+
+    @Test fun interruptedGenerationReplaysTheSameRequestOnce() = kotlinx.coroutines.runBlocking {
+        val cases = listOf(
+            Triple("fresh:goals-1", CloudGenerationStage.COMPLETE, false),
+            Triple("fresh:terse-4", CloudGenerationStage.COMPLETE, false),
+            Triple("fresh:logs-6", CloudGenerationStage.COMPLETE, true),
+            Triple("compose:notes", CloudGenerationStage.COMPLETE, true),
+            Triple("compose:mortgage", CloudGenerationStage.PLAN, true),
+        )
+        for ((id, stage, headers) in cases) {
+            val calls = AtomicInteger()
+            val failures = mutableListOf<GenerationTransportFailure>()
+            val session = CloudSession().apply { generationTransportObserver = { failures += it } }
+            Server { _, output ->
+                if (calls.incrementAndGet() == 1) {
+                    if (headers) output.interruptedGeneration()
+                } else output.answer("{}")
+            }.use { server ->
+                val text = mutableListOf<String>()
+                DeepSeekProvider(server.url).respond("alpha-test-only",
+                    CloudRequest(listOf(CloudTurn("user", id)), false, jsonObject = true, generationStage = stage), session
+                ) { if (it is CloudEvent.Text) text += it.value }
+                assertEquals(id, listOf("{}"), text)
+                assertEquals(id, 2, server.requests.size)
+                assertEquals(id, 1, server.requests.map { it.json.toString() }.distinct().size)
+                assertEquals(id, listOf(GenerationTransportFailure(stage, 1,
+                    if (headers) GenerationTransportPhase.RESPONSE_BODY else GenerationTransportPhase.BEFORE_HEADERS,
+                    if (headers) "stream_io" else "pre_headers_io", true)), failures)
+                assertEquals(id, 1, session.claimGenerationRepair(CloudGenerationStage.PLAN))
+                assertEquals(id, 1, session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
+                assertTrue(server.failures.toString(), server.failures.isEmpty())
+            }
+        }
+    }
+
+    @Test fun transportRetryStopsAfterOneAttemptPartialOutputOrCancellation() = kotlinx.coroutines.runBlocking {
+        val request = CloudRequest(listOf(CloudTurn("user", "Return the plan.")), false,
+            jsonObject = true, generationStage = CloudGenerationStage.PLAN)
+        for (mode in listOf("exhausted", "partial", "buffered", "public-update", "cancelled")) {
+            val session = CloudSession()
+            val failures = mutableListOf<GenerationTransportFailure>()
+            session.generationTransportObserver = { failures += it }
+            val admissions = AtomicInteger()
+            session.beforeHttp = {
+                if (admissions.incrementAndGet() == 2 && mode == "cancelled") session.cancel()
+            }
+            val update = "Checking the workflow."
+            Server { _, output ->
+                output.interruptedGeneration(when (mode) {
+                    "partial", "buffered" -> "partial"
+                    "public-update" -> "{\"publicUpdate\":${JSONObject.quote(update)},"
+                    else -> null
+                })
+            }.use { server ->
+                val received = mutableListOf<String>()
+                val updates = mutableListOf<String>()
+                val provider = DeepSeekProvider(server.url)
+                val call = if (mode in setOf("buffered", "public-update")) request.copy(
+                    capabilityDiscovery = { error("The interrupted request cannot discover capabilities.") },
+                    publicUpdateContext = "Build a local counter."
+                ) else request
+                val failure = runCatching {
+                    provider.respond("alpha-test-only", call, session) {
+                        if (it is CloudEvent.Text) received += it.value
+                        if (it is CloudEvent.PublicUpdate) updates += it.text
+                    }
+                }.exceptionOrNull() as CloudFailure
+                assertEquals(mode, if (mode == "cancelled") "cancelled" else "stream_io", failure.code)
+                assertEquals(mode, if (mode == "exhausted") 2 else 1, server.requests.size)
+                assertEquals(mode, if (mode == "partial") listOf("partial") else emptyList<String>(), received)
+                assertEquals(mode, if (mode == "public-update") listOf(update) else emptyList<String>(), updates)
+                assertEquals(mode, when (mode) {
+                    "exhausted" -> listOf(true, false)
+                    "cancelled" -> listOf(true)
+                    else -> listOf(false)
+                }, failures.map { it.retryRequested })
+                if (mode == "exhausted") {
+                    val complete = runCatching {
+                        provider.respond("alpha-test-only", request.copy(generationStage = CloudGenerationStage.COMPLETE), session) {}
+                    }.exceptionOrNull() as CloudFailure
+                    assertEquals("stream_io", complete.code)
+                    assertEquals(3, server.requests.size)
+                    assertEquals(GenerationTransportFailure(CloudGenerationStage.COMPLETE, 1,
+                        GenerationTransportPhase.RESPONSE_BODY, "stream_io", false), failures.last())
+                }
+                assertTrue(server.failures.toString(), server.failures.isEmpty())
+            }
+        }
+    }
+
+    @Test fun generationTransportRetryPublishesOneArtifact() {
+        val prompt = "Build a local counter that adds one."
+        val plan = """{"wholeScreen":true,"language":"en","behavior":{"status":"checkable","scenario":{
+            "slots":{"add":{"kind":"action"},"count":{"kind":"value"}},
+            "steps":[{"op":"action","slot":"add"},{"op":"assert","slot":"count","test":"equals","value":1}]}}}"""
+        val writer = """{"formatVersion":3,"title":"Counter","description":"Add one","capabilities":[],
+            "stateSchema":{"count":"number"},"initialState":{"count":0},
+            "ui":{"type":"column","children":[{"type":"metric","text":"Count","bind":"count"},{"type":"button","text":"Add","action":"add"}]},
+            "behaviorBindings":{"add":"add","count":[0]},
+            "source":"const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='add')s.count++;return {state:s};"}"""
+        val calls = AtomicInteger()
+        Server { request, output ->
+            if (request.classifying) output.classification(decision("I can build that.", "create", "none", prompt))
+            else when (calls.incrementAndGet()) {
+                1 -> output.interruptedGeneration()
+                2 -> output.answer(plan)
+                3 -> output.answer(writer)
+                else -> error("Unexpected generation call.")
+            }
+        }.use { server ->
+            Fixture(DeepSeekProvider(server.url)).use { fixture ->
+                val trace = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
+                main { fixture.model.tools.generationTraceObserver = { trace += it } }
+                fixture.submit(prompt)
+                fixture.idle()
+                assertEquals(fixture.last.error, "complete", fixture.last.status)
+                assertEquals(1, fixture.last.toolRevision)
+                val generation = server.requests.filterNot { it.classifying }
+                assertEquals(3, generation.size)
+                assertEquals(generation[0].json.toString(), generation[1].json.toString())
+                val transport = trace.filterIsInstance<ToolGenerationTraceEvent.Transport>().single()
+                assertEquals(fixture.last.toolOperationId, transport.operationId.toString())
+                assertEquals(GenerationTransportFailure(CloudGenerationStage.PLAN, 1,
+                    GenerationTransportPhase.RESPONSE_BODY, "stream_io", true), transport.failure)
+                assertTrue(trace.none { it is ToolGenerationTraceEvent.Repair })
+                ToolStore(app, "${fixture.name}.db-tools.db").use { store ->
+                    assertEquals(fixture.last.toolId, store.tools().single().id)
+                    assertEquals(1, store.tools().single().revision)
+                }
+                assertTrue(server.failures.toString(), server.failures.isEmpty())
             }
         }
     }
@@ -349,6 +499,124 @@ class CloudWorkflowTest {
                 assertEquals(text, result.brief)
             }
             assertEquals(cases.size, server.requests.size)
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+        }
+    }
+
+    @Test fun authoredIntentDecisionsRouteThroughChatAndGeneration() {
+        val authored = instrumentation.context.assets.open("generation-reliability/chat-intent-authored.json")
+            .bufferedReader().use { JSONObject(it.readText()) }
+        val cases = authored.getJSONArray("cases")
+        val current = AtomicReference<JSONObject>()
+        val calls = AtomicInteger()
+        Server { request, output ->
+            val case = checkNotNull(current.get())
+            val prompt = case.getString("request")
+            val kind = case.getString("route")
+            val message = request.json.getJSONArray("messages").let { it.getJSONObject(it.length() - 1) }.getString("content")
+            val callNumber = calls.incrementAndGet()
+            if (callNumber == 1) {
+                request.requireStrictDecision(image = true)
+                assertEquals(prompt, message)
+                if (kind == "device_plan") {
+                    val steps = JSONArray().put(JSONObject().put("context", prompt).put("anchor", case.getString("anchor")))
+                    output.calls(call(0, name = "prepare_device_plan", arguments = JSONObject().put("steps", steps).toString()))
+                } else {
+                    val result = decision(case.getString("text"), kind, brief = case.optString("brief"))
+                    output.classification(JSONObject(result).put("image", "").toString())
+                }
+            } else when (kind) {
+                "answer" -> {
+                    assertEquals(2, callNumber)
+                    assertTrue(request.answering)
+                    assertEquals(prompt, JSONObject(message).getString("originalRequest"))
+                    output.answer(case.getString("text"))
+                }
+                "create" -> {
+                    val app = authored.getJSONObject("apps").getJSONObject(case.getString("app"))
+                    when (callNumber) {
+                        2 -> {
+                            assertEquals(prompt, JSONObject(message).getString("request"))
+                            output.answer(app.getJSONObject("plan").toString())
+                        }
+                        3 -> output.answer(app.getJSONObject("writer").toString())
+                        else -> error("Unexpected generation request.")
+                    }
+                }
+                "device_plan" -> {
+                    assertEquals(2, callNumber)
+                    val context = JSONObject(message)
+                    assertEquals(prompt, context.getString("currentRequest"))
+                    assertEquals(case.getString("anchor"), context.getJSONArray("steps").getJSONObject(0).getString("anchor"))
+                    assertTrue(request.json.getJSONArray("messages").getJSONObject(0).getString("content").contains("clock.setTimer"))
+                    val command = JSONObject().put("function", "clock.setTimer")
+                        .put("args", JSONObject().put("seconds", case.getInt("seconds")))
+                    output.answer(JSONObject().put("steps", JSONArray().put(command)).toString())
+                }
+                else -> error("Unexpected request for $kind.")
+            }
+        }.use { server ->
+            val fixture = Fixture(DeepSeekProvider(server.url))
+            val clock = instrumentation.addMonitor(IntentFilter(android.provider.AlarmClock.ACTION_SET_TIMER), null, true)
+            try {
+                fixture.use {
+                    ToolStore(app, "${fixture.name}.db-tools.db").use { store ->
+                        repeat(cases.length()) { index ->
+                            val case = cases.getJSONObject(index)
+                            val id = case.getString("id")
+                            val kind = case.getString("route")
+                            current.set(case)
+                            calls.set(0)
+                            main { fixture.model.select(null) }
+                            val before = store.tools().map { it.id }.toSet()
+                            fixture.submit(case.getString("request"))
+                            fixture.idle()
+                            val last = fixture.last
+                            assertEquals("$id: ${last.error}; ${server.failures}", "complete", last.status)
+                            when (kind) {
+                                "create" -> {
+                                    assertEquals(id, 3, calls.get())
+                                    val saved = store.tools().single { it.id !in before }
+                                    assertEquals(id, saved.id, last.toolId)
+                                    assertEquals(id, 1, saved.revision)
+                                    val expected = authored.getJSONObject("apps").getJSONObject(case.getString("app"))
+                                        .getJSONObject("plan").getJSONObject("behavior").getJSONObject("scenario").getJSONArray("steps")
+                                    main { fixture.model.tools.interact(saved, "enter", expected.getJSONObject(0).getInt("value")) }
+                                    waitUntil { JSONObject(store.tools().single { it.id == saved.id }.state).getInt("amount") ==
+                                        expected.getJSONObject(0).getInt("value") }
+                                    val state = JSONObject(store.tools().single { it.id == saved.id }.state)
+                                    for (i in 1 until expected.length()) {
+                                        val assertion = expected.getJSONObject(i)
+                                        assertEquals(id, assertion.getDouble("value"), state.getDouble(assertion.getString("slot")), 0.0)
+                                    }
+                                }
+                                "device_plan" -> main {
+                                    val plan = checkNotNull(fixture.model.agent.plan)
+                                    assertEquals(id, AgentPhase.REVIEW, plan.phase)
+                                    val command = plan.steps.single().command
+                                    assertEquals(id, "clock.setTimer", command.function)
+                                    assertEquals(id, case.getInt("seconds"), command.args().getInt("seconds"))
+                                    assertEquals(id, 0, clock.hits)
+                                    assertEquals(id, 2, calls.get())
+                                }
+                                else -> {
+                                    assertEquals(id, case.getString("text"), last.text)
+                                    assertEquals(id, if (kind == "answer") 2 else 1, calls.get())
+                                }
+                            }
+                            if (kind != "create") {
+                                assertNull(id, last.toolId)
+                                assertEquals(id, before, store.tools().map { it.id }.toSet())
+                            }
+                            android.util.Log.i("ChatIntentReplay", "$id authoredRoute=$kind calls=${calls.get()} PASS")
+                        }
+                    }
+                }
+                assertEquals(0, clock.hits)
+            } finally {
+                instrumentation.removeMonitor(clock)
+                app.deleteDatabase("${fixture.name}.db-agent.db")
+            }
             assertTrue(server.failures.toString(), server.failures.isEmpty())
         }
     }
@@ -454,7 +722,7 @@ class CloudWorkflowTest {
     private fun decision(text: String = "A sourced answer [1]", kind: String = "answer", search: String = "none", brief: String = "") =
         JSONObject().put("kind",kind).put("text",text).put("brief",brief).put("search",search).toString()
 
-    private fun Request.requireStrictDecision(): JSONObject {
+    private fun Request.requireStrictDecision(image: Boolean = false): JSONObject {
         assertEquals("/beta/chat/completions", path)
         assertEquals("deepseek-flash", json.getString("model"))
         assertTrue(json.getBoolean("stream"))
@@ -478,7 +746,7 @@ class CloudWorkflowTest {
         val parameters = function.getJSONObject("parameters")
         assertEquals("object", parameters.getString("type"))
         assertFalse(parameters.getBoolean("additionalProperties"))
-        val fields = setOf("kind", "text", "brief", "search")
+        val fields = setOf("kind", "text", "brief", "search") + if (image) setOf("image") else emptySet()
         val required = parameters.getJSONArray("required")
         assertEquals(fields, (0 until required.length()).map(required::getString).toSet())
         val properties = parameters.getJSONObject("properties")

@@ -92,7 +92,7 @@ object GraphicsContract {
         val p=parent
         return doubleArrayOf(p[0]*m[0]+p[2]*m[1],p[1]*m[0]+p[3]*m[1],p[0]*m[2]+p[2]*m[3],p[1]*m[2]+p[3]*m[3],p[0]*m[4]+p[2]*m[5]+p[4],p[1]*m[4]+p[3]*m[5]+p[5]).also {a -> require(a.all(Double::isFinite) && a.take(4).all {it in -1024.0..1024.0}) {"Composed transform exceeds its limit."}}
     }
-    fun frame(raw: String,eventType: String,budget: Budget=Budget()): JSONObject {
+    fun frame(raw: String,eventType: String,budget: Budget=Budget(),surfacePath: String="$.surfaces[0]"): JSONObject {
         budget.bytes+=raw.toByteArray(Charsets.UTF_8).size
         require(budget.bytes<=FRAME_BYTES)
         val o=SandboxContract.objectFrom(raw)
@@ -126,20 +126,30 @@ object GraphicsContract {
             require(stops.getJSONObject(0).getDouble("offset")==0.0 && previous==1.0)
             return setOf("gradient")
         }
-        fun visit(array: JSONArray,depth: Int,m: DoubleArray) {
+        fun fields(command: JSONObject, expected: Set<String>, path: String) {
+            val actual = keys(command)
+            if (actual == expected) return
+            val unexpectedStroke = "stroke" in actual && "stroke" !in expected
+            throw ToolValidationFailure(ToolValidationCategory.DRAWING, ToolValidationDetails(
+                "drawing.command_fields", if (unexpectedStroke) "$path.stroke" else path,
+                if (unexpectedStroke) "no stroke field on this drawing command" else "the documented command fields",
+                if (unexpectedStroke) "unsupported stroke field" else "missing or unsupported fields"))
+        }
+        fun visit(array: JSONArray,depth: Int,m: DoubleArray,path: String) {
             require(depth<=6 && array.length()<=512)
             repeat(array.length()) {i ->
                 require(++budget.commands<=512)
                 val c=array.getJSONObject(i);val type=c.getString("type")
+                val commandPath = "$path[$i]"
                 if(type=="group") {
-                    require(keys(c)==setOf("type","children")+(if(c.has("transform"))setOf("transform") else emptySet()))
+                    fields(c,setOf("type","children")+(if(c.has("transform"))setOf("transform") else emptySet()),commandPath)
                     val next=if(c.has("transform"))transform(m,c.getJSONArray("transform")) else m
                     point(0.0,0.0,next,false)
-                    visit(c.getJSONArray("children"),depth+1,next)
+                    visit(c.getJSONArray("children"),depth+1,next,"$commandPath.children")
                     return@repeat
                 }
                 if(type=="bitmap") {
-                    require(keys(c)==setOf("type","resourceId","label","x","y","width","height"))
+                    fields(c,setOf("type","resourceId","label","x","y","width","height"),commandPath)
                     val handle=c.get("resourceId")
                     require(handle is String && handle.matches(bitmapHandle)) {"Bitmap drawing needs an opaque image handle."}
                     budget.bitmapHandles.add(handle)
@@ -194,10 +204,10 @@ object GraphicsContract {
                     "text" -> {point(number(c,"x"),number(c,"y"),m);number(c,"size",1.0,128.0);require(c.get("text") is String);budget.chars+=c.getString("text").length;require(budget.chars<=2048);setOf("type","x","y","size","text")}
                     else -> error("Unsupported drawing command")
                 }
-                require(keys(c)==fields+paint(c,m))
+                fields(c,fields+paint(c,m),commandPath)
             }
         }
-        visit(o.getJSONArray("commands"),1,identity)
+        visit(o.getJSONArray("commands"),1,identity,"$surfacePath.commands")
         return o
     }
 }

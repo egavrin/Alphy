@@ -17,7 +17,7 @@ internal data class SceneRequirement(
             The examples use excerpts from example requests. Replace them with excerpts from the original request.
             For a full-window moving playfield use this complete plan shape with the requested language and brief:
             {"wholeScreen":true,"language":"en","scene":{"placement":"immersive","brief":"A clear playfield with moving objects and visible feedback.","outcome":{"kind":"continuous"},"checks":{"status":"checkable","scenario":{"slots":{"surface":{"kind":"surface"},"object":{"kind":"geometry"}},"steps":[{"op":"frames","slot":"surface","count":4,"observe":"object","changes":3}]}},"checkEvidence":[{"step":1,"excerpt":"moving objects","purpose":"motion","scope":"whole"}]}}
-            For an embedded scene use "inline". Example of the top-level scene value for a native numeric control:
+            Use "inline" for a canvas inside the app screen alongside native controls, even when the canvas takes most of the screen. Example for a native numeric control:
             {"placement":"inline","brief":"Show a clearly labeled shape that grows with the slider.","outcome":{"kind":"continuous"},"liveInputs":["slider"],"checks":{"status":"checkable","scenario":{"slots":{"slider":{"kind":"action"},"shape":{"kind":"geometry"}},"steps":[{"op":"capture","slot":"shape","as":"before"},{"op":"action","slot":"slider","value":5},{"op":"assert","slot":"shape","test":"changed","capture":"before"}]}},"checkEvidence":[{"step":3,"excerpt":"grows with the slider","purpose":"outcome","scope":"whole"}]}
             Use "stage" for the existing standalone drawing above native controls. Every drawing needs a scene check.
             Include in liveInputs only action slots that require continuous input. For a native slider used by those slots set inputMode to "live" in inputs.
@@ -39,8 +39,12 @@ internal data class SceneRequirement(
             requireParts(placement in setOf("inline", "stage", "immersive"), "$.scene.placement", "inline, stage, or immersive")
             val brief = scene.opt("brief")
             requireParts(brief is String && brief.isNotBlank() && brief.length <= 1200, "$.scene.brief", "a visual brief up to 1200 characters")
-            val checks = GenerationBehavior.parse(scene.opt("checks"), emptySet(), threeScene) as? GenerationBehavior.Scenario
+            val scenario = GenerationBehavior.parse(scene.opt("checks"), emptySet(), threeScene, "$.scene.checks") as? GenerationBehavior.Scenario
                 ?: throw PartsContractFailure("$.scene.checks", "an executable drawing check")
+            val inferWriterTypes = requireOutcome && !threeScene
+            val checks = if (inferWriterTypes || scenario.slots.values.any { it.valueType != null }) {
+                GenerationBehavior.resolveValueTypes(scenario, emptyMap(), inferWriterTypes, field = "$.scene.checks")
+            } else scenario
             requireParts(checks.steps.any { step ->
                 step is GenerationBehavior.Step.Advance && step.observe != null ||
                     step is GenerationBehavior.Step.Assert && checks.slots[step.slot]?.kind == GenerationBehavior.Kind.GEOMETRY

@@ -25,7 +25,7 @@ import org.json.JSONObject
 /** Only event kinds and structural indices can leave this local workflow. */
 internal class ToolSmokeFailure(val event: String, val path: String, cause: Exception,
     val replay: List<String>? = null) : Exception(null, cause) {
-    val correction get() = "Smoke event: $event. Path: $path. Return valid state, UI, drawing, and subscriptions for this event." +
+    fun correction(rejectedPath: String = path) = "Smoke event: $event. Path: $rejectedPath. Return valid state, UI, drawing, and subscriptions for this event." +
         when ((cause as? CloudFailure)?.code) {
             "javascript_script_error" -> " Read the event from input.event. Declare local variables before use."
             "javascript_invalid_result" -> if (event == "action")
@@ -210,7 +210,24 @@ internal class ToolGenerationSmoke(
             }
             fun read(slot: String): Any {
                 if (fenced) fail("native or record result required", BehaviorFailureRule.EXTERNAL_RESULT_REQUIRED, slot)
-                val kind = scenario.slots.getValue(slot).kind
+                val planned = scenario.slots.getValue(slot)
+                if (planned.kind == Kind.ACTION) {
+                    val root = JSONObject(ui)
+                    val id = when (val binding = target(slot)) {
+                        is Binding.Id -> binding.value
+                        is Binding.Ui -> {
+                            var node = root
+                            for (index in binding.path) {
+                                node = node.optJSONArray("children")?.optJSONObject(index)
+                                    ?: fail("button binding path is unavailable", BehaviorFailureRule.TARGET_MISSING, slot)
+                            }
+                            node.optString("action")
+                        }
+                        is Binding.Drawing -> fail("invalid button binding", BehaviorFailureRule.BINDING_SHAPE, slot)
+                    }
+                    return ToolUiCatalog.ordinaryButtonAvailability(root, id, displayState())
+                        ?: fail("bind an existing ordinary button", BehaviorFailureRule.TARGET_MISSING, slot)
+                }
                 return when (val binding = target(slot)) {
                     is Binding.Ui -> {
                         val values = displayState()
@@ -218,9 +235,15 @@ internal class ToolGenerationSmoke(
                             fail("visible output unavailable", rule, slot, type)
                         }
                         val type = node.getString("type")
-                        checkNotNull(behaviorUiObservation(node, values, kind, binding.native) { rule, shape ->
+                        val observed = checkNotNull(behaviorUiObservation(node, values, planned.kind, binding.native) { rule, shape ->
                             fail("compatible visible output unavailable", rule, slot, type, shape)
                         })
+                        val shape = BehaviorValueShape.of(observed)
+                        if (planned.valueType != null && shape != planned.valueType) {
+                            fail("slot $slot requires a visible ${planned.valueType.id} output",
+                                BehaviorFailureRule.SCALAR_SHAPE, slot, type, shape)
+                        }
+                        observed
                     }
                     is Binding.Drawing -> {
                         if (requireVisibleDrawing && canvasSurfaceIds(spec.ui).isNotEmpty() &&
@@ -231,7 +254,8 @@ internal class ToolGenerationSmoke(
                             ?: fail("drawing output unavailable", BehaviorFailureRule.DRAWING_UNAVAILABLE, slot)
                         val geometry = observeSurfaceGeometry(surface(binding.surface, slot), commands, binding.path)
                             ?: fail("drawing selection unavailable", BehaviorFailureRule.DRAWING_UNAVAILABLE, slot)
-                        if (requireVisibleDrawing && !geometry.hasInk) {
+                        val assertion = stepIndex?.let(scenario.steps::get) as? Step.Assert
+                        if (requireVisibleDrawing && !geometry.hasInk && assertion?.test != "empty") {
                             fail("the required drawing produces no visible pixels", BehaviorFailureRule.DRAWING_UNAVAILABLE, slot)
                         }
                         geometry
@@ -350,10 +374,11 @@ internal class ToolGenerationSmoke(
                             current.width == expected.width && current.height == expected.height && current.visible == expected.visible
                         } else sameToolJson(current, expected)
                         val passed = when (step.test) {
-                            "equals", "unchanged" -> equal
+                            "equals", "unchanged", "availability" -> equal
                             "changed" -> !equal
                             "greater" -> numeric(current, step.slot) > numeric(expected, step.slot)
                             "less" -> numeric(current, step.slot) < numeric(expected, step.slot)
+                            "empty" -> current is SurfaceGeometry && !current.hasInk
                             else -> when (current) {
                                 is String -> current.isNotBlank()
                                 is SurfaceGeometry -> current.hasInk

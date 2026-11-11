@@ -25,6 +25,7 @@ internal enum class ToolValidationCategory(val id: String, val guidance: String)
     UI_PROPERTIES("tool_ui_properties", "Remove unsupported properties. Put a component's tone and emphasis inside its style object. Use only the styles allowed for that component. visible and enabled must be booleans."),
     UI_BINDINGS("tool_ui_bindings", "Use declared dotted object paths with the documented type. Paths must exist in both schema and state. Never use array indices or prototype access."),
     UI_ACTIONS("tool_ui_actions", "Use a unique action ID for each actionable control. IDs must start with an ASCII letter and contain at most 48 letters, digits, or underscores."),
+    DRAWING("tool_drawing", "Return only the documented fields for each drawing command."),
     COMPOSITION("tool_composition", "Keep the host-owned parts in their fixed positions. Use only fill-owned state, actions, and surfaces in generated fill."),
     NATIVE_PRESENTATION("tool_native_presentation", "Keep the existing focal slot structure, its position, and its action.");
 

@@ -1,0 +1,60 @@
+{
+  "case": "extra:russian-embedded-drawing",
+  "request": "Сделай мини-приложение на русском с заголовком «Метка на холсте». Внутри экрана размести отдельный холст. При касании холста поставь в этой точке оранжевую метку и убери предыдущую. Покажи число касаний. Кнопка «Сбросить» очищает холст и возвращает счётчик к нулю.",
+  "context": "User request: Сделай мини-приложение на русском с заголовком «Метка на холсте». Внутри экрана размести отдельный холст. При касании холста поставь в этой точке оранжевую метку и убери предыдущую. Покажи число касаний. Кнопка «Сбросить» очищает холст и возвращает счётчик к нулю.\nWidget brief: Мини-приложение на русском языке. Заголовок «Метка на холсте». Внутри экрана — отдельный холст (canvas), занимающий основную часть экрана, с рамкой/фоном. По касанию (tap/click) холста в точке касания отображается оранжевая метка; предыдущая метка удаляется — одновременно видна только одна метка. Отображается счётчик числа касаний (общее количество касаний с момента последнего сброса), обновляется при каждом касании. Кнопка «Сбросить» очищает холст (удаляет метку) и возвращает счётчик к 0. Интерфейс на русском.\nExcerpts below may be truncated. Preserve the complete request, brief, and source URLs above.\nReply excerpt: Сделаю мини-приложение «Метка на холсте» на русском.",
+  "wirePath": "evidence/alphy-ui/generation-full-134-after-reliability/captures/extra:russian-embedded-drawing:candidate:1/provider.jsonl",
+  "wireSha256": "f9f6307df11fecc02538d0f1ba581b63701d1f38fa19bbad27e62aeae7c94efd",
+  "reportSha256": "b428892b49fca764066004baaf73d70a44eb3db79ba1bd91d0f8726b80344ede",
+  "terminalAttempt": {
+    "operation_id": "18ab8601-ec0c-4fc5-aee8-17253e976d1e",
+    "attempt": 4,
+    "at_ns": 13787996763615,
+    "kind": "attempt",
+    "stage": "smoke",
+    "outcome": "rejected",
+    "disposition": "finish",
+    "failure_code": "widget_preview",
+    "smoke": {
+      "event": "preview",
+      "path": "$.ui",
+      "failureCode": "unknown"
+    }
+  },
+  "replies": [
+    {
+      "stage": "PLAN",
+      "call": 2,
+      "line": 6,
+      "contentSha256": "407865f9fb837f8747049756b12c83da73687d3084cbd9d863ecafff19d57f41",
+      "content": "{\"wholeScreen\":true,\"language\":\"ru\",\"scene\":{\"placement\":\"immersive\",\"brief\":\"Отдельный холст с рамкой и светло-серым фоном занимает основную часть экрана. В верхней части — заголовок «Метка на холсте» и счётчик касаний (крупное число, подпись «Касаний»). Внизу — кнопка «Сбросить». По касанию холста в точке касания рисуется оранжевая метка (круг с точкой), предыдущая метка исчезает — видна ровно одна метка. Счётчик увеличивается на 1 при каждом касании. Кнопка «Сбросить» удаляет метку и обнуляет счётчик.\",\"outcome\":{\"kind\":\"continuous\"},\"liveInputs\":[],\"checks\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"surface\":{\"kind\":\"surface\"},\"marker\":{\"kind\":\"geometry\"},\"count\":{\"kind\":\"value\"},\"reset\":{\"kind\":\"action\"}},\"steps\":[{\"op\":\"surface\",\"slot\":\"surface\",\"event\":\"pointer\",\"phase\":\"down\",\"x\":0.5,\"y\":0.5},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":1},{\"op\":\"assert\",\"slot\":\"marker\",\"test\":\"nonempty\"},{\"op\":\"capture\",\"slot\":\"marker\",\"as\":\"before\"},{\"op\":\"surface\",\"slot\":\"surface\",\"event\":\"pointer\",\"phase\":\"down\",\"x\":0.2,\"y\":0.8},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":2},{\"op\":\"assert\",\"slot\":\"marker\",\"test\":\"changed\",\"capture\":\"before\"},{\"op\":\"capture\",\"slot\":\"marker\",\"as\":\"beforeReset\"},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":0},{\"op\":\"assert\",\"slot\":\"marker\",\"test\":\"changed\",\"capture\":\"beforeReset\"}]}},\"checkEvidence\":[{\"step\":2,\"excerpt\":\"Покажи число касаний.\",\"purpose\":\"outcome\"},{\"step\":3,\"excerpt\":\"поставь в этой точке оранжевую метку\",\"purpose\":\"outcome\",\"scope\":\"whole\"},{\"step\":6,\"excerpt\":\"Покажи число касаний.\",\"purpose\":\"outcome\"},{\"step\":7,\"excerpt\":\"убери предыдущую\",\"purpose\":\"outcome\",\"scope\":\"whole\"},{\"step\":10,\"excerpt\":\"возвращает счётчик к нулю\",\"purpose\":\"outcome\"},{\"step\":11,\"excerpt\":\"Кнопка «Сбросить» очищает холст\",\"purpose\":\"outcome\",\"scope\":\"whole\"}],\"visualReview\":[\"оранжевую метку\",\"отдельный холст\"]}}"
+    },
+    {
+      "stage": "COMPLETE",
+      "call": 3,
+      "line": 9,
+      "contentSha256": "a7d2613048336d47bbfdb055a8fdb71518a35e628402a73c65cfeea071ae97b0",
+      "content": "{\"formatVersion\":3,\"title\":\"Метка на холсте\",\"description\":\"Один холст с рамкой: касание ставит оранжевую метку в точке касания, показывает число касаний и сбрасывается кнопкой «Сбросить».\",\"capabilities\":[],\"capabilityResults\":false,\"presentation\":{\"mode\":\"immersive\"},\"surfaces\":[{\"id\":\"main\",\"width\":360,\"height\":640,\"sizing\":\"viewport\"}],\"stateSchema\":{\"count\":\"number\",\"hasMark\":\"boolean\",\"nx\":\"number\",\"ny\":\"number\",\"vw\":\"number\",\"vh\":\"number\"},\"initialState\":{\"count\":0,\"hasMark\":false,\"nx\":0.5,\"ny\":0.5,\"vw\":360,\"vh\":640},\"behaviorBindings\":{\"surface\":\"main\",\"marker\":{\"surface\":\"main\",\"path\":[2]},\"count\":[0],\"reset\":\"reset\"},\"ui\":{\"type\":\"column\",\"style\":{\"padding\":\"medium\",\"gap\":\"small\"},\"children\":[{\"type\":\"metric\",\"text\":\"Касаний\",\"bind\":\"count\",\"format\":\"number\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"button\",\"text\":\"Сбросить\",\"action\":\"reset\",\"variant\":\"tonal\"},{\"type\":\"text\",\"text\":\"Коснитесь холста, чтобы поставить метку.\"}]},\"source\":\"const event = input.event || {};\\nconst s = Object.assign({}, input.state);\\nlet vw = Number(s.vw);\\nif (!isFinite(vw) || vw <= 0) vw = 360;\\nlet vh = Number(s.vh);\\nif (!isFinite(vh) || vh <= 0) vh = 640;\\nconst type = event.type;\\nif (type === 'viewport' && event.surfaceId === 'main') {\\n  const w = Number(event.width);\\n  const h = Number(event.height);\\n  if (isFinite(w) && w >= 64 && w <= 2048) { s.vw = w; vw = w; }\\n  if (isFinite(h) && h >= 64 && h <= 2048) { s.vh = h; vh = h; }\\n} else if (type === 'pointer' && event.surfaceId === 'main' && event.phase === 'down' && event.pointer === 0) {\\n  let x = Number(event.x);\\n  let y = Number(event.y);\\n  if (!isFinite(x)) x = vw / 2;\\n  if (!isFinite(y)) y = vh / 2;\\n  s.nx = Math.min(1, Math.max(0, x / vw));\\n  s.ny = Math.min(1, Math.max(0, y / vh));\\n  s.count = (Number(s.count) || 0) + 1;\\n  s.hasMark = true;\\n} else if (type === 'action' && event.actionId === 'reset') {\\n  s.count = 0;\\n  s.hasMark = false;\\n}\\nconst width = vw;\\nconst height = vh;\\nconst hasMark = s.hasMark === true;\\nconst nx = Math.min(1, Math.max(0, Number(s.nx) || 0));\\nconst ny = Math.min(1, Math.max(0, Number(s.ny) || 0));\\nconst mx = nx * width;\\nconst my = ny * height;\\nconst count = Math.max(0, Math.round(Number(s.count) || 0));\\nconst outerR = hasMark ? 18 : 0;\\nconst innerR = hasMark ? 6 : 0;\\nconst commands = [\\n  {type: 'rect', x: 0, y: 0, width: width, height: height, color: '#F1F3F4'},\\n  {type: 'roundRect', x: 10, y: 10, width: Math.max(1, width - 20), height: Math.max(1, height - 20), radius: 18, stroke: 2, color: 'muted'},\\n  {type: 'group', children: [\\n    {type: 'circle', x: mx, y: my, radius: outerR, color: '#FF7A00'},\\n    {type: 'circle', x: mx, y: my, radius: innerR, color: '#FFFFFFFF'}\\n  ]},\\n  {type: 'text', x: 24, y: 60, size: 44, text: String(count), color: '#FF202124'},\\n  {type: 'text', x: 24, y: 84, size: 14, text: 'Касаний', color: '#FF5F6368'}\\n];\\nconst ui = {\\n  type: 'column',\\n  style: {padding: 'medium', gap: 'small'},\\n  children: [\\n    {type: 'metric', text: 'Касаний', bind: 'count', format: 'number', style: {emphasis: 'number'}},\\n    {type: 'button', text: 'Сбросить', action: 'reset', variant: 'tonal'},\\n    {type: 'text', text: 'Коснитесь холста, чтобы поставить метку.'}\\n  ]\\n};\\nreturn {state: s, ui: ui, surfaces: {main: {commands: commands}}};\"}"
+    },
+    {
+      "stage": "COMPLETE",
+      "call": 4,
+      "line": 12,
+      "contentSha256": "7f49925b5eaaed508074840c67c09f1f2d4f4aa478cab02cba035a65026a3c4f",
+      "content": "{\"fields\":{\"ui\":{\"type\":\"column\",\"style\":{\"padding\":\"medium\",\"gap\":\"small\"},\"children\":[{\"type\":\"metric\",\"text\":\"Касаний\",\"bind\":\"count\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"section\",\"text\":\"Управление\",\"children\":[{\"type\":\"button\",\"text\":\"Сбросить\",\"action\":\"reset\",\"variant\":\"tonal\"},{\"type\":\"text\",\"text\":\"Коснитесь холста, чтобы поставить метку.\"}]}]}},\"sourceEdits\":[{\"search\":\"return {state: s, ui: ui, surfaces: {main: {commands: commands}}};\",\"replace\":\"return {state: s, surfaces: {main: {commands: commands}}};\"}]}"
+    },
+    {
+      "stage": "COMPLETE",
+      "call": 5,
+      "line": 15,
+      "contentSha256": "9536a21ce88670dc69db8201bfe9b2b0f9fd2d2390c93f1d3377f0b5b5287cb7",
+      "content": "{\"fields\":{\"ui\":{\"type\":\"column\",\"style\":{\"padding\":\"medium\",\"gap\":\"medium\"},\"children\":[{\"type\":\"metric\",\"text\":\"Касаний\",\"bind\":\"count\",\"format\":\"number\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"button\",\"text\":\"Сбросить\",\"action\":\"reset\",\"variant\":\"tonal\"},{\"type\":\"text\",\"text\":\"Коснитесь холста, чтобы поставить оранжевую метку.\"}]}}}"
+    },
+    {
+      "stage": "COMPLETE",
+      "call": 6,
+      "line": 18,
+      "contentSha256": "b315f446ec5335f7f34d56824281e815fb9ce8de3c758044cd56c6ea07403431",
+      "content": "{\"fields\":{\"ui\":{\"type\":\"column\",\"style\":{\"padding\":\"medium\",\"gap\":\"small\"},\"children\":[{\"type\":\"metric\",\"text\":\"Касаний\",\"bind\":\"count\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"button\",\"text\":\"Сбросить\",\"action\":\"reset\",\"variant\":\"filled\"},{\"type\":\"text\",\"text\":\"Коснитесь холста — метка появится в точке касания.\"}]},\"initialState\":{\"count\":0,\"hasMark\":false,\"nx\":0.5,\"ny\":0.5,\"vw\":360,\"vh\":640}},\"sourceEdits\":[{\"search\":\"    {type: 'metric', text: 'Касаний', bind: 'count', format: 'number', style: {emphasis: 'number'}},\\n    {type: 'button', text: 'Сбросить', action: 'reset', variant: 'tonal'},\\n    {type: 'text', text: 'Коснитесь холста, чтобы поставить метку.'}\",\"replace\":\"    {type: 'metric', text: 'Касаний', bind: 'count', style: {emphasis: 'number'}},\\n    {type: 'button', text: 'Сбросить', action: 'reset', variant: 'filled'},\\n    {type: 'text', text: 'Коснитесь холста — метка появится в точке касания.'}\"}]}"
+    }
+  ]
+}
