@@ -33,7 +33,7 @@ internal enum class ToolGenerationRoute(val id: String) {
 }
 
 internal enum class BehaviorFailureRule(val id: String) {
-    BINDING_SHAPE("binding_shape"), BINDING_MISSING("binding_missing"), TARGET_MISSING("target_missing"),
+    ROW_SCOPE_MISMATCH("row_scope_mismatch"), BINDING_SHAPE("binding_shape"), BINDING_MISSING("binding_missing"), TARGET_MISSING("target_missing"),
     TARGET_HIDDEN("target_hidden"), OBSERVATION_KIND("observation_kind"), SCALAR_MISSING("scalar_missing"),
     SCALAR_SHAPE("scalar_shape"), ACTION_UNAVAILABLE("action_unavailable"), SURFACE_UNAVAILABLE("surface_unavailable"),
     DRAWING_UNAVAILABLE("drawing_unavailable"), SUBSCRIPTION_UNAVAILABLE("subscription_unavailable"),
@@ -67,6 +67,10 @@ internal enum class BehaviorComparison {
     }
 }
 
+internal enum class BehaviorDiscoveryStage(val id: String) {
+    WRITER_BINDING("writer_binding"), BEHAVIOR_EXECUTION("behavior_execution")
+}
+
 internal enum class BehaviorObservation { CHANGED, UNCHANGED, COMPARISON_FAILED, TOO_FEW_CHANGES }
 
 /** Step and slot numbers start at one. Both follow the validated scenario order. */
@@ -86,6 +90,7 @@ internal data class BehaviorBindingDiagnostic(
     val frames: Int? = null,
     val requiredChanges: Int? = null,
     val observedChanges: Int? = null,
+    val discoveryStage: BehaviorDiscoveryStage? = null,
 ) {
     fun report(): JSONObject = JSONObject().put("route", route.id).put("rule", rule.id)
         .put("step", step).put("slot", slot).put("slotKind", slotKind?.wire)
@@ -95,6 +100,8 @@ internal data class BehaviorBindingDiagnostic(
         .put("scope", scope?.wire).put("comparison", comparison?.wire)
         .put("observation", observation?.name?.lowercase(java.util.Locale.ROOT))
         .put("frames", frames).put("requiredChanges", requiredChanges).put("observedChanges", observedChanges)
+        .put("contractOwner", "plan".takeIf { rule == BehaviorFailureRule.ROW_SCOPE_MISMATCH })
+        .put("discoveryStage", discoveryStage?.id)
 }
 
 /** Operation evidence contains no candidate data or diagnostic details from generated content. */
@@ -242,7 +249,7 @@ internal inline fun <T> ToolGenerationTrace.Run?.timed(
 
 private fun safeSelectorBatch(batch: String?) = batch?.takeIf { it == "sections" || it == "parts" }
 private val needsPlanPath = Regex(
-    """\$(?:\.(?:wholeScreen|scene|checks|checkEvidence|visualReview|behavior|scenario|steps|title|description|language|inputs|constants|needs|questions|id|label|type|value|uses|sourceIds|stops|bands|items|ideas|name|minutes|min|max|step|control|expression|example|unit|date|offsetDays|repeatDays|effort|ask|options|count|maxFrames|milliseconds)(?:\[\d{1,2}])?)*|\$\.(?:behavior|scene\.checks)\.scenario\.slots\[\d{1,2}](?:\.valueType)?"""
+    """\$(?:\.(?:wholeScreen|scene|checks|checkEvidence|visualReview|behavior|scenario|steps|title|description|language|inputs|constants|needs|questions|id|label|type|value|uses|sourceIds|stops|bands|items|ideas|name|minutes|min|max|step|control|expression|example|unit|date|offsetDays|repeatDays|effort|ask|options|count|maxFrames|milliseconds)(?:\[\d{1,2}])?)*|\$\.(?:behavior|scene\.checks)\.scenario\.slots\[\d{1,2}](?:\.(?:valueType|rowValueType))?"""
 )
 
 /** No candidate, exception message, private field name, or generated identifier enters this record.

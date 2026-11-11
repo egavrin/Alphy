@@ -163,6 +163,8 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         this.attemptObserver=attemptObserver
     }
     private enum class GenerationProblem(val code: String, val message: String, val correction: String) {
+        PLAN("widget_plan", "The PLAN did not declare the row action contract. Retry the request.",
+            "Declare rowValueType boolean and a keyed Boolean payload for each writer-owned row checkbox action."),
         SPEC("widget_spec", "The generator returned an invalid tool definition, state schema, or controls. Retry the request.",
             "The tool definition was invalid. Follow the exact schema and native control limits."),
         STATE("widget_state", "The generated revision is incompatible with the saved state. Existing data is unchanged. Request a revision that preserves its fields and types.",
@@ -1150,10 +1152,15 @@ ${imageWriterGuidance()}"""
         val typedOutputs = generatedSlots.mapNotNull { (id, slot) -> slot.valueType?.let { id to it.id } }.toMap()
         val outputTypeGuidance = if (typedOutputs.isEmpty()) "" else
             "\nBind these value slots to visible outputs of the indicated scalar types: ${JSONObject(typedOutputs)}."
+        val rowActions = generatedSlots.filterValues { it.rowValueType != null }.keys
+        val rowActionGuidance = if (rowActions.isEmpty()) "" else
+            "\nBind these row action slots by action ID to actual rowTemplate checkboxes: ${jsonArray(rowActions.toList())}. " +
+                "Preserve the planned keyed Boolean payloads. Create stable row IDs that match the scenario keys. " +
+                "The host resolves each row from the current state when its action step executes."
         val coreGuidance = if (stagedApp) "\nBuild the complete functional core with simple default presentation. " +
             "Defer generated images, textures, and requested visual refinement." else ""
         val sharedRules = fillGuidance + routeContext + portGuidance + sceneGuidance + workflowGuidance +
-            bindingShapeGuidance + outputTypeGuidance + coreGuidance
+            bindingShapeGuidance + outputTypeGuidance + rowActionGuidance + coreGuidance
         val contract = "$task $definitionFormat$instructions$sharedRules"
         val fullContract = contract + bindingLocation
         val patchContract = """
@@ -1281,6 +1288,20 @@ ${imageWriterGuidance()}"""
                 checkActive={checkActive()},
                 generation=this@ToolGenerationService,policy=policy,onInitialPreview=onInitialPreview,
                 checkUi=checkUi)
+            fun rejectBehavior(failure: BehaviorCheckFailure): Nothing {
+                throw InvalidGeneratedOutput(
+                    if (failure.bindingDiagnostic?.rule == BehaviorFailureRule.ROW_SCOPE_MISMATCH) GenerationProblem.PLAN else GenerationProblem.SCENE,
+                    sceneFailure = failure.detail,
+                    sceneCorrection = failure.correction + (if (ports.isEmpty()) "" else
+                        " When a selected native slider changes, the fill receives render with the new input.ports. Redraw the observed geometry in render."),
+                    behaviorDiagnostic = failure.bindingDiagnostic)
+            }
+            if (workflow != null) {
+                validation.stage = ToolGenerationStage.BEHAVIOR
+                try { checker.checkBehaviorBindings(workflow, bindings, route, nativeBindings.keys) }
+                catch (failure: BehaviorCheckFailure) { rejectBehavior(failure) }
+            }
+            validation.stage = ToolGenerationStage.SMOKE
             val preview = try {
                 trace.timed(attemptNumber, validation.stage) { checker.run() }
             } catch(cancel: CancellationException) { throw cancel }
@@ -1336,10 +1357,7 @@ ${imageWriterGuidance()}"""
                         checker.checkBehavior(workflow, targets, preview, route, nativeBindings.keys,
                             requireVisibleDrawing = scene != null, liveInputSlots = scene?.liveInputs.orEmpty())
                     } catch (failure: BehaviorCheckFailure) {
-                        throw InvalidGeneratedOutput(GenerationProblem.SCENE, sceneFailure = failure.detail,
-                            sceneCorrection = failure.correction + (if (ports.isEmpty()) "" else
-                                " When a selected native slider changes, the fill receives render with the new input.ports. Redraw the observed geometry in render."),
-                            behaviorDiagnostic = failure.bindingDiagnostic)
+                        rejectBehavior(failure)
                     } catch (failure: ToolSmokeFailure) {
                         val code = failure.cause as? CloudFailure
                         if (code?.code in setOf("javascript_busy", "javascript_unavailable", "cancelled")) throw checkNotNull(code)
@@ -1433,6 +1451,7 @@ ${imageWriterGuidance()}"""
                 val error = if (rejectedPatch == null) failure
                     else CloudFailure("widget_patch", "Alphy could not apply an app repair. Retry the request.")
                 val next = when {
+                    failure is InvalidGeneratedOutput && failure.problem == GenerationProblem.PLAN -> null
                     partsOnly || edit?.bindingsOnly == true && rejectedPatch != null -> null
                     failure is InvalidGeneratedOutput && failure.behaviorDiagnostic?.native == true &&
                         failure.behaviorDiagnostic.rule == BehaviorFailureRule.ASSERTION_FAILED -> null
@@ -1468,7 +1487,7 @@ ${imageWriterGuidance()}"""
                 if (writerRepair != null || next == null || !session.claimGenerationCorrection()) {
                     observeAttempt(attemptNumber, validation.stage, error, validation.smoke, trace = trace)
                     throw if (failure is InvalidGeneratedOutput) {
-                        if(mixed && failure.problem != GenerationProblem.SCENE) incompleteMixed() else failure.failure()
+                        if(mixed && failure.problem !in setOf(GenerationProblem.SCENE, GenerationProblem.PLAN)) incompleteMixed() else failure.failure()
                     } else if (failure is SceneBindingMismatch) {
                         CloudFailure("widget_behavior", failure.message.orEmpty())
                     } else error
@@ -1529,6 +1548,10 @@ ${imageWriterGuidance()}"""
                 } catch (failure: GenerationRepair.Rejected) {
                     failure.feedback
                 } catch (failure: InvalidGeneratedOutput) {
+                    if (failure.problem == GenerationProblem.PLAN) {
+                        observeAttempt(attemptNumber, ToolGenerationStage.BEHAVIOR, failure, trace = trace)
+                        throw failure.failure()
+                    }
                     failure.correction
                 } catch (failure: SceneBindingMismatch) {
                     failure.message.orEmpty()

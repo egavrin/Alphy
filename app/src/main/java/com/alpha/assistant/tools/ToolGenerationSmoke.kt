@@ -165,6 +165,46 @@ internal class ToolGenerationSmoke(
         if(spec.isSealedStandalone) Branch({ _, _ -> error("A sealed standalone app has no executor.") },initialUi,seedState,freezeClock).block()
         else sandbox.disposable {execute -> Branch(execute,initialUi,seedState,freezeClock).block()}
 
+    fun checkBehaviorBindings(scenario: GenerationBehavior.Scenario, rawBindings: Any?,
+        route: ToolGenerationRoute, nativeSlots: Set<String>) {
+        val proposed = rawBindings as? JSONObject ?: return
+        for ((slot, planned) in scenario.slots) {
+            if (planned.kind != Kind.ACTION || planned.rowValueType != null) continue
+            val step = scenario.steps.indexOfFirst { it is Step.Action && it.slot == slot }.takeIf { it >= 0 } ?: continue
+            val action = proposed.opt(slot) as? String ?: continue
+            checkActionContract(scenario, mapOf(slot to Binding.Id(action)), spec.ui, route, nativeSlots,
+                slot, action, step, BehaviorDiscoveryStage.WRITER_BINDING)
+        }
+    }
+
+    private fun checkActionContract(scenario: GenerationBehavior.Scenario, bindings: Map<String, Binding>,
+        root: JSONObject, route: ToolGenerationRoute, nativeSlots: Set<String>, slot: String, action: String?,
+        step: Int?, discoveryStage: BehaviorDiscoveryStage) {
+        if (slot in nativeSlots) return
+        val planned = scenario.slots.getValue(slot)
+        val binding = bindings[slot]
+        val target = action?.let { ToolUiCatalog.actionTarget(root, it) }
+        val type = target?.node?.optString("type")
+        val rule = when {
+            planned.rowValueType == null && target?.inRowTemplate == true && type == "checkbox" &&
+                target.node.optString("action") == action -> BehaviorFailureRule.ROW_SCOPE_MISMATCH
+            planned.rowValueType != null && (binding !is Binding.Id || target?.inRowTemplate != true ||
+                type != "checkbox" || target.node.optString("action") != action) -> BehaviorFailureRule.BINDING_SHAPE
+            else -> return
+        }
+        val reason = if (rule == BehaviorFailureRule.ROW_SCOPE_MISMATCH)
+            "The PLAN must declare rowValueType boolean and a keyed Boolean value for a row checkbox action"
+        else "A declared row action requires an action ID bound to a rowTemplate checkbox"
+        val kind = when (binding) {
+            is Binding.Id -> "id"
+            is Binding.Ui -> "ui"
+            is Binding.Drawing -> "drawing"
+            null -> "missing"
+        }
+        throw BehaviorCheckFailure(step, reason, BehaviorBindingDiagnostic(route, rule, step?.plus(1),
+            scenario.slots.keys.indexOf(slot) + 1, planned.kind, false, kind, type, discoveryStage = discoveryStage))
+    }
+
     suspend fun checkBehavior(scenario: GenerationBehavior.Scenario, bindings: Map<String, Binding>, preview: ToolPreview,
         route: ToolGenerationRoute, nativeSlots: Set<String>,
         requireVisibleDrawing: Boolean = false, liveInputSlots: Set<String> = emptySet(),
@@ -280,7 +320,13 @@ internal class ToolGenerationSmoke(
                     when (step) {
                         is Step.Action -> {
                             val root = JSONObject(ui)
-                            val action = when (val binding = target(step.slot)) {
+                            val binding = target(step.slot)
+                            val planned = scenario.slots.getValue(step.slot)
+                            if (planned.rowValueType != null) {
+                                checkActionContract(scenario, bindings, root, route, nativeSlots, step.slot,
+                                    (binding as? Binding.Id)?.value, stepIndex, BehaviorDiscoveryStage.BEHAVIOR_EXECUTION)
+                            }
+                            val action = when (binding) {
                                 is Binding.Id -> binding.value
                                 is Binding.Ui -> {
                                     val node = visibleBehaviorNode(root, displayState(), binding.path) { rule, type ->
@@ -292,16 +338,24 @@ internal class ToolGenerationSmoke(
                                 }
                                 is Binding.Drawing -> fail("invalid action binding", BehaviorFailureRule.BINDING_SHAPE, step.slot)
                             }
+                            if (planned.rowValueType == null) {
+                                checkActionContract(scenario, bindings, root, route, nativeSlots, step.slot, action, stepIndex,
+                                    BehaviorDiscoveryStage.BEHAVIOR_EXECUTION)
+                            }
                             val value = step.value.takeUnless { it == JSONObject.NULL }
                             val control = ToolUiCatalog.action(root, action)
                             val liveInput = control?.let(ToolUiCatalog::isLiveInput) == true
                             if (step.slot in liveInputSlots && !liveInput) {
                                 fail("the planned scene control requires live input", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot)
                             }
+                            val rowControlKind = if (planned.rowValueType != null)
+                                ToolUiCatalog.actionTarget(root, action)?.node?.optString("type") else null
                             val event = try {
                                 controlEvent(root, displayState(), action, value, liveInput)
-                            } catch (_: IllegalArgumentException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot) }
-                              catch (_: IllegalStateException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot) }
+                            } catch (_: IllegalArgumentException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE,
+                                step.slot, rowControlKind) }
+                              catch (_: IllegalStateException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE,
+                                  step.slot, rowControlKind) }
                             send(event)
                             recordEvent("action", step.slot)
                         }

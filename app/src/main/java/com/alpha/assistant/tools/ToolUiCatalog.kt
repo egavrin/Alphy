@@ -769,7 +769,7 @@ object ToolUiCatalog {
 
     fun action(root: JSONObject, id: String): JSONObject? = findAction(root, id, activeOnly = true)?.node
 
-    private data class ActionTarget(val node: JSONObject, val inRowTemplate: Boolean = false)
+    internal data class ActionTarget(val node: JSONObject, val inRowTemplate: Boolean = false)
 
     private fun findAction(root: JSONObject, id: String, activeOnly: Boolean): ActionTarget? {
         if(activeOnly && (!visible(root) || !enabled(root))) return null
@@ -786,6 +786,8 @@ object ToolUiCatalog {
         return null
     }
 
+    internal fun actionTarget(root: JSONObject, id: String): ActionTarget? = findAction(root, id, activeOnly = false)
+
     internal fun actionPayloadRequirement(root: JSONObject, id: String, payload: Any?): String? {
         val target = findAction(root, id, activeOnly = false) ?: return "a declared native action"
         val value = if (target.inRowTemplate) {
@@ -795,7 +797,7 @@ object ToolUiCatalog {
         return invalidActionPayload(target.node, id, value)
     }
 
-    private fun isRowPayload(payload: Any?): Boolean =
+    internal fun isRowPayload(payload: Any?): Boolean =
         payload is JSONObject && ToolValueSchema.keys(payload) == setOf("key","value") && validStableKey(payload.get("key"))
 
     fun validateAction(root: JSONObject, id: String, payload: Any?, state: JSONObject): JSONObject =

@@ -19,7 +19,8 @@ internal sealed interface GenerationBehavior {
         STATE("state"), AUDIO("audio");
         val observable get() = this in setOf(VALUE, COLLECTION, GEOMETRY, STATE, AUDIO)
     }
-    data class Slot(val kind: Kind, val part: String?, val member: String?, val valueType: BehaviorValueShape? = null)
+    data class Slot(val kind: Kind, val part: String?, val member: String?, val valueType: BehaviorValueShape? = null,
+        val rowValueType: BehaviorValueShape? = null)
 
     sealed interface Step {
         data class Action(val slot: String, val value: Any?) : Step
@@ -72,7 +73,11 @@ internal sealed interface GenerationBehavior {
             Use every slot. Use at most 64 steps. Start from the saved definition's initial state.
             An action is {"op":"action","slot":"actionSlot"}. Add a scalar value for an input and omit value for a button.
             For a native mini-app button, {"op":"availability","slot":"actionSlot","value":false} checks that the button is unavailable without pressing it. Use true to check that it is available.
-            Use a keyed row payload only for a declared native member that accepts it. For writer actions use the supported scalar value or a plain press.
+            Use a keyed row payload for a declared native member that accepts it.
+            For a writer-owned rowTemplate checkbox, declare rowValueType boolean on its action slot.
+            Every action on that slot requires value {"key":"stableRowId","value":true} with a JSON Boolean.
+            Choose stable row keys from the scenario so rows created by earlier steps can be addressed.
+            Other writer actions use a supported scalar value or a plain press.
             To compare an observable result with its earlier value, use {"op":"capture","slot":"result","as":"before"}.
             Then use {"op":"assert","slot":"result","test":"changed|unchanged|equals","capture":"before"}.
             To test an explicit expected result, use equals with a typed scalar value instead of capture.
@@ -246,7 +251,7 @@ internal sealed interface GenerationBehavior {
             val slots = ToolValueSchema.keys(slotObject).mapIndexed { index, id ->
                 identifier(id, field)
                 val row = obj(slotObject.opt(id), field)
-                row.requireKeys(field, setOf("kind"), setOf("part", "member", "valueType"))
+                row.requireKeys(field, setOf("kind"), setOf("part", "member", "valueType", "rowValueType"))
                 val kind = Kind.entries.firstOrNull { it.wire == row.opt("kind") }
                     ?: throw PartsContractFailure(field, "a supported slot kind")
                 requireParts(if (threeScene) kind != Kind.TIMER else kind !in setOf(Kind.STATE, Kind.AUDIO),
@@ -261,7 +266,14 @@ internal sealed interface GenerationBehavior {
                         ?: contractFailure("slot_value_type", "$field.scenario.slots[$index].valueType",
                             "number, string, or boolean on a mini-app value slot", value)
                 }
-                id to Slot(kind, part, member, valueType)
+                val rowValueType = row.opt("rowValueType")?.let { value ->
+                    if (threeScene || kind != Kind.ACTION || part != null || value != "boolean") {
+                        contractFailure("slot_row_value_type", "$field.scenario.slots[$index].rowValueType",
+                            "boolean on a writer-owned mini-app action slot", value)
+                    }
+                    BehaviorValueShape.BOOLEAN
+                }
+                id to Slot(kind, part, member, valueType, rowValueType)
             }.toMap()
             val captures = mutableMapOf<String, Kind>()
             val used = mutableSetOf<String>()
@@ -289,13 +301,23 @@ internal sealed interface GenerationBehavior {
                         row.requireKeys(at, setOf("op", "slot"), setOf("value"))
                         events++
                         val action = slot(Kind.ACTION)
-                        Step.Action(action, row.opt("value")?.let { actionValue(it, slots.getValue(action), at) })
+                        val planned = slots.getValue(action)
+                        val value = row.opt("value")
+                        if (planned.rowValueType != null && (!ToolUiCatalog.isRowPayload(value) ||
+                                (value as JSONObject).opt("value") !is Boolean)) {
+                            contractFailure("action_payload", "$at.value",
+                                "an object with exactly key (a nonblank string of at most 128 characters) and value (a JSON Boolean)", value)
+                        }
+                        Step.Action(action, value?.let { actionValue(it, planned, at) })
                     }
                     "availability" -> {
                         row.requireKeys(at, setOf("op", "slot", "value"))
                         val value = row.opt("value")
                         requireParts(!threeScene && value is Boolean, at, "a Boolean availability check for an ordinary mini-app button")
-                        Step.Assert(slot(Kind.ACTION), "availability", value, null)
+                        val action = slot(Kind.ACTION)
+                        if (slots.getValue(action).rowValueType != null) contractFailure("row_availability", at,
+                            "an ordinary button slot without rowValueType for an availability check")
+                        Step.Assert(action, "availability", value, null)
                     }
                     "surface" -> {
                         val event = row.opt("event") as? String
@@ -508,7 +530,7 @@ internal sealed interface GenerationBehavior {
             requireParts(it.matches(Regex("[A-Za-z][A-Za-z0-9_]*")), path, "a valid identifier")
         }
         private fun actionValue(raw: Any, slot: Slot, path: String): Any {
-            if (raw !is JSONObject || slot.member == null) return scalar(raw, path)
+            if (raw !is JSONObject || slot.member == null && slot.rowValueType == null) return scalar(raw, path)
             raw.requireKeys(path, setOf("key", "value"))
             return JSONObject().put("key", planText(raw.get("key"), path, 512))
                 .put("value", scalar(raw.get("value"), path))

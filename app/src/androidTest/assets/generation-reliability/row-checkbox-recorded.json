@@ -1,0 +1,445 @@
+{
+  "revision": "64b92e27a885ddf09ff021d4c51c540601817418",
+  "source": "fresh:near-2:candidate:1",
+  "request": "to do list where each item has a checkbox I can tick",
+  "plan": {
+    "wholeScreen": true,
+    "language": "en",
+    "behavior": {
+      "status": "checkable",
+      "scenario": {
+        "slots": {
+          "newItem": {
+            "kind": "action"
+          },
+          "add": {
+            "kind": "action"
+          },
+          "toggle": {
+            "kind": "action"
+          },
+          "remaining": {
+            "kind": "value"
+          },
+          "list": {
+            "kind": "collection"
+          }
+        },
+        "steps": [
+          {
+            "op": "action",
+            "slot": "newItem",
+            "value": "Buy milk"
+          },
+          {
+            "op": "action",
+            "slot": "add"
+          },
+          {
+            "op": "assert",
+            "slot": "list",
+            "test": "equals",
+            "value": 1
+          },
+          {
+            "op": "assert",
+            "slot": "remaining",
+            "test": "equals",
+            "value": 1
+          },
+          {
+            "op": "action",
+            "slot": "toggle"
+          },
+          {
+            "op": "assert",
+            "slot": "remaining",
+            "test": "equals",
+            "value": 0
+          },
+          {
+            "op": "assert",
+            "slot": "list",
+            "test": "equals",
+            "value": 1
+          }
+        ]
+      }
+    }
+  },
+  "candidates": [
+    {
+      "call": 3,
+      "response": {
+        "formatVersion": 3,
+        "title": "To-Do List",
+        "description": "Tick tasks off, add new ones, delete items, and see how many are left.",
+        "capabilities": [],
+        "capabilityResults": false,
+        "stateSchema": {
+          "newItem": "string",
+          "nextId": "number",
+          "remaining": "number",
+          "items": {
+            "type": "list",
+            "maxItems": 100,
+            "fields": {
+              "id": "string",
+              "text": "string",
+              "done": "boolean"
+            }
+          }
+        },
+        "initialState": {
+          "newItem": "",
+          "nextId": 1,
+          "remaining": 0,
+          "items": []
+        },
+        "ui": {
+          "type": "column",
+          "children": [
+            {
+              "type": "metric",
+              "text": "Remaining",
+              "bind": "remaining",
+              "format": "number"
+            },
+            {
+              "type": "row",
+              "wrap": false,
+              "children": [
+                {
+                  "type": "input",
+                  "text": "New task",
+                  "bind": "newItem",
+                  "action": "newItem",
+                  "maxLength": 200,
+                  "imeAction": "done",
+                  "layout": {
+                    "weight": 1
+                  }
+                },
+                {
+                  "type": "button",
+                  "text": "Add",
+                  "action": "add",
+                  "variant": "filled"
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "text": "Tasks",
+              "bind": "items",
+              "emptyText": "No tasks yet",
+              "rowTemplate": {
+                "type": "row",
+                "wrap": false,
+                "children": [
+                  {
+                    "type": "checkbox",
+                    "text": "Done",
+                    "bind": "done",
+                    "action": "toggle"
+                  },
+                  {
+                    "type": "text",
+                    "text": "Task",
+                    "bind": "text",
+                    "layout": {
+                      "weight": 1
+                    }
+                  },
+                  {
+                    "type": "button",
+                    "text": "Delete",
+                    "action": "remove",
+                    "variant": "text"
+                  }
+                ]
+              }
+            },
+            {
+              "type": "button",
+              "text": "Clear completed",
+              "action": "clearDone",
+              "variant": "text"
+            }
+          ]
+        },
+        "source": "const s = input.state;\nconst e = input.event;\nfunction remainingOf(items) {\n  var n = 0;\n  for (var i = 0; i < items.length; i++) { if (!items[i].done) n++; }\n  return n;\n}\nfunction keyOf(v) {\n  if (v && typeof v === 'object') return v.key;\n  return typeof v === 'string' ? v : '';\n}\nif (e.type === 'action') {\n  if (e.actionId === 'add') {\n    var txt = (s.newItem || '').trim();\n    if (txt.length > 0 && s.items.length < 100) {\n      var items = s.items.concat([{ id: 't' + s.nextId, text: txt.slice(0, 200), done: false }]);\n      return { state: Object.assign({}, s, { items: items, newItem: '', nextId: s.nextId + 1, remaining: remainingOf(items) }) };\n    }\n    return { state: s };\n  }\n  if (e.actionId === 'toggle') {\n    var v = e.value;\n    var key = keyOf(v);\n    var val = (v && typeof v === 'object') ? (v.value === true) : true;\n    var items2 = s.items.map(function (it) {\n      return it.id === key ? Object.assign({}, it, { done: val }) : it;\n    });\n    return { state: Object.assign({}, s, { items: items2, remaining: remainingOf(items2) }) };\n  }\n  if (e.actionId === 'remove') {\n    var key2 = keyOf(e.value);\n    var items3 = s.items.filter(function (it) { return it.id !== key2; });\n    return { state: Object.assign({}, s, { items: items3, remaining: remainingOf(items3) }) };\n  }\n  if (e.actionId === 'clearDone') {\n    var items4 = s.items.filter(function (it) { return !it.done; });\n    return { state: Object.assign({}, s, { items: items4, remaining: remainingOf(items4) }) };\n  }\n}\nreturn { state: s };",
+        "behaviorBindings": {
+          "newItem": "newItem",
+          "add": "add",
+          "toggle": "toggle",
+          "remaining": [
+            0
+          ],
+          "list": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "call": 4,
+      "response": {
+        "sourceEdits": [
+          {
+            "search": "  if (e.actionId === 'add') {",
+            "replace": "  if (e.actionId === 'newItem') {\n    var typed = typeof e.value === 'string' ? e.value : '';\n    return { state: Object.assign({}, s, { newItem: typed.slice(0, 200) }) };\n  }\n  if (e.actionId === 'add') {"
+          }
+        ]
+      }
+    },
+    {
+      "call": 5,
+      "response": {
+        "fields": {
+          "stateSchema": {
+            "newItem": "string",
+            "nextId": "number",
+            "remaining": "number",
+            "allDone": "boolean",
+            "items": {
+              "type": "list",
+              "maxItems": 100,
+              "fields": {
+                "id": "string",
+                "text": "string",
+                "done": "boolean"
+              }
+            }
+          },
+          "initialState": {
+            "newItem": "",
+            "nextId": 1,
+            "remaining": 0,
+            "allDone": false,
+            "items": []
+          },
+          "ui": {
+            "type": "column",
+            "children": [
+              {
+                "type": "metric",
+                "text": "Remaining",
+                "bind": "remaining",
+                "format": "number"
+              },
+              {
+                "type": "checkbox",
+                "text": "All done",
+                "bind": "allDone",
+                "action": "toggle"
+              },
+              {
+                "type": "row",
+                "wrap": false,
+                "children": [
+                  {
+                    "type": "input",
+                    "text": "New task",
+                    "bind": "newItem",
+                    "action": "newItem",
+                    "maxLength": 200,
+                    "imeAction": "done",
+                    "layout": {
+                      "weight": 1
+                    }
+                  },
+                  {
+                    "type": "button",
+                    "text": "Add",
+                    "action": "add",
+                    "variant": "filled"
+                  }
+                ]
+              },
+              {
+                "type": "list",
+                "text": "Tasks",
+                "bind": "items",
+                "emptyText": "No tasks yet",
+                "rowTemplate": {
+                  "type": "row",
+                  "wrap": false,
+                  "children": [
+                    {
+                      "type": "checkbox",
+                      "text": "Done",
+                      "bind": "done",
+                      "action": "tickItem"
+                    },
+                    {
+                      "type": "text",
+                      "text": "Task",
+                      "bind": "text",
+                      "layout": {
+                        "weight": 1
+                      }
+                    },
+                    {
+                      "type": "button",
+                      "text": "Delete",
+                      "action": "remove",
+                      "variant": "text"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "button",
+                "text": "Clear completed",
+                "action": "clearDone",
+                "variant": "text"
+              }
+            ]
+          },
+          "behaviorBindings": {
+            "newItem": "newItem",
+            "add": "add",
+            "toggle": "toggle",
+            "remaining": [
+              0
+            ],
+            "list": [
+              3
+            ]
+          }
+        },
+        "sourceEdits": [
+          {
+            "search": "function keyOf(v) {",
+            "replace": "function allDoneOf(items) {\n  if (items.length === 0) return false;\n  for (var j = 0; j < items.length; j++) { if (!items[j].done) return false; }\n  return true;\n}\nfunction withItems(st, items) {\n  return Object.assign({}, st, { items: items, remaining: remainingOf(items), allDone: allDoneOf(items) });\n}\nfunction keyOf(v) {"
+          },
+          {
+            "search": "  if (e.actionId === 'toggle') {\n    var v = e.value;\n    var key = keyOf(v);\n    var val = (v && typeof v === 'object') ? (v.value === true) : true;\n    var items2 = s.items.map(function (it) {\n      return it.id === key ? Object.assign({}, it, { done: val }) : it;\n    });\n    return { state: Object.assign({}, s, { items: items2, remaining: remainingOf(items2) }) };\n  }",
+            "replace": "  if (e.actionId === 'toggle') {\n    var markAll = !s.allDone;\n    if (e.value && typeof e.value === 'object' && typeof e.value.value === 'boolean') markAll = e.value.value;\n    else if (typeof e.value === 'boolean') markAll = e.value;\n    var items2 = s.items.map(function (it) { return Object.assign({}, it, { done: markAll }); });\n    return { state: withItems(s, items2) };\n  }\n  if (e.actionId === 'tickItem') {\n    var keyOne = keyOf(e.value);\n    var markOne = true;\n    if (e.value && typeof e.value === 'object' && typeof e.value.value === 'boolean') markOne = e.value.value;\n    var items5 = s.items.map(function (it) {\n      return it.id === keyOne ? Object.assign({}, it, { done: markOne }) : it;\n    });\n    return { state: withItems(s, items5) };\n  }"
+          },
+          {
+            "search": "      return { state: Object.assign({}, s, { items: items, newItem: '', nextId: s.nextId + 1, remaining: remainingOf(items) }) };",
+            "replace": "      return { state: Object.assign(withItems(s, items), { newItem: '', nextId: s.nextId + 1 }) };"
+          },
+          {
+            "search": "    return { state: Object.assign({}, s, { items: items3, remaining: remainingOf(items3) }) };",
+            "replace": "    return { state: withItems(s, items3) };"
+          },
+          {
+            "search": "    return { state: Object.assign({}, s, { items: items4, remaining: remainingOf(items4) }) };",
+            "replace": "    return { state: withItems(s, items4) };"
+          }
+        ]
+      }
+    },
+    {
+      "call": 6,
+      "response": {
+        "fields": {
+          "ui": {
+            "type": "column",
+            "children": [
+              {
+                "type": "metric",
+                "text": "Remaining",
+                "bind": "remaining",
+                "format": "number"
+              },
+              {
+                "type": "button",
+                "text": "Mark all done",
+                "action": "toggle",
+                "variant": "tonal"
+              },
+              {
+                "type": "row",
+                "wrap": false,
+                "children": [
+                  {
+                    "type": "input",
+                    "text": "New task",
+                    "bind": "newItem",
+                    "action": "newItem",
+                    "maxLength": 200,
+                    "imeAction": "done",
+                    "layout": {
+                      "weight": 1
+                    }
+                  },
+                  {
+                    "type": "button",
+                    "text": "Add",
+                    "action": "add",
+                    "variant": "filled"
+                  }
+                ]
+              },
+              {
+                "type": "list",
+                "text": "Tasks",
+                "bind": "items",
+                "emptyText": "No tasks yet",
+                "rowTemplate": {
+                  "type": "row",
+                  "wrap": false,
+                  "children": [
+                    {
+                      "type": "input",
+                      "text": "Done",
+                      "bind": "done",
+                      "action": "tickItem"
+                    },
+                    {
+                      "type": "text",
+                      "text": "Task",
+                      "bind": "text",
+                      "layout": {
+                        "weight": 1
+                      }
+                    },
+                    {
+                      "type": "button",
+                      "text": "Delete",
+                      "action": "remove",
+                      "variant": "text"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "button",
+                "text": "Clear completed",
+                "action": "clearDone",
+                "variant": "text"
+              }
+            ]
+          },
+          "behaviorBindings": {
+            "newItem": "newItem",
+            "add": "add",
+            "toggle": "toggle",
+            "remaining": [
+              0
+            ],
+            "list": [
+              3
+            ]
+          }
+        },
+        "sourceEdits": [
+          {
+            "search": "  if (e.actionId === 'toggle') {\n    var markAll = !s.allDone;",
+            "replace": "  if (e.actionId === 'toggle') {\n    var markAll = !s.allDone;\n    if (typeof e.value === 'boolean') markAll = e.value;"
+          }
+        ]
+      }
+    }
+  ],
+  "historicalFailures": {
+    "3": "step 3",
+    "4": "step 5",
+    "5": "step 5",
+    "6": "component_binding_schema_type"
+  }
+}

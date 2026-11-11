@@ -63,6 +63,10 @@ class PlanContractReplayTest {
         val rejectedPlans get() = events.filterIsInstance<ToolGenerationTraceEvent.Attempt>()
             .filter { it.stage == ToolGenerationStage.PLAN && it.outcome == ToolGenerationOutcome.REJECTED }
         val repairs get() = events.filterIsInstance<ToolGenerationTraceEvent.Repair>()
+        val firstRejected get() = events.filterIsInstance<ToolGenerationTraceEvent.Attempt>()
+            .first { it.outcome == ToolGenerationOutcome.REJECTED }
+        val rowMismatch get() = events.filterIsInstance<ToolGenerationTraceEvent.Attempt>()
+            .first { it.behaviorBinding?.rule == BehaviorFailureRule.ROW_SCOPE_MISMATCH }
 
         fun assertWriterBudgetIntact() {
             assertFalse(repairs.any { it.providerStage == CloudGenerationStage.COMPLETE })
@@ -437,4 +441,366 @@ class PlanContractReplayTest {
         assertTrue(run.planRequests[2].turns.last().text.contains("1200 total frames (this step reaches 1201)"))
         run.assertWriterBudgetIntact()
     }
+    private val rowCase by lazy {
+        instrumentation.context.assets.open("generation-reliability/row-checkbox-recorded.json")
+            .bufferedReader().use { JSONObject(it.readText()) }.apply { put("context", getString("request")) }
+    }
+
+    private fun rowPlan(declared: Boolean = true): JSONObject = JSONObject(rowCase.getJSONObject("plan").toString()).apply {
+        if (declared) {
+            scenario(this).getJSONObject("slots").getJSONObject("toggle").put("rowValueType", "boolean")
+            scenario(this).getJSONArray("steps").getJSONObject(4).put("value", rowPayload())
+        }
+    }
+
+    private fun rowPayload(key: Any = "t1", value: Any = true) = JSONObject().put("key", key).put("value", value)
+
+    private fun rowWriter(call: Int = 4): JSONObject {
+        val responses = rowCase.getJSONArray("candidates")
+        val repair = GenerationRepair.writer(ToolSpec.generatedFields + "behaviorBindings", null)
+        var text = responses.getJSONObject(0).getJSONObject("response").toString()
+        repair.retain(text)
+        for (index in 1..call - 3) text = repair.apply(responses.getJSONObject(index).getJSONObject("response").toString()).text
+        return JSONObject(text)
+    }
+
+    private fun repeatedWriter(writer: JSONObject) = listOf(writer.toString()) + List(3) { patch("title" to "Row replay repair ${it + 1}") }
+
+    @Test fun recordedRowCandidatesExposePlanScopeAndRetainDistinctOtherFailures() = runBlocking {
+        for (call in 3..6) {
+            val run = replay("recorded row call $call", rowCase, listOf(rowPlan(false).toString()), repeatedWriter(rowWriter(call)))
+            val rejected = run.events.filterIsInstance<ToolGenerationTraceEvent.Attempt>().last { it.outcome == ToolGenerationOutcome.REJECTED }
+            when (call) {
+                3, 4 -> {
+                    assertEquals("widget_plan", (run.result.exceptionOrNull() as? CloudFailure)?.code)
+                    assertEquals(BehaviorFailureRule.ROW_SCOPE_MISMATCH, rejected.behaviorBinding?.rule)
+                }
+                5 -> {
+                    assertEquals(5, rejected.behaviorBinding?.step)
+                    assertEquals(BehaviorFailureRule.ACTION_UNAVAILABLE, rejected.behaviorBinding?.rule)
+                }
+                6 -> assertEquals("component_binding_schema_type", rejected.validationRule)
+            }
+            assertEquals(if (call < 5) 1 else 4, run.writerRequests.size)
+            assertEquals(if (call < 5) emptyList() else listOf(1, 2, 3), run.repairs.map { it.repairNumber })
+        }
+    }
+
+    @Test fun malformedDeclaredRowPayloadRepairsOnlyPlan() = runBlocking {
+        val malformed = listOf<Any?>(null, JSONObject.NULL, true, "true", JSONObject(),
+            JSONObject().put("key", "t1"), JSONObject().put("value", true), rowPayload().put("extra", false),
+            rowPayload(""), rowPayload(" "), rowPayload("a".repeat(129)), rowPayload(1),
+            rowPayload(value = JSONObject.NULL), rowPayload(value = "true"), rowPayload(value = 1))
+        for ((index, value) in malformed.withIndex()) {
+            val plan = rowPlan()
+            val step = scenario(plan).getJSONArray("steps").getJSONObject(4)
+            if (value == null) step.remove("value") else step.put("value", value)
+            val run = replay("row payload $index", rowCase, listOf(plan.toString(),
+                patch("behavior" to rowPlan().getJSONObject("behavior"))), listOf(rowWriter().toString()))
+            run.result.getOrThrow()
+            assertEquals(listOf("behavior.action_payload"), run.rejectedPlans.map { it.planShape?.rule })
+            assertEquals(listOf("\$.behavior.scenario.steps[4].value"), run.rejectedPlans.map { it.planPath })
+            assertEquals(listOf(CloudGenerationStage.PLAN), run.repairs.map { it.providerStage })
+            run.assertWriterBudgetIntact()
+        }
+    }
+
+    @Test fun invalidRowDeclarationRepairsOnlyPlanAndKeepsNumericPaths() = runBlocking {
+        for ((slot, type) in listOf("toggle" to "number", "toggle" to true, "toggle" to JSONObject.NULL, "remaining" to "boolean")) {
+            val plan = rowPlan()
+            scenario(plan).getJSONObject("slots").getJSONObject(slot).put("rowValueType", type)
+            val run = replay("row declaration $slot $type", rowCase, listOf(plan.toString(),
+                patch("behavior" to rowPlan().getJSONObject("behavior"))), listOf(rowWriter().toString()))
+            run.result.getOrThrow()
+            assertEquals("behavior.slot_row_value_type", run.rejectedPlans.single().planShape?.rule)
+            assertEquals("\$.behavior.scenario.slots[${if (slot == "toggle") 2 else 3}].rowValueType", run.rejectedPlans.single().planPath)
+            run.assertWriterBudgetIntact()
+        }
+    }
+
+    @Test fun declaredRowRequiresAnActionIdForAnActualRowCheckbox() = runBlocking {
+        val correct = rowWriter()
+        val global = rowWriter(5)
+        val rowButton = rowWriter().apply {
+            getJSONObject("behaviorBindings").put("toggle", "remove")
+        }
+        val wrongType = rowWriter().apply {
+            getJSONObject("ui").getJSONArray("children").getJSONObject(2).getJSONObject("rowTemplate")
+                .getJSONArray("children").getJSONObject(0).put("type", "toggle")
+        }
+        val uiPath = rowWriter().apply { getJSONObject("behaviorBindings").put("toggle", JSONArray().put(2)) }
+        for ((index, writer) in listOf(global, rowButton, wrongType, uiPath).withIndex()) {
+            val run = replay("wrong row binding $index", rowCase, listOf(rowPlan().toString()),
+                listOf(writer.toString(), patch("ui" to correct.getJSONObject("ui"), "behaviorBindings" to correct.getJSONObject("behaviorBindings"))))
+            run.result.getOrThrow()
+            assertTrue(run.rejectedPlans.isEmpty())
+            assertEquals(BehaviorFailureRule.BINDING_SHAPE, run.firstRejected.behaviorBinding?.rule)
+            assertEquals(5, run.firstRejected.behaviorBinding?.step)
+            assertEquals(if (index == 3) "ui" else "id", run.firstRejected.behaviorBinding?.bindingKind)
+            assertEquals(listOf("checkbox", "button", "toggle", null)[index], run.firstRejected.behaviorBinding?.nodeKind)
+            assertEquals(listOf(CloudGenerationStage.COMPLETE), run.repairs.map { it.providerStage })
+            assertEquals(1, run.session.claimGenerationRepair(CloudGenerationStage.PLAN))
+            assertEquals(2, run.session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
+        }
+    }
+
+    @Test fun undeclaredRowScopeStopsBeforeWriterRepairAndPreservesItsRemainingBudget() = runBlocking {
+        for (writer in listOf(rowWriter(), rowWriter().put("source", "throw new Error('broken writer');"))) {
+            val run = replay("late row scope", rowCase, listOf(rowPlan(false).toString()), listOf(writer.toString()))
+            assertEquals("widget_plan", (run.result.exceptionOrNull() as? CloudFailure)?.code)
+            assertEquals(1, run.writerRequests.size)
+            assertTrue(run.repairs.isEmpty())
+            val diagnostic = run.events.filterIsInstance<ToolGenerationTraceEvent.Attempt>().last().behaviorBinding!!.report()
+            assertEquals("plan", diagnostic.getString("contractOwner"))
+            assertEquals("writer_binding", diagnostic.getString("discoveryStage"))
+            assertEquals("row_scope_mismatch", diagnostic.getString("rule"))
+            assertEquals(3, diagnostic.getInt("slot"))
+            assertEquals("id", diagnostic.getString("bindingKind"))
+            assertEquals("checkbox", diagnostic.getString("nodeKind"))
+            assertFalse(diagnostic.toString().contains("toggle"))
+            assertEquals(1, run.session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
+        }
+    }
+
+    @Test fun lateRowScopeAfterInputRepairPreservesSpentWriterBudget() = runBlocking {
+        val writer = rowWriter(3)
+        writer.getJSONObject("ui").getJSONArray("children").getJSONObject(2).remove("rowTemplate")
+        val first = writer.toString()
+        val run = replay("late row after input repair", rowCase, listOf(rowPlan(false).toString()),
+            listOf(first, JSONObject().put("fields", JSONObject().put("ui", rowWriter().getJSONObject("ui")))
+                .put("sourceEdits", rowCase.getJSONArray("candidates").getJSONObject(1).getJSONObject("response").getJSONArray("sourceEdits")).toString()))
+        assertEquals("widget_plan", (run.result.exceptionOrNull() as? CloudFailure)?.code)
+        assertEquals(BehaviorFailureRule.ROW_SCOPE_MISMATCH, run.rowMismatch.behaviorBinding?.rule)
+        assertEquals(listOf(CloudGenerationStage.COMPLETE), run.repairs.map { it.providerStage })
+        assertEquals(2, run.session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
+        assertEquals(1, run.session.claimGenerationRepair(CloudGenerationStage.PLAN))
+    }
+
+    @Test fun currentRowsResolveAtTheActionStepAndUnavailableRowsKeepWriterOwnership() = runBlocking {
+        replay("row created earlier", rowCase, listOf(rowPlan().toString()), listOf(rowWriter().toString())).result.getOrThrow()
+        for (condition in listOf("missing", "visible", "enabled")) {
+            val wrong = rowWriter()
+            if (condition == "missing") {
+                wrong.put("source", wrong.getString("source").replace("id: 't' + s.nextId", "id: 'other' + s.nextId"))
+            } else {
+                wrong.getJSONObject("ui").getJSONArray("children").getJSONObject(2).getJSONObject("rowTemplate").put(condition, false)
+            }
+            val run = replay("unavailable row $condition", rowCase, listOf(rowPlan().toString()), repeatedWriter(wrong))
+            assertTrue(run.result.isFailure)
+            assertTrue(run.rejectedPlans.isEmpty())
+            assertEquals(BehaviorFailureRule.ACTION_UNAVAILABLE, run.firstRejected.behaviorBinding?.rule)
+            assertEquals(5, run.firstRejected.behaviorBinding?.step)
+            assertEquals("id", run.firstRejected.behaviorBinding?.bindingKind)
+            assertEquals("checkbox", run.firstRejected.behaviorBinding?.nodeKind)
+            assertEquals(4, run.writerRequests.size)
+            assertEquals(listOf(1, 2, 3), run.repairs.map { it.repairNumber })
+            assertTrue(run.repairs.all { it.providerStage == CloudGenerationStage.COMPLETE })
+            assertNull(run.session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
+            assertEquals(1, run.session.claimGenerationRepair(CloudGenerationStage.PLAN))
+        }
+    }
+
+    @Test fun malformedRowsStopAtTheExistingPlanRepairBoundary() = runBlocking {
+        val plan = rowPlan().apply { scenario(this).getJSONArray("steps").getJSONObject(4).remove("value") }
+        val run = replay("row plan boundary", rowCase,
+            listOf(plan.toString()) + List(3) { index ->
+                scenario(plan).getJSONArray("steps").getJSONObject(4).put("value", "invalid$index")
+                patch("behavior" to plan.getJSONObject("behavior"))
+            })
+        assertEquals("widget_plan", (run.result.exceptionOrNull() as? CloudFailure)?.code)
+        assertEquals(4, run.rejectedPlans.size)
+        assertEquals(listOf(1, 2, 3), run.repairs.map { it.repairNumber })
+        assertTrue(run.writerRequests.isEmpty())
+        assertNull(run.session.claimGenerationRepair(CloudGenerationStage.PLAN))
+        run.assertWriterBudgetIntact()
+    }
+
+    @Test fun rowDeclarationRejectsNativeAndThreeSceneSlots() {
+        for (three in listOf(false, true)) {
+            val behavior = rowPlan().getJSONObject("behavior")
+            if (!three) behavior.getJSONObject("scenario").getJSONObject("slots").getJSONObject("toggle")
+                .put("part", "native").put("member", "visit")
+            val failure = runCatching {
+                com.alpha.assistant.tools.generation.GenerationBehavior.parse(behavior, setOf("native"), threeScene = three)
+            }.exceptionOrNull() as? com.alpha.assistant.tools.generation.PartsContractFailure
+            assertEquals("behavior.slot_row_value_type", failure?.shape?.rule)
+        }
+    }
+
+    @Test fun rowScopeFirstRevealedDuringExecutionIsATerminalPlanMismatch() = runBlocking {
+        val writer = rowWriter()
+        val dynamicUi = writer.getJSONObject("ui").toString()
+        val source = writer.getString("source").replace(
+            "return { state: Object.assign({}, s, { items: items, newItem: '', nextId: s.nextId + 1, remaining: remainingOf(items) }) };",
+            "return { ui: $dynamicUi, state: Object.assign({}, s, { items: items, newItem: '', nextId: s.nextId + 1, remaining: remainingOf(items) }) };")
+        assertTrue(source != writer.getString("source"))
+        writer.put("source", source)
+        writer.getJSONObject("ui").getJSONArray("children").getJSONObject(2).remove("rowTemplate")
+        val run = replay("runtime row scope", rowCase, listOf(rowPlan(false).toString()), listOf(writer.toString()))
+        assertEquals("widget_plan", (run.result.exceptionOrNull() as? CloudFailure)?.code)
+        assertEquals(1, run.writerRequests.size)
+        assertTrue(run.repairs.isEmpty())
+        val diagnostic = run.events.filterIsInstance<ToolGenerationTraceEvent.Attempt>().last().behaviorBinding!!.report()
+        assertEquals("behavior_execution", diagnostic.getString("discoveryStage"))
+        assertEquals("row_scope_mismatch", diagnostic.getString("rule"))
+        assertEquals("plan", diagnostic.getString("contractOwner"))
+        assertEquals("id", diagnostic.getString("bindingKind"))
+        assertEquals("checkbox", diagnostic.getString("nodeKind"))
+        assertEquals(3, diagnostic.getInt("slot"))
+        assertFalse(diagnostic.toString().contains("toggle"))
+        assertEquals(5, diagnostic.getInt("step"))
+        assertEquals(1, run.session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
+    }
+
+    @Test fun lateScopeMismatchSurvivesAnExhaustedWriterBudget() = runBlocking {
+        val writer = rowWriter(3)
+        writer.getJSONObject("ui").getJSONArray("children").getJSONObject(2).remove("rowTemplate")
+        val inputRepair = JSONObject().put("fields", JSONObject().put("ui", rowWriter().getJSONObject("ui")))
+            .put("sourceEdits", rowCase.getJSONArray("candidates").getJSONObject(1).getJSONObject("response").getJSONArray("sourceEdits"))
+        val run = replay("late row exhausted budget", rowCase, listOf(rowPlan(false).toString()),
+            listOf(writer.toString(), patch("title" to "Input repair one"), patch("title" to "Input repair two"), inputRepair.toString()))
+        assertEquals("widget_plan", (run.result.exceptionOrNull() as? CloudFailure)?.code)
+        assertEquals(BehaviorFailureRule.ROW_SCOPE_MISMATCH, run.rowMismatch.behaviorBinding?.rule)
+        assertEquals(listOf(1, 2, 3), run.repairs.map { it.repairNumber })
+        assertEquals(4, run.writerRequests.size)
+        assertNull(run.session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
+        assertEquals(1, run.session.claimGenerationRepair(CloudGenerationStage.PLAN))
+    }
+
+    private fun dynamicRowWriter(event: String): JSONObject = rowWriter().apply {
+        val dynamicUi = getJSONObject("ui").toString()
+        val source = getString("source")
+        put("source", if (event == "open") {
+            "if(input.event.type==='open') return {state:input.state,ui:$dynamicUi};\n$source"
+        } else source.replace(
+            "return { state: Object.assign({}, s, { items: items, newItem: '', nextId: s.nextId + 1, remaining: remainingOf(items) }) };",
+            "return { ui: $dynamicUi, state: Object.assign({}, s, { items: items, newItem: '', nextId: s.nextId + 1, remaining: remainingOf(items) }) };"))
+        getJSONObject("ui").getJSONArray("children").getJSONObject(2).remove("rowTemplate")
+    }
+
+    @Test fun declaredRowsCanAppearOnOpenOrAnEarlierScenarioAction() = runBlocking {
+        for (event in listOf("open", "add")) {
+            val run = replay("dynamic declared row $event", rowCase, listOf(rowPlan().toString()), listOf(dynamicRowWriter(event).toString()))
+            run.result.getOrThrow()
+            assertTrue(run.repairs.isEmpty())
+            assertEquals(1, run.writerRequests.size)
+        }
+    }
+
+    @Test fun declaredRowAvailabilityRepairsPlanBeforeWriter() = runBlocking {
+        val plan = rowPlan()
+        scenario(plan).getJSONArray("steps").put(4, JSONObject().put("op", "availability").put("slot", "toggle").put("value", false))
+        val run = replay("declared row availability", rowCase,
+            listOf(plan.toString(), patch("behavior" to rowPlan().getJSONObject("behavior"))), listOf(rowWriter().toString()))
+        run.result.getOrThrow()
+        assertEquals("behavior.row_availability", run.rejectedPlans.single().planShape?.rule)
+        assertEquals("\$.behavior.scenario.steps[4]", run.rejectedPlans.single().planPath)
+        run.assertWriterBudgetIntact()
+    }
+
+    @Test fun nonCheckboxRowBindingsAndAvailabilityKeepCompleteOwnership() = runBlocking {
+        for (kind in listOf("button", "toggle", "input", "availability")) {
+            val plan = rowPlan(false)
+            val writer = rowWriter()
+            when (kind) {
+                "button" -> writer.getJSONObject("behaviorBindings").put("toggle", "remove")
+                "toggle", "input" -> {
+                    val control = writer.getJSONObject("ui").getJSONArray("children").getJSONObject(2)
+                        .getJSONObject("rowTemplate").getJSONArray("children").getJSONObject(0)
+                    control.put("type", kind)
+                    if (kind == "input") control.put("bind", "text")
+                    scenario(plan).getJSONArray("steps").getJSONObject(4).put("value", if (kind == "input") "Done" else true)
+                }
+                else -> scenario(plan).getJSONArray("steps").put(4,
+                    JSONObject().put("op", "availability").put("slot", "toggle").put("value", false))
+            }
+            val run = replay("legacy row $kind", rowCase, listOf(plan.toString()), repeatedWriter(writer))
+            assertEquals("widget_behavior", (run.result.exceptionOrNull() as? CloudFailure)?.code)
+            assertEquals(if (kind == "availability") BehaviorFailureRule.TARGET_MISSING else BehaviorFailureRule.ACTION_UNAVAILABLE,
+                run.firstRejected.behaviorBinding?.rule)
+            assertEquals(5, run.firstRejected.behaviorBinding?.step)
+            assertEquals("id", run.firstRejected.behaviorBinding?.bindingKind)
+            assertNull(run.firstRejected.behaviorBinding?.nodeKind)
+            assertTrue(run.repairs.all { it.providerStage == CloudGenerationStage.COMPLETE })
+            assertEquals(3, run.repairs.size)
+        }
+    }
+
+    @Test fun knownPlanMismatchPrecedesOtherDeclaredBindingFailures() = runBlocking {
+        for (badFirst in listOf(true, false)) {
+            val plan = rowPlan(false)
+            val workflow = scenario(plan)
+            val oldSlots = workflow.getJSONObject("slots")
+            val bad = JSONObject("""{"kind":"action","rowValueType":"boolean"}""")
+            val slots = JSONObject()
+            if (badFirst) slots.put("bad", bad)
+            ToolValueSchema.keys(oldSlots).forEach { slots.put(it, oldSlots.get(it)) }
+            if (!badFirst) slots.put("bad", bad)
+            workflow.put("slots", slots)
+            val steps = JSONArray().put(action("bad", rowPayload()))
+            val oldSteps = workflow.getJSONArray("steps")
+            repeat(oldSteps.length()) { steps.put(oldSteps.get(it)) }
+            workflow.put("steps", steps)
+            val writer = rowWriter().apply { getJSONObject("behaviorBindings").put("bad", "add") }
+            val run = replay("scope priority $badFirst", rowCase, listOf(plan.toString()), listOf(writer.toString()))
+            assertEquals("widget_plan", (run.result.exceptionOrNull() as? CloudFailure)?.code)
+            assertEquals(BehaviorFailureRule.ROW_SCOPE_MISMATCH, run.firstRejected.behaviorBinding?.rule)
+            assertEquals(6, run.firstRejected.behaviorBinding?.step)
+            assertTrue(run.repairs.isEmpty())
+            assertEquals(1, run.session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
+        }
+    }
+
+    @Test fun unrelatedBadBindingsStillFollowSmokeValidation() = runBlocking {
+        val writer = rowWriter().apply {
+            getJSONObject("ui").getJSONArray("children").getJSONObject(2).remove("rowTemplate")
+            getJSONObject("behaviorBindings").remove("remaining")
+            put("source", "throw new Error('unrelated source failure');")
+        }
+        val run = replay("non-row validation order", rowCase, listOf(rowPlan(false).toString()), repeatedWriter(writer))
+        assertEquals("widget_preview", run.firstRejected.failureCode)
+        assertEquals(ToolGenerationStage.SMOKE, run.firstRejected.stage)
+        assertEquals("preview", run.firstRejected.smoke?.getString("event"))
+        assertEquals(3, run.repairs.size)
+    }
+
+    @Test fun mixedNativeAndWriterRowMismatchPreservesPlanCodeAndBudget() = runBlocking {
+        val plan = JSONObject("""{"title":"Counter and tasks","description":"Count and check tasks","language":"en",
+            "inputs":[],"constants":[],"questions":[],"needs":[
+                {"id":"count","type":"counter","label":"Count","description":"Increase and reset"},
+                {"id":"custom","type":"other","label":"Tasks","description":"Add and check tasks","reads":[],"writes":[]}]}""")
+            .put("behavior", rowPlan(false).getJSONObject("behavior"))
+        var text = rowWriter().toString()
+        for (id in listOf("newItem", "nextId", "remaining", "items", "add", "toggle", "remove", "clearDone")) {
+            text = text.replace(Regex("\\b$id\\b"), "fill_$id")
+        }
+        val fill = JSONObject(text).apply {
+            remove("formatVersion")
+            val inner = getJSONObject("ui")
+            put("ui", JSONObject().put("type", "column").put("children", JSONArray().put(inner)))
+            put("behaviorBindings", JSONObject().put("newItem", "fill_newItem").put("add", "fill_add")
+                .put("toggle", "fill_toggle").put("remaining", JSONArray().put(1).put(0)).put("list", JSONArray().put(1).put(2)))
+        }
+        val writer = JSONObject().put("holes", JSONArray().put("custom")).put("fill", fill)
+        val run = replay("mixed row scope", rowCase, listOf(plan.toString()), listOf(writer.toString()))
+        assertEquals("widget_plan", (run.result.exceptionOrNull() as? CloudFailure)?.code)
+        assertEquals(BehaviorFailureRule.ROW_SCOPE_MISMATCH, run.firstRejected.behaviorBinding?.rule)
+        assertEquals(ToolGenerationRoute.MIXED, run.firstRejected.behaviorBinding?.route)
+        assertTrue(run.repairs.isEmpty())
+        assertEquals(1, run.session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
+
+        val unrelated = JSONObject(writer.toString()).apply {
+            val body = getJSONObject("fill")
+            body.getJSONObject("ui").getJSONArray("children").getJSONObject(0)
+                .getJSONArray("children").getJSONObject(2).remove("rowTemplate")
+            body.getJSONObject("behaviorBindings").remove("remaining")
+            body.put("source", "throw new Error('unrelated mixed source failure');")
+        }
+        val smoke = replay("mixed non-row validation order", rowCase, listOf(plan.toString()), repeatedWriter(unrelated))
+        assertEquals("widget_preview", smoke.firstRejected.failureCode)
+        assertEquals(ToolGenerationStage.SMOKE, smoke.firstRejected.stage)
+        assertEquals("widget_incomplete", (smoke.result.exceptionOrNull() as? CloudFailure)?.code)
+    }
+
+
 }
