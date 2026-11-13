@@ -53,13 +53,20 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -289,7 +296,7 @@ internal fun SettingsDisclosure(@StringRes label: Int, initiallyOpen: Boolean = 
 }
 
 @Composable
-private fun NameSettings(model: ShellViewModel) {
+internal fun NameSettings(model: ShellViewModel) {
     val label = stringResource(R.string.settings_name_label)
     OutlinedTextField(value = model.snapshot.userName, onValueChange = model::setUserName, label = { Text(label) },
         supportingText = { Text(stringResource(R.string.settings_name_hint)) }, singleLine = true,
@@ -360,53 +367,72 @@ private fun ImageSettingsPane(model: ShellViewModel) {
 
 @Composable
 private fun DeepSeekSettings(model: ShellViewModel) {
+    val scroll = rememberScrollState()
+    SettingsDetail(SettingsSection.DeepSeek, scroll) { DeepSeekKeyPanel(model, scroll) }
+}
+
+internal const val DEEPSEEK_KEYS_URL = "https://platform.deepseek.com/api_keys"
+
+/** The key status, entry, consent text, and actions. «Настройки» and the first-run flow show the same panel. */
+@Composable
+internal fun DeepSeekKeyPanel(model: ShellViewModel, scroll: ScrollState) {
     val status = model.keyStatus
     // remember, not rememberSaveable, so a recreation clears the typed key.
     var key by remember { mutableStateOf("") }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
-    val scroll = rememberScrollState()
+    var helpFailed by remember { mutableStateOf(false) }
+    val uriHandler = LocalUriHandler.current
     var shownStatus by remember { mutableStateOf(status) }
     LaunchedEffect(status) {
         val previous = shownStatus
         shownStatus = status
         if (previous != KeyStatus.Checking && previous != status) scroll.animateScrollTo(0)
     }
-    SettingsDetail(SettingsSection.DeepSeek, scroll) {
-        SettingsPanel {
-            when (status) {
-                KeyStatus.Ready -> StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(R.string.key_ready), PoliteLiveRegion)
-                KeyStatus.Unreadable -> StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.key_unreadable), PoliteLiveRegion)
-                else -> StatusLine(Glyph.Cloud, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(when (status) {
-                    KeyStatus.Missing -> R.string.key_missing
-                    KeyStatus.NeedsConsent -> R.string.key_needs_consent
-                    else -> R.string.key_checking
-                }), PoliteLiveRegion)
-            }
-            if (status == KeyStatus.Missing || status == KeyStatus.Ready) {
-                val label = stringResource(R.string.key_label)
-                OutlinedTextField(value = key, onValueChange = { key = it }, label = { Text(label) }, placeholder = { Text(stringResource(R.string.key_placeholder)) },
-                    supportingText = { Text(stringResource(R.string.key_supporting)) }, visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), singleLine = true,
-                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = label })
-            }
-            SettingsDisclosure(R.string.settings_deepseek_disclosure, initiallyOpen = status != KeyStatus.Ready) {
-                Text(stringResource(R.string.consent_text), style = MaterialTheme.typography.bodyMedium)
-            }
-            if (status != KeyStatus.Checking) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val idle = !model.keyBusy
-                val save = { model.saveKey(key) { if (it) key = "" } }
-                when (status) {
-                    KeyStatus.Missing -> Button(onClick = save, enabled = idle && key.isNotBlank(), shape = MaterialTheme.shapes.small) { Text(stringResource(R.string.consent_and_save)) }
-                    KeyStatus.Ready -> OutlinedButton(onClick = save, enabled = idle && key.isNotBlank(), shape = MaterialTheme.shapes.small) { Text(stringResource(R.string.consent_and_save)) }
-                    KeyStatus.NeedsConsent -> Button(onClick = model::acceptConsent, enabled = idle) { Text(stringResource(R.string.consent_accept)) }
-                    KeyStatus.Unreadable -> Button(onClick = { confirmDelete = true }, enabled = idle) { Text(stringResource(R.string.key_delete)) }
-                    KeyStatus.Checking -> Unit
-                }
-                if (status == KeyStatus.Ready || status == KeyStatus.NeedsConsent)
-                    TextButton(onClick = { confirmDelete = true }, enabled = idle) { Text(stringResource(R.string.key_delete)) }
-            }
-            model.keyFailure?.let { StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(it), PoliteLiveRegion) }
+    SettingsPanel {
+        when (status) {
+            KeyStatus.Ready -> StatusLine(Glyph.Check, MaterialTheme.colorScheme.primary, stringResource(R.string.key_ready), PoliteLiveRegion)
+            KeyStatus.Unreadable -> StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.key_unreadable), PoliteLiveRegion)
+            else -> StatusLine(Glyph.Cloud, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(when (status) {
+                KeyStatus.Missing -> R.string.key_missing
+                KeyStatus.NeedsConsent -> R.string.key_needs_consent
+                else -> R.string.key_checking
+            }), PoliteLiveRegion)
         }
+        if (status == KeyStatus.Missing || status == KeyStatus.Ready) {
+            val label = stringResource(R.string.key_label)
+            OutlinedTextField(value = key, onValueChange = { key = it }, label = { Text(label) }, placeholder = { Text(stringResource(R.string.key_placeholder)) },
+                supportingText = { Text(stringResource(R.string.key_supporting)) }, visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), singleLine = true,
+                modifier = Modifier.fillMaxWidth().semantics { contentDescription = label })
+            val help = stringResource(R.string.key_help)
+            val linkColor = MaterialTheme.colorScheme.primary
+            val link = remember(help, linkColor) {
+                buildAnnotatedString {
+                    withLink(LinkAnnotation.Url(DEEPSEEK_KEYS_URL, TextLinkStyles(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline))) {
+                        helpFailed = runCatching { uriHandler.openUri(DEEPSEEK_KEYS_URL) }.isFailure
+                    }) { append(help) }
+                }
+            }
+            Box(Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.CenterStart) { Text(link) }
+            if (helpFailed) StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(R.string.key_help_failed), PoliteLiveRegion)
+        }
+        SettingsDisclosure(R.string.settings_deepseek_disclosure, initiallyOpen = status != KeyStatus.Ready) {
+            Text(stringResource(R.string.consent_text), style = MaterialTheme.typography.bodyMedium)
+        }
+        if (status != KeyStatus.Checking) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val idle = !model.keyBusy
+            val save = { model.saveKey(key) { if (it) key = "" } }
+            when (status) {
+                KeyStatus.Missing -> Button(onClick = save, enabled = idle && key.isNotBlank(), shape = MaterialTheme.shapes.small) { Text(stringResource(R.string.consent_and_save)) }
+                KeyStatus.Ready -> OutlinedButton(onClick = save, enabled = idle && key.isNotBlank(), shape = MaterialTheme.shapes.small) { Text(stringResource(R.string.consent_and_save)) }
+                KeyStatus.NeedsConsent -> Button(onClick = model::acceptConsent, enabled = idle) { Text(stringResource(R.string.consent_accept)) }
+                KeyStatus.Unreadable -> Button(onClick = { confirmDelete = true }, enabled = idle) { Text(stringResource(R.string.key_delete)) }
+                KeyStatus.Checking -> Unit
+            }
+            if (status == KeyStatus.Ready || status == KeyStatus.NeedsConsent)
+                TextButton(onClick = { confirmDelete = true }, enabled = idle) { Text(stringResource(R.string.key_delete)) }
+        }
+        model.keyFailure?.let { StatusLine(Glyph.Close, MaterialTheme.colorScheme.error, stringResource(it), PoliteLiveRegion) }
     }
     val dismissDelete = { confirmDelete = false }
     if (confirmDelete) AlertDialog(onDismissRequest = dismissDelete, title = { Text(stringResource(R.string.key_delete_title)) },

@@ -29,13 +29,28 @@ class DesktopWorkflowTest {
         fixture.launch().use { scenario ->
             robot.waitUntil { greetings("Евгений").any { robot.find(it) != null } }
             robot.waitFor(robot.text(R.string.desktop_prompt))
-            robot.reveal("Здесь появятся твои инструменты")
-            robot.reveal("«Сделай таймер для готовки»")
+            robot.reveal("Здесь появятся ваши мини-приложения")
+            robot.reveal("Сделай таймер для готовки")
             assertNull(robot.find(robot.text(R.string.desktop_edit)))
             assertNull(robot.find(robot.text(R.string.desktop_open_library)))
-            assertNull(robot.find(robot.text(R.string.now_connect_title)))
+            assertNull(robot.find(robot.text(R.string.onboarding_key_title)))
             assertNull(robot.find(robot.text(R.string.now_day_title)))
             robot.assertTarget(robot.text(R.string.composer_label))
+        }
+    }
+
+    @Test fun exampleChipAddsItsTextToTheComposer() {
+        fixture.install(saveKey = false)
+        val composer = robot.text(R.string.composer_label)
+        val example = robot.text(R.string.desktop_example_list)
+        fixture.launch().use {
+            robot.waitFor(robot.text(R.string.desktop_prompt))
+            robot.edit(composer, "Молоко")
+            robot.reveal(example)
+            robot.click(example)
+            // The chip keeps the typed text.
+            robot.waitUntil { robot.field(composer).text?.toString() == "Молоко\n$example" }
+            assertEquals(0, fixture.provider.calls)
         }
     }
 

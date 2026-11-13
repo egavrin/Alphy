@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="onboarding_step">Шаг %1$d из %2$d</string>
+    <string name="onboarding_welcome_title">Здравствуйте, я Alphy</string>
+    <string name="onboarding_feature_answers">Отвечаю на вопросы и ищу в интернете</string>
+    <string name="onboarding_feature_apps">Создаю мини-приложения по вашему описанию</string>
+    <string name="onboarding_feature_more">Готовлю уроки и настраиваю автоматизации</string>
+    <string name="onboarding_next">Далее</string>
+    <string name="onboarding_key_title">Подключите DeepSeek</string>
+    <string name="onboarding_key_text">Alphy отвечает с помощью DeepSeek. Добавьте свой API-ключ, чтобы задавать вопросы и создавать мини-приложения.</string>
+    <string name="onboarding_later">Позже</string>
+    <string name="onboarding_ready_title">Всё готово</string>
+    <string name="onboarding_ready_text">Попробуйте один из запросов или напишите свой.</string>
+    <string name="onboarding_start">Начать</string>
+    <string name="key_help">Где взять ключ</string>
+    <string name="key_help_failed">Не удалось открыть браузер. Адрес: platform.deepseek.com/api_keys</string>
+</resources>

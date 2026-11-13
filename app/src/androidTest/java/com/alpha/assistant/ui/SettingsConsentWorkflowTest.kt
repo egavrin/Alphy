@@ -60,6 +60,8 @@ class SettingsConsentWorkflowTest {
         fixture.install(saveKey = false)
         fixture.launch().use { scenario ->
             send("Before key")
+            // The key error shows the retry action without a long press.
+            robot.waitFor(robot.text(R.string.chat_message_retry))
             robot.click(robot.text(R.string.open_settings))
             robot.waitUntil { robot.composed(scenario, "settings-pane") }
             robot.waitFor(robot.text(R.string.key_missing))
@@ -71,9 +73,10 @@ class SettingsConsentWorkflowTest {
             assertEquals("alpha-test-only", fixture.keys.read().getOrThrow())
             assertEquals(0, fixture.provider.calls)
             robot.back()
-            send("After key")
+            robot.click(robot.text(R.string.chat_message_retry))
             robot.waitFor("Fixture response")
             assertEquals(1, fixture.provider.calls)
+            assertEquals("Before key", fixture.provider.lastRequest?.turns?.lastOrNull { it.role == "user" }?.text)
         }
     }
 

@@ -102,6 +102,8 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     private val keys: SecureKeyStore = SecureKeyStore(application),
     voiceFactory: ((Application, kotlinx.coroutines.CoroutineScope, (String) -> Unit) -> com.alpha.assistant.voice.VoiceSession)? = null,
     private val weatherLocator: WeatherLocator = AndroidWeatherLocator(application),
+    // Only the app's own model offers the first-run flow. Test models opt in.
+    private val offerOnboarding: Boolean = false,
 ) : AndroidViewModel(application) {
     internal val imageGeneration = com.alpha.assistant.images.ImageGeneration(application)
     internal val updates = AppUpdater.get(application)
@@ -639,6 +641,8 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     var loadFailed by mutableStateOf(false); private set
     var saveFailed by mutableStateOf(false); private set
     var keyStatus by mutableStateOf(KeyStatus.Checking); private set
+    /** The first-run flow is visible. The model decides one time at load, so a key saved in the flow does not close it. */
+    var onboarding by mutableStateOf(false); private set
     @get:StringRes var keyFailure by mutableStateOf<Int?>(null); private set
     var keyBusy by mutableStateOf(false); private set
     var requestError by mutableStateOf<String?>(null); private set
@@ -875,6 +879,10 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 queueOrder = it.conversations.maxOfOrNull { chat -> chat.messages.maxOfOrNull { message -> message.queueOrder ?: 0L } ?: 0L } ?: 0L
             }
             loadFailed = result.isFailure
+            if (offerOnboarding && result.getOrNull()?.onboarded == false) {
+                refreshKey()
+                onboarding = keyStatus == KeyStatus.Missing
+            }
             loading = false
             if (result.isSuccess) {
                 sceneAssetCleanup.request()
@@ -899,6 +907,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                     current.conversations.forEach(store::saveConversation)
                     store.saveNewDraft(current.newDraft)
                     store.saveSetting("userName", current.userName)
+                    if (current.onboarded) store.saveSetting("onboarded", "1")
                     store.writableDatabase.setTransactionSuccessful()
                 } finally { store.writableDatabase.endTransaction() }
             }
@@ -927,6 +936,17 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         writes.trySend { store.saveSetting("userName", name) }
     }
     fun editDraft(draft: Draft) = editDraft(draft, null)
+    /** Adds an example request to the draft. Typed text stays, and the example goes on a new line. */
+    fun addExample(text: String) {
+        val draft = snapshot.draft
+        editDraft(draft.copy(text = listOf(draft.text, text).filter(String::isNotBlank).joinToString("\n")))
+    }
+    fun finishOnboarding(example: String? = null) {
+        onboarding = false
+        snapshot = snapshot.copy(onboarded = true)
+        writes.trySend { store.saveSetting("onboarded", "1") }
+        example?.let(::addExample)
+    }
 
     private fun editDraft(draft: Draft, assetLease: Closeable?) {
         val removedAsset = snapshot.draft.attachments.any { old ->

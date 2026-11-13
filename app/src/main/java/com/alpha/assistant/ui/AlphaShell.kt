@@ -293,6 +293,8 @@ private data class MiniAppOrigin(
                 Text(stringResource(R.string.load_failed_text))
                 Button(onClick = model::load) { Text(stringResource(R.string.retry)) }
             }
+        } else if (model.onboarding) {
+            OnboardingPane(model)
         } else AdaptiveShellLayout(
             immersive, previewingMiniApp || editingMiniApp, systemInsets,
             splitAutomations = destination == ShellDestination.Automations && !model.tools.storageUnavailable,

@@ -32,7 +32,8 @@ data class Conversation(val id: String, val title: String, val createdAt: Long, 
     val cardIds: List<String> get() = messages.mapNotNull { it.toolId }.distinct()
     val composerDraft: Draft get() = refinementDraft ?: draft
 }
-data class ShellSnapshot(val conversations: List<Conversation> = emptyList(), val selectedId: String? = null, val newDraft: Draft = Draft(), val userName: String = "") {
+data class ShellSnapshot(val conversations: List<Conversation> = emptyList(), val selectedId: String? = null, val newDraft: Draft = Draft(), val userName: String = "",
+    val onboarded: Boolean = false) {
     val selected: Conversation? get() = conversations.find { it.id == selectedId }
     val draft: Draft get() = selected?.composerDraft ?: newDraft
 }
@@ -140,7 +141,7 @@ class ShellStore(private val context: Context, name: String = "alpha.db") : SQLi
         }
         val results = automationMessages()
         val withResults = conversations.map { it.withAutomationMessages(results[it.id].orEmpty()) }.sortedByDescending { it.updatedAt }
-        return ShellSnapshot(conversations = withResults, newDraft = newDraft, userName = settings["userName"] ?: "")
+        return ShellSnapshot(conversations = withResults, newDraft = newDraft, userName = settings["userName"] ?: "", onboarded = "onboarded" in settings)
     }
     fun saveConversation(conversation: Conversation) {
         writableDatabase.insertWithOnConflict("conversations", null, ContentValues().apply {

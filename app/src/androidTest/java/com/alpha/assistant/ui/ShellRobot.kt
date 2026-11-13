@@ -124,9 +124,9 @@ internal class ShellFixture(prefix: String) {
     val provider: FixtureProvider = FixtureProvider()
     @Volatile var model: ShellViewModel? = null
 
-    fun install(saveKey: Boolean = true, voice: VoiceFactory? = null) {
+    fun install(saveKey: Boolean = true, voice: VoiceFactory? = null, onboarding: Boolean = false) {
         if (saveKey) check(keys.save("alpha-test-only").isSuccess)
-        CloudTestActivity.factory = { app -> ShellViewModel(app, provider, store, keys, voiceFactory = voice).openSeededChat(store).also { model = it } }
+        CloudTestActivity.factory = { app -> ShellViewModel(app, provider, store, keys, voiceFactory = voice, offerOnboarding = onboarding).openSeededChat(store).also { model = it } }
     }
     fun seedChat(id: String, title: String, message: String, selected: Boolean = false, updatedAt: Long = 1L) {
         store.saveConversation(Conversation(id, title, updatedAt, updatedAt, messages = listOf(Message("$id-u", "user", message, updatedAt, "sent"))))

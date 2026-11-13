@@ -91,8 +91,6 @@
     <string name="greeting_named">%1$s, %2$s</string>
     <string name="desktop_prompt">Чем помочь?</string>
     <string name="now_title">Сейчас</string>
-    <string name="now_connect_title">Подключите DeepSeek</string>
-    <string name="now_connect_text">Добавьте ключ, чтобы задавать вопросы и создавать мини-приложения.</string>
     <string name="now_day_title">Мой день</string>
     <string name="now_day_text">Сводка из календаря каждое утро в 08:00.</string>
     <string name="now_mini_app_title">Мини-приложение</string>

@@ -146,7 +146,10 @@ import com.alpha.assistant.data.Source
                     }
                 }
                 if (!user && message.errorCode in KEY_ERRORS) {
-                    TextButton(onClick = settings) { Text(stringResource(R.string.open_settings)) }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = settings) { Text(stringResource(R.string.open_settings)) }
+                        if (retry != null) TextButton(onClick = retry, enabled = retryEnabled) { Text(stringResource(R.string.chat_message_retry)) }
+                    }
                 }
                 if (message.status == "queued") Text(stringResource(R.string.chat_request_queued), style = MaterialTheme.typography.labelSmall)
                 if (cancelQueued != null) TextButton(onClick = cancelQueued, modifier = Modifier.heightIn(min = 48.dp)) {

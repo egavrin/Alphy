@@ -14,6 +14,7 @@ import android.speech.SpeechRecognizer
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
@@ -35,7 +36,10 @@ object AssistantChat : ViewModelStoreOwner {
 
     fun model(application: Application): ShellViewModel =
         (application as? ModelSource)?.assistantModel(application)
-            ?: ViewModelProvider(this, ViewModelProvider.AndroidViewModelFactory.getInstance(application))[ShellViewModel::class.java]
+            ?: ViewModelProvider(this, object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T = ShellViewModel(application, offerOnboarding = true) as T
+            })[ShellViewModel::class.java]
 }
 
 internal const val ASSIST_INVOCATION = "assist_invocation"

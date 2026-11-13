@@ -256,9 +256,8 @@ class ChatPresentationWorkflowTest {
             fixture.launch().use { scenario ->
                 scenario.onActivity { assertEquals(2f, it.resources.configuration.fontScale) }
                 robot.reveal("Последний фрагмент")
-                openActions("Последний фрагмент")
-                robot.waitFor("Повторить запрос")
-                robot.back()
+                // A key error shows the retry action without a long press.
+                robot.reveal(robot.text(R.string.chat_message_retry))
                 val settings = robot.text(R.string.open_settings)
                 robot.reveal(settings)
                 robot.click(settings)

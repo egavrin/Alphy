@@ -3,10 +3,10 @@
     <string name="desktop_grid_title">Мой стол</string>
     <string name="desktop_edit">Изменить</string>
     <string name="desktop_done">Готово</string>
-    <string name="desktop_empty">Здесь появятся твои инструменты</string>
-    <string name="desktop_example_list">«Создай список покупок»</string>
-    <string name="desktop_example_habits">«Сделай счётчик привычек»</string>
-    <string name="desktop_example_timer">«Сделай таймер для готовки»</string>
+    <string name="desktop_empty">Здесь появятся ваши мини-приложения</string>
+    <string name="desktop_example_list">Создай список покупок</string>
+    <string name="desktop_example_habits">Сделай счётчик привычек</string>
+    <string name="desktop_example_timer">Сделай таймер для готовки</string>
     <string name="desktop_open_library">Открыть библиотеку</string>
     <string name="desktop_open_tile">Открыть «%1$s»</string>
     <string name="desktop_remove_tile">Убрать «%1$s» со стола</string>

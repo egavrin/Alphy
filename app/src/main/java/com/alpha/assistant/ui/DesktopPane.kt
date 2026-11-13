@@ -269,9 +269,7 @@ import java.util.TimeZone
                     }
                     if (empty && desktopLoaded && tools.error == null) {
                         Text(stringResource(R.string.desktop_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(stringResource(R.string.desktop_example_list), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(stringResource(R.string.desktop_example_habits), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(stringResource(R.string.desktop_example_timer), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        ExampleRequests(model::addExample)
                     }
                     if (empty && tools.tools.any { it.saved && !it.archived }) {
                         TextButton(onClick = openLibrary, modifier = Modifier.heightIn(min = 48.dp)) {
