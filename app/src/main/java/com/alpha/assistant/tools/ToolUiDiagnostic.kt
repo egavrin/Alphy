@@ -21,6 +21,10 @@ internal data class ToolUiDiagnostic(
         if (rule == "component_text") {
             append(" Give this node a short label in the requested language. Omit text only if the catalog allows the node without text.")
         }
+        if (rule == "component_type") {
+            append(" Supported native component types: ${ToolUiCatalog.components.keys.joinToString()}.")
+            append(" Declare drawing surfaces at the definition root. For inline drawing use a native canvas bound to a declared surface.")
+        }
         if (rule == "component_action") {
             append(" Use distinct IDs for dismissAction and every child action. If both close the modal, handle both IDs in source.")
         }

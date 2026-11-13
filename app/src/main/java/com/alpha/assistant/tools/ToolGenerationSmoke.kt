@@ -367,7 +367,24 @@ internal class ToolGenerationSmoke(
                                 checkActionContract(scenario, bindings, root, route, nativeSlots, step.slot, action, stepIndex,
                                     BehaviorDiscoveryStage.BEHAVIOR_EXECUTION)
                             }
-                            val value = step.value.takeUnless { it == JSONObject.NULL }
+                            if (step.row != null && fenced) fail("native or record result required", BehaviorFailureRule.EXTERNAL_RESULT_REQUIRED)
+                            val plannedValue = step.value.takeUnless { it == JSONObject.NULL }
+                            val values = displayState()
+                            val value = step.row?.let { row ->
+                                val collection = target(row.slot) as? Binding.Ui
+                                    ?: fail("row collection unavailable", BehaviorFailureRule.BINDING_SHAPE, row.slot)
+                                val node = visibleBehaviorNode(root, values, collection.path) { rule, type ->
+                                    fail("row collection unavailable", rule, row.slot, type)
+                                }
+                                if (!supportsBehaviorObservation(node.getString("type"), Kind.COLLECTION, collection.native)) {
+                                    fail("row collection unavailable", BehaviorFailureRule.OBSERVATION_KIND, row.slot)
+                                }
+                                val record = ToolUiCatalog.records(node, values).optJSONObject(row.index)
+                                    ?: fail("current row unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot)
+                                ToolUiCatalog.scenarioRowPayload(node, action, ToolUiCatalog.stableKey(record), plannedValue)
+                                    ?: fail("action does not belong to the current row collection or its payload is invalid",
+                                        BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot)
+                            } ?: plannedValue
                             val control = ToolUiCatalog.action(root, action)
                             val liveInput = control?.let(ToolUiCatalog::isLiveInput) == true
                             if (step.slot in liveInputSlots && !liveInput) {
@@ -388,7 +405,7 @@ internal class ToolGenerationSmoke(
                                     rowControlKind ?: control?.optString("type"), BehaviorValueShape.of(value))
                             }
                             val event = try {
-                                controlEvent(root, displayState(), action, value, liveInput)
+                                controlEvent(root, values, action, value, liveInput)
                             } catch (failure: CancellationException) {
                                 throw failure
                             } catch (failure: ToolUiCatalog.InvalidBooleanActionPayload) {

@@ -202,7 +202,7 @@ internal class TestFixAgent(
         return scenario.steps.withIndex().all { (index, step) ->
             val (slot, value) = when (step) {
                 is Step.Action -> {
-                    if (index == scenario.steps.lastIndex) return false
+                    if (index == scenario.steps.lastIndex || step.row != null) return false
                     step.slot to step.value
                 }
                 is Step.Assert -> {

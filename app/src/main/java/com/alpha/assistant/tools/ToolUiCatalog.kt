@@ -865,6 +865,17 @@ object ToolUiCatalog {
 
     internal fun actionTarget(root: JSONObject, id: String): ActionTarget? = findAction(root, id, activeOnly = false)
 
+    internal fun scenarioRowPayload(collection: JSONObject, action: String, key: String, value: Any?): Any? {
+        if (collection.getString("type") !in setOf("list", "table", "groupedList", "lazyList", "lazyGrid")) return null
+        val template = collection.optJSONObject("rowTemplate")
+        if (template != null && findAction(template, action, activeOnly = false) != null) {
+            return JSONObject().put("key", key).put("value", value ?: JSONObject.NULL)
+        }
+        val rows = collection.optJSONArray("rowActions")
+        return key.takeIf { value == null && (collection.optString("action") == action ||
+            rows != null && (0 until rows.length()).any { rows.getJSONObject(it).optString("action") == action }) }
+    }
+
     internal fun actionPayloadRequirement(root: JSONObject, id: String, payload: Any?): String? {
         val target = findAction(root, id, activeOnly = false) ?: return "a declared native action"
         val value = if (target.inRowTemplate) {

@@ -19,6 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -344,6 +345,92 @@ class GenerationBehaviorWorkflowTest {
         val missing = JSONObject(appBindings).put("apply", "missing").toString()
         assertTrue(runCatching { check(appPlan, candidate(app(true), wrongType)) }.exceptionOrNull() is GenerationBehavior.BindingFailure)
         assertTrue(runCatching { check(appPlan, candidate(app(true), missing)) }.exceptionOrNull() is BehaviorCheckFailure)
+    }
+
+    private class Provider(private val behavior: String, private vararg val replies: String) : ChatProvider {
+        val calls = mutableListOf<CloudRequest>()
+        private var writer = 0
+        override suspend fun respond(key: String, request: CloudRequest, session: CloudSession,
+            emit: suspend (CloudEvent) -> Unit) {
+            calls += request
+            val reply = when (request.generationStage) {
+                CloudGenerationStage.PLAN -> JSONObject("""{"wholeScreen":true,"language":"en","requiredCapabilities":[]}""")
+                    .put("behavior", JSONObject(behavior)).toString()
+                CloudGenerationStage.COMPLETE -> replies.getOrElse(writer++) { replies.last() }
+                else -> error("Unexpected fixture stage")
+            }
+            emit(CloudEvent.Text(reply))
+        }
+    }
+
+    private fun sourcePatch(vararg edits: Pair<String, String>) = JSONObject().put("sourceEdits",
+        JSONArray(edits.map { (search, replace) -> JSONObject().put("search", search).put("replace", replace) })).toString()
+
+    private fun bindingPatch(bindings: String) =
+        JSONObject().put("fields", JSONObject().put("behaviorBindings", JSONObject(bindings))).toString()
+
+    private suspend fun generate(provider: Provider) = ToolGenerationService(provider, SandboxClient(context))
+        .generate("offline", "Double the entered number.", null, emptyList(), CloudSession(), "repair-history")
+
+    @Test fun invalidMultiEditKeepsTheLastCandidateAndCanBeRepaired(): Unit = runBlocking {
+        val raw = candidate(app(false), appBindings)
+        val missing = sourcePatch("s.result=s.amount;" to "s.result=s.amount*2;", "missing source" to "")
+        val overlapping = sourcePatch("s.result=s.amount;" to "s.result=s.amount*2;", "s.amount;" to "0;")
+        val valid = sourcePatch("s.result=s.amount;" to "s.result=s.amount*2;")
+        val provider = Provider(plan(appPlan), raw, missing, overlapping, valid)
+        val result = generate(provider)
+        assertTrue(result.spec.source.contains("s.result=s.amount*2;"))
+        assertEquals(listOf(CloudGenerationStage.PLAN) + List(4) { CloudGenerationStage.COMPLETE },
+            provider.calls.map { it.generationStage })
+        val repairs = provider.calls.drop(2)
+        assertTrue(repairs.all { it.turns[1].text == raw })
+        assertTrue(repairs[1].turns.last().text.contains("missing_match"))
+        assertTrue(repairs[1].turns.last().text.contains("$.sourceEdits[1].search"))
+        assertTrue(repairs[1].turns.last().text.contains("assertion failed"))
+        assertTrue(repairs[2].turns.last().text.contains("overlap"))
+    }
+
+    @Test fun distinctCandidateFailuresKeepTheirOrderAndAdvanceTheBase(): Unit = runBlocking {
+        val raw = candidate(app(false), appBindings)
+        val badBinding = JSONObject(appBindings).put("result", JSONArray("[9]")).toString()
+        val finalPatch = JSONObject(sourcePatch("s.result=s.amount;" to "s.result=s.amount*2;"))
+            .put("fields", JSONObject().put("behaviorBindings", JSONObject(appBindings))).toString()
+        val provider = Provider(plan(appPlan), raw, bindingPatch(badBinding),
+            bindingPatch(appBindings), finalPatch)
+        generate(provider)
+        val third = provider.calls[3]
+        assertEquals(JSONArray("[9]").toString(),
+            JSONObject(third.turns[1].text).getJSONObject("behaviorBindings").getJSONArray("result").toString())
+        assertTrue(third.turns.last().text.contains("assertion failed"))
+        assertTrue(third.turns.last().text.contains("unavailable"))
+        assertTrue(provider.calls.last().turns.last().text.contains("repeated_candidate"))
+    }
+
+    @Test fun repeatedRejectedActionStopsAgainstTheSameBase(): Unit = runBlocking {
+        val raw = candidate(app(false), appBindings)
+        val missing = sourcePatch("missing source" to "")
+        val provider = Provider(plan(appPlan), raw, missing, missing)
+        val failure = runCatching { generate(provider) }.exceptionOrNull() as? CloudFailure
+        assertEquals("widget_patch", failure?.code)
+        assertEquals(4, provider.calls.size)
+    }
+
+    @Test fun rowReferenceSelectsTheSecondCurrentRecordAfterOrderingChanges(): Unit = runBlocking {
+        val scenario = """{"slots":{"rows":{"kind":"collection"},"select":{"kind":"action"},
+            "remove":{"kind":"action"},"reverse":{"kind":"action"},"remaining":{"kind":"value","valueType":"string"}},
+            "steps":[{"op":"action","slot":"reverse"},{"op":"action","slot":"select","row":{"slot":"rows","index":1}},
+            {"op":"action","slot":"remove"},{"op":"assert","slot":"rows","test":"equals","value":1},
+            {"op":"assert","slot":"remaining","test":"equals","value":"Second"}]}"""
+        val raw = """{"formatVersion":3,"title":"Rows","description":"","capabilities":[],
+            "stateSchema":{"selected":"string","remaining":"string","rows":{"type":"list","maxItems":2,
+            "fields":{"id":"string","text":"string"}}},"initialState":{"selected":"","remaining":"",
+            "rows":[{"id":"a","text":"First"},{"id":"b","text":"Second"}]},
+            "ui":{"type":"column","children":[{"type":"list","text":"Notes","bind":"rows","action":"select"},
+            {"type":"button","text":"Delete selected","action":"remove"},
+            {"type":"text","text":"Remaining","bind":"remaining"},{"type":"button","text":"Reverse","action":"reverse"}]},
+            "source":"const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='reverse')s.rows.reverse();if(e.type==='action'&&e.actionId==='select')s.selected=e.value;if(e.type==='action'&&e.actionId==='remove'&&s.selected){s.rows=s.rows.filter(r=>r.id!==s.selected);s.remaining=s.rows[0].text;}return {state:s};",
+            "behaviorBindings":{"rows":[0],"select":"select","remove":"remove","reverse":"reverse","remaining":[2]}}"""
+        check(scenario, raw)
     }
 
     @Test fun gameRequiresRepeatedGeometryChangeAndReset(): Unit = runBlocking {

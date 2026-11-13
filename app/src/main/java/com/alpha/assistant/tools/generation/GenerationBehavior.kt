@@ -22,8 +22,10 @@ internal sealed interface GenerationBehavior {
     data class Slot(val kind: Kind, val part: String?, val member: String?, val valueType: BehaviorValueShape? = null,
         val rowValueType: BehaviorValueShape? = null)
 
+    data class RowReference(val slot: String, val index: Int)
+
     sealed interface Step {
-        data class Action(val slot: String, val value: Any?) : Step
+        data class Action(val slot: String, val value: Any?, val row: RowReference? = null) : Step
         data class Surface(val slot: String, val event: String, val phase: String?, val x: Double?, val y: Double?, val direction: String?) : Step
         data class Advance(val slot: String, val count: Int, val observe: String?, val changes: Int, val frameMs: Int? = null) : Step
         data class Clock(val slot: String, val milliseconds: Int) : Step
@@ -78,7 +80,9 @@ internal sealed interface GenerationBehavior {
             For a native mini-app button, {"op":"availability","slot":"actionSlot","value":false} checks that the button is unavailable without pressing it. Use true to check that it is available.
             Use a keyed row payload for a declared native member that accepts it.
             For a writer-owned rowTemplate checkbox, declare an action slot as {"kind":"action","rowValueType":"boolean"}.
-            Every action on that slot requires value {"key":"stableRowId","value":true} with a JSON Boolean.
+            On that slot use a keyed Boolean payload, or use row with the Boolean value directly.
+            To target a row by its current position, add "row":{"slot":"collectionSlot","index":0} to the action step.
+            The index is zero based. Bind the collection slot to the same list as the action. For rowActions or row selection, omit value with row.
             For a list rowActions control, the action value is the current stable string key, even after rows change order.
             Choose deterministic keys for rows created by earlier steps. Preserve the required delete, undo, and clear actions.
             Other writer actions use a supported scalar value or a plain press.
@@ -304,23 +308,36 @@ internal sealed interface GenerationBehavior {
                 fun slot(vararg kinds: Kind) = use(row, "slot", kinds.toSet(), at)
                 val step = when (row.opt("op") as? String) {
                     "action" -> {
-                        row.requireKeys(at, setOf("op", "slot"), setOf("value"))
+                        row.requireKeys(at, setOf("op", "slot"), setOf("value", "row"))
                         events++
                         val action = slot(Kind.ACTION)
                         val planned = slots.getValue(action)
                         val value = row.opt("value")
+                        val reference = if (row.has("row")) {
+                            val path = "$at.row"
+                            requireParts(!threeScene, path, "row selection in a native mini-app")
+                            val target = obj(row.opt("row"), path)
+                            target.requireKeys(path, setOf("slot", "index"))
+                            val collection = use(target, "slot", setOf(Kind.COLLECTION), "$path.slot")
+                            val index = target.opt("index")
+                            requireParts(index is Int && index in 0..255, "$path.index", "a zero-based row index from 0 to 255")
+                            requireParts(value !is JSONObject, "$at.value", "a scalar value when the host supplies the row key")
+                            RowReference(collection, index as Int)
+                        } else null
                         if (!threeScene && planned.part == null && planned.rowValueType == null &&
                             ToolUiCatalog.isRowPayload(value) && (value as JSONObject).opt("value") is Boolean) {
                             val slotIndex = slots.keys.indexOf(action)
                             contractFailure("slot_row_value_type", "$field.scenario.slots[$slotIndex].rowValueType",
                                 "the string boolean for a writer-owned row checkbox with a keyed Boolean payload", value)
                         }
-                        if (planned.rowValueType != null && (!ToolUiCatalog.isRowPayload(value) ||
-                                (value as JSONObject).opt("value") !is Boolean)) {
-                            contractFailure("action_payload", "$at.value",
-                                "an object with exactly key (a nonblank string of at most 128 characters) and value (a JSON Boolean)", value)
+                        if (planned.rowValueType != null) {
+                            val boolean = if (reference != null) value else
+                                (value as? JSONObject)?.takeIf(ToolUiCatalog::isRowPayload)?.opt("value")
+                            if (boolean !is Boolean) contractFailure("action_payload", "$at.value",
+                                if (reference != null) "a JSON Boolean for the referenced row" else
+                                    "an object with exactly key (a nonblank string of at most 128 characters) and value (a JSON Boolean)", value)
                         }
-                        Step.Action(action, value?.let { actionValue(it, planned, at) })
+                        Step.Action(action, value?.let { actionValue(it, planned, at) }, reference)
                     }
                     "availability" -> {
                         row.requireKeys(at, setOf("op", "slot", "value"))
@@ -480,7 +497,7 @@ internal sealed interface GenerationBehavior {
                 .filter { !proposed.has(it.slot) && it.slot !in liveInputs }
                 .groupBy { it.slot }
                 .filter { (id, steps) ->
-                    id in savedButtonIds || steps.all { it.value == null || it.value === JSONObject.NULL }
+                    id in savedButtonIds || steps.all { it.row == null && (it.value == null || it.value === JSONObject.NULL) }
                 }
             if (missingPresses.isEmpty()) return proposed
 

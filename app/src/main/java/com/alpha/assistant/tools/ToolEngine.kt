@@ -95,6 +95,8 @@ private class PlanRetry(
     val feedback: String,
     val requiredCapabilities: Set<String>,
     val receiptCandidate: ReceiptPlanCandidate?,
+    val ownershipRecovery: Boolean = false,
+    val replacementWriter: Boolean = false,
 ) : Exception()
 private class NativeValidation(var stage: ToolGenerationStage, var smoke: ToolSmokeFailure? = null)
 
@@ -307,13 +309,17 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         currentCoroutineContext().ensureActive()
     }
 
+    private class MixedFillIncomplete : Exception()
+
+    private fun requireCompleteFill(reply: JsonObject) {
+        if (reply.keys != setOf("incomplete")) return
+        val reason = (reply["incomplete"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        requireParts(!reason.isNullOrBlank() && reason.length <= 300, "$.incomplete", "a short reason")
+        throw MixedFillIncomplete()
+    }
+
     private fun generatedFill(raw: String, holeIds: List<String>?): String {
         val reply=generatedObject(raw)
-        if(reply.keys == setOf("incomplete")) {
-            val reason=(reply["incomplete"] as? JsonPrimitive)?.takeIf {it.isString}?.content
-            requireParts(!reason.isNullOrBlank() && reason.length<=300,"$.incomplete","a short reason")
-            throw incompleteMixed()
-        }
         val expected=if(holeIds==null) setOf("fill") else setOf("holes","fill")
         requireParts(reply.keys==expected,"$","the declared fill response fields")
         if(holeIds!=null) {
@@ -379,10 +385,13 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         attempt: Int,
         trace: ToolGenerationTrace.Run?,
         restrictRemovals: Boolean = false,
+        mixedFill: Boolean = false,
         fetch: suspend () -> String,
     ): String {
         val start = SystemClock.elapsedRealtimeNanos()
         var responseBytes: Int? = null
+        var response: String? = null
+        var rejection: GenerationRepair.Rejected? = null
         var applied: GenerationRepair.Applied? = null
         var result = "failed"
         try {
@@ -395,7 +404,18 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                 }
                 throw failure
             }
+            response = raw
             if (trace != null) responseBytes = GenerationRepair.byteSize(raw)
+            if (mixedFill) {
+                val parsed = try { generatedObject(raw) } catch (_: ToolValidationFailure) { null }
+                if (parsed != null) try {
+                    requireCompleteFill(parsed)
+                } catch (_: PartsContractFailure) {
+                    if (request.mode == GenerationRepair.Mode.PATCH)
+                        throw GenerationRepair.Rejected(GenerationRepair.Problem.SHAPE, "$.incomplete")
+                    throw InvalidGeneratedOutput(GenerationProblem.SPEC)
+                }
+            }
             if (request.mode == GenerationRepair.Mode.REWRITE) {
                 repair.retain(raw, rejectRepeated = stage == CloudGenerationStage.PLAN && request.repairNumber == 3)
                 result = "received"
@@ -405,7 +425,11 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             applied = candidate
             result = "applied"
             return candidate.text
+        } catch (failure: MixedFillIncomplete) {
+            result = "incomplete"
+            throw failure
         } catch (failure: GenerationRepair.Rejected) {
+            rejection = failure
             result = failure.problem.wire
             throw failure
         } catch (failure: CancellationException) {
@@ -415,6 +439,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             if (failure.code == "cancelled") result = "cancelled"
             throw failure
         } finally {
+            repair.record(request, response, result, applied, rejection)
             trace?.repair(attempt, stage, request.repairNumber, request.mode, result, responseBytes,
                 applied?.let { GenerationRepair.byteSize(it.text) }, applied?.changes, applied?.sourceEdits,
                 SystemClock.elapsedRealtimeNanos() - start)
@@ -719,7 +744,18 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                     is GenerationBehavior.Step.Action -> {
                         val binding = native[step.slot] as? GenerationBehavior.Binding.Id ?: return@forEachIndexed
                         val part = placements.getValue(checkNotNull(workflow.slots.getValue(step.slot).part))
-                        val payload = step.value.takeUnless { it === JSONObject.NULL }
+                        val value = step.value.takeUnless { it === JSONObject.NULL }
+                        val payload = step.row?.let { row ->
+                            val collection = native[row.slot] as? GenerationBehavior.Binding.Ui
+                            val samePart = workflow.slots.getValue(row.slot).part == part.needId
+                            if (collection == null || !samePart) GenerationBehavior.contractFailure("action_payload",
+                                "$path.row", "a collection owned by the action's native part")
+                            val node = collection.path.drop(1).fold(part.full) { parent, index ->
+                                parent.getJSONArray("children").getJSONObject(index)
+                            }
+                            ToolUiCatalog.scenarioRowPayload(node, binding.value, "planned-row", value)
+                                ?: GenerationBehavior.contractFailure("action_payload", "$path.row", "a row action on that collection")
+                        } ?: value
                         ToolUiCatalog.actionPayloadRequirement(part.full, binding.value, payload)?.let { requirement ->
                             GenerationBehavior.contractFailure("action_payload", "$path.value",
                                 "$requirement for slot ${step.slot}", step.value)
@@ -843,7 +879,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                     val plan = trace.timed(attemptNumber, ToolGenerationStage.PLAN, providerStage = CloudGenerationStage.PLAN) {
                         suspend fun fetch() = response(key, turns, session, CloudGenerationStage.PLAN, instructions,
                             originalRequest = originalRequest, onPublicUpdate = modelPublicUpdate)
-                        planText = if (edit == null) fetch().also { repair?.retain(it) }
+                        planText = if (edit == null) fetch().also { repair?.initial(it) }
                             else repairResponse(checkNotNull(repair), edit, CloudGenerationStage.PLAN, attemptNumber, trace) { fetch() }
                         checkActive()
                         if (capabilityOnly) {
@@ -862,6 +898,10 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                         }
                         if (planRetry != null) requireParts(generation.requiredCapabilities.containsAll(planRetry.requiredCapabilities),
                             "$.requiredCapabilities", "the previously accepted required Android operations")
+                        if (planRetry?.ownershipRecovery == true) {
+                            requireParts(generation is GenerationPlan.WholeScreen && !generation.threeScene, "$.wholeScreen",
+                                "a native whole-screen plan for the requested cross-part changes")
+                        }
                         val hasQuestions = generation is GenerationPlan.Parts && generation.needs.questions.isNotEmpty()
                         if (stagedApp && generation.scene == null && !hasQuestions) {
                             requireParts(generation.behavior != null, "$.behavior", "an executable workflow or an explicit unchecked outcome")
@@ -957,7 +997,8 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                     if (repair != null) {
                         val retry = feedback?.let {
                             repair.next(it + repair.planRemovalGuidance(), next,
-                                finalPlanRewrite = (patchNewApp || capabilityOnly) && consecutivePatchRejections >= 2) {
+                                finalPlanRewrite = (patchNewApp || capabilityOnly) && consecutivePatchRejections >= 2,
+                                patchRejected = rejectedPatch != null) {
                                 session.claimGenerationRepair(CloudGenerationStage.PLAN)
                             }
                         }
@@ -1280,7 +1321,7 @@ ${imageWriterGuidance()}"""
         val rowActions = generatedSlots.filterValues { it.rowValueType != null }.keys
         val rowActionGuidance = if (rowActions.isEmpty()) "" else
             "\nBind these row action slots by action ID to actual rowTemplate checkboxes: ${jsonArray(rowActions.toList())}. " +
-                "Preserve the planned keyed Boolean payloads. Create stable row IDs that match the scenario keys. " +
+                "Preserve the planned Boolean payloads. Use stable row IDs and match any explicit keys in the scenario. " +
                 "The host resolves each row from the current state when its action step executes."
         val coreGuidance = if (stagedApp) "\nBuild the complete functional core with simple default presentation. " +
             "Defer generated images, textures, and requested visual refinement." else ""
@@ -1296,7 +1337,8 @@ ${imageWriterGuidance()}"""
             Preserve every existing state field, type, collection definition, and record ID.
             $liveDataGuidance
             ${CapabilityCatalog.modelGuidance(allowedCapabilities)} $requiredCapabilityGuidance
-        """.trimIndent() + sharedRules
+        """.trimIndent() + sharedRules + bindingLocation + if (previous == null)
+            "\n${ToolUiCatalog.modelGuidance()}" else ""
         val writerRequest = if (stagedApp && prompt != originalRequest)
             JSONObject().put("request", originalRequest).put("context", prompt).toString()
         else "Request: $prompt"
@@ -1315,8 +1357,10 @@ ${imageWriterGuidance()}"""
         suspend fun validateCandidate(raw: String?, validation: NativeValidation, hostDecorated: ToolSpec? = null,
             publishPreview: Boolean = false): VerifiedApp {
             validation.stage = ToolGenerationStage.DEFINITION
-            val candidateEnvelope = if (raw != null && workflow != null) generatedOutput(GenerationProblem.SPEC) {
-                JSONObject(generatedObject(raw).toString())
+            val candidateEnvelope = if (raw != null && (workflow != null || mixed)) generatedOutput(GenerationProblem.SPEC) {
+                val parsed = generatedObject(raw)
+                if (mixed) requireCompleteFill(parsed)
+                JSONObject(parsed.toString())
             } else null
             val bindings = candidateEnvelope?.let {
                 if (mixed) it.optJSONObject("fill")?.remove("behaviorBindings") else it.remove("behaviorBindings")
@@ -1465,7 +1509,7 @@ ${imageWriterGuidance()}"""
                             ReceiptPlanCandidate(JSONObject(planText).apply { remove("behavior") }, assembly, smokedWriter)
                         } else null
                         throw PlanRetry(attemptNumber + 1, planRepair, edit, feedback,
-                            planned?.requiredCapabilities.orEmpty(), retained)
+                            planned?.requiredCapabilities.orEmpty(), retained, ownershipRecovery = planRetry?.ownershipRecovery == true)
                     }
                     val reportPlanFailure = booleanPayload || requiredReceipt
                     if (reportPlanFailure) validation.stage = ToolGenerationStage.PLAN
@@ -1558,12 +1602,17 @@ ${imageWriterGuidance()}"""
             return VerifiedApp(preview, raw)
         }
 
+        val recoveryAttempt = attemptNumber
         suspend fun attempt(correction: String? = null, edit: GenerationRepair.Request? = null,
             retained: String? = null): VerifiedApp {
             val validation = NativeValidation(
                 if (partsOnly || retained != null) ToolGenerationStage.DEFINITION else ToolGenerationStage.PROVIDER)
             try {
                 checkActive()
+                if (planRetry?.replacementWriter == true && correction == null && edit == null && retained == null &&
+                    attemptNumber == recoveryAttempt && session.claimGenerationRepair(CloudGenerationStage.COMPLETE) == null) {
+                    throw incompleteMixed()
+                }
                 val raw = if (retained != null) {
                     val definition = if (workflow != null) retained else
                         JsonObject(generatedObject(retained) - "behaviorBindings").toString()
@@ -1586,7 +1635,7 @@ ${imageWriterGuidance()}"""
                         )
                         edit != null -> {
                             val request = if (!wholeScreen && edit.mode == GenerationRepair.Mode.PATCH)
-                                original.copy(text = "$contract${languageGuidance()}\n$writerRequest") else original
+                                original.copy(text = "$patchContract${languageGuidance()}\n$writerRequest") else original
                             listOfNotNull(request, edit.base?.let { CloudTurn("assistant", it) }, CloudTurn("user", edit.instructions))
                         }
                         correction != null -> listOfNotNull(original, rejectedCandidate?.let { CloudTurn("assistant", it) }, CloudTurn("user", correction))
@@ -1595,7 +1644,7 @@ ${imageWriterGuidance()}"""
                     trace.timed(attemptNumber, ToolGenerationStage.PROVIDER, providerStage = modelStage) {
                         val system = when {
                             !wholeScreen -> ""
-                            edit?.mode == GenerationRepair.Mode.PATCH -> contract + languageGuidance() + GenerationRepair.FORMAT_OVERRIDE
+                            edit?.mode == GenerationRepair.Mode.PATCH -> patchContract + languageGuidance()
                             else -> fullContract + languageGuidance()
                         }
                         suspend fun fetch(): String {
@@ -1632,14 +1681,29 @@ ${imageWriterGuidance()}"""
                             return JsonObject(candidate - languageFields).toString()
                         }
                         if (edit == null) fetch().also {
-                            if (writerRepair == null) rejectedCandidate = it else writerRepair.retain(it)
-                        } else repairResponse(checkNotNull(writerRepair), edit, modelStage, attemptNumber, trace) { fetch() }
+                            if (writerRepair == null) rejectedCandidate = it else writerRepair.initial(it)
+                        } else repairResponse(checkNotNull(writerRepair), edit, modelStage, attemptNumber, trace, mixedFill = mixed) { fetch() }
                     }.also { checkActive() }
                 }
                 return validateCandidate(raw, validation, publishPreview = true)
             } catch(failure: Exception) {
                 draftPreview?.clear()
                 if (failure is PlanRetry) throw failure
+                if (failure is MixedFillIncomplete) {
+                    val terminal = incompleteMixed()
+                    val feedback = "The mixed fill cannot complete the requested changes with separate ownership. " +
+                        "Plan the original request with wholeScreen:true and writer-owned slots. Preserve the required behavior, language, and Android operations."
+                    val replan = if (stagedApp && mixedAssembly != null && scene == null && planRetry?.ownershipRecovery != true &&
+                        session.hasGenerationRepair(CloudGenerationStage.COMPLETE)) {
+                        planRepair?.next(feedback + planRepair.planRemovalGuidance(),
+                            "$feedback Return the corrected complete plan.") { session.claimGenerationRepair(CloudGenerationStage.PLAN) }
+                    } else null
+                    observeAttempt(attemptNumber, ToolGenerationStage.DEFINITION, terminal, trace = trace,
+                        disposition = if (replan == null) ToolGenerationDisposition.FINISH else ToolGenerationDisposition.CORRECT)
+                    if (replan != null) throw PlanRetry(attemptNumber + 1, checkNotNull(planRepair), replan, feedback,
+                        planned?.requiredCapabilities.orEmpty(), null, ownershipRecovery = true, replacementWriter = true)
+                    throw terminal
+                }
                 val rejectedPatch = failure as? GenerationRepair.Rejected
                 val error = if (rejectedPatch == null) failure
                     else CloudFailure("widget_patch", "Alphy could not apply an app repair. Retry the request.")
@@ -1669,7 +1733,7 @@ ${imageWriterGuidance()}"""
                             "Return the complete corrected ${if (mixed) "fill response" else "app definition"}. " + next
                         else -> next
                     }
-                    writerRepair.next(next, rewrite) { session.claimGenerationRepair(modelStage) }
+                    writerRepair.next(next, rewrite, patchRejected = rejectedPatch != null) { session.claimGenerationRepair(modelStage) }
                 } else null
                 if (writerRepair != null && retry != null) {
                     observeAttempt(attemptNumber, validation.stage, error, validation.smoke, disposition = ToolGenerationDisposition.CORRECT, trace = trace)
@@ -2098,16 +2162,18 @@ ${imageWriterGuidance()}"""
                     require(record.toString().toByteArray(Charsets.UTF_8).size+75<=8192) {"The record exceeds 8 KiB."}
                 }
             }
-            if(event.getString("type") != "action") {
+            val type = event.getString("type")
+            val readOnly = type == "preview" || type == "render"
+            if (type != "action") {
                 require(records.length() == 0) { "Only explicit action events can request records." }
                 if(requestedEffects.length() != 0) throw GenerationProblem.PREVIEW_EFFECTS.failure()
-                if(event.getString("type") in setOf("preview","render") && next.toString() != JSONObject(state).toString()) throw GenerationProblem.PREVIEW_STATE.failure()
-                if(event.getString("type") == "capabilityResults") require(spec.capabilityResults)
-                if(event.getString("type") == "recordResults") require(spec.collections.length() > 0)
+                if(readOnly && !sameToolJson(next, JSONObject(state))) throw GenerationProblem.PREVIEW_STATE.failure()
+                if(type == "capabilityResults") require(spec.capabilityResults)
+                if(type == "recordResults") require(spec.collections.length() > 0)
             }
-            val effects = CapabilityCatalog.parseEffects(requestedEffects,spec.capabilities,event.getString("type"))
+            val effects = CapabilityCatalog.parseEffects(requestedEffects,spec.capabilities,type)
             val output=ArtifactProtocol.output(spec,json)
-            ToolPreview(spec,next.toString(),ui,effects,records,output.surfaces,output.frames,output.timers,output.playback)
+            ToolPreview(spec,if (readOnly) state else next.toString(),ui,effects,records,output.surfaces,output.frames,output.timers,output.playback)
         }
 }
 

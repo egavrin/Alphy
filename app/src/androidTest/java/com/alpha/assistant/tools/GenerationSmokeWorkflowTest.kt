@@ -61,6 +61,23 @@ class GenerationSmokeWorkflowTest {
         assertEquals(2,provider.requests.size)
         assertFalse(provider.requests.last().turns.last().text.contains("SECRET_"))
     }
+    @Test fun previewAndRenderPreserveStateWithReorderedObjectKeys(): Unit = runBlocking {
+        val candidate = JSONObject(spec()).apply {
+            remove("surfaces")
+            put("stateSchema", JSONObject("""{"count":"number","options":{"type":"object","fields":{"low":"number","high":"number"}}}"""))
+            put("initialState", JSONObject("""{"count":0,"options":{"low":1,"high":9}}"""))
+            put("source", """
+                const s=input.state,e=input.event;
+                if(e.type==='preview'||e.type==='render')return {state:{options:{high:s.options.high,low:s.options.low},count:s.count}};
+                return {state:s};
+            """.trimIndent())
+        }
+        val provider = Provider(listOf(candidate.toString()))
+        val result = ToolGenerationService(provider, SandboxClient(context))
+            .generate("offline", "Local fixture", null, emptyList(), CloudSession(), "fixture")
+        assertEquals(candidate.getJSONObject("initialState").toString(), result.state)
+        assertEquals(1, provider.requests.size)
+    }
     @Test fun hiddenEventFailuresRepairExactlyOnceWithSanitizedLocations(): Unit=runBlocking {
         val predicates=listOf(
             "e.type==='render'", "e.type==='action'", "e.type==='open'",
@@ -84,7 +101,7 @@ class GenerationSmokeWorkflowTest {
         val invalid=spec("if(e.type==='action')throw Error('SECRET_RUNTIME');")
         val provider=Provider(listOf(invalid))
         val failure=runCatching {ToolGenerationService(provider,SandboxClient(context)).generate("offline","Local fixture",null,emptyList(),CloudSession(),"fixture")}.exceptionOrNull()
-        assertTrue(failure is CloudFailure);assertEquals(4,provider.requests.size)
+        assertTrue(failure is CloudFailure);assertEquals(3,provider.requests.size)
         assertFalse(failure.toString().contains("SECRET_"))
     }
     @Test fun typedControlsAndIndependentBranchesUseDisposableInitialState(): Unit=runBlocking {

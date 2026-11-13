@@ -31,12 +31,13 @@ internal class GenerationRepair private constructor(
         PROTECTED_UI("protected_ui", "The saved layout cannot be replaced or removed. Use only the layout edit described in the patch instructions."),
     }
 
-    class Rejected(val problem: Problem) : IllegalArgumentException() {
-        val feedback get() = "The previous patch could not apply (${problem.wire}). ${problem.guidance}"
+    class Rejected(val problem: Problem, val path: String? = null) : IllegalArgumentException() {
+        val feedback get() = "The previous patch could not apply (${problem.wire}). " +
+            (path?.let { "Path: $it. " } ?: "") + problem.guidance
     }
 
-    data class Request(val mode: Mode, val repairNumber: Int, val instructions: String, val base: String?, val bindingsOnly: Boolean = false)
-    data class Applied(val text: String, val changes: Int, val sourceEdits: Int)
+    data class Request(val mode: Mode, val repairNumber: Int, val instructions: String, val base: String?, val bindingsOnly: Boolean = false, val baseVersion: Int = 0)
+    data class Applied(val text: String, val changes: Int, val sourceEdits: Int, val fields: List<String>)
     private data class Candidate(val text: String, val json: JsonObject)
     private data class SourceEdit(val start: Int, val end: Int, val replacement: String)
 
@@ -47,6 +48,32 @@ internal class GenerationRepair private constructor(
         private set
     private val seen = mutableListOf<JsonObject>()
     private var rewritten = false
+    private data class Turn(val result: String, var validation: String? = null)
+    private val history = mutableListOf<Turn>()
+    private val rejectedPatches = mutableSetOf<Pair<Int, JsonObject>>()
+    private var repeatedPatch = false
+
+    fun initial(raw: String) {
+        retain(raw)
+        history += Turn(if (base == null) "Initial response has no usable base." else "Initial response is candidate ${seen.size}.")
+    }
+
+    fun record(request: Request, raw: String?, result: String, applied: Applied?, rejected: Rejected?) {
+        val outcome = when {
+            applied != null -> "applied to candidate ${seen.size}, fields ${applied.fields.joinToString()}, source edits ${applied.sourceEdits}."
+            rejected != null -> rejected.feedback
+            result == "received" && request.baseVersion != seen.size -> "received candidate ${seen.size}."
+            else -> "$result."
+        }
+        history += Turn("Repair ${request.repairNumber} (${request.mode.wire}) on candidate ${request.baseVersion}: $outcome")
+        if (writer && !refinement && request.mode == Mode.PATCH && rejected != null && raw != null) {
+            repeatedPatch = strictObject(raw, maxBytes)?.let { !rejectedPatches.add(request.baseVersion to it) } ?: false
+        }
+    }
+
+    private fun historyContext() = if (history.isEmpty()) "" else history.joinToString(
+        separator = "\n", prefix = "\nRepair history (host results):\n",
+    ) { it.result + (it.validation?.let { failure -> " Validation: $failure" } ?: "") }
 
     fun retain(raw: String, rejectRepeated: Boolean = false) {
         val json = strictObject(raw, maxBytes) ?: return
@@ -67,7 +94,10 @@ internal class GenerationRepair private constructor(
 
     fun testPatch(number: Int, feedback: String): Request? = base?.let { patch(number, feedback, it) }
 
-    fun next(feedback: String, rewriteInstructions: String, finalPlanRewrite: Boolean = false, claim: () -> Int?): Request? {
+    fun next(feedback: String, rewriteInstructions: String, finalPlanRewrite: Boolean = false, patchRejected: Boolean = false,
+        claim: () -> Int?): Request? {
+        if (!patchRejected) history.lastOrNull()?.validation = feedback
+        if (repeatedPatch) return null
         val candidate = base
         if (candidate == null && (rewritten || protectedUi)) return null
         val number = claim() ?: return null
@@ -75,7 +105,7 @@ internal class GenerationRepair private constructor(
         if (candidate == null || refinement && !protectedUi && number == 3 || replacePlan) {
             if (replacePlan) base = null
             rewritten = true
-            return Request(Mode.REWRITE, number, rewriteInstructions, null)
+            return Request(Mode.REWRITE, number, rewriteInstructions + historyContext(), null, baseVersion = seen.size)
         }
         return patch(number, feedback, candidate)
     }
@@ -90,10 +120,11 @@ internal class GenerationRepair private constructor(
 
     fun correctBindings(feedback: String, claim: () -> Int?): Request? {
         val candidate = base ?: return null
+        history.lastOrNull()?.validation = feedback
         val number = claim() ?: return null
-        return Request(Mode.PATCH, number, "$feedback\nReturn one JSON patch object only. " +
+        return Request(Mode.PATCH, number, "$feedback${historyContext()}\nReturn one JSON patch object only. " +
             "Set only behaviorBindings inside fields. Keep source, controls, state, and the planned check unchanged.",
-            candidate.text, bindingsOnly = true)
+            candidate.text, bindingsOnly = true, baseVersion = seen.size)
     }
 
     private fun patch(number: Int, feedback: String, candidate: Candidate): Request {
@@ -117,9 +148,9 @@ internal class GenerationRepair private constructor(
             else -> ""
         }
         return Request(Mode.PATCH, number,
-            "$feedback\nReturn one JSON patch object only. This replaces the earlier full-output instruction. " +
+            "$feedback${historyContext()}\nReturn one JSON patch object only. This replaces the earlier full-output instruction. " +
                 "$structure$source$layout Make at least one change. Do not return the complete candidate.",
-            candidate.text)
+            candidate.text, baseVersion = seen.size)
     }
 
     fun apply(raw: String, restrictRemovals: Boolean = false, bindingsOnly: Boolean = false): Applied {
@@ -129,20 +160,21 @@ internal class GenerationRepair private constructor(
             addAll(planPatchKeys)
             if (allowSourceEdits) add("sourceEdits")
         }
-        if (patch.keys.any { it !in sections }) reject()
-        val values = patch["fields"]?.let { it as? JsonObject ?: reject() }.orEmpty()
+        if (patch.keys.any { it !in sections }) reject(path = "$")
+        val values = patch["fields"]?.let { it as? JsonObject ?: reject(path = "$.fields") }.orEmpty()
         if (bindingsOnly && (patch.keys != setOf("fields") || values.keys != setOf("behaviorBindings") ||
                 values["behaviorBindings"] !is JsonObject)) reject()
         val removals = patch["removeFields"]?.let { value ->
             (value as? JsonArray ?: reject()).map { string(it) ?: reject() }
         }.orEmpty()
-        val edits = patch["sourceEdits"]?.let { it as? JsonArray ?: reject() }.orEmpty()
+        val edits = patch["sourceEdits"]?.let { it as? JsonArray ?: reject(path = "$.sourceEdits") }.orEmpty()
         if (protectedUi && ("ui" in values || "ui" in removals)) reject(Problem.PROTECTED_UI)
         val topText = values["prependText"]?.let { string(it)?.takeIf(String::isNotBlank) ?: reject() }
         val layout = topText?.let(::prependText)
         val fields = if (layout == null) values else values - "prependText"
         val changes = values.size + removals.size + edits.size
-        if (changes !in 1..32 || edits.size > 16 || fields.keys.any { it !in editableFields } ||
+        if (fields.keys.any { it !in editableFields }) reject(path = "$.fields")
+        if (changes !in 1..32 || edits.size > 16 ||
             removals.toSet().size != removals.size || removals.any {
                 it in fields || writer && it == "source" || restrictRemovals && it !in editableFields
             }) reject()
@@ -166,7 +198,7 @@ internal class GenerationRepair private constructor(
         base = Candidate(text, json)
         if (topText != null) prependedText = topText
         seen += json
-        return Applied(text, changes, edits.size)
+        return Applied(text, changes, edits.size, values.keys.toList() + removals.filter { it in editableFields })
     }
 
     private fun prependText(text: String): JsonObject {
@@ -178,14 +210,14 @@ internal class GenerationRepair private constructor(
     }
 
     private fun editSource(source: String, edits: List<JsonElement>): String {
-        val resolved = edits.map { raw ->
+        val resolved = edits.mapIndexed { index, raw ->
             val edit = raw as? JsonObject ?: reject()
             if (edit.keys != sourceEditKeys) reject()
             val search = string(edit["search"])?.takeIf { it.isNotEmpty() } ?: reject()
             val replace = string(edit["replace"]) ?: reject()
             val start = source.indexOf(search)
-            if (start < 0) reject(Problem.MISSING_MATCH)
-            if (source.indexOf(search, start + 1) >= 0) reject(Problem.AMBIGUOUS_MATCH)
+            if (start < 0) reject(Problem.MISSING_MATCH, "$.sourceEdits[$index].search")
+            if (source.indexOf(search, start + 1) >= 0) reject(Problem.AMBIGUOUS_MATCH, "$.sourceEdits[$index].search")
             SourceEdit(start, start + search.length, replace)
         }.sortedBy { it.start }
         if (resolved.zipWithNext().any { (first, second) -> first.end > second.start }) reject(Problem.OVERLAP)
@@ -239,6 +271,6 @@ internal class GenerationRepair private constructor(
             null
         }
 
-        private fun reject(problem: Problem = Problem.SHAPE): Nothing = throw Rejected(problem)
+        private fun reject(problem: Problem = Problem.SHAPE, path: String? = null): Nothing = throw Rejected(problem, path)
     }
 }

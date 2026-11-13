@@ -366,6 +366,40 @@ class GenerationRouteWorkflowTest {
         }
     }
 
+    @Test fun incompleteMixedFillUsesTheExistingPlanAndCompleteBudgets(): Unit = runBlocking {
+        val independent = JSONObject(custom).put("writes", JSONArray()).put("reads", JSONArray())
+        for (afterPatch in listOf(false, true)) {
+            var completes = 0
+            val provider = FixtureProvider { turn, _ ->
+                when (turn.generationStage) {
+                    CloudGenerationStage.PLAN -> if (turn.turns.size == 1) plan("$count,$independent") else {
+                        assertTrue(turn.turns.last().text.contains("wholeScreen"))
+                        """{"fields":{"wholeScreen":true},"removeFields":["title","description","inputs","constants","needs","questions"]}"""
+                    }
+                    CloudGenerationStage.SELECTOR -> answer(turn)
+                    CloudGenerationStage.COMPLETE -> when (completes++) {
+                        0 -> if (afterPatch) """{"holes":["custom"],"fill":{"source":"return {state:input.state};"}}"""
+                            else """{"incomplete":"The selected native part cannot share the reset action."}"""
+                        1 -> if (afterPatch) """{"incomplete":"The selected native part cannot share the reset action."}"""
+                            else definition()
+                        else -> definition()
+                    }
+                    else -> error("Unexpected generation stage")
+                }
+            }
+            withEngine(provider) { _, engine, _ ->
+                val session = CloudSession()
+                val draft = engine.createDraft(request, null)
+                engine.generate(draft.id, "fixture", emptyList(), session)
+                assertNull(ToolSpec.parsePersisted(engine.accept(draft.id).spec).composition)
+                assertEquals(provider.stages.toString(), 2, provider.stages.count { it == CloudGenerationStage.PLAN })
+                assertEquals(if (afterPatch) 3 else 2, provider.stages.count { it == CloudGenerationStage.COMPLETE })
+                assertEquals(2, session.claimGenerationRepair(CloudGenerationStage.PLAN))
+                assertEquals(if (afterPatch) 3 else 2, session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
+            }
+        }
+    }
+
     @Test fun selectorFailureCompletesWholeScreenWithAllNeedsAndTheOriginalRequest(): Unit = runBlocking {
         val events = mutableListOf<JSONObject>()
         val provider = FixtureProvider { turn, _ ->

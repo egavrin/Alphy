@@ -127,14 +127,20 @@ class CloudSession {
 
     internal fun claimGenerationRepair(stage: CloudGenerationStage): Int? {
         check()
-        val counter = when (stage) {
-            CloudGenerationStage.PLAN -> planRepairs
-            CloudGenerationStage.COMPLETE -> completeRepairs
-            CloudGenerationStage.REFINE -> refineRepairs
-            else -> error("This stage does not use patch repair.")
-        }
-        val used = counter.getAndUpdate { minOf(it + 1, 3) }
+        val used = repairCounter(stage).getAndUpdate { minOf(it + 1, 3) }
         return (used + 1).takeIf { it <= 3 }
+    }
+
+    internal fun hasGenerationRepair(stage: CloudGenerationStage): Boolean {
+        check()
+        return repairCounter(stage).get() < 3
+    }
+
+    private fun repairCounter(stage: CloudGenerationStage) = when (stage) {
+        CloudGenerationStage.PLAN -> planRepairs
+        CloudGenerationStage.COMPLETE -> completeRepairs
+        CloudGenerationStage.REFINE -> refineRepairs
+        else -> error("This stage does not use patch repair.")
     }
 
     private fun claimCorrection(used: AtomicBoolean): Boolean {
