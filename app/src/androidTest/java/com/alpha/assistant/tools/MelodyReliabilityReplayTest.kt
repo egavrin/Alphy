@@ -12,6 +12,7 @@ import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.tools.generation.sameToolJson
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -38,7 +39,9 @@ class MelodyReliabilityReplayTest {
             .filter { it.getString("stage") == stage.name }.map { it.getString("content") }
     }
 
-    private class FixtureProvider(plans: List<String>, private val writer: String) : ChatProvider {
+    private inner class FixtureProvider(
+        plans: List<String>, private val writer: String,
+    ) : ChatProvider {
         private val planReplies = plans.iterator()
         val calls = mutableListOf<CloudRequest>()
         override suspend fun respond(
@@ -47,11 +50,17 @@ class MelodyReliabilityReplayTest {
             calls += request
             val reply = when (request.generationStage) {
                 CloudGenerationStage.PLAN -> planReplies.next()
-                CloudGenerationStage.COMPLETE -> writer.takeIf { calls.count { it.generationStage == CloudGenerationStage.COMPLETE } == 1 }
-                    ?: throw CloudFailure("offline_fixture_end", request.turns.last().text.take(500))
+                CloudGenerationStage.COMPLETE -> when {
+                    calls.count { it.generationStage == CloudGenerationStage.COMPLETE } == 1 -> writer
+                    else -> throw CloudFailure("offline_fixture_end", request.turns.last().text.take(500))
+                }
                 else -> error("Unexpected stage: ${request.generationStage}")
             }
-            emit(CloudEvent.Text(reply))
+            val planned = if (request.generationStage == CloudGenerationStage.PLAN && request.turns.size == 1) {
+                JSONObject(reply).put("requiredCapabilities", JSONArray().put(JSONObject()
+                    .put("id", "audio.torchSequence").put("excerpt", case.getString("request").take(300)))).toString()
+            } else reply
+            emit(CloudEvent.Text(planned))
         }
     }
 
@@ -62,16 +71,24 @@ class MelodyReliabilityReplayTest {
             trace = ToolGenerationTrace(UUID.randomUUID(), { events += it }),
         )
 
-    @Test fun recordedMelodyStillStopsAtTheEffectFence(): Unit = runBlocking {
-        val provider = FixtureProvider(replies(CloudGenerationStage.PLAN), replies(CloudGenerationStage.COMPLETE).first())
+    @Test fun recordedMelodyReplansAtTheRequiredEffectFence(): Unit = runBlocking {
+        val corrected = """{"fields":{"behavior":{"status":"unchecked","reason":"external_outcome"}}}"""
+        val writer = replies(CloudGenerationStage.COMPLETE).first()
+        val provider = FixtureProvider(replies(CloudGenerationStage.PLAN) + corrected, writer)
         val events = mutableListOf<ToolGenerationTraceEvent>()
-        assertTrue(runCatching { generate(provider, events) }.isFailure)
-        val rejection = events.filterIsInstance<ToolGenerationTraceEvent.Attempt>().mapNotNull { it.behaviorBinding }.single()
-        assertEquals(BehaviorFailureRule.EXTERNAL_RESULT_REQUIRED, rejection.rule)
-        assertEquals(2, rejection.step)
-        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE),
+        val result = generate(provider, events)
+        val rejection = events.filterIsInstance<ToolGenerationTraceEvent.Attempt>()
+            .single { it.planShape?.rule == "behavior.required_receipt" }
+        assertEquals(ToolGenerationStage.PLAN, rejection.stage)
+        assertEquals(BehaviorFailureRule.EXTERNAL_RESULT_REQUIRED, rejection.behaviorBinding?.rule)
+        assertEquals(2, rejection.behaviorBinding?.step)
+        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.PLAN),
             events.filterIsInstance<ToolGenerationTraceEvent.Repair>().map { it.providerStage })
-        Log.i("WorkflowReliability", "bench:melody recorded behavior=${rejection.rule} step=${rejection.step}")
+        assertEquals(1, provider.calls.count { it.generationStage == CloudGenerationStage.COMPLETE })
+        assertTrue(sameToolJson(JSONObject(writer).apply { remove("behaviorBindings") },
+            JSONObject(result.spec.providerDefinition())))
+        assertEquals(setOf("audio.torchSequence"), result.spec.capabilities)
+        assertTrue(result.effects.isEmpty())
     }
 
     @Test fun generatedMelodyWaitsForTheMatchingOfflineReceipt() = runBlocking {
@@ -104,7 +121,7 @@ class MelodyReliabilityReplayTest {
         val events = mutableListOf<ToolGenerationTraceEvent>()
         val preview = generate(provider, events)
         assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE), provider.calls.map { it.generationStage })
-        assertTrue(provider.calls.first().systemInstructions.contains("completion depends on a native capability receipt"))
+        assertTrue(provider.calls.first().systemInstructions.contains("when the requested outcome depends on a native receipt"))
         assertTrue(provider.calls.last().systemInstructions.contains("matching capabilityResults receipt"))
         assertTrue(preview.effects.isEmpty())
         assertTrue(events.none { it is ToolGenerationTraceEvent.Repair })

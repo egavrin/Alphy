@@ -1,0 +1,19 @@
+{
+  "case": "fresh:cooking-1",
+  "request": "scale a recipe: it serves 4 and uses 300 g flour, I want to cook for 6",
+  "expected_route": "answer",
+  "source": {
+    "file": "prompt-followups/fresh-cooking-1/live/provider.jsonl",
+    "sha256": "4b38ba7222e8785fadaaae02539565c353b793c90cc105512935cd261c39c0f8"
+  },
+  "replies": [
+    {
+      "stage": "CHAT_DECISION",
+      "reply": "{\"kind\": \"answer\", \"text\": \"For 6 servings from a 4-serving recipe, multiply everything by 1.5 — so 300 g flour becomes 450 g flour.\", \"brief\": \"\", \"search\": \"none\", \"image\": \"\"}"
+    },
+    {
+      "stage": "ANSWER",
+      "reply": "For 6 servings, multiply the 4-serving recipe by 1.5. So 300 g flour becomes 450 g flour."
+    }
+  ]
+}

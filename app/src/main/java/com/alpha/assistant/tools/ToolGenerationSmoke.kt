@@ -16,6 +16,7 @@ import com.alpha.assistant.tools.generation.GenerationBehavior.Kind
 import com.alpha.assistant.tools.generation.GenerationBehavior.Step
 import com.alpha.assistant.tools.generation.behaviorUiObservation
 import com.alpha.assistant.tools.generation.sameToolJson
+import com.alpha.assistant.tools.generation.supportsBehaviorObservation
 import com.alpha.assistant.tools.generation.execute
 import com.alpha.assistant.tools.generation.visibleBehaviorNode
 import kotlinx.coroutines.CancellationException
@@ -27,6 +28,7 @@ internal class ToolSmokeFailure(val event: String, val path: String, cause: Exce
     val replay: List<String>? = null) : Exception(null, cause) {
     fun correction(rejectedPath: String = path) = "Smoke event: $event. Path: $rejectedPath. Return valid state, UI, drawing, and subscriptions for this event." +
         when ((cause as? CloudFailure)?.code) {
+            "widget_timer_host" -> " Remove custom timer subscriptions from an app without a drawing surface."
             "javascript_script_error" -> " Read the event from input.event. Declare local variables before use."
             "javascript_invalid_result" -> if (event == "action")
                 " If the action requests effects, check their capability schemas. Effect IDs must match [A-Za-z][A-Za-z0-9_]{0,47}." else ""
@@ -35,13 +37,14 @@ internal class ToolSmokeFailure(val event: String, val path: String, cause: Exce
 }
 
 internal class BehaviorCheckFailure(val step: Int?, val reason: String,
-    val bindingDiagnostic: BehaviorBindingDiagnostic? = null, val precedingEvent: String? = null) : IllegalStateException() {
+    val bindingDiagnostic: BehaviorBindingDiagnostic? = null, val precedingEvent: String? = null,
+    val fencedCapabilities: Set<String> = emptySet()) : IllegalStateException() {
     val detail get() = if (step == null) reason else "step ${step + 1}: $reason"
     val correction get() = (bindingDiagnostic?.let { "$detail. Binding diagnostic: ${it.report()}" } ?: detail) +
         precedingEvent?.let { ". Preceding $it" }.orEmpty() +
         when (bindingDiagnostic?.takeUnless { it.native == true }?.rule) {
             BehaviorFailureRule.TARGET_MISSING -> ". Resolve the target path from the full composed UI root in this workflow state."
-            BehaviorFailureRule.ACTION_UNAVAILABLE -> ". Bind a visible, enabled control that accepts the exact planned value. An ordinary button takes no value."
+            BehaviorFailureRule.ACTION_UNAVAILABLE -> ". Bind a visible, enabled control that accepts the exact planned value."
             else -> ""
         }
 }
@@ -72,6 +75,8 @@ internal class ToolGenerationSmoke(
         var frames=emptySet<String>()
         var timers=emptyMap<String,Int>()
         var fenced=false
+        var fencedEffects = emptyList<com.alpha.assistant.capabilities.CapabilityRequest>()
+            private set
         private var clock = clockSample ?: generation.partClockFor(spec)
         private val replay = observeReplay?.let { mutableListOf<String>() }
         fun displayState(): JSONObject = projectToolState(spec, JSONObject(state), clock)
@@ -93,6 +98,10 @@ internal class ToolGenerationSmoke(
                 val result=generation.executeEvent(spec,id,revision,state,event,ui,policy,clock) { source,input ->
                     execute(source,input.toString())
                 }
+                if (spec.surfaces.isEmpty() && !result.timers.isNullOrEmpty()) {
+                    throw ToolSmokeFailure(type, "$.timers[0]",
+                        CloudFailure("widget_timer_host", "Custom timer subscriptions require a drawing surface."), replay?.toList())
+                }
                 val merged=JSONObject(surfaces.toString())
                 result.surfaces?.let {output -> output.keys().forEach {merged.put(it,output.getJSONObject(it))}}
                 ArtifactProtocol.validateSurfaces(merged)
@@ -104,10 +113,12 @@ internal class ToolGenerationSmoke(
                 state=result.state;ui=result.ui;surfaces=merged
                 frames=result.frames ?: frames;timers=result.timers ?: timers
                 playback.update(result.playback,type)
-                fenced=result.effects.isNotEmpty() || result.records.length()>0
+                fencedEffects = result.effects
+                fenced=fencedEffects.isNotEmpty() || result.records.length()>0
                 replay?.let { observeReplay?.invoke(it) }
                 return result
             } catch(cancel: CancellationException) {throw cancel}
+              catch(failure: ToolSmokeFailure) {throw failure}
               catch(failure: Exception) {throw ToolSmokeFailure(event.getString("type"),path,failure,replay?.toList())}
         }
         suspend fun subscriptions() {
@@ -236,7 +247,9 @@ internal class ToolGenerationSmoke(
                     slot?.let { scenario.slots.keys.indexOf(it) + 1 }, scenario.slots[slot]?.kind,
                     slot?.let { it in nativeSlots }, bindingKind, nodeKind, valueShape,
                     (bindings[slot] as? Binding.Drawing)?.let { GeometryScope.of(it, threeScene = false) },
-                    comparison, observation, frames, requiredChanges, observedChanges), precedingEvent)
+                    comparison, observation, frames, requiredChanges, observedChanges), precedingEvent,
+                    if (rule == BehaviorFailureRule.EXTERNAL_RESULT_REQUIRED)
+                        fencedEffects.map { it.capability }.toSet() else emptySet())
             }
             fun target(slot: String) = bindings[slot] ?: fail("missing binding", BehaviorFailureRule.BINDING_MISSING, slot)
             fun targetId(slot: String) = (target(slot) as Binding.Id).value
@@ -245,7 +258,8 @@ internal class ToolGenerationSmoke(
             suspend fun send(event: JSONObject) {
                 if (fenced) fail("native or record result required", BehaviorFailureRule.EXTERNAL_RESULT_REQUIRED)
                 if (event.optString("type") != "frame" && ++sent > GenerationBehavior.MAX_EVENTS) fail("event limit reached", BehaviorFailureRule.EVENT_LIMIT)
-                val path = stepIndex?.let { "\$.behavior.scenario.steps[$it]" } ?: "\$.behavior"
+                val field = if (requireVisibleDrawing) "$.scene.checks" else "$.behavior"
+                val path = stepIndex?.let { "$field.scenario.steps[$it]" } ?: field
                 this.event(event, path)
             }
             fun read(slot: String): Any {
@@ -305,6 +319,17 @@ internal class ToolGenerationSmoke(
             }
             fun numeric(value: Any?, slot: String) = (value as? Number)?.toDouble()
                 ?: fail("numeric output unavailable", BehaviorFailureRule.SCALAR_SHAPE, slot, valueShape = BehaviorValueShape.of(value))
+            fun plansBooleanAction(root: JSONObject, slot: String, control: JSONObject): Boolean {
+                if (scenario.steps.any { it is Step.Action && it.slot == slot && it.value is Boolean }) return true
+                // A writer can bind a planned press to the wrong control. Require evidence of Boolean intent before replanning.
+                return scenario.slots.any { (id, planned) ->
+                    if (planned.kind != Kind.VALUE || planned.valueType != BehaviorValueShape.BOOLEAN) return@any false
+                    val binding = bindings[id] as? Binding.Ui ?: return@any false
+                    binding.path.fold<Int, JSONObject?>(root) { node, index ->
+                        node?.optJSONArray("children")?.optJSONObject(index)
+                    } === control
+                }
+            }
             send(JSONObject().put("type", "open"))
             for (surface in effectiveSurfaces.values) {
                 if (surface.sizing == "viewport") send(GraphicsContract.viewport(surface))
@@ -348,14 +373,38 @@ internal class ToolGenerationSmoke(
                             if (step.slot in liveInputSlots && !liveInput) {
                                 fail("the planned scene control requires live input", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot)
                             }
-                            val rowControlKind = if (planned.rowValueType != null)
-                                ToolUiCatalog.actionTarget(root, action)?.node?.optString("type") else null
+                            val rowControlKind = if (planned.rowValueType != null) {
+                                ToolUiCatalog.actionTarget(root, action)?.node?.optString("type")
+                            } else control?.optString("type")?.takeIf { supportsBehaviorObservation(it, Kind.COLLECTION) }
+                            fun unavailable(): Nothing {
+                                val requirement = control?.let { ToolUiCatalog.actionPayloadRequirement(root, action, value) }
+                                val reason = when {
+                                    rowControlKind != null ->
+                                        "row action unavailable. Use the planned stable row key on an enabled current row. Preserve the row control and its action"
+                                    requirement != null -> "the bound control requires $requirement. Match the planned payload with a supported control"
+                                    else -> "action or input unavailable"
+                                }
+                                fail(reason, BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot,
+                                    rowControlKind ?: control?.optString("type"), BehaviorValueShape.of(value))
+                            }
                             val event = try {
                                 controlEvent(root, displayState(), action, value, liveInput)
-                            } catch (_: IllegalArgumentException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE,
-                                step.slot, rowControlKind) }
-                              catch (_: IllegalStateException) { fail("action or input unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE,
-                                  step.slot, rowControlKind) }
+                            } catch (failure: CancellationException) {
+                                throw failure
+                            } catch (failure: ToolUiCatalog.InvalidBooleanActionPayload) {
+                                if (fenced) fail("native or record result required", BehaviorFailureRule.EXTERNAL_RESULT_REQUIRED)
+                                if (step.slot !in nativeSlots && planned.rowValueType == null &&
+                                    plansBooleanAction(root, step.slot, failure.control)) {
+                                    fail("a JSON Boolean value (true or false) for slot ${step.slot}",
+                                        BehaviorFailureRule.BOOLEAN_ACTION_PAYLOAD, step.slot, failure.control.getString("type"),
+                                        BehaviorValueShape.of(step.value))
+                                }
+                                unavailable()
+                            } catch (_: IllegalArgumentException) {
+                                unavailable()
+                            } catch (_: IllegalStateException) {
+                                unavailable()
+                            }
                             send(event)
                             recordEvent("action", step.slot)
                         }
@@ -451,12 +500,18 @@ internal class ToolGenerationSmoke(
 
     }
 
+    private suspend fun preview(freezeClock: Boolean = false): ToolPreview = branch(freezeClock = freezeClock) {
+        val result = event(JSONObject().put("type", "preview"), "$.ui")
+        event(JSONObject().put("type", "render"), "$.ui")
+        result
+    }
+
+    suspend fun checkNativePlan(scenario: GenerationBehavior.Scenario, bindings: Map<String, Binding>) {
+        checkBehavior(scenario, bindings, preview(freezeClock = true), ToolGenerationRoute.NATIVE, bindings.keys)
+    }
+
     suspend fun run(): ToolPreview {
-        val preview=branch {
-            val result=event(JSONObject().put("type","preview"),"$.ui")
-            event(JSONObject().put("type","render"),"$.ui")
-            result
-        }
+        val preview = preview()
         onInitialPreview?.let {
             checkActive()
             it(preview)

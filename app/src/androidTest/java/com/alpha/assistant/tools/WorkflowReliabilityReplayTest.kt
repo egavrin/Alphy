@@ -65,7 +65,7 @@ class WorkflowReliabilityReplayTest {
                 val tape = replies[request.generationStage] ?: error("Unexpected stage: ${request.generationStage}")
                 if (!tape.hasNext()) throw CloudFailure("offline_fixture_end",
                     "No further offline replies. ${request.turns.last().text.take(600)}")
-                emit(CloudEvent.Text(tape.next()))
+                emit(CloudEvent.Text(request.withFixtureCapabilityPlan(tape.next())))
             }
         }
         val result = runCatching {
@@ -230,7 +230,7 @@ class WorkflowReliabilityReplayTest {
                         }
                     }
                     val checks = Plan5WorkflowChecks(robot, proof, { checkNotNull(store.tool(id)) }, ::screenshot, database)
-                    checks.run(case.getString("case"), { error("Unexpected reopen") }, { error("Unexpected refinement") })
+                    checks.run(case.getString("case"), { error("Unexpected reopen") }) { error("Unexpected refinement") }
                     robot.waitUntil {
                         val saved = JSONObject(checkNotNull(store.tool(id)).state)
                         saved.getInt("count") == 0 && saved.getDouble("x") > 0 && saved.getDouble("y") > 0

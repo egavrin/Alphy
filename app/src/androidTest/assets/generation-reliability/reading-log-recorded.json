@@ -1,0 +1,105 @@
+{
+  "case": "fresh:logs-3",
+  "request": "reading log: book name and pages, sum of pages",
+  "source": {
+    "file": "generation-systemic-170/captures/fresh:logs-3:candidate:1/provider.jsonl",
+    "sha256": "08c922d9b7463115dabf1a9945ca1d12b9c8b159060017112d0a5334af74f431"
+  },
+  "terminal_failure": "widget_plan",
+  "replies": [
+    {
+      "stage": "CHAT_DECISION",
+      "reply": "{\"kind\": \"create\", \"text\": \"I'll build a reading log with book names, pages, and a running total.\", \"brief\": \"{\\\"app\\\":\\\"reading log\\\",\\\"interface_language\\\":\\\"en\\\",\\\"features\\\":[\\\"add a book entry with a book name field and a pages field (pages read as a number)\\\",\\\"list all entries showing book name and pages\\\",\\\"running total of pages summed across all entries\\\",\\\"edit or delete an entry\\\",\\\"total updates automatically when entries change\\\"],\\\"notes\\\":\\\"local only, no network\\\"}\", \"search\": \"none\", \"image\": \"\"}"
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"title\":\"Reading log\",\"description\":\"Log each book with the pages you read and see the running total of pages across all entries.\",\"language\":\"en\",\"inputs\":[],\"constants\":[],\"needs\":[{\"id\":\"log\",\"type\":\"entries\",\"label\":\"Books\",\"description\":\"Add a book with its name and the number of pages read. Entries can be edited or removed, and the list shows each book name with its pages.\",\"fields\":[{\"id\":\"title\",\"label\":\"Book name\",\"type\":\"text\"},{\"id\":\"pages\",\"label\":\"Pages\",\"type\":\"number\"}]},{\"id\":\"total\",\"type\":\"figure\",\"label\":\"Total pages\",\"description\":\"Sum of pages across all logged books, updated automatically when entries change.\",\"expression\":{\"aggregate\":\"sum\",\"need\":\"log\",\"field\":\"pages\"}}],\"questions\":[],\"requiredCapabilities\":[],\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"bookName\":{\"kind\":\"action\",\"part\":\"log\",\"member\":\"edit_1\"},\"bookPages\":{\"kind\":\"action\",\"part\":\"log\",\"member\":\"edit_2\"},\"add\":{\"kind\":\"action\",\"part\":\"log\",\"member\":\"add\"},\"records\":{\"kind\":\"collection\",\"part\":\"log\",\"member\":\"records\"},\"total\":{\"kind\":\"value\",\"part\":\"total\",\"member\":\"value\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"bookName\",\"value\":\"Dune\"},{\"op\":\"action\",\"slot\":\"bookPages\",\"value\":100},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"action\",\"slot\":\"bookName\",\"value\":\"Emma\"},{\"op\":\"action\",\"slot\":\"bookPages\",\"value\":50},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"records\",\"test\":\"equals\",\"value\":2},{\"op\":\"assert\",\"slot\":\"total\",\"test\":\"equals\",\"value\":150}]}}}"
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"s_log\",\"choice\":\"B\",\"confidence\":0.8,\"probabilities\":{\"A\":0.2,\"B\":0.8}},{\"id\":\"s_total\",\"choice\":\"A\",\"confidence\":0.8,\"probabilities\":{\"A\":0.8,\"B\":0.2}}]}",
+      "questions": [
+        "s_log",
+        "s_total"
+      ]
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"p_total\",\"choice\":\"A\",\"confidence\":0.93,\"probabilities\":{\"A\":0.93,\"B\":0.07}},{\"id\":\"v_profile\",\"choice\":\"B\",\"confidence\":0.6,\"probabilities\":{\"A\":0.2,\"B\":0.6,\"C\":0.2}},{\"id\":\"v_preset\",\"choice\":\"A\",\"confidence\":0.45,\"probabilities\":{\"A\":0.45,\"B\":0.2,\"C\":0.1,\"D\":0.05,\"E\":0.1,\"F\":0.1}},{\"id\":\"v_focal\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}}]}",
+      "questions": [
+        "p_total",
+        "v_profile",
+        "v_preset",
+        "v_focal"
+      ]
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"needs\":[{\"id\":\"log\",\"type\":\"entries\",\"label\":\"Books\",\"description\":\"Add a book with its name and the number of pages read. Entries can be edited or removed, and the list shows each book name with its pages.\",\"fields\":[{\"id\":\"book\",\"label\":\"Book name\",\"type\":\"text\"},{\"id\":\"pages\",\"label\":\"Pages\",\"type\":\"number\"}]},{\"id\":\"total\",\"type\":\"figure\",\"label\":\"Total pages\",\"description\":\"Sum of pages across all logged books, updated automatically when entries change.\",\"expression\":{\"aggregate\":\"sum\",\"need\":\"log\",\"field\":\"pages\"}}],\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"bookName\":{\"kind\":\"action\",\"part\":\"log\",\"member\":\"edit_book\"},\"bookPages\":{\"kind\":\"action\",\"part\":\"log\",\"member\":\"edit_pages\"},\"add\":{\"kind\":\"action\",\"part\":\"log\",\"member\":\"add\"},\"records\":{\"kind\":\"collection\",\"part\":\"log\",\"member\":\"records\"},\"total\":{\"kind\":\"value\",\"part\":\"total\",\"member\":\"value\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"bookName\",\"value\":\"Dune\"},{\"op\":\"action\",\"slot\":\"bookPages\",\"value\":100},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"action\",\"slot\":\"bookName\",\"value\":\"Emma\"},{\"op\":\"action\",\"slot\":\"bookPages\",\"value\":50},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"records\",\"test\":\"equals\",\"value\":2},{\"op\":\"assert\",\"slot\":\"total\",\"test\":\"equals\",\"value\":150}]}}}}"
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"s_log\",\"choice\":\"A\",\"confidence\":0.7,\"probabilities\":{\"A\":0.7,\"B\":0.3}},{\"id\":\"s_total\",\"choice\":\"A\",\"confidence\":0.75,\"probabilities\":{\"A\":0.75,\"B\":0.25}}]}",
+      "questions": [
+        "s_log",
+        "s_total"
+      ]
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"p_log\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"p_total\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"v_profile\",\"choice\":\"B\",\"confidence\":0.75,\"probabilities\":{\"A\":0.15,\"B\":0.75,\"C\":0.1}},{\"id\":\"v_preset\",\"choice\":\"A\",\"confidence\":0.6,\"probabilities\":{\"A\":0.6,\"B\":0.15,\"C\":0.08,\"D\":0.05,\"E\":0.07,\"F\":0.05}},{\"id\":\"v_focal\",\"choice\":\"A\",\"confidence\":0.8,\"probabilities\":{\"A\":0.8,\"B\":0.15,\"C\":0.05}}]}",
+      "questions": [
+        "p_log",
+        "p_total",
+        "v_profile",
+        "v_preset",
+        "v_focal"
+      ]
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"bookName\":{\"kind\":\"action\",\"part\":\"log\",\"member\":\"edit_1\"},\"bookPages\":{\"kind\":\"action\",\"part\":\"log\",\"member\":\"edit_2\"},\"add\":{\"kind\":\"action\",\"part\":\"log\",\"member\":\"add\"},\"records\":{\"kind\":\"collection\",\"part\":\"log\",\"member\":\"records\"},\"total\":{\"kind\":\"value\",\"part\":\"total\",\"member\":\"value\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"bookName\",\"value\":\"Dune\"},{\"op\":\"action\",\"slot\":\"bookPages\",\"value\":100},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"action\",\"slot\":\"bookName\",\"value\":\"Emma\"},{\"op\":\"action\",\"slot\":\"bookPages\",\"value\":50},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"records\",\"test\":\"equals\",\"value\":2},{\"op\":\"assert\",\"slot\":\"total\",\"test\":\"equals\",\"value\":150}]}}}}"
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"s_log\",\"choice\":\"B\",\"confidence\":0.55,\"probabilities\":{\"A\":0.45,\"B\":0.55}},{\"id\":\"s_total\",\"choice\":\"A\",\"confidence\":0.7,\"probabilities\":{\"A\":0.7,\"B\":0.3}}]}",
+      "questions": [
+        "s_log",
+        "s_total"
+      ]
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"p_total\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"v_profile\",\"choice\":\"B\",\"confidence\":0.7,\"probabilities\":{\"A\":0.2,\"B\":0.7,\"C\":0.1}},{\"id\":\"v_preset\",\"choice\":\"A\",\"confidence\":0.6,\"probabilities\":{\"A\":0.6,\"B\":0.15,\"C\":0.1,\"D\":0.05,\"E\":0.05,\"F\":0.05}},{\"id\":\"v_focal\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}}]}",
+      "questions": [
+        "p_total",
+        "v_profile",
+        "v_preset",
+        "v_focal"
+      ]
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"bookName\":{\"kind\":\"action\"},\"bookPages\":{\"kind\":\"action\"},\"add\":{\"kind\":\"action\",\"part\":\"log\",\"member\":\"add\"},\"records\":{\"kind\":\"collection\",\"part\":\"log\",\"member\":\"records\"},\"total\":{\"kind\":\"value\",\"part\":\"total\",\"member\":\"value\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"bookName\",\"value\":\"Dune\"},{\"op\":\"action\",\"slot\":\"bookPages\",\"value\":100},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"action\",\"slot\":\"bookName\",\"value\":\"Emma\"},{\"op\":\"action\",\"slot\":\"bookPages\",\"value\":50},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"records\",\"test\":\"equals\",\"value\":2},{\"op\":\"assert\",\"slot\":\"total\",\"test\":\"equals\",\"value\":150}]}}}}"
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"s_log\",\"choice\":\"A\",\"confidence\":0.62,\"probabilities\":{\"A\":0.62,\"B\":0.38}},{\"id\":\"s_total\",\"choice\":\"A\",\"confidence\":0.6,\"probabilities\":{\"A\":0.6,\"B\":0.4}}]}",
+      "questions": [
+        "s_log",
+        "s_total"
+      ]
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"p_log\",\"choice\":\"A\",\"confidence\":0.88,\"probabilities\":{\"A\":0.88,\"B\":0.12}},{\"id\":\"p_total\",\"choice\":\"A\",\"confidence\":0.92,\"probabilities\":{\"A\":0.92,\"B\":0.08}},{\"id\":\"v_profile\",\"choice\":\"B\",\"confidence\":0.72,\"probabilities\":{\"A\":0.24,\"B\":0.72,\"C\":0.04}},{\"id\":\"v_preset\",\"choice\":\"A\",\"confidence\":0.6,\"probabilities\":{\"A\":0.6,\"B\":0.15,\"C\":0.1,\"D\":0.03,\"E\":0.07,\"F\":0.05}},{\"id\":\"v_focal\",\"choice\":\"A\",\"confidence\":0.7,\"probabilities\":{\"A\":0.7,\"B\":0.25,\"C\":0.05}}]}",
+      "questions": [
+        "p_log",
+        "p_total",
+        "v_profile",
+        "v_preset",
+        "v_focal"
+      ]
+    }
+  ]
+}

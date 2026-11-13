@@ -1,0 +1,158 @@
+{
+  "case": "fresh:logs-5",
+  "request": "coffee counter that beeps when I add a cup",
+  "source": {
+    "file": "prompt-followups/fresh-logs-5/native-receipt-plan/live/provider.jsonl",
+    "sha256": "014481c00f9c1ff6272b9e8cede9951053e32da55902da79dd5919d9cf8c30dc"
+  },
+  "first_plan_rule": "behavior.native_owner",
+  "repair_stages": [
+    "PLAN",
+    "COMPLETE",
+    "COMPLETE",
+    "COMPLETE",
+    "PLAN"
+  ],
+  "rejections": [
+    {
+      "stage": "plan",
+      "failure_code": "widget_plan",
+      "plan_rule": "behavior.native_owner"
+    },
+    {
+      "stage": "definition",
+      "failure_code": "widget_spec",
+      "validation_category": "tool_ui_actions",
+      "validation_rule": "component_action"
+    },
+    {
+      "stage": "smoke",
+      "failure_code": "widget_preview",
+      "smoke_path": "$.ui.children[1]"
+    },
+    {
+      "stage": "smoke",
+      "failure_code": "widget_preview",
+      "smoke_path": "$.ui.children[1]"
+    },
+    {
+      "stage": "plan",
+      "failure_code": "widget_plan",
+      "plan_rule": "behavior.required_receipt",
+      "behavior_rule": "external_result_required"
+    },
+    {
+      "stage": "definition",
+      "failure_code": "widget_spec",
+      "validation_category": "tool_ui_actions",
+      "validation_rule": "component_action"
+    }
+  ],
+  "terminal_failure": "widget_spec",
+  "replies": [
+    {
+      "stage": "CHAT_DECISION",
+      "reply": "{\"kind\": \"create\", \"text\": \"Here's a coffee counter that beeps each time you add a cup.\", \"brief\": \"A coffee cup counter mini-app. Large current cup count displayed for today. A primary \\\"+ Add cup\\\" button: increments the counter and plays a short beep (audio tone) each time. A \\\"−\\\" or reset button to correct mistakes or start a new day (with confirmation for reset). Show total cups today and the time of the last added cup. Optional: small history list of added cups, and a mute toggle to disable the beep. Interface language: English. Default styling.\", \"search\": \"none\", \"image\": \"\"}",
+      "call_id": "call_00_SEZqLOTgyEKVoJXg1ml16779"
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"title\":\"Coffee counter\",\"description\":\"Count cups of coffee today. Each cup adds to today's total, and the app beeps when you add one.\",\"language\":\"en\",\"inputs\":[],\"constants\":[{\"id\":\"cupAmount\",\"value\":1},{\"id\":\"cupUnit\",\"value\":\"cups\"},{\"id\":\"addLabel\",\"value\":\"Add cup\"}],\"needs\":[{\"id\":\"coffee\",\"type\":\"quick_log\",\"label\":\"Coffee cups\",\"description\":\"Tap Add cup to log one cup. Show today's total and a history of cups, and play a short beep each time a cup is added.\",\"uses\":{\"amount\":\"cupAmount\",\"unit\":\"cupUnit\",\"button\":\"addLabel\"}}],\"questions\":[],\"requiredCapabilities\":[{\"id\":\"audio.tone\",\"excerpt\":\"beeps when I add a cup\"}],\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"add\":{\"kind\":\"action\",\"part\":\"coffee\",\"member\":\"add\"},\"records\":{\"kind\":\"collection\",\"part\":\"coffee\",\"member\":\"records\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"records\",\"test\":\"equals\",\"value\":1}]}}}"
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"s_coffee\",\"choice\":\"B\",\"confidence\":0.82,\"probabilities\":{\"A\":0.18,\"B\":0.82}}]}",
+      "questions": [
+        "s_coffee"
+      ]
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"add\":{\"kind\":\"action\"},\"records\":{\"kind\":\"collection\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"records\",\"test\":\"equals\",\"value\":1}]}}}}"
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"s_coffee\",\"choice\":\"B\",\"confidence\":0.86,\"probabilities\":{\"A\":0.14,\"B\":0.86}}]}",
+      "questions": [
+        "s_coffee"
+      ]
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"formatVersion\":3,\"title\":\"Coffee counter\",\"description\":\"Count today's cups of coffee. Each cup adds to the total and plays a short beep.\",\"capabilities\":[\"audio.tone\"],\"capabilityResults\":false,\"stateSchema\":{\"total\":\"number\",\"lastTime\":\"string\",\"muted\":\"boolean\",\"confirmOpen\":\"boolean\",\"history\":{\"type\":\"list\",\"maxItems\":100,\"fields\":{\"id\":\"string\",\"label\":\"string\",\"at\":\"string\"}}},\"initialState\":{\"total\":0,\"lastTime\":\"—\",\"muted\":false,\"confirmOpen\":false,\"history\":[]},\"collections\":{\"cups\":{\"type\":\"object\",\"fields\":{\"at\":\"number\"}}},\"behaviorBindings\":{\"add\":\"addCup\",\"records\":[0]},\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"section\",\"text\":\"Today\",\"children\":[{\"type\":\"metric\",\"text\":\"Cups today\",\"bind\":\"total\",\"format\":\"number\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"facts\",\"children\":[{\"type\":\"fact\",\"text\":\"Last cup\",\"bind\":\"lastTime\"}]}]},{\"type\":\"button\",\"text\":\"Add cup\",\"action\":\"addCup\",\"variant\":\"filled\"},{\"type\":\"toggle\",\"text\":\"Mute beep\",\"bind\":\"muted\",\"action\":\"toggleMute\"},{\"type\":\"button\",\"text\":\"Reset day\",\"action\":\"openReset\",\"variant\":\"text\"},{\"type\":\"section\",\"text\":\"History\",\"children\":[{\"type\":\"list\",\"text\":\"Cups logged today\",\"bind\":\"history\",\"columns\":[{\"text\":\"Cup\",\"field\":\"label\"},{\"text\":\"Time\",\"field\":\"at\"}],\"emptyText\":\"No cups yet today.\"}]},{\"type\":\"dialog\",\"text\":\"Start a new day?\",\"visibleBind\":\"confirmOpen\",\"dismissAction\":\"closeReset\",\"children\":[{\"type\":\"text\",\"text\":\"This clears today's cup count and history.\"},{\"type\":\"row\",\"children\":[{\"type\":\"button\",\"text\":\"Clear\",\"action\":\"resetConfirm\",\"variant\":\"filled\"},{\"type\":\"button\",\"text\":\"Cancel\",\"action\":\"closeReset\",\"variant\":\"text\"}]}]}]},\"source\":\"const event = input.event;\\nconst state = input.state;\\n\\nfunction timeLabel(ms) {\\n  const d = new Date(ms);\\n  let h = d.getHours();\\n  const m = d.getMinutes();\\n  const ampm = h >= 12 ? 'PM' : 'AM';\\n  h = h % 12;\\n  if (h === 0) { h = 12; }\\n  const mm = m < 10 ? '0' + m : '' + m;\\n  return h + ':' + mm + ' ' + ampm;\\n}\\n\\nif (event.type === 'action') {\\n  if (event.actionId === 'addCup') {\\n    const now = Date.now();\\n    const total = state.total + 1;\\n    const stamp = timeLabel(now);\\n    const key = 'cup-' + now + '-' + total;\\n    const history = state.history.concat([{id: key, label: 'Cup ' + total, at: stamp}]);\\n    while (history.length > 100) { history.shift(); }\\n    const next = Object.assign({}, state, {total: total, lastTime: stamp, history: history});\\n    const result = {state: next, records: [{id: 'saveCup', collection: 'cups', op: 'put', key: key, expectedToken: null, value: {at: now}}]};\\n    if (!state.muted) {\\n      result.effects = [{id: 'beep', capability: 'audio.tone', args: {tone: 'beep', durationMillis: 180}}];\\n    }\\n    return result;\\n  }\\n  if (event.actionId === 'toggleMute') {\\n    return {state: Object.assign({}, state, {muted: event.value === true})};\\n  }\\n  if (event.actionId === 'openReset') {\\n    return {state: Object.assign({}, state, {confirmOpen: true})};\\n  }\\n  if (event.actionId === 'closeReset') {\\n    return {state: Object.assign({}, state, {confirmOpen: false})};\\n  }\\n  if (event.actionId === 'resetConfirm') {\\n    return {state: Object.assign({}, state, {total: 0, lastTime: '—', history: [], confirmOpen: false})};\\n  }\\n}\\n\\nreturn {state: state};\"}"
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"fields\":{\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"section\",\"text\":\"Today\",\"children\":[{\"type\":\"metric\",\"text\":\"Cups today\",\"bind\":\"total\",\"format\":\"number\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"facts\",\"children\":[{\"type\":\"fact\",\"text\":\"Last cup\",\"bind\":\"lastTime\"}]}]},{\"type\":\"button\",\"text\":\"Add cup\",\"action\":\"addCup\",\"variant\":\"filled\"},{\"type\":\"toggle\",\"text\":\"Mute beep\",\"bind\":\"muted\",\"action\":\"toggleMute\"},{\"type\":\"button\",\"text\":\"Reset day\",\"action\":\"openReset\",\"variant\":\"text\"},{\"type\":\"section\",\"text\":\"History\",\"children\":[{\"type\":\"list\",\"text\":\"Cups logged today\",\"bind\":\"history\",\"columns\":[{\"text\":\"Cup\",\"field\":\"label\"},{\"text\":\"Time\",\"field\":\"at\"}],\"emptyText\":\"No cups yet today.\"}]},{\"type\":\"dialog\",\"text\":\"Start a new day?\",\"visibleBind\":\"confirmOpen\",\"dismissAction\":\"closeReset\",\"children\":[{\"type\":\"text\",\"text\":\"This clears today's cup count and history.\"},{\"type\":\"row\",\"children\":[{\"type\":\"button\",\"text\":\"Clear\",\"action\":\"resetConfirm\",\"variant\":\"filled\"},{\"type\":\"button\",\"text\":\"Cancel\",\"action\":\"cancelReset\",\"variant\":\"text\"}]}]}]}},\"sourceEdits\":[{\"search\":\"if (event.actionId === 'closeReset') {\",\"replace\":\"if (event.actionId === 'closeReset' || event.actionId === 'cancelReset') {\"}]}"
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"fields\":{\"initialState\":{\"total\":0,\"lastTime\":\"No cups yet\",\"muted\":false,\"confirmOpen\":false,\"history\":[]}},\"sourceEdits\":[{\"search\":\"    const total = state.total + 1;\\n    const stamp = timeLabel(now);\\n    const key = 'cup-' + now + '-' + total;\\n    const history = state.history.concat([{id: key, label: 'Cup ' + total, at: stamp}]);\\n    while (history.length > 100) { history.shift(); }\",\"replace\":\"    const prevTotal = typeof state.total === 'number' && isFinite(state.total) ? state.total : 0;\\n    const total = prevTotal + 1;\\n    const stamp = timeLabel(now);\\n    const key = 'cup-' + now + '-' + total;\\n    const prior = Array.isArray(state.history) ? state.history : [];\\n    const history = prior.concat([{id: key, label: 'Cup ' + total, at: stamp}]).slice(-100);\"},{\"search\":\"total: 0, lastTime: '—', history: [], confirmOpen: false\",\"replace\":\"total: 0, lastTime: 'No cups yet', history: [], confirmOpen: false\"},{\"search\":\"  if (event.actionId === 'toggleMute') {\\n    return {state: Object.assign({}, state, {muted: event.value === true})};\",\"replace\":\"  if (event.actionId === 'toggleMute') {\\n    const muted = typeof event.value === 'boolean' ? event.value : !state.muted;\\n    return {state: Object.assign({}, state, {muted: muted})};\"}]}"
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"fields\":{\"behaviorBindings\":{\"add\":\"addCup\",\"records\":[4,0]}},\"removeFields\":[\"collections\"],\"sourceEdits\":[{\"search\":\"    const result = {state: next, records: [{id: 'saveCup', collection: 'cups', op: 'put', key: key, expectedToken: null, value: {at: now}}]};\\n    if (!state.muted) {\\n      result.effects = [{id: 'beep', capability: 'audio.tone', args: {tone: 'beep', durationMillis: 180}}];\\n    }\\n    return result;\",\"replace\":\"    const out = {state: next};\\n    if (!state.muted) {\\n      out.effects = [{id: 'beep', capability: 'audio.tone', args: {tone: 'beep', durationMillis: 180}}];\\n    }\\n    return out;\"}]}"
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"unchecked\",\"reason\":\"external_outcome\"}}}"
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"formatVersion\":3,\"title\":\"Coffee counter\",\"description\":\"Count your coffee cups for today, with a short beep each time you add one.\",\"capabilities\":[\"audio.tone\"],\"capabilityResults\":false,\"stateSchema\":{\"cups\":\"number\",\"lastTime\":\"string\",\"muted\":\"boolean\",\"confirmReset\":\"boolean\",\"history\":{\"type\":\"list\",\"maxItems\":100,\"fields\":{\"id\":\"string\",\"time\":\"string\"}}},\"initialState\":{\"cups\":0,\"lastTime\":\"\",\"muted\":false,\"confirmReset\":false,\"history\":[]},\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"section\",\"text\":\"Today\",\"children\":[{\"type\":\"metric\",\"text\":\"Cups today\",\"bind\":\"cups\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"facts\",\"text\":\"Details\",\"children\":[{\"type\":\"fact\",\"text\":\"Last cup\",\"bind\":\"lastTime\"}]}]},{\"type\":\"row\",\"children\":[{\"type\":\"button\",\"text\":\"Add cup\",\"icon\":\"Plus\",\"action\":\"addCup\",\"variant\":\"filled\"},{\"type\":\"button\",\"text\":\"New day\",\"action\":\"openReset\",\"variant\":\"outlined\"}]},{\"type\":\"toggle\",\"text\":\"Mute beep\",\"bind\":\"muted\",\"action\":\"toggleMute\"},{\"type\":\"list\",\"text\":\"History\",\"bind\":\"history\",\"columns\":[{\"text\":\"Time\",\"field\":\"time\"}],\"emptyText\":\"No cups logged yet today.\"},{\"type\":\"dialog\",\"text\":\"Reset today's cups?\",\"visibleBind\":\"confirmReset\",\"dismissAction\":\"cancelReset\",\"children\":[{\"type\":\"text\",\"text\":\"This clears today's cup count and history.\"},{\"type\":\"row\",\"children\":[{\"type\":\"button\",\"text\":\"Reset\",\"action\":\"resetDay\",\"variant\":\"filled\"},{\"type\":\"button\",\"text\":\"Cancel\",\"action\":\"cancelReset\",\"variant\":\"text\"}]}]}]},\"source\":\"var s = input.state;\\nvar ev = input.event;\\nfunction fmt(d){var h = d.getHours(); var m = d.getMinutes(); var ap = h < 12 ? 'AM' : 'PM'; var hh = h % 12; if (hh === 0) { hh = 12; } var mm = m < 10 ? '0' + m : '' + m; return hh + ':' + mm + ' ' + ap;}\\nif (ev.type === 'action') {\\n  var id = ev.actionId;\\n  if (id === 'addCup') {\\n    var cups = s.cups + 1;\\n    if (!isFinite(cups) || cups > 9007199254740991) { return {state: s}; }\\n    var now = new Date();\\n    var t = fmt(now);\\n    var hist = s.history.slice();\\n    if (hist.length < 100) { hist.push({id: 'c' + now.getTime() + 'x' + cups, time: t}); }\\n    var next = {cups: cups, lastTime: t, history: hist, muted: s.muted === true, confirmReset: false};\\n    if (next.muted) { return {state: next}; }\\n    return {state: next, effects: [{id: 'beep', capability: 'audio.tone', args: {tone: 'acknowledgment', durationMillis: 150}}]};\\n  }\\n  if (id === 'toggleMute') {\\n    return {state: {cups: s.cups, lastTime: s.lastTime, history: s.history, muted: ev.value === true, confirmReset: s.confirmReset}};\\n  }\\n  if (id === 'openReset') {\\n    return {state: {cups: s.cups, lastTime: s.lastTime, history: s.history, muted: s.muted, confirmReset: true}};\\n  }\\n  if (id === 'cancelReset') {\\n    return {state: {cups: s.cups, lastTime: s.lastTime, history: s.history, muted: s.muted, confirmReset: false}};\\n  }\\n  if (id === 'resetDay') {\\n    return {state: {cups: 0, lastTime: '', history: [], muted: s.muted, confirmReset: false}};\\n  }\\n}\\nreturn {state: s};\"}",
+      "required_capability": "audio.tone"
+    }
+  ],
+  "retention": {
+    "rejections": [
+      {
+        "stage": "plan",
+        "failure_code": "widget_plan",
+        "plan_rule": "behavior.native_owner"
+      },
+      {
+        "stage": "definition",
+        "failure_code": "widget_spec",
+        "validation_category": "tool_ui_actions",
+        "validation_rule": "component_action"
+      },
+      {
+        "stage": "smoke",
+        "failure_code": "widget_preview",
+        "smoke_path": "$.ui.children[1]"
+      },
+      {
+        "stage": "smoke",
+        "failure_code": "widget_preview",
+        "smoke_path": "$.ui.children[1]"
+      },
+      {
+        "stage": "plan",
+        "failure_code": "widget_plan",
+        "plan_rule": "behavior.required_receipt",
+        "behavior_rule": "external_result_required"
+      }
+    ],
+    "feedback": {
+      "7": [
+        "component_action",
+        "$.ui.children[5].children[1].children[1].action",
+        "dismissAction"
+      ],
+      "8": [
+        "Smoke event: action",
+        "$.ui.children[1]",
+        "Record requests cannot share an action with device effects."
+      ],
+      "9": [
+        "Smoke event: action",
+        "$.ui.children[1]",
+        "Record requests cannot share an action with device effects."
+      ],
+      "10": [
+        "required native receipt",
+        "unchecked external_outcome"
+      ]
+    }
+  }
+}

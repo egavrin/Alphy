@@ -1,0 +1,51 @@
+{
+  "source": {
+    "file": "prompt-followups/fresh-logs-5/live-retry/live/provider.jsonl",
+    "sha256": "385104522732fd425aedab1b852b743d85cab2b0a47c8fdbbe27e2a5fbfc23bc"
+  },
+  "derivation": "Replay the first five recorded replies and the recorded receipt PLAN repair from call 7. The retained writer exposes the missing Boolean toggle payload. Apply the authored PLAN patch, then use the unchanged recorded writer from call 8.",
+  "prefix_replies": 5,
+  "repair_stages": [
+    "PLAN",
+    "COMPLETE",
+    "PLAN",
+    "PLAN"
+  ],
+  "feedback_contains": [
+    "required native receipt"
+  ],
+  "expected_plan_paths": [
+    "$.behavior.scenario.steps[8]",
+    "$.behavior.scenario.steps[3]",
+    "$.behavior.scenario.steps[2].value"
+  ],
+  "expected_plan_rules": [
+    "behavior.step_slot",
+    "behavior.required_receipt",
+    "behavior.action_payload"
+  ],
+  "verify_toggle": {
+    "label": "Mute beep",
+    "state_field": "mute"
+  },
+  "replies": [
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"add\":{\"kind\":\"action\"},\"reset\":{\"kind\":\"action\"},\"muteToggle\":{\"kind\":\"action\"},\"mute\":{\"kind\":\"value\",\"valueType\":\"boolean\"},\"count\":{\"kind\":\"value\",\"valueType\":\"number\"}},\"steps\":[{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":0},{\"op\":\"assert\",\"slot\":\"mute\",\"test\":\"equals\",\"value\":false},{\"op\":\"action\",\"slot\":\"muteToggle\"},{\"op\":\"assert\",\"slot\":\"mute\",\"test\":\"equals\",\"value\":true},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":2},{\"op\":\"action\",\"slot\":\"muteToggle\"},{\"op\":\"assert\",\"slot\":\"mute\",\"test\":\"equals\",\"value\":false},{\"op\":\"availability\",\"slot\":\"add\",\"value\":true},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":0}]}}}}"
+    },
+    {
+      "stage": "PLAN",
+      "feedback_contains": [
+        "$.behavior.scenario.steps[2].value",
+        "JSON Boolean",
+        "true or false",
+        "muteToggle"
+      ],
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"add\":{\"kind\":\"action\"},\"reset\":{\"kind\":\"action\"},\"muteToggle\":{\"kind\":\"action\"},\"mute\":{\"kind\":\"value\",\"valueType\":\"boolean\"},\"count\":{\"kind\":\"value\",\"valueType\":\"number\"}},\"steps\":[{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":0},{\"op\":\"assert\",\"slot\":\"mute\",\"test\":\"equals\",\"value\":false},{\"op\":\"action\",\"slot\":\"muteToggle\",\"value\":true},{\"op\":\"assert\",\"slot\":\"mute\",\"test\":\"equals\",\"value\":true},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":2},{\"op\":\"action\",\"slot\":\"muteToggle\",\"value\":false},{\"op\":\"assert\",\"slot\":\"mute\",\"test\":\"equals\",\"value\":false},{\"op\":\"availability\",\"slot\":\"add\",\"value\":true},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":0}]}}}}"
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"formatVersion\":3,\"title\":\"Coffee Cup Counter\",\"description\":\"Counts cups of coffee and beeps each time you add one.\",\"capabilities\":[\"audio.tone\"],\"capabilityResults\":false,\"stateSchema\":{\"count\":\"number\",\"mute\":\"boolean\"},\"initialState\":{\"count\":0,\"mute\":false},\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"metric\",\"text\":\"Cups added\",\"bind\":\"count\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"button\",\"text\":\"Add cup\",\"action\":\"add\",\"variant\":\"filled\"},{\"type\":\"button\",\"text\":\"Reset\",\"action\":\"reset\",\"variant\":\"outlined\"},{\"type\":\"toggle\",\"text\":\"Mute beep\",\"bind\":\"mute\",\"action\":\"muteToggle\"},{\"type\":\"text\",\"text\":\"Each cup adds one and plays a short beep.\"}]},\"behaviorBindings\":{\"add\":\"add\",\"reset\":\"reset\",\"muteToggle\":\"muteToggle\",\"mute\":[3],\"count\":[0]},\"source\":\"const event = input.event || {};\\nconst state = input.state;\\nconst count = Number(state.count) || 0;\\nconst mute = state.mute === true;\\n\\nif (event.type === 'action') {\\n  if (event.actionId === 'add') {\\n    const next = { count: count + 1, mute: mute };\\n    if (mute) return { state: next };\\n    return {\\n      state: next,\\n      effects: [{ id: 'beep', capability: 'audio.tone', args: { tone: 'beep', durationMillis: 150 } }]\\n    };\\n  }\\n  if (event.actionId === 'reset') {\\n    return { state: { count: 0, mute: mute } };\\n  }\\n  if (event.actionId === 'muteToggle') {\\n    const nextMute = typeof event.value === 'boolean' ? event.value : !mute;\\n    return { state: { count: count, mute: nextMute } };\\n  }\\n  return { state: state };\\n}\\n\\nreturn { state: state };\"}"
+    }
+  ]
+}

@@ -285,10 +285,7 @@ class ComparisonChatCaptureTest {
                 val proof = JSONObject().put("status", "failed")
                 report.put("workflow", proof)
                 fun reopen() {
-                    robot.back()
-                    robot.waitFor(robot.text(R.string.tool_search))
-                    robot.click(title)
-                    robot.waitFor(robot.text(R.string.tool_refine))
+                    Plan5WorkflowChecks.reopenSaved(robot, title)
                 }
                 var edited = false
                 val refine: (String) -> Unit = {
@@ -359,7 +356,19 @@ class ComparisonChatCaptureTest {
             report.put("fresh_conversation", chat.id).put("assistant_message", assistant.id)
                 .put("assistant_status", assistant.status).put("operation_id", assistant.toolOperationId ?: JSONObject.NULL)
                 .put("provisional_label_observed", previewObserved)
-            acceptedOperations.lastOrNull()?.optString("kind")?.let { report.put("chat_decision", it) }
+            val decision = acceptedOperations.lastOrNull()?.optString("kind")
+            decision?.let { report.put("chat_decision", it) }
+            report.put("assistant_text", assistant.text)
+            val sentAt = report.getLong("send_action_elapsed_ns")
+            report.getJSONObject("measurements").put("terminal_chat_ms",
+                (SystemClock.elapsedRealtimeNanos() - sentAt) / 1_000_000)
+            if (decision == "device_plan") {
+                onMain { vm.agent.plan?.takeIf { it.conversationId == chat.id } }?.let { plan ->
+                    report.put("phone_plan", JSONObject().put("phase", plan.phase.name)
+                        .put("steps", JSONArray(plan.steps.map { it.command.json() }))
+                        .put("results", JSONArray(plan.results)))
+                }
+            }
             generationEvents.filterIsInstance<ToolGenerationTraceEvent.Attempt>().lastOrNull {
                 it.operationId.toString() == assistant.toolOperationId && it.disposition == ToolGenerationDisposition.FINISH
             }?.let { report.put("terminal_attempt", traceEvent(it)) }
@@ -454,10 +463,7 @@ class ComparisonChatCaptureTest {
                         fun savedTool() = onMain { vm.tools.tools.single { it.id == artifact } }
                         fun reopen() {
                             val before = savedTool()
-                            robot.back()
-                            robot.waitFor(robot.text(R.string.tool_search))
-                            robot.click(ToolSpec.parsePersisted(before.spec).title)
-                            robot.waitFor(robot.text(R.string.tool_refine))
+                            Plan5WorkflowChecks.reopenSaved(robot, ToolSpec.parsePersisted(before.spec).title, fromChat = true)
                             val after = savedTool()
                             check(after.revision == before.revision)
                         }

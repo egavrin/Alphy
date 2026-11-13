@@ -29,9 +29,13 @@ class CanvasGenerationWorkflowTest {
         for ((mode, ui) in listOf("app" to inline, "app" to stage, "immersive" to stage)) {
             val candidate = definition().put("ui", ui).put("presentation", JSONObject().put("mode", mode))
             val provider = object : ChatProvider {
+                private var repair = 0
                 override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                    val output = if (request.generationStage?.name == "PLAN") """{"wholeScreen":true,"language":"en"}"""
-                    else candidate.toString()
+                    val output = when {
+                        request.generationStage == CloudGenerationStage.PLAN -> """{"wholeScreen":true,"language":"en"}"""
+                        request.turns.size == 1 -> candidate.toString()
+                        else -> """{"fields":{"description":"Still unplanned drawing ${++repair}"}}"""
+                    }
                     emit(CloudEvent.Text(request.withFixtureCheckEvidence(output)))
                 }
             }
@@ -41,7 +45,7 @@ class CanvasGenerationWorkflowTest {
                     val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context)))
                     val draft = engine.createDraft("Draw four diagrams.", null)
                     val failure = runCatching { engine.generate(draft.id, "offline", emptyList(), CloudSession()) }.exceptionOrNull() as CloudFailure
-                    assertEquals("widget_behavior", failure.code)
+                    assertEquals("widget_spec", failure.code)
                     assertEquals(null, store.draft(draft.id)?.candidate)
                 }
             } finally {

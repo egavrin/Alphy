@@ -26,7 +26,10 @@ class GenerationSmokeWorkflowTest {
         var afterResponse: (()->Unit)?=null
         override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend(CloudEvent)->Unit) {
             val hasDrawing = JSONObject(outputs.first()).has("surfaces")
-            if (request.replyWithFixturePlan(emit, fixtureScene().takeIf { hasDrawing })) return
+            val required = if (request.generationStage == CloudGenerationStage.PLAN &&
+                JSONObject(request.turns.first().text).optString("request").contains("vibrates the phone")
+            ) JSONArray("""[{"id":"vibration.play","excerpt":"vibrates the phone"}]""") else null
+            if (request.replyWithFixturePlan(emit, fixtureScene().takeIf { hasDrawing }, required)) return
             requests += request
             val candidate = JSONObject(outputs[(requests.size - 1).coerceAtMost(outputs.lastIndex)])
             if (hasDrawing && request.generationStage == CloudGenerationStage.COMPLETE) candidate.withFixtureDrawingBinding("SECRET_LEFT")

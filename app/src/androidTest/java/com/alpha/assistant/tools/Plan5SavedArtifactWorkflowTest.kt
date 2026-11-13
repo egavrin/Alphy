@@ -50,10 +50,7 @@ class Plan5SavedArtifactWorkflowTest {
                     try {
                         val saved = { checkNotNull(store.tool(id)) }
                         fun reopen() {
-                            robot.back()
-                            robot.waitFor(robot.text(R.string.tool_search))
-                            robot.click(spec.title)
-                            robot.waitFor(robot.text(R.string.tool_refine))
+                            Plan5WorkflowChecks.reopenSaved(robot, spec.title)
                         }
                         val checks = Plan5WorkflowChecks(robot, proof, saved, {
                             val shot = robot.automation.takeScreenshot()

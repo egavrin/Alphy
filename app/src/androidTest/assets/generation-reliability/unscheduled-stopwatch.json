@@ -1,0 +1,235 @@
+{
+  "plan": {
+    "wholeScreen": true,
+    "language": "en",
+    "requiredCapabilities": [],
+    "behavior": {
+      "status": "checkable",
+      "scenario": {
+        "slots": {
+          "start": {
+            "kind": "action"
+          },
+          "pause": {
+            "kind": "action"
+          },
+          "lap": {
+            "kind": "action"
+          },
+          "reset": {
+            "kind": "action"
+          },
+          "elapsed": {
+            "kind": "value"
+          },
+          "laps": {
+            "kind": "collection"
+          },
+          "ticker": {
+            "kind": "timer"
+          }
+        },
+        "steps": [
+          {
+            "op": "capture",
+            "slot": "elapsed",
+            "as": "zero"
+          },
+          {
+            "op": "action",
+            "slot": "start"
+          },
+          {
+            "op": "capture",
+            "slot": "elapsed",
+            "as": "afterStart"
+          },
+          {
+            "op": "timers",
+            "slot": "ticker",
+            "count": 2
+          },
+          {
+            "op": "assert",
+            "slot": "elapsed",
+            "test": "changed",
+            "capture": "afterStart"
+          },
+          {
+            "op": "action",
+            "slot": "lap"
+          },
+          {
+            "op": "assert",
+            "slot": "laps",
+            "test": "equals",
+            "value": 1
+          },
+          {
+            "op": "action",
+            "slot": "pause"
+          },
+          {
+            "op": "capture",
+            "slot": "elapsed",
+            "as": "paused"
+          },
+          {
+            "op": "timers",
+            "slot": "ticker",
+            "count": 2
+          },
+          {
+            "op": "assert",
+            "slot": "elapsed",
+            "test": "unchanged",
+            "capture": "paused"
+          },
+          {
+            "op": "action",
+            "slot": "reset"
+          },
+          {
+            "op": "assert",
+            "slot": "laps",
+            "test": "equals",
+            "value": 0
+          },
+          {
+            "op": "assert",
+            "slot": "elapsed",
+            "test": "unchanged",
+            "capture": "zero"
+          }
+        ]
+      }
+    }
+  },
+  "spec": {
+    "formatVersion": 3,
+    "title": "Simple Stopwatch",
+    "description": "Stopwatch with hundredths, accurate timestamp-based timing, laps, pause and reset.",
+    "capabilities": [],
+    "capabilityResults": false,
+    "stateSchema": {
+      "running": "boolean",
+      "notRunning": "boolean",
+      "startAt": "number",
+      "accumulatedMs": "number",
+      "elapsedMs": "number",
+      "elapsedText": "string",
+      "statusText": "string",
+      "laps": {
+        "type": "array",
+        "maxItems": 100,
+        "items": {
+          "type": "object",
+          "fields": {
+            "id": "string",
+            "label": "string",
+            "split": "string",
+            "total": "string",
+            "totalMs": "number"
+          }
+        }
+      }
+    },
+    "initialState": {
+      "running": false,
+      "notRunning": true,
+      "startAt": 0,
+      "accumulatedMs": 0,
+      "elapsedMs": 0,
+      "elapsedText": "00:00:00.00",
+      "statusText": "Ready",
+      "laps": []
+    },
+    "ui": {
+      "type": "theme",
+      "preset": "technical",
+      "children": [
+        {
+          "type": "column",
+          "children": [
+            {
+              "type": "metric",
+              "text": "Elapsed time",
+              "bind": "elapsedText",
+              "style": {
+                "emphasis": "number"
+              }
+            },
+            {
+              "type": "text",
+              "text": "Status",
+              "bind": "statusText",
+              "style": {
+                "tone": "muted"
+              }
+            },
+            {
+              "type": "flowRow",
+              "children": [
+                {
+                  "type": "button",
+                  "text": "Start",
+                  "action": "startStopwatch",
+                  "variant": "filled",
+                  "enabledBind": "notRunning"
+                },
+                {
+                  "type": "button",
+                  "text": "Pause",
+                  "action": "pauseStopwatch",
+                  "enabledBind": "running"
+                },
+                {
+                  "type": "button",
+                  "text": "Lap",
+                  "action": "recordLap",
+                  "enabledBind": "running"
+                },
+                {
+                  "type": "button",
+                  "text": "Reset",
+                  "action": "resetStopwatch",
+                  "variant": "text",
+                  "enabledBind": "notRunning"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "text": "Laps",
+              "style": {
+                "emphasis": "title"
+              }
+            },
+            {
+              "type": "list",
+              "text": "Laps",
+              "bind": "laps",
+              "columns": [
+                {
+                  "text": "Lap",
+                  "field": "label"
+                },
+                {
+                  "text": "Split",
+                  "field": "split"
+                },
+                {
+                  "text": "Total",
+                  "field": "total"
+                }
+              ],
+              "emptyText": "No laps recorded yet."
+            }
+          ]
+        }
+      ]
+    },
+    "source": "const event=input.event;const prev=input.state;function pad(n,w){var s=String(Math.floor(n));while(s.length<w){s='0'+s;}return s;}function fmt(ms){var t=Math.floor(ms);if(!isFinite(t)||t<0){t=0;}var h=Math.floor(t/3600000);var m=Math.floor(t/60000)%60;var s=Math.floor(t/1000)%60;var cs=Math.floor((t%1000)/10);return pad(h,2)+':'+pad(m,2)+':'+pad(s,2)+'.'+pad(cs,2);}var ui={'type':'theme','preset':'technical','children':[{'type':'column','children':[{'type':'metric','text':'Elapsed time','bind':'elapsedText','style':{'emphasis':'number'}},{'type':'text','text':'Status','bind':'statusText','style':{'tone':'muted'}},{'type':'flowRow','children':[{'type':'button','text':'Start','action':'startStopwatch','variant':'filled','enabledBind':'notRunning'},{'type':'button','text':'Pause','action':'pauseStopwatch','enabledBind':'running'},{'type':'button','text':'Lap','action':'recordLap','enabledBind':'running'},{'type':'button','text':'Reset','action':'resetStopwatch','variant':'text','enabledBind':'notRunning'}]},{'type':'text','text':'Laps','style':{'emphasis':'title'}},{'type':'list','text':'Laps','bind':'laps','columns':[{'text':'Lap','field':'label'},{'text':'Split','field':'split'},{'text':'Total','field':'total'}],'emptyText':'No laps recorded yet.'}]}]};var timers=[{id:'tick',intervalMs:50}];var now=Date.now();var next=prev;if(event.type==='timer'){if(event.timerId==='tick'&&prev.running){var e1=prev.accumulatedMs+(now-prev.startAt);next=Object.assign({},prev,{elapsedMs:e1,elapsedText:fmt(e1)});}}else if(event.type==='action'){var a=event.actionId;if(a==='startStopwatch'){if(!prev.running){next=Object.assign({},prev,{running:true,notRunning:false,startAt:now,statusText:'Running',elapsedMs:prev.accumulatedMs,elapsedText:fmt(prev.accumulatedMs)});}}else if(a==='pauseStopwatch'){if(prev.running){var acc=prev.accumulatedMs+(now-prev.startAt);next=Object.assign({},prev,{running:false,notRunning:true,startAt:0,accumulatedMs:acc,elapsedMs:acc,elapsedText:fmt(acc),statusText:'Paused'});}}else if(a==='recordLap'){if(prev.running){var total=prev.accumulatedMs+(now-prev.startAt);var laps=prev.laps.slice();var last=laps.length>0?laps[laps.length-1].totalMs:0;var split=total-last;if(laps.length<100){laps.push({id:'lap-'+now+'-'+(laps.length+1),label:'Lap '+(laps.length+1),split:fmt(split),total:fmt(total),totalMs:total});}next=Object.assign({},prev,{laps:laps,elapsedMs:total,elapsedText:fmt(total)});}}else if(a==='resetStopwatch'){if(!prev.running){next=Object.assign({},prev,{accumulatedMs:0,startAt:0,elapsedMs:0,elapsedText:fmt(0),laps:[],statusText:'Ready'});}}}return {state:next,ui:ui,timers:timers};",
+    "appLanguage": "en"
+  }
+}

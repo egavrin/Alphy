@@ -1,0 +1,36 @@
+{
+  "source": {
+    "file": "generation-full-134-after-row-checkbox/captures/fresh:health-4:candidate:1/provider.jsonl",
+    "sha256": "727cdf9a9bd1fb5b7631332b6ec5d615377c88a907a22faa3bc11e2334cc570b"
+  },
+  "derivation": "Authored PLAN patch based on the historical saved native food log. Adds requiredCapabilities and uses Apple/120 as its executable check. Keeps historical SELECTOR replies.",
+  "replies": [
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"title\":\"Calorie budget\",\"description\":\"Log what you ate and see the calories left against your 2000 kcal daily goal.\",\"language\":\"en\",\"inputs\":[{\"id\":\"goal\",\"label\":\"Daily goal (kcal)\",\"type\":\"number\",\"value\":2000}],\"constants\":[],\"needs\":[{\"id\":\"log\",\"type\":\"entries\",\"label\":\"Food log\",\"description\":\"Add each food or meal with its calories. The list totals everything logged for today.\",\"fields\":[{\"id\":\"food\",\"label\":\"Food / meal\",\"type\":\"text\"},{\"id\":\"calories\",\"label\":\"Calories (kcal)\",\"type\":\"number\"}]},{\"id\":\"left\",\"type\":\"figure\",\"label\":\"Remaining (kcal)\",\"description\":\"Calories left today. If the total goes above the goal this shows a negative amount.\",\"expression\":{\"op\":\"subtract\",\"args\":[{\"ref\":\"goal\"},{\"aggregate\":\"sum\",\"need\":\"log\",\"field\":\"calories\"}]}},{\"id\":\"used\",\"type\":\"figure\",\"label\":\"Percent of goal used\",\"description\":\"Share of the daily goal already eaten.\",\"expression\":{\"op\":\"multiply\",\"args\":[{\"op\":\"divide\",\"args\":[{\"aggregate\":\"sum\",\"need\":\"log\",\"field\":\"calories\"},{\"ref\":\"goal\"}]},{\"number\":100}]}}],\"questions\":[],\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"food\":{\"kind\":\"action\",\"part\":\"log\",\"member\":\"edit_1\"},\"amount\":{\"kind\":\"action\",\"part\":\"log\",\"member\":\"edit_2\"},\"add\":{\"kind\":\"action\",\"part\":\"log\",\"member\":\"add\"},\"records\":{\"kind\":\"collection\",\"part\":\"log\",\"member\":\"records\"},\"left\":{\"kind\":\"value\",\"part\":\"left\",\"member\":\"value\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"food\",\"value\":\"Apple\"},{\"op\":\"action\",\"slot\":\"amount\",\"value\":120},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"records\",\"test\":\"equals\",\"value\":1},{\"op\":\"assert\",\"slot\":\"left\",\"test\":\"equals\",\"value\":1880}]}},\"requiredCapabilities\":[]}}"
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"s_goal\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_log\",\"choice\":\"A\",\"confidence\":0.85,\"probabilities\":{\"A\":0.85,\"B\":0.15}},{\"id\":\"s_left\",\"choice\":\"A\",\"confidence\":0.88,\"probabilities\":{\"A\":0.88,\"B\":0.12}},{\"id\":\"s_used\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}}]}",
+      "questions": [
+        "s_goal",
+        "s_log",
+        "s_left",
+        "s_used"
+      ]
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"p_goal\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"p_log\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"p_left\",\"choice\":\"A\",\"confidence\":0.92,\"probabilities\":{\"A\":0.92,\"B\":0.08}},{\"id\":\"p_used\",\"choice\":\"A\",\"confidence\":0.92,\"probabilities\":{\"A\":0.92,\"B\":0.08}},{\"id\":\"v_profile\",\"choice\":\"B\",\"confidence\":0.6,\"probabilities\":{\"A\":0.2,\"B\":0.6,\"C\":0.2}},{\"id\":\"v_preset\",\"choice\":\"A\",\"confidence\":0.5,\"probabilities\":{\"A\":0.5,\"B\":0.12,\"C\":0.1,\"D\":0.08,\"E\":0.1,\"F\":0.1}},{\"id\":\"v_focal\",\"choice\":\"C\",\"confidence\":0.55,\"probabilities\":{\"A\":0.1,\"B\":0.15,\"C\":0.55,\"D\":0.15,\"E\":0.05}}]}",
+      "questions": [
+        "p_goal",
+        "p_log",
+        "p_left",
+        "p_used",
+        "v_profile",
+        "v_preset",
+        "v_focal"
+      ]
+    }
+  ]
+}

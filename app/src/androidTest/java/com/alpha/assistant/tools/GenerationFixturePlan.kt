@@ -21,23 +21,36 @@ internal fun firstSelectorChoices(body: String): String {
 private const val fixtureNeeds = """{"title":"Fixture","description":"Local test fixture","language":"en","inputs":[],"constants":[],"needs":[{"id":"custom","type":"other","label":"Fixture behavior","description":"Implement the complete behavior in the request."}],"questions":[]}"""
 
 // A single unsupported need makes production request a full definition from the fixture.
-internal suspend fun CloudRequest.replyWithFixturePlan(emit: suspend (CloudEvent) -> Unit, scene: JSONObject? = null): Boolean {
+internal suspend fun CloudRequest.replyWithFixturePlan(
+    emit: suspend (CloudEvent) -> Unit, scene: JSONObject? = null, requiredCapabilities: JSONArray? = null,
+): Boolean {
     if (generationStage == CloudGenerationStage.SELECTOR) error("The fixture plan must not require part selection")
     if (generationStage != CloudGenerationStage.PLAN) return false
     check(jsonObject && !search && selectedText.isEmpty())
-    emit(CloudEvent.Text(withFixtureCheckEvidence(
-        if (scene == null) fixtureNeeds else JSONObject(fixtureNeeds).put("scene", scene).toString())))
+    val raw = if (systemInstructions.startsWith("Plan required Android capabilities")) """{"requiredCapabilities":[]}"""
+        else if (scene == null) fixtureNeeds else JSONObject(fixtureNeeds).put("scene", scene).toString()
+    val reply = if (requiredCapabilities == null) raw
+        else JSONObject(raw).put("requiredCapabilities", requiredCapabilities).toString()
+    emit(CloudEvent.Text(withFixtureCheckEvidence(reply)))
     return true
 }
 
-internal fun CloudRequest.withFixtureCheckEvidence(raw: String, scope: String = "whole"): String {
+internal fun CloudRequest.withFixtureCapabilityPlan(raw: String): String {
+    if (generationStage != CloudGenerationStage.PLAN || !systemInstructions.contains("Include requiredCapabilities as an array")) return raw
+    val plan = runCatching { JSONObject(raw) }.getOrNull() ?: return raw
+    if (plan.has("fields") || plan.has("removeFields") || plan.has("requiredCapabilities")) return raw
+    return plan.put("requiredCapabilities", JSONArray()).toString()
+}
+
+internal fun CloudRequest.withFixtureCheckEvidence(original: String, scope: String = "whole"): String {
+    val raw = withFixtureCapabilityPlan(original)
     if (generationStage != CloudGenerationStage.PLAN) return raw
     val plan = runCatching { JSONObject(raw) }.getOrNull() ?: return raw
     val envelope = plan.optJSONObject("fields") ?: plan
     val scene = envelope.optJSONObject("scene")
     val stagedApp = systemInstructions.contains("Plan the functional core first.")
     if (scene == null) {
-        if (!stagedApp) return raw
+        if (!stagedApp || envelope !== plan) return raw
         if (envelope.has("runtime") || envelope.has("behavior") ||
             !envelope.has("needs") && envelope.opt("wholeScreen") != true) return raw
         // These fixture plans test another generation contract. Full checks have their own workflow fixtures.

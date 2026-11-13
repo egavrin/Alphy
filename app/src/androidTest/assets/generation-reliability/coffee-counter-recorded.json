@@ -1,0 +1,35 @@
+{
+  "case": "fresh:logs-5",
+  "request": "coffee counter that beeps when I add a cup",
+  "source": {
+    "file": "generation-systemic-170/captures/fresh:logs-5:candidate:1/provider.jsonl",
+    "sha256": "e54da938f092afeea3bdafbfa63621ccfbae6a2441332ce67aa90e2fcb3c3e3f"
+  },
+  "first_plan_rule": "behavior.required_receipt",
+  "replies": [
+    {
+      "stage": "CHAT_DECISION",
+      "reply": "{\"kind\": \"create\", \"text\": \"I'll build a coffee counter that beeps each time you add a cup.\", \"brief\": \"A local coffee counter mini-app. Main control: a large \\\"Add cup\\\" button that increments the count and plays a short beep sound (via the audio tone action) each time it is pressed. Show the current cup count large and clearly. Include a \\\"Reset\\\" button to set the count back to 0. Also show the count for today, if it is simple to do locally. Keep the interface clean with a coffee theme. Interface language: English.\", \"search\": \"none\", \"image\": \"\"}"
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"wholeScreen\":true,\"language\":\"en\",\"requiredCapabilities\":[{\"id\":\"audio.tone\",\"excerpt\":\"beeps when I add a cup\"}],\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"add\":{\"kind\":\"action\"},\"reset\":{\"kind\":\"action\"},\"count\":{\"kind\":\"value\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":2},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":0}]}}}"
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"formatVersion\":3,\"title\":\"Coffee Cup Counter\",\"description\":\"Count today's cups and hear a short beep with each cup.\",\"capabilities\":[\"audio.tone\"],\"capabilityResults\":false,\"stateSchema\":{\"count\":\"number\",\"dayKey\":\"string\"},\"initialState\":{\"count\":0,\"dayKey\":\"\"},\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"metric\",\"text\":\"Cups today\",\"bind\":\"count\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"text\",\"text\":\"Each Add cup logs a cup and plays a short beep.\",\"style\":{\"tone\":\"muted\"}},{\"type\":\"button\",\"text\":\"Add cup\",\"action\":\"addCup\",\"variant\":\"filled\"},{\"type\":\"button\",\"text\":\"Reset\",\"action\":\"resetCount\",\"variant\":\"text\"}]},\"behaviorBindings\":{\"add\":\"addCup\",\"reset\":\"resetCount\",\"count\":[0]},\"source\":\"const s = input.state;\\nconst e = input.event;\\n\\nfunction todayKey() {\\n  const d = new Date();\\n  const y = d.getFullYear();\\n  const m = String(d.getMonth() + 1).padStart(2, '0');\\n  const day = String(d.getDate()).padStart(2, '0');\\n  return y + '-' + m + '-' + day;\\n}\\n\\nif (e.type === 'action') {\\n  if (e.actionId === 'addCup') {\\n    const today = todayKey();\\n    const base = s.dayKey === today ? s.count : 0;\\n    const count = base + 1;\\n    return {\\n      state: { count: count, dayKey: today },\\n      effects: [\\n        { id: 'beep', capability: 'audio.tone', args: { tone: 'beep', durationMillis: 120 } }\\n      ]\\n    };\\n  }\\n  if (e.actionId === 'resetCount') {\\n    return { state: { count: 0, dayKey: s.dayKey } };\\n  }\\n}\\n\\nreturn { state: s };\"}"
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"fields\":{\"capabilityResults\":true},\"sourceEdits\":[{\"search\":\"return { state: s };\",\"replace\":\"if (e.type === 'capabilityResults') {\\n  return { state: s };\\n}\\n\\nreturn { state: s };\"}]}"
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"removeFields\":[\"capabilityResults\"],\"fields\":{\"behaviorBindings\":{\"add\":\"addCup\",\"reset\":\"resetCount\",\"count\":[0]}},\"sourceEdits\":[{\"search\":\"if (e.type === 'capabilityResults') {\\n  return { state: s };\\n}\\n\\nreturn { state: s };\",\"replace\":\"return { state: s };\"}]}"
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"fields\":{\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"text\",\"text\":\"Cups today\",\"bind\":\"count\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"text\",\"text\":\"Each Add cup logs a cup and plays a short beep.\",\"style\":{\"tone\":\"muted\"}},{\"type\":\"button\",\"text\":\"Add cup\",\"action\":\"addCup\",\"variant\":\"filled\"},{\"type\":\"button\",\"text\":\"Reset\",\"action\":\"resetCount\",\"variant\":\"text\"}]},\"behaviorBindings\":{\"add\":\"addCup\",\"reset\":\"resetCount\",\"count\":[0]}}}"
+    }
+  ]
+}

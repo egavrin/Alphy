@@ -60,11 +60,12 @@ data class CapabilityDefinition(val id: String, val title: String, val action: C
     val parameters: Map<String,CapabilityArgument>, val explanation: String, val resultStatus: String,
     val resultDescription: String, val permission: String? = null, val feature: String? = null,
     val foreground: Boolean = false, val selection: Boolean = false, val minApi: Int = 29,
-    val resultData: String = "{}", val phone: Boolean = false) {
+    val resultData: String = "{}", val phone: Boolean = false, val prerequisites: Set<String> = emptySet()) {
     val argumentSchema get() = if (id == NetworkEffectContract.ID) NetworkEffectContract.argumentSchema()
         else capabilityArgumentSchema(parameters)
     fun json() = JSONObject().put("id",id).put("title",title).put("implementation","implemented").put("callable",true)
         .put("argumentSchema",argumentSchema).put("description",explanation).put("minApi",minApi)
+        .put("prerequisites", JSONArray(prerequisites.toList()))
         .put("access",JSONObject().put("toolGrant",id==NetworkEffectContract.ID).put("confirmation",id in setOf("share.text", PHOTO_CAPTURE, MiniAppImage.ID)).put("androidPermission",permission ?: JSONObject.NULL)
             .put("manifestPermissions",JSONArray(when {
                 id == DeviceReadContract.STATUS -> listOf(Manifest.permission.ACCESS_NETWORK_STATE)
@@ -155,7 +156,7 @@ object CapabilityCatalog {
             "Returns only an opaque app-scoped calendarRef. Display names and accounts remain native.",Manifest.permission.READ_CALENDAR,foreground=true,resultData=OwnedCalendarContract.resultSchema),
         CapabilityDefinition("calendar.createOwned","Create owned calendar event",CapabilityAction.CALENDAR_OWNED,OwnedCalendarContract.create,
             "Version 1. One timed event, optionally repeatDaily:true, with one alert reminder 0..10080 minutes before. Daily events use whole-second duration and recur at the selected local time in the explicit IANA timeZone. Use a selected calendarRef and stable eventKey. Start and end are explicit epoch milliseconds with current deviceTimeZone. Do not invent dates, times, medical schedules, or doses. The native control displays exact details. A repeated eventKey only reads the original operation and never repeats an uncertain insert.","succeeded",
-            "Success requires exact provider readback of the owned event and reminder. Delivery remains unverified. Partial or interrupted writes return unknownOutcome.",Manifest.permission.READ_CALENDAR,foreground=true,resultData=OwnedCalendarContract.resultSchema),
+            "Success requires exact provider readback of the owned event and reminder. Delivery remains unverified. Partial or interrupted writes return unknownOutcome.",Manifest.permission.READ_CALENDAR,foreground=true,resultData=OwnedCalendarContract.resultSchema, prerequisites = setOf("calendar.select")),
         CapabilityDefinition("calendar.readOwned","Read owned calendar event",CapabilityAction.CALENDAR_OWNED,OwnedCalendarContract.reference,
             "Version 1. Read only an eventRef returned for this app. No arbitrary event or calendar scan.","succeeded",
             "Returns exact bounded owned event data after ownership and reminder verification.",Manifest.permission.READ_CALENDAR,foreground=true,resultData=OwnedCalendarContract.resultSchema),
@@ -184,7 +185,7 @@ object CapabilityCatalog {
                 "mode" to CapabilityArgument("string",choices = setOf("walking","driving","transit","bicycling"))),
             "Version 1 only. Destination uses stopId, label, integer latE6/lonE6 and coordinateSystem. Origin comes only from the latest native reachedRef. Use the native foreground route control. Never use a previous planned stop.","launched",
             "Launch confirms only the installed map activity opened with explicit origin and destination. routeVerified is always false. Google Maps accepts WGS84, AMap accepts GCJ-02. Mixed systems and missing handlers are unavailable.",foreground = true,
-            resultData = NavigationContract.routeResultSchema),
+            resultData = NavigationContract.routeResultSchema, prerequisites = setOf("maps.markReached")),
         CapabilityDefinition("vibration.play","Вибрация",CapabilityAction.VIBRATION_PLAY,mapOf("milliseconds" to integer(1,2000)),
             "Make the phone vibrate or buzz for 1 to 2000 milliseconds. Requires the manifest VIBRATE permission and vibrator hardware.","unknownOutcome","Android accepted the request. Physical vibration is unverified.", phone = true),
         CapabilityDefinition("flashlight.set","Фонарик",CapabilityAction.FLASHLIGHT_SET,mapOf("enabled" to CapabilityArgument("boolean")),
@@ -222,6 +223,20 @@ object CapabilityCatalog {
             "launched", "Only the Sharesheet opened. The user selects a destination.", foreground = true, phone = true)
     ) + MedicineContract.definitions + DeviceReadContract.definitions + AudioContract.definitions + NetworkEffectContract.definition + VideoContract.definitions + TiltContract.definition
     val ids = definitions.map { it.id }.toSet()
+
+    internal fun requiredClosure(operations: Set<String>): Set<String> = buildSet {
+        fun include(id: String) {
+            if (add(id)) definition(id).prerequisites.forEach(::include)
+        }
+        operations.forEach(::include)
+    }
+
+    internal fun miniAppPlanningGuidance() = "Implemented MINI_APP operations: " +
+        definitions.joinToString { "${it.id} (${it.title}, ${it.resultStatus})" } + ". " +
+        "Device availability and permissions are checked at execution. Use location.once for current location, then a separate foreground Share action. " +
+        "A location result handler cannot open Share. If a request requires both operations from one press, explain the single-press limitation before offering separate actions. " +
+        "Use the existing phone plan for a requested device timer or Clock alarm. A local countdown or notification does not fulfill a Clock alarm requirement. " +
+        "For an app that also requires a phone-only operation, explain the missing operation and preserve it in the brief. Clarify a strict unsupported combination."
     val planned = listOf(
         PlannedCapability("source.searchFetch","Source search and fetch","Require a native network boundary, source attribution, size limits and untrusted-content handling. Chat search is not a generated-app API."),
         PlannedCapability("document.readShare","Selected documents and share","Require selected URI grants, bounded reads, MIME validation and explicit share confirmation."),
@@ -247,21 +262,22 @@ object CapabilityCatalog {
             ?: phoneContract(id).description.substringBefore(" Use ")
     }
 
-    internal fun discovery(caller: CapabilityCaller): JSONObject = JSONObject().put("platform", "Android").put("catalog", "Alphy")
+    internal fun discovery(caller: CapabilityCaller, eligible: Set<String>? = null): JSONObject = JSONObject().put("platform", "Android").put("catalog", "Alphy")
         .put("caller", caller.wireName).put("schemaVersion", 1)
         .put("implemented", JSONArray().apply {
             for (id in ids + PhoneCapabilities.definitions.keys) {
                 val mini = definitions.firstOrNull { it.id == id }
                 val phone = PhoneCapabilities.definitions[id]
                 val phoneEligible = phone != null || mini?.phone == true
-                val allowed = if (caller == CapabilityCaller.PHONE) phoneEligible else mini != null
-                val row = if (allowed) {
+                val callerEligible = if (caller == CapabilityCaller.PHONE) phoneEligible else mini != null
+                val callable = callerEligible && (eligible == null || id in eligible)
+                val row = if (callerEligible) {
                     if (caller == CapabilityCaller.PHONE && phone != null) phone.json() else checkNotNull(mini).json()
                 } else JSONObject().put("id", id).put("title", mini?.title ?: id).put("implementation", "implemented")
-                if (allowed && caller == CapabilityCaller.PHONE) {
+                if (callerEligible && caller == CapabilityCaller.PHONE) {
                     row.getJSONObject("access").put("confirmation", true).put("foreground", true)
                 }
-                put(row.put("callable", allowed).put("callers", JSONArray().apply {
+                put(row.put("callable", callable).put("callers", JSONArray().apply {
                     if (phoneEligible) put(CapabilityCaller.PHONE.wireName)
                     if (mini != null) put(CapabilityCaller.MINI_APP.wireName)
                 }))
@@ -277,7 +293,7 @@ object CapabilityCatalog {
     fun modelGuidance(allowed: Set<String>): String = "Alphy Android callable shortlist (device availability is checked at execution): " +
         JSONArray().apply { definitions.filter { it.id in allowed }.forEach { put(it.json()) } }.toString() +
         ". Declare only these implemented IDs. Planned or unavailable IDs are not executable: " + unavailable.keys.joinToString() +
-        ". An oversized result batch returns failed entries with data.code=resultBatchTooLarge and the original nativeStatus. This means result delivery failed, not that the external action failed. Never repeat an external action automatically. Medicine capabilities use dedicated native medicine controls with capability and args, without generated text. Echo input.event.medicine exactly in one effect. Record meal and actual intake only from explicit user statements. Never infer intake from reminder delivery. Use stable keys and explicit user-selected times and IANA zones. Meal offsets are 0..30 minutes. Daily DST gaps are skipped; overlap fires once. Reports require the native preview and a separate Share click. Only explicit foreground mini-app actions can request declared device operations. Android permissions and system pickers still apply. calendar.select/createOwned/readOwned/deleteOwned/deleteAllOwned/open require the dedicated native calendar control. Echo input.event.calendar exactly. Calendar selection and Android permissions remain explicit native actions. Generic buttons, inputs, previews, widgets and background tasks cannot authorize direct calendar actions. Keep calendar refs and results local. Never infer reminder delivery from a saved event. maps.markReached and maps.route require direct foreground user actions. Route origin must be the latest native reachedRef, never a planned stop. Use dedicated native navigation controls with capability and args, without text. Echo input.event.navigation exactly. Generic buttons and inputs cannot authorize direct navigation. Never mark stops from unrelated actions. Keep reached markers and route parameters local. Android permission is separate. Activity launch never proves completion."
+        ". An oversized result batch returns failed entries with data.code=resultBatchTooLarge and the original nativeStatus. This means result delivery failed, not that the external action failed. Never repeat an external action automatically. Medicine capabilities use dedicated native medicine controls with capability and args, without generated text. Echo input.event.medicine exactly in one effect. Record meal and actual intake only from explicit user statements. Never infer intake from reminder delivery. Use stable keys and explicit user-selected times and IANA zones. Meal offsets are 0..30 minutes. Daily DST gaps are skipped; overlap fires once. Reports require the native preview and a separate Share click. Only explicit foreground mini-app actions can request declared device operations. Android permissions and system pickers still apply. calendar.select/createOwned/readOwned/deleteOwned/deleteAllOwned/open require the dedicated native calendar control. Echo input.event.calendar exactly. Calendar selection and Android permissions remain explicit native actions. Omit create, read, or delete controls that require an owned reference until the native receipt supplies it. Render the control from that stored reference. A hidden control still needs valid arguments. Generic buttons, inputs, previews, widgets and background tasks cannot authorize direct calendar actions. Keep calendar refs and results local. Never infer reminder delivery from a saved event. maps.markReached and maps.route require direct foreground user actions. Route origin must be the latest native reachedRef, never a planned stop. Omit the route control until that receipt exists. Use dedicated native navigation controls with capability and args, without text. Echo input.event.navigation exactly. Generic buttons and inputs cannot authorize direct navigation. Never mark stops from unrelated actions. Keep reached markers and route parameters local. Android permission is separate. Activity launch never proves completion."
     fun request(json: JSONObject): CapabilityRequest {
         require(json.keys().asSequence().toSet() == setOf("id","capability","args")) { "Неверные поля системного действия" }
         val id = json.getString("id")

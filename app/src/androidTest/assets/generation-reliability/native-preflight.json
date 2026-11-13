@@ -1,0 +1,2368 @@
+{
+  "fresh:unit-1": {
+    "request": "how many miles is a run if I type in the distance in kilometres",
+    "context": "how many miles is a run if I type in the distance in kilometres",
+    "invalid": {
+      "title": "Kilometres to miles converter",
+      "description": "Type a run distance in kilometres to see the equivalent distance in miles.",
+      "language": "en",
+      "inputs": [
+        {
+          "id": "distance",
+          "label": "Distance (kilometres)",
+          "type": "number",
+          "value": 0,
+          "min": 0
+        }
+      ],
+      "constants": [
+        {
+          "id": "conversion",
+          "value": 0.621371
+        }
+      ],
+      "needs": [
+        {
+          "id": "miles",
+          "type": "figure",
+          "label": "Distance (miles)",
+          "description": "Shows the distance converted from kilometres to miles, rounded to two decimal places. Show “Enter a distance” when the input is empty; negative values are rejected by the input limit.",
+          "expression": {
+            "op": "multiply",
+            "args": [
+              {
+                "ref": "distance"
+              },
+              {
+                "ref": "conversion"
+              }
+            ]
+          }
+        }
+      ],
+      "questions": [],
+      "behavior": {
+        "status": "checkable",
+        "scenario": {
+          "slots": {
+            "distance": {
+              "kind": "action",
+              "part": "distance",
+              "member": "edit"
+            },
+            "miles": {
+              "kind": "value",
+              "part": "miles",
+              "member": "value"
+            }
+          },
+          "steps": [
+            {
+              "op": "action",
+              "slot": "distance",
+              "value": 5
+            },
+            {
+              "op": "assert",
+              "slot": "miles",
+              "test": "equals",
+              "value": 3.11
+            }
+          ]
+        }
+      }
+    },
+    "corrected": {
+      "fields": {
+        "behavior": {
+          "status": "checkable",
+          "scenario": {
+            "slots": {
+              "distance": {
+                "kind": "action",
+                "part": "distance",
+                "member": "edit"
+              },
+              "miles": {
+                "kind": "value",
+                "part": "miles",
+                "member": "value"
+              }
+            },
+            "steps": [
+              {
+                "op": "action",
+                "slot": "distance",
+                "value": 5
+              },
+              {
+                "op": "assert",
+                "slot": "miles",
+                "test": "equals",
+                "value": 3.106855
+              }
+            ]
+          }
+        }
+      }
+    },
+    "expected": "A PLAN rejection and one PLAN repair. The corrected native workflow validates without a COMPLETE request."
+  },
+  "fresh:health-5": {
+    "request": "BMI in pounds and inches",
+    "context": "BMI in pounds and inches",
+    "invalid": {
+      "title": "BMI Calculator",
+      "description": "Enter your height in feet and inches plus your weight in pounds to see your BMI, rounded to one decimal, with the WHO weight categories for reference.",
+      "language": "en",
+      "inputs": [
+        {
+          "id": "weight",
+          "label": "Weight (lb)",
+          "type": "number",
+          "value": 150
+        },
+        {
+          "id": "feet",
+          "label": "Height (ft)",
+          "type": "number",
+          "value": 5
+        },
+        {
+          "id": "inches",
+          "label": "Height (in)",
+          "type": "number",
+          "value": 9
+        }
+      ],
+      "constants": [
+        {
+          "id": "factor",
+          "value": 703
+        },
+        {
+          "id": "ftToIn",
+          "value": 12
+        },
+        {
+          "id": "categoryText",
+          "value": "Underweight: below 18.5  ·  Normal: 18.5–24.9  ·  Overweight: 25–29.9  ·  Obese: 30 and above"
+        }
+      ],
+      "needs": [
+        {
+          "id": "totalInches",
+          "type": "figure",
+          "label": "Total height (in)",
+          "description": "Total height in inches: feet times 12 plus inches.",
+          "unit": "in",
+          "expression": {
+            "op": "add",
+            "args": [
+              {
+                "op": "multiply",
+                "args": [
+                  {
+                    "ref": "feet"
+                  },
+                  {
+                    "ref": "ftToIn"
+                  }
+                ]
+              },
+              {
+                "ref": "inches"
+              }
+            ]
+          }
+        },
+        {
+          "id": "bmi",
+          "type": "figure",
+          "label": "BMI",
+          "description": "Body mass index using BMI = 703 × weight (lb) ÷ height (in)², rounded to one decimal.",
+          "expression": {
+            "op": "divide",
+            "args": [
+              {
+                "op": "round",
+                "args": [
+                  {
+                    "op": "multiply",
+                    "args": [
+                      {
+                        "op": "divide",
+                        "args": [
+                          {
+                            "op": "multiply",
+                            "args": [
+                              {
+                                "ref": "factor"
+                              },
+                              {
+                                "ref": "weight"
+                              }
+                            ]
+                          },
+                          {
+                            "op": "power",
+                            "args": [
+                              {
+                                "ref": "totalInches"
+                              },
+                              {
+                                "number": 2
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "number": 10
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "number": 10
+              }
+            ]
+          }
+        },
+        {
+          "id": "categories",
+          "type": "content",
+          "label": "WHO weight categories",
+          "description": "Reference bands for interpreting the BMI value.",
+          "uses": {
+            "body": "categoryText"
+          }
+        }
+      ],
+      "questions": [],
+      "behavior": {
+        "status": "checkable",
+        "scenario": {
+          "slots": {
+            "weightIn": {
+              "kind": "action",
+              "part": "weight",
+              "member": "edit"
+            },
+            "feetIn": {
+              "kind": "action",
+              "part": "feet",
+              "member": "edit"
+            },
+            "inchesIn": {
+              "kind": "action",
+              "part": "inches",
+              "member": "edit"
+            },
+            "bmiVal": {
+              "kind": "value",
+              "part": "bmi",
+              "member": "value"
+            },
+            "heightVal": {
+              "kind": "value",
+              "part": "totalInches",
+              "member": "value"
+            }
+          },
+          "steps": [
+            {
+              "op": "action",
+              "slot": "weightIn",
+              "value": 200
+            },
+            {
+              "op": "assert",
+              "slot": "bmiVal",
+              "test": "equals",
+              "value": 29.5
+            },
+            {
+              "op": "action",
+              "slot": "feetIn",
+              "value": 6
+            },
+            {
+              "op": "assert",
+              "slot": "heightVal",
+              "test": "equals",
+              "value": 81
+            },
+            {
+              "op": "assert",
+              "slot": "bmiVal",
+              "test": "equals",
+              "value": 21.4
+            },
+            {
+              "op": "action",
+              "slot": "inchesIn",
+              "value": 0
+            },
+            {
+              "op": "assert",
+              "slot": "bmiVal",
+              "test": "equals",
+              "value": 20.2
+            }
+          ]
+        }
+      }
+    },
+    "corrected": {
+      "fields": {
+        "behavior": {
+          "status": "checkable",
+          "scenario": {
+            "slots": {
+              "weightIn": {
+                "kind": "action",
+                "part": "weight",
+                "member": "edit"
+              },
+              "feetIn": {
+                "kind": "action",
+                "part": "feet",
+                "member": "edit"
+              },
+              "inchesIn": {
+                "kind": "action",
+                "part": "inches",
+                "member": "edit"
+              },
+              "bmiVal": {
+                "kind": "value",
+                "part": "bmi",
+                "member": "value"
+              },
+              "heightVal": {
+                "kind": "value",
+                "part": "totalInches",
+                "member": "value"
+              }
+            },
+            "steps": [
+              {
+                "op": "action",
+                "slot": "weightIn",
+                "value": 200
+              },
+              {
+                "op": "assert",
+                "slot": "bmiVal",
+                "test": "equals",
+                "value": 29.5
+              },
+              {
+                "op": "action",
+                "slot": "feetIn",
+                "value": 6
+              },
+              {
+                "op": "assert",
+                "slot": "heightVal",
+                "test": "equals",
+                "value": 81
+              },
+              {
+                "op": "assert",
+                "slot": "bmiVal",
+                "test": "equals",
+                "value": 21.4
+              },
+              {
+                "op": "action",
+                "slot": "inchesIn",
+                "value": 0
+              },
+              {
+                "op": "assert",
+                "slot": "bmiVal",
+                "test": "equals",
+                "value": 27.1
+              }
+            ]
+          }
+        }
+      }
+    },
+    "expected": "A PLAN rejection and one PLAN repair. The corrected native workflow validates without a COMPLETE request."
+  },
+  "fresh:goals-8": {
+    "request": "study hours goal of 100, hours done so far, hours left",
+    "context": "study hours goal of 100, hours done so far, hours left",
+    "invalid": {
+      "title": "Study hours tracker",
+      "description": "Set a study goal in hours, enter hours done so far, and see hours left and progress toward the goal. Hours left and progress update as you type, and hours left stays at 0 once the goal is reached or passed.",
+      "language": "en",
+      "inputs": [
+        {
+          "id": "goal",
+          "label": "Goal",
+          "type": "number",
+          "value": 100,
+          "min": 0,
+          "step": 0.5
+        },
+        {
+          "id": "hoursDone",
+          "label": "Hours done so far",
+          "type": "number",
+          "value": 0,
+          "min": 0,
+          "step": 0.5
+        }
+      ],
+      "constants": [],
+      "needs": [
+        {
+          "id": "hoursLeft",
+          "type": "figure",
+          "label": "Hours left",
+          "description": "Hours remaining to reach the goal. Never shows a negative number.",
+          "unit": "hours",
+          "expression": {
+            "op": "max",
+            "args": [
+              {
+                "op": "subtract",
+                "args": [
+                  {
+                    "ref": "goal"
+                  },
+                  {
+                    "ref": "hoursDone"
+                  }
+                ]
+              },
+              {
+                "number": 0
+              }
+            ]
+          }
+        },
+        {
+          "id": "percent",
+          "type": "figure",
+          "label": "Progress",
+          "description": "Percentage of the goal completed, capped at 100 percent.",
+          "unit": "%",
+          "expression": {
+            "op": "min",
+            "args": [
+              {
+                "op": "multiply",
+                "args": [
+                  {
+                    "op": "divide",
+                    "args": [
+                      {
+                        "ref": "hoursDone"
+                      },
+                      {
+                        "ref": "goal"
+                      }
+                    ]
+                  },
+                  {
+                    "number": 100
+                  }
+                ]
+              },
+              {
+                "number": 100
+              }
+            ]
+          }
+        }
+      ],
+      "questions": [],
+      "behavior": {
+        "status": "checkable",
+        "scenario": {
+          "slots": {
+            "goalEdit": {
+              "kind": "action",
+              "part": "goal",
+              "member": "edit"
+            },
+            "doneEdit": {
+              "kind": "action",
+              "part": "hoursDone",
+              "member": "edit"
+            },
+            "left": {
+              "kind": "value",
+              "part": "hoursLeft",
+              "member": "value"
+            },
+            "pct": {
+              "kind": "value",
+              "part": "percent",
+              "member": "value"
+            }
+          },
+          "steps": [
+            {
+              "op": "action",
+              "slot": "doneEdit",
+              "value": 40
+            },
+            {
+              "op": "assert",
+              "slot": "left",
+              "test": "equals",
+              "value": 60
+            },
+            {
+              "op": "assert",
+              "slot": "pct",
+              "test": "equals",
+              "value": 40
+            },
+            {
+              "op": "action",
+              "slot": "goalEdit",
+              "value": 50
+            },
+            {
+              "op": "assert",
+              "slot": "left",
+              "test": "equals",
+              "value": 0
+            },
+            {
+              "op": "assert",
+              "slot": "pct",
+              "test": "equals",
+              "value": 100
+            }
+          ]
+        }
+      }
+    },
+    "corrected": {
+      "fields": {
+        "behavior": {
+          "status": "checkable",
+          "scenario": {
+            "slots": {
+              "goalEdit": {
+                "kind": "action",
+                "part": "goal",
+                "member": "edit"
+              },
+              "doneEdit": {
+                "kind": "action",
+                "part": "hoursDone",
+                "member": "edit"
+              },
+              "left": {
+                "kind": "value",
+                "part": "hoursLeft",
+                "member": "value"
+              },
+              "pct": {
+                "kind": "value",
+                "part": "percent",
+                "member": "value"
+              }
+            },
+            "steps": [
+              {
+                "op": "action",
+                "slot": "doneEdit",
+                "value": 40
+              },
+              {
+                "op": "assert",
+                "slot": "left",
+                "test": "equals",
+                "value": 60
+              },
+              {
+                "op": "assert",
+                "slot": "pct",
+                "test": "equals",
+                "value": 40
+              },
+              {
+                "op": "action",
+                "slot": "goalEdit",
+                "value": 50
+              },
+              {
+                "op": "assert",
+                "slot": "left",
+                "test": "equals",
+                "value": 10
+              },
+              {
+                "op": "assert",
+                "slot": "pct",
+                "test": "equals",
+                "value": 80
+              }
+            ]
+          }
+        }
+      }
+    },
+    "expected": "A PLAN rejection and one PLAN repair. The corrected native workflow validates without a COMPLETE request."
+  },
+  "fresh:math-1": {
+    "request": "compound interest on my savings over 5 years at 4%",
+    "context": "compound interest on my savings over 5 years at 4%",
+    "invalid": {
+      "title": "Compound interest calculator",
+      "description": "See how savings grow with compound interest over a chosen term, including the final balance, total interest, and a year-by-year balance breakdown.",
+      "language": "en",
+      "iconId": "calculator",
+      "inputs": [
+        {
+          "id": "principal",
+          "label": "Starting principal",
+          "type": "number",
+          "value": 0
+        },
+        {
+          "id": "rate",
+          "label": "Annual interest rate (%)",
+          "type": "number",
+          "value": 4
+        },
+        {
+          "id": "years",
+          "label": "Term (years)",
+          "type": "number",
+          "value": 5,
+          "min": 1
+        },
+        {
+          "id": "periods",
+          "label": "Compounding periods per year (1 = annually, 2 = semi-annually, 4 = quarterly, 12 = monthly)",
+          "type": "number",
+          "value": 1,
+          "min": 1,
+          "max": 12
+        }
+      ],
+      "constants": [],
+      "questions": [],
+      "needs": [
+        {
+          "id": "balance",
+          "type": "figure",
+          "label": "Final balance",
+          "description": "Starting principal grown at the annual rate with the chosen compounding frequency over the full term.",
+          "expression": {
+            "op": "multiply",
+            "args": [
+              {
+                "ref": "principal"
+              },
+              {
+                "op": "power",
+                "args": [
+                  {
+                    "op": "add",
+                    "args": [
+                      {
+                        "number": 1
+                      },
+                      {
+                        "op": "divide",
+                        "args": [
+                          {
+                            "op": "divide",
+                            "args": [
+                              {
+                                "ref": "rate"
+                              },
+                              {
+                                "number": 100
+                              }
+                            ]
+                          },
+                          {
+                            "ref": "periods"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "multiply",
+                    "args": [
+                      {
+                        "ref": "periods"
+                      },
+                      {
+                        "ref": "years"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "interest",
+          "type": "figure",
+          "label": "Total interest earned",
+          "description": "Final balance minus the starting principal.",
+          "expression": {
+            "op": "subtract",
+            "args": [
+              {
+                "ref": "balance"
+              },
+              {
+                "ref": "principal"
+              }
+            ]
+          }
+        },
+        {
+          "id": "growth",
+          "type": "figure",
+          "label": "Growth (%)",
+          "description": "Total interest as a percentage of the starting principal; zero when the principal is zero.",
+          "expression": {
+            "op": "if",
+            "args": [
+              {
+                "op": "equal",
+                "args": [
+                  {
+                    "ref": "principal"
+                  },
+                  {
+                    "number": 0
+                  }
+                ]
+              },
+              {
+                "number": 0
+              },
+              {
+                "op": "multiply",
+                "args": [
+                  {
+                    "op": "divide",
+                    "args": [
+                      {
+                        "ref": "interest"
+                      },
+                      {
+                        "ref": "principal"
+                      }
+                    ]
+                  },
+                  {
+                    "number": 100
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "year1",
+          "type": "figure",
+          "label": "Balance after year 1",
+          "description": "Ending balance after the first year at the chosen compounding frequency.",
+          "expression": {
+            "op": "multiply",
+            "args": [
+              {
+                "ref": "principal"
+              },
+              {
+                "op": "power",
+                "args": [
+                  {
+                    "op": "add",
+                    "args": [
+                      {
+                        "number": 1
+                      },
+                      {
+                        "op": "divide",
+                        "args": [
+                          {
+                            "op": "divide",
+                            "args": [
+                              {
+                                "ref": "rate"
+                              },
+                              {
+                                "number": 100
+                              }
+                            ]
+                          },
+                          {
+                            "ref": "periods"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "multiply",
+                    "args": [
+                      {
+                        "ref": "periods"
+                      },
+                      {
+                        "number": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "year2",
+          "type": "figure",
+          "label": "Balance after year 2",
+          "description": "Ending balance after the second year at the chosen compounding frequency.",
+          "expression": {
+            "op": "multiply",
+            "args": [
+              {
+                "ref": "principal"
+              },
+              {
+                "op": "power",
+                "args": [
+                  {
+                    "op": "add",
+                    "args": [
+                      {
+                        "number": 1
+                      },
+                      {
+                        "op": "divide",
+                        "args": [
+                          {
+                            "op": "divide",
+                            "args": [
+                              {
+                                "ref": "rate"
+                              },
+                              {
+                                "number": 100
+                              }
+                            ]
+                          },
+                          {
+                            "ref": "periods"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "multiply",
+                    "args": [
+                      {
+                        "ref": "periods"
+                      },
+                      {
+                        "number": 2
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "year3",
+          "type": "figure",
+          "label": "Balance after year 3",
+          "description": "Ending balance after the third year at the chosen compounding frequency.",
+          "expression": {
+            "op": "multiply",
+            "args": [
+              {
+                "ref": "principal"
+              },
+              {
+                "op": "power",
+                "args": [
+                  {
+                    "op": "add",
+                    "args": [
+                      {
+                        "number": 1
+                      },
+                      {
+                        "op": "divide",
+                        "args": [
+                          {
+                            "op": "divide",
+                            "args": [
+                              {
+                                "ref": "rate"
+                              },
+                              {
+                                "number": 100
+                              }
+                            ]
+                          },
+                          {
+                            "ref": "periods"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "multiply",
+                    "args": [
+                      {
+                        "ref": "periods"
+                      },
+                      {
+                        "number": 3
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "year4",
+          "type": "figure",
+          "label": "Balance after year 4",
+          "description": "Ending balance after the fourth year at the chosen compounding frequency.",
+          "expression": {
+            "op": "multiply",
+            "args": [
+              {
+                "ref": "principal"
+              },
+              {
+                "op": "power",
+                "args": [
+                  {
+                    "op": "add",
+                    "args": [
+                      {
+                        "number": 1
+                      },
+                      {
+                        "op": "divide",
+                        "args": [
+                          {
+                            "op": "divide",
+                            "args": [
+                              {
+                                "ref": "rate"
+                              },
+                              {
+                                "number": 100
+                              }
+                            ]
+                          },
+                          {
+                            "ref": "periods"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "multiply",
+                    "args": [
+                      {
+                        "ref": "periods"
+                      },
+                      {
+                        "number": 4
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "year5",
+          "type": "figure",
+          "label": "Balance after year 5",
+          "description": "Ending balance after the fifth year at the chosen compounding frequency.",
+          "expression": {
+            "op": "multiply",
+            "args": [
+              {
+                "ref": "principal"
+              },
+              {
+                "op": "power",
+                "args": [
+                  {
+                    "op": "add",
+                    "args": [
+                      {
+                        "number": 1
+                      },
+                      {
+                        "op": "divide",
+                        "args": [
+                          {
+                            "op": "divide",
+                            "args": [
+                              {
+                                "ref": "rate"
+                              },
+                              {
+                                "number": 100
+                              }
+                            ]
+                          },
+                          {
+                            "ref": "periods"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "multiply",
+                    "args": [
+                      {
+                        "ref": "periods"
+                      },
+                      {
+                        "number": 5
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "behavior": {
+        "status": "checkable",
+        "scenario": {
+          "slots": {
+            "principal": {
+              "kind": "action",
+              "part": "principal",
+              "member": "edit"
+            },
+            "rate": {
+              "kind": "action",
+              "part": "rate",
+              "member": "edit"
+            },
+            "years": {
+              "kind": "action",
+              "part": "years",
+              "member": "edit"
+            },
+            "periods": {
+              "kind": "action",
+              "part": "periods",
+              "member": "edit"
+            },
+            "balance": {
+              "kind": "value",
+              "part": "balance",
+              "member": "value"
+            },
+            "interest": {
+              "kind": "value",
+              "part": "interest",
+              "member": "value"
+            },
+            "year5": {
+              "kind": "value",
+              "part": "year5",
+              "member": "value"
+            }
+          },
+          "steps": [
+            {
+              "op": "action",
+              "slot": "principal",
+              "value": 1000
+            },
+            {
+              "op": "action",
+              "slot": "rate",
+              "value": 4
+            },
+            {
+              "op": "action",
+              "slot": "years",
+              "value": 5
+            },
+            {
+              "op": "action",
+              "slot": "periods",
+              "value": 1
+            },
+            {
+              "op": "assert",
+              "slot": "balance",
+              "test": "equals",
+              "value": 1216.65
+            },
+            {
+              "op": "assert",
+              "slot": "interest",
+              "test": "equals",
+              "value": 216.65
+            },
+            {
+              "op": "assert",
+              "slot": "year5",
+              "test": "equals",
+              "value": 1216.65
+            }
+          ]
+        }
+      }
+    },
+    "corrected": {
+      "fields": {
+        "behavior": {
+          "status": "checkable",
+          "scenario": {
+            "slots": {
+              "principal": {
+                "kind": "action",
+                "part": "principal",
+                "member": "edit"
+              },
+              "rate": {
+                "kind": "action",
+                "part": "rate",
+                "member": "edit"
+              },
+              "years": {
+                "kind": "action",
+                "part": "years",
+                "member": "edit"
+              },
+              "periods": {
+                "kind": "action",
+                "part": "periods",
+                "member": "edit"
+              },
+              "balance": {
+                "kind": "value",
+                "part": "balance",
+                "member": "value"
+              },
+              "interest": {
+                "kind": "value",
+                "part": "interest",
+                "member": "value"
+              },
+              "year5": {
+                "kind": "value",
+                "part": "year5",
+                "member": "value"
+              }
+            },
+            "steps": [
+              {
+                "op": "action",
+                "slot": "principal",
+                "value": 1000
+              },
+              {
+                "op": "action",
+                "slot": "rate",
+                "value": 4
+              },
+              {
+                "op": "action",
+                "slot": "years",
+                "value": 5
+              },
+              {
+                "op": "action",
+                "slot": "periods",
+                "value": 1
+              },
+              {
+                "op": "assert",
+                "slot": "balance",
+                "test": "equals",
+                "value": 1216.6529024000001
+              },
+              {
+                "op": "assert",
+                "slot": "interest",
+                "test": "equals",
+                "value": 216.65290240000013
+              },
+              {
+                "op": "assert",
+                "slot": "year5",
+                "test": "equals",
+                "value": 1216.6529024000001
+              }
+            ]
+          }
+        }
+      }
+    },
+    "expected": "A PLAN rejection and one PLAN repair. The corrected native workflow validates without a COMPLETE request."
+  },
+  "fresh:math-2": {
+    "request": "monthly mortgage payment for a 30 year loan",
+    "context": "monthly mortgage payment for a 30 year loan",
+    "invalid": {
+      "title": "Mortgage Payment Calculator",
+      "description": "Estimate the monthly principal-and-interest payment on a fixed-rate loan, plus total interest and total of payments, and see the first payment split between principal and interest.",
+      "language": "en",
+      "inputs": [
+        {
+          "id": "amount",
+          "label": "Loan amount",
+          "type": "number",
+          "value": 300000
+        },
+        {
+          "id": "rate",
+          "label": "Annual interest rate (%)",
+          "type": "number",
+          "value": 6
+        },
+        {
+          "id": "term",
+          "label": "Loan term (years)",
+          "type": "number",
+          "value": 30
+        },
+        {
+          "id": "down",
+          "label": "Down payment",
+          "type": "number",
+          "value": 0
+        }
+      ],
+      "constants": [
+        {
+          "id": "noteBody",
+          "value": "Fixed-rate, fully amortizing loan: equal monthly payments for the whole term. Early payments are mostly interest; later payments are mostly principal."
+        }
+      ],
+      "needs": [
+        {
+          "id": "principal",
+          "type": "figure",
+          "label": "Amount borrowed",
+          "description": "Loan amount minus down payment.",
+          "expression": {
+            "op": "subtract",
+            "args": [
+              {
+                "ref": "amount"
+              },
+              {
+                "ref": "down"
+              }
+            ]
+          }
+        },
+        {
+          "id": "monthlyRate",
+          "type": "figure",
+          "label": "Monthly interest rate",
+          "description": "Annual rate divided by 12 and by 100.",
+          "expression": {
+            "op": "divide",
+            "args": [
+              {
+                "ref": "rate"
+              },
+              {
+                "number": 1200
+              }
+            ]
+          }
+        },
+        {
+          "id": "payment",
+          "type": "figure",
+          "label": "Monthly payment",
+          "description": "Principal and interest payment from the standard amortization formula M = P*r/(1-(1+r)^-n).",
+          "expression": {
+            "op": "divide",
+            "args": [
+              {
+                "op": "multiply",
+                "args": [
+                  {
+                    "ref": "principal"
+                  },
+                  {
+                    "ref": "monthlyRate"
+                  }
+                ]
+              },
+              {
+                "op": "subtract",
+                "args": [
+                  {
+                    "number": 1
+                  },
+                  {
+                    "op": "power",
+                    "args": [
+                      {
+                        "op": "add",
+                        "args": [
+                          {
+                            "number": 1
+                          },
+                          {
+                            "ref": "monthlyRate"
+                          }
+                        ]
+                      },
+                      {
+                        "op": "multiply",
+                        "args": [
+                          {
+                            "ref": "term"
+                          },
+                          {
+                            "number": -12
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "totalPaid",
+          "type": "figure",
+          "label": "Total of payments",
+          "description": "Monthly payment times the number of payments over the term.",
+          "expression": {
+            "op": "multiply",
+            "args": [
+              {
+                "ref": "payment"
+              },
+              {
+                "op": "multiply",
+                "args": [
+                  {
+                    "ref": "term"
+                  },
+                  {
+                    "number": 12
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "totalInterest",
+          "type": "figure",
+          "label": "Total interest paid",
+          "description": "Total of payments minus the amount borrowed.",
+          "expression": {
+            "op": "subtract",
+            "args": [
+              {
+                "ref": "totalPaid"
+              },
+              {
+                "ref": "principal"
+              }
+            ]
+          }
+        },
+        {
+          "id": "firstInterest",
+          "type": "figure",
+          "label": "Interest in first payment",
+          "description": "First month interest equals the amount borrowed times the monthly rate.",
+          "expression": {
+            "op": "multiply",
+            "args": [
+              {
+                "ref": "principal"
+              },
+              {
+                "ref": "monthlyRate"
+              }
+            ]
+          }
+        },
+        {
+          "id": "firstPrincipal",
+          "type": "figure",
+          "label": "Principal in first payment",
+          "description": "First payment minus the interest portion of that payment.",
+          "expression": {
+            "op": "subtract",
+            "args": [
+              {
+                "ref": "payment"
+              },
+              {
+                "ref": "firstInterest"
+              }
+            ]
+          }
+        },
+        {
+          "id": "note",
+          "type": "content",
+          "label": "About this estimate",
+          "description": "Short note on how the fixed-rate amortization works.",
+          "uses": {
+            "body": "noteBody"
+          }
+        }
+      ],
+      "questions": [],
+      "behavior": {
+        "status": "checkable",
+        "scenario": {
+          "slots": {
+            "amount": {
+              "kind": "action",
+              "part": "amount",
+              "member": "edit"
+            },
+            "rate": {
+              "kind": "action",
+              "part": "rate",
+              "member": "edit"
+            },
+            "term": {
+              "kind": "action",
+              "part": "term",
+              "member": "edit"
+            },
+            "down": {
+              "kind": "action",
+              "part": "down",
+              "member": "edit"
+            },
+            "payment": {
+              "kind": "value",
+              "part": "payment",
+              "member": "value",
+              "valueType": "number"
+            },
+            "totalInterest": {
+              "kind": "value",
+              "part": "totalInterest",
+              "member": "value",
+              "valueType": "number"
+            }
+          },
+          "steps": [
+            {
+              "op": "capture",
+              "slot": "payment",
+              "as": "before"
+            },
+            {
+              "op": "action",
+              "slot": "rate",
+              "value": 6
+            },
+            {
+              "op": "action",
+              "slot": "amount",
+              "value": 300000
+            },
+            {
+              "op": "action",
+              "slot": "term",
+              "value": 30
+            },
+            {
+              "op": "assert",
+              "slot": "payment",
+              "test": "changed",
+              "capture": "before"
+            },
+            {
+              "op": "capture",
+              "slot": "totalInterest",
+              "as": "beforeTerm"
+            },
+            {
+              "op": "action",
+              "slot": "term",
+              "value": 15
+            },
+            {
+              "op": "assert",
+              "slot": "totalInterest",
+              "test": "changed",
+              "capture": "beforeTerm"
+            },
+            {
+              "op": "capture",
+              "slot": "payment",
+              "as": "beforeDown"
+            },
+            {
+              "op": "action",
+              "slot": "down",
+              "value": 60000
+            },
+            {
+              "op": "assert",
+              "slot": "payment",
+              "test": "changed",
+              "capture": "beforeDown"
+            }
+          ]
+        }
+      }
+    },
+    "corrected": {
+      "fields": {
+        "behavior": {
+          "status": "checkable",
+          "scenario": {
+            "slots": {
+              "amount": {
+                "kind": "action",
+                "part": "amount",
+                "member": "edit"
+              },
+              "rate": {
+                "kind": "action",
+                "part": "rate",
+                "member": "edit"
+              },
+              "term": {
+                "kind": "action",
+                "part": "term",
+                "member": "edit"
+              },
+              "down": {
+                "kind": "action",
+                "part": "down",
+                "member": "edit"
+              },
+              "payment": {
+                "kind": "value",
+                "part": "payment",
+                "member": "value",
+                "valueType": "number"
+              },
+              "totalInterest": {
+                "kind": "value",
+                "part": "totalInterest",
+                "member": "value",
+                "valueType": "number"
+              }
+            },
+            "steps": [
+              {
+                "op": "capture",
+                "slot": "payment",
+                "as": "before"
+              },
+              {
+                "op": "action",
+                "slot": "rate",
+                "value": 5
+              },
+              {
+                "op": "action",
+                "slot": "amount",
+                "value": 300000
+              },
+              {
+                "op": "action",
+                "slot": "term",
+                "value": 30
+              },
+              {
+                "op": "assert",
+                "slot": "payment",
+                "test": "changed",
+                "capture": "before"
+              },
+              {
+                "op": "capture",
+                "slot": "totalInterest",
+                "as": "beforeTerm"
+              },
+              {
+                "op": "action",
+                "slot": "term",
+                "value": 15
+              },
+              {
+                "op": "assert",
+                "slot": "totalInterest",
+                "test": "changed",
+                "capture": "beforeTerm"
+              },
+              {
+                "op": "capture",
+                "slot": "payment",
+                "as": "beforeDown"
+              },
+              {
+                "op": "action",
+                "slot": "down",
+                "value": 60000
+              },
+              {
+                "op": "assert",
+                "slot": "payment",
+                "test": "changed",
+                "capture": "beforeDown"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "expected": "A PLAN rejection and one PLAN repair. The corrected native workflow validates without a COMPLETE request."
+  },
+  "bench:tip": {
+    "request": "Tip calculator: the bill amount, a tip percent slider and the number of people; show the tip, the total and what each person pays.",
+    "context": "Tip calculator: the bill amount, a tip percent slider and the number of people; show the tip, the total and what each person pays.",
+    "invalid": {
+      "title": "Tip calculator",
+      "description": "Work out the tip, the total and each person's share.",
+      "language": "en",
+      "inputs": [
+        {
+          "id": "bill",
+          "label": "Bill amount",
+          "type": "number",
+          "value": 0
+        },
+        {
+          "id": "tipPercent",
+          "label": "Tip percent",
+          "type": "number",
+          "value": 15,
+          "min": 0,
+          "max": 30,
+          "step": 1,
+          "control": "slider"
+        },
+        {
+          "id": "people",
+          "label": "Number of people",
+          "type": "number",
+          "value": 1,
+          "min": 1
+        }
+      ],
+      "constants": [],
+      "needs": [
+        {
+          "id": "tip",
+          "type": "figure",
+          "label": "Tip",
+          "description": "The tip amount, rounded to two decimals.",
+          "expression": {
+            "op": "divide",
+            "args": [
+              {
+                "op": "round",
+                "args": [
+                  {
+                    "op": "multiply",
+                    "args": [
+                      {
+                        "op": "multiply",
+                        "args": [
+                          {
+                            "ref": "bill"
+                          },
+                          {
+                            "ref": "tipPercent"
+                          }
+                        ]
+                      },
+                      {
+                        "number": 100
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "number": 100
+              }
+            ]
+          }
+        },
+        {
+          "id": "total",
+          "type": "figure",
+          "label": "Total",
+          "description": "The bill plus the tip, rounded to two decimals.",
+          "expression": {
+            "op": "divide",
+            "args": [
+              {
+                "op": "round",
+                "args": [
+                  {
+                    "op": "multiply",
+                    "args": [
+                      {
+                        "op": "add",
+                        "args": [
+                          {
+                            "ref": "bill"
+                          },
+                          {
+                            "ref": "tip"
+                          }
+                        ]
+                      },
+                      {
+                        "number": 100
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "number": 100
+              }
+            ]
+          }
+        },
+        {
+          "id": "perPerson",
+          "type": "figure",
+          "label": "Each person pays",
+          "description": "The total split between the people, rounded to two decimals.",
+          "expression": {
+            "op": "divide",
+            "args": [
+              {
+                "op": "round",
+                "args": [
+                  {
+                    "op": "multiply",
+                    "args": [
+                      {
+                        "op": "divide",
+                        "args": [
+                          {
+                            "ref": "total"
+                          },
+                          {
+                            "ref": "people"
+                          }
+                        ]
+                      },
+                      {
+                        "number": 100
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "number": 100
+              }
+            ]
+          }
+        }
+      ],
+      "questions": [],
+      "behavior": {
+        "status": "checkable",
+        "scenario": {
+          "slots": {
+            "bill": {
+              "kind": "action",
+              "part": "bill",
+              "member": "edit"
+            },
+            "tipPercent": {
+              "kind": "action",
+              "part": "tipPercent",
+              "member": "edit"
+            },
+            "people": {
+              "kind": "action",
+              "part": "people",
+              "member": "edit"
+            },
+            "tip": {
+              "kind": "value",
+              "part": "tip",
+              "member": "value"
+            },
+            "total": {
+              "kind": "value",
+              "part": "total",
+              "member": "value"
+            },
+            "perPerson": {
+              "kind": "value",
+              "part": "perPerson",
+              "member": "value"
+            }
+          },
+          "steps": [
+            {
+              "op": "action",
+              "slot": "bill",
+              "value": 100
+            },
+            {
+              "op": "action",
+              "slot": "tipPercent",
+              "value": 20
+            },
+            {
+              "op": "action",
+              "slot": "people",
+              "value": 4
+            },
+            {
+              "op": "assert",
+              "slot": "tip",
+              "test": "equals",
+              "value": 20
+            },
+            {
+              "op": "assert",
+              "slot": "total",
+              "test": "equals",
+              "value": 120
+            },
+            {
+              "op": "assert",
+              "slot": "perPerson",
+              "test": "equals",
+              "value": 30
+            }
+          ]
+        }
+      },
+      "iconId": "calculator"
+    },
+    "corrected": {
+      "fields": {
+        "needs": [
+          {
+            "id": "tip",
+            "type": "figure",
+            "label": "Tip",
+            "description": "The tip amount, rounded to two decimals.",
+            "expression": {
+              "op": "divide",
+              "args": [
+                {
+                  "op": "round",
+                  "args": [
+                    {
+                      "op": "multiply",
+                      "args": [
+                        {
+                          "ref": "bill"
+                        },
+                        {
+                          "ref": "tipPercent"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "number": 100
+                }
+              ]
+            }
+          },
+          {
+            "id": "total",
+            "type": "figure",
+            "label": "Total",
+            "description": "The bill plus the tip, rounded to two decimals.",
+            "expression": {
+              "op": "divide",
+              "args": [
+                {
+                  "op": "round",
+                  "args": [
+                    {
+                      "op": "multiply",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "ref": "bill"
+                            },
+                            {
+                              "ref": "tip"
+                            }
+                          ]
+                        },
+                        {
+                          "number": 100
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "number": 100
+                }
+              ]
+            }
+          },
+          {
+            "id": "perPerson",
+            "type": "figure",
+            "label": "Each person pays",
+            "description": "The total split between the people, rounded to two decimals.",
+            "expression": {
+              "op": "divide",
+              "args": [
+                {
+                  "op": "round",
+                  "args": [
+                    {
+                      "op": "multiply",
+                      "args": [
+                        {
+                          "op": "divide",
+                          "args": [
+                            {
+                              "ref": "total"
+                            },
+                            {
+                              "ref": "people"
+                            }
+                          ]
+                        },
+                        {
+                          "number": 100
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "number": 100
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "expected": "A PLAN rejection and one PLAN repair. The corrected native workflow validates without a COMPLETE request."
+  },
+  "extra:reference-itinerary": {
+    "request": "Сделай план прогулки. Начинаю в 09:10: выставочный зал на 25 минут, сквер на 35 минут и книжный павильон на 20 минут. Между остановками по 10 минут. Покажи время каждой остановки и конец прогулки. Дай менять время старта и отмечать, где я уже побывал.",
+    "context": "Сделай план прогулки. Начинаю в 09:10: выставочный зал на 25 минут, сквер на 35 минут и книжный павильон на 20 минут. Между остановками по 10 минут. Покажи время каждой остановки и конец прогулки. Дай менять время старта и отмечать, где я уже побывал.",
+    "invalid": {
+      "title": "План прогулки",
+      "description": "Таймлайн прогулки с временем каждой остановки, переходами и отметками «побывал»",
+      "language": "ru",
+      "inputs": [],
+      "constants": [],
+      "needs": [
+        {
+          "id": "walk",
+          "type": "itinerary",
+          "label": "План прогулки",
+          "description": "Старт в 09:10. Остановки: выставочный зал — 25 минут, сквер — 35 минут, книжный павильон — 20 минут; между остановками по 10 минут. Показать время начала и окончания каждой остановки и переходов, итоговое время окончания (10:50), дать менять время старта и отмечать посещённые остановки.",
+          "stops": [
+            {
+              "name": "Выставочный зал",
+              "minutes": 25
+            },
+            {
+              "name": "Сквер",
+              "minutes": 35
+            },
+            {
+              "name": "Книжный павильон",
+              "minutes": 20
+            }
+          ]
+        }
+      ],
+      "questions": [],
+      "behavior": {
+        "status": "checkable",
+        "scenario": {
+          "slots": {
+            "visit": {
+              "kind": "action",
+              "part": "walk",
+              "member": "visit"
+            },
+            "end": {
+              "kind": "value",
+              "part": "walk",
+              "member": "end"
+            },
+            "stops": {
+              "kind": "collection",
+              "part": "walk",
+              "member": "stops"
+            }
+          },
+          "steps": [
+            {
+              "op": "assert",
+              "slot": "end",
+              "test": "equals",
+              "value": "10:50"
+            },
+            {
+              "op": "action",
+              "slot": "visit",
+              "value": {
+                "key": "stop1",
+                "value": true
+              }
+            },
+            {
+              "op": "assert",
+              "slot": "stops",
+              "test": "nonempty"
+            },
+            {
+              "op": "assert",
+              "slot": "end",
+              "test": "equals",
+              "value": "10:50"
+            }
+          ]
+        }
+      },
+      "iconId": "travel"
+    },
+    "corrected": {
+      "fields": {
+        "constants": [
+          {
+            "id": "walkStart",
+            "value": 550
+          },
+          {
+            "id": "walkGap",
+            "value": 10
+          }
+        ],
+        "needs": [
+          {
+            "id": "walk",
+            "type": "itinerary",
+            "label": "План прогулки",
+            "description": "Старт в 09:10. Остановки: выставочный зал — 25 минут, сквер — 35 минут, книжный павильон — 20 минут; между остановками по 10 минут. Показать время начала и окончания каждой остановки и переходов, итоговое время окончания (10:50), дать менять время старта и отмечать посещённые остановки.",
+            "stops": [
+              {
+                "name": "Выставочный зал",
+                "minutes": 25
+              },
+              {
+                "name": "Сквер",
+                "minutes": 35
+              },
+              {
+                "name": "Книжный павильон",
+                "minutes": 20
+              }
+            ],
+            "uses": {
+              "start": "walkStart",
+              "gap": "walkGap"
+            }
+          }
+        ],
+        "behavior": {
+          "status": "checkable",
+          "scenario": {
+            "slots": {
+              "visit": {
+                "kind": "action",
+                "part": "walk",
+                "member": "visit"
+              },
+              "end": {
+                "kind": "value",
+                "part": "walk",
+                "member": "end"
+              },
+              "stops": {
+                "kind": "collection",
+                "part": "walk",
+                "member": "stops"
+              },
+              "start": {
+                "kind": "action",
+                "part": "walk",
+                "member": "start"
+              }
+            },
+            "steps": [
+              {
+                "op": "assert",
+                "slot": "end",
+                "test": "equals",
+                "value": "10:50"
+              },
+              {
+                "op": "action",
+                "slot": "visit",
+                "value": {
+                  "key": "stop1",
+                  "value": true
+                }
+              },
+              {
+                "op": "assert",
+                "slot": "stops",
+                "test": "nonempty"
+              },
+              {
+                "op": "assert",
+                "slot": "end",
+                "test": "equals",
+                "value": "10:50"
+              },
+              {
+                "op": "action",
+                "slot": "start",
+                "value": 560
+              },
+              {
+                "op": "assert",
+                "slot": "end",
+                "test": "equals",
+                "value": "11:00"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "expected": "A PLAN rejection and one PLAN repair. The corrected native workflow validates without a COMPLETE request."
+  },
+  "compose:stopwatch": {
+    "request": "A simple stopwatch",
+    "context": "A simple stopwatch",
+    "invalid": {
+      "title": "Simple stopwatch",
+      "description": "Start, pause, and reset a stopwatch that shows minutes, seconds, and hundredths of a second.",
+      "language": "en",
+      "inputs": [],
+      "constants": [],
+      "needs": [
+        {
+          "id": "stopwatch",
+          "type": "stopwatch",
+          "label": "Stopwatch",
+          "description": "A large monospaced MM:SS.CC readout. Start begins timing, Stop pauses it, and Reset clears the elapsed time to zero when the timer is stopped or paused. No lap list."
+        }
+      ],
+      "questions": [],
+      "behavior": {
+        "status": "checkable",
+        "scenario": {
+          "slots": {
+            "elapsed": {
+              "kind": "value",
+              "part": "stopwatch",
+              "member": "value"
+            },
+            "start": {
+              "kind": "action",
+              "part": "stopwatch",
+              "member": "start"
+            },
+            "pause": {
+              "kind": "action",
+              "part": "stopwatch",
+              "member": "pause"
+            },
+            "reset": {
+              "kind": "action",
+              "part": "stopwatch",
+              "member": "reset"
+            }
+          },
+          "steps": [
+            {
+              "op": "capture",
+              "slot": "elapsed",
+              "as": "before"
+            },
+            {
+              "op": "action",
+              "slot": "start"
+            },
+            {
+              "op": "clock",
+              "slot": "elapsed",
+              "milliseconds": 2000
+            },
+            {
+              "op": "assert",
+              "slot": "elapsed",
+              "test": "changed",
+              "capture": "before"
+            },
+            {
+              "op": "action",
+              "slot": "pause"
+            },
+            {
+              "op": "capture",
+              "slot": "elapsed",
+              "as": "paused"
+            },
+            {
+              "op": "clock",
+              "slot": "elapsed",
+              "milliseconds": 1000
+            },
+            {
+              "op": "assert",
+              "slot": "elapsed",
+              "test": "unchanged",
+              "capture": "paused"
+            },
+            {
+              "op": "action",
+              "slot": "reset"
+            },
+            {
+              "op": "assert",
+              "slot": "elapsed",
+              "test": "equals",
+              "value": "00:00.00"
+            }
+          ]
+        }
+      }
+    },
+    "corrected": {
+      "fields": {
+        "behavior": {
+          "status": "checkable",
+          "scenario": {
+            "slots": {
+              "elapsed": {
+                "kind": "value",
+                "part": "stopwatch",
+                "member": "value"
+              },
+              "start": {
+                "kind": "action",
+                "part": "stopwatch",
+                "member": "start"
+              },
+              "pause": {
+                "kind": "action",
+                "part": "stopwatch",
+                "member": "pause"
+              },
+              "reset": {
+                "kind": "action",
+                "part": "stopwatch",
+                "member": "reset"
+              }
+            },
+            "steps": [
+              {
+                "op": "capture",
+                "slot": "elapsed",
+                "as": "before"
+              },
+              {
+                "op": "action",
+                "slot": "start"
+              },
+              {
+                "op": "clock",
+                "slot": "elapsed",
+                "milliseconds": 2000
+              },
+              {
+                "op": "assert",
+                "slot": "elapsed",
+                "test": "changed",
+                "capture": "before"
+              },
+              {
+                "op": "action",
+                "slot": "pause"
+              },
+              {
+                "op": "capture",
+                "slot": "elapsed",
+                "as": "paused"
+              },
+              {
+                "op": "clock",
+                "slot": "elapsed",
+                "milliseconds": 1000
+              },
+              {
+                "op": "assert",
+                "slot": "elapsed",
+                "test": "unchanged",
+                "capture": "paused"
+              },
+              {
+                "op": "action",
+                "slot": "reset"
+              },
+              {
+                "op": "assert",
+                "slot": "elapsed",
+                "test": "equals",
+                "value": 0
+              }
+            ]
+          }
+        }
+      }
+    },
+    "expected": "A PLAN rejection and one PLAN repair. The corrected native workflow validates without a COMPLETE request."
+  }
+}

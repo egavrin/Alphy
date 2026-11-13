@@ -76,21 +76,22 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
                 if (id in setOf(MiniAppAi.ID, MiniAppImage.ID)) put("providerConsent", "checkedAtExecution")
             }
     }
-    internal fun discover(caller: CapabilityCaller = CapabilityCaller.MINI_APP): JSONObject = CapabilityCatalog.discovery(caller).apply {
-        val entries = getJSONArray("implemented")
-        repeat(entries.length()) { index ->
-            val entry = entries.getJSONObject(index)
-            val id = entry.getString("id")
-            val phone = PhoneCapabilities.definitions[id]
-            val platform = if (phone != null && (caller == CapabilityCaller.PHONE || id !in CapabilityCatalog.ids)) {
-                val granted = phone.permissions.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
-                JSONObject().put("state", if (granted) "available" else "permissionRequired")
-                    .put("permissionGranted", granted)
-                    .put("activityHandler", if (phone.handoff) "checkedAtExecution" else "notRequired")
-            } else availability(id)
-            entry.put("availability", platform)
+    internal fun discover(caller: CapabilityCaller = CapabilityCaller.MINI_APP, eligible: Set<String>? = null): JSONObject =
+        CapabilityCatalog.discovery(caller, eligible).apply {
+            val entries = getJSONArray("implemented")
+            repeat(entries.length()) { index ->
+                val entry = entries.getJSONObject(index)
+                val id = entry.getString("id")
+                val phone = PhoneCapabilities.definitions[id]
+                val platform = if (phone != null && (caller == CapabilityCaller.PHONE || id !in CapabilityCatalog.ids)) {
+                    val granted = phone.permissions.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+                    JSONObject().put("state", if (granted) "available" else "permissionRequired")
+                        .put("permissionGranted", granted)
+                        .put("activityHandler", if (phone.handoff) "checkedAtExecution" else "notRequired")
+                } else availability(id)
+                entry.put("availability", platform)
+            }
         }
-    }
     fun calendars(): List<Pair<Long,String>> {
         if(context.checkSelfPermission(Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) return emptyList()
         return context.contentResolver.query(CalendarContract.Calendars.CONTENT_URI,

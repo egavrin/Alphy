@@ -85,6 +85,58 @@ class GenerationBehaviorWorkflowTest {
         assertTrue((failure as BehaviorCheckFailure).detail.contains("assertion failed"))
     }
 
+    @Test fun writerButtonWithNumericPayloadReportsTheActualContract(): Unit = runBlocking {
+        val invalid = appPlan.replace("""{"op":"action","slot":"apply"}""", """{"op":"action","slot":"apply","value":7}""")
+        val failure = runCatching { check(invalid, candidate(app(true), appBindings)) }.exceptionOrNull()
+            as BehaviorCheckFailure
+        assertEquals(BehaviorFailureRule.ACTION_UNAVAILABLE, failure.bindingDiagnostic?.rule)
+        assertEquals(BehaviorValueShape.NUMBER, failure.bindingDiagnostic?.valueShape)
+        assertTrue(failure.correction, failure.correction.contains("a press without a value"))
+    }
+
+    private fun booleanControl(type: String, enabled: Boolean = true) = """
+        {"formatVersion":3,"title":"Filter","description":"","capabilities":[],
+        "stateSchema":{"active":"boolean"},"initialState":{"active":false},
+        "ui":{"type":"column","children":[{"type":"$type","text":"Show active items","bind":"active","action":"setActive","enabled":$enabled}]},
+        "source":"const {state:s,event:e}=input;if(e.type==='action'&&e.actionId==='setActive')s.active=e.value;return {state:s};"}
+    """.trimIndent()
+
+    private fun booleanScenario(lastValue: String) = """
+        {"slots":{"set":{"kind":"action"},"active":{"kind":"value","valueType":"boolean"}},"steps":[
+        {"op":"assert","slot":"active","test":"equals","value":false},
+        {"op":"action","slot":"set","value":true},
+        {"op":"assert","slot":"active","test":"equals","value":true},
+        {"op":"action","slot":"set"$lastValue},
+        {"op":"assert","slot":"active","test":"equals","value":false}]}
+    """.trimIndent()
+
+    @Test fun writerBooleanControlsUseExactValuesThroughIdAndPathBindings(): Unit = runBlocking {
+        for (type in listOf("toggle", "checkbox", "chip")) {
+            for (binding in listOf("\"setActive\"", "[0]")) {
+                val raw = candidate(booleanControl(type), """{"set":$binding,"active":[0]}""")
+                check(booleanScenario(",\"value\":false"), raw)
+            }
+        }
+    }
+
+    @Test fun writerBooleanPayloadFailureReportsTheExactLaterStep(): Unit = runBlocking {
+        val raw = candidate(booleanControl("toggle"), """{"set":[0],"active":[0]}""")
+        for ((value, shape) in listOf("" to BehaviorValueShape.MISSING, "null" to BehaviorValueShape.NULL,
+            "\"false\"" to BehaviorValueShape.STRING, "0" to BehaviorValueShape.NUMBER)) {
+            val scenario = booleanScenario(if (value.isEmpty()) "" else ",\"value\":$value")
+            val failure = runCatching { check(scenario, raw) }.exceptionOrNull() as BehaviorCheckFailure
+            assertEquals(BehaviorFailureRule.BOOLEAN_ACTION_PAYLOAD, failure.bindingDiagnostic?.rule)
+            assertEquals(shape, failure.bindingDiagnostic?.valueShape)
+            assertEquals(4, failure.bindingDiagnostic?.step)
+            assertEquals("toggle", failure.bindingDiagnostic?.nodeKind)
+        }
+        val disabled = candidate(booleanControl("toggle", enabled = false), """{"set":"setActive","active":[0]}""")
+        val failure = runCatching { check(booleanScenario(",\"value\":false"), disabled) }.exceptionOrNull()
+            as BehaviorCheckFailure
+        assertEquals(BehaviorFailureRule.ACTION_UNAVAILABLE, failure.bindingDiagnostic?.rule)
+        assertEquals(2, failure.bindingDiagnostic?.step)
+    }
+
     @Test fun aThreeJsExclusionAllowsANativeAppToSaveAndReopen(): Unit = runBlocking {
         val original = "Build a native mini-app that doubles the entered number. Do not use Three.js."
         val brief = "$original\nSuggested implementation: use a Three.js viewport."
@@ -119,7 +171,7 @@ class GenerationBehaviorWorkflowTest {
                     }
                     else -> error("Unexpected generation stage ${request.generationStage}")
                 }
-                emit(CloudEvent.Text(raw))
+                emit(CloudEvent.Text(request.withFixtureCapabilityPlan(raw)))
             }
         }
         val database = "native-runtime-exclusion-${java.util.UUID.randomUUID()}.db"
@@ -174,7 +226,7 @@ class GenerationBehaviorWorkflowTest {
                     }
                     else -> error("Unexpected generation stage")
                 }
-                emit(CloudEvent.Text(raw))
+                emit(CloudEvent.Text(call.withFixtureCapabilityPlan(raw)))
             }
         }
         val preview = ToolGenerationService(provider, SandboxClient(context)).generate("fixture", request, null,
@@ -201,7 +253,7 @@ class GenerationBehaviorWorkflowTest {
                     CloudGenerationStage.REFINE -> """{"fields":{"behaviorBindings":{"apply":"reset"}}}"""
                     else -> error("Unexpected generation stage")
                 }
-                emit(CloudEvent.Text(raw))
+                emit(CloudEvent.Text(call.withFixtureCapabilityPlan(raw)))
             }
         }
         val database = "staged-native-fallback-${java.util.UUID.randomUUID()}.db"

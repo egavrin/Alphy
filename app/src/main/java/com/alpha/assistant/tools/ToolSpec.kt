@@ -38,7 +38,7 @@ internal class ToolValidationFailure(val category: ToolValidationCategory, val d
     IllegalArgumentException(category.feedback + details?.let { " ${it.feedback}" }.orEmpty())
 internal fun <T> validateTool(category: ToolValidationCategory, details: ToolValidationDetails? = null, validate: () -> T): T = try { validate() }
     catch(failure: Exception) {
-        if(failure is ToolValidationFailure) throw failure
+        if(failure is kotlinx.coroutines.CancellationException || failure is ToolValidationFailure) throw failure
         if(failure !is IllegalArgumentException && failure !is IllegalStateException && failure !is org.json.JSONException) throw failure
         throw ToolValidationFailure(category,details)
     }
@@ -322,12 +322,14 @@ data class ToolSpec private constructor(val json: String, val title: String, val
                 } else null
             }
             val initialState = validateTool(ToolValidationCategory.INITIAL_STATE) { j.getJSONObject("initialState").toString() }
-            val ui = try {validateTool(ToolValidationCategory.UI_STRUCTURE) { j.getJSONObject("ui") }}
-                catch(failure: ToolValidationFailure) {
-                    val trace=ToolUiValidationTrace(ToolUiValidationStage.DEFINITION,observer)
-                    trace.at("ui_object","$.ui","object",j.opt("ui"))
-                    throw ToolValidationFailure(failure.category,failure.details,trace.failure(failure.category))
+            val uiTrace=ToolUiValidationTrace(ToolUiValidationStage.DEFINITION,observer)
+            val ui = try {
+                uiTrace.checking("ui_object", "$.ui", "object", j.opt("ui")) {
+                    validateTool(ToolValidationCategory.UI_STRUCTURE) { j.getJSONObject("ui") }
                 }
+            } catch(failure: ToolValidationFailure) {
+                throw ToolValidationFailure(failure.category,failure.details,uiTrace.failure(failure.category))
+            }
             val composition = if (j.has("composition")) validateComposition {
                 ToolComposition.read(j,schema,JSONObject(initialState),surfaces.keys)
             } else null

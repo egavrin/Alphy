@@ -73,6 +73,8 @@ internal class SceneCheckEvidence private constructor(
             Paused frame steps deliver frame calls to the scene so the host can check that it stays still.
         """.trimIndent() else """
             2D geometry observes drawing commands. Bind path [] for the whole drawing, or use command and group indices for selected geometry.
+            Bind a marker check to its own persistent group. Keep background commands outside that group.
+            For reset, keep the selected group addressable and remove its marker ink.
             A slot name does not select an object. Frame and timer steps require active playback and the corresponding subscription.
         """.trimIndent()
 
@@ -117,14 +119,14 @@ internal class SceneCheckEvidence private constructor(
             val slotScopes = mutableMapOf<String, GeometryScope>()
             val relations = mutableListOf<TargetRelation>()
             val covered = mutableSetOf<Int>()
-            for (item in rows) {
-                val row = item as? JSONObject ?: throw PartsContractFailure(FIELD, "an evidence object")
-                row.requireKeys(FIELD, setOf("step", "excerpt", "purpose"), setOf("scope"))
+            for ((rowIndex, item) in rows.withIndex()) {
+                val at = "$FIELD[$rowIndex]"
+                val row = item as? JSONObject ?: throw PartsContractFailure(at, "an evidence object")
+                row.requireKeys(at, setOf("step", "excerpt", "purpose"), setOf("scope"))
                 val number = row.opt("step") as? Int
                 val index = number?.minus(1)
-                requireParts(index != null && index in observed && covered.add(index), FIELD, "one row per observed step")
+                requireParts(index != null && index in observed && covered.add(index), at, "one row per observed step")
                 val step = steps[checkNotNull(index)]
-                val at = "$FIELD[$index]"
                 val slot = checkNotNull(observedSlot(step))
                 val geometry = scenario.slots.getValue(slot).kind == Kind.GEOMETRY
                 val quote = excerpt(row.opt("excerpt"), normalizedRequest, at)
@@ -194,14 +196,14 @@ internal class SceneCheckEvidence private constructor(
                 val b = slotScopes[relation.other]
                 requireParts(a == null || b == null || a == b, FIELD, "the same geometry scope for a captured comparison")
             }
-            return SceneCheckEvidence(scopes, relations, readVisual(scene, request))
+            return SceneCheckEvidence(scopes, relations, readVisual(scene, request, "$.scene"))
         }
 
-        fun readVisual(root: JSONObject, request: String): List<String> {
+        fun readVisual(root: JSONObject, request: String, parent: String): List<String> {
             if (!root.has("visualReview")) return emptyList()
             val normalizedRequest = normalizedExcerpt(request)
-            return root.items("visualReview", 1..8, "$.visualReview")
-                .map { excerpt(it, normalizedRequest, "$.visualReview") }.distinct()
+            return root.items("visualReview", 1..8, "$parent.visualReview")
+                .map { excerpt(it, normalizedRequest, "$parent.visualReview") }.distinct()
         }
 
         fun excerpt(value: Any?, normalizedRequest: String, path: String): String {

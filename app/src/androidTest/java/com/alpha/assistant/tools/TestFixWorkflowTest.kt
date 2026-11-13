@@ -72,6 +72,21 @@ class TestFixWorkflowTest {
         assertFalse(provider.calls.first().turns.joinToString().contains("throw Error"))
     }
 
+    @Test fun reproducesAndRemovesAnUnsupportedTimerSubscription(): Unit = runBlocking {
+        val working = definition.replace("if(s.amount===7)throw Error('bad');s.result=s.amount;", "s.result=s.amount*2;")
+        val subscription = "if(e.type==='action'&&e.actionId==='apply')return {state:s,timers:[{id:'tick',intervalMs:50}]};"
+        val broken = working.replace("return {state:s};", subscription + "return {state:s};")
+        val patch = JSONObject().put("sourceEdits", JSONArray().put(
+            JSONObject().put("search", subscription).put("replace", ""))).toString()
+        val provider = Provider(scenario(14), patch)
+        val result = ToolGenerationService(provider, SandboxClient(context))
+            .testAndFix("fixture", "Test and fix this app.", tool(broken), false, CloudSession())
+        assertEquals(result.detail, TestFixStatus.VERIFIED, result.status)
+        assertEquals(1, result.patchAttempts)
+        assertTrue(provider.calls.last().turns.last().text.contains("action at $.timers[0]: widget_timer_host"))
+        assertFalse(checkNotNull(result.candidate).spec.source.contains("intervalMs"))
+    }
+
     @Test fun modelInventedExpectationCannotAuthorizeAnEdit(): Unit = runBlocking {
         val provider = Provider(scenario(-156))
         val working = definition.replace("if(s.amount===7)throw Error('bad');s.result=s.amount;", "s.result=s.amount*2;")

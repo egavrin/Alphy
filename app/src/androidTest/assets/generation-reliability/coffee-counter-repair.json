@@ -1,0 +1,23 @@
+{
+  "source": {
+    "file": "generation-systemic-170/captures/fresh:logs-5:candidate:1/provider.jsonl",
+    "sha256": "e54da938f092afeea3bdafbfa63621ccfbae6a2441332ce67aa90e2fcb3c3e3f"
+  },
+  "derivation": "Replay the original decision, PLAN and first COMPLETE. The current host returns the native receipt fence to PLAN. The authored PLAN patch marks the outcome external while retaining required audio.tone. Rebuild the exact original writer with only behaviorBindings removed. Real Android UI actions verify cup counts and native tone receipts.",
+  "prefix_replies": 3,
+  "feedback_contains": [
+    "required native receipt",
+    "Keep the required Android operation and control"
+  ],
+  "replies": [
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"unchecked\",\"reason\":\"external_outcome\"}}}"
+    },
+    {
+      "stage": "COMPLETE",
+      "required_capability": "audio.tone",
+      "reply": "{\"formatVersion\":3,\"title\":\"Coffee Cup Counter\",\"description\":\"Count today's cups and hear a short beep with each cup.\",\"capabilities\":[\"audio.tone\"],\"capabilityResults\":false,\"stateSchema\":{\"count\":\"number\",\"dayKey\":\"string\"},\"initialState\":{\"count\":0,\"dayKey\":\"\"},\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"metric\",\"text\":\"Cups today\",\"bind\":\"count\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"text\",\"text\":\"Each Add cup logs a cup and plays a short beep.\",\"style\":{\"tone\":\"muted\"}},{\"type\":\"button\",\"text\":\"Add cup\",\"action\":\"addCup\",\"variant\":\"filled\"},{\"type\":\"button\",\"text\":\"Reset\",\"action\":\"resetCount\",\"variant\":\"text\"}]},\"source\":\"const s = input.state;\\nconst e = input.event;\\n\\nfunction todayKey() {\\n  const d = new Date();\\n  const y = d.getFullYear();\\n  const m = String(d.getMonth() + 1).padStart(2, '0');\\n  const day = String(d.getDate()).padStart(2, '0');\\n  return y + '-' + m + '-' + day;\\n}\\n\\nif (e.type === 'action') {\\n  if (e.actionId === 'addCup') {\\n    const today = todayKey();\\n    const base = s.dayKey === today ? s.count : 0;\\n    const count = base + 1;\\n    return {\\n      state: { count: count, dayKey: today },\\n      effects: [\\n        { id: 'beep', capability: 'audio.tone', args: { tone: 'beep', durationMillis: 120 } }\\n      ]\\n    };\\n  }\\n  if (e.actionId === 'resetCount') {\\n    return { state: { count: 0, dayKey: s.dayKey } };\\n  }\\n}\\n\\nreturn { state: s };\"}"
+    }
+  ]
+}

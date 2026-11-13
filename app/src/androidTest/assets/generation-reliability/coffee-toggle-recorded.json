@@ -1,0 +1,62 @@
+{
+  "case": "fresh:logs-5",
+  "request": "coffee counter that beeps when I add a cup",
+  "source": {
+    "file": "prompt-followups/fresh-logs-5/live-retry/live/provider.jsonl",
+    "sha256": "385104522732fd425aedab1b852b743d85cab2b0a47c8fdbbe27e2a5fbfc23bc"
+  },
+  "first_plan_rule": "behavior.step_slot",
+  "repair_stages": [
+    "PLAN",
+    "COMPLETE",
+    "COMPLETE",
+    "PLAN",
+    "COMPLETE"
+  ],
+  "terminal_failure": "widget_behavior",
+  "terminal_binding": {
+    "rule": "action_unavailable",
+    "step": 3,
+    "slot": 3,
+    "nodeKind": "toggle",
+    "valueShape": "missing"
+  },
+  "replies": [
+    {
+      "stage": "CHAT_DECISION",
+      "reply": "{\"kind\": \"create\", \"text\": \"I'll build a coffee counter that beeps each time you add a cup.\", \"brief\": \"A simple coffee cup counter mini-app. Main control: a large \\\"Add cup\\\" button that increments the cup count and plays a short beep (audio.tone) each time a cup is added. Show today's total prominently, plus a reset button to clear the count. Optional: a small history of increments with timestamps, and a toggle to mute the beep. Keep the count as the primary number displayed. Interface language: English. Styling: clean defaults.\", \"search\": \"none\", \"image\": \"\"}"
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"wholeScreen\":true,\"language\":\"en\",\"requiredCapabilities\":[{\"id\":\"audio.tone\",\"excerpt\":\"beeps when I add a cup\"}],\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"add\":{\"kind\":\"action\"},\"reset\":{\"kind\":\"action\"},\"mute\":{\"kind\":\"value\",\"valueType\":\"boolean\"},\"count\":{\"kind\":\"value\",\"valueType\":\"number\"}},\"steps\":[{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":0},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":2},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":3},{\"op\":\"assert\",\"slot\":\"mute\",\"test\":\"equals\",\"value\":false},{\"op\":\"action\",\"slot\":\"mute\",\"value\":true},{\"op\":\"assert\",\"slot\":\"mute\",\"test\":\"equals\",\"value\":true},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":4},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":0}]}}}"
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"add\":{\"kind\":\"action\"},\"reset\":{\"kind\":\"action\"},\"muteToggle\":{\"kind\":\"action\"},\"mute\":{\"kind\":\"value\",\"valueType\":\"boolean\"},\"count\":{\"kind\":\"value\",\"valueType\":\"number\"}},\"steps\":[{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":0},{\"op\":\"assert\",\"slot\":\"mute\",\"test\":\"equals\",\"value\":false},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":2},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":3},{\"op\":\"action\",\"slot\":\"muteToggle\"},{\"op\":\"assert\",\"slot\":\"mute\",\"test\":\"equals\",\"value\":true},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":4},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":0}]}}}}"
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"formatVersion\":3,\"title\":\"Coffee Counter\",\"description\":\"Count cups of coffee and beep on each addition.\",\"capabilities\":[\"audio.tone\"],\"capabilityResults\":false,\"stateSchema\":{\"count\":\"number\",\"mute\":\"boolean\"},\"initialState\":{\"count\":0,\"mute\":false},\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"section\",\"text\":\"Today's coffee\",\"children\":[{\"type\":\"card\",\"children\":[{\"type\":\"column\",\"children\":[{\"type\":\"metric\",\"text\":\"Cups\",\"bind\":\"count\",\"style\":{\"emphasis\":\"number\",\"align\":\"center\"}}],\"style\":{\"align\":\"center\",\"gap\":\"small\",\"padding\":\"medium\"}}]},{\"type\":\"row\",\"children\":[{\"type\":\"button\",\"text\":\"Add cup\",\"action\":\"add\",\"variant\":\"filled\"},{\"type\":\"button\",\"text\":\"Reset\",\"action\":\"reset\",\"variant\":\"outlined\"}]}]},{\"type\":\"section\",\"text\":\"Sound\",\"children\":[{\"type\":\"toggle\",\"text\":\"Beep on add\",\"bind\":\"mute\",\"action\":\"muteToggle\"}]}]},\"behaviorBindings\":{\"add\":\"add\",\"reset\":\"reset\",\"muteToggle\":\"muteToggle\",\"mute\":\"mute\",\"count\":\"count\"},\"source\":\"const event = input.event;\\nconst state = Object.assign({}, input.state);\\n\\nif (event.type === 'action') {\\n  if (event.actionId === 'add') {\\n    state.count = Math.min(9007199254740991, (typeof state.count === 'number' ? state.count : 0) + 1);\\n    if (!state.mute) {\\n      return {\\n        state: state,\\n        effects: [{ id: 'tone1', capability: 'audio.tone', args: { tone: 'beep', durationMillis: 150 } }]\\n      };\\n    }\\n    return { state: state };\\n  }\\n  if (event.actionId === 'reset') {\\n    state.count = 0;\\n    return { state: state };\\n  }\\n  if (event.actionId === 'muteToggle') {\\n    state.mute = !!event.value;\\n    return { state: state };\\n  }\\n}\\n\\nreturn { state: input.state };\"}"
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"fields\":{\"behaviorBindings\":{\"add\":\"add\",\"reset\":\"reset\",\"muteToggle\":\"muteToggle\",\"mute\":[1,0],\"count\":[0,0,0,0]}}}"
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"fields\":{\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"section\",\"text\":\"Today's coffee\",\"children\":[{\"type\":\"card\",\"children\":[{\"type\":\"metric\",\"text\":\"Cups\",\"bind\":\"count\",\"style\":{\"emphasis\":\"number\"}}]},{\"type\":\"row\",\"children\":[{\"type\":\"button\",\"text\":\"Add cup\",\"action\":\"add\",\"variant\":\"filled\"},{\"type\":\"button\",\"text\":\"Reset\",\"action\":\"reset\",\"variant\":\"outlined\"}]}]},{\"type\":\"section\",\"text\":\"Sound\",\"children\":[{\"type\":\"toggle\",\"text\":\"Beep on add\",\"bind\":\"mute\",\"action\":\"muteToggle\"},{\"type\":\"text\",\"text\":\"Beep enabled\",\"bind\":\"mute\"}]}]},\"behaviorBindings\":{\"add\":\"add\",\"reset\":\"reset\",\"muteToggle\":\"muteToggle\",\"mute\":[1,1],\"count\":[0,0,0]}}}"
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"add\":{\"kind\":\"action\"},\"reset\":{\"kind\":\"action\"},\"muteToggle\":{\"kind\":\"action\"},\"mute\":{\"kind\":\"value\",\"valueType\":\"boolean\"},\"count\":{\"kind\":\"value\",\"valueType\":\"number\"}},\"steps\":[{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":0},{\"op\":\"assert\",\"slot\":\"mute\",\"test\":\"equals\",\"value\":false},{\"op\":\"action\",\"slot\":\"muteToggle\"},{\"op\":\"assert\",\"slot\":\"mute\",\"test\":\"equals\",\"value\":true},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":2},{\"op\":\"action\",\"slot\":\"muteToggle\"},{\"op\":\"assert\",\"slot\":\"mute\",\"test\":\"equals\",\"value\":false},{\"op\":\"availability\",\"slot\":\"add\",\"value\":true},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":0}]}}}}"
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"formatVersion\":3,\"title\":\"Coffee Cup Counter\",\"description\":\"Counts cups of coffee and beeps each time you add one.\",\"capabilities\":[\"audio.tone\"],\"capabilityResults\":false,\"stateSchema\":{\"count\":\"number\",\"mute\":\"boolean\"},\"initialState\":{\"count\":0,\"mute\":false},\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"metric\",\"text\":\"Cups added\",\"bind\":\"count\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"button\",\"text\":\"Add cup\",\"action\":\"add\",\"variant\":\"filled\"},{\"type\":\"button\",\"text\":\"Reset\",\"action\":\"reset\",\"variant\":\"outlined\"},{\"type\":\"toggle\",\"text\":\"Mute beep\",\"bind\":\"mute\",\"action\":\"muteToggle\"},{\"type\":\"text\",\"text\":\"Each cup adds one and plays a short beep.\"}]},\"behaviorBindings\":{\"add\":\"add\",\"reset\":\"reset\",\"muteToggle\":\"muteToggle\",\"mute\":[3],\"count\":[0]},\"source\":\"const event = input.event || {};\\nconst state = input.state;\\nconst count = Number(state.count) || 0;\\nconst mute = state.mute === true;\\n\\nif (event.type === 'action') {\\n  if (event.actionId === 'add') {\\n    const next = { count: count + 1, mute: mute };\\n    if (mute) return { state: next };\\n    return {\\n      state: next,\\n      effects: [{ id: 'beep', capability: 'audio.tone', args: { tone: 'beep', durationMillis: 150 } }]\\n    };\\n  }\\n  if (event.actionId === 'reset') {\\n    return { state: { count: 0, mute: mute } };\\n  }\\n  if (event.actionId === 'muteToggle') {\\n    const nextMute = typeof event.value === 'boolean' ? event.value : !mute;\\n    return { state: { count: count, mute: nextMute } };\\n  }\\n  return { state: state };\\n}\\n\\nreturn { state: state };\"}"
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"fields\":{\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"metric\",\"text\":\"Cups added\",\"bind\":\"count\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"text\",\"text\":\"Beep status\",\"bind\":\"mute\"},{\"type\":\"button\",\"text\":\"Add cup\",\"action\":\"add\",\"variant\":\"filled\"},{\"type\":\"button\",\"text\":\"Reset\",\"action\":\"reset\",\"variant\":\"outlined\"},{\"type\":\"toggle\",\"text\":\"Mute beep\",\"bind\":\"mute\",\"action\":\"muteToggle\"},{\"type\":\"text\",\"text\":\"Each cup adds one and plays a short beep.\"}]},\"behaviorBindings\":{\"add\":\"add\",\"reset\":\"reset\",\"muteToggle\":\"muteToggle\",\"mute\":[1],\"count\":[0]}}}"
+    }
+  ]
+}

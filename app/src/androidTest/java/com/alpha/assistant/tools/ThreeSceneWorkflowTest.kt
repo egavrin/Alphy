@@ -349,7 +349,7 @@ class ThreeSceneWorkflowTest {
                 "steps":[{"op":"frames","slot":"view","count":8,"observe":"object","changes":3}]}},
             "checkEvidence":[{"step":1,"excerpt":"Reach the final result.","purpose":"motion","scope":"whole"}]}}""")
         fun parse(candidate: JSONObject = plan, originalRequest: String = request) =
-            com.alpha.assistant.tools.generation.NeedsPlan.parseResponse(candidate.toString(), null, emptySet(),
+            com.alpha.assistant.tools.generation.NeedsPlan.parseResponse(candidate.put("requiredCapabilities", JSONArray()).toString(), null, emptySet(),
                 originalRequest, requireSceneOutcome = true)
         assertTrue(runCatching { parse() }.isFailure)
         val continuousRequest = "Keep the object moving continuously."
@@ -390,7 +390,7 @@ class ThreeSceneWorkflowTest {
                 {"op":"complete","slot":"view","observe":"result","value":true,"maxFrames":100}]}},
             "checkEvidence":[{"step":1,"excerpt":"scene","purpose":"outcome","scope":"whole"},
                 {"step":4,"excerpt":"reach the final result.","purpose":"outcome"}]}}""")
-        assertNotNull(com.alpha.assistant.tools.generation.NeedsPlan.parseResponse(plan.toString(), null, emptySet(), request))
+        assertNotNull(com.alpha.assistant.tools.generation.NeedsPlan.parseResponse(plan.put("requiredCapabilities", JSONArray()).toString(), null, emptySet(), request))
     }
 
     @Test fun boundedRaceChecksTouchPauseFinishRestartAndReopen() = runBlocking {
@@ -1445,7 +1445,7 @@ class ThreeSceneWorkflowTest {
             """{"op":"surface","slot":"view","event":"start"}""")) {
             steps.put(0, JSONObject(event))
             assertTrue(runCatching {
-                com.alpha.assistant.tools.generation.NeedsPlan.parseResponse(plan.toString(), null, emptySet())
+                com.alpha.assistant.tools.generation.NeedsPlan.parseResponse(plan.put("requiredCapabilities", JSONArray()).toString(), null, emptySet())
             }.isFailure)
         }
     }

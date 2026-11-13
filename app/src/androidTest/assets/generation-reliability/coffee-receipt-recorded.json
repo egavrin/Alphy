@@ -1,0 +1,80 @@
+{
+  "case": "fresh:logs-5",
+  "request": "coffee counter that beeps when I add a cup",
+  "source": {
+    "file": "prompt-followups/fresh-logs-5/toggle-boolean/live/provider.jsonl",
+    "sha256": "c5c2e48237b26b38e460cff9fd1d1e623731da0078c0197c832daba371ef0fe4"
+  },
+  "first_plan_rule": "behavior.native_owner",
+  "repair_stages": [
+    "PLAN",
+    "PLAN",
+    "PLAN"
+  ],
+  "terminal_failure": "widget_plan",
+  "terminal_binding": {
+    "rule": "external_result_required",
+    "step": 2
+  },
+  "replies": [
+    {
+      "stage": "CHAT_DECISION",
+      "reply": "{\"kind\": \"create\", \"text\": \"I'll build a coffee counter that beeps each time you add a cup.\", \"brief\": \"{\\\"app\\\":\\\"Coffee counter\\\",\\\"interface_language\\\":\\\"English\\\",\\\"controls\\\":[{\\\"type\\\":\\\"counter\\\",\\\"label\\\":\\\"Cups today\\\",\\\"initial\\\":0,\\\"max\\\":null},{\\\"type\\\":\\\"button\\\",\\\"label\\\":\\\"Add cup\\\",\\\"action\\\":\\\"increment counter by 1 and play a short beep (audio.tone) each time\\\"},{\\\"type\\\":\\\"button\\\",\\\"label\\\":\\\"Undo\\\",\\\"action\\\":\\\"decrement counter by 1, minimum 0, no beep\\\"},{\\\"type\\\":\\\"button\\\",\\\"label\\\":\\\"Reset\\\",\\\"action\\\":\\\"set counter to 0 with confirmation\\\"}],\\\"behavior\\\":\\\"Show the current cup count prominently. Play a short beep via the supported audio.tone capability on every add. Keep the counter state locally in the app. Optional: show a simple daily goal progress hint.\", \"search\": \"none\", \"image\": \"\"}"
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"title\":\"Coffee counter\",\"description\":\"Count your cups of coffee and beep each time you add a cup\",\"language\":\"en\",\"inputs\":[],\"constants\":[],\"needs\":[{\"id\":\"cups\",\"type\":\"counter\",\"label\":\"Cups today\",\"description\":\"Counts cups of coffee. Each add increments the count by one and plays a short beep through audio.tone. Reset returns the count to zero without a beep.\"}],\"questions\":[],\"requiredCapabilities\":[{\"id\":\"audio.tone\",\"excerpt\":\"beeps when I add a cup\"}],\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"add\":{\"kind\":\"action\",\"part\":\"cups\",\"member\":\"add\"},\"reset\":{\"kind\":\"action\",\"part\":\"cups\",\"member\":\"reset\"},\"count\":{\"kind\":\"value\",\"part\":\"cups\",\"member\":\"value\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":2},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":0}]}}}"
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"s_cups\",\"choice\":\"B\",\"confidence\":0.8,\"probabilities\":{\"A\":0.2,\"B\":0.8}}]}",
+      "questions": [
+        "s_cups"
+      ]
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"add\":{\"kind\":\"action\"},\"reset\":{\"kind\":\"action\"},\"count\":{\"kind\":\"value\",\"valueType\":\"number\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":2},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":0}]}}}}"
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"s_cups\",\"choice\":\"B\",\"confidence\":0.86,\"probabilities\":{\"A\":0.14,\"B\":0.86}}]}",
+      "questions": [
+        "s_cups"
+      ]
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"formatVersion\":3,\"title\":\"Coffee counter\",\"description\":\"Count your cups of coffee and beep each time you add a cup\",\"capabilities\":[\"audio.tone\"],\"capabilityResults\":false,\"stateSchema\":{\"count\":\"number\"},\"initialState\":{\"count\":0},\"behaviorBindings\":{\"add\":\"add\",\"reset\":\"reset\",\"count\":[0,0]},\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"section\",\"text\":\"Today's cups\",\"children\":[{\"type\":\"metric\",\"text\":\"Cups today\",\"bind\":\"count\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"row\",\"children\":[{\"type\":\"button\",\"text\":\"Add cup\",\"action\":\"add\",\"variant\":\"filled\"},{\"type\":\"button\",\"text\":\"Undo\",\"action\":\"undo\",\"variant\":\"outlined\"}]}]},{\"type\":\"button\",\"text\":\"Reset\",\"action\":\"reset\",\"variant\":\"text\"}]},\"source\":\"const state = input.state;\\nconst event = input.event;\\n\\nif (event.type === 'preview' || event.type === 'render') {\\n  return {state: state};\\n}\\n\\nif (event.type === 'action') {\\n  const count = typeof state.count === 'number' ? state.count : 0;\\n\\n  if (event.actionId === 'add') {\\n    const next = count + 1;\\n    if (next > 9007199254740991) {\\n      return {state: state};\\n    }\\n    return {\\n      state: Object.assign({}, state, {count: next}),\\n      effects: [{id: 'beep', capability: 'audio.tone', args: {tone: 'beep', durationMillis: 120}}]\\n    };\\n  }\\n\\n  if (event.actionId === 'undo') {\\n    return {state: Object.assign({}, state, {count: Math.max(0, count - 1)})};\\n  }\\n\\n  if (event.actionId === 'reset') {\\n    return {state: Object.assign({}, state, {count: 0})};\\n  }\\n}\\n\\nreturn {state: state};\"}"
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"unchecked\",\"reason\":\"external_outcome\"}}}"
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"s_cups\",\"choice\":\"A\",\"confidence\":0.86,\"probabilities\":{\"A\":0.86,\"B\":0.14}}]}",
+      "questions": [
+        "s_cups"
+      ]
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"p_cups\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"v_profile\",\"choice\":\"A\",\"confidence\":0.85,\"probabilities\":{\"A\":0.85,\"B\":0.1,\"C\":0.05}},{\"id\":\"v_preset\",\"choice\":\"A\",\"confidence\":0.7,\"probabilities\":{\"A\":0.7,\"B\":0.1,\"C\":0.08,\"D\":0.05,\"E\":0.05,\"F\":0.02}},{\"id\":\"v_focal\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}}]}",
+      "questions": [
+        "p_cups",
+        "v_profile",
+        "v_preset",
+        "v_focal"
+      ]
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"wholeScreen\":true,\"language\":\"en\",\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"add\":{\"kind\":\"action\"},\"count\":{\"kind\":\"value\"},\"reset\":{\"kind\":\"action\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":2},{\"op\":\"action\",\"slot\":\"reset\"},{\"op\":\"assert\",\"slot\":\"count\",\"test\":\"equals\",\"value\":0}]}},\"requiredCapabilities\":[{\"id\":\"audio.tone\",\"excerpt\":\"beeps when I add a cup\"}]},\"removeFields\":[\"title\",\"description\",\"inputs\",\"constants\",\"needs\",\"questions\"]}"
+    },
+    {
+      "stage": "COMPLETE",
+      "reply": "{\"formatVersion\":3,\"title\":\"Coffee Counter\",\"description\":\"Counts cups of coffee and beeps each time you add one.\",\"capabilities\":[\"audio.tone\"],\"capabilityResults\":false,\"stateSchema\":{\"count\":\"number\"},\"initialState\":{\"count\":0},\"behaviorBindings\":{\"add\":\"addCup\",\"count\":[0],\"reset\":\"resetCups\"},\"ui\":{\"type\":\"column\",\"style\":{\"gap\":\"medium\",\"padding\":\"medium\"},\"children\":[{\"type\":\"metric\",\"text\":\"Cups today\",\"bind\":\"count\",\"format\":\"number\",\"style\":{\"emphasis\":\"number\",\"align\":\"center\"}},{\"type\":\"flowRow\",\"style\":{\"gap\":\"small\",\"arrangement\":\"center\"},\"children\":[{\"type\":\"button\",\"text\":\"Add cup\",\"action\":\"addCup\",\"variant\":\"filled\"},{\"type\":\"button\",\"text\":\"Undo\",\"action\":\"undoCup\",\"variant\":\"outlined\"},{\"type\":\"button\",\"text\":\"Reset\",\"action\":\"resetCups\",\"variant\":\"text\"}]},{\"type\":\"text\",\"text\":\"Each cup added plays a short beep.\",\"style\":{\"tone\":\"muted\",\"align\":\"center\"}}]},\"source\":\"const state = Object.assign({}, input.state); const event = input.event; const toCount = function (v) { return Number.isFinite(v) && v > 0 ? Math.floor(v) : 0; }; if (event.type === 'action') { if (event.actionId === 'addCup') { const next = toCount(state.count) + 1; if (next > 9007199254740991) { return { state: state }; } state.count = next; return { state: state, effects: [{ id: 'beep', capability: 'audio.tone', args: { tone: 'beep', durationMillis: 120 } }] }; } if (event.actionId === 'undoCup') { state.count = Math.max(0, toCount(state.count) - 1); return { state: state }; } if (event.actionId === 'resetCups') { state.count = 0; return { state: state }; } } return { state: state };\"}"
+    }
+  ]
+}

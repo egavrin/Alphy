@@ -38,7 +38,8 @@ class SyntheticSchemaDiagnosticTest {
             "component_binding_missing_path" to "declared_path_in_schema_and_state",
             "component_binding_schema_type" to "compatible_schema_type",
             "component_binding_state_value" to "schema_valid_state_value", "component_action" to "unique_ascii_action",
-            "component_contract" to "catalog_component_contract", "theme_preset" to "catalog_preset", "grid_columns" to "integer_1_4",
+            "component_contract" to "catalog_component_contract", "native_capability_id" to "catalog_capability_id",
+            "native_capability_arguments" to "catalog_native_arguments", "theme_preset" to "catalog_preset", "grid_columns" to "integer_1_4",
             "spacer_size" to "integer_0_64", "icon_name" to "catalog_icon", "button_icon" to "catalog_icon",
             "input_length" to "integer_1_2048", "text_format" to "number_or_clock_format", "selection_options" to "options_1_30",
             "selection_option" to "typed_unique_option", "selection_current_value" to "current_value_in_options",
@@ -200,7 +201,7 @@ class SyntheticSchemaDiagnosticTest {
     }
     private fun uiDiagnosticReport(diagnostic: ToolUiDiagnostic): JSONObject {
         check(uiRules[diagnostic.rule] == diagnostic.expected)
-        check(diagnostic.path.matches(Regex("\\$\\.ui(?:\\.(?:type|properties|visible|enabled|text|style|bind|action|preset|columns|size|name|icon|maxLength|format|options|rowActions|emphasis|enabledField|field|kind|categories|series|resourceId|fit|min|max|step|children|value)(?:\\[[0-9]{1,3}\\])?)*")))
+        check(diagnostic.path.matches(Regex("\\$\\.ui(?:\\.(?:type|properties|visible|enabled|text|style|bind|action|capability|args|preset|columns|size|name|icon|maxLength|format|options|rowActions|emphasis|enabledField|field|kind|categories|series|resourceId|fit|min|max|step|children|value)(?:\\[[0-9]{1,3}\\])?)*")))
         check(diagnostic.observed in setOf("missing","null","object","array","string","integer","number","boolean","other"))
         return JSONObject().put("origin","actualValidatorFailure").put("stage",diagnostic.stage.name.lowercase(java.util.Locale.ROOT))
             .put("category",diagnostic.category.id).put("rule",diagnostic.rule).put("path",diagnostic.path)

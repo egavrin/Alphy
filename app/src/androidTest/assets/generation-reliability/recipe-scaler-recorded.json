@@ -1,0 +1,74 @@
+{
+  "case": "fresh:cooking-1",
+  "request": "scale a recipe: it serves 4 and uses 300 g flour, I want to cook for 6",
+  "source": {
+    "file": "generation-systemic-170/captures/fresh:cooking-1:candidate:1/provider.jsonl",
+    "sha256": "7500c0c7ca7c23a32bbee75368bdc2fb4503d905df1e14922083aeaacc9384a3"
+  },
+  "replies": [
+    {
+      "stage": "CHAT_DECISION",
+      "reply": "{\"kind\": \"create\", \"text\": \"Here's a recipe scaler: enter servings and amounts for each ingredient.\", \"brief\": \"{\\\"app\\\":\\\"Recipe scaler\\\",\\\"interface_language\\\":\\\"English\\\",\\\"purpose\\\":\\\"Scale recipe ingredient amounts from the original serving count to a desired serving count.\\\",\\\"inputs\\\":[{\\\"name\\\":\\\"Original servings\\\",\\\"type\\\":\\\"number\\\",\\\"initial\\\":4,\\\"unit\\\":\\\"servings\\\"},{\\\"name\\\":\\\"Desired servings\\\",\\\"type\\\":\\\"number\\\",\\\"initial\\\":6,\\\"unit\\\":\\\"servings\\\"},{\\\"name\\\":\\\"Ingredients\\\",\\\"type\\\":\\\"editable list\\\",\\\"initial\\\":[{\\\"name\\\":\\\"Flour\\\",\\\"amount\\\":300,\\\"unit\\\":\\\"g\\\"}]}],\\\"features\\\":[\\\"Add, edit and remove ingredient rows\\\",\\\"Optional ingredient name field\\\",\\\"Show scale factor (desired / original servings)\\\",\\\"Show scaled amount per ingredient\\\",\\\"Preserve units as entered; do not convert units\\\",\\\"Optional rounding to sensible decimals (e.g. 1 decimal, or whole numbers for grams)\\\",\\\"Validation for zero or empty serving counts\\\"]}\", \"search\": \"none\", \"image\": \"\"}"
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"title\":\"Recipe scaler\",\"description\":\"Scale ingredient amounts from the original serving count to the serving count you want, keeping units as entered.\",\"language\":\"en\",\"inputs\":[{\"id\":\"originalServings\",\"label\":\"Original servings\",\"type\":\"number\",\"value\":4,\"min\":1},{\"id\":\"desiredServings\",\"label\":\"Desired servings\",\"type\":\"number\",\"value\":6,\"min\":1}],\"constants\":[],\"needs\":[{\"id\":\"scaleFactor\",\"type\":\"figure\",\"label\":\"Scale factor\",\"description\":\"Desired servings divided by original servings.\",\"expression\":{\"op\":\"divide\",\"args\":[{\"ref\":\"desiredServings\"},{\"ref\":\"originalServings\"}]}},{\"id\":\"ingredients\",\"type\":\"entries\",\"label\":\"Ingredients\",\"description\":\"Add, edit and remove ingredient rows. Each row has an optional name and an amount in the unit as entered. Show the scaled amount as amount × scale factor, rounded to one decimal, without converting units.\",\"fields\":[{\"id\":\"name\",\"label\":\"Ingredient\",\"type\":\"text\"},{\"id\":\"amount\",\"label\":\"Amount\",\"type\":\"number\"}]}],\"questions\":[],\"requiredCapabilities\":[],\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"editName\":{\"kind\":\"action\",\"part\":\"ingredients\",\"member\":\"edit_1\"},\"editAmount\":{\"kind\":\"action\",\"part\":\"ingredients\",\"member\":\"edit_2\"},\"add\":{\"kind\":\"action\",\"part\":\"ingredients\",\"member\":\"add\"},\"list\":{\"kind\":\"collection\",\"part\":\"ingredients\",\"member\":\"records\"},\"factor\":{\"kind\":\"value\",\"part\":\"scaleFactor\",\"member\":\"value\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"editName\",\"value\":\"Flour\"},{\"op\":\"action\",\"slot\":\"editAmount\",\"value\":300},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"list\",\"test\":\"equals\",\"value\":1},{\"op\":\"assert\",\"slot\":\"factor\",\"test\":\"equals\",\"value\":1.5}]}}}"
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"s_originalServings\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_desiredServings\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_scaleFactor\",\"choice\":\"A\",\"confidence\":0.85,\"probabilities\":{\"A\":0.85,\"B\":0.15}},{\"id\":\"s_ingredients\",\"choice\":\"B\",\"confidence\":0.85,\"probabilities\":{\"A\":0.15,\"B\":0.85}}]}",
+      "questions": [
+        "s_originalServings",
+        "s_desiredServings",
+        "s_scaleFactor",
+        "s_ingredients"
+      ]
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"p_originalServings\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"p_desiredServings\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"p_scaleFactor\",\"choice\":\"A\",\"confidence\":0.93,\"probabilities\":{\"A\":0.93,\"B\":0.07}},{\"id\":\"v_profile\",\"choice\":\"A\",\"confidence\":0.6,\"probabilities\":{\"A\":0.6,\"B\":0.25,\"C\":0.15}},{\"id\":\"v_preset\",\"choice\":\"A\",\"confidence\":0.45,\"probabilities\":{\"A\":0.45,\"B\":0.15,\"C\":0.1,\"D\":0.1,\"E\":0.1,\"F\":0.1}},{\"id\":\"v_focal\",\"choice\":\"C\",\"confidence\":0.5,\"probabilities\":{\"A\":0.2,\"B\":0.25,\"C\":0.5,\"D\":0.05}}]}",
+      "questions": [
+        "p_originalServings",
+        "p_desiredServings",
+        "p_scaleFactor",
+        "v_profile",
+        "v_preset",
+        "v_focal"
+      ]
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"editName\":{\"kind\":\"action\"},\"editAmount\":{\"kind\":\"action\"},\"add\":{\"kind\":\"action\",\"part\":\"ingredients\",\"member\":\"add\"},\"list\":{\"kind\":\"collection\",\"part\":\"ingredients\",\"member\":\"records\"},\"factor\":{\"kind\":\"value\",\"part\":\"scaleFactor\",\"member\":\"value\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"editName\",\"value\":\"Flour\"},{\"op\":\"action\",\"slot\":\"editAmount\",\"value\":300},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"list\",\"test\":\"equals\",\"value\":1},{\"op\":\"assert\",\"slot\":\"factor\",\"test\":\"equals\",\"value\":1.5}]}}}}"
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"s_originalServings\",\"choice\":\"A\",\"confidence\":0.8,\"probabilities\":{\"A\":0.8,\"B\":0.2}},{\"id\":\"s_desiredServings\",\"choice\":\"A\",\"confidence\":0.8,\"probabilities\":{\"A\":0.8,\"B\":0.2}},{\"id\":\"s_scaleFactor\",\"choice\":\"A\",\"confidence\":0.8,\"probabilities\":{\"A\":0.8,\"B\":0.2}},{\"id\":\"s_ingredients\",\"choice\":\"B\",\"confidence\":0.85,\"probabilities\":{\"A\":0.15,\"B\":0.85}}]}",
+      "questions": [
+        "s_originalServings",
+        "s_desiredServings",
+        "s_scaleFactor",
+        "s_ingredients"
+      ]
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"p_originalServings\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"p_desiredServings\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"p_scaleFactor\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"v_profile\",\"choice\":\"A\",\"confidence\":0.7,\"probabilities\":{\"A\":0.7,\"B\":0.2,\"C\":0.1}},{\"id\":\"v_preset\",\"choice\":\"A\",\"confidence\":0.5,\"probabilities\":{\"A\":0.5,\"B\":0.15,\"C\":0.15,\"D\":0.05,\"E\":0.1,\"F\":0.05}},{\"id\":\"v_focal\",\"choice\":\"C\",\"confidence\":0.6,\"probabilities\":{\"A\":0.2,\"B\":0.15,\"C\":0.6,\"D\":0.05}}]}",
+      "questions": [
+        "p_originalServings",
+        "p_desiredServings",
+        "p_scaleFactor",
+        "v_profile",
+        "v_preset",
+        "v_focal"
+      ]
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"editName\":{\"kind\":\"action\",\"part\":\"ingredients\",\"member\":\"edit_1\"},\"editAmount\":{\"kind\":\"action\",\"part\":\"ingredients\",\"member\":\"edit_2\"},\"add\":{\"kind\":\"action\",\"part\":\"ingredients\",\"member\":\"add\"},\"list\":{\"kind\":\"collection\",\"part\":\"ingredients\",\"member\":\"records\"},\"factor\":{\"kind\":\"value\",\"part\":\"scaleFactor\",\"member\":\"value\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"editName\",\"value\":\"Flour\"},{\"op\":\"action\",\"slot\":\"editAmount\",\"value\":300},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"list\",\"test\":\"equals\",\"value\":1},{\"op\":\"assert\",\"slot\":\"factor\",\"test\":\"equals\",\"value\":1.5}]}}}}"
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"editName\":{\"kind\":\"action\",\"part\":\"ingredients\",\"member\":\"edit_1\"},\"editAmount\":{\"kind\":\"action\",\"part\":\"ingredients\",\"member\":\"edit_2\"},\"add\":{\"kind\":\"action\",\"part\":\"ingredients\",\"member\":\"add\"},\"list\":{\"kind\":\"collection\",\"part\":\"ingredients\",\"member\":\"records\"},\"factor\":{\"kind\":\"value\",\"part\":\"scaleFactor\",\"member\":\"value\"}},\"steps\":[{\"op\":\"action\",\"slot\":\"editName\",\"value\":\"Flour\"},{\"op\":\"action\",\"slot\":\"editAmount\",\"value\":300},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"list\",\"test\":\"equals\",\"value\":1},{\"op\":\"assert\",\"slot\":\"factor\",\"test\":\"equals\",\"value\":1.5}]}}}}"
+    }
+  ]
+}

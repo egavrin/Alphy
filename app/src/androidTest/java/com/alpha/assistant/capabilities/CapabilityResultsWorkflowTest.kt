@@ -202,10 +202,13 @@ class CapabilityResultsWorkflowTest {
         val capture=object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests.add(request)
-                emit(CloudEvent.Text(request.withFixtureLanguage("""{"fields":{"title":"Updated results"}}""")))
+                val reply = if (request.generationStage == CloudGenerationStage.PLAN) """{"requiredCapabilities":[]}"""
+                    else request.withFixtureLanguage("""{"fields":{"title":"Updated results"}}""")
+                emit(CloudEvent.Text(reply))
             }
         }
         val result=ToolGenerationService(capture,SandboxClient(context)).generate("fixture","Rename to Updated results",base,emptyList(),CloudSession(),tool.id)
+        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE), requests.map { it.generationStage })
         assertFalse(requests.any { marker in it.systemInstructions || it.turns.any { turn -> marker in turn.text } })
         assertEquals("Updated results", result.spec.title)
         assertEquals(marker,JSONObject(result.state).getString("secret"))

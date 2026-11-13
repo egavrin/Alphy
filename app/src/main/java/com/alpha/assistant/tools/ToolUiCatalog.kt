@@ -29,9 +29,11 @@ object ToolUiCatalog {
     private val timerModes = setOf("countdown", "stopwatch")
     private val optionalBindings=setOf("text","metric","badge","fact","timelineItem","image","progress","progressRing")
     val choiceTypes=setOf("select","tabs","singleChoice","multiChoice","segmented","navigationBar","navigationRail","menu")
+    val booleanInputTypes = setOf("toggle", "checkbox", "chip")
     val modalTypes=setOf("dialog","bottomSheet")
     val interactionKeys=setOf("enter","space","escape","up","down","left","right")
     private class MissingBindingPath : IllegalArgumentException("Binding path is missing.")
+    internal class InvalidBooleanActionPayload(val control: JSONObject) : IllegalArgumentException("Invalid action value.")
     internal val tones=setOf("default","muted","accent","success","warning","error")
     val presets=setOf("clean","soft","expressive","editorial","technical","playful")
     val icons=setOf("Menu","History","Plus","Arrow","Close","Back","Cloud","Mic","Grid","Spark","Calendar","Repeat","Settings","File","Link","Chevron","Search","Screen","Camera","Bell","Check")
@@ -76,7 +78,7 @@ object ToolUiCatalog {
         add(entry("actionChip",setOf("action","variant"),Projection.SUMMARY,action=true))
         add(entry("icon",setOf("name","action"),Projection.SUMMARY))
         for(type in listOf("input","numberInput","timeInput","dateInput","toggle","checkbox","slider","select","tabs","chip","singleChoice","multiChoice","segmented","navigationBar","navigationRail","menu","rangeSlider","dateRangeInput","search")) {
-            val binding=when(type) {"input","search","dateInput" -> setOf("string"); "rangeSlider","dateRangeInput","multiChoice" -> setOf("array"); "toggle","checkbox","chip" -> setOf("boolean"); "numberInput","timeInput","slider" -> setOf("number"); else -> scalar}
+            val binding=when(type) {"input","search","dateInput" -> setOf("string"); "rangeSlider","dateRangeInput","multiChoice" -> setOf("array"); in booleanInputTypes -> setOf("boolean"); "numberInput","timeInput","slider" -> setOf("number"); else -> scalar}
             val props=when(type) {"chip" -> setOf("variant","dismissAction"); "input","search" -> setOf("maxLength","keyboard","imeAction","maxLines"); "numberInput","slider","rangeSlider" -> setOf("min","max","step"); "singleChoice" -> setOf("options","variant"); in choiceTypes -> setOf("options"); else -> emptySet()}
             val inputProps = if (type in liveInputTypes) props + "inputMode" else props
             add(entry(type,setOf("bind","action")+inputProps,if(type == "toggle") Projection.LOCAL_ACTION else Projection.SUMMARY,binding,action=true))
@@ -175,99 +177,119 @@ object ToolUiCatalog {
     fun validate(root: JSONObject, fields: JSONObject, state: JSONObject): JSONObject = validate(root,fields,state,null)
     internal fun validate(root: JSONObject,fields: JSONObject,state: JSONObject,trace: ToolUiValidationTrace?, capabilities: Set<String>? = null): JSONObject {
         val size = root.toString().toByteArray(Charsets.UTF_8).size
-        trace?.at("ui_bytes","$.ui","bytes_at_most_$MAX_UI_BYTES",root,size)
-        require(size <= MAX_UI_BYTES) {"Native UI exceeds ${MAX_UI_BYTES / 1024} KiB."}
+        trace.checking("ui_bytes","$.ui","bytes_at_most_$MAX_UI_BYTES",root,size) {
+            require(size <= MAX_UI_BYTES) {"Native UI exceeds ${MAX_UI_BYTES / 1024} KiB."}
+        }
         var count=0; val actions=mutableSetOf<String>()
         var hasRouteStack = false
-        fun visit(node: JSONObject, depth: Int, location: String, fields: JSONObject, state: JSONObject, template: Boolean = false, schemaOnly: Boolean = false, register: Boolean = true, motion: Boolean = false, stage: Boolean = false, layerContent: Boolean = false, parent: String = "") {
-            trace?.at("node_depth_limit",location,"nodes_${MAX_NODES}_depth_8",node,count+1)
-            require((!register || ++count <= MAX_NODES) && depth <= 8) {"Native UI exceeds its node or depth limit."}
-            trace?.at("component_type","$location.type","catalog_component",node.opt("type"))
-            val type=node.getString("type"); val definition=component(type)
+        fun validateNativeCapability(node: JSONObject, location: String, ids: Set<String>, validate: (JSONObject) -> Unit) {
+            val capability = node.opt("capability")
+            trace.checking("native_capability_id", "$location.capability", "catalog_capability_id", capability) {
+                require(capability is String && capability in ids)
+            }
+            trace.checking("native_capability_arguments", "$location.args", "catalog_native_arguments", node.opt("args")) {
+                validate(node)
+            }
+        }
+        fun visit(node: JSONObject, depth: Int, location: String, fields: JSONObject, state: JSONObject, template: Boolean = false, schemaOnly: Boolean = false, register: Boolean = true, motion: Boolean = false, stage: Boolean = false, layerContent: Boolean = false, parent: String = ""): Unit = trace.checking("component_contract", location, "catalog_component_contract", node) {
+            trace.checking("node_depth_limit",location,"nodes_${MAX_NODES}_depth_8",node,count+1) {
+                require((!register || ++count <= MAX_NODES) && depth <= 8) {"Native UI exceeds its node or depth limit."}
+            }
+            val definition = trace.checking("component_type","$location.type","catalog_component",node.opt("type")) {
+                component(node.getString("type"))
+            }
+            val type = definition.type
             if(template) require(type !in setOf("list","table","groupedList","lazyList","lazyGrid","image","video","calendar","medicine","navigation","stage","canvas","dialog","bottomSheet","pager","routeStack")) {"Unsupported row-template component."}
             if(stage && layerContent) require(type != "transform") {"Stage transforms must be direct layer children."}
             if(stage) require(!node.has("interactions") && !node.has("dismissAction") && !node.has("action") && !component(type).actionRequired && type !in setOf("motion","stage","list","table","groupedList","lazyList","lazyGrid","canvas")) {"Stage content must be noninteractive layers."}
             validateTool(ToolValidationCategory.UI_PROPERTIES) {
-                trace?.at("component_properties",location,"catalog_properties",node,node.length())
-                if(type == "theme") validateTheme(node)
-                if (type == "canvas") {
-                    val ids = node.getJSONArray("surfaces")
-                    require(ids.length() in 1..4 && (0 until ids.length()).all { ids.get(it) is String }) {
-                        "A canvas needs one to four surface IDs."
+                trace.checking("component_properties",location,"catalog_properties",node,node.length()) {
+                    if(type == "theme") trace.checking("component_theme", location, "catalog_theme", node) { validateTheme(node) }
+                    if (type == "canvas") {
+                        val ids = node.getJSONArray("surfaces")
+                        require(ids.length() in 1..4 && (0 until ids.length()).all { ids.get(it) is String }) {
+                            "A canvas needs one to four surface IDs."
+                        }
                     }
-                }
-                require(ToolValueSchema.keys(node).all {it in definition.properties}) {"Unsupported component property."}
-                if (node.has("inputMode")) {
-                    val mode = node.get("inputMode")
-                    trace?.at("input_mode", "$location.inputMode", "apply_or_live", mode)
-                    require(mode == "apply" || mode == "live") { "Input mode must be apply or live." }
-                }
-                for(flag in listOf("visible","enabled")) if(node.has(flag)) {
-                    trace?.at("component_flag","$location.$flag","boolean",node.opt(flag))
-                    require(node.get(flag) is Boolean)
-                }
-                for(flag in listOf("visibleBind","enabledBind")) if(node.has(flag)) {
-                    require(node.get(flag) is String && schema(fields,node.getString(flag)) == "boolean") {"Visibility and availability need declared boolean bindings."}
-                    if(!schemaOnly) require(value(state,node.getString(flag)) is Boolean)
-                }
-                if(node.has("text")) {
-                    trace?.at("component_text","$location.text","string_length_1_300",node.opt("text"),(node.opt("text") as? String)?.length)
-                    require(node.get("text") is String && node.getString("text").length in 1..300)
-                }
-                if(node.has("layout")) validateLayout(node.getJSONObject("layout"),parent)
-                if(node.has("style")) {
-                    trace?.at("component_style","$location.style","catalog_style",node.opt("style"))
-                    val style=node.getJSONObject("style"); require(ToolValueSchema.keys(style).all {it in definition.styles})
-                    style.keys().forEach { key -> require(style.get(key) is String && style.getString(key) in when(key) {
-                        "tone" -> tones
-                        "emphasis" -> setOf("body","title","headline","label","number")
-                        "align","crossAlign" -> setOf("start","center","end")
-                        "arrangement" -> setOf("start","center","end","between","around","evenly")
-                        "padding","gap" -> setOf("none","small","medium","large")
-                        else -> emptySet()
-                    }) }
+                    require(ToolValueSchema.keys(node).all {it in definition.properties}) {"Unsupported component property."}
+                    if (node.has("inputMode")) {
+                        val mode = node.get("inputMode")
+                        trace.checking("input_mode", "$location.inputMode", "apply_or_live", mode) {
+                            require(mode == "apply" || mode == "live") { "Input mode must be apply or live." }
+                        }
+                    }
+                    for(flag in listOf("visible","enabled")) if(node.has(flag)) {
+                        trace.checking("component_flag","$location.$flag","boolean",node.opt(flag)) {
+                            require(node.get(flag) is Boolean)
+                        }
+                    }
+                    for(flag in listOf("visibleBind","enabledBind")) if(node.has(flag)) {
+                        require(node.get(flag) is String && schema(fields,node.getString(flag)) == "boolean") {"Visibility and availability need declared boolean bindings."}
+                        if(!schemaOnly) require(value(state,node.getString(flag)) is Boolean)
+                    }
+                    if(node.has("text")) {
+                        trace.checking("component_text","$location.text","string_length_1_300",node.opt("text"),(node.opt("text") as? String)?.length) {
+                            require(node.get("text") is String && node.getString("text").length in 1..300)
+                        }
+                    }
+                    if(node.has("layout")) trace.checking("component_layout", "$location.layout", "catalog_layout", node.opt("layout")) {
+                        validateLayout(node.getJSONObject("layout"), parent)
+                    }
+                    if(node.has("style")) {
+                        trace.checking("component_style","$location.style","catalog_style",node.opt("style")) {
+                            val style=node.getJSONObject("style"); require(ToolValueSchema.keys(style).all {it in definition.styles})
+                            style.keys().forEach { key -> require(style.get(key) is String && style.getString(key) in when(key) {
+                                "tone" -> tones
+                                "emphasis" -> setOf("body","title","headline","label","number")
+                                "align","crossAlign" -> setOf("start","center","end")
+                                "arrangement" -> setOf("start","center","end","between","around","evenly")
+                                "padding","gap" -> setOf("none","small","medium","large")
+                                else -> emptySet()
+                            }) }
+                        }
+                    }
                 }
             }
             if(!definition.container && type !in unlabeledLeaves) {
-                trace?.at("accessible_label","$location.text","label_present",node.opt("text"))
-                require(node.has("text")) {"Native controls need an accessible label."}
+                trace.checking("accessible_label","$location.text","label_present",node.opt("text")) {
+                    require(node.has("text")) {"Native controls need an accessible label."}
+                }
             }
             var binding: Any?=null
             val managedTimer = type == "timer" && node.has("foreground")
             if(node.has("bind") || (definition.binding.isNotEmpty() && type !in optionalBindings && !managedTimer)) {
                 validateTool(ToolValidationCategory.UI_BINDINGS) {
-                    trace?.at("component_binding","$location.bind","declared_binding_and_state",node.opt("bind"))
-                    try {
-                        if(!node.has("bind")) throw MissingBindingPath()
-                        require(node.get("bind") is String)
-                        val parts=path(node.getString("bind"))
-                        trace?.at("component_binding_schema_type","$location.bind","compatible_schema_type",node.opt("bind"))
-                        binding=schema(fields,parts)
-                        trace?.at("component_binding_schema_type","$location.bind","compatible_schema_type",binding)
-                        require(kind(checkNotNull(binding)) in definition.binding)
-                        if(!schemaOnly) {
-                            trace?.at("component_binding_state_value","$location.bind","schema_valid_state_value")
-                            val current=value(state,parts)
-                            trace?.at("component_binding_state_value","$location.bind","schema_valid_state_value",current)
-                            ToolValueSchema.validate(checkNotNull(binding),current)
+                    trace.checking("component_binding", "$location.bind", "declared_binding_and_state", node.opt("bind")) {
+                        try {
+                            if(!node.has("bind")) throw MissingBindingPath()
+                            require(node.get("bind") is String)
+                            val parts=path(node.getString("bind"))
+                            binding = trace.checking("component_binding_schema_type", "$location.bind", "compatible_schema_type", node.opt("bind")) {
+                                schema(fields, parts).also { require(kind(it) in definition.binding) }
+                            }
+                            if(!schemaOnly) trace.checking("component_binding_state_value", "$location.bind", "schema_valid_state_value") {
+                                val current=value(state,parts)
+                                trace.checking("component_binding_state_value", "$location.bind", "schema_valid_state_value", current) {
+                                    ToolValueSchema.validate(checkNotNull(binding),current)
+                                }
+                            }
+                        } catch(failure: MissingBindingPath) {
+                            trace.checking("component_binding_missing_path", "$location.bind", "declared_path_in_schema_and_state") { throw failure }
                         }
-                    } catch(failure: MissingBindingPath) {
-                        trace?.at("component_binding_missing_path","$location.bind","declared_path_in_schema_and_state")
-                        throw failure
                     }
                 }
             }
-            if(definition.actionRequired || node.has("action")) validateTool(ToolValidationCategory.UI_ACTIONS) {
-                trace?.at("component_action","$location.action","unique_ascii_action",node.opt("action"))
-                require(node.get("action") is String); val action=node.getString("action")
-                require(action.matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")) && (!register || actions.add(action))) {"Action IDs must be unique."}
+            fun registerComponentAction(field: String) = validateTool(ToolValidationCategory.UI_ACTIONS) {
+                trace.checking("component_action", "$location.$field", "unique_ascii_action", node.opt(field)) {
+                    registerAction(node.get(field), actions, register)
+                }
             }
-            validateInteractions(node,actions,register,stage)
-            trace?.at("component_contract",location,"catalog_component_contract",node)
+            if(definition.actionRequired || node.has("action")) registerComponentAction("action")
+            trace.checking("component_interactions", location, "catalog_interactions_and_semantics", node) { validateInteractions(node,actions,register,stage) }
             when(type) {
                 "dialog","bottomSheet" -> {
                     require(node.has("text") && node.has("visibleBind")) {"Modals require a title and declared visibility."}
-                    registerAction(node.get("dismissAction"),actions,register)
+                    registerComponentAction("dismissAction")
                 }
                 "pager" -> {
                     val pages=node.getJSONArray("children"); require(pages.length() in 1..10)
@@ -328,26 +350,36 @@ object ToolUiCatalog {
                         if(!schemaOnly) require(scalarValue(value(state,node.getString(name))))
                     }
                 }
-                "calendar" -> com.alpha.assistant.capabilities.OwnedCalendarContract.request(node)
-                "medicine" -> com.alpha.assistant.capabilities.MedicineContract.request(node)
-                "navigation" -> com.alpha.assistant.capabilities.NavigationContract.request(node)
+                "calendar" -> validateNativeCapability(node, location, com.alpha.assistant.capabilities.OwnedCalendarContract.ids) {
+                    com.alpha.assistant.capabilities.OwnedCalendarContract.request(it)
+                }
+                "medicine" -> validateNativeCapability(node, location, com.alpha.assistant.capabilities.MedicineContract.ids) {
+                    com.alpha.assistant.capabilities.MedicineContract.request(it)
+                }
+                "navigation" -> validateNativeCapability(node, location, com.alpha.assistant.capabilities.NavigationContract.ids) {
+                    com.alpha.assistant.capabilities.NavigationContract.request(it)
+                }
                 "theme" -> {
-                    trace?.at("theme_preset","$location.preset","catalog_preset",node.opt("preset"))
-                    require(node.get("preset") is String && node.getString("preset") in presets)
+                    trace.checking("theme_preset","$location.preset","catalog_preset",node.opt("preset")) {
+                        require(node.get("preset") is String && node.getString("preset") in presets)
+                    }
                 }
                 "row" -> if(node.has("wrap")) require(node.get("wrap") is Boolean)
                 "grid" -> {
                     if(node.has("minCellWidth")) require(node.get("minCellWidth") is Int && node.getInt("minCellWidth") in 48..512)
-                    trace?.at("grid_columns","$location.columns","integer_1_4",node.opt("columns"))
-                    if(node.has("columns")) require(node.get("columns") is Int && node.getInt("columns") in 1..4)
+                    trace.checking("grid_columns","$location.columns","integer_1_4",node.opt("columns")) {
+                        if(node.has("columns")) require(node.get("columns") is Int && node.getInt("columns") in 1..4)
+                    }
                 }
                 "spacer" -> {
-                    trace?.at("spacer_size","$location.size","integer_0_64",node.opt("size"))
-                    if(node.has("size")) require(node.get("size") is Int && node.getInt("size") in 0..64)
+                    trace.checking("spacer_size","$location.size","integer_0_64",node.opt("size")) {
+                        if(node.has("size")) require(node.get("size") is Int && node.getInt("size") in 0..64)
+                    }
                 }
                 "icon" -> {
-                    trace?.at("icon_name","$location.name","catalog_icon",node.opt("name"))
-                    require(node.get("name") is String && node.getString("name") in icons)
+                    trace.checking("icon_name","$location.name","catalog_icon",node.opt("name")) {
+                        require(node.get("name") is String && node.getString("name") in icons)
+                    }
                 }
                 "chip" -> {
                     if(node.has("variant")) require(node.get("variant") is String && node.getString("variant") in setOf("filter","input"))
@@ -357,20 +389,23 @@ object ToolUiCatalog {
                 "button" -> {
                     if(node.has("variant"))require(node.get("variant") is String && node.getString("variant") in setOf("filled","outlined","text","tonal","elevated","fab","extendedFab"))
                     if(node.optString("variant") == "fab")require(node.has("icon")) {"An icon FAB requires an icon and label."}
-                    trace?.at("button_icon","$location.icon","catalog_icon",node.opt("icon"))
-                    if(node.has("icon")) require(node.get("icon") is String && node.getString("icon") in icons)
+                    trace.checking("button_icon","$location.icon","catalog_icon",node.opt("icon")) {
+                        if(node.has("icon")) require(node.get("icon") is String && node.getString("icon") in icons)
+                    }
                 }
                 "input","search" -> {
-                    trace?.at("input_length","$location.maxLength","integer_1_2048",node.opt("maxLength"))
-                    if(node.has("maxLength")) require(node.get("maxLength") is Int && node.getInt("maxLength") in 1..2048)
+                    trace.checking("input_length","$location.maxLength","integer_1_2048",node.opt("maxLength")) {
+                        if(node.has("maxLength")) require(node.get("maxLength") is Int && node.getInt("maxLength") in 1..2048)
+                    }
                     if(node.has("keyboard")) require(node.get("keyboard") is String && node.getString("keyboard") in setOf("text","email","uri","phone","number","password"))
                     if(node.has("imeAction")) require(node.get("imeAction") is String && node.getString("imeAction") in setOf("done","next","search"))
                     if(node.has("maxLines")) require(node.get("maxLines") is Int && node.getInt("maxLines") in 1..8)
                 }
                 "timer" -> {
                     val mode = node.opt("mode")
-                    trace?.at("timer_mode", "$location.mode", "countdown_or_stopwatch", mode)
-                    require(mode is String && mode in timerModes) { "Timer mode must be countdown or stopwatch." }
+                    trace.checking("timer_mode", "$location.mode", "countdown_or_stopwatch", mode) {
+                        require(mode is String && mode in timerModes) { "Timer mode must be countdown or stopwatch." }
+                    }
                     if (managedTimer) {
                         require(!template && !stage) { "Foreground timers require a native app control." }
                         val timer = ForegroundTimerSpec.parse(node)
@@ -378,36 +413,46 @@ object ToolUiCatalog {
                     } else if (!schemaOnly) {
                         require(!node.has("action")) { "A clock display cannot send actions." }
                         val timestamp = value(state, node.getString("bind"))
-                        trace?.at("timer_timestamp", "$location.bind", "bounded_epoch_milliseconds", timestamp)
-                        require(timerTimestamp(timestamp) != null) { "Timer binding must contain bounded integer epoch milliseconds." }
+                        trace.checking("timer_timestamp", "$location.bind", "bounded_epoch_milliseconds", timestamp) {
+                            require(timerTimestamp(timestamp) != null) { "Timer binding must contain bounded integer epoch milliseconds." }
+                        }
                     }
                 }
                 "text","metric","fact" -> if(node.has("format")) {
-                    trace?.at("text_format","$location.format","number_or_clock_format",node.opt("format"))
-                    require(node.get("format") is String && node.getString("format") in setOf("number","clock")); if(node.getString("format") == "clock") require(binding == "number" && (schemaOnly || validTime(value(state,node.getString("bind")))))}
+                    trace.checking("text_format","$location.format","number_or_clock_format",node.opt("format")) {
+                        require(node.get("format") is String && node.getString("format") in setOf("number","clock")); if(node.getString("format") == "clock") require(binding == "number" && (schemaOnly || validTime(value(state,node.getString("bind")))))
+                    }
+                }
                 in choiceTypes -> {
                     if (type == "singleChoice" && node.has("variant")) {
-                        trace?.at("selection_variant", "$location.variant", "scene_choice_variant", node.opt("variant"))
-                        require(isSceneChoice(node)) { "singleChoice variant must be scene." }
+                        trace.checking("selection_variant", "$location.variant", "scene_choice_variant", node.opt("variant")) {
+                            require(isSceneChoice(node)) { "singleChoice variant must be scene." }
+                        }
                     }
-                    trace?.at("selection_options","$location.options","options_1_30",node.opt("options"),node.optJSONArray("options")?.length())
-                    val options=options(node); require(options.length() in 1..if(type == "segmented") 6 else 30)
+                    val options = trace.checking("selection_options","$location.options","options_1_30",node.opt("options"),node.optJSONArray("options")?.length()) {
+                        val options=options(node); require(options.length() in 1..if(type == "segmented") 6 else 30)
+                        options
+                    }
                     val optionContract=if(type == "multiChoice") (checkNotNull(binding) as JSONObject).get("items") else checkNotNull(binding)
                     require(kind(optionContract) in scalar)
                     val seen=mutableListOf<Any>()
                     repeat(options.length()) {
-                        trace?.at("selection_option","$location.options[$it]","typed_unique_option",options.opt(it))
-                        val option=options.getJSONObject(it); require(ToolValueSchema.keys(option) == setOf("text","value"))
-                        require(option.get("text") is String && option.getString("text").length in 1..100)
-                        val value=option.get("value"); require(scalarValue(value)); ToolValueSchema.validate(optionContract,value)
-                        require(seen.none {previous -> matches(previous,value)}); seen.add(value)
+                        trace.checking("selection_option","$location.options[$it]","typed_unique_option",options.opt(it)) {
+                            val option=options.getJSONObject(it); require(ToolValueSchema.keys(option) == setOf("text","value"))
+                            require(option.get("text") is String && option.getString("text").length in 1..100)
+                            val value=option.get("value"); require(scalarValue(value)); ToolValueSchema.validate(optionContract,value)
+                            require(seen.none {previous -> matches(previous,value)}); seen.add(value)
+                        }
                     }
-                    trace?.at("selection_current_value","$location.options","current_value_in_options",node.opt("options"),options.length())
-                    if(!schemaOnly) require(validChoice(node,value(state,node.getString("bind"))))
+                    trace.checking("selection_current_value","$location.options","current_value_in_options",node.opt("options"),options.length()) {
+                        if(!schemaOnly) require(validChoice(node,value(state,node.getString("bind"))))
+                    }
                 }
                 "list","table","groupedList","lazyList","lazyGrid" -> {
-                    trace?.at("record_collection","$location.bind","stable_record_collection",node.opt("bind"))
-                    val item=collectionItem(checkNotNull(binding)); val rows=if(schemaOnly) JSONArray() else records(node,state)
+                    val (item, rows) = trace.checking("record_collection","$location.bind","stable_record_collection",node.opt("bind")) {
+                        val item=collectionItem(checkNotNull(binding)); val rows=if(schemaOnly) JSONArray() else records(node,state)
+                        item to rows
+                    }
                     if(type in setOf("lazyList","lazyGrid")) {
                         if(node.has("viewportHeight")) require(node.get("viewportHeight") is Int && node.getInt("viewportHeight") in 96..1024)
                         for(name in listOf("selectedKeyBind","scrollToKeyBind")) if(node.has(name)) {
@@ -436,44 +481,48 @@ object ToolUiCatalog {
                     if(type == "groupedList") require(node.has("groupBy"))
                     if(node.has("groupBy")) require(node.get("groupBy") is String && kind(schema(item.getJSONObject("fields"),node.getString("groupBy"))) in scalar)
                     if (node.has("reorder")) validateTool(ToolValidationCategory.UI_ACTIONS) {
-                        trace?.at("record_reorder","$location.reorder","ungrouped_stable_key_reorder",node.opt("reorder"))
-                        require(!node.has("groupBy")) { "Reorder requires an ungrouped list." }
-                        val reorder = node.getJSONObject("reorder")
-                        require(ToolValueSchema.keys(reorder).all { it in setOf("action", "labelField", "visibleField", "enabledField") })
-                        registerAction(reorder.get("action"), actions, register)
-                        val fields = item.getJSONObject("fields")
-                        require(reorder.get("labelField") is String)
-                        val labelPath = reorder.getString("labelField")
-                        require(schema(fields, labelPath) == "string")
-                        repeat(rows.length()) { index ->
-                            val label = value(rows.getJSONObject(index), labelPath)
-                            require(label is String && label.isNotBlank() && label.length <= 300)
-                        }
-                        for (flag in listOf("visibleField", "enabledField")) if (reorder.has(flag)) {
-                            require(reorder.get(flag) is String && schema(fields, reorder.getString(flag)) == "boolean")
+                        trace.checking("record_reorder","$location.reorder","ungrouped_stable_key_reorder",node.opt("reorder")) {
+                            require(!node.has("groupBy")) { "Reorder requires an ungrouped list." }
+                            val reorder = node.getJSONObject("reorder")
+                            require(ToolValueSchema.keys(reorder).all { it in setOf("action", "labelField", "visibleField", "enabledField") })
+                            registerAction(reorder.get("action"), actions, register)
+                            val fields = item.getJSONObject("fields")
+                            require(reorder.get("labelField") is String)
+                            val labelPath = reorder.getString("labelField")
+                            require(schema(fields, labelPath) == "string")
+                            repeat(rows.length()) { index ->
+                                val label = value(rows.getJSONObject(index), labelPath)
+                                require(label is String && label.isNotBlank() && label.length <= 300)
+                            }
+                            for (flag in listOf("visibleField", "enabledField")) if (reorder.has(flag)) {
+                                require(reorder.get(flag) is String && schema(fields, reorder.getString(flag)) == "boolean")
+                            }
                         }
                     }
-                    if(node.has("rowTemplate")) {
+                    if(node.has("rowTemplate")) trace.checking("record_template", "$location.rowTemplate", "template_owned_controls", node.opt("rowTemplate")) {
                         require((!node.has("columns") || type == "lazyGrid") && !node.has("action") && !node.has("rowActions")) {"Row templates own their controls."}
                         val rowTemplate=node.getJSONObject("rowTemplate")
                         if(rows.length() == 0) visit(rowTemplate,depth+1,"$location.rowTemplate",item.getJSONObject("fields"),JSONObject(),true,true,register,motion,stage)
                         repeat(rows.length()) {index -> visit(rowTemplate,depth+1,"$location.rowTemplate",item.getJSONObject("fields"),rows.getJSONObject(index),true,false,register && index==0,motion,stage)}
                     }
                     if(node.has("rowActions")) validateTool(ToolValidationCategory.UI_ACTIONS) {
-                        trace?.at("row_actions","$location.rowActions","actions_1_3",node.opt("rowActions"),node.optJSONArray("rowActions")?.length())
-                        val rowActions=node.getJSONArray("rowActions"); require(rowActions.length() in 1..3) {"Lists support one to three row actions."}
+                        val rowActions = trace.checking("row_actions","$location.rowActions","actions_1_3",node.opt("rowActions"),node.optJSONArray("rowActions")?.length()) {
+                            val rowActions=node.getJSONArray("rowActions"); require(rowActions.length() in 1..3) {"Lists support one to three row actions."}
+                            rowActions
+                        }
                         repeat(rowActions.length()) { index ->
-                            trace?.at("row_action","$location.rowActions[$index]","catalog_row_action",rowActions.opt(index))
-                            val rowAction=rowActions.getJSONObject(index)
-                            require(ToolValueSchema.keys(rowAction).all {it in setOf("action","text","emphasis","enabledField")})
-                            require(rowAction.get("action") is String)
-                            val id=rowAction.getString("action")
-                            require(id.matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")) && (!register || actions.add(id))) {"Action IDs must be unique."}
-                            require(rowAction.get("text") is String && rowAction.getString("text").length in 1..100)
-                            if(rowAction.has("emphasis")) require(rowAction.get("emphasis") is String && rowAction.getString("emphasis") in setOf("primary","secondary"))
-                            if(rowAction.has("enabledField")) {
-                                require(rowAction.get("enabledField") is String && schema(item.getJSONObject("fields"),rowAction.getString("enabledField")) == "boolean")
-                                repeat(rows.length()) {require(value(rows.getJSONObject(it),rowAction.getString("enabledField")) is Boolean)}
+                            trace.checking("row_action","$location.rowActions[$index]","catalog_row_action",rowActions.opt(index)) {
+                                val rowAction=rowActions.getJSONObject(index)
+                                require(ToolValueSchema.keys(rowAction).all {it in setOf("action","text","emphasis","enabledField")})
+                                require(rowAction.get("action") is String)
+                                val id=rowAction.getString("action")
+                                require(id.matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")) && (!register || actions.add(id))) {"Action IDs must be unique."}
+                                require(rowAction.get("text") is String && rowAction.getString("text").length in 1..100)
+                                if(rowAction.has("emphasis")) require(rowAction.get("emphasis") is String && rowAction.getString("emphasis") in setOf("primary","secondary"))
+                                if(rowAction.has("enabledField")) {
+                                    require(rowAction.get("enabledField") is String && schema(item.getJSONObject("fields"),rowAction.getString("enabledField")) == "boolean")
+                                    repeat(rows.length()) {require(value(rows.getJSONObject(it),rowAction.getString("enabledField")) is Boolean)}
+                                }
                             }
                         }
                     }
@@ -482,37 +531,43 @@ object ToolUiCatalog {
                         val rowActions=node.getJSONArray("rowActions")
                         require((0 until rowActions.length()).any {rowActions.getJSONObject(it).getString("action") == node.getString("swipeAction")}) {"Swipe must reference a visible row action."}
                     }
-                    trace?.at("table_rows","$location.bind","rows_at_most_50",rows,rows.length())
-                    if(type == "table") require(rows.length() <= 50)
+                    trace.checking("table_rows","$location.bind","rows_at_most_50",rows,rows.length()) {
+                        if(type == "table") require(rows.length() <= 50)
+                    }
                     if(type == "table" || (node.has("columns") && type != "lazyGrid")) {
-                        trace?.at("table_columns","$location.columns","columns_1_8_cells_400",node.opt("columns"),node.optJSONArray("columns")?.length())
-                        val columns=node.getJSONArray("columns"); require(columns.length() in 1..8 && rows.length()*columns.length() <= 400)
+                        val columns = trace.checking("table_columns","$location.columns","columns_1_8_cells_400",node.opt("columns"),node.optJSONArray("columns")?.length()) {
+                            val columns=node.getJSONArray("columns"); require(columns.length() in 1..8 && rows.length()*columns.length() <= 400)
+                            columns
+                        }
                         repeat(columns.length()) { index ->
-                            trace?.at("table_column","$location.columns[$index]","scalar_record_column",columns.opt(index))
-                            val column=columns.getJSONObject(index); require(ToolValueSchema.keys(column) == setOf("text","field"))
-                            require(column.get("text") is String && column.getString("text").length in 1..100)
-                            require(column.get("field") is String && kind(schema(item.getJSONObject("fields"),column.getString("field"))) in scalar)
-                            repeat(rows.length()) {require(scalarValue(value(rows.getJSONObject(it),column.getString("field"))))}
+                            trace.checking("table_column","$location.columns[$index]","scalar_record_column",columns.opt(index)) {
+                                val column=columns.getJSONObject(index); require(ToolValueSchema.keys(column) == setOf("text","field"))
+                                require(column.get("text") is String && column.getString("text").length in 1..100)
+                                require(column.get("field") is String && kind(schema(item.getJSONObject("fields"),column.getString("field"))) in scalar)
+                                repeat(rows.length()) {require(scalarValue(value(rows.getJSONObject(it),column.getString("field"))))}
+                            }
                         }
                     }
                 }
                 "chart" -> validateChart(node,fields,state,trace,location,schemaOnly)
                 "image" -> {
-                    trace?.at("image_handle",location,"opaque_resource_handle",node)
-                    require(listOf("bind", "resourceId", "assetSlot").count(node::has) == 1)
-                    if (node.has("assetSlot")) {
-                        require(node.get("assetSlot").let { it is String && it.matches(Regex("[A-Za-z][A-Za-z0-9_-]{0,39}")) })
-                    } else {
-                        val handle=if(node.has("bind")) value(state,node.getString("bind")) else node.get("resourceId")
-                        require(handle is String && ((node.has("bind") && handle.isEmpty()) || handle.matches(Regex("[0-9a-f]{64}")))) {"Images need an opaque resource handle."}
+                    trace.checking("image_handle",location,"opaque_resource_handle",node) {
+                        require(listOf("bind", "resourceId", "assetSlot").count(node::has) == 1)
+                        if (node.has("assetSlot")) {
+                            require(node.get("assetSlot").let { it is String && it.matches(Regex("[A-Za-z][A-Za-z0-9_-]{0,39}")) })
+                        } else {
+                            val handle=if(node.has("bind")) value(state,node.getString("bind")) else node.get("resourceId")
+                            require(handle is String && ((node.has("bind") && handle.isEmpty()) || handle.matches(Regex("[0-9a-f]{64}")))) {"Images need an opaque resource handle."}
+                        }
+                        if(node.has("fit")) require(node.get("fit") is String && node.getString("fit") in setOf("fit","crop"))
                     }
-                    if(node.has("fit")) require(node.get("fit") is String && node.getString("fit") in setOf("fit","crop"))
                 }
                 "video" -> if (!schemaOnly) {
                     val handle = value(state, node.getString("bind"))
-                    trace?.at("video_handle", location, "empty_or_opaque_resource_handle", handle)
-                    require(handle is String && (handle.isEmpty() || videoHandle.matches(handle))) {
-                        "Videos need an empty binding or an opaque resource handle."
+                    trace.checking("video_handle", location, "empty_or_opaque_resource_handle", handle) {
+                        require(handle is String && (handle.isEmpty() || videoHandle.matches(handle))) {
+                            "Videos need an empty binding or an opaque resource handle."
+                        }
                     }
                 }
             }
@@ -521,31 +576,37 @@ object ToolUiCatalog {
                 require(node.has("bind") || node.optBoolean("indeterminate"))
             }
             if(type in setOf("numberInput","slider","progress","progressRing")) {
-                trace?.at("numeric_bounds",location,"finite_ordered_bounds_and_value",node)
-                val (low,high)=bounds(node); require(low < high)
-                if(!schemaOnly && node.has("bind")) {val v=value(state,node.getString("bind")); require(v is Number && v.toDouble() in low..high)}
-                if (node.has("step")) {
-                    trace?.at("numeric_step", "$location.step", "positive_finite_step_within_bounds", node.opt("step"))
-                    val step = numeric(node, "step", 1.0)
-                    require(step > 0 && step <= high - low) { "Step must be positive and no larger than the range." }
+                trace.checking("numeric_bounds",location,"finite_ordered_bounds_and_value",node) {
+                    val (low,high)=bounds(node); require(low < high)
+                    if(!schemaOnly && node.has("bind")) {val v=value(state,node.getString("bind")); require(v is Number && v.toDouble() in low..high)}
+                    if (node.has("step")) {
+                        trace.checking("numeric_step", "$location.step", "positive_finite_step_within_bounds", node.opt("step")) {
+                            val step = numeric(node, "step", 1.0)
+                            require(step > 0 && step <= high - low) { "Step must be positive and no larger than the range." }
+                        }
+                    }
                 }
             }
             if(type == "timeInput") {
-                trace?.at("time_value","$location.bind","integer_minutes_0_1439",node.opt("bind"))
-                if(!schemaOnly) require(validTime(value(state,node.getString("bind"))))
+                trace.checking("time_value","$location.bind","integer_minutes_0_1439",node.opt("bind")) {
+                    if(!schemaOnly) require(validTime(value(state,node.getString("bind"))))
+                }
             }
             if(type == "dateInput" && !schemaOnly) {
                 val date=value(state,node.getString("bind"))
-                trace?.at("date_value","$location.bind","iso_date",date)
-                require(validDate(date))
+                trace.checking("date_value","$location.bind","iso_date",date) {
+                    require(validDate(date))
+                }
             }
-            if(type == "text") validateText(node,actions,register,stage)
+            if(type == "text") trace.checking("text_properties", location, "catalog_text_properties", node) { validateText(node,actions,register,stage) }
             if(definition.container) {
-                trace?.at("container_children","$location.children","children_1_50",node.opt("children"),node.optJSONArray("children")?.length())
-                val children=node.getJSONArray("children"); require(children.length() in 1..50)
+                val children = trace.checking("container_children","$location.children","children_1_50",node.opt("children"),node.optJSONArray("children")?.length()) {
+                    val children=node.getJSONArray("children"); require(children.length() in 1..50)
+                    children
+                }
                 repeat(children.length()) {
-                    trace?.at("child_object","$location.children[$it]","object",children.opt(it))
-                    visit(children.getJSONObject(it),depth+1,"$location.children[$it]",fields,state,template,schemaOnly,register,motion || type == "motion",stage || type == "stage",stage && (layerContent || type != "transform"),if(type == "row" && node.optBoolean("wrap",true)) "flowRow" else type)
+                    val child = trace.checking("child_object", "$location.children[$it]", "object", children.opt(it)) { children.getJSONObject(it) }
+                    visit(child,depth+1,"$location.children[$it]",fields,state,template,schemaOnly,register,motion || type == "motion",stage || type == "stage",stage && (layerContent || type != "transform"),if(type == "row" && node.optBoolean("wrap",true)) "flowRow" else type)
                 }
             }
         }
@@ -555,37 +616,44 @@ object ToolUiCatalog {
     fun validateRenderedWork(root: JSONObject, state: JSONObject) = validateRenderedWork(root,state,null)
     private fun validateRenderedWork(root: JSONObject,state: JSONObject,trace: ToolUiValidationTrace?) {
         var structural=0
-        fun structure(node: JSONObject,depth: Int) {
-            require(++structural <= MAX_NODES && depth <= 8) {"Native UI exceeds its node or depth limit."}
-            node.optJSONObject("rowTemplate")?.let {structure(it,depth+1)}
-            node.optJSONArray("children")?.let {children -> repeat(children.length()) {structure(children.getJSONObject(it),depth+1)}}
-        }
-        structure(root,0)
-        var work=0; var images=0
-        fun visit(node: JSONObject, values: JSONObject, depth: Int, location: String) {
-            require(depth <= 8) {"Native UI exceeds its depth limit."}
-            work++
-            when(node.getString("type")) {
-                "list","table","groupedList","lazyList","lazyGrid" -> {
-                    val rows=records(node,values); val columns=node.optJSONArray("columns")?.length() ?: 1
-                    val template=node.optJSONObject("rowTemplate")
-                    if(template != null) repeat(rows.length()) {visit(template,rows.getJSONObject(it),depth+1,"$location.rowTemplate")}
-                    else work+=rows.length()*(1+columns+(node.optJSONArray("rowActions")?.length() ?: 0))+columns
-                    if(node.has("groupBy")) work+=rows.length()
-                    if(node.has("reorder")) work+=rows.length()
+        fun structure(node: JSONObject, depth: Int, location: String): Unit =
+            trace.checking("node_depth_limit", location, "nodes_${MAX_NODES}_depth_8", node, structural + 1) {
+                require(++structural <= MAX_NODES && depth <= 8) {"Native UI exceeds its node or depth limit."}
+                node.optJSONObject("rowTemplate")?.let {structure(it, depth+1, "$location.rowTemplate")}
+                node.optJSONArray("children")?.let { children ->
+                    repeat(children.length()) {structure(children.getJSONObject(it), depth+1, "$location.children[$it]")}
                 }
-                "text" -> work+=node.optJSONArray("spans")?.length() ?: 0
-                in choiceTypes -> work+=node.getJSONArray("options").length()
-                "chart" -> work+=(value(values,node.getString("categories")) as JSONArray).length()*node.getJSONArray("series").length()
-                "image" -> require(++images <= MAX_IMAGES) {"Native UI exceeds its image limit ($MAX_IMAGES)."}
             }
-            trace?.at("render_work_limit",location,"render_work_at_most_2048",node,work)
-            require(work <= MAX_RENDER_WORK) {"Native UI exceeds its rendered-work limit ($MAX_RENDER_WORK)."}
-            node.optJSONArray("children")?.let {children ->
-                require(children.length() in 1..50)
-                repeat(children.length()) {visit(children.getJSONObject(it),values,depth+1,"$location.children[$it]")}
+        structure(root,0,"$.ui")
+        var work=0; var images=0
+        fun visit(node: JSONObject, values: JSONObject, depth: Int, location: String): Unit =
+            trace.checking("render_node", location, "valid_render_node", node) {
+                require(depth <= 8) {"Native UI exceeds its depth limit."}
+                work++
+                when(node.getString("type")) {
+                    "list","table","groupedList","lazyList","lazyGrid" -> {
+                        val rows=records(node,values); val columns=node.optJSONArray("columns")?.length() ?: 1
+                        val template=node.optJSONObject("rowTemplate")
+                        if(template != null) repeat(rows.length()) {visit(template,rows.getJSONObject(it),depth+1,"$location.rowTemplate")}
+                        else work+=rows.length()*(1+columns+(node.optJSONArray("rowActions")?.length() ?: 0))+columns
+                        if(node.has("groupBy")) work+=rows.length()
+                        if(node.has("reorder")) work+=rows.length()
+                    }
+                    "text" -> work+=node.optJSONArray("spans")?.length() ?: 0
+                    in choiceTypes -> work+=node.getJSONArray("options").length()
+                    "chart" -> work+=(value(values,node.getString("categories")) as JSONArray).length()*node.getJSONArray("series").length()
+                    "image" -> trace.checking("render_image_limit", location, "images_at_most_$MAX_IMAGES", node, images + 1) {
+                        require(++images <= MAX_IMAGES) {"Native UI exceeds its image limit ($MAX_IMAGES)."}
+                    }
+                }
+                trace.checking("render_work_limit",location,"render_work_at_most_2048",node,work) {
+                    require(work <= MAX_RENDER_WORK) {"Native UI exceeds its rendered-work limit ($MAX_RENDER_WORK)."}
+                }
+                node.optJSONArray("children")?.let {children ->
+                    require(children.length() in 1..50)
+                    repeat(children.length()) {visit(children.getJSONObject(it),values,depth+1,"$location.children[$it]")}
+                }
             }
-        }
         visit(root,state,0,"$.ui")
     }
     private fun validateLayout(layout: JSONObject,parent: String) {
@@ -714,31 +782,40 @@ object ToolUiCatalog {
         return number.takeIf { it in 0.0..MAX_TIMER_TIMESTAMP.toDouble() && it % 1.0 == 0.0 }?.toLong()
     }
     private fun validateChart(node: JSONObject, fields: JSONObject, state: JSONObject,trace: ToolUiValidationTrace?,location: String,schemaOnly: Boolean = false) {
-        trace?.at("chart_kind","$location.kind","line_bar_area_or_pie",node.opt("kind"))
-        val kind = node.get("kind")
-        require(kind is String && kind in setOf("line", "bar", "area", "pie"))
+        val kind = trace.checking("chart_kind","$location.kind","line_bar_area_or_pie",node.opt("kind")) {
+            val kind = node.get("kind")
+            require(kind is String && kind in setOf("line", "bar", "area", "pie"))
+            kind
+        }
         val pie = kind == "pie"
-        trace?.at("chart_categories","$location.categories","scalar_array_binding",node.opt("categories"))
-        val categorySchema=schema(fields,node.getString("categories"))
-        require(categorySchema is JSONObject && categorySchema.getString("type") == "array" && categorySchema.get("items") in setOf("string","number"))
-        val categories=if(schemaOnly) JSONArray() else value(state,node.getString("categories")) as JSONArray
-        trace?.at("chart_series","$location.series",if (pie) "series_1_points_256" else "series_1_2_points_256",node.opt("series"),node.optJSONArray("series")?.length())
-        val series=node.getJSONArray("series")
-        require(series.length() in 1..(if (pie) 1 else 2) && categories.length()*series.length() <= 256)
+        val (categorySchema, categories) = trace.checking("chart_categories","$location.categories","scalar_array_binding",node.opt("categories")) {
+            val categorySchema=schema(fields,node.getString("categories"))
+            require(categorySchema is JSONObject && categorySchema.getString("type") == "array" && categorySchema.get("items") in setOf("string","number"))
+            val categories=if(schemaOnly) JSONArray() else value(state,node.getString("categories")) as JSONArray
+            categorySchema to categories
+        }
+        val series = trace.checking("chart_series","$location.series",if (pie) "series_1_points_256" else "series_1_2_points_256",node.opt("series"),node.optJSONArray("series")?.length()) {
+            val series=node.getJSONArray("series")
+            require(series.length() in 1..(if (pie) 1 else 2) && categories.length()*series.length() <= 256)
+            series
+        }
         repeat(series.length()) {
-            trace?.at("chart_series_entry","$location.series[$it]","aligned_numeric_array",series.opt(it))
-            val entry=series.getJSONObject(it); require(ToolValueSchema.keys(entry) == setOf("text","bind"))
-            require(entry.get("text") is String && entry.getString("text").length in 1..100)
-            val contract=schema(fields,entry.getString("bind")); require(contract is JSONObject && contract.getString("type") == "array" && contract.get("items") == "number")
-            val values=if(schemaOnly) JSONArray() else value(state,entry.getString("bind")) as JSONArray
-            require(values.length() == categories.length()); if(!schemaOnly) ToolValueSchema.validate(contract,values)
-            if (pie) {
-                trace?.at("chart_pie_values","$location.series[$it].bind","nonnegative_numeric_array",values,values.length())
-                require((0 until values.length()).all { index -> values.getDouble(index) >= 0.0 })
+            trace.checking("chart_series_entry","$location.series[$it]","aligned_numeric_array",series.opt(it)) {
+                val entry=series.getJSONObject(it); require(ToolValueSchema.keys(entry) == setOf("text","bind"))
+                require(entry.get("text") is String && entry.getString("text").length in 1..100)
+                val contract=schema(fields,entry.getString("bind")); require(contract is JSONObject && contract.getString("type") == "array" && contract.get("items") == "number")
+                val values=if(schemaOnly) JSONArray() else value(state,entry.getString("bind")) as JSONArray
+                require(values.length() == categories.length()); if(!schemaOnly) ToolValueSchema.validate(contract,values)
+                if (pie) {
+                    trace.checking("chart_pie_values","$location.series[$it].bind","nonnegative_numeric_array",values,values.length()) {
+                        require((0 until values.length()).all { index -> values.getDouble(index) >= 0.0 })
+                    }
+                }
             }
         }
-        trace?.at("chart_category_values","$location.categories","declared_category_values",categories,categories.length())
-        if(!schemaOnly) ToolValueSchema.validate(categorySchema,categories)
+        trace.checking("chart_category_values","$location.categories","declared_category_values",categories,categories.length()) {
+            if(!schemaOnly) ToolValueSchema.validate(categorySchema,categories)
+        }
     }
     fun chartRange(node: JSONObject, state: JSONObject): Pair<Double,Double> {
         var low=Double.POSITIVE_INFINITY; var high=Double.NEGATIVE_INFINITY
@@ -902,7 +979,7 @@ object ToolUiCatalog {
                 val limit = node.optInt("maxLength", 2048)
                 "a string of at most $limit characters".takeUnless { payload is String && payload.length <= limit }
             }
-            "toggle","checkbox","chip" -> "a Boolean input".takeUnless { payload is Boolean }
+            in booleanInputTypes -> "a Boolean input".takeUnless { payload is Boolean }
             "timeInput" -> "an integer between 0 and 1439 minutes".takeUnless { validTime(payload) }
             "dateInput" -> "a valid ISO date".takeUnless { validDate(payload) }
             "numberInput","slider" -> if (acceptsNumericInput(node, payload)) null else {
@@ -921,7 +998,10 @@ object ToolUiCatalog {
 
     private fun validateActionValue(node: JSONObject,id: String,payload: Any?,state: JSONObject): JSONObject {
         val type=node.getString("type"); component(type)
-        require(invalidActionPayload(node, id, payload) == null) {"Invalid action value."}
+        if (invalidActionPayload(node, id, payload) != null) {
+            if (type in booleanInputTypes && node.optString("action") == id) throw InvalidBooleanActionPayload(node)
+            throw IllegalArgumentException("Invalid action value.")
+        }
         if(node.optString("dismissAction") == id || id in interactionActions(node).values) {
             return node
         }
@@ -1028,7 +1108,7 @@ Text supports maxLines 1..100, overflow clip/ellipsis, softWrap boolean, lineHei
 lazyList and lazyGrid bind the same stable record collections as list and accept rowTemplate and rowActions with the same current-key typed events and aggregate work budget. lazyList supports columns and groupBy. lazyGrid columns is an integer 1..4, minCellWidth 48..512 dp; it supports groupBy and spanField, without column descriptors. Both use viewportHeight 96..1024 dp (default 360). selectedKeyBind and scrollToKeyBind refer to declared string fields containing a current stable key or empty string. Selection marks the current row without changing it. A changed scroll target moves the native viewport to that record; empty target issues no command. Host saveable viewport state survives ordinary recomposition/recreation, while a nonempty declared target applies on open. Virtualization does not remove aggregate validation limits. Lazy collections project only an exact-app widget summary without row contents.
 Theme requires preset. It uses the system light or dark color scheme. Do not include palette or mode. Optional typeScale is 0.85..1.5 and cornerRadius is 0..32 dp. Font scaling remains active. Shapes and typography apply only inside the theme subtree.
 Material controls: button variant filled/outlined/text/tonal/elevated/fab/extendedFab chooses a native button. fab requires icon and text. actionChip variant assist/suggestion sends null. chip variant filter/input binds boolean and sends boolean; optional dismissAction sends null through a separate remove affordance. singleChoice uses radio buttons by default. Optional variant scene shows a responsive group of equal-width choices with one selected value. segmented uses 1..6 typed options. navigationBar/navigationRail/menu use typed options like select. multiChoice binds an array of scalar option values and sends the complete unique selected array, including empty. Other choice controls send one option value. All options remain finite, typed, unique, and current. rangeSlider binds exactly two ordered finite numbers inside min/max (defaults 0..100), optional positive step, and sends both on Apply. dateRangeInput binds exactly two real ordered ISO dates in years 0001..9999 and sends both on native confirmation. search is a labeled bounded input with Search action. input/search accept keyboard text/email/uri/phone/number/password, imeAction done/next/search, maxLines 1..8. These configure input only and never grant access. progress/progressRing can use indeterminate:true without bind.
-appBar/bottomBar contain native children for local actions. dialog/bottomSheet require text, visibleBind to a declared boolean, dismissAction, and children. Dismiss sends null through that action. Child actions are unavailable while hidden. The script controls visibility. pager requires text, numeric bind to integer page index, action, 1..10 children, viewportHeight 96..1024. Page changes send the index. Only current page child actions are available. Native previous/next buttons provide accessible alternatives to swipe. Each page retains its normal node validation and work cost.
+appBar/bottomBar contain native children for local actions. dialog/bottomSheet require text, visibleBind to a declared boolean, dismissAction, and children. The host supplies a Close control and sends null through dismissAction. Add a Cancel button only if needed. Give that Cancel button its own action ID. Handle both IDs in source if both close the modal. Child actions are unavailable while hidden. The script controls visibility. pager requires text, numeric bind to integer page index, action, 1..10 children, viewportHeight 96..1024. Page changes send the index. Only current page child actions are available. Native previous/next buttons provide accessible alternatives to swipe. Each page retains its normal node validation and work cost.
 routeStack requires text, bind, action, routes and children. Declare one stack per mini-app. routes has 1..$MAX_ROUTES distinct ASCII IDs, with the root first, and children has one native subtree per ID in the same order. Bind a declared string array with maxItems at most $MAX_ROUTES. The nonempty stack starts at the root and contains only declared IDs. Repeated visits are valid. Use ordinary active-route actions to push routes. Back is available only above the root and sends the exact current stack array in event.value. Pop the last entry in the script and keep the root. All routes validate and share the native UI limits. Only the active route can send actions. Widgets show a summary and open the exact mini-app.
 Use one screen title and open sections with short headings. Use a metric for the focal result and an explicit card to group content that needs a surface. List items and ordinary record lists use divider rows. Use neutral empty states with a short message and a relevant next action. Give a status badge or banner a success, warning or error tone only when its text describes that status. The renderer adds an icon for these tones. Editorial changes heading fonts. Technical changes metric values. Body text and controls use system font families. In a row or flowRow with several visible buttons, the first enabled unstyled button is primary unless an enabled explicit filled, fab or extendedFab button already reserves that emphasis. Other unstyled peers become outlined. Explicit variants keep their style. Use explicit variants when the hierarchy should differ.
 All nodes accept optional semantics with label/stateDescription (1..300 chars), heading boolean, liveRegion polite/assertive. Optional interactions maps click/longClick/doubleClick/focus to globally unique action IDs, plus keys:{enter/space/escape/up/down/left/right:actionId}. Use a separate node without action/dismissAction/rowActions. Give it text or semantics.label. Click/long/double/key events send null. Focus changes send boolean. Long/double gestures expose labeled accessibility alternatives. Hidden or disabled ancestors reject all events. Gestures never imply network, files, or native capability authority.

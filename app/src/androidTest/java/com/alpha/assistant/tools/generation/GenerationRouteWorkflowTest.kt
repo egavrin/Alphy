@@ -7,6 +7,8 @@ import com.alpha.assistant.tools.nativeFixtureBehavior
 import com.alpha.assistant.tools.withFixtureDrawingBinding
 import com.alpha.assistant.tools.withFixtureLanguage
 import com.alpha.assistant.tools.ToolRecord
+import androidx.lifecycle.Lifecycle
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.CloudEvent
@@ -14,6 +16,7 @@ import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
+import com.alpha.assistant.MainActivity
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.GraphicsContract
@@ -439,7 +442,9 @@ class GenerationRouteWorkflowTest {
         var attemptedOwnershipEdit = false
         val provider = FixtureProvider { turn, _ ->
             when (turn.generationStage) {
-                CloudGenerationStage.PLAN -> JSONObject(plan("$count,$scene")).put("scene", fixtureScene(moving = true)).toString()
+                CloudGenerationStage.PLAN -> if (turn.systemInstructions.startsWith("Plan required Android capabilities"))
+                    """{"requiredCapabilities":[]}"""
+                else JSONObject(plan("$count,$scene")).put("scene", fixtureScene(moving = true)).toString()
                 CloudGenerationStage.SELECTOR -> answer(turn)
                 CloudGenerationStage.COMPLETE -> {
                     assertTrue(turn.turns.first().text.contains("Move a dot on each frame"))
@@ -517,12 +522,12 @@ class GenerationRouteWorkflowTest {
             val refine = engine.createDraft("Rename the dot control.", live.id)
             provider.requests.clear()
             val refined = engine.generate(refine.id, "fixture", emptyList(), CloudSession())
-            assertEquals(listOf(CloudGenerationStage.REFINE), provider.stages)
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE), provider.stages)
             assertEquals(live.state, refined.previewState)
             rejectRefinement = true
             provider.requests.clear()
             failure("widget_incomplete") { engine.generate(refine.id, "fixture", emptyList(), CloudSession()) }
-            assertEquals(List(4) { CloudGenerationStage.REFINE }, provider.stages)
+            assertEquals(listOf(CloudGenerationStage.PLAN) + List(4) { CloudGenerationStage.REFINE }, provider.stages)
             assertEquals(live, store.tool(live.id))
             assertEquals(refined, store.draft(refine.id))
             val next = engine.accept(refine.id)
@@ -538,7 +543,7 @@ class GenerationRouteWorkflowTest {
             provider.requests.clear()
             val translation = engine.createDraft("Translate the interface to Italian", next.id)
             failure("widget_language_native") { engine.generate(translation.id, "fixture", emptyList(), CloudSession()) }
-            assertEquals(listOf(CloudGenerationStage.REFINE), provider.stages)
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE), provider.stages)
             assertEquals(next, store.tool(next.id))
             assertNull(store.draft(translation.id)?.candidate)
             assertEquals("Move the dot", afterSpec.action(afterSpec.ui, "fill_copy")!!.getString("text"))
@@ -776,29 +781,337 @@ class GenerationRouteWorkflowTest {
         }
     }
 
-    @Test fun failedNativeAssertionDoesNotRetryTheMixedWriter(): Unit = runBlocking {
-        val local = """{"id":"note","type":"action","label":"Note","description":"An independent action","writes":[]}"""
-        val raw = JSONObject(plan("$count,$local")).put("behavior", nativeFixtureBehavior(
-            """"add":{"kind":"action","part":"count","member":"add"},
-                "value":{"kind":"value","part":"count","member":"value"}""",
-            """{"op":"action","slot":"add"},{"op":"assert","slot":"value","test":"equals","value":2}"""
-        )).toString()
+    @Test fun onePlanRepairNamesEveryUnselectedSlotOwner(): Unit = runBlocking {
+        val custom = """{"id":"note","type":"other","label":"Note","description":"Independent custom output","writes":[],"reads":[]}"""
+        val rejected = JSONObject(plan("$count,$custom")).put("behavior", nativeFixtureBehavior(
+            """"write":{"kind":"action","part":"note","member":"edit"},
+                "summary":{"kind":"value","part":"note","member":"value"}""",
+            """{"op":"action","slot":"write","value":"Example"},
+                {"op":"assert","slot":"summary","test":"equals","value":"Example"}"""
+        ))
+        val corrected = JSONObject(plan(count))
+        var plans = 0
         val provider = FixtureProvider { turn, _ ->
             when (turn.generationStage) {
-                CloudGenerationStage.PLAN -> raw
+                CloudGenerationStage.PLAN -> if (++plans == 1) rejected.toString() else {
+                    val feedback = turn.turns.last().text
+                    assertTrue(feedback, "write -> note" in feedback && "summary -> note" in feedback)
+                    JSONObject().put("fields", JSONObject()
+                        .put("needs", corrected.getJSONArray("needs"))
+                        .put("behavior", corrected.getJSONObject("behavior"))).toString()
+                }
                 CloudGenerationStage.SELECTOR -> answer(turn)
-                CloudGenerationStage.COMPLETE -> """{"holes":["note"],"fill":{"capabilities":[],
-                    "stateSchema":{"fill_value":"number"},"initialState":{"fill_value":0},
-                    "ui":{"type":"column","children":[{"type":"button","text":"Note","action":"fill_note"}]},
-                    "source":"return {state:input.state};"}}"""
+                else -> error("The corrected native plan must skip the writer.")
+            }
+        }
+        withEngine(provider) { _, engine, _ ->
+            val draft = engine.createDraft("Build a count with Add and Reset.", null)
+            engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+            assertEquals(2, plans)
+            assertTrue(engine.accept(draft.id).saved)
+        }
+    }
+
+    @Test fun receiptRepairReselectsChangedNeedsAndExplainsMissingNativeCapability(): Unit = runBlocking {
+        val prompt = "Keep a chime count and play a beep each time I press Chime."
+        val initial = JSONObject(plan(count)).put("requiredCapabilities", JSONArray()
+            .put(JSONObject().put("id", "audio.tone").put("excerpt", "play a beep")))
+            .put("behavior", nativeFixtureBehavior(
+                """"play":{"kind":"action"},"value":{"kind":"value","valueType":"number"}""",
+                """{"op":"action","slot":"play"},{"op":"assert","slot":"value","test":"equals","value":1}"""))
+        val unchecked = JSONObject("""{"status":"unchecked","reason":"external_outcome"}""")
+        val writer = JSONObject(definition(stateKey = "count", action = "play", source = """
+            const s = input.state;
+            if (input.event.actionId !== 'play') return {state:s};
+            return {state:{count:s.count+1},effects:[{id:'tone',capability:'audio.tone',args:{tone:'beep',durationMillis:120}}]};
+        """.trimIndent())).put("capabilities", JSONArray().put("audio.tone"))
+            .put("ui", JSONObject("""{"type":"column","children":[{"type":"button","text":"Chime","action":"play"},
+                {"type":"metric","text":"Chimes","bind":"count"}]}"""))
+        var plans = 0
+        var selections = 0
+        var writers = 0
+        val provider = FixtureProvider { turn, _ ->
+            when (turn.generationStage) {
+                CloudGenerationStage.PLAN -> when (++plans) {
+                    1 -> initial.toString()
+                    2 -> {
+                        assertTrue(turn.turns.last().text.contains("required native receipt"))
+                        JSONObject().put("fields", JSONObject().put("behavior", unchecked)
+                            .put("needs", JSONArray().put(JSONObject(count).put("label", "Chimes")))).toString()
+                    }
+                    3 -> {
+                        val feedback = turn.turns.last().text
+                        assertTrue(feedback, "$.requiredCapabilities" in feedback && "audio.tone" in feedback && "wholeScreen" in feedback)
+                        JSONObject().put("fields", JSONObject().put("wholeScreen", true))
+                            .put("removeFields", JSONArray(listOf("title", "description", "inputs", "constants", "needs", "questions")))
+                            .toString()
+                    }
+                    else -> error("Unexpected PLAN repair.")
+                }
+                CloudGenerationStage.SELECTOR -> if (++selections == 1) answer(turn, mapOf("s_count" to "B")) else answer(turn)
+                CloudGenerationStage.COMPLETE -> if (++writers == 1) JSONObject(writer.toString())
+                    .put("behaviorBindings", JSONObject("""{"play":"play","value":[1]}""")).toString() else writer.toString()
+                else -> error("Unexpected generation stage.")
+            }
+        }
+        withEngine(provider) { _, engine, _ ->
+            val draft = engine.createDraft(prompt, null)
+            val session = CloudSession()
+            engine.generate(draft.id, "fixture", emptyList(), session)
+            val saved = engine.accept(draft.id)
+            assertEquals(setOf("audio.tone"), ToolSpec.parsePersisted(saved.spec).capabilities)
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.COMPLETE,
+                CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.SELECTOR,
+                CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE), provider.stages)
+            assertEquals(1, session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
+        }
+    }
+
+    private val receiptPrompt = "Count each change and play a beep when the switch turns on."
+
+    private fun receiptBehavior(enabled: Boolean, expected: Int) = nativeFixtureBehavior(
+        """"change":{"kind":"action"},"count":{"kind":"value","valueType":"number"}""",
+        """{"op":"action","slot":"change","value":$enabled},{"op":"assert","slot":"count","test":"equals","value":$expected}""")
+
+    private fun receiptPlan() = JSONObject("""{"wholeScreen":true,"language":"en"}""")
+        .put("requiredCapabilities", JSONArray().put(JSONObject().put("id", "audio.tone").put("excerpt", "play a beep")))
+        .put("behavior", receiptBehavior(true, 1))
+
+    private fun receiptWriter() = JSONObject(definition(stateKey = "count", source = """
+        const e = input.event, s = input.state;
+        if (e.type !== 'action') return {state:s};
+        const result = {state:{count:s.count + 1, enabled:e.value}};
+        if (e.value) result.effects = [{id:'tone',capability:'audio.tone',args:{tone:'beep',durationMillis:120}}];
+        return result;
+    """.trimIndent())).put("capabilities", JSONArray().put("audio.tone"))
+        .put("ui", JSONObject("""{"type":"column","children":[{"type":"toggle","text":"Enable beep","bind":"enabled","action":"change"},
+            {"type":"metric","text":"Changes","bind":"count"}]}"""))
+        .put("behaviorBindings", JSONObject("""{"change":"change","count":[1]}"""))
+        .apply {
+            getJSONObject("stateSchema").put("enabled", "boolean")
+            getJSONObject("initialState").put("enabled", false)
+        }
+
+    @Test fun receiptRepairDiscardsTheHandoffAfterAnIncompatiblePlan(): Unit = runBlocking {
+        val writer = receiptWriter()
+        val first = JSONObject(plan(count))
+        val receipt = receiptPlan()
+        first.put("requiredCapabilities", receipt.getJSONArray("requiredCapabilities"))
+            .put("behavior", receipt.getJSONObject("behavior"))
+        val nativeOwner = receiptBehavior(true, 1).apply {
+            getJSONObject("scenario").getJSONObject("slots").getJSONObject("change").put("part", "count").put("member", "add")
+        }
+        val rebuilt = JSONObject(writer.toString()).put("title", "New writer").apply { remove("behaviorBindings") }
+        var plans = 0
+        var writers = 0
+        val provider = FixtureProvider { turn, _ ->
+            when (turn.generationStage) {
+                CloudGenerationStage.PLAN -> when (++plans) {
+                    1 -> first.toString()
+                    2 -> JSONObject().put("fields", JSONObject().put("behavior", nativeOwner)).toString()
+                    3 -> {
+                        assertTrue("These slot owners were not selected" in turn.turns.last().text)
+                        """{"fields":{"behavior":{"status":"unchecked","reason":"external_outcome"}}}"""
+                    }
+                    else -> error("Unexpected PLAN repair.")
+                }
+                CloudGenerationStage.SELECTOR -> answer(turn, mapOf("s_count" to "B"))
+                CloudGenerationStage.COMPLETE -> {
+                    assertEquals(1, turn.turns.size)
+                    if (++writers == 1) writer.toString() else rebuilt.toString()
+                }
+                else -> error("Unexpected generation stage.")
+            }
+        }
+        withEngine(provider) { _, engine, _ ->
+            val session = CloudSession()
+            val draft = engine.createDraft(receiptPrompt, null)
+            engine.generate(draft.id, "fixture", emptyList(), session)
+            assertEquals("New writer", ToolSpec.parsePersisted(engine.accept(draft.id).spec).title)
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.COMPLETE,
+                CloudGenerationStage.PLAN, CloudGenerationStage.SELECTOR, CloudGenerationStage.PLAN,
+                CloudGenerationStage.SELECTOR, CloudGenerationStage.COMPLETE), provider.stages)
+            assertEquals(1, session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
+        }
+    }
+
+    @Test fun receiptRepairRechecksRetainedWriterAndKeepsItsPatchBase(): Unit = runBlocking {
+        for (expected in listOf(1, 2)) {
+            val writer = receiptWriter()
+            val provider = FixtureProvider { turn, _ ->
+                when (turn.generationStage) {
+                    CloudGenerationStage.PLAN -> if (turn.turns.size == 1) receiptPlan().toString()
+                        else JSONObject().put("fields", JSONObject().put("behavior", receiptBehavior(false, expected))).toString()
+                    CloudGenerationStage.COMPLETE -> if (turn.turns.size == 1) writer.toString()
+                        else {
+                            assertEquals(2, expected)
+                            assertTrue(sameToolJson(writer, JSONObject(turn.turns[turn.turns.lastIndex - 1].text)))
+                            assertTrue("assertion_failed" in turn.turns.last().text)
+                            """{"sourceEdits":[{"search":"s.count + 1","replace":"s.count + 2"}]}"""
+                        }
+                    else -> error("Unexpected generation stage.")
+                }
+            }
+            val diagnostics = mutableListOf<JSONObject>()
+            withEngine(provider, observer = { diagnostics += it }) { _, engine, _ ->
+                val session = CloudSession()
+                val draft = engine.createDraft(receiptPrompt, null)
+                engine.generate(draft.id, "fixture", emptyList(), session)
+                val saved = ToolSpec.parsePersisted(engine.accept(draft.id).spec)
+                val stages = listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.PLAN)
+                assertEquals(if (expected == 2) stages + CloudGenerationStage.COMPLETE else stages, provider.stages)
+                assertEquals(expected, session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
+                assertEquals(0, JSONObject(saved.initialState).getInt("count"))
+                assertEquals(writer.getString("source").replace("s.count + 1", "s.count + $expected"), saved.source)
+                assertEquals(expected == 2, diagnostics.any {
+                    it.optJSONObject("behaviorBinding")?.optString("rule") == "assertion_failed"
+                })
+            }
+        }
+    }
+
+    @Test fun receiptRepairUsesEachHandoffOnceAndStopsAtThePlanBudget(): Unit = runBlocking {
+        val writer = receiptWriter()
+        var plans = 0
+        val provider = FixtureProvider { turn, _ ->
+            when (turn.generationStage) {
+                CloudGenerationStage.PLAN -> when (++plans) {
+                    1 -> receiptPlan().toString()
+                    in 2..4 -> JSONObject().put("fields", JSONObject().put("behavior", receiptBehavior(true, plans))).toString()
+                    else -> error("Unexpected PLAN repair.")
+                }
+                CloudGenerationStage.COMPLETE -> {
+                    assertEquals(1, turn.turns.size)
+                    writer.toString()
+                }
                 else -> error("Unexpected generation stage.")
             }
         }
         withEngine(provider) { store, engine, _ ->
-            val draft = engine.createDraft("Add one to a count and include a separate Note button.", null)
-            failure("widget_behavior") { engine.generate(draft.id, "fixture", emptyList(), CloudSession()) }
+            val session = CloudSession()
+            val draft = engine.createDraft(receiptPrompt, null)
+            val failure = runCatching { engine.generate(draft.id, "fixture", emptyList(), session) }.exceptionOrNull()
+            assertEquals("widget_plan", (failure as? CloudFailure)?.code)
+            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.PLAN,
+                CloudGenerationStage.PLAN, CloudGenerationStage.PLAN), provider.stages)
+            assertEquals(1, session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
+            assertNull(store.draft(draft.id)?.candidate)
+            assertTrue(store.tools().isEmpty())
+        }
+    }
+
+    @Test fun receiptRepairStopsOnCancellationOrExhaustedWriterBudget(): Unit = runBlocking {
+        for (cancel in listOf(true, false)) {
+            val session = CloudSession()
+            if (!cancel) repeat(3) { session.claimGenerationRepair(CloudGenerationStage.COMPLETE) }
+            val provider = FixtureProvider { turn, _ ->
+                when (turn.generationStage) {
+                    CloudGenerationStage.PLAN -> if (turn.turns.size == 1) receiptPlan().toString()
+                        else JSONObject().put("fields", JSONObject().put("behavior", receiptBehavior(false, 2))).toString()
+                    CloudGenerationStage.COMPLETE -> {
+                        assertEquals(1, turn.turns.size)
+                        receiptWriter().toString()
+                    }
+                    else -> error("Unexpected generation stage.")
+                }
+            }
+            withEngine(provider) { store, engine, _ ->
+                val draft = engine.createDraft(receiptPrompt, null)
+                val trace = ToolGenerationTrace(UUID.fromString(draft.id), { event ->
+                    if (cancel && event is ToolGenerationTraceEvent.Stage && event.started &&
+                        event.attempt == 2 && event.stage == ToolGenerationStage.SMOKE) session.cancel()
+                })
+                val failure = runCatching {
+                    engine.generate(draft.id, "fixture", emptyList(), session, progress = null, previewObserver = null, trace = trace)
+                }.exceptionOrNull()
+                assertEquals(if (cancel) "cancelled" else "widget_behavior", (failure as? CloudFailure)?.code)
+                assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.PLAN), provider.stages)
+                assertNull(store.draft(draft.id)?.candidate)
+                assertTrue(store.tools().isEmpty())
+            }
+        }
+    }
+
+    @Test fun inlineSceneChecksUseDeclaredNativeControlsAndResults(): Unit = runBlocking {
+        val scenePlan = fixtureScene(moving = true)
+        val scenario = scenePlan.getJSONObject("checks").getJSONObject("scenario")
+        val oldSteps = scenario.getJSONArray("steps")
+        scenario.getJSONObject("slots")
+            .put("add", JSONObject("""{"kind":"action","part":"count","member":"add"}"""))
+            .put("count", JSONObject("""{"kind":"value","part":"count","member":"value"}"""))
+        scenario.put("steps", JSONArray("""[
+            {"op":"action","slot":"add"},{"op":"assert","slot":"count","test":"equals","value":1}
+        ]""").put(oldSteps.getJSONObject(0)))
+        val provider = FixtureProvider { turn, _ ->
+            when (turn.generationStage) {
+                CloudGenerationStage.PLAN -> {
+                    assertEquals(1, turn.turns.size)
+                    JSONObject(plan("$count,$scene")).put("scene", scenePlan).toString()
+                }
+                CloudGenerationStage.SELECTOR -> answer(turn)
+                CloudGenerationStage.COMPLETE -> mixed(sceneFill())
+                else -> error("Unexpected stage.")
+            }
+        }
+        withEngine(provider) { _, engine, _ ->
+            val draft = engine.createDraft("Build a counter and a separate moving dot.", null)
+            engine.generate(draft.id, "fixture", emptyList(), CloudSession())
+            val saved = engine.accept(draft.id)
+            assertEquals(0, JSONObject(saved.state).getInt(counterState))
             assertEquals(1, provider.stages.count { it == CloudGenerationStage.COMPLETE })
-            assertNull(store.tool(draft.id))
+        }
+    }
+
+    @Test fun mixedNativeAssertionRepairsThePlanBeforeRebuildingTheWriter(): Unit = runBlocking {
+        val local = """{"id":"note","type":"other","label":"Note","description":"An independent action","writes":[],"reads":[]}"""
+        fun behavior(expected: Int) = nativeFixtureBehavior(
+            """"add":{"kind":"action","part":"count","member":"add"},
+                "value":{"kind":"value","part":"count","member":"value"}""",
+            """{"op":"action","slot":"add"},{"op":"assert","slot":"value","test":"equals","value":$expected}"""
+        )
+        val raw = JSONObject(plan("$count,$local")).put("behavior", behavior(2)).toString()
+        for (pauseOwner in listOf(false, true)) {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                var plans = 0
+                val provider = FixtureProvider { turn, _ ->
+                    when (turn.generationStage) {
+                        CloudGenerationStage.PLAN -> if (++plans == 1) raw else {
+                            assertTrue(turn.turns.last().text, "$.behavior.scenario.steps[1]" in turn.turns.last().text)
+                            JSONObject().put("fields", JSONObject().put("behavior", behavior(1))).toString()
+                        }
+                        CloudGenerationStage.SELECTOR -> answer(turn)
+                        CloudGenerationStage.COMPLETE -> {
+                            assertEquals("Writer repairs must not pay for the native mismatch.", 1, turn.turns.size)
+                            """{"holes":["note"],"fill":{"capabilities":[],
+                                "stateSchema":{"fill_value":"number"},"initialState":{"fill_value":0},
+                                "ui":{"type":"column","children":[{"type":"button","text":"Note","action":"fill_note"}]},
+                                "source":"return {state:input.state};"}}"""
+                        }
+                        else -> error("Unexpected generation stage.")
+                    }
+                }
+                val suspendOwner: ((JSONObject) -> Unit)? = if (pauseOwner) { event ->
+                    if (event.optString("stage") == "plan" && event.optString("disposition") == "correct") {
+                        scenario.moveToState(Lifecycle.State.STARTED)
+                    }
+                } else null
+                withEngine(provider, suspendOwner) { store, engine, _ ->
+                    val draft = engine.createDraft("Add one to a count and include a separate Note button.", null)
+                    val session = CloudSession()
+                    if (pauseOwner) {
+                        failure("widget_owner") { engine.generate(draft.id, "fixture", emptyList(), session) }
+                        assertEquals(1, plans)
+                        assertEquals(1, provider.stages.count { it == CloudGenerationStage.COMPLETE })
+                        assertNull(store.tool(draft.id))
+                        return@withEngine
+                    }
+                    engine.generate(draft.id, "fixture", emptyList(), session)
+                    assertEquals(2, plans)
+                    assertEquals(2, provider.stages.count { it == CloudGenerationStage.COMPLETE })
+                    assertEquals(1, session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
+                    assertTrue(engine.accept(draft.id).saved)
+                }
+            }
         }
     }
 
@@ -1064,7 +1377,8 @@ class GenerationRouteWorkflowTest {
                     1 -> """{"wholeScreen":false}"""
                     2 -> """{"fields":{"wholeScreen":1}}"""
                     3 -> """{"fields":{"wholeScreen":"true"}}"""
-                    4 -> """{"fields":{"wholeScreen":true,"language":"en"}}"""
+                    4 -> """{"fields":{"wholeScreen":true,"language":"en",
+                        "behavior":{"status":"unchecked","reason":"unsupported_observation"}}}"""
                     else -> error("A fourth PLAN repair dispatched.")
                 }
                 CloudGenerationStage.COMPLETE -> when (++writerCalls) {

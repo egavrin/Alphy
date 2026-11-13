@@ -35,7 +35,7 @@ internal enum class ToolGenerationRoute(val id: String) {
 internal enum class BehaviorFailureRule(val id: String) {
     ROW_SCOPE_MISMATCH("row_scope_mismatch"), BINDING_SHAPE("binding_shape"), BINDING_MISSING("binding_missing"), TARGET_MISSING("target_missing"),
     TARGET_HIDDEN("target_hidden"), OBSERVATION_KIND("observation_kind"), SCALAR_MISSING("scalar_missing"),
-    SCALAR_SHAPE("scalar_shape"), ACTION_UNAVAILABLE("action_unavailable"), SURFACE_UNAVAILABLE("surface_unavailable"),
+    SCALAR_SHAPE("scalar_shape"), ACTION_UNAVAILABLE("action_unavailable"), BOOLEAN_ACTION_PAYLOAD("boolean_action_payload"), SURFACE_UNAVAILABLE("surface_unavailable"),
     DRAWING_UNAVAILABLE("drawing_unavailable"), SUBSCRIPTION_UNAVAILABLE("subscription_unavailable"),
     ASSERTION_FAILED("assertion_failed"), EVENT_LIMIT("event_limit"), EXTERNAL_RESULT_REQUIRED("external_result_required")
 }
@@ -100,7 +100,9 @@ internal data class BehaviorBindingDiagnostic(
         .put("scope", scope?.wire).put("comparison", comparison?.wire)
         .put("observation", observation?.name?.lowercase(java.util.Locale.ROOT))
         .put("frames", frames).put("requiredChanges", requiredChanges).put("observedChanges", observedChanges)
-        .put("contractOwner", "plan".takeIf { rule == BehaviorFailureRule.ROW_SCOPE_MISMATCH })
+        .put("contractOwner", "plan".takeIf {
+            rule == BehaviorFailureRule.ROW_SCOPE_MISMATCH || rule == BehaviorFailureRule.BOOLEAN_ACTION_PAYLOAD
+        })
         .put("discoveryStage", discoveryStage?.id)
 }
 
@@ -249,7 +251,7 @@ internal inline fun <T> ToolGenerationTrace.Run?.timed(
 
 private fun safeSelectorBatch(batch: String?) = batch?.takeIf { it == "sections" || it == "parts" }
 private val needsPlanPath = Regex(
-    """\$(?:\.(?:wholeScreen|scene|checks|checkEvidence|visualReview|behavior|scenario|steps|title|description|language|inputs|constants|needs|questions|id|label|type|value|uses|sourceIds|stops|bands|items|ideas|name|minutes|min|max|step|control|expression|example|unit|date|offsetDays|repeatDays|effort|ask|options|count|maxFrames|milliseconds)(?:\[\d{1,2}])?)*|\$\.(?:behavior|scene\.checks)\.scenario\.slots\[\d{1,2}](?:\.(?:valueType|rowValueType))?"""
+    """\$(?:\.(?:wholeScreen|scene|checks|checkEvidence|visualReview|requiredCapabilities|excerpt|behavior|scenario|steps|title|description|language|inputs|constants|needs|questions|id|label|type|value|uses|sourceIds|stops|bands|items|ideas|name|minutes|min|max|step|control|expression|example|unit|date|offsetDays|repeatDays|effort|ask|options|count|maxFrames|milliseconds)(?:\[\d{1,2}])?)*|\$\.(?:behavior|scene\.checks)\.scenario\.slots\[\d{1,2}](?:\.(?:valueType|rowValueType))?"""
 )
 
 /** No candidate, exception message, private field name, or generated identifier enters this record.
@@ -299,9 +301,10 @@ internal data class ToolGenerationAttemptDiagnostic(
             "response_length","response_size","stream_invalid","stream_timeout","stream_io","pre_headers_io",
             "pre_headers_timeout","source_attribution","decision_language",
             "unavailable","tool_invalid","tool_limit","widget_generation","widget_response_size",
-            "widget_request","widget_plan","widget_selector","widget_questions","widget_incomplete",
+            "widget_request","widget_plan","widget_owner","widget_selector","widget_questions","widget_incomplete",
             "three_behavior","three_declined","three_deadline","three_unavailable",
-            "widget_spec","widget_state","widget_behavior","widget_patch","widget_preview","widget_preview_state","widget_preview_effects","drawing.command_fields",
+            "widget_spec","widget_state","widget_behavior","widget_patch","widget_preview","widget_preview_state","widget_preview_effects","widget_timer_host","drawing.command_fields",
+            "records_with_effects",
             "javascript_unavailable","javascript_busy","javascript_sandbox_died","javascript_closed","javascript_memory_limit",
             "javascript_script_error","javascript_timeout","javascript_invalid_request","javascript_invalid_result") +
             ThreeSceneProblem.entries.map { it.code }
@@ -309,7 +312,9 @@ internal data class ToolGenerationAttemptDiagnostic(
             "schema.constructor","schema.type","object.keys","object.fields","list.keys","list.fields","list.maxItems","list.id",
             "list.field","array.keys","array.maxItems","state.fields","collections.count")
         private val smokeEvents=setOf("preview","render","open","action","liveInput","viewport","frame","timer","start","pointer","control","pause","resume","restart","stop")
-        private val smokeLocation=Regex("\\$\\.(?:ui(?:\\.(?:children|rowActions)\\[[0-9]{1,3}\\]|\\.rowTemplate)*|timers\\[[0-9]{1,3}\\]|surfaces\\[[0-9]{1,3}\\](?:\\.commands\\[[0-9]{1,3}\\](?:\\.children\\[[0-9]{1,3}\\])*(?:\\.stroke)?)?)")
+        private val smokeLocation = Regex(
+            """\$\.(?:ui(?:\.(?:children|rowActions)\[[0-9]{1,3}\]|\.rowTemplate)*|timers\[[0-9]{1,3}\]|surfaces\[[0-9]{1,3}\](?:\.commands\[[0-9]{1,3}\](?:\.children\[[0-9]{1,3}\])*(?:\.stroke)?)?|(?:behavior|scene\.checks)(?:\.scenario\.steps\[[0-9]{1,2}\])?)"""
+        )
         internal fun safeCode(code: String)=code.takeIf {it in codes || it.matches(Regex("http_[0-9]{3}"))} ?: "unknown"
     }
 }

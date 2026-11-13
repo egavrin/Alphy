@@ -95,11 +95,11 @@ class GenerationContractGuidanceTest {
 
     @Test fun needsPlanGuidanceShowsAValidObject() {
         val example = NeedsPlan.prompt.substringAfter("Use these fields:\n").substringBefore("\nUse the language")
-        val parsed = NeedsPlan.parse(example)
+        val parsed = (NeedsPlan.parseResponse(example, null, emptySet()) as GenerationPlan.Parts).needs
         assertTrue(parsed.inputs.isEmpty())
         assertTrue(parsed.needs.single().uses.isEmpty())
         val references = NeedsPlan.prompt.substringAfter("Complete example with a reference:\n").substringBefore("\nReference rules:")
-        val referenced = NeedsPlan.parse(references)
+        val referenced = (NeedsPlan.parseResponse(references, null, emptySet()) as GenerationPlan.Parts).needs
         assertEquals(mapOf("step" to "increment"),referenced.needs.single().uses)
         assertEquals(2,(referenced.constants.getValue("increment").raw as Number).toInt())
         assertTrue(NeedsPlan.prompt.contains(NeedsPlan.structureChecklist))
@@ -116,6 +116,18 @@ class GenerationContractGuidanceTest {
         assertEquals("component_text", diagnostic.rule)
         assertTrue(diagnostic.correction.contains("Observed count: 0."))
         assertFalse(diagnostic.correction.contains(secret))
+    }
+
+    @Test fun shortToolPolicyDistinguishesCreationAnswersAndDeviceActions() {
+        val instructions = com.alpha.assistant.cloud.ChatToolReply.instructions()
+        assertTrue(instructions.contains("Use ordinary styling defaults without adding a user requirement."))
+        assertTrue(instructions.contains("A location result handler cannot open Share."))
+        assertTrue(instructions.contains("Choose create for a short tool request when a useful minimal mini-app is clear"))
+        assertTrue(instructions.contains("a timer, stopwatch, discount %, or a protein target per kilogram"))
+        assertTrue(instructions.contains("Choose answer for fixed-value questions"))
+        assertTrue(instructions.contains("A conversion rate alone does not supply an input to convert."))
+        assertTrue(instructions.contains("Use the device plan for a request to start or set a task timer"))
+        assertFalse(instructions.contains("For \"a timer\", ask"))
     }
 
     @Test fun stagedPromptExamplesContainTheirRequiredChecks() {
@@ -137,7 +149,7 @@ class GenerationContractGuidanceTest {
     }
 
     @Test fun wholeScreenMarkerIsExactAndUnavailableToLessonPlans() {
-        val marker = """{"wholeScreen":true,"language":"en"}"""
+        val marker = """{"wholeScreen":true,"language":"en","requiredCapabilities":[]}"""
         assertEquals(GenerationPlan.WholeScreen(null), NeedsPlan.parseResponse(marker, null, emptySet()))
         for (invalid in listOf("{}", """{"wholeScreen":false}""", """{"wholeScreen":1}""",
             """{"wholeScreen":null}""", """{"wholeScreen":"true"}""",

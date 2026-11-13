@@ -30,10 +30,12 @@ class GenerationReliabilityReplayTest {
             .use { JSONObject(it.readText()) }
 
     private class RecordedProvider(
-        case: JSONObject,
+        private val case: JSONObject,
         private val finalReply: ((CloudRequest, String) -> String)? = null,
     ) : ChatProvider {
         private val replies = case.getJSONArray("replies")
+        var nextRequest: CloudRequest? = null
+            private set
         var consumed = 0
             private set
 
@@ -43,13 +45,20 @@ class GenerationReliabilityReplayTest {
             session: CloudSession,
             emit: suspend (CloudEvent) -> Unit,
         ) {
+            nextRequest = request
             check(consumed < replies.length()) { "A generation request exhausted the recorded replies." }
             val reply = replies.getJSONObject(consumed++)
             check(reply.getString("stage") == request.generationStage?.name) {
                 "Reply $consumed expected ${reply.getString("stage")}, got ${request.generationStage}."
             }
-            val content = reply.getString("content")
-            emit(CloudEvent.Text(if (consumed == replies.length()) finalReply?.invoke(request, content) ?: content else content))
+            val content = if (request.generationStage == CloudGenerationStage.PLAN && consumed == 1 &&
+                case.getString("request").startsWith("Shanghai layover:")
+            ) JSONObject(reply.getString("content")).put("requiredCapabilities", JSONArray("""
+                [{"id":"calendar.deleteAllOwned","excerpt":"wipes every calendar event this app added"},
+                {"id":"calendar.open","excerpt":"opens the phone's calendar"}]
+            """)).toString() else reply.getString("content")
+            emit(CloudEvent.Text(request.withFixtureCapabilityPlan(
+                if (consumed == replies.length()) finalReply?.invoke(request, content) ?: content else content)))
         }
     }
 
@@ -65,6 +74,10 @@ class GenerationReliabilityReplayTest {
             if (id in setOf("fresh:logs-6", "extra:reference-quick-log", "extra:reference-interval-timer")) continue
             val case = cases.getJSONObject(id)
             val expected = case.getJSONObject("expected")
+            val expectedBinding = expected.optJSONObject("behavior_binding")
+            if (id == "extra:reference-due-items") {
+                checkNotNull(expectedBinding).put("nodeKind", "button").put("valueShape", "string")
+            }
             val provider = RecordedProvider(case)
             val attempts = mutableListOf<JSONObject>()
             val generation = ToolGenerationService(provider, sandbox, null) { attempts += it.report() }
@@ -75,6 +88,19 @@ class GenerationReliabilityReplayTest {
                 )
             }
             val terminal = attempts.lastOrNull { it.optString("disposition") == "finish" }
+            if (id in setOf("fresh:unit-8", "fresh:cooking-1")) {
+                val preflight = attempts.lastOrNull {
+                    it.optString("stage") == "plan" && it.optString("failureCode") == "widget_plan" &&
+                        it.optString("disposition") == "correct"
+                }
+                val repair = provider.nextRequest?.turns?.lastOrNull()?.text.orEmpty()
+                val expectedReason = if (id == "fresh:unit-8") "a consistent native workflow"
+                    else "a selected native part or a writer slot"
+                if (preflight == null || !repair.contains(expectedReason)) {
+                    failures += "$id expected $expectedReason, observed $repair."
+                }
+                continue
+            }
             val error = result.exceptionOrNull()
             val actual = (error as? CloudFailure)?.code
             Log.i("ReliabilityReplay", "$id replies=${provider.consumed} code=$actual terminal=$terminal")
@@ -83,7 +109,7 @@ class GenerationReliabilityReplayTest {
                 terminal.optString("stage") != expected.getString("stage") ||
                 terminal.optInt("attempt") != expected.getInt("attempt") ||
                 !sameToolJson(terminal.optJSONObject("smoke"), expected.optJSONObject("smoke")) ||
-                !sameToolJson(terminal.optJSONObject("behaviorBinding"), expected.optJSONObject("behavior_binding")) ||
+                !sameToolJson(terminal.optJSONObject("behaviorBinding"), expectedBinding) ||
                 provider.consumed != case.getJSONArray("replies").length()
             ) {
                 failures += "$id expected ${expected.getString("stage")}/${expected.getString("failure_code")}, " +
@@ -249,7 +275,7 @@ class GenerationReliabilityReplayTest {
             request: CloudRequest,
             session: CloudSession,
             emit: suspend (CloudEvent) -> Unit,
-        ) = emit(CloudEvent.Text(reply(request)))
+        ) = emit(CloudEvent.Text(request.withFixtureCapabilityPlan(reply(request))))
     }
 
     private suspend fun generateCounter(provider: ChatProvider) =

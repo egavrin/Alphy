@@ -93,7 +93,7 @@ class PlanContractReplayTest {
             ) {
                 val reply = when (request.generationStage) {
                     CloudGenerationStage.PLAN -> plans.getOrElse(plansSeen.size) {
-                        throw AssertionError("$id unexpected PLAN request ${plansSeen.size + 1}")
+                        throw AssertionError("$id unexpected PLAN request ${plansSeen.size + 1}: ${request.turns.last().text.take(800)}")
                     }.let(request::withFixtureCheckEvidence).also { plansSeen += request }
                     CloudGenerationStage.SELECTOR -> {
                         val body = request.turns.single().text
@@ -126,6 +126,26 @@ class PlanContractReplayTest {
         return run
     }
 
+    @Test fun nativeInconsistenciesRepairBeforeAcceptingThePlan() = runBlocking {
+        val fixtures = instrumentation.context.assets.open("generation-reliability/native-preflight.json")
+            .bufferedReader().use { JSONObject(it.readText()) }
+        val failures = mutableListOf<String>()
+        for (id in fixtures.keys()) {
+            val fixture = fixtures.getJSONObject(id)
+            runCatching {
+                val run = replay(id, fixture, listOf(fixture.getJSONObject("invalid").toString(),
+                    fixture.getJSONObject("corrected").toString()))
+                run.result.getOrThrow()
+                assertEquals(2, run.planRequests.size)
+                assertEquals(1, run.rejectedPlans.size)
+                assertEquals(listOf(CloudGenerationStage.PLAN), run.repairs.map { it.providerStage })
+                assertTrue(run.writerRequests.isEmpty())
+                run.assertWriterBudgetIntact()
+            }.onFailure { failures += "$id: ${it.message}" }
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
     @Test fun recordedScalarPlansRepairBeforeWriterAndKeepTheirBudget() = runBlocking {
         for ((id, slot, step) in listOf(
             Triple("fresh:unit-3", "inches", 3),
@@ -133,7 +153,15 @@ class PlanContractReplayTest {
             Triple("fresh:beyond-1", "total", 3),
         )) {
             val case = cases.getJSONObject(id)
-            val plan = candidate(case, CloudGenerationStage.PLAN)
+            val plan = candidate(case, CloudGenerationStage.PLAN).let { captured ->
+                if (id != "fresh:home-5") captured else {
+                    val workflow = scenario(captured)
+                    val slots = workflow.getJSONObject("slots")
+                    for (slotId in slots.keys()) slots.getJSONObject(slotId).apply { remove("part"); remove("member") }
+                    JSONObject().put("wholeScreen", true).put("language", "en")
+                        .put("behavior", captured.getJSONObject("behavior"))
+                }
+            }
             val original = plan.toString()
             val workflow = scenario(plan)
             workflow.getJSONObject("slots").getJSONObject(slot).put("valueType", "number")
@@ -352,37 +380,72 @@ class PlanContractReplayTest {
     }
 
     @Test fun timerBatchAndEventBoundaryUseTheRealChecker() = runBlocking {
-        val request = "Make a local timer that counts delivered ticks."
+        val request = "Make a drawing with a timer that counts delivered ticks."
         val case = JSONObject().put("request", request).put("context", request)
         for ((counts, allowed, rule) in listOf(
             Triple(listOf(25), listOf(24), "behavior.timer_count"),
             Triple(listOf(24, 24, 12), listOf(24, 24, 11), "behavior.event_limit"),
         )) {
             fun plan(batches: List<Int>): JSONObject {
-                val steps = JSONArray()
+                val scene = fixtureScene("inline")
+                val workflow = scene.getJSONObject("checks").getJSONObject("scenario")
+                val slots = workflow.getJSONObject("slots")
+                slots.put("t", JSONObject().put("kind", "timer"))
+                slots.put("v", JSONObject().put("kind", "value"))
+                val steps = workflow.getJSONArray("steps")
                 for (count in batches) steps.put(JSONObject().put("op", "timers").put("slot", "t").put("count", count))
                 steps.put(assertion("v", "equals", batches.sum()))
-                return JSONObject("""{"wholeScreen":true,"language":"en","behavior":{"status":"checkable",
-                    "scenario":{"slots":{"t":{"kind":"timer"},"v":{"kind":"value"}}}}}""")
-                    .apply { scenario(this).put("steps", steps) }
+                return JSONObject("""{"wholeScreen":true,"language":"en"}""").put("scene", scene)
             }
             val definition = """{"formatVersion":3,"title":"Timer","description":"Count ticks","capabilities":[],
                 "stateSchema":{"ticks":"number"},"initialState":{"ticks":0},
-                "ui":{"type":"column","children":[{"type":"metric","text":"Ticks","bind":"ticks"}]},
-                "behaviorBindings":{"t":"tick","v":[0]},
-                "source":"const s=input.state; if(input.event.type==='open') return {state:s,timers:[{id:'tick',intervalMs:1000}]}; if(input.event.type==='timer') s.ticks++; return {state:s};"}"""
-            val run = replay(rule, case, listOf(plan(counts).toString(), patch("behavior" to plan(allowed).getJSONObject("behavior"))),
+                "surfaces":[{"id":"board","width":64,"height":64}],
+                "ui":{"type":"column","children":[{"type":"metric","text":"Ticks","bind":"ticks"},{"type":"canvas","text":"Drawing","surfaces":["board"]}]},
+                "behaviorBindings":{"t":"tick","v":[0],"drawing":{"surface":"board","path":[]}},
+                "source":"const s=input.state;if(input.event.type==='timer') s.ticks++;return {state:s,timers:[{id:'tick',intervalMs:1000}],surfaces:{board:{commands:[{type:'circle',x:32,y:32,radius:4,color:'accent'}]}}};"}"""
+            val run = replay(rule, case, listOf(plan(counts).toString(), patch("scene" to plan(allowed).getJSONObject("scene"))),
                 listOf(definition))
             run.result.getOrThrow()
             assertEquals(rule, run.rejectedPlans.single().planShape?.rule)
             val perBatch = counts.size == 1
-            assertEquals(if (perBatch) "\$.behavior.scenario.steps[0].count" else "\$.behavior.scenario.steps[2]",
+            assertEquals(if (perBatch) "\$.scene.checks.scenario.steps[1].count" else "\$.scene.checks.scenario.steps[3]",
                 run.rejectedPlans.single().planPath)
             assertTrue(run.planRequests.last().turns.last().text.contains(if (perBatch) "1 to 24 timer deliveries"
                 else "64 total events including 5 reserved for the host (this step reaches 65)"))
             assertEquals(1, run.writerRequests.size)
             run.assertWriterBudgetIntact()
         }
+    }
+
+    @Test fun anUnscheduledStopwatchPlanRepairsToANativeClock() = runBlocking {
+        val recorded = instrumentation.context.assets.open("generation-reliability/unscheduled-stopwatch.json")
+            .bufferedReader().use { JSONObject(it.readText()) }
+        val fixture = instrumentation.context.assets.open("generation-reliability/native-preflight.json")
+            .bufferedReader().use { JSONObject(it.readText()).getJSONObject("compose:stopwatch") }
+        val native = fixture.getJSONObject("invalid")
+            .put("behavior", fixture.getJSONObject("corrected").getJSONObject("fields").getJSONObject("behavior"))
+        val corrected = JSONObject().put("fields", native).put("removeFields", JSONArray().put("wholeScreen"))
+        val run = replay("recorded unscheduled stopwatch", fixture,
+            listOf(recorded.getJSONObject("plan").toString(), corrected.toString()))
+        run.result.getOrThrow()
+        val rejected = run.rejectedPlans.single()
+        assertEquals("behavior.timer_host", rejected.planShape?.rule)
+        assertEquals("\$.behavior.scenario.steps[3]", rejected.planPath)
+        assertTrue(run.planRequests.last().turns.last().text.contains("native countdown or stopwatch"))
+        assertTrue(run.writerRequests.isEmpty())
+        run.assertWriterBudgetIntact()
+
+        val spec = ToolSpec.parsePersisted(recorded.getJSONObject("spec").toString())
+        val sandbox = SandboxClient(instrumentation.targetContext)
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession,
+                emit: suspend (CloudEvent) -> Unit) = error("No provider in a smoke replay")
+        }
+        val smoke = ToolGenerationSmoke(sandbox, spec, "stopwatch-replay", 1, spec.initialState,
+            checkActive = {}, generation = ToolGenerationService(provider, sandbox))
+        val failure = runCatching { smoke.run() }.exceptionOrNull() as ToolSmokeFailure
+        assertEquals("\$.timers[0]", failure.path)
+        assertEquals("widget_timer_host", (failure.cause as CloudFailure).code)
     }
 
     @Test fun clockAndStepLimitsRejectTheFirstExcessStep() = runBlocking {
@@ -399,14 +462,19 @@ class PlanContractReplayTest {
         val tooMany = JSONArray().put(action("start")).put(advance(86_400_000))
         repeat(63) { tooMany.put(assertion("elapsed", "equals", 86_400)) }
         val valid = JSONArray(tooMany.toString()).apply { remove(64) }
+        val misplacedType = JSONArray().put(action("start")).put(advance(86_400_000))
+            .put(assertion("elapsed", "equals", 86_400).put("valueType", "number"))
         val run = replay("authored clock and step limits", case,
-            listOf(plan.put("behavior", behavior(initial)).toString(), patch("behavior" to behavior(tooMany)), patch("behavior" to behavior(valid))))
+            listOf(plan.put("behavior", behavior(initial)).toString(), patch("behavior" to behavior(tooMany)),
+                patch("behavior" to behavior(misplacedType)), patch("behavior" to behavior(valid))))
         run.result.getOrThrow()
-        assertEquals(listOf("behavior.clock_limit", "behavior.steps_count"), run.rejectedPlans.map { it.planShape?.rule })
-        assertEquals(listOf("\$.behavior.scenario.steps[2].milliseconds", "\$.behavior.scenario.steps[64]"),
+        assertEquals(listOf("behavior.clock_limit", "behavior.steps_count", "plan.fields"), run.rejectedPlans.map { it.planShape?.rule })
+        assertEquals(listOf("\$.behavior.scenario.steps[2].milliseconds", "\$.behavior.scenario.steps[64]", "\$.behavior.scenario.steps[2]"),
             run.rejectedPlans.map { it.planPath })
         assertTrue(run.planRequests[1].turns.last().text.contains("86400000 milliseconds (24 hours)"))
         assertTrue(run.planRequests[2].turns.last().text.contains("at most 64 steps"))
+        assertTrue(run.planRequests[3].turns.last().text.contains("required keys [op, slot, test, value]"))
+        assertEquals("object", run.rejectedPlans.last().planShape?.observedType)
         assertTrue(run.writerRequests.isEmpty())
         run.assertWriterBudgetIntact()
     }
@@ -576,6 +644,58 @@ class PlanContractReplayTest {
         assertEquals(1, run.session.claimGenerationRepair(CloudGenerationStage.PLAN))
     }
 
+    @Test fun undeclaredKeyedBooleanGetsPlanSlotFeedback() = runBlocking {
+        val invalid = rowPlan(false)
+        scenario(invalid).getJSONArray("steps").getJSONObject(4).put("value", rowPayload())
+        val run = replay("missing row slot type", rowCase,
+            listOf(invalid.toString(), patch("behavior" to rowPlan().getJSONObject("behavior"))), listOf(rowWriter().toString()))
+        run.result.getOrThrow()
+        val rejected = run.rejectedPlans.single()
+        assertEquals("behavior.slot_row_value_type", rejected.planShape?.rule)
+        assertTrue(rejected.planPath.orEmpty().endsWith(".rowValueType"))
+        run.assertWriterBudgetIntact()
+    }
+
+    @Test fun writerRepairsTheMissingStableKeyAndDeletesTheRightRowAfterReorder() = runBlocking {
+        val plan = """{"wholeScreen":true,"language":"en","behavior":{"status":"checkable","scenario":{
+            "slots":{"reverse":{"kind":"action"},"delete":{"kind":"action"},"undo":{"kind":"action"},
+            "clear":{"kind":"action"},"first":{"kind":"value"},"rows":{"kind":"collection"}},
+            "steps":[{"op":"action","slot":"reverse"},{"op":"assert","slot":"first","test":"equals","value":"Erase"},
+            {"op":"action","slot":"delete","value":"row-erase"},{"op":"assert","slot":"rows","test":"equals","value":1},
+            {"op":"assert","slot":"first","test":"equals","value":"Keep"},{"op":"action","slot":"undo"},
+            {"op":"assert","slot":"rows","test":"equals","value":2},{"op":"assert","slot":"first","test":"equals","value":"Erase"},
+            {"op":"action","slot":"clear"},{"op":"assert","slot":"rows","test":"equals","value":0}]}}}"""
+        val state = JSONObject("""{"rows":[{"id":"row-keep","label":"Keep"},{"id":"row-erase","label":"Erase"}],"previous":[],"first":"Keep"}""")
+        val writer = JSONObject("""{"formatVersion":3,"title":"Notes","description":"Manage notes","capabilities":[],
+            "stateSchema":{"rows":{"type":"list","maxItems":8,"fields":{"id":"string","label":"string"}},
+            "previous":{"type":"list","maxItems":8,"fields":{"id":"string","label":"string"}},"first":"string"},
+            "initialState":{},"ui":{"type":"column","children":[{"type":"text","text":"First note","bind":"first"},
+            {"type":"list","text":"Notes","bind":"rows","columns":[{"text":"Note","field":"label"}],
+            "rowActions":[{"text":"Delete","action":"delete"}]},
+            {"type":"button","text":"Reverse","action":"reverse"},{"type":"button","text":"Undo","action":"undo"},
+            {"type":"button","text":"Clear","action":"clear"}]},"behaviorBindings":{"reverse":"reverse","delete":"delete",
+            "undo":"undo","clear":"clear","first":[0],"rows":[1]}}""")
+            .put("initialState", JSONObject(state.toString().replace("row-erase", "wrong-key")))
+            .put("source", """const s = input.state, e = input.event;
+                if (e.type !== 'action') return {state:s};
+                if (e.actionId === 'reverse') s.rows.reverse();
+                if (e.actionId === 'delete') {
+                  s.previous = s.rows;
+                  s.rows = s.rows.filter(row => row.id !== e.value);
+                }
+                if (e.actionId === 'undo' && s.previous.length) { s.rows = s.previous; s.previous = []; }
+                if (e.actionId === 'clear') s.rows = [];
+                s.first = s.rows.length ? s.rows[0].label : '';
+                return {state:s};""")
+        val request = "Create a notes list with reverse ordering, addressed deletion, undo, and clear."
+        val fixture = JSONObject().put("request", request).put("context", request)
+        val run = replay("stable row deletion", fixture, listOf(plan),
+            listOf(writer.toString(), patch("initialState" to state)))
+        run.result.getOrThrow()
+        assertEquals(listOf(CloudGenerationStage.COMPLETE), run.repairs.map { it.providerStage })
+        assertTrue(run.writerRequests[1].turns.last().text.contains("stable row key"))
+    }
+
     @Test fun currentRowsResolveAtTheActionStepAndUnavailableRowsKeepWriterOwnership() = runBlocking {
         replay("row created earlier", rowCase, listOf(rowPlan().toString()), listOf(rowWriter().toString())).result.getOrThrow()
         for (condition in listOf("missing", "visible", "enabled")) {
@@ -720,7 +840,7 @@ class PlanContractReplayTest {
                 run.firstRejected.behaviorBinding?.rule)
             assertEquals(5, run.firstRejected.behaviorBinding?.step)
             assertEquals("id", run.firstRejected.behaviorBinding?.bindingKind)
-            assertNull(run.firstRejected.behaviorBinding?.nodeKind)
+            assertEquals(kind.takeUnless { it == "availability" }, run.firstRejected.behaviorBinding?.nodeKind)
             assertTrue(run.repairs.all { it.providerStage == CloudGenerationStage.COMPLETE })
             assertEquals(3, run.repairs.size)
         }

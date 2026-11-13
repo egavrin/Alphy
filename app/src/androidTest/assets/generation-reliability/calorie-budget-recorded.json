@@ -1,0 +1,97 @@
+{
+  "case": "fresh:health-4",
+  "request": "calorie budget left today, my goal is 2000 and I enter what I ate",
+  "source": {
+    "file": "generation-systemic-170/captures/fresh:health-4:candidate:1/provider.jsonl",
+    "sha256": "a5bafddadfad5e3a0e5dc6a7139753680bbc7096bd6a516553bd9c47221bb04e"
+  },
+  "replies": [
+    {
+      "stage": "CHAT_DECISION",
+      "reply": "{\"kind\": \"create\", \"text\": \"Here's a calorie budget tracker: 2000 kcal goal, add what you ate, and see what's left today.\", \"brief\": \"Local calorie budget tracker. Daily goal default 2000 kcal, editable. Input field to add a food entry with calories and optional name; list of today's entries with delete; running total consumed and remaining = goal - consumed; show over-budget amount in red/negative when exceeded. Reset for a new day (button to clear today). Interface language English.\", \"search\": \"none\", \"image\": \"\"}"
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"title\":\"Calorie budget\",\"description\":\"Track today's food calories against a 2000 kcal daily goal; remaining calories go negative and red when over budget, and Clear today starts a new day.\",\"language\":\"en\",\"inputs\":[{\"id\":\"goal\",\"label\":\"Daily goal (kcal)\",\"type\":\"number\",\"value\":2000}],\"constants\":[],\"needs\":[{\"id\":\"food\",\"type\":\"entries\",\"label\":\"Today's food\",\"description\":\"Add a food name and calories; delete entries individually.\",\"fields\":[{\"id\":\"name\",\"label\":\"Food\",\"type\":\"text\"},{\"id\":\"calories\",\"label\":\"Calories\",\"type\":\"number\"}]},{\"id\":\"consumed\",\"type\":\"figure\",\"label\":\"Consumed\",\"description\":\"Total calories from today's entries.\",\"expression\":{\"aggregate\":\"sum\",\"need\":\"food\",\"field\":\"calories\"},\"unit\":\"kcal\"},{\"id\":\"remaining\",\"type\":\"figure\",\"label\":\"Remaining\",\"description\":\"Daily goal minus consumed calories; shows a negative red amount when over budget.\",\"expression\":{\"op\":\"subtract\",\"args\":[{\"ref\":\"goal\"},{\"ref\":\"consumed\"}]},\"unit\":\"kcal\"},{\"id\":\"clear\",\"type\":\"action\",\"label\":\"Clear today\",\"description\":\"Clears all of today's food entries for a new day.\",\"writes\":[\"food\"]}],\"questions\":[],\"requiredCapabilities\":[],\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"goal\":{\"kind\":\"action\",\"part\":\"goal\",\"member\":\"edit\"},\"name\":{\"kind\":\"action\",\"part\":\"food\",\"member\":\"edit_1\"},\"calories\":{\"kind\":\"action\",\"part\":\"food\",\"member\":\"edit_2\"},\"add\":{\"kind\":\"action\",\"part\":\"food\",\"member\":\"add\"},\"remove\":{\"kind\":\"action\",\"part\":\"food\",\"member\":\"remove\"},\"clear\":{\"kind\":\"action\"},\"consumed\":{\"kind\":\"value\",\"part\":\"consumed\",\"member\":\"value\"},\"remaining\":{\"kind\":\"value\",\"part\":\"remaining\",\"member\":\"value\"},\"records\":{\"kind\":\"collection\",\"part\":\"food\",\"member\":\"records\"}},\"steps\":[{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":2000},{\"op\":\"action\",\"slot\":\"goal\",\"value\":2200},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":2200},{\"op\":\"action\",\"slot\":\"name\",\"value\":\"Oatmeal\"},{\"op\":\"action\",\"slot\":\"calories\",\"value\":350},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"consumed\",\"test\":\"equals\",\"value\":350},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":1850},{\"op\":\"assert\",\"slot\":\"records\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"goal\",\"value\":2000},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":1650},{\"op\":\"action\",\"slot\":\"name\",\"value\":\"Pizza\"},{\"op\":\"action\",\"slot\":\"calories\",\"value\":1800},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"consumed\",\"test\":\"equals\",\"value\":2150},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":-150},{\"op\":\"assert\",\"slot\":\"records\",\"test\":\"equals\",\"value\":2},{\"op\":\"action\",\"slot\":\"remove\",\"value\":\"0\"},{\"op\":\"assert\",\"slot\":\"consumed\",\"test\":\"equals\",\"value\":1800},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":200},{\"op\":\"assert\",\"slot\":\"records\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"clear\"},{\"op\":\"assert\",\"slot\":\"consumed\",\"test\":\"equals\",\"value\":0},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":2000},{\"op\":\"assert\",\"slot\":\"records\",\"test\":\"equals\",\"value\":0}]}}}"
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"s_goal\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_food\",\"choice\":\"B\",\"confidence\":0.8,\"probabilities\":{\"A\":0.2,\"B\":0.8}},{\"id\":\"s_consumed\",\"choice\":\"A\",\"confidence\":0.85,\"probabilities\":{\"A\":0.85,\"B\":0.15}},{\"id\":\"s_remaining\",\"choice\":\"A\",\"confidence\":0.88,\"probabilities\":{\"A\":0.88,\"B\":0.12}}]}",
+      "questions": [
+        "s_goal",
+        "s_food",
+        "s_consumed",
+        "s_remaining"
+      ]
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"p_goal\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"p_consumed\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"p_remaining\",\"choice\":\"A\",\"confidence\":0.92,\"probabilities\":{\"A\":0.92,\"B\":0.08}},{\"id\":\"v_profile\",\"choice\":\"B\",\"confidence\":0.7,\"probabilities\":{\"A\":0.2,\"B\":0.7,\"C\":0.1}},{\"id\":\"v_preset\",\"choice\":\"A\",\"confidence\":0.55,\"probabilities\":{\"A\":0.55,\"B\":0.1,\"C\":0.15,\"D\":0.05,\"E\":0.1,\"F\":0.05}},{\"id\":\"v_focal\",\"choice\":\"C\",\"confidence\":0.75,\"probabilities\":{\"A\":0.15,\"B\":0.1,\"C\":0.75,\"D\":0}}]}",
+      "questions": [
+        "p_goal",
+        "p_consumed",
+        "p_remaining",
+        "v_profile",
+        "v_preset",
+        "v_focal"
+      ]
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"name\":{\"kind\":\"action\",\"part\":\"food\",\"member\":\"edit_1\"},\"calories\":{\"kind\":\"action\",\"part\":\"food\",\"member\":\"edit_2\"},\"add\":{\"kind\":\"action\",\"part\":\"food\",\"member\":\"add\"},\"remove\":{\"kind\":\"action\",\"part\":\"food\",\"member\":\"remove\"},\"clear\":{\"kind\":\"action\"},\"consumed\":{\"kind\":\"value\",\"part\":\"consumed\",\"member\":\"value\"},\"remaining\":{\"kind\":\"value\",\"part\":\"remaining\",\"member\":\"value\"},\"records\":{\"kind\":\"collection\",\"part\":\"food\",\"member\":\"records\"}},\"steps\":[{\"op\":\"assert\",\"slot\":\"consumed\",\"test\":\"equals\",\"value\":0},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":2000},{\"op\":\"action\",\"slot\":\"name\",\"value\":\"Oatmeal\"},{\"op\":\"action\",\"slot\":\"calories\",\"value\":350},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"consumed\",\"test\":\"equals\",\"value\":350},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":1650},{\"op\":\"assert\",\"slot\":\"records\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"name\",\"value\":\"Pizza\"},{\"op\":\"action\",\"slot\":\"calories\",\"value\":1800},{\"op\":\"action\",\"slot\":\"add\"},{\"op\":\"assert\",\"slot\":\"consumed\",\"test\":\"equals\",\"value\":2150},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":-150},{\"op\":\"assert\",\"slot\":\"records\",\"test\":\"equals\",\"value\":2},{\"op\":\"action\",\"slot\":\"remove\",\"value\":\"0\"},{\"op\":\"assert\",\"slot\":\"consumed\",\"test\":\"equals\",\"value\":1800},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":200},{\"op\":\"assert\",\"slot\":\"records\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"clear\"},{\"op\":\"assert\",\"slot\":\"consumed\",\"test\":\"equals\",\"value\":0},{\"op\":\"assert\",\"slot\":\"remaining\",\"test\":\"equals\",\"value\":2000},{\"op\":\"assert\",\"slot\":\"records\",\"test\":\"equals\",\"value\":0}]}}}}"
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"s_goal\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"s_food\",\"choice\":\"B\",\"confidence\":0.85,\"probabilities\":{\"A\":0.15,\"B\":0.85}},{\"id\":\"s_consumed\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}},{\"id\":\"s_remaining\",\"choice\":\"A\",\"confidence\":0.95,\"probabilities\":{\"A\":0.95,\"B\":0.05}}]}",
+      "questions": [
+        "s_goal",
+        "s_food",
+        "s_consumed",
+        "s_remaining"
+      ]
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"p_goal\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"p_consumed\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"p_remaining\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"v_profile\",\"choice\":\"A\",\"confidence\":0.75,\"probabilities\":{\"A\":0.75,\"B\":0.17,\"C\":0.08}},{\"id\":\"v_preset\",\"choice\":\"A\",\"confidence\":0.7,\"probabilities\":{\"A\":0.7,\"B\":0.1,\"C\":0.08,\"D\":0.04,\"E\":0.05,\"F\":0.03}},{\"id\":\"v_focal\",\"choice\":\"C\",\"confidence\":0.6,\"probabilities\":{\"A\":0.2,\"B\":0.15,\"C\":0.6,\"D\":0.05}}]}",
+      "questions": [
+        "p_goal",
+        "p_consumed",
+        "p_remaining",
+        "v_profile",
+        "v_preset",
+        "v_focal"
+      ]
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"inputs\":[{\"id\":\"goal\",\"label\":\"Daily goal (kcal)\",\"type\":\"number\",\"value\":2000,\"min\":0}],\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"foodName\":{\"kind\":\"action\",\"part\":\"food\",\"member\":\"edit_1\"},\"foodCalories\":{\"kind\":\"action\",\"part\":\"food\",\"member\":\"edit_2\"},\"addFood\":{\"kind\":\"action\",\"part\":\"food\",\"member\":\"add\"},\"removeFood\":{\"kind\":\"action\",\"part\":\"food\",\"member\":\"remove\"},\"clearToday\":{\"kind\":\"action\"},\"consumedValue\":{\"kind\":\"value\",\"part\":\"consumed\",\"member\":\"value\"},\"remainingValue\":{\"kind\":\"value\",\"part\":\"remaining\",\"member\":\"value\"},\"foodRecords\":{\"kind\":\"collection\",\"part\":\"food\",\"member\":\"records\"}},\"steps\":[{\"op\":\"assert\",\"slot\":\"consumedValue\",\"test\":\"equals\",\"value\":0},{\"op\":\"assert\",\"slot\":\"remainingValue\",\"test\":\"equals\",\"value\":2000},{\"op\":\"action\",\"slot\":\"foodName\",\"value\":\"Oatmeal\"},{\"op\":\"action\",\"slot\":\"foodCalories\",\"value\":350},{\"op\":\"action\",\"slot\":\"addFood\"},{\"op\":\"assert\",\"slot\":\"consumedValue\",\"test\":\"equals\",\"value\":350},{\"op\":\"assert\",\"slot\":\"remainingValue\",\"test\":\"equals\",\"value\":1650},{\"op\":\"assert\",\"slot\":\"foodRecords\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"foodName\",\"value\":\"Pizza\"},{\"op\":\"action\",\"slot\":\"foodCalories\",\"value\":1800},{\"op\":\"action\",\"slot\":\"addFood\"},{\"op\":\"assert\",\"slot\":\"consumedValue\",\"test\":\"equals\",\"value\":2150},{\"op\":\"assert\",\"slot\":\"remainingValue\",\"test\":\"equals\",\"value\":-150},{\"op\":\"assert\",\"slot\":\"foodRecords\",\"test\":\"equals\",\"value\":2},{\"op\":\"action\",\"slot\":\"removeFood\",\"value\":\"0\"},{\"op\":\"assert\",\"slot\":\"consumedValue\",\"test\":\"equals\",\"value\":1800},{\"op\":\"assert\",\"slot\":\"remainingValue\",\"test\":\"equals\",\"value\":200},{\"op\":\"assert\",\"slot\":\"foodRecords\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"clearToday\"},{\"op\":\"assert\",\"slot\":\"consumedValue\",\"test\":\"equals\",\"value\":0},{\"op\":\"assert\",\"slot\":\"remainingValue\",\"test\":\"equals\",\"value\":2000},{\"op\":\"assert\",\"slot\":\"foodRecords\",\"test\":\"equals\",\"value\":0}]}}},\"removeFields\":[]}"
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"s_goal\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_food\",\"choice\":\"A\",\"confidence\":0.85,\"probabilities\":{\"A\":0.85,\"B\":0.15}},{\"id\":\"s_consumed\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"s_remaining\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}}]}",
+      "questions": [
+        "s_goal",
+        "s_food",
+        "s_consumed",
+        "s_remaining"
+      ]
+    },
+    {
+      "stage": "SELECTOR",
+      "reply": "{\"answers\":[{\"id\":\"p_goal\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"p_food\",\"choice\":\"A\",\"confidence\":0.9,\"probabilities\":{\"A\":0.9,\"B\":0.1}},{\"id\":\"p_consumed\",\"choice\":\"A\",\"confidence\":0.92,\"probabilities\":{\"A\":0.92,\"B\":0.08}},{\"id\":\"p_remaining\",\"choice\":\"A\",\"confidence\":0.92,\"probabilities\":{\"A\":0.92,\"B\":0.08}},{\"id\":\"v_profile\",\"choice\":\"B\",\"confidence\":0.75,\"probabilities\":{\"A\":0.15,\"B\":0.75,\"C\":0.1}},{\"id\":\"v_preset\",\"choice\":\"A\",\"confidence\":0.5,\"probabilities\":{\"A\":0.5,\"B\":0.1,\"C\":0.1,\"D\":0.1,\"E\":0.1,\"F\":0.1}},{\"id\":\"v_focal\",\"choice\":\"D\",\"confidence\":0.55,\"probabilities\":{\"A\":0.2,\"B\":0.1,\"C\":0.1,\"D\":0.55,\"E\":0.05}}]}",
+      "questions": [
+        "p_goal",
+        "p_food",
+        "p_consumed",
+        "p_remaining",
+        "v_profile",
+        "v_preset",
+        "v_focal"
+      ]
+    },
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"checkable\",\"scenario\":{\"slots\":{\"foodName\":{\"kind\":\"action\",\"part\":\"food\",\"member\":\"edit_1\"},\"foodCalories\":{\"kind\":\"action\",\"part\":\"food\",\"member\":\"edit_2\"},\"addFood\":{\"kind\":\"action\",\"part\":\"food\",\"member\":\"add\"},\"removeFood\":{\"kind\":\"action\",\"part\":\"food\",\"member\":\"remove\"},\"consumedValue\":{\"kind\":\"value\",\"part\":\"consumed\",\"member\":\"value\"},\"remainingValue\":{\"kind\":\"value\",\"part\":\"remaining\",\"member\":\"value\"},\"foodRecords\":{\"kind\":\"collection\",\"part\":\"food\",\"member\":\"records\"}},\"steps\":[{\"op\":\"assert\",\"slot\":\"consumedValue\",\"test\":\"equals\",\"value\":0},{\"op\":\"assert\",\"slot\":\"remainingValue\",\"test\":\"equals\",\"value\":2000},{\"op\":\"action\",\"slot\":\"foodName\",\"value\":\"Oatmeal\"},{\"op\":\"action\",\"slot\":\"foodCalories\",\"value\":350},{\"op\":\"action\",\"slot\":\"addFood\"},{\"op\":\"assert\",\"slot\":\"consumedValue\",\"test\":\"equals\",\"value\":350},{\"op\":\"assert\",\"slot\":\"remainingValue\",\"test\":\"equals\",\"value\":1650},{\"op\":\"assert\",\"slot\":\"foodRecords\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"foodName\",\"value\":\"Pizza\"},{\"op\":\"action\",\"slot\":\"foodCalories\",\"value\":1800},{\"op\":\"action\",\"slot\":\"addFood\"},{\"op\":\"assert\",\"slot\":\"consumedValue\",\"test\":\"equals\",\"value\":2150},{\"op\":\"assert\",\"slot\":\"remainingValue\",\"test\":\"equals\",\"value\":-150},{\"op\":\"assert\",\"slot\":\"foodRecords\",\"test\":\"equals\",\"value\":2},{\"op\":\"action\",\"slot\":\"removeFood\",\"value\":\"0\"},{\"op\":\"assert\",\"slot\":\"consumedValue\",\"test\":\"equals\",\"value\":1800},{\"op\":\"assert\",\"slot\":\"remainingValue\",\"test\":\"equals\",\"value\":200},{\"op\":\"assert\",\"slot\":\"foodRecords\",\"test\":\"equals\",\"value\":1},{\"op\":\"action\",\"slot\":\"removeFood\",\"value\":\"0\"},{\"op\":\"assert\",\"slot\":\"consumedValue\",\"test\":\"equals\",\"value\":0},{\"op\":\"assert\",\"slot\":\"remainingValue\",\"test\":\"equals\",\"value\":2000},{\"op\":\"assert\",\"slot\":\"foodRecords\",\"test\":\"equals\",\"value\":0}]}}}}}"
+    }
+  ]
+}

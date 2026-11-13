@@ -1,6 +1,7 @@
 package com.alpha.assistant.tools.generation
 
 import com.alpha.assistant.tools.nativeFixtureBehavior
+import com.alpha.assistant.tools.withFixtureCapabilityPlan
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -42,7 +43,9 @@ class ClockPartsWorkflowTest {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 stages += request.generationStage
                 val output = when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> JSONObject("""{"title":"Stopwatch","description":"","language":"en","inputs":[],
+                    CloudGenerationStage.PLAN -> if (request.turns.size > 1)
+                        """{"fields":{"description":"Immediate check attempt ${stages.size}"}}"""
+                    else JSONObject("""{"title":"Stopwatch","description":"","language":"en","inputs":[],
                         "constants":[],"needs":[{"id":"clock","type":"stopwatch","label":"Elapsed","description":"Start, pause, and reset"}],
                         "questions":[]}""").put("behavior", nativeFixtureBehavior(
                             """"start":{"kind":"action","part":"clock","member":"start"},"pause":{"kind":"action","part":"clock","member":"pause"},
@@ -61,14 +64,15 @@ class ClockPartsWorkflowTest {
                         "source":"return {state:input.state};"}"""
                     else -> error("Unexpected stopwatch stage.")
                 }
-                emit(CloudEvent.Text(output))
+                emit(CloudEvent.Text(request.withFixtureCapabilityPlan(output)))
             }
         }
         val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context), ::clock))
         try {
             val rejected = engine.createDraft("A simple stopwatch", null)
             val failure = runCatching { engine.generate(rejected.id, "fixture", emptyList(), CloudSession()) }.exceptionOrNull()
-            assertEquals("widget_behavior", (failure as? CloudFailure)?.code)
+            assertEquals("widget_plan", (failure as? CloudFailure)?.code)
+            assertEquals(4, stages.count { it == CloudGenerationStage.PLAN })
             assertFalse(stages.contains(CloudGenerationStage.COMPLETE))
             stages.clear()
             batches.clear()
@@ -147,7 +151,7 @@ class ClockPartsWorkflowTest {
                     CloudGenerationStage.SELECTOR -> selectorAnswer(JSONObject(request.turns.single().text))
                     else -> error("Native clocks must not call the writer.")
                 }
-                emit(CloudEvent.Text(output))
+                emit(CloudEvent.Text(request.withFixtureCapabilityPlan(output)))
             }
         }
         val service = ToolGenerationService(provider, SandboxClient(context), ::clock)

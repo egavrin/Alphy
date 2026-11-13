@@ -202,9 +202,10 @@ internal class GenerationRepair private constructor(
         private val protectedFields = setOf("source")
         private val sourceEditKeys = setOf("search", "replace")
         private val mixedKeys = setOf("holes", "fill")
-        private val planFields = setOf("wholeScreen", "title", "description", "language", "inputs", "constants", "needs", "questions", "literals", "iconId", "scene", "runtime", "imageRequests", "removeImageSlots", "behavior", "visualReview", "assetRequest")
+        private val planFields = setOf("wholeScreen", "title", "description", "language", "inputs", "constants", "needs", "questions", "literals", "iconId", "scene", "runtime", "imageRequests", "removeImageSlots", "behavior", "visualReview", "assetRequest", "requiredCapabilities")
 
-        fun plan() = GenerationRepair(planFields, null, null, false)
+        fun plan(capabilitiesOnly: Boolean = false) = GenerationRepair(
+            if (capabilitiesOnly) setOf("requiredCapabilities") else planFields, null, null, false)
 
         fun writer(fields: Set<String>, holes: List<String>?, allowSourceEdits: Boolean = true) =
             GenerationRepair(fields - protectedFields, "fill".takeIf { holes != null }, holes, true,

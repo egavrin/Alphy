@@ -72,16 +72,20 @@ internal sealed interface GenerationBehavior {
             Specify kind for each slot. Use only the controls and outputs that the runtime supports.
             Use every slot. Use at most 64 steps. Start from the saved definition's initial state.
             An action is {"op":"action","slot":"actionSlot"}. Add a scalar value for an input and omit value for a button.
+            The primary value-change action of a toggle, standalone checkbox, or chip requires the intended JSON Boolean true or false in value.
+            A chip's separate dismiss action is a press without a value.
+            Observe a Boolean control's checked state through a separate value slot bound to that control.
             For a native mini-app button, {"op":"availability","slot":"actionSlot","value":false} checks that the button is unavailable without pressing it. Use true to check that it is available.
             Use a keyed row payload for a declared native member that accepts it.
-            For a writer-owned rowTemplate checkbox, declare rowValueType boolean on its action slot.
+            For a writer-owned rowTemplate checkbox, declare an action slot as {"kind":"action","rowValueType":"boolean"}.
             Every action on that slot requires value {"key":"stableRowId","value":true} with a JSON Boolean.
-            Choose stable row keys from the scenario so rows created by earlier steps can be addressed.
+            For a list rowActions control, the action value is the current stable string key, even after rows change order.
+            Choose deterministic keys for rows created by earlier steps. Preserve the required delete, undo, and clear actions.
             Other writer actions use a supported scalar value or a plain press.
             To compare an observable result with its earlier value, use {"op":"capture","slot":"result","as":"before"}.
             Then use {"op":"assert","slot":"result","test":"changed|unchanged|equals","capture":"before"}.
             To test an explicit expected result, use equals with a typed scalar value instead of capture.
-            Use nonempty only for visible text, records or drawing ink. For a mini-app value slot, valueType may be number, string, or boolean.
+            Use nonempty only for visible text, records or drawing ink. Declare valueType as number, string, or boolean inside a mini-app value slot. Never put valueType on a step.
             Use {"op":"assert","slot":"drawing","test":"empty"} when a native canvas drawing must clear. Keep the bound drawing target present and visible.
             Literal and numeric assertions also establish a value's type. For writer-bound text with nonempty and no other type evidence, set valueType to string.
             Include an observation at or after the final action.
@@ -90,7 +94,8 @@ internal sealed interface GenerationBehavior {
             For a terminal state reached through animation use {"op":"complete","slot":"surface","observe":"result","value":true,"maxFrames":360}.
             Bind observe to a scalar available before and during the run. Use the expected terminal value, with its actual type.
             The host advances fixed 50 ms frames until the output reaches that value, up to 1,200 frames per scenario.
-            Include separate checks for requested interaction, progress, pause, restart, and reopening.
+            Check requested local interactions, progress, pause, and reset. For native forms exercise editing and Save.
+            Native app reopen is a host lifecycle check. Use surface events only for graphics playback and input.
             Use geometry to prove requested motion. Use the terminal output to prove completion.
             A value observes a visible ${behaviorScalarNodes.joinToString()}.
             A collection observes the record count of a visible ${behaviorCollectionNodes.joinToString()}.
@@ -103,10 +108,11 @@ internal sealed interface GenerationBehavior {
             Use at most 24 deliveries per timer or frame batch, 64 events including 5 reserved for the host, and 1,200 frames in total.
             For a native clock need with ID "timer", declare "elapsed":{"kind":"value","part":"timer","member":"value"} in slots.
             After Start, use {"op":"clock","slot":"elapsed","milliseconds":1000} with that same declared value slot ID.
-            Native elapsed time only advances on clock steps. Use timers and timer slots only for custom timer subscriptions.
+            Native elapsed time only advances on clock steps. Use timers and timer slots only for custom timer subscriptions on a drawing surface. Use a native countdown or stopwatch for a clock-only workflow.
             Use action input values within the control's declared bounds. An out-of-range value cannot drive a workflow step.
             Use {"status":"unchecked","reason":"external_outcome"} only for a real external outcome.
-            Use that outcome when completion depends on a native capability receipt, such as audio.torchSequence. A request for the effect does not establish its result.
+            A scenario cannot continue after a step requests an external capability or record result. Use a separately observable local path when available.
+            Use unchecked external_outcome when the requested outcome depends on a native receipt and no independent workflow can check it. Keep the required effect in the app. An effect request does not establish success.
             Use {"status":"unchecked","reason":"unsupported_observation"} only if these checks cannot express the result.
         """.trimIndent() + "\n" + scenarioLimits
 
@@ -117,7 +123,6 @@ internal sealed interface GenerationBehavior {
             // Only host-owned rule codes enter traces, never candidate values or exception text.
             val rule = when (failure.expected) {
                 "an object" -> "object"
-                "the declared fields" -> "fields"
                 "a supported unchecked reason" -> "unchecked_reason"
                 "a checkable or explicitly unchecked behavior" -> "status"
                 "1 to 12 slots" -> "slots_count"
@@ -238,20 +243,21 @@ internal sealed interface GenerationBehavior {
                 }
                 "checkable" -> {
                     behavior.requireKeys(field, setOf("status", "scenario"))
-                    parseScenario(obj(behavior.opt("scenario"), field), needIds, threeScene, field)
+                    parseScenario(obj(behavior.opt("scenario"), "$field.scenario"), needIds, threeScene, field)
                 }
                 else -> throw PartsContractFailure(field, "a checkable or explicitly unchecked behavior")
             }
         }
 
         private fun parseScenario(raw: JSONObject, needIds: Set<String>, threeScene: Boolean, field: String): Scenario {
-            raw.requireKeys(field, setOf("slots", "steps"))
+            raw.requireKeys("$field.scenario", setOf("slots", "steps"))
             val slotObject = obj(raw.opt("slots"), field)
             requireParts(slotObject.length() in 1..12, field, "1 to 12 slots")
             val slots = ToolValueSchema.keys(slotObject).mapIndexed { index, id ->
                 identifier(id, field)
-                val row = obj(slotObject.opt(id), field)
-                row.requireKeys(field, setOf("kind"), setOf("part", "member", "valueType", "rowValueType"))
+                val path = "$field.scenario.slots[$index]"
+                val row = obj(slotObject.opt(id), path)
+                row.requireKeys(path, setOf("kind"), setOf("part", "member", "valueType", "rowValueType"))
                 val kind = Kind.entries.firstOrNull { it.wire == row.opt("kind") }
                     ?: throw PartsContractFailure(field, "a supported slot kind")
                 requireParts(if (threeScene) kind != Kind.TIMER else kind !in setOf(Kind.STATE, Kind.AUDIO),
@@ -263,12 +269,12 @@ internal sealed interface GenerationBehavior {
                 requireParts(part == null || kind == Kind.ACTION || member != null, field, "a native observation member")
                 val valueType = row.opt("valueType")?.let { value ->
                     scalarTypes.firstOrNull { !threeScene && kind == Kind.VALUE && it.id == value }
-                        ?: contractFailure("slot_value_type", "$field.scenario.slots[$index].valueType",
+                        ?: contractFailure("slot_value_type", "$path.valueType",
                             "number, string, or boolean on a mini-app value slot", value)
                 }
                 val rowValueType = row.opt("rowValueType")?.let { value ->
                     if (threeScene || kind != Kind.ACTION || part != null || value != "boolean") {
-                        contractFailure("slot_row_value_type", "$field.scenario.slots[$index].rowValueType",
+                        contractFailure("slot_row_value_type", "$path.rowValueType",
                             "boolean on a writer-owned mini-app action slot", value)
                     }
                     BehaviorValueShape.BOOLEAN
@@ -303,6 +309,12 @@ internal sealed interface GenerationBehavior {
                         val action = slot(Kind.ACTION)
                         val planned = slots.getValue(action)
                         val value = row.opt("value")
+                        if (!threeScene && planned.part == null && planned.rowValueType == null &&
+                            ToolUiCatalog.isRowPayload(value) && (value as JSONObject).opt("value") is Boolean) {
+                            val slotIndex = slots.keys.indexOf(action)
+                            contractFailure("slot_row_value_type", "$field.scenario.slots[$slotIndex].rowValueType",
+                                "the string boolean for a writer-owned row checkbox with a keyed Boolean payload", value)
+                        }
                         if (planned.rowValueType != null && (!ToolUiCatalog.isRowPayload(value) ||
                                 (value as JSONObject).opt("value") !is Boolean)) {
                             contractFailure("action_payload", "$at.value",
@@ -547,10 +559,10 @@ internal sealed interface GenerationBehavior {
 }
 
 private val behaviorScalarNodes = setOf("text", "button", "metric", "badge", "fact", "timelineItem", "progress", "progressRing") +
-    (ToolUiCatalog.choiceTypes - "multiChoice")
+    (ToolUiCatalog.choiceTypes - "multiChoice") + ToolUiCatalog.booleanInputTypes
 private val behaviorCollectionNodes = setOf("list", "table", "groupedList", "lazyList", "lazyGrid")
 
-private val nativeInputObservationNodes = setOf("input", "numberInput", "slider", "toggle")
+private val nativeInputObservationNodes = setOf("input", "numberInput", "slider")
 
 internal fun supportsBehaviorObservation(type: String, kind: GenerationBehavior.Kind, native: Boolean = false): Boolean = when (kind) {
     GenerationBehavior.Kind.COLLECTION -> type in behaviorCollectionNodes

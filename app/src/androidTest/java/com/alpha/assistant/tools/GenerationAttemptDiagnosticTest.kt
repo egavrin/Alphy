@@ -69,29 +69,41 @@ class GenerationAttemptDiagnosticTest {
         assertFalse(encoded,encoded.contains("SECRET"));assertFalse(encoded,encoded.contains("content://"))
         assertFalse(encoded,encoded.contains("credential"));assertFalse(encoded,encoded.contains("private"))
     }
+    @Test fun smokeTraceRetainsOnlyStructuralWorkflowPaths() {
+        val diagnostic = ToolGenerationAttemptDiagnostic(1, ToolGenerationOutcome.REJECTED,
+            ToolGenerationStage.BEHAVIOR, "widget_behavior", ToolGenerationDisposition.FINISH, smokeEvent = "action")
+        for (path in listOf("$.behavior.scenario.steps[2]", "$.scene.checks.scenario.steps[4]")) {
+            assertEquals(path, diagnostic.copy(smokePath = path).safeSmoke()?.getString("path"))
+        }
+        assertEquals("unknown", diagnostic.copy(smokePath = "$.scene.checks.$secret").safeSmoke()?.getString("path"))
+    }
+
     @Test fun behaviorPlanFailuresExposeOnlyHostStructuralRules() {
-        // Failure cases: missing behavior, unknown fields, excess steps, unused slots, and missing final assertions.
         val valid = """{"status":"checkable","scenario":{"slots":{"result":{"kind":"value"}},
             "steps":[{"op":"assert","slot":"result","test":"nonempty"}]}}"""
         val cases = listOf(
-            "object" to null,
-            "fields" to JSONObject(valid).put(secret, secret),
-            "steps_count" to JSONObject(valid).apply {
+            ResponseShape("behavior.object", "$.behavior", "unknown") to null,
+            ResponseShape("plan.fields", "$.behavior", "object") to JSONObject(valid).put(secret, secret),
+            ResponseShape("plan.fields", "$.behavior.scenario.slots[0]", "object") to JSONObject(valid).apply {
+                getJSONObject("scenario").getJSONObject("slots").getJSONObject("result").put(secret, secret)
+            },
+            ResponseShape("behavior.steps_count", "$.behavior.scenario.steps[64]", "missing") to JSONObject(valid).apply {
                 getJSONObject("scenario").put("steps", JSONArray().apply {
                     repeat(65) { put(JSONObject("""{"op":"assert","slot":"result","test":"nonempty"}""")) }
                 })
             },
-            "slots_or_events" to JSONObject(valid).apply {
+            ResponseShape("behavior.unused_slot", "$.behavior.scenario.slots[1]", "missing") to JSONObject(valid).apply {
                 getJSONObject("scenario").getJSONObject("slots").put("unused", JSONObject("""{"kind":"action"}"""))
             },
-            "final_assertion" to JSONObject(valid).apply {
+            ResponseShape("behavior.final_assertion", "$.behavior", "unknown") to JSONObject(valid).apply {
                 getJSONObject("scenario").getJSONObject("slots").put("press", JSONObject("""{"kind":"action"}"""))
                 getJSONObject("scenario").getJSONArray("steps").put(JSONObject("""{"op":"action","slot":"press"}"""))
             },
         )
-        for ((rule, raw) in cases) {
+        for ((shape, raw) in cases) {
             val failure = runCatching { GenerationBehavior.parse(raw, emptySet()) }.exceptionOrNull() as PartsContractFailure
-            assertEquals(ResponseShape("behavior.$rule", "$.behavior", "unknown"), failure.shape)
+            assertEquals(shape, failure.shape)
+            assertFalse(failure.message.orEmpty().contains(secret))
             val events = mutableListOf<ToolGenerationTraceEvent>()
             ToolGenerationTrace(UUID.randomUUID(), { events += it }).Run().diagnostic(
                 ToolGenerationAttemptDiagnostic(1, ToolGenerationOutcome.REJECTED, ToolGenerationStage.PLAN,

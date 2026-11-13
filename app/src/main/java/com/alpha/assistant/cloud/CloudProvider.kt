@@ -508,7 +508,10 @@ class DeepSeekProvider internal constructor(
         val canLocate = userTextAvailable && request.search && request.weatherLocation != null
         val allowMemory = userTextAvailable && request.allowMemoryFact
         val allowCourse = userTextAvailable && request.allowCourseDecision
-        val allowDevicePlan = userTextAvailable && request.allowDevicePlan
+        // A bare noun phrase contains neither a device action nor a requested language.
+        val shortEnglishFragment = current.role == "user" &&
+            current.text.trim().matches(Regex("""a(?:n)?\s+[a-z]+[.!?]?""", RegexOption.IGNORE_CASE))
+        val allowDevicePlan = userTextAvailable && request.allowDevicePlan && !shortEnglishFragment
         val allowTestFix = userTextAvailable && request.allowTestFix
         val inventory = request.capabilityDiscovery?.takeIf { userTextAvailable && session.canDiscoverCapabilities }
         val canPlanImage = userTextAvailable && request.allowChatImage
@@ -623,6 +626,7 @@ use "Eiffel Tower" and "https://example.com/" as anchors in their respective ver
 Start an immediate countdown or set a one-time Android Clock alarm with prepare_device_plan. For
 "Set a five-minute timer.", return one step with the full clause as context and "five-minute" as anchor.
 For an immediate timer fragment with a fixed duration and no requested app controls, the context can omit the verb.
+A request for a timer for an immediate task belongs to the device plan or a duration clarification. Use mini-app creation when the user asks for a reusable timer, editable controls, or presets.
 For "laundry timer 35 min", use the full fragment as context and "35 min" as anchor.
 Use prepare_device_plan for a requested still photo or selfie. For "Take a selfie.", use that clause
 and the anchor "selfie". For a photo with an explicit lens, anchor the camera phrase.
@@ -821,8 +825,6 @@ The user reviews and approves the plan before any device action.
         }
         var overBudget: ChatToolReply.Decision? = null
         var clarificationSearch: String? = null
-        // A bare English article and one word cannot contain a separate output language instruction.
-        val shortEnglishFragment = current.role == "user" && current.text.trim().matches(Regex("a(?:n)? [a-z]+", RegexOption.IGNORE_CASE))
         var decision = readDecision(classificationBody(), CompletionStage.DECISION, retryBody = ::classificationBody) { completed ->
             val candidate = decodeClassification(completed)
             overBudget?.let { requireSameOperation(it, candidate) }

@@ -6,6 +6,9 @@ import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.alpha.assistant.R
+import com.alpha.assistant.capabilities.AudioContract
+import com.alpha.assistant.capabilities.CapabilityEffect
+import com.alpha.assistant.media.MAX_TONE_MILLIS
 import com.alpha.assistant.tools.generation.sameToolJson
 import com.alpha.assistant.ui.ShellRobot
 import kotlinx.coroutines.runBlocking
@@ -22,7 +25,24 @@ internal class Plan5WorkflowChecks(
 ) {
     companion object {
         val cases = setOf("extra:reference-points-ledger", "compose:stopwatch", "extra:russian-grid-game",
-            "extra:russian-embedded-drawing")
+            "extra:russian-embedded-drawing", "unseen:controlled-clock", "fresh:health-4", "fresh:cooking-1", "fresh:logs-3", "fresh:logs-5")
+
+        fun reopenSaved(robot: ShellRobot, title: String, fromChat: Boolean = false) {
+            val refine = robot.text(R.string.tool_refine)
+            val library = robot.text(R.string.desktop_open_library)
+            val search = robot.text(R.string.tool_search)
+            robot.back()
+            robot.waitGone(refine)
+            if (fromChat) {
+                robot.click(robot.text(R.string.tool_open))
+            } else {
+                robot.waitUntil { robot.find(search) != null || robot.find(library) != null }
+                if (robot.find(search) == null) robot.click(library)
+                robot.waitFor(search)
+                robot.click(title)
+            }
+            robot.waitFor(refine)
+        }
     }
 
     private val checks = JSONArray().also { proof.put("checks", it) }
@@ -30,17 +50,32 @@ internal class Plan5WorkflowChecks(
     private val context get() = robot.instrumentation.targetContext
     private val numbers = Regex("""-?\d+(?:[.,]\d+)?""")
 
-    fun run(case: String, reopen: () -> Unit, refine: (String) -> Unit) = when (case) {
+    fun run(case: String, reopen: () -> Unit, verifyCoffeeDismissals: Boolean = false, refine: (String) -> Unit) = when (case) {
         "extra:reference-points-ledger" -> ledger(reopen, refine)
-        "compose:stopwatch" -> stopwatch()
+        "compose:stopwatch", "unseen:controlled-clock" -> stopwatch()
         "extra:russian-grid-game" -> grid(reopen)
         "extra:russian-embedded-drawing" -> drawing()
+        "fresh:health-4" -> calorieBudget(reopen)
+        "fresh:cooking-1" -> recipeScaler(reopen)
+        "fresh:logs-3" -> readingLog(reopen)
+        "fresh:logs-5" -> coffeeCounter(reopen, verifyCoffeeDismissals)
         else -> error("No executable Plan 5 workflow for this case.")
     }
 
     private fun step(name: String, verify: () -> Any) {
         proof.put("step", name)
-        checks.put(JSONObject().put("name", name).put("observed", verify()))
+        try {
+            checks.put(JSONObject().put("name", name).put("observed", verify()))
+        } catch (failure: Throwable) {
+            if (!proof.has("first_failed_boundary")) {
+                proof.put("first_failed_boundary", name)
+                    .put("failure_type", failure.javaClass.name)
+                    .put("failure_detail", failure.message?.take(600))
+                    .put("state_at_failure", runCatching { saved().state.take(4096) }.getOrNull())
+                    .put("failure_screenshot", runCatching { screenshot("workflow-failure") }.getOrDefault(false))
+            }
+            throw failure
+        }
     }
 
     private fun uiNodes(node: JSONObject): Sequence<JSONObject> = sequence {
@@ -74,8 +109,17 @@ internal class Plan5WorkflowChecks(
         check(accessibility(robot.diagnostics.freshRoot()).count {
             it.isVisibleToUser && it.text?.toString() == label
         } == 1) { "Ambiguous generated control." }
-        actions.put(JSONObject().put("step", proof.getString("step")).put("action", control.getString("action")))
-        robot.click(label)
+        val delivery = JSONObject().put("step", proof.getString("step"))
+            .put("action", control.getString("action")).put("delivery", "attempted")
+        actions.put(delivery)
+        try {
+            robot.click(label)
+            delivery.put("delivery", "delivered")
+        } catch (failure: Throwable) {
+            delivery.put("delivery", "failed_or_unconfirmed").put("failure_type", failure.javaClass.name)
+                .put("failure_detail", failure.message?.take(600))
+            throw failure
+        }
         robot.waitGone(robot.text(R.string.tool_working))
     }
 
@@ -111,6 +155,205 @@ internal class Plan5WorkflowChecks(
     }
 
     private fun numeric(text: String) = numbers.findAll(text).mapNotNull { it.value.replace(',', '.').toDoubleOrNull() }.toList()
+
+    private fun generatedInput(type: String, labelPattern: String): JSONObject =
+        uiNodes(JSONObject(saved().ui)).single {
+            it.optString("type") == type && matching(labelPattern).containsMatchIn(it.optString("text"))
+        }
+
+    private fun editGeneratedInput(control: JSONObject, value: String) {
+        val label = controlLabel(control)
+        robot.reveal(label, null)
+        robot.edit(label, value)
+        val apply = robot.text(R.string.tool_generated_apply_en, label)
+        val finish = robot.text(R.string.tool_live_input_finish_en, label)
+        if (ToolUiCatalog.isLiveInput(control)) {
+            if (robot.find(finish) != null) robot.click(finish)
+        } else {
+            robot.reveal(apply, null)
+            robot.click(apply)
+        }
+        robot.waitGone(robot.text(R.string.tool_working))
+    }
+
+    private fun verifyLogRows(original: ToolRecord, expectedRows: Map<String, Int>) {
+        val record = saved()
+        check(record.id == original.id && record.revision == original.revision)
+        val state = JSONObject(record.state)
+        val collection = uiNodes(JSONObject(record.ui)).single {
+            it.optString("type") in setOf("list", "table", "lazyList", "lazyGrid", "groupedList")
+        }
+        val rows = ToolUiCatalog.records(collection, state)
+        check(rows.length() == expectedRows.size) { "The stored log has ${rows.length()} rows." }
+        for ((name, amount) in expectedRows) {
+            val row = (0 until rows.length()).map(rows::getJSONObject).single {
+                it.keys().asSequence().filter { key -> key != "id" }.any { key -> it.opt(key) == name }
+            }
+            check(row.keys().asSequence().any { (row.opt(it) as? Number)?.toDouble() == amount.toDouble() }) {
+                "The stored entry for $name has the wrong amount."
+            }
+            val nameNode = robot.reveal(name, null)
+            val rowText = accessibility(nameNode.parent).filter { it.isVisibleToUser }
+                .flatMap { numeric(it.text?.toString().orEmpty()).asSequence() }
+            check(rowText.any { it == amount.toDouble() }) { "The visible entry for $name does not show $amount." }
+        }
+    }
+
+    private fun calorieBudget(reopen: () -> Unit) {
+        val original = saved()
+        proof.put("artifact_id", original.id).put("artifact_revision", original.revision)
+        val expectedRows = linkedMapOf<String, Int>()
+        fun verify(remaining: Int, image: String): JSONObject {
+            val balance = visibleValue(""".*\b(?:remaining|left)\b.*""", remaining.toDouble())
+            val valueLabel = remaining.toString()
+            if (robot.find(valueLabel) != null) robot.reveal(valueLabel, null)
+            check(screenshot("$image-balance"))
+            verifyLogRows(original, expectedRows)
+            check(screenshot(image))
+            return JSONObject().put("remaining", remaining).put("visible_balance", balance)
+                .put("rows", JSONObject(expectedRows))
+        }
+        step("calorie_initial") { verify(2000, "calorie-initial") }
+        for ((name, amount, remaining) in listOf(Triple("Oatmeal", 500, 1500), Triple("Lunch", 850, 650))) {
+            val image = "calorie-${name.lowercase()}"
+            step(image) {
+                editGeneratedInput(generatedInput("input", "food|meal|name"), name)
+                editGeneratedInput(generatedInput("numberInput", """^(?!.*(?:goal|target|budget)).*(?:calorie|kcal).*"""), amount.toString())
+                button("""^\s*(?:add|log|record)(?:\s+.*)?$""")
+                expectedRows[name] = amount
+                verify(remaining, image)
+            }
+        }
+        step("calorie_reopened") {
+            reopen()
+            verify(650, "calorie-reopened")
+        }
+    }
+
+    private fun recipeScaler(reopen: () -> Unit) {
+        val original = saved()
+        proof.put("artifact_id", original.id).put("artifact_revision", original.revision)
+        fun servings() = generatedInput("numberInput", "desired|target|new|wanted")
+        fun verify(target: Int, flour: Int, image: String): JSONObject {
+            val control = controlLabel(servings())
+            robot.reveal(control, null)
+            check(robot.field(control).text?.toString()?.toDoubleOrNull() == target.toDouble()) {
+                "The visible target serving count is not $target."
+            }
+            val result = visibleValue(""".*\b(?:flour|scaled amount|scaled quantity)\b.*""", flour.toDouble())
+            if (robot.find(flour.toString()) != null) robot.reveal(flour.toString(), null)
+            check(screenshot(image))
+            val grams = matching("""\b(?:g|grams?)\b""")
+            if (robot.texts().none(grams::containsMatchIn)) robot.reveal("g", null)
+            check(robot.texts().any(grams::containsMatchIn)) { "The recipe does not display grams." }
+            val record = saved()
+            check(record.id == original.id && record.revision == original.revision)
+            return JSONObject().put("servings", target).put("flour_grams", flour).put("visible_result", result)
+        }
+        step("recipe_initial") { verify(6, 450, "recipe-initial") }
+        step("recipe_adjusted") {
+            editGeneratedInput(servings(), "8")
+            verify(8, 600, "recipe-adjusted")
+        }
+        step("recipe_reopened") {
+            reopen()
+            verify(8, 600, "recipe-reopened")
+        }
+    }
+
+    private fun readingLog(reopen: () -> Unit) {
+        val original = saved()
+        proof.put("artifact_id", original.id).put("artifact_revision", original.revision)
+        val expectedRows = linkedMapOf<String, Int>()
+        fun verify(total: Int, image: String): JSONObject {
+            val visibleTotal = visibleValue(""".*\b(?:(?:total|sum).*pages|pages.*total)\b.*""", total.toDouble())
+            if (total > 0 && robot.find(total.toString()) != null) robot.reveal(total.toString(), null)
+            check(screenshot("$image-total"))
+            verifyLogRows(original, expectedRows)
+            check(screenshot(image))
+            return JSONObject().put("total_pages", total).put("visible_total", visibleTotal)
+                .put("rows", JSONObject(expectedRows))
+        }
+        step("reading_initial") { verify(0, "reading-initial") }
+        for ((name, pages, total) in listOf(Triple("Dune", 412, 412), Triple("Emma", 320, 732))) {
+            val image = "reading-${name.lowercase()}"
+            step(image) {
+                editGeneratedInput(generatedInput("input", "book|title|name"), name)
+                editGeneratedInput(generatedInput("numberInput", """\bpages?\b"""), pages.toString())
+                button("""^\s*(?:add|log|record)(?:\s+.*)?$""")
+                expectedRows[name] = pages
+                verify(total, image)
+            }
+        }
+        step("reading_reopened") {
+            reopen()
+            verify(732, "reading-reopened")
+        }
+    }
+
+    private fun coffeeCounter(reopen: () -> Unit, verifyDismissals: Boolean) {
+        val original = saved()
+        proof.put("artifact_id", original.id).put("artifact_revision", original.revision)
+            .put("audio_verification", "Native tone receipts. Physical audibility is unverified.")
+        val receiptKeys = mutableListOf<String>()
+        fun verify(count: Int, image: String): JSONObject {
+            val visibleCount = visibleValue(""".*\b(?:cups?|count)\b.*""", count.toDouble())
+            val current = saved()
+            check(current.id == original.id && current.revision == original.revision)
+            val receipts = ToolStore(context, toolDatabase).use { store ->
+                var tones = emptyList<CapabilityEffect>()
+                robot.waitUntil {
+                    tones = store.effects(original.id).filter { it.request.capability == AudioContract.TONE }
+                    tones.size >= count && tones.all { it.phase == "terminal" }
+                }
+                check(tones.size == count) { "Expected $count tone receipts, found ${tones.size}." }
+                for (tone in tones) {
+                    check(tone.result.status == "succeeded") { "Native tone result was ${tone.result.status}." }
+                    check(tone.request.args.getString("tone") == "beep")
+                    check(tone.request.args.getInt("durationMillis") in 1..MAX_TONE_MILLIS)
+                    check(tone.owner == original.id && tone.revision == original.revision)
+                }
+                tones
+            }
+            check(receipts.map { it.key }.take(receiptKeys.size) == receiptKeys)
+            receiptKeys.clear()
+            receiptKeys.addAll(receipts.map { it.key })
+            check(screenshot(image))
+            return JSONObject().put("cups", count).put("visible_count", visibleCount)
+                .put("tone_receipts", JSONArray(receipts.map {
+                    JSONObject().put("key", it.key).put("request", it.request.json()).put("result", it.result.json())
+                }))
+        }
+        step("coffee_initial") { verify(0, "coffee-initial") }
+        for (count in 1..2) {
+            step("coffee_add_$count") {
+                button("""^\s*(?:(?:add|log|record)(?:\s+.*)?|\+\s*1(?:\s+cup)?)\s*$""")
+                verify(count, "coffee-$count")
+            }
+        }
+        step("coffee_reopened") {
+            reopen()
+            verify(2, "coffee-reopened")
+        }
+        if (verifyDismissals) {
+            val dialog = "Start a new day?"
+            val close = robot.text(R.string.tool_generated_dialog_close, dialog)
+            step("coffee_cancel_reset") {
+                button("^Reset day$")
+                robot.waitFor(dialog)
+                button("^Cancel$")
+                robot.waitGone(dialog)
+                verify(2, "coffee-cancel-reset")
+            }
+            step("coffee_close_reset") {
+                button("^Reset day$")
+                robot.waitFor(dialog)
+                robot.click(close)
+                robot.waitGone(dialog)
+                verify(2, "coffee-close-reset")
+            }
+        }
+    }
 
     fun grid(reopen: () -> Unit, verifyHostRestart: Boolean = false,
         refineVictory: ((String) -> Unit)? = null) = ToolStore(context, toolDatabase).use { store ->
@@ -212,15 +455,20 @@ internal class Plan5WorkflowChecks(
             check(labels().intersect(victoryLabels).isNotEmpty())
             "Graphics restart leaves the score at 3"
         }
-        step("restart") {
-            button("заново|перезапус|новая игра")
-            score(0)
+        step("restart_delivered") { button("заново|перезапус|новая игра"); "delivered" }
+        step("restart_zero_observed") { score(0) }
+        step("restart_victory_cleared") {
             robot.waitUntil { labels().intersect(victoryLabels).isEmpty() }
-            tapCell(2)
-            score(1)
-            reopen()
-            score(1)
+            true
         }
+        step("restart_cell2_located") {
+            if (drawnBoard) canvas() else robot.reveal(controlLabel(checkNotNull(cellControl(2))), null)
+            true
+        }
+        step("restart_cell2_delivery") { tapCell(2); "delivered" }
+        step("restart_score1_observed") { score(1) }
+        step("restart_reopen_completed") { reopen(); true }
+        step("restart_score1_after_reopen") { score(1) }
     }
 
     fun ledger(reopen: () -> Unit, refine: ((String) -> Unit)? = null) {

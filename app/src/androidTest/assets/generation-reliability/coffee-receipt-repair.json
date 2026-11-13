@@ -1,0 +1,36 @@
+{
+  "source": {
+    "file": "prompt-followups/fresh-logs-5/toggle-boolean/live/provider.jsonl",
+    "sha256": "c5c2e48237b26b38e460cff9fd1d1e623731da0078c0197c832daba371ef0fe4"
+  },
+  "derivation": "Replay recorded responses 1–7 unchanged. Retain the accepted writer-only selection when the PLAN changes only behavior. Rebuild the original writer with behaviorBindings removed because the repaired behavior is explicitly unchecked for a native outcome.",
+  "prefix_replies": 6,
+  "repair_stages": [
+    "PLAN",
+    "PLAN"
+  ],
+  "feedback_contains": [
+    "required native receipt",
+    "Keep the required Android operation and control"
+  ],
+  "expected_plan_paths": [
+    "$.behavior.scenario.slots[0]",
+    "$.behavior.scenario.steps[1]"
+  ],
+  "expected_plan_rules": [
+    "behavior.native_owner",
+    "behavior.required_receipt"
+  ],
+  "expected_plan_observed_type": "inconsistent",
+  "replies": [
+    {
+      "stage": "PLAN",
+      "reply": "{\"fields\":{\"behavior\":{\"status\":\"unchecked\",\"reason\":\"external_outcome\"}}}"
+    },
+    {
+      "stage": "COMPLETE",
+      "required_capability": "audio.tone",
+      "reply": "{\"formatVersion\":3,\"title\":\"Coffee counter\",\"description\":\"Count your cups of coffee and beep each time you add a cup\",\"capabilities\":[\"audio.tone\"],\"capabilityResults\":false,\"stateSchema\":{\"count\":\"number\"},\"initialState\":{\"count\":0},\"ui\":{\"type\":\"column\",\"children\":[{\"type\":\"section\",\"text\":\"Today's cups\",\"children\":[{\"type\":\"metric\",\"text\":\"Cups today\",\"bind\":\"count\",\"style\":{\"emphasis\":\"number\"}},{\"type\":\"row\",\"children\":[{\"type\":\"button\",\"text\":\"Add cup\",\"action\":\"add\",\"variant\":\"filled\"},{\"type\":\"button\",\"text\":\"Undo\",\"action\":\"undo\",\"variant\":\"outlined\"}]}]},{\"type\":\"button\",\"text\":\"Reset\",\"action\":\"reset\",\"variant\":\"text\"}]},\"source\":\"const state = input.state;\\nconst event = input.event;\\n\\nif (event.type === 'preview' || event.type === 'render') {\\n  return {state: state};\\n}\\n\\nif (event.type === 'action') {\\n  const count = typeof state.count === 'number' ? state.count : 0;\\n\\n  if (event.actionId === 'add') {\\n    const next = count + 1;\\n    if (next > 9007199254740991) {\\n      return {state: state};\\n    }\\n    return {\\n      state: Object.assign({}, state, {count: next}),\\n      effects: [{id: 'beep', capability: 'audio.tone', args: {tone: 'beep', durationMillis: 120}}]\\n    };\\n  }\\n\\n  if (event.actionId === 'undo') {\\n    return {state: Object.assign({}, state, {count: Math.max(0, count - 1)})};\\n  }\\n\\n  if (event.actionId === 'reset') {\\n    return {state: Object.assign({}, state, {count: 0})};\\n  }\\n}\\n\\nreturn {state: state};\"}"
+    }
+  ]
+}
