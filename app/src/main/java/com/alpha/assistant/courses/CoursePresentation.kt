@@ -33,10 +33,12 @@ internal sealed interface CoursePage {
         val course: CourseSnapshot,
         val issue: CourseSlideIssue,
         val step: CourseStep,
+        val answered: Boolean = false,
     ) : CoursePage {
         val generationRequest: CourseSlideGenerationRequest?
             // A current slide that does not load can be built again. The old slide stays until a new one passes.
-            get() = if (step.slide.id == course.progress.currentSlideId) {
+            // The store keeps an answered slide, so it gets no request.
+            get() = if (step.slide.id == course.progress.currentSlideId && !answered) {
                 CourseSlideGenerationRequest(course.id, course.revision, step.slide.id)
             } else null
     }
@@ -242,7 +244,9 @@ internal class CoursePresentation(
             return when (saved) {
                 is CoursePage.Unavailable -> {
                     val sameReach = saved.step == pending.step && saved.course.outlineRevision == pending.course.outlineRevision
-                    val failure = if (sameReach && saved.issue == CourseSlideIssue.MISSING && !reloaded) {
+                    // A failed rebuild leaves the old INVALID slide saved, so the page reports the failure in its place.
+                    val failure = if (sameReach && !reloaded &&
+                        (saved.issue == CourseSlideIssue.MISSING || saved.issue == CourseSlideIssue.INVALID)) {
                         saved.copy(issue = issue)
                     } else saved
                     CourseSlideGenerationUpdate(failure, reloaded || !sameReach, searchIssue)
@@ -275,7 +279,7 @@ internal class CoursePresentation(
         return try {
             checkedSlide(course, step, number, attempt, content)
         } catch (_: CourseWorkflowException) {
-            CoursePage.Unavailable(course, CourseSlideIssue.INVALID, step)
+            CoursePage.Unavailable(course, CourseSlideIssue.INVALID, step, answered = attempt != null)
         }
     }
 

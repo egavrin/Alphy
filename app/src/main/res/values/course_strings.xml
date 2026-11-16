@@ -34,6 +34,7 @@
     <string name="course_generation_busy">Дождитесь завершения предыдущей попытки.</string>
     <string name="course_generation_unavailable">Подготовка слайдов сейчас недоступна.</string>
     <string name="course_slide_invalid">Этот слайд сохранён в старом формате. Его можно подготовить заново.</string>
+    <string name="course_slide_invalid_answered">Этот слайд сохранён в старом формате, и на него уже есть ответ. Его нельзя подготовить заново.</string>
     <string name="course_slide_rebuild">Подготовить заново</string>
     <string name="course_next">Дальше</string>
     <string name="course_finish">Завершить</string>

@@ -326,8 +326,7 @@ class CoursePlayerGenerationUiWorkflowTest {
     @Test fun invalidSlideShowsRebuildAndReplacesIt() {
         val runtime = Runtime {}
         withPlayer(runtime) { store, saved ->
-            val unknownKey = JSONObject(fixtureSpec("Old explanation").json).put("composition", JSONObject())
-            saveOldSlide(store, saved, mapOf("definition" to unknownKey.toString()))
+            saveInvalidSlide(store, saved)
             openPlayer()
             waitFor(R.string.course_slide_invalid)
             robot.waitFor(goal)
@@ -336,6 +335,43 @@ class CoursePlayerGenerationUiWorkflowTest {
             robot.waitFor(generatedText)
             assertEquals(1, runtime.requests.size)
             assertSavedWork(store, saved)
+        }
+    }
+
+    @Test fun aFailedRebuildShowsTheFailureAndKeepsTheOldSlide() {
+        val runtime = Runtime { attempt -> if (attempt == 1) error("Private rebuild failure") }
+        withPlayer(runtime) { store, saved ->
+            saveInvalidSlide(store, saved)
+            val old = store.slide(saved.id, "explanation")
+            openPlayer()
+            click(R.string.course_slide_rebuild)
+            waitFor(R.string.course_slide_generation_failed)
+            assertFalse(robot.texts().any { it.contains("Private rebuild failure") })
+            assertEquals(old, store.slide(saved.id, "explanation"))
+            click(R.string.course_generation_retry)
+            robot.waitFor(generatedText)
+            assertEquals(2, runtime.requests.size)
+        }
+    }
+
+    // The store rejects a new slide in place of an answered one, so the player must not offer it.
+    @Test fun anAnsweredInvalidSlideOffersNoRebuild() {
+        val runtime = Runtime {}
+        withPlayer(runtime, startAtPractice = CourseSlideKind.CHOICE) { store, saved ->
+            val content = checkNotNull(store.slide(saved.id, "practice")).content
+            store.commitAnswer(saved.id, CourseAnswerSubmission("wrong", saved.revision, "practice",
+                CourseAnswer.Choice("whole"), false, content.stateJson))
+            val unknownKey = JSONObject(content.definitionJson).put("composition", JSONObject())
+            SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+                db.execSQL("UPDATE slides SET definition=? WHERE course_id=? AND slide_id=?",
+                    arrayOf(unknownKey.toString(), saved.id, "practice"))
+            }
+            robot.click("Fractions")
+            click(R.string.course_open)
+            waitFor(R.string.course_slide_invalid_answered)
+            waitFor(R.string.course_reload)
+            assertNull(robot.find(robot.text(R.string.course_slide_rebuild)))
+            assertTrue(runtime.requests.isEmpty())
         }
     }
 
@@ -550,6 +586,9 @@ class CoursePlayerGenerationUiWorkflowTest {
     }
 
     /** Saves the explanation slide, then overwrites [columns] of its row as an earlier version wrote them. */
+    private fun File.saveInvalidSlide(store: CourseStore, saved: CourseSnapshot) = saveOldSlide(store, saved,
+        mapOf("definition" to JSONObject(fixtureSpec("Old explanation").json).put("composition", JSONObject()).toString()))
+
     private fun File.saveOldSlide(store: CourseStore, saved: CourseSnapshot, columns: Map<String, String>) {
         val old = fixtureSpec("Old explanation")
         store.commitGeneration(store.beginGeneration(saved.id, saved.revision, "explanation"),

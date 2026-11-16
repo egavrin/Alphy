@@ -1264,7 +1264,8 @@ private fun CourseGenerationPage(
         Text(page.step.slide.goal)
         val message = when {
             waiting -> R.string.course_generation_waiting
-            page.issue == CourseSlideIssue.INVALID -> R.string.course_slide_invalid
+            page.issue == CourseSlideIssue.INVALID ->
+                if (page.answered) R.string.course_slide_invalid_answered else R.string.course_slide_invalid
             page.generationRequest != null && !hostAvailable -> R.string.course_generation_unavailable
             page.issue == CourseSlideIssue.GENERATION_FAILED -> R.string.course_slide_generation_failed
             page.issue == CourseSlideIssue.GENERATION_INTERRUPTED -> R.string.course_generation_interrupted

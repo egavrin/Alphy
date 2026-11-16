@@ -599,6 +599,9 @@ class LibraryManagementWorkflowTest {
     // Alpha 12 and earlier saved mixed apps: host parts with a generated fill. The fixture is one such record, as that code wrote it.
     @Test fun savedMixedAppFromAnOlderVersionStaysButDoesNotOpen() = retiredAppStaysButDoesNotOpen("legacy/mixed-app.json","Mixed workshop")
 
+    // Alpha 12 also saved apps built only from host parts with a nativePresentation recipe and no composition. The fixture has that record shape.
+    @Test fun savedPresentationAppFromAnOlderVersionStaysButDoesNotOpen() = retiredAppStaysButDoesNotOpen("legacy/native-presentation-app.json","Focus counter")
+
     private fun retiredAppStaysButDoesNotOpen(asset: String,title: String) {
         val name="library-retired-${UUID.randomUUID()}.db"
         val shell=ShellStore(app,name)
