@@ -3,6 +3,7 @@ package com.alpha.assistant.courses
 import com.alpha.assistant.tools.CanvasLiveChecks
 import android.os.SystemClock
 import android.view.View
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -69,6 +70,24 @@ class LiveCourseWorkflowTest {
                 if (!robot.scrollForward()) return@repeat
             }
             robot.waitFor(text)
+        }
+        // The slide text can repeat an option label. The option is the first match with a clickable ancestor.
+        fun option(label: String): AccessibilityNodeInfo? {
+            fun search(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+                if (node == null) return null
+                if (node.text?.toString()?.trimEnd() == label) generateSequence(node) { it.parent }.firstOrNull { it.isClickable }?.let { return it }
+                repeat(node.childCount) { search(node.getChild(it))?.let { found -> return found } }
+                return null
+            }
+            return search(robot.diagnostics.freshRoot())
+        }
+        fun choose(label: String) {
+            var scrolls = 0
+            while (option(label)?.isVisibleToUser != true && scrolls++ < 5 && robot.scrollForward()) Unit
+            var node: AccessibilityNodeInfo? = null
+            robot.waitUntil { node = option(label); node?.let { it.isVisibleToUser && it.isEnabled } == true }
+            check(robot.diagnostics.click(label, node))
+            robot.automation.waitForIdle(100, 3000)
         }
 
         val calls = AtomicInteger()
@@ -258,9 +277,7 @@ class LiveCourseWorkflowTest {
                             val values = input.getJSONArray(answer)
                             when (kind) {
                                 CourseSlideKind.CHOICE -> {
-                                    val option = values.getString(0)
-                                    reveal(option)
-                                    robot.click(option)
+                                    choose(values.getString(0))
                                 }
                                 CourseSlideKind.FILL_IN -> robot.edit(robot.text(R.string.course_answer_label), values.getString(0))
                                 CourseSlideKind.ORDER -> {
@@ -271,8 +288,7 @@ class LiveCourseWorkflowTest {
                                     }
                                     repeat(values.length()) { index ->
                                         val option = values.getString(index)
-                                        reveal(option)
-                                        robot.click(option)
+                                        choose(option)
                                         reveal(robot.text(R.string.course_order_position, index + 1, option))
                                     }
                                 }

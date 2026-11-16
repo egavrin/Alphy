@@ -37,10 +37,10 @@ private fun lessonGuide(kind: CourseSlideKind): String = buildString {
         - This slide is $kind.
         - Use no capabilities, no collections, no device controls (calendar, medicine, navigation, image, video), and no immersive presentation.
         - Use no actions, row actions, or interactions in the slide, except live inputs on a scene slide.
-        - Show the words, letters, numbers, and facts that the slide goal names as visible text in the first screen. No input may hide them.
         - For a picture of one object (a fruit, an animal, the sun, a cloud), put its emoji in a text node with "style":{"emphasis":"headline"} next to its name.
     """.trimIndent())
     append('\n')
+    if (!kind.requiresAnswer) append("- Show the words, letters, numbers, and facts that the slide goal names as visible text in the first screen. No input may hide them.\n")
     append(if (kind.allowsScene) "- When the goal needs a diagram or a live model, this slide can use a scene: a canvas with declared surfaces. " +
         "It must draw visible content in the first screen. " +
         "Live inputs (slider, numberInput, toggle, checkbox, button, select, segmented) can change it. Use no answer control on a scene slide."
@@ -61,5 +61,6 @@ private fun lessonGuide(kind: CourseSlideKind): String = buildString {
     append("\n  The question has at most 512 characters. Options: 2 to 30, with distinct IDs and distinct labels of at most 100 characters.")
     append("\n  Accepted answers: 1 to 20, without spaces at the start or end.")
     append("\n- The host adds the answer control and the Check button. Do not add actionId, an answer control, or a node bound to $EXERCISE_FIELD.")
-    append("\n  Show only the instruction and the content that the learner needs to answer.")
+    append("\n  Show only the instruction and the content that the learner needs to answer. ")
+        .append("Do not repeat the option labels or the answer, and do not say how to enter the answer: the host control shows it.")
 }
