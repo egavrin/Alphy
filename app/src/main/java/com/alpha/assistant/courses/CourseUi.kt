@@ -1280,7 +1280,10 @@ private fun CourseGenerationPage(
                 TextButton(onClick = onCancel) { Text(stringResource(R.string.course_generation_cancel)) }
             }
             hostAvailable && page.generationRequest != null -> {
-                Button(onClick = onRetry) { Text(stringResource(R.string.course_generation_retry)) }
+                Button(onClick = onRetry) {
+                    Text(stringResource(if (page.issue == CourseSlideIssue.INVALID) R.string.course_slide_rebuild
+                        else R.string.course_generation_retry))
+                }
             }
             else -> TextButton(onClick = onReload) { Text(stringResource(R.string.course_reload)) }
         }

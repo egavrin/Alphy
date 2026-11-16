@@ -2,6 +2,7 @@ package com.alpha.assistant.courses
 
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.tools.ToolSpec
+import org.json.JSONObject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.currentCoroutineContext
@@ -35,7 +36,8 @@ internal sealed interface CoursePage {
         val sceneFailure: String? = null,
     ) : CoursePage {
         val generationRequest: CourseSlideGenerationRequest?
-            get() = if (issue != CourseSlideIssue.INVALID && step.slide.id == course.progress.currentSlideId) {
+            // A current slide that does not load can be built again. The old slide stays until a new one passes.
+            get() = if (step.slide.id == course.progress.currentSlideId) {
                 CourseSlideGenerationRequest(course.id, course.revision, step.slide.id)
             } else null
     }
@@ -288,21 +290,12 @@ internal class CoursePresentation(
 
     private fun checkedSlide(
         course: CourseSnapshot, step: CourseStep, number: Int, attempt: CourseAnswerAttempt?, content: CourseSlideContent,
-    ): CoursePage.Slide = validateCourseOutput {
-        content.encodeSources()
-        val spec = parseCourseSpec(content, step.slide.kind)
-        val scene = spec.takeIf { step.slide.kind.allowsScene && it.surfaces.isNotEmpty() }
-            ?.let { if (it.lessonImageIntent == null && it.generatedImages.isEmpty()) it
-                else ToolSpec.parsePersisted(courseSceneDefinition(it.json)) }
-        require(spec.composition == null || scene != null)
-        val exercise = CourseExercise.read(spec, step.slide.kind)
-        require(exercise?.actionId == null)
-        checkedCourseUi(spec, spec.ui.toString(), spec.initialState, exercise, step.slide.kind)
-        val (ui, state) = checkedCourseUi(spec, content.uiJson, content.stateJson, exercise, step.slide.kind)
+    ): CoursePage.Slide {
+        val saved = checkSavedSlide(step, content)
         val feedback = attempt?.let { CourseAnswerFeedback(it.answer, it.correct) }
-        CoursePage.Slide(course, step, number, ui.toString(), state.toString(), exercise?.prompt,
-            content.sources, content.adaptationNote, feedback, scene,
-            imageDefinition = spec.takeIf { it.lessonImageIntent != null || it.generatedImages.isNotEmpty() })
+        return CoursePage.Slide(course, step, number, saved.ui.toString(), saved.state.toString(), saved.exercise?.prompt,
+            content.sources, content.adaptationNote, feedback, saved.scene,
+            imageDefinition = saved.spec.takeIf { it.lessonImageIntent != null || it.generatedImages.isNotEmpty() })
     }
 
     private fun requireCourse(id: String): CourseSnapshot =
@@ -358,3 +351,23 @@ internal val CoursePage.Slide.nextRequest: CourseNextRequest?
     get() = if (number < course.progress.totalSlides && (prompt == null || feedback?.correct == true)) {
         CourseNextRequest(course.id, course.revision, step.slide.id)
     } else null
+
+/** A saved slide in the form that the player shows. */
+internal class SavedCourseSlide(
+    val spec: ToolSpec, val scene: ToolSpec?, val exercise: CourseExercise?, val ui: JSONObject, val state: JSONObject,
+)
+
+/** Throws [CourseWorkflowException] when the saved slide does not load. */
+internal fun checkSavedSlide(step: CourseStep, content: CourseSlideContent): SavedCourseSlide = validateCourseOutput {
+    content.encodeSources()
+    val spec = parseCourseSpec(content, step.slide.kind)
+    val scene = spec.takeIf { step.slide.kind.allowsScene && it.surfaces.isNotEmpty() }
+        ?.let { if (it.lessonImageIntent == null && it.generatedImages.isEmpty()) it
+            else ToolSpec.parsePersisted(courseSceneDefinition(it.json)) }
+    require(spec.composition == null || scene != null)
+    val exercise = CourseExercise.read(spec, step.slide.kind)
+    require(exercise?.actionId == null)
+    checkedCourseUi(spec, spec.ui.toString(), spec.initialState, exercise, step.slide.kind)
+    val (ui, state) = checkedCourseUi(spec, content.uiJson, content.stateJson, exercise, step.slide.kind)
+    SavedCourseSlide(spec, scene, exercise, ui, state)
+}

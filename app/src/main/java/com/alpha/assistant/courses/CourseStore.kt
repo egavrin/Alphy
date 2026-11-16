@@ -139,11 +139,16 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
         } }
     }
 
-    /** An explicit retry replaces an interrupted operation at the current course revision. */
-    fun beginGeneration(courseId: String, expectedRevision: Long, slideId: String): CourseGenerationOperation = write {
+    /**
+     * An explicit retry replaces an interrupted operation at the current course revision.
+     * With [replace], a saved slide without answers can be built again. It stays saved until the commit.
+     */
+    fun beginGeneration(courseId: String, expectedRevision: Long, slideId: String, replace: Boolean = false): CourseGenerationOperation = write {
         val course = requireRevision(courseId, expectedRevision)
         course.requireReached(slideId)
-        if (slideExists(courseId, slideId)) reject(CourseRejection.SLIDE_ALREADY_GENERATED)
+        if (slideExists(courseId, slideId) &&
+            (!replace || exists("SELECT 1 FROM answers WHERE course_id=? AND slide_id=?", courseId, slideId))
+        ) reject(CourseRejection.SLIDE_ALREADY_GENERATED)
         val updated = updateCourse(course, ContentValues().apply {
             put("generation_id", UUID.randomUUID().toString())
             putNull("generation_failure")
@@ -153,6 +158,10 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
 
     fun commitGeneration(operation: CourseGenerationOperation, content: CourseSlideContent): CourseSnapshot = write {
         val course = requireGeneration(operation)
+        // Each store write changes the revision, so a row here is the slide that beginGeneration accepted to replace.
+        if (slideExists(course.id, operation.slideId)) {
+            delete("slides", "course_id=? AND slide_id=?", arrayOf(course.id, operation.slideId))
+        }
         insertSlide(course, operation.slideId, content)
         updateCourse(course, ContentValues().apply { putNull("generation_id") })
     }

@@ -1,6 +1,7 @@
 package com.alpha.assistant.courses
 
 import android.content.Context
+import android.database.sqlite.SQLiteDatabase
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.ChatProvider
@@ -69,7 +70,6 @@ class CourseGenerationWorkflowTest {
             CourseStore(context, name).use { store ->
                 val resumed = checkNotNull(store.course(id))
                 val player = CourseController(store, runtime.generation)
-                assertEquals(resumed, player.generate(id, resumed.revision, practice, key, CloudSession()))
                 assertEquals(1, runtime.prompts.size)
                 workflowError(CourseWorkflowError.INVALID_ANSWER) {
                     player.submitAnswer(id, resumed.revision, practice, "bad", CourseAnswer.Choice("injected"))
@@ -118,6 +118,9 @@ class CourseGenerationWorkflowTest {
                 for (request in runtime.prompts) {
                     for (privateValue in privateValues) assertFalse(request.contains(privateValue))
                 }
+                // Reopening a saved slide that loads returns the saved course without a provider request.
+                assertEquals(review, player.generate(id, review.revision, reviewSlide, key, CloudSession()))
+                assertEquals(2, runtime.prompts.size)
                 assertTrue(player.advance(id, review.revision, reviewSlide).progress.isComplete)
             }
         }
@@ -452,6 +455,77 @@ class CourseGenerationWorkflowTest {
                     })
                 }
             }
+        }
+    }
+
+    @Test fun invalidCurrentSlideIsReplacedOnlyAfterANewSlidePasses(): Unit = runBlocking {
+        withDatabase { context, name ->
+            val provider = LessonAgentProvider()
+            CourseStore(context, name).use { store ->
+                val course = store.create(setup, outline())
+                val controller = CourseController(store, ToolGenerationService(provider, SandboxClient(context)))
+                val presentation = CoursePresentation(store, controller)
+                provider.slide = lessonSlide(CourseSlideKind.CHOICE)
+                controller.generate(course.id, course.revision, "practice", key, CloudSession())
+                breakSlide(context, name, course.id, "practice")
+                val broken = checkNotNull(store.slide(course.id, "practice"))
+                val page = presentation.player(course.id) as CoursePage.Unavailable
+                assertEquals(CourseSlideIssue.INVALID, page.issue)
+                val request = checkNotNull(page.generationRequest)
+
+                // A CHOICE slide without its exercise never passes, so the old slide stays.
+                provider.slide = lessonSlide(CourseSlideKind.EXPLANATION)
+                workflowError(CourseWorkflowError.UNSUPPORTED_LESSON) {
+                    controller.generate(course.id, request.expectedRevision, "practice", key, CloudSession())
+                }
+                assertEquals(broken, store.slide(course.id, "practice"))
+
+                provider.slide = lessonSlide(CourseSlideKind.CHOICE, "Which form is new?")
+                val failed = checkNotNull(store.course(course.id))
+                val rebuilt = controller.generate(course.id, failed.revision, "practice", key, CloudSession())
+                assertNull(rebuilt.generation)
+                assertNull(rebuilt.generationFailure)
+                val slide = presentation.player(course.id) as CoursePage.Slide
+                assertEquals("Which form is new?", slide.prompt?.question)
+                assertEquals(rebuilt.outlineRevision, store.slide(course.id, "practice")?.outlineRevision)
+            }
+        }
+    }
+
+    @Test fun rebuildRejectsAnsweredOrChangedSlides(): Unit = runBlocking {
+        withDatabase { context, name ->
+            CourseStore(context, name).use { store ->
+                val runtime = FixtureRuntime()
+                val player = CourseController(store, runtime.generation)
+                val course = store.create(setup, outline())
+                runtime.response = { preview(definition(choice())) }
+                val active = player.generate(course.id, course.revision, "practice", key, CloudSession())
+                val unanswered = checkNotNull(store.slide(course.id, "practice"))
+                val replacement = definition(choice(correct = "b")).let { CourseSlideContent(it.json, it.ui.toString(), it.initialState) }
+
+                // The learner answers the old slide between the start and the save of a rebuild.
+                val operation = store.beginGeneration(course.id, active.revision, "practice", replace = true)
+                val answered = store.commitAnswer(course.id, CourseAnswerSubmission(
+                    "wrong", checkNotNull(store.course(course.id)).revision, "practice", CourseAnswer.Choice("b"), false,
+                    unanswered.content.stateJson,
+                ))
+                rejected(CourseRejection.STALE_GENERATION) { store.commitGeneration(operation, replacement) }
+                assertEquals(unanswered, store.slide(course.id, "practice"))
+                rejected(CourseRejection.SLIDE_ALREADY_GENERATED) {
+                    store.beginGeneration(course.id, answered.revision, "practice", replace = true)
+                }
+                assertEquals(answered.revision, store.course(course.id)?.revision)
+                assertEquals(unanswered, store.slide(course.id, "practice"))
+            }
+        }
+    }
+
+    /** An earlier version saved this slide in a format that the player no longer loads. */
+    private fun breakSlide(context: Context, name: String, courseId: String, slideId: String) {
+        val definition = JSONObject(checkNotNull(CourseStore(context, name).use { it.slide(courseId, slideId) }).content.definitionJson)
+            .put("composition", JSONObject())
+        SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("UPDATE slides SET definition=? WHERE course_id=? AND slide_id=?", arrayOf(definition.toString(), courseId, slideId))
         }
     }
 

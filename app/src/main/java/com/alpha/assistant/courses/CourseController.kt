@@ -38,11 +38,13 @@ internal class CourseController(
         trustedSearchResults: List<Source> = emptyList(),
     ): CourseSnapshot {
         val (course, step) = reached(courseId, expectedRevision, slideId)
-        if (store.slide(courseId, slideId) != null) return reached(courseId, expectedRevision, slideId).first
+        val saved = store.slide(courseId, slideId)
+        val loads = saved != null && runCatching { checkSavedSlide(step, saved.content) }.isSuccess
+        if (loads) return reached(courseId, expectedRevision, slideId).first
         checkActive(session)
         val input = generation.input(store, course, course.progress.completedSlides, trustedSearchResults)
         checkActive(session)
-        val operation = store.beginGeneration(courseId, expectedRevision, slideId)
+        val operation = store.beginGeneration(courseId, expectedRevision, slideId, replace = saved != null)
         val content = try {
             generation.generate(key, input, session, artifactId(courseId, slideId), step.slide.kind).also {
                 checkActive(session)

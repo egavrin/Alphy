@@ -322,6 +322,28 @@ class CoursePlayerGenerationUiWorkflowTest {
         }
     }
 
+    @Test fun invalidSlideShowsRebuildAndReplacesIt() {
+        val runtime = Runtime {}
+        withPlayer(runtime) { store, saved ->
+            val old = fixtureSpec("Old explanation")
+            store.commitGeneration(store.beginGeneration(saved.id, saved.revision, "explanation"),
+                CourseSlideContent(old.json, old.ui.toString(), old.initialState))
+            // An earlier version saved this slide in a format that the player no longer loads.
+            SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+                db.execSQL("UPDATE slides SET definition=? WHERE course_id=? AND slide_id=?",
+                    arrayOf(JSONObject(old.json).put("composition", JSONObject()).toString(), saved.id, "explanation"))
+            }
+            openPlayer()
+            waitFor(R.string.course_slide_invalid)
+            robot.waitFor(goal)
+            assertTrue(runtime.requests.isEmpty())
+            click(R.string.course_slide_rebuild)
+            robot.waitFor(generatedText)
+            assertEquals(1, runtime.requests.size)
+            assertSavedWork(store, saved)
+        }
+    }
+
     @Test fun cancelAndBackLeaveThePendingSlideForExplicitRetry() {
         val activeAttempt = AtomicInteger()
         val release = CompletableDeferred<Unit>()
