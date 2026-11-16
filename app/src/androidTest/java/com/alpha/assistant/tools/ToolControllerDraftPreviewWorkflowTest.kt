@@ -1,18 +1,10 @@
 package com.alpha.assistant.tools
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
-import com.alpha.assistant.cloud.ChatProvider
-import com.alpha.assistant.cloud.CloudEvent
-import com.alpha.assistant.cloud.CloudRequest
-import com.alpha.assistant.cloud.CloudSession
-import com.alpha.assistant.data.SecureKeyStore
 import kotlinx.coroutines.*
 import org.junit.Assert.*
 import org.junit.Test
-import org.json.JSONObject
 import org.junit.runner.RunWith
-import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
@@ -114,68 +106,5 @@ class ToolControllerDraftPreviewWorkflowTest {
         assertNull(state.previewFor(original.id))
         beforeDisappear.onPreview(preview.copy(identity=preview.identity.copy(requestId="removed")))
         assertNull(state.previewFor(original.id))
-    }
-
-    @Test fun recreatedControllerReadsCompletedDraftWithoutTemporaryPreview(): Unit=runBlocking {
-        val app=InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as android.app.Application
-        val name="draft-preview-${UUID.randomUUID()}.db"
-        val keys=SecureKeyStore(app,name,name)
-        val controllerScope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
-        val definition="""{"formatVersion":3,"title":"Drawing","description":"","capabilities":[],
-            "stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"text","text":"Drawing"},
-            "surfaces":[{"id":"board","width":64,"height":64}],
-            "source":"return {state:input.state,surfaces:{board:{commands:[{type:'circle',x:8,y:16,radius:2,color:'accent'}]}}};"}"""
-        val fixture=object: ChatProvider {
-            override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
-                if(!request.replyWithFixturePlan(emit, fixtureScene())) emit(CloudEvent.Text(JSONObject(definition).withFixtureDrawingBinding("board").toString()))
-            }
-        }
-        val offline=object: ChatProvider {
-            override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
-                error("Opening a completed draft does not need a provider.")
-            }
-        }
-        suspend fun <T> withController(provider: ChatProvider,block: suspend (ToolController)->T): T {
-            val store=ToolStore(app,name)
-            val database=store.writableDatabase
-            val controller=withContext(Dispatchers.Main) {ToolController(app,controllerScope,provider,keys,store)}
-            try {
-                withTimeout(5000) {while(withContext(Dispatchers.Main) {controller.busy}) delay(10)}
-                return block(controller)
-            } finally {
-                withContext(Dispatchers.Main) {controller.close()}
-                withTimeout(5000) {while(database.isOpen) delay(10)}
-            }
-        }
-        try {
-            keys.save("fixture").getOrThrow()
-            val complete=withController(fixture) {original ->
-                withContext(Dispatchers.Main) {original.generate("Draw a dot.",null,"chat",emptyList())}
-                withTimeout(15000) {while(withContext(Dispatchers.Main) {original.busy}) delay(10)}
-                withContext(Dispatchers.Main) {
-                    assertNull(original.error)
-                    val draft=original.drafts.single()
-                    val preview=checkNotNull(original.previewFor(draft.id))
-                    assertEquals(draft.candidate,preview.candidateJson)
-                    assertEquals(draft.previewState,preview.stateJson)
-                    assertEquals(draft.previewUi,preview.uiJson)
-                    assertTrue(original.tools.isEmpty())
-                    draft
-                }
-            }
-            withController(offline) {recreated ->
-                withContext(Dispatchers.Main) {
-                    assertEquals(complete,recreated.drafts.single())
-                    assertNull(recreated.previewFor(complete.id))
-                    assertTrue(recreated.tools.isEmpty())
-                }
-            }
-        } finally {
-            controllerScope.cancel()
-            app.deleteDatabase(name)
-            app.deleteDatabase("$name-automations.db")
-            keys.clear()
-            app.deleteSharedPreferences(name)
-        }
     }
 }

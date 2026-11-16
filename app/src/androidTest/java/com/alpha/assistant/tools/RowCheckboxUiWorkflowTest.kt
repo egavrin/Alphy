@@ -4,33 +4,18 @@ import android.graphics.Bitmap
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.core.app.ActivityScenario
-import com.alpha.assistant.MainActivity
-import com.alpha.assistant.cloud.ChatProvider
-import com.alpha.assistant.cloud.CloudEvent
-import com.alpha.assistant.cloud.CloudFailure
-import com.alpha.assistant.cloud.CloudGenerationStage
-import com.alpha.assistant.cloud.CloudRequest
-import com.alpha.assistant.cloud.CloudSession
-import com.alpha.assistant.sandbox.SandboxClient
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.R
 import com.alpha.assistant.tools.generation.GenerationRepair
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
-import java.util.UUID
 
 /** Real row controls must address one stable key and retain their state after reopening. */
 @RunWith(AndroidJUnit4::class)
@@ -142,71 +127,6 @@ class RowCheckboxUiWorkflowTest {
             fixture.remove()
             fixture.context.deleteDatabase("${fixture.name}.db-courses.db")
             fixture.context.deleteDatabase("${fixture.name}.db-memory.db")
-        }
-    }
-
-    @Test fun polishRowScopeMismatchKeepsWriterBudgetAndVerifiedCoreApproval() = runBlocking {
-        val request = "Create a to-do list. Use a bright result label."
-        val plan = JSONObject(recorded.getJSONObject("plan").toString()).apply {
-            getJSONObject("behavior").getJSONObject("scenario").getJSONArray("steps").getJSONObject(4).put("value", true)
-            put("visualReview", JSONArray().put("Use a bright result label."))
-        }
-        val core = recordedWriter(5)
-        val revised = JSONObject(core.getJSONObject("ui").toString()).apply {
-            getJSONArray("children").getJSONObject(1).put("action", "spare")
-            getJSONArray("children").getJSONObject(3).getJSONObject("rowTemplate")
-                .getJSONArray("children").getJSONObject(0).put("action", "toggle")
-        }
-        ActivityScenario.launch(MainActivity::class.java).use {
-            for (choice in listOf("Cancel", "Save")) {
-                val session = CloudSession()
-                val events = mutableListOf<ToolGenerationTraceEvent>()
-                val stages = mutableListOf<CloudGenerationStage?>()
-                val provider = object : ChatProvider {
-                    override suspend fun respond(key: String, call: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                        stages += call.generationStage
-                        val response = when (call.generationStage) {
-                            CloudGenerationStage.PLAN -> if (call.systemInstructions.startsWith("Plan only native mini-app illustrations."))
-                                """{"disposition":"unchanged","excerpt":"","imageRequests":[],"removeImageSlots":[]}"""
-                            else call.withFixtureCheckEvidence(plan.toString())
-                            CloudGenerationStage.COMPLETE -> core.toString()
-                            CloudGenerationStage.REFINE -> JSONObject().put("fields", JSONObject().put("ui", revised)).toString()
-                            else -> error("Unexpected polish stage ${call.generationStage}")
-                        }
-                        emit(CloudEvent.Text(response))
-                    }
-                }
-                val result = runCatching {
-                    withTimeout(30_000) {
-                        val approve = launch(Dispatchers.IO) {
-                            val automation = instrumentation.uiAutomation
-                            while (true) {
-                                val root = automation.rootInActiveWindow
-                                val notice = root?.findAccessibilityNodeInfosByText("Missing: requested appearance changes").orEmpty()
-                                val buttons = root?.findAccessibilityNodeInfosByText(choice).orEmpty()
-                                if (notice.isNotEmpty() && buttons.any { button -> button.isClickable &&
-                                        button.text?.toString().equals(choice, ignoreCase = true) &&
-                                        button.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK) }) break
-                                delay(100)
-                            }
-                        }
-                        try {
-                            ToolGenerationService(provider, SandboxClient(instrumentation.targetContext)).generate(
-                                "offline", request, null, emptyList(), session, "row-polish", privateState = false, draftPreview = null,
-                                trace = ToolGenerationTrace(UUID.randomUUID(), { events += it }))
-                        } finally { approve.cancelAndJoin() }
-                    }
-                }
-                if (choice == "Cancel") assertEquals("widget_declined", (result.exceptionOrNull() as? CloudFailure)?.code)
-                else assertEquals("toggle", JSONObject(result.getOrThrow().ui).getJSONArray("children").getJSONObject(1).getString("action"))
-                assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.PLAN,
-                    CloudGenerationStage.REFINE), stages)
-                assertFalse(events.filterIsInstance<ToolGenerationTraceEvent.Repair>().any { it.providerStage == CloudGenerationStage.COMPLETE })
-                val mismatch = events.filterIsInstance<ToolGenerationTraceEvent.Attempt>().single { it.behaviorBinding?.rule == BehaviorFailureRule.ROW_SCOPE_MISMATCH }
-                assertEquals("widget_plan", mismatch.failureCode)
-                assertEquals("writer_binding", mismatch.behaviorBinding!!.report().getString("discoveryStage"))
-                assertEquals(1, session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
-            }
         }
     }
 

@@ -24,50 +24,60 @@
       "id": "fresh:money-3",
       "group": "one-off",
       "request": "what do I pay after a 25% discount on something that costs £80",
-      "route": "answer",
+      "route": "create",
       "text": "You pay £60.",
+      "app": "discount",
+      "brief": "Price £80 and a 25% discount, show the amount to pay.",
       "requestSha256": "89d7ee4d50fb099db344ee43000953cab351d3842d85c28db972ed8ea08b6797"
     },
     {
       "id": "fresh:money-8",
       "group": "one-off",
       "request": "dinner was 2400 rupees and six of us are sharing, what is each share",
-      "route": "answer",
+      "route": "create",
       "text": "Each person pays 400 rupees.",
+      "app": "split",
+      "brief": "Bill 2400 rupees shared by six people, show each share.",
       "requestSha256": "04a90875b675bfcd90f87f276640cc93d7f2b4235eb3a39884e5cbe579d0fa03"
     },
     {
       "id": "fresh:cooking-3",
       "group": "direct-timer",
       "request": "pasta timer 11 min",
-      "route": "device_plan",
-      "text": "Review the Android Clock timer.",
-      "anchor": "11 min",
-      "seconds": 660,
+      "route": "create",
+      "text": "I can build an 11-minute pasta timer.",
+      "app": "timer",
+      "brief": "Pasta timer with a default duration of 11 minutes.",
       "requestSha256": "dc8568fdd839ec8700cd3f539c23cfebb789700a04b0e8dc0d72a83efb82261d"
     },
     {
       "id": "fresh:terse-1",
       "group": "ambiguous",
       "request": "a timer",
-      "route": "clarify",
-      "text": "Do you want a device timer or a mini-app?",
+      "route": "create",
+      "text": "I can build a timer.",
+      "app": "timer",
+      "brief": "A timer with an adjustable duration.",
       "requestSha256": "3d3ef8d2e46ec0a7b30a3f3cdceae07af0b6340cad5d2ae6ed95c1eccf65cbb9"
     },
     {
       "id": "fresh:terse-3",
       "group": "ambiguous",
       "request": "km to miles",
-      "route": "answer",
-      "text": "Multiply kilometres by 0.621371.",
+      "route": "create",
+      "text": "I can build a distance converter.",
+      "app": "conversion",
+      "brief": "Enter kilometres and display miles.",
       "requestSha256": "be60e4e9909bbbc25a4533ea4f6e9f0b4b3dceeefb6fa118e352b5ad28408ef5"
     },
     {
       "id": "fresh:goals-2",
       "group": "ambiguous",
       "request": "reading challenge: 24 books this year, how far along am I",
-      "route": "clarify",
-      "text": "How many books have you finished?",
+      "route": "create",
+      "text": "I can build a reading tracker.",
+      "app": "reading",
+      "brief": "Enter books finished, show progress towards 24 books.",
       "requestSha256": "6218f3408a1433c842cbcb9ed1eb5c043060e655d717963c870378838ab25b80"
     },
     {
@@ -91,42 +101,37 @@
       "app": "reading",
       "brief": "Enter books finished, show progress towards 24 books.",
       "requestSha256": "3503b82ac7072000c7571e688d4628094eec68828ecff0715382a6797efdbd5a"
+    },
+    {
+      "id": "authored:answer-1",
+      "group": "knowledge",
+      "request": "why do recipes say to salt pasta water",
+      "route": "answer",
+      "text": "Salt seasons the pasta while it absorbs water.",
+      "requestSha256": "5958d435c74aa052651fc017631f27fb916d5ca14ad989a35ee90b8442f02178"
+    },
+    {
+      "id": "authored:device-1",
+      "group": "direct-timer",
+      "request": "Set a pasta timer for 11 minutes.",
+      "route": "device_plan",
+      "text": "Review the Android Clock timer.",
+      "anchor": "11 minutes",
+      "seconds": 660,
+      "requestSha256": "d50a39755466ec64f322d7bab5320ade5b868ccb7bc922d0c789f612ffd8914d"
+    },
+    {
+      "id": "authored:clarify-1",
+      "group": "unclear",
+      "request": "make me something useful",
+      "route": "clarify",
+      "text": "What should the app help you do?",
+      "requestSha256": "6a209001e81d4ecb3bb771afbb7d04c268530e4de5797e680c6f68a8f22a2d3a"
     }
   ],
   "apps": {
     "conversion": {
-      "plan": {
-        "wholeScreen": true,
-        "language": "en",
-        "behavior": {
-          "status": "checkable",
-          "scenario": {
-            "slots": {
-              "enter": {
-                "kind": "action"
-              },
-              "miles": {
-                "kind": "value",
-                "valueType": "number"
-              }
-            },
-            "steps": [
-              {
-                "op": "action",
-                "slot": "enter",
-                "value": 10
-              },
-              {
-                "op": "assert",
-                "slot": "miles",
-                "test": "equals",
-                "value": 6.21
-              }
-            ]
-          }
-        }
-      },
-      "writer": {
+      "app": {
         "formatVersion": 3,
         "title": "Distance Converter",
         "description": "Distance Converter",
@@ -157,58 +162,22 @@
             }
           ]
         },
-        "behaviorBindings": {
-          "enter": "enter",
-          "miles": [
-            1
-          ]
-        },
         "source": "const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='enter'){s.amount=e.value;s.miles=Math.round(s.amount*62.1371)/100;}return {state:s};"
-      }
+      },
+      "checks": [
+        {
+          "set": "enter",
+          "value": 10
+        },
+        {
+          "expect": "value",
+          "target": "miles",
+          "equals": 6.21
+        }
+      ]
     },
     "savings": {
-      "plan": {
-        "wholeScreen": true,
-        "language": "en",
-        "behavior": {
-          "status": "checkable",
-          "scenario": {
-            "slots": {
-              "enter": {
-                "kind": "action"
-              },
-              "percent": {
-                "kind": "value",
-                "valueType": "number"
-              },
-              "remaining": {
-                "kind": "value",
-                "valueType": "number"
-              }
-            },
-            "steps": [
-              {
-                "op": "action",
-                "slot": "enter",
-                "value": 1250
-              },
-              {
-                "op": "assert",
-                "slot": "percent",
-                "test": "equals",
-                "value": 25
-              },
-              {
-                "op": "assert",
-                "slot": "remaining",
-                "test": "equals",
-                "value": 3750
-              }
-            ]
-          }
-        }
-      },
-      "writer": {
+      "app": {
         "formatVersion": 3,
         "title": "Savings Tracker",
         "description": "Savings Tracker",
@@ -246,51 +215,27 @@
             }
           ]
         },
-        "behaviorBindings": {
-          "enter": "enter",
-          "percent": [
-            1
-          ],
-          "remaining": [
-            2
-          ]
-        },
         "source": "const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='enter'){s.amount=e.value;s.percent=s.amount/50;s.remaining=5000-s.amount;}return {state:s};"
-      }
+      },
+      "checks": [
+        {
+          "set": "enter",
+          "value": 1250
+        },
+        {
+          "expect": "value",
+          "target": "percent",
+          "equals": 25
+        },
+        {
+          "expect": "value",
+          "target": "remaining",
+          "equals": 3750
+        }
+      ]
     },
     "reading": {
-      "plan": {
-        "wholeScreen": true,
-        "language": "en",
-        "behavior": {
-          "status": "checkable",
-          "scenario": {
-            "slots": {
-              "enter": {
-                "kind": "action"
-              },
-              "percent": {
-                "kind": "value",
-                "valueType": "number"
-              }
-            },
-            "steps": [
-              {
-                "op": "action",
-                "slot": "enter",
-                "value": 6
-              },
-              {
-                "op": "assert",
-                "slot": "percent",
-                "test": "equals",
-                "value": 25
-              }
-            ]
-          }
-        }
-      },
-      "writer": {
+      "app": {
         "formatVersion": 3,
         "title": "Reading Tracker",
         "description": "Reading Tracker",
@@ -321,14 +266,157 @@
             }
           ]
         },
-        "behaviorBindings": {
-          "enter": "enter",
-          "percent": [
-            1
+        "source": "const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='enter'){s.amount=e.value;s.percent=s.amount/24*100;}return {state:s};"
+      },
+      "checks": [
+        {
+          "set": "enter",
+          "value": 6
+        },
+        {
+          "expect": "value",
+          "target": "percent",
+          "equals": 25
+        }
+      ]
+    },
+    "discount": {
+      "app": {
+        "formatVersion": 3,
+        "title": "Discount Calculator",
+        "description": "Discount Calculator",
+        "capabilities": [],
+        "stateSchema": {
+          "amount": "number",
+          "pay": "number"
+        },
+        "initialState": {
+          "amount": 80,
+          "pay": 60
+        },
+        "ui": {
+          "type": "column",
+          "children": [
+            {
+              "type": "numberInput",
+              "text": "Price",
+              "bind": "amount",
+              "action": "enter",
+              "min": 0,
+              "max": 100000
+            },
+            {
+              "type": "metric",
+              "text": "You pay",
+              "bind": "pay"
+            }
           ]
         },
-        "source": "const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='enter'){s.amount=e.value;s.percent=s.amount/24*100;}return {state:s};"
-      }
+        "source": "const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='enter'){s.amount=e.value;s.pay=s.amount*0.75;}return {state:s};"
+      },
+      "checks": [
+        {
+          "set": "enter",
+          "value": 80
+        },
+        {
+          "expect": "value",
+          "target": "pay",
+          "equals": 60
+        }
+      ]
+    },
+    "split": {
+      "app": {
+        "formatVersion": 3,
+        "title": "Bill Splitter",
+        "description": "Bill Splitter",
+        "capabilities": [],
+        "stateSchema": {
+          "amount": "number",
+          "share": "number"
+        },
+        "initialState": {
+          "amount": 2400,
+          "share": 400
+        },
+        "ui": {
+          "type": "column",
+          "children": [
+            {
+              "type": "numberInput",
+              "text": "Bill",
+              "bind": "amount",
+              "action": "enter",
+              "min": 0,
+              "max": 1000000
+            },
+            {
+              "type": "metric",
+              "text": "Each share",
+              "bind": "share"
+            }
+          ]
+        },
+        "source": "const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='enter'){s.amount=e.value;s.share=s.amount/6;}return {state:s};"
+      },
+      "checks": [
+        {
+          "set": "enter",
+          "value": 2400
+        },
+        {
+          "expect": "value",
+          "target": "share",
+          "equals": 400
+        }
+      ]
+    },
+    "timer": {
+      "app": {
+        "formatVersion": 3,
+        "title": "Pasta Timer",
+        "description": "Pasta Timer",
+        "capabilities": [],
+        "stateSchema": {
+          "amount": "number",
+          "seconds": "number"
+        },
+        "initialState": {
+          "amount": 11,
+          "seconds": 660
+        },
+        "ui": {
+          "type": "column",
+          "children": [
+            {
+              "type": "numberInput",
+              "text": "Minutes",
+              "bind": "amount",
+              "action": "enter",
+              "min": 0,
+              "max": 600
+            },
+            {
+              "type": "metric",
+              "text": "Seconds",
+              "bind": "seconds"
+            }
+          ]
+        },
+        "source": "const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='enter'){s.amount=e.value;s.seconds=s.amount*60;}return {state:s};"
+      },
+      "checks": [
+        {
+          "set": "enter",
+          "value": 11
+        },
+        {
+          "expect": "value",
+          "target": "seconds",
+          "equals": 660
+        }
+      ]
     }
   }
 }

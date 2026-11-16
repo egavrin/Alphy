@@ -41,6 +41,7 @@ import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
+import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.data.Conversation
@@ -48,6 +49,7 @@ import com.alpha.assistant.data.Message
 import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.data.ShellStore
 import com.alpha.assistant.diagnostics.UiFailureDiagnostics
+import com.alpha.assistant.tools.agentReply
 import com.alpha.assistant.tools.replyWithFixturePlan
 import com.alpha.assistant.voice.VoiceSession
 import kotlinx.coroutines.CompletableDeferred
@@ -93,9 +95,15 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
             emit(CloudEvent.RoundComplete(it, false))
             return
         }
+        val app = """{"formatVersion":3,"title":"Fixture","description":"","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"text","text":"Count","bind":"count"},"source":"return {state:input.state};"}"""
+        if (request.generationStage == CloudGenerationStage.AGENT) {
+            emit(CloudEvent.Text(request.agentReply(app)))
+            return
+        }
+        // Course lessons still use the staged generation pipeline.
         if (request.replyWithFixturePlan(emit)) return
         if (request.generationStage != null) {
-            emit(CloudEvent.Text("""{"formatVersion":3,"title":"Fixture","description":"","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"text","text":"Count","bind":"count"},"source":"return {state:input.state};"}"""))
+            emit(CloudEvent.Text(app))
             return
         }
         emit(CloudEvent.RoundComplete("""{"kind":"answer","text":${JSONObject.quote(reply)},"brief":"","search":"none"}""", false))

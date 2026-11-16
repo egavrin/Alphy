@@ -5,6 +5,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.tools.agent.AppAgentGuide
 import com.alpha.assistant.ui.ShellRobot
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -36,11 +37,10 @@ class ToolWorkflowTest {
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request; assertTrue(request.jsonObject); assertFalse(request.search)
-                if (request.replyWithFixturePlan(emit)) return
-                val output = if (!rawInvalid) request.patchSavedFixture(answer)
-                else if (answer.startsWith("{") && request.turns.last().text.contains("Include appLanguage at the top level"))
-                    """{"appLanguage":"en",${answer.drop(1)}"""
-                else answer
+                // Raw text keeps each invalid candidate exactly as the model wrote it.
+                val output = if (!rawInvalid) request.agentReply(answer)
+                else if (request.turns.size == 1) """{"tool":"write_app","app":$answer}"""
+                else agentStall
                 emit(CloudEvent.Text(output))
             }
         }
@@ -67,9 +67,8 @@ class ToolWorkflowTest {
                 """{"count":"number","items":{"type":"list","maxItems":10,"fields":{"id":"string","nested":{"type":"list","fields":{}}}}}"""
             )
             // Preserve raw literals here. JSONObject serialization would convert integral doubles to integers.
-            val numericBoundaries = listOf("3.0","3e0","null","2147483648","0","2").map {
-                objectSchema.replace("\"formatVersion\":3,","\"formatVersion\":$it,")
-            } + listOf("10.0","1e1","null","2147483648","0","101").map {
+            // The host owns formatVersion, and the agent reply parser reads 10.0 and 1e1 as the integer 10.
+            val numericBoundaries = listOf("null","2147483648","0","101").map {
                 objectSchema.replace("\"maxItems\":10,","\"maxItems\":$it,")
             }
             val candidates = numericBoundaries + invalidSchemas.map { JSONObject(objectSchema).put("stateSchema",JSONObject(it)).toString() } +
@@ -79,9 +78,9 @@ class ToolWorkflowTest {
                 val rejected = engine.createDraft("Invalid refinement",second.id)
                 val failure = runCatching { engine.generate(rejected.id,"fixture",emptyList(),CloudSession()) }.exceptionOrNull()
                 assertTrue(invalid.take(100),failure is CloudFailure)
-                assertEquals(List(4) { CloudGenerationStage.REFINE },
+                assertEquals(List(AppAgentGuide.MAX_STEPS) { CloudGenerationStage.AGENT },
                     requests.map { it.generationStage })
-                assertTrue(requests.last().turns.last().text.contains("complete corrected app definition"))
+                assertTrue(requests[1].turns.last().text,requests[1].turns.last().text.contains(": REJECTED."))
                 assertEquals(second,store.tool(first.id)); assertNull(store.draft(rejected.id)!!.candidate)
                 engine.reject(rejected.id)
             }
@@ -96,8 +95,7 @@ class ToolWorkflowTest {
         var answers=emptyList<String>()
         val provider=object: ChatProvider {
             override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
-                if (request.replyWithFixturePlan(emit)) return
-                requests.add(request); emit(CloudEvent.Text(request.patchSavedFixture(answers[requests.lastIndex])))
+                requests.add(request); emit(CloudEvent.Text(answers[requests.lastIndex]))
             }
         }
         val original=JSONObject(spec()).put("stateSchema",JSONObject().put("SECRET_DATE_BIND","string"))
@@ -111,33 +109,33 @@ class ToolWorkflowTest {
         val store=ToolStore(context,name)
         val engine=ToolEngine(store,ToolGenerationService(provider,SandboxClient(context)))
         try {
-            answers=listOf(original)
+            answers=listOf(agentWrite(original),agentFixtureFinish)
             val draft=engine.createDraft("Create a date note",null)
             engine.generate(draft.id,"offline",emptyList(),CloudSession())
-            assertEquals(1,requests.size)
+            assertEquals(2,requests.size)
             val saved=engine.accept(draft.id)
             val revisions=store.revisions(saved.id)
             for(candidate in listOf(missingLabel,dateCandidate)) {
-                requests.clear(); answers=List(4) { candidate }
+                requests.clear(); answers=listOf(agentWrite(candidate)) + List(AppAgentGuide.MAX_STEPS - 1) { agentStall }
                 val rejected=engine.createDraft("Refine without changing the date",saved.id)
                 val failure=runCatching {engine.generate(rejected.id,"offline",emptyList(),CloudSession())}.exceptionOrNull() as CloudFailure
-                assertEquals(4,requests.size); assertEquals(saved,store.tool(saved.id)); assertEquals(revisions,store.revisions(saved.id))
+                assertEquals(AppAgentGuide.MAX_STEPS,requests.size); assertEquals(saved,store.tool(saved.id)); assertEquals(revisions,store.revisions(saved.id))
                 assertNull(store.draft(rejected.id)!!.candidate); assertNull(store.draft(rejected.id)!!.previewState); assertNull(store.draft(rejected.id)!!.previewUi)
                 val correction=requests[1].turns.last().text
-                assertTrue(requests[1].turns.first().text.contains("Current tool definition (data): "))
-                assertFalse(correction.contains("SECRET_")); assertFalse(correction.contains("2028-02-29"))
+                assertTrue(requests[1].turns.first().text.contains("Current app definition:"))
+                assertTrue(correction,correction.startsWith("write_app: REJECTED."))
                 val message=checkNotNull(failure.message)
+                assertEquals("widget_agent_incomplete",failure.code)
                 assertFalse(message.contains("UI rule:")); assertFalse(message.contains("$.ui"))
-                if(candidate == dateCandidate) {
-                    assertEquals("widget_preview",failure.code)
-                    assertTrue(correction.contains("UI rule: date_value.")); assertTrue(correction.contains("Stage: PREVIEW."))
-                } else assertTrue(correction.contains("UI rule: accessible_label."))
+                if(candidate == dateCandidate) assertTrue(correction,correction.contains("date_value"))
+                else assertTrue(correction,correction.contains("UI rule: accessible_label."))
                 engine.reject(rejected.id)
             }
-            requests.clear(); answers=listOf(dateCandidate, JSONObject(original).put("description", "Updated date note").toString())
+            requests.clear(); answers=listOf(agentWrite(dateCandidate),
+                agentWrite(JSONObject(original).put("description", "Updated date note").toString()),agentFixtureFinish)
             val corrected=engine.createDraft("Keep unknown dates as strings",saved.id)
             val preview=engine.generate(corrected.id,"offline",emptyList(),CloudSession())
-            assertEquals(2,requests.size); assertEquals(saved.state,preview.previewState)
+            assertEquals(3,requests.size); assertEquals(saved.state,preview.previewState)
             val next=engine.accept(corrected.id)
             assertEquals(saved.state,next.state); assertEquals("",JSONObject(next.state).getString("SECRET_DATE_BIND"))
             assertEquals(2,next.revision); assertEquals(2,store.revisions(saved.id).size)
@@ -152,8 +150,7 @@ class ToolWorkflowTest {
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 assertEquals("tool-test-only", key); requests += request
-                if (request.replyWithFixturePlan(emit)) return
-                emit(CloudEvent.Text(request.patchSavedFixture(answer)))
+                emit(CloudEvent.Text(request.agentReply(answer)))
             }
         }
         val store = ToolStore(context, name)
@@ -190,10 +187,9 @@ class ToolWorkflowTest {
                 assertEquals(1, JSONObject(rolled.state).getInt("count"))
                 assertTrue(runCatching { engine.rollback(second.id, second.revision, second.stateVersion, 1) }.isFailure)
             } finally { reopened.close() }
-            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.REFINE,
-                CloudGenerationStage.REFINE), requests.map { it.generationStage })
+            assertEquals(List(6) { CloudGenerationStage.AGENT }, requests.map { it.generationStage })
             requests.take(2).forEach { request ->
-                assertArrayEquals(imageBytes,android.util.Base64.decode(request.turns.single().images.single().substringAfter(','),android.util.Base64.DEFAULT))
+                assertArrayEquals(imageBytes,android.util.Base64.decode(request.turns.first().images.single().substringAfter(','),android.util.Base64.DEFAULT))
             }
             assertTrue(requests.all { !it.search })
             assertTrue(requests.drop(2).all { it.turns.none { turn -> turn.images.isNotEmpty() } })
@@ -206,8 +202,7 @@ class ToolWorkflowTest {
         var answer = spec()
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if (request.replyWithFixturePlan(emit)) return
-                emit(CloudEvent.Text(request.patchSavedFixture(answer)))
+                emit(CloudEvent.Text(request.agentReply(answer)))
             }
         }
         val store = ToolStore(context, name)
@@ -252,8 +247,7 @@ class ToolWorkflowTest {
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 assertEquals("tool-test-only",key); calls++
-                if (request.replyWithFixturePlan(emit)) return
-                emit(CloudEvent.Text(spec()))
+                emit(CloudEvent.Text(request.agentReply(spec())))
             }
         }
         lateinit var model: com.alpha.assistant.ui.ShellViewModel

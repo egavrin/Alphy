@@ -25,6 +25,26 @@ class Plan5SavedArtifactWorkflowTest {
         replay("ledger-with-prefixed-balances") { checks, reopen, _ -> checks.ledger(reopen) }
     }
 
+    /** Failure case: each cell was a list item "Клетка N" with an action, and the check found no cell controls. */
+    @Test fun capturedGridPressesListItemCells() {
+        replay("grid-with-list-item-cells") { checks, reopen, _ -> checks.grid(reopen) }
+    }
+
+    /** Failure case: the balance was the text "0 очк.", and the check read only a number. */
+    @Test fun capturedLedgerReadsTextBalances() {
+        replay("ledger-with-text-balances") { checks, reopen, _ -> checks.ledger(reopen) }
+    }
+
+    /** Failure case: an ingredient showed "300 g → 450 g", and the check found two numbers. */
+    @Test fun capturedRecipeReadsTheResultOfAnArrowAmount() {
+        replay("recipe-with-arrow-amount") { checks, reopen, _ -> checks.run("fresh:cooking-1", reopen) {} }
+    }
+
+    /** Failure case: an ingredient row showed "Ingredient: Flour" beside "Scaled: 450 g". */
+    @Test fun capturedRecipeReadsAScaledAmountBesideItsIngredient() {
+        replay("recipe-with-scaled-row-text") { checks, reopen, _ -> checks.run("fresh:cooking-1", reopen) {} }
+    }
+
     private fun replay(asset: String, workflow: (Plan5WorkflowChecks, () -> Unit, () -> ToolRecord) -> Unit) {
         val fixture = ShellFixture("plan5-saved-artifact")
         val robot = ShellRobot(fixture.name)

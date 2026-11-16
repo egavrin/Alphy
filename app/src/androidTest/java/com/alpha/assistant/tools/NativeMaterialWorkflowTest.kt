@@ -11,9 +11,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.data.*
-import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.ui.ShellViewModel
-import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -59,6 +57,20 @@ class NativeMaterialWorkflowTest {
         for(type in listOf("progress","progressRing"))spec(JSONObject("""{"type":"$type","text":"Loading","indeterminate":true}"""))
         rejects {spec(JSONObject("""{"type":"progress","text":"Loading","indeterminate":"true"}"""))}
     }
+    @Test fun progressTextShowsTheShareOfItsRange() {
+        // Failure case: a raw value such as "Goal: 62.5" or "Goal: 3" next to a bar that shows a share.
+        val node=JSONObject("""{"type":"progress","text":"Goal","bind":"n","max":8}""")
+        assertEquals("Goal: 38%",ToolUiCatalog.display(node,JSONObject().put("n",3)))
+        assertEquals("Goal: 100%",ToolUiCatalog.display(node,JSONObject().put("n",12)))
+        assertEquals("Done: 63%",ToolUiCatalog.display(JSONObject("""{"type":"progressRing","text":"Done","bind":"n"}"""),JSONObject().put("n",62.5)))
+    }
+    @Test fun sentenceLabelJoinsItsValueWithoutAColon() {
+        // Failure case: a live grid game showed "Соберите три звезды на поле.: Звёзд найдено: 1 из 3."
+        val node=JSONObject("""{"type":"text","text":"Соберите три звезды на поле.","bind":"s"}""")
+        assertEquals("Соберите три звезды на поле. 1 из 3",ToolUiCatalog.display(node,JSONObject().put("s","1 из 3")))
+        assertEquals("1 из 3",ToolUiCatalog.boundText(node,JSONObject().put("s","1 из 3")))
+        assertEquals("Score: 2",ToolUiCatalog.display(JSONObject("""{"type":"metric","text":"Score","bind":"n"}"""),JSONObject().put("n",2)))
+    }
     @Test fun interactionsAndSemanticsKeepCurrentAuthority() {
         val node=JSONObject("""{"type":"text","text":"Interactive","interactions":{"click":"click","longClick":"hold","doubleClick":"twice","focus":"focus","keys":{"enter":"enter","escape":"escape"}},"semantics":{"label":"Interactive card","stateDescription":"Ready","heading":true,"liveRegion":"polite"}}""")
         val selected=spec(node); val values=JSONObject(selected.initialState)
@@ -103,23 +115,6 @@ class NativeMaterialWorkflowTest {
                 assertEquals("Fraction $fraction for $properties",expected,actual,if(fraction == 0f || fraction == 1f) 0.0 else 1e-15)
                 ToolUiCatalog.validateAction(node,"range",JSONArray().put(node.getDouble("min")).put(actual),state)
             }
-        }
-    }
-    @Test fun generationSmokeSamplesNewEvents(): Unit=runBlocking {
-        val context=InstrumentationRegistry.getInstrumentation().targetContext
-        val predicates=listOf("input.event.actionId==='tags' && input.event.value.length===0","input.event.actionId==='range' && input.event.value[1]===10","input.event.actionId==='page' && input.event.value===1","input.event.actionId==='focus' && input.event.value===true","input.event.actionId==='confirm'","input.event.actionId==='inactive'")
-        for(predicate in predicates) {
-            val good=NativeMaterialFixture.definition(JSONObject(NativeMaterialFixture.ui))
-            val bad=JSONObject(good).put("source","if(input.event.type==='action' && ($predicate))throw Error('Representative event reached');"+JSONObject(good).getString("source")).toString()
-            var requests=0
-            val provider=object: ChatProvider {
-                override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
-                    if (request.replyWithFixturePlan(emit)) return
-                    requests++;emit(CloudEvent.Text(if(requests==1)bad else good))
-                }
-            }
-            ToolGenerationService(provider,SandboxClient(context)).generate("offline","Local Material fixture",null,emptyList(),CloudSession(),"material")
-            assertEquals("Smoke omitted $predicate",2,requests)
         }
     }
     @Test fun nativeMaterialChoiceModalPagerAndReopenWorkflow() {

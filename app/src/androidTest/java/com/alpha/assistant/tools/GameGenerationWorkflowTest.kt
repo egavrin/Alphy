@@ -42,25 +42,6 @@ class GameGenerationWorkflowTest {
             try {block(store,engine,tool)} finally {engine.closeArtifacts();context.deleteDatabase(name)}
         }
     }
-    @Test fun exactPromptExamplePassesProductionGenerationAndKeepsNongameWidgetsValid():Unit=runBlocking {
-        val raw=GameGenerationExample.spec();val provider=Provider(raw)
-        val result=ToolGenerationService(provider,SandboxClient(context)).generate("offline","A local game",null,emptyList(),CloudSession(),"fixture")
-        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE),provider.requests.map { it.generationStage })
-        val writer = provider.requests.last()
-        val writerPrompt = writer.systemInstructions + writer.turns.first().text
-        assertFalse(writerPrompt.contains("Neon Arkanoid"))
-        assertTrue(provider.requests.first().systemInstructions.contains("The original request defines the feature set."))
-        assertTrue(writerPrompt.contains("The original request defines the feature set."))
-        assertEquals(ToolSpec.parse(raw).initialState,result.state)
-        assertTrue(result.effects.isEmpty());assertEquals(0,result.records.length())
-        assertTrue(result.surfaces!!.getJSONObject("main").getJSONArray("commands").length()>0)
-        val widget=JSONObject(raw).apply {
-            remove("surfaces");remove("presentation");remove("hostControls");put("source","return {state:input.state};")
-            put("ui",JSONObject("""{"type":"text","text":"Status","bind":"status"}"""))
-        }.toString()
-        val nongame=ToolGenerationService(Provider(widget),SandboxClient(context)).generate("offline","A status widget",null,emptyList(),CloudSession(),"fixture")
-        assertTrue(nongame.spec.surfaces.isEmpty());assertNull(nongame.frames)
-    }
     private val brickColors=setOf("#FF6489","#B48AFF","#648EFF","#42D9CF","#FFC66D")
     private fun bricks(surfaces:JSONObject):List<JSONObject> {
         val commands=surfaces.getJSONObject("main").getJSONArray("commands")
@@ -259,29 +240,4 @@ class GameGenerationWorkflowTest {
             assertEquals(30,bricks(reset.surfaces!!).size);assertEquals(setOf("main"),reset.frames)
         }
     }
-    @Test fun retainedFalseGamesPassPreviewButFailArkanoidWorkflow():Unit=runBlocking {
-        for(deadSimulation in listOf(false,true)) {
-            val raw=falseGame(deadSimulation)
-            val preview=ToolGenerationService(Provider(raw),SandboxClient(context)).generate("offline","Arkanoid",null,emptyList(),CloudSession(),"fixture")
-            assertTrue(preview.spec.surfaces.isEmpty());assertNull(preview.surfaces);assertNull(preview.frames)
-            fixture(raw) {_,engine,tool ->
-                val opened=engine.openArtifact(tool)
-                val started=engine.interact(tool.id,1,opened.tool.stateVersion,"start",null)
-                val snapshot=engine.artifactSnapshot(tool.id,1)
-                assertEquals("playing",JSONObject(started.state).getString("status"))
-                assertEquals(300,JSONObject(started.state).getInt("y"))
-                assertTrue("Arkanoid workflow FAIL: no board",snapshot.surfaces.length()==0)
-                assertTrue("Arkanoid workflow FAIL: no frame subscription",snapshot.frames.isEmpty())
-                assertTrue(runCatching {engine.artifactEvent(tool.id,1,GraphicsContract.event("frame",16))}.isFailure)
-                println("FALSE_GAME fixture=${if(deadSimulation) "uncalled-simulation" else "status-only"} preview=ACCEPTED workflow=FAIL motion=ABSENT screenshots=NOT_PROOF")
-            }
-        }
-    }
-    /** Synthetic reductions of s4-r3-e206aebb8c8f and s4-r1-6d3526377e81, without captured labels or user data. */
-    private fun falseGame(deadSimulation:Boolean):String=JSONObject().put("formatVersion",3).put("title","Negative game fixture")
-        .put("description","").put("capabilities",JSONArray()).put("stateSchema",JSONObject("""{"status":"string","y":"number"}"""))
-        .put("initialState",JSONObject("""{"status":"ready","y":300}"""))
-        .put("ui",JSONObject("""{"type":"button","text":"Start","action":"start"}"""))
-        .put("source",(if(deadSimulation) "function simulate(s){s.y-=3;return s;} " else "")+
-            "if(input.event.type==='action')input.state.status='playing';return {state:input.state};").toString()
 }

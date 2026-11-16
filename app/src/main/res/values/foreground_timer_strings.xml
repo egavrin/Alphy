@@ -5,7 +5,7 @@
     <string name="foreground_timer_reset">Сбросить таймер</string>
     <string name="foreground_timer_ready">Готов: %1$s</string>
     <string name="foreground_timer_paused">На паузе: %1$s</string>
-    <string name="foreground_timer_vibration">По окончании — вибрация %1$d мс</string>
+    <string name="foreground_timer_vibration">По окончании телефон завибрирует</string>
     <string name="foreground_timer_notification">По окончании — уведомление «%1$s». %2$s</string>
     <string name="foreground_timer_denied">Время вышло. Android не разрешил оповещение.</string>
     <string name="foreground_timer_unavailable">Время вышло. Оповещение недоступно.</string>

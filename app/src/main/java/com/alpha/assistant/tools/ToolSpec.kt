@@ -181,14 +181,6 @@ data class ToolSpec private constructor(val json: String, val title: String, val
         return parsePersisted(definition.toString())
     }
 
-    internal fun preserveNativePresentation(candidate: ToolSpec, observer: ((ToolUiDiagnostic) -> Unit)? = null): ToolSpec {
-        require(candidate.nativePresentation == null)
-        val recipe = nativePresentation ?: return candidate
-        validateNativePresentation { recipe.focalNode(candidate.ui) }
-        val definition = JSONObject(candidate.json).put(NativePresentation.FIELD, recipe.json())
-        return parsePersisted(definition.toString(),observer)
-    }
-
     companion object {
         private const val THREE_LIBRARY = "three@0.180.0"
         internal const val MAX_DEFINITION_BYTES = 256 * 1024

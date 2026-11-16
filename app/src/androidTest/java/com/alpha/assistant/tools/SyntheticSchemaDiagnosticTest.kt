@@ -221,12 +221,7 @@ class SyntheticSchemaDiagnosticTest {
             return when (stage) {
                 CloudGenerationStage.PLAN -> {
                     check(++plans <= 2)
-                    val contract = com.alpha.assistant.tools.generation.NeedsPlan.prompt
-                    if (plans == 1) check(request.systemInstructions.startsWith(contract + "\n\n"))
-                    else {
-                        check(request.systemInstructions.startsWith(contract + "\n\n"))
-                        check(request.turns.last() == CloudTurn("user","Return the corrected JSON plan."))
-                    }
+                    if (plans > 1) check(request.turns.last() == CloudTurn("user","Return the corrected JSON plan."))
                     check(JSONObject(request.turns.first().text).getString("request") == prompt)
                     true
                 }

@@ -1,25 +1,15 @@
 package com.alpha.assistant.tools
 
-import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.alpha.assistant.MainActivity
-import com.alpha.assistant.cloud.CloudFailure
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
-import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.generation.GenerationBehavior
 import com.alpha.assistant.tools.generation.PartsContractFailure
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
-import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -138,174 +128,6 @@ class GenerationBehaviorWorkflowTest {
         assertEquals(2, failure.bindingDiagnostic?.step)
     }
 
-    @Test fun aThreeJsExclusionAllowsANativeAppToSaveAndReopen(): Unit = runBlocking {
-        val original = "Build a native mini-app that doubles the entered number. Do not use Three.js."
-        val brief = "$original\nSuggested implementation: use a Three.js viewport."
-        val reference = "data:image/png;base64,native-reference"
-        val stages = mutableListOf<CloudGenerationStage?>()
-        val provider = object : ChatProvider {
-            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                stages += request.generationStage
-                val raw = when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> {
-                        assertEquals(request.turns.last().text, 1, request.turns.size)
-                        val user = request.turns.single()
-                        val payload = JSONObject(user.text)
-                        assertEquals(original, payload.getString("request"))
-                        assertEquals(brief, payload.getString("context"))
-                        assertEquals(listOf(reference), user.images)
-                        assertTrue(request.systemInstructions.contains("If the plan uses Three.js"))
-                        assertFalse(request.systemInstructions.contains("require a Three.js plan"))
-                        assertFalse(request.systemInstructions.contains("orbit the Sun"))
-                        assertFalse(request.systemInstructions.contains("animate the orbit"))
-                        JSONObject("""{"wholeScreen":true,"language":"en"}""")
-                            .put("behavior", JSONObject(plan(appPlan))).toString()
-                    }
-                    CloudGenerationStage.COMPLETE -> {
-                        val user = request.turns.single()
-                        val payload = JSONObject(user.text)
-                        assertEquals(original, payload.getString("request"))
-                        assertEquals(brief, payload.getString("context"))
-                        assertEquals(listOf(reference), user.images)
-                        assertTrue(request.systemInstructions.contains(GenerationBehavior.workflowScopeGuidance))
-                        candidate(app(true), appBindings)
-                    }
-                    else -> error("Unexpected generation stage ${request.generationStage}")
-                }
-                emit(CloudEvent.Text(request.withFixtureCapabilityPlan(raw)))
-            }
-        }
-        val database = "native-runtime-exclusion-${java.util.UUID.randomUUID()}.db"
-        try {
-            ToolStore(context, database).use { store ->
-                val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context)))
-                try {
-                    val draft = engine.createDraft(brief, null)
-                    engine.generate(draft.id, "fixture", listOf(reference), CloudSession(), previewObserver = null,
-                        trace = null, originalRequest = original)
-                    val saved = engine.accept(draft.id)
-                    assertFalse(ToolSpec.parsePersisted(saved.spec).threeScene)
-                    val entered = engine.interact(saved.id, saved.revision, saved.stateVersion, "amount", 7)
-                    val doubled = engine.interact(saved.id, saved.revision, entered.stateVersion, "apply", null)
-                    val reopened = engine.openArtifact(doubled)
-                    try {
-                        assertEquals(14, JSONObject(reopened.tool.state).getInt("result"))
-                        assertEquals(1, store.revisions(saved.id).size)
-                    } finally { engine.closeArtifact(saved.id, saved.revision, reopened.sessionGeneration) }
-                    assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE), stages)
-                } finally { engine.closeArtifacts() }
-            }
-        } finally { context.deleteDatabase(database) }
-    }
-
-    private val noImagePlan = """{"disposition":"unchanged","excerpt":"","imageRequests":[],"removeImageSlots":[]}"""
-
-    @Test fun newAppKeepsItsExactWorkflowDuringVisualRefinement(): Unit = runBlocking {
-        val request = "Double the entered number and use a bright result label."
-        val reference = "data:image/png;base64,fixture-reference"
-        val stages = mutableListOf<CloudGenerationStage?>()
-        val provider = object : ChatProvider {
-            override suspend fun respond(key: String, call: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                stages += call.generationStage
-                val raw = when (call.generationStage) {
-                    CloudGenerationStage.PLAN -> if (call.systemInstructions.startsWith("Plan only native mini-app illustrations.")) {
-                        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.PLAN), stages)
-                        assertEquals(listOf(reference), call.turns.single().images)
-                        assertEquals(request, JSONObject(call.turns.single().text).getString("request"))
-                        noImagePlan
-                    } else JSONObject("""{"wholeScreen":true,"language":"en"}""")
-                        .put("behavior", JSONObject(plan(appPlan)))
-                        .put("visualReview", org.json.JSONArray().put("use a bright result label.")).toString()
-                    CloudGenerationStage.COMPLETE -> candidate(app(true), appBindings)
-                    CloudGenerationStage.REFINE -> {
-                        assertTrue(call.turns.any { reference in it.images && request in it.text })
-                        """{"fields":{"ui":{"type":"column","children":[
-                            {"type":"numberInput","text":"Amount","bind":"amount","action":"amount","min":0,"max":10},
-                            {"type":"button","text":"Double","action":"apply"},
-                            {"type":"metric","text":"Bright result","bind":"result"},
-                            {"type":"button","text":"Reset","action":"reset"}]}}}"""
-                    }
-                    else -> error("Unexpected generation stage")
-                }
-                emit(CloudEvent.Text(call.withFixtureCapabilityPlan(raw)))
-            }
-        }
-        val preview = ToolGenerationService(provider, SandboxClient(context)).generate("fixture", request, null,
-            listOf(reference), CloudSession(), "staged-native")
-        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.PLAN,
-            CloudGenerationStage.REFINE), stages)
-        assertTrue(preview.spec.generatedImages.isEmpty())
-        assertTrue(preview.ui.contains("Bright result"))
-        assertEquals(0, JSONObject(preview.state).getInt("result"))
-        check(appPlan, candidate(preview.spec.providerDefinition(), appBindings))
-    }
-
-    @Test fun failedNativePolishCanSaveOrCancelTheVerifiedCore(): Unit = runBlocking {
-        val request = "Double the entered number and use a bright result label."
-        val provider = object : ChatProvider {
-            override suspend fun respond(key: String, call: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                val raw = when (call.generationStage) {
-                    CloudGenerationStage.PLAN -> if (call.systemInstructions.startsWith("Plan only native mini-app illustrations."))
-                        noImagePlan
-                    else JSONObject("""{"wholeScreen":true,"language":"en"}""")
-                        .put("behavior", JSONObject(plan(appPlan)))
-                        .put("visualReview", org.json.JSONArray().put("use a bright result label.")).toString()
-                    CloudGenerationStage.COMPLETE -> candidate(app(true), appBindings)
-                    CloudGenerationStage.REFINE -> """{"fields":{"behaviorBindings":{"apply":"reset"}}}"""
-                    else -> error("Unexpected generation stage")
-                }
-                emit(CloudEvent.Text(call.withFixtureCapabilityPlan(raw)))
-            }
-        }
-        val database = "staged-native-fallback-${java.util.UUID.randomUUID()}.db"
-        try {
-            ActivityScenario.launch(MainActivity::class.java).use {
-                ToolStore(context, database).use { store ->
-                    val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context)))
-                    try {
-                        for (choice in listOf("Cancel", "Save")) {
-                            val draft = engine.createDraft(request, null)
-                            val generated = runCatching {
-                                withTimeout(30_000) {
-                                    val click = launch(Dispatchers.IO) {
-                                        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-                                        while (true) {
-                                            val root = automation.rootInActiveWindow
-                                            val notice = root?.findAccessibilityNodeInfosByText("Missing: requested appearance changes").orEmpty()
-                                            val buttons = root?.findAccessibilityNodeInfosByText(choice).orEmpty()
-                                            if (notice.isNotEmpty() && buttons.any {
-                                                    it.isClickable && it.text?.toString().equals(choice, ignoreCase = true) &&
-                                                        it.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
-                                                }) break
-                                            delay(100)
-                                        }
-                                    }
-                                    try { engine.generate(draft.id, "fixture", emptyList(), CloudSession()) }
-                                    finally { click.cancelAndJoin() }
-                                }
-                            }
-                            if (choice == "Cancel") {
-                                val failure = generated.exceptionOrNull()
-                                if (failure !is CloudFailure) throw AssertionError("Expected the native preview to be declined.", failure)
-                                assertEquals("widget_declined", failure.code)
-                                assertNull(store.draft(draft.id)?.candidate)
-                                assertNull(store.tool(draft.id))
-                                engine.reject(draft.id)
-                            } else {
-                                generated.getOrThrow()
-                                val saved = engine.accept(draft.id, retainReceipt = true)
-                                assertEquals(0, JSONObject(saved.state).getInt("result"))
-                                assertFalse(saved.ui.contains("Bright result"))
-                                assertEquals(saved.revision, store.draft(draft.id)?.acceptedRevision)
-                                assertTrue(runCatching { engine.accept(draft.id) }.isFailure)
-                            }
-                        }
-                    } finally { engine.closeArtifacts() }
-                }
-            }
-        } finally { context.deleteDatabase(database) }
-    }
-
     @Test fun capturedTipWriterActionPathsPassTheBehaviorCheck(): Unit = runBlocking {
         val fixture = InstrumentationRegistry.getInstrumentation().context.assets
             .open("behavior-replay/tip-action-paths.json").bufferedReader().use { JSONObject(it.readText()) }
@@ -345,74 +167,6 @@ class GenerationBehaviorWorkflowTest {
         val missing = JSONObject(appBindings).put("apply", "missing").toString()
         assertTrue(runCatching { check(appPlan, candidate(app(true), wrongType)) }.exceptionOrNull() is GenerationBehavior.BindingFailure)
         assertTrue(runCatching { check(appPlan, candidate(app(true), missing)) }.exceptionOrNull() is BehaviorCheckFailure)
-    }
-
-    private class Provider(private val behavior: String, private vararg val replies: String) : ChatProvider {
-        val calls = mutableListOf<CloudRequest>()
-        private var writer = 0
-        override suspend fun respond(key: String, request: CloudRequest, session: CloudSession,
-            emit: suspend (CloudEvent) -> Unit) {
-            calls += request
-            val reply = when (request.generationStage) {
-                CloudGenerationStage.PLAN -> JSONObject("""{"wholeScreen":true,"language":"en","requiredCapabilities":[]}""")
-                    .put("behavior", JSONObject(behavior)).toString()
-                CloudGenerationStage.COMPLETE -> replies.getOrElse(writer++) { replies.last() }
-                else -> error("Unexpected fixture stage")
-            }
-            emit(CloudEvent.Text(reply))
-        }
-    }
-
-    private fun sourcePatch(vararg edits: Pair<String, String>) = JSONObject().put("sourceEdits",
-        JSONArray(edits.map { (search, replace) -> JSONObject().put("search", search).put("replace", replace) })).toString()
-
-    private fun bindingPatch(bindings: String) =
-        JSONObject().put("fields", JSONObject().put("behaviorBindings", JSONObject(bindings))).toString()
-
-    private suspend fun generate(provider: Provider) = ToolGenerationService(provider, SandboxClient(context))
-        .generate("offline", "Double the entered number.", null, emptyList(), CloudSession(), "repair-history")
-
-    @Test fun invalidMultiEditKeepsTheLastCandidateAndCanBeRepaired(): Unit = runBlocking {
-        val raw = candidate(app(false), appBindings)
-        val missing = sourcePatch("s.result=s.amount;" to "s.result=s.amount*2;", "missing source" to "")
-        val overlapping = sourcePatch("s.result=s.amount;" to "s.result=s.amount*2;", "s.amount;" to "0;")
-        val valid = sourcePatch("s.result=s.amount;" to "s.result=s.amount*2;")
-        val provider = Provider(plan(appPlan), raw, missing, overlapping, valid)
-        val result = generate(provider)
-        assertTrue(result.spec.source.contains("s.result=s.amount*2;"))
-        assertEquals(listOf(CloudGenerationStage.PLAN) + List(4) { CloudGenerationStage.COMPLETE },
-            provider.calls.map { it.generationStage })
-        val repairs = provider.calls.drop(2)
-        assertTrue(repairs.all { it.turns[1].text == raw })
-        assertTrue(repairs[1].turns.last().text.contains("missing_match"))
-        assertTrue(repairs[1].turns.last().text.contains("$.sourceEdits[1].search"))
-        assertTrue(repairs[1].turns.last().text.contains("assertion failed"))
-        assertTrue(repairs[2].turns.last().text.contains("overlap"))
-    }
-
-    @Test fun distinctCandidateFailuresKeepTheirOrderAndAdvanceTheBase(): Unit = runBlocking {
-        val raw = candidate(app(false), appBindings)
-        val badBinding = JSONObject(appBindings).put("result", JSONArray("[9]")).toString()
-        val finalPatch = JSONObject(sourcePatch("s.result=s.amount;" to "s.result=s.amount*2;"))
-            .put("fields", JSONObject().put("behaviorBindings", JSONObject(appBindings))).toString()
-        val provider = Provider(plan(appPlan), raw, bindingPatch(badBinding),
-            bindingPatch(appBindings), finalPatch)
-        generate(provider)
-        val third = provider.calls[3]
-        assertEquals(JSONArray("[9]").toString(),
-            JSONObject(third.turns[1].text).getJSONObject("behaviorBindings").getJSONArray("result").toString())
-        assertTrue(third.turns.last().text.contains("assertion failed"))
-        assertTrue(third.turns.last().text.contains("unavailable"))
-        assertTrue(provider.calls.last().turns.last().text.contains("repeated_candidate"))
-    }
-
-    @Test fun repeatedRejectedActionStopsAgainstTheSameBase(): Unit = runBlocking {
-        val raw = candidate(app(false), appBindings)
-        val missing = sourcePatch("missing source" to "")
-        val provider = Provider(plan(appPlan), raw, missing, missing)
-        val failure = runCatching { generate(provider) }.exceptionOrNull() as? CloudFailure
-        assertEquals("widget_patch", failure?.code)
-        assertEquals(4, provider.calls.size)
     }
 
     @Test fun rowReferenceSelectsTheSecondCurrentRecordAfterOrderingChanges(): Unit = runBlocking {

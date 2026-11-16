@@ -29,6 +29,8 @@ import com.alpha.assistant.R
 import com.alpha.assistant.timer.ForegroundTimerLedger.Phase
 import com.alpha.assistant.tools.ToolController
 import com.alpha.assistant.tools.ToolRecord
+import com.alpha.assistant.tools.TimerDisplay
+import com.alpha.assistant.tools.miniAppString
 
 internal class ForegroundTimerUiHost(val controller: ToolController, val tool: ToolRecord, val active: Boolean, val unlocked: () -> Boolean)
 
@@ -64,30 +66,32 @@ internal class ForegroundTimerUiHost(val controller: ToolController, val tool: T
     val seconds = ((run?.remainingMillis ?: spec.durationMillis) + 999L) / 1_000L
     val countdown = stringResource(R.string.tool_timer_clock, seconds / 3_600L, seconds / 60L % 60L, seconds % 60L)
     val status = when (phase) {
-        Phase.RUNNING -> stringResource(R.string.tool_timer_remaining, countdown)
-        Phase.PAUSED -> stringResource(R.string.foreground_timer_paused, countdown)
-        Phase.SUPPRESSED -> stringResource(R.string.foreground_timer_suppressed)
-        Phase.ADMITTED, Phase.CLAIMED -> stringResource(R.string.foreground_timer_uncertain)
-        Phase.FINISHED -> stringResource(when (run?.outcome) {
+        Phase.RUNNING -> miniAppString(R.string.tool_timer_remaining, countdown)
+        Phase.PAUSED -> miniAppString(R.string.foreground_timer_paused, countdown)
+        Phase.SUPPRESSED -> miniAppString(R.string.foreground_timer_suppressed)
+        Phase.ADMITTED, Phase.CLAIMED -> miniAppString(R.string.foreground_timer_uncertain)
+        Phase.FINISHED -> miniAppString(when (run?.outcome) {
             "succeeded" -> R.string.tool_timer_expired
             "denied" -> R.string.foreground_timer_denied
             "unavailable", "cancelled" -> R.string.foreground_timer_unavailable
             else -> R.string.foreground_timer_uncertain
         })
-        else -> stringResource(R.string.foreground_timer_ready, countdown)
+        else -> miniAppString(R.string.foreground_timer_ready, countdown)
     }
+    // The clock shows the time. Only an outcome adds a status line. The Start or Resume button shows a paused or ready timer.
+    val note = status.takeIf { phase != null && phase !in setOf(Phase.IDLE, Phase.RUNNING, Phase.PAUSED) }
     Column(modifier.onGloballyPositioned { inWindow = !it.boundsInWindow().isEmpty }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(stringResource(R.string.tool_timer_value, title, status))
+        TimerDisplay(title, countdown, note, stringResource(R.string.tool_timer_value, title, status))
         if (driver != null) {
-            spec.alert.vibrationMillis?.let { Text(stringResource(R.string.foreground_timer_vibration, it)) }
-            spec.alert.notification?.let { Text(stringResource(R.string.foreground_timer_notification, it.title, it.text)) }
-            if (driver.failed) Text(stringResource(R.string.foreground_timer_failed))
+            if (spec.alert.vibrationMillis != null) Text(miniAppString(R.string.foreground_timer_vibration))
+            spec.alert.notification?.let { Text(miniAppString(R.string.foreground_timer_notification, it.title, it.text)) }
+            if (driver.failed) Text(miniAppString(R.string.foreground_timer_failed))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (phase != Phase.RUNNING) Button(driver::start, Modifier.heightIn(min = 48.dp), enabled = driver.eligible && enabled) {
-                    Text(stringResource(if (phase == Phase.PAUSED) R.string.foreground_timer_resume else R.string.foreground_timer_start))
+                    Text(miniAppString(if (phase == Phase.PAUSED) R.string.foreground_timer_resume else R.string.foreground_timer_start))
                 }
                 if (phase != null && phase != Phase.IDLE) TextButton(driver::reset, Modifier.heightIn(min = 48.dp), enabled = driver.eligible && enabled) {
-                    Text(stringResource(R.string.foreground_timer_reset))
+                    Text(miniAppString(R.string.foreground_timer_reset))
                 }
             }
         }

@@ -43,8 +43,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
-import androidx.lifecycle.setViewTreeLifecycleOwner
-import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.alpha.assistant.R
 import com.alpha.assistant.capabilities.DeviceReadHost
 import com.alpha.assistant.capabilities.ForegroundCapabilityEffects
@@ -337,50 +335,6 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
         }
     }
 }
-
-internal suspend fun approveNativeGeneration(preview: ToolPreview, message: String, checkActive: suspend () -> Unit) =
-    withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
-        val activity = com.alpha.assistant.tools.three.ThreeSceneForeground.activity() as androidx.activity.ComponentActivity
-        val choice = kotlinx.coroutines.CompletableDeferred<Boolean>()
-        val view = androidx.compose.ui.platform.ComposeView(activity).apply {
-            setContent {
-                com.alpha.assistant.ui.AlphaTheme {
-                    Surface {
-                        Column(Modifier.padding(16.dp).heightIn(max = 280.dp).verticalScroll(rememberScrollState())) {
-                            DraftPreviewContent(preview.spec, preview.ui, preview.state, preview.surfaces?.toString()).Render(150.dp)
-                        }
-                    }
-                }
-            }
-        }
-        val dialog = android.app.AlertDialog.Builder(activity).setTitle(preview.spec.title)
-            .setMessage(message)
-            .setView(view)
-            .setNegativeButton("Cancel") { _, _ -> choice.complete(false) }
-            .setPositiveButton("Save") { _, _ -> choice.complete(true) }
-            .setOnDismissListener { choice.complete(false) }.create()
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE) choice.complete(false)
-        }
-        try {
-            checkActive()
-            activity.lifecycle.addObserver(observer)
-            checkNotNull(dialog.window).decorView.apply {
-                setViewTreeLifecycleOwner(activity)
-                setViewTreeSavedStateRegistryOwner(activity)
-            }
-            dialog.show()
-            while (!choice.isCompleted) {
-                checkActive()
-                delay(50)
-            }
-            if (!choice.await()) throw com.alpha.assistant.cloud.CloudFailure("widget_declined", "The verified mini-app was declined.")
-            checkActive()
-        } finally {
-            activity.lifecycle.removeObserver(observer)
-            dialog.dismiss()
-        }
-    }
 
 @Composable private fun MiniAppMenuItems(
     controller: ToolController,
@@ -830,7 +784,8 @@ catch (_: Exception) { null }
         val stageAvailableHeight = (maxHeight - 40.dp).coerceAtLeast(0.dp).takeIf { standaloneStage }
         @Composable fun AccessAndEffects() {
             if (tool != null && spec != null && draft == null) {
-                controller.effects.lastOrNull()?.let { effect ->
+                // A completed effect shows its result in the app. The access panel keeps the host receipt.
+                controller.effects.lastOrNull()?.takeIf { it.result.status !in setOf("succeeded", "launched") }?.let { effect ->
                     Text(effect.result.message, style = MaterialTheme.typography.bodySmall,
                         color = if (effect.result.status in setOf("failed", "denied", "revoked", "unavailable"))
                             MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)

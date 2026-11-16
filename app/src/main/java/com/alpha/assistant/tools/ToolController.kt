@@ -355,7 +355,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         key: String, images: List<String>, call: CloudSession, cancelRequest: () -> Unit,
         prepared: suspend () -> Unit, onPublicUpdate: (String) -> Unit,
         canCommit: () -> Boolean, committed: (ToolRecord) -> Unit,
-        originalRequest: String = prompt, sceneAttachments: List<Attachment> = emptyList()) {
+        sceneAttachments: List<Attachment> = emptyList()) {
         if(busy || closing) throw CloudFailure("widget_busy","Another tool operation is active. Retry after it completes.")
         busy = true; error = null; errorCode = null; automaticCancel = cancelRequest; automaticJob = currentCoroutineContext()[Job]
         previews.clear()
@@ -374,7 +374,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                 created = true
             }
             withContext(Dispatchers.IO) {
-                generateWithPreview(operationId, key, images, call, originalRequest,
+                generateWithPreview(operationId, key, images, call,
                     ThreeSceneAssets.attachmentRefs(sceneAttachments), onPublicUpdate = { note ->
                         withContext(Dispatchers.Main.immediate) { onPublicUpdate(note) }
                     }, checkOwner = {
@@ -476,7 +476,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     }
     internal var generationTraceObserver: ((ToolGenerationTraceEvent) -> Unit)? = null
 
-    private suspend fun generateWithPreview(id: String,key: String,images: List<String>,call: CloudSession,originalRequest: String? = null,
+    private suspend fun generateWithPreview(id: String,key: String,images: List<String>,call: CloudSession,
         sceneAssets: List<ThreeSceneAssetRef> = emptyList(), onPublicUpdate: (suspend (String) -> Unit)? = null,
         checkOwner: suspend () -> Unit = {}) {
         check(!closing) {"The tool controller is closed."}
@@ -485,7 +485,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         try {
             val trace = generationTraceObserver?.let { ToolGenerationTrace(UUID.fromString(id), it) }
             val completed = engine.generate(id, key, images, call, previewObserver = observer,
-                trace = trace, originalRequest = originalRequest, sceneAssets = sceneAssets, onPublicUpdate = onPublicUpdate,
+                trace = trace, sceneAssets = sceneAssets, onPublicUpdate = onPublicUpdate,
                 checkOwner = checkOwner)
             previews.complete(requestId,completed)
         } catch(failure: Throwable) {

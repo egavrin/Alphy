@@ -2,6 +2,7 @@ package com.alpha.assistant.tools
 
 import android.graphics.Color
 import android.graphics.Rect
+import android.os.Bundle
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -48,7 +49,9 @@ internal class Plan5WorkflowChecks(
     private val checks = JSONArray().also { proof.put("checks", it) }
     private val actions = JSONArray().also { proof.put("actions", it) }
     private val context get() = robot.instrumentation.targetContext
-    private val numbers = Regex("""-?\d+(?:[.,]\d+)?""")
+    // A grouped number such as "2,000" or "2 000" is one value, not a decimal fraction.
+    private val numbers = Regex("""-?\d{1,3}(?:[,\u00a0\u202f]\d{3})+(?![.,]?\d)|-?\d+(?:[.,]\d+)?""")
+    private val grouped = Regex("""^-?\d{1,3}(?:[,\u00a0\u202f]\d{3})+$""")
 
     fun run(case: String, reopen: () -> Unit, verifyCoffeeDismissals: Boolean = false, refine: (String) -> Unit) = when (case) {
         "extra:reference-points-ledger" -> ledger(reopen, refine)
@@ -71,6 +74,9 @@ internal class Plan5WorkflowChecks(
                 proof.put("first_failed_boundary", name)
                     .put("failure_type", failure.javaClass.name)
                     .put("failure_detail", failure.message?.take(600))
+                    .put("failure_frame", failure.stackTrace.let { frames ->
+                        frames.firstOrNull { it.className.startsWith(Plan5WorkflowChecks::class.java.name) } ?: frames.firstOrNull()
+                    }?.toString())
                     .put("state_at_failure", runCatching { saved().state.take(4096) }.getOrNull())
                     .put("failure_screenshot", runCatching { screenshot("workflow-failure") }.getOrDefault(false))
             }
@@ -94,8 +100,41 @@ internal class Plan5WorkflowChecks(
 
     private fun matching(expression: String): Regex = Regex(expression, RegexOption.IGNORE_CASE)
 
-    private fun controls() = uiNodes(JSONObject(saved().ui)).filter { it.optString("type") == "button" }
-    private fun controlLabel(control: JSONObject) = control.getString("text")
+    /** Nodes that the current state shows. A closed dialog keeps its buttons in the spec, but no person can press them. */
+    private fun shownNodes(): Sequence<JSONObject> {
+        val tool = saved()
+        val state = projectToolState(ToolSpec.parsePersisted(tool.spec), JSONObject(tool.state), localPartClock(context))
+        fun walk(node: JSONObject): Sequence<JSONObject> = sequence {
+            if (!ToolUiCatalog.visible(node, state)) return@sequence
+            yield(node)
+            node.optJSONArray("children")?.let { children -> repeat(children.length()) { yieldAll(walk(children.getJSONObject(it))) } }
+        }
+        return walk(JSONObject(tool.ui))
+    }
+
+    /** Buttons and other nodes that a tap operates, such as a clickable card in a game board. */
+    private fun controls() = shownNodes().filter {
+        it.optString("type") == "button" || (ToolUiCatalog.interactionActions(it)["click"] != null ||
+            it.has("action") && it.optString("type") in pressedItems) && controlLabel(it).isNotEmpty()
+    }
+    // A list item, a chip, or a timeline item with an action is a press target, such as a board cell "Клетка 1".
+    private val pressedItems = setOf("listItem", "actionChip", "timelineItem")
+    private fun controlLabel(control: JSONObject) = if (control.optString("type") == "button") control.getString("text")
+        else control.optJSONObject("semantics")?.optString("label").orEmpty().ifEmpty { control.optString("text") }
+            .ifEmpty { shownChildText(control) }
+
+    private fun currentState(): JSONObject {
+        val tool = saved()
+        return projectToolState(ToolSpec.parsePersisted(tool.spec), JSONObject(tool.state), localPartClock(context))
+    }
+
+    /** The first fixed text that a control shows now, for example the number of a board cell. */
+    private fun shownChildText(control: JSONObject): String {
+        val state = currentState()
+        return uiNodes(control).drop(1).firstOrNull {
+            it.optString("type") == "text" && !it.has("bind") && it.optString("text").isNotBlank() && ToolUiCatalog.visible(it, state)
+        }?.optString("text").orEmpty()
+    }
 
     private fun button(expression: String) {
         val pattern = matching(expression)
@@ -106,11 +145,15 @@ internal class Plan5WorkflowChecks(
     private fun clickControl(control: JSONObject) {
         val label = controlLabel(control)
         robot.reveal(label, null)
-        check(accessibility(robot.diagnostics.freshRoot()).count {
-            it.isVisibleToUser && it.text?.toString() == label
-        } == 1) { "Ambiguous generated control." }
+        // A card can repeat its label in a child text. Both lead to the same tap target, so count targets.
+        check(accessibility(robot.diagnostics.freshRoot()).filter {
+            it.isVisibleToUser && (it.text?.toString() == label || it.contentDescription?.toString() == label)
+        }.map { node -> generateSequence(node) { it.parent }.firstOrNull { it.isClickable } ?: node }.distinct().count() == 1) {
+            "Ambiguous generated control."
+        }
         val delivery = JSONObject().put("step", proof.getString("step"))
-            .put("action", control.getString("action")).put("delivery", "attempted")
+            .put("action", control.optString("action").ifEmpty { ToolUiCatalog.interactionActions(control).getValue("click") })
+            .put("delivery", "attempted")
         actions.put(delivery)
         try {
             robot.click(label)
@@ -125,10 +168,17 @@ internal class Plan5WorkflowChecks(
 
     private fun visibleValue(label: String, expected: Double): String {
         val name = matching(label)
-        val inlinePattern = matching("""^\s*(?:$label)\s*[:=]\s*(-?\d+(?:[.,]\d+)?)\s*$""")
+        val inlinePattern = matching("""^\s*(?:$label)\s*[:=]\s*(-?\d[\d.,\u00a0\u202f]*)\s*$""")
         var observed = ""
-        val matchingLabel = uiNodes(JSONObject(saved().ui)).map { it.optString("text") }
-            .firstOrNull { name.matches(it.trim()) }
+        // An empty state shows only without rows. Its sentence can name the value, but it never labels one.
+        fun shownNodes(node: JSONObject): Sequence<JSONObject> = if (node.optString("type") == "emptyState") emptySequence()
+            else sequenceOf(node) + (node.optJSONArray("children")?.let { children ->
+                (0 until children.length()).asSequence().flatMap { shownNodes(children.getJSONObject(it)) } } ?: emptySequence())
+        // A bound text shows "label: value", never its label alone.
+        val matchingLabel = shownNodes(JSONObject(saved().ui)).filterNot { it.optString("type") == "text" && it.has("bind") }
+            .map { it.optString("text") }.firstOrNull { name.matches(it.trim()) }
+            // A list row can carry the label as data, for example an ingredient name.
+            ?: rowTexts().firstOrNull { name.matches(it.trim()) }
         if (matchingLabel != null) robot.reveal(matchingLabel, null)
         robot.waitUntil {
             val tool = saved()
@@ -136,29 +186,106 @@ internal class Plan5WorkflowChecks(
             val matchingNode = uiNodes(JSONObject(tool.ui)).firstOrNull { node ->
                 val text = node.optString("text")
                 val value = node.optString("bind").takeIf(String::isNotEmpty)?.let { ToolUiCatalog.value(state, it) }
-                name.matches(text.trim()) && (value as? Number)?.toDouble() == expected
+                val shown = if (value is Number) value.toDouble() else (value as? String)?.let(::shownNumber)
+                name.matches(text.trim()) && shown == expected
             }
             val texts = robot.texts()
             val inline = texts.firstOrNull {
-                inlinePattern.matchEntire(it)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() == expected
+                inlinePattern.matchEntire(it)?.groupValues?.get(1)?.let(::shownNumber) == expected
             }
-            val metricVisible = matchingNode?.let { metric ->
-                val labelNode = robot.find(metric.optString("text")) ?: return@let false
-                accessibility(labelNode.parent).any {
-                    it.isVisibleToUser && numeric(it.text?.toString().orEmpty()).singleOrNull() == expected
+            // A metric shows its label and value as two texts. A list row shows "Label: value" texts side by side.
+            val labels = listOfNotNull(matchingNode?.optString("text")) + texts.filter { name.matches(it.trim()) }
+            val besideLabel = labels.firstOrNull { text ->
+                val labelNode = robot.find(text.trimEnd()) ?: return@firstOrNull false
+                // A row can put the label and the value in nested containers of one row, also inside a field.
+                generateSequence(labelNode.parent) { it.parent }.take(3).any { container ->
+                    accessibility(container).any {
+                        it != labelNode && it.isVisibleToUser && shownNumber(it.text?.toString().orEmpty()) == expected
+                    }
                 }
-            } == true
-            observed = inline ?: matchingNode?.optString("text").orEmpty()
-            inline != null || metricVisible
+            }
+            observed = inline ?: besideLabel ?: matchingNode?.optString("text").orEmpty()
+            inline != null || besideLabel != null
         }
         return "$observed = ${expected.toInt()}"
     }
 
-    private fun numeric(text: String) = numbers.findAll(text).mapNotNull { it.value.replace(',', '.').toDoubleOrNull() }.toList()
+    /** The slider for [label]. The label can be the slider's own description or a text beside it. */
+    private fun sliderNode(label: String): AccessibilityNodeInfo {
+        var match: AccessibilityNodeInfo? = null
+        robot.waitUntil {
+            match = accessibility(robot.diagnostics.freshRoot())
+                .filter { it.text?.toString() == label || it.contentDescription?.toString() == label }
+                .firstNotNullOfOrNull { labelNode ->
+                    generateSequence(labelNode) { it.parent }.take(3).firstNotNullOfOrNull { container ->
+                        accessibility(container).firstOrNull { it.rangeInfo != null && it.isVisibleToUser }
+                    }
+                }
+            match != null
+        }
+        return checkNotNull(match)
+    }
+
+    /** The value that a slider shows, in the units of its definition. */
+    private fun sliderValue(control: JSONObject, node: AccessibilityNodeInfo): Double {
+        val (min, max) = ToolUiCatalog.bounds(control)
+        val range = checkNotNull(node.rangeInfo)
+        val value = min + (range.current - range.min) / (range.max - range.min) * (max - min)
+        return Math.round(value * 100) / 100.0
+    }
+
+    private fun setSlider(control: JSONObject, value: Double) {
+        val label = controlLabel(control)
+        val node = sliderNode(label)
+        val (min, max) = ToolUiCatalog.bounds(control)
+        val range = checkNotNull(node.rangeInfo)
+        val progress = Bundle().apply {
+            putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE,
+                range.min + ((value - min) / (max - min)).toFloat() * (range.max - range.min))
+        }
+        check(node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id, progress))
+        if (!ToolUiCatalog.isLiveInput(control)) {
+            val apply = robot.text(R.string.tool_generated_apply_en, label)
+            robot.reveal(apply, null)
+            robot.click(apply)
+        }
+        val bind = control.getString("bind")
+        robot.waitUntil { (ToolUiCatalog.value(JSONObject(saved().state), bind) as? Number)?.toDouble() == value }
+    }
+
+    /** The texts that list rows display, as the row template shows them. */
+    private fun rowTexts(): List<String> {
+        val record = saved()
+        val state = JSONObject(record.state)
+        return uiNodes(JSONObject(record.ui)).filter { it.has("rowTemplate") }.toList().flatMap { collection ->
+            val rows = runCatching { ToolUiCatalog.records(collection, state) }.getOrNull() ?: return@flatMap emptyList()
+            val texts = uiNodes(collection.getJSONObject("rowTemplate")).filter { it.optString("type") == "text" && it.has("bind") }.toList()
+            (0 until rows.length()).map(rows::getJSONObject).flatMap { row ->
+                texts.mapNotNull { runCatching { ToolUiCatalog.display(it, row) }.getOrNull() }
+            }
+        }
+    }
+
+    private fun numeric(text: String) = numbers.findAll(text).mapNotNull {
+        val value = it.value
+        (if (grouped.matches(value)) value.filter { c -> c == '-' || c.isDigit() } else value.replace(',', '.')).toDoubleOrNull()
+    }.toList()
+
+    /** The number that a value text shows: "450 g" shows 450, "1 из 3" or "1 of 3" shows 1, and "300 g → 450 g" shows 450. */
+    private fun shownNumber(text: String): Double? = numeric(text).let { values ->
+        values.singleOrNull() ?: values.takeIf { it.size == 2 }?.let {
+            if (outOf.containsMatchIn(text)) it.first() else if (becomes.containsMatchIn(text)) it.last() else null
+        }
+    }
+    private val outOf = Regex("""\d\s*(?:из|of|/)\s*-?\d""", RegexOption.IGNORE_CASE)
+    private val becomes = Regex("""\d[^\d]*(?:→|->|⇒)[^\d]*-?\d""")
 
     private fun generatedInput(type: String, labelPattern: String): JSONObject =
         uiNodes(JSONObject(saved().ui)).single {
-            it.optString("type") == type && matching(labelPattern).containsMatchIn(it.optString("text"))
+            // A number field can also be a text input with a number keyboard.
+            val kind = it.optString("type")
+            (kind == type || type == "numberInput" && kind == "input" && it.optString("keyboard") in setOf("number", "decimal")) &&
+                matching(labelPattern).containsMatchIn(it.optString("text"))
         }
 
     private fun editGeneratedInput(control: JSONObject, value: String) {
@@ -167,11 +294,17 @@ internal class Plan5WorkflowChecks(
         robot.edit(label, value)
         val apply = robot.text(R.string.tool_generated_apply_en, label)
         val finish = robot.text(R.string.tool_live_input_finish_en, label)
+        // A field can commit the typed value at once. Its Apply or Finish button is then disabled or absent.
+        fun committed() = control.optString("bind").takeIf(String::isNotEmpty)
+            ?.let { runCatching { ToolUiCatalog.value(JSONObject(saved().state), it).toString() }.getOrNull() }
+            .let { stored -> stored == value || stored?.toDoubleOrNull()?.let { it == value.toDoubleOrNull() } == true }
         if (ToolUiCatalog.isLiveInput(control)) {
+            // On a loaded device the Finish button can appear some frames after the typed text.
+            robot.waitUntil { robot.find(finish) != null || committed() }
             if (robot.find(finish) != null) robot.click(finish)
         } else {
             robot.reveal(apply, null)
-            robot.click(apply)
+            if (!committed()) robot.click(apply)
         }
         robot.waitGone(robot.text(R.string.tool_working))
     }
@@ -180,11 +313,14 @@ internal class Plan5WorkflowChecks(
         val record = saved()
         check(record.id == original.id && record.revision == original.revision)
         val state = JSONObject(record.state)
-        val collection = uiNodes(JSONObject(record.ui)).single {
+        fun names(rows: JSONArray) = (0 until rows.length()).map(rows::getJSONObject)
+            .flatMap { row -> row.keys().asSequence().filter { it != "id" }.map(row::opt).toList() }
+        // An app can show other lists next to the log, for example totals of earlier days.
+        val (collection, rows) = uiNodes(JSONObject(record.ui)).filter {
             it.optString("type") in setOf("list", "table", "lazyList", "lazyGrid", "groupedList")
-        }
-        val rows = ToolUiCatalog.records(collection, state)
-        check(rows.length() == expectedRows.size) { "The stored log has ${rows.length()} rows." }
+        }.mapNotNull { node -> runCatching { node to ToolUiCatalog.records(node, state) }.getOrNull() }.firstOrNull { (_, rows) ->
+            rows.length() == expectedRows.size && names(rows).containsAll(expectedRows.keys)
+        } ?: error("No list holds exactly the ${expectedRows.size} logged entries.")
         for ((name, amount) in expectedRows) {
             val row = (0 until rows.length()).map(rows::getJSONObject).single {
                 it.keys().asSequence().filter { key -> key != "id" }.any { key -> it.opt(key) == name }
@@ -192,8 +328,15 @@ internal class Plan5WorkflowChecks(
             check(row.keys().asSequence().any { (row.opt(it) as? Number)?.toDouble() == amount.toDouble() }) {
                 "The stored entry for $name has the wrong amount."
             }
-            val nameNode = robot.reveal(name, null)
-            val rowText = accessibility(nameNode.parent).filter { it.isVisibleToUser }
+            // A bound text in a row shows its label before the value, so look for the text the row displays.
+            val shown = collection.optJSONObject("rowTemplate")?.let(::uiNodes).orEmpty()
+                .filter { it.optString("type") == "text" && it.has("bind") }
+                .map { runCatching { ToolUiCatalog.display(it, row) }.getOrDefault("") }
+                .firstOrNull { it == name || it.endsWith(" $name") } ?: name
+            val nameNode = robot.reveal(shown, null)
+            // A row template can put the name and the amount in nested rows of one row container.
+            // The rest of the row can be rendered just below the screen edge, so it need not be on screen.
+            val rowText = generateSequence(nameNode.parent) { it.parent }.take(2).flatMap { accessibility(it) }
                 .flatMap { numeric(it.text?.toString().orEmpty()).asSequence() }
             check(rowText.any { it == amount.toDouble() }) { "The visible entry for $name does not show $amount." }
         }
@@ -219,7 +362,7 @@ internal class Plan5WorkflowChecks(
             step(image) {
                 editGeneratedInput(generatedInput("input", "food|meal|name"), name)
                 editGeneratedInput(generatedInput("numberInput", """^(?!.*(?:goal|target|budget)).*(?:calorie|kcal).*"""), amount.toString())
-                button("""^\s*(?:add|log|record)(?:\s+.*)?$""")
+                button("""^\s*(?:add|log|record|save)(?:\s+.*)?$""")
                 expectedRows[name] = amount
                 verify(remaining, image)
             }
@@ -233,13 +376,25 @@ internal class Plan5WorkflowChecks(
     private fun recipeScaler(reopen: () -> Unit) {
         val original = saved()
         proof.put("artifact_id", original.id).put("artifact_revision", original.revision)
-        fun servings() = generatedInput("numberInput", "desired|target|new|wanted")
+        // The target serving count can be a number field or a slider. Its label varies, so it is the
+        // number control that starts at the requested 6 servings.
+        val servings = uiNodes(JSONObject(original.ui)).filter {
+            val kind = it.optString("type")
+            kind in setOf("numberInput", "slider") || kind == "input" && it.optString("keyboard") in setOf("number", "decimal")
+        }.toList().let { controls ->
+            val state = JSONObject(original.state)
+            controls.singleOrNull {
+                runCatching { ToolUiCatalog.value(state, it.getString("bind")).toString().toDoubleOrNull() }.getOrNull() == 6.0
+            } ?: controls.single { matching("desired|target|new|wanted").containsMatchIn(it.optString("text")) }
+        }
         fun verify(target: Int, flour: Int, image: String): JSONObject {
-            val control = controlLabel(servings())
+            val control = controlLabel(servings)
             robot.reveal(control, null)
-            check(robot.field(control).text?.toString()?.toDoubleOrNull() == target.toDouble()) {
-                "The visible target serving count is not $target."
-            }
+            fun shown() = if (servings.optString("type") == "slider") sliderValue(servings, sliderNode(control))
+                else robot.field(control).text?.toString()?.toDoubleOrNull()
+            // A reopened screen can fill its fields after the first frame.
+            runCatching { robot.waitUntil { shown() == target.toDouble() } }
+            check(shown() == target.toDouble()) { "The visible target serving count is not $target." }
             val result = visibleValue(""".*\b(?:flour|scaled amount|scaled quantity)\b.*""", flour.toDouble())
             if (robot.find(flour.toString()) != null) robot.reveal(flour.toString(), null)
             check(screenshot(image))
@@ -252,7 +407,7 @@ internal class Plan5WorkflowChecks(
         }
         step("recipe_initial") { verify(6, 450, "recipe-initial") }
         step("recipe_adjusted") {
-            editGeneratedInput(servings(), "8")
+            if (servings.optString("type") == "slider") setSlider(servings, 8.0) else editGeneratedInput(servings, "8")
             verify(8, 600, "recipe-adjusted")
         }
         step("recipe_reopened") {
@@ -266,7 +421,8 @@ internal class Plan5WorkflowChecks(
         proof.put("artifact_id", original.id).put("artifact_revision", original.revision)
         val expectedRows = linkedMapOf<String, Int>()
         fun verify(total: Int, image: String): JSONObject {
-            val visibleTotal = visibleValue(""".*\b(?:(?:total|sum).*pages|pages.*total)\b.*""", total.toDouble())
+            // The sum can be named "Total", "Sum of pages", or "Pages read". Later steps tell it apart from a count.
+            val visibleTotal = visibleValue(""".*\b(?:total|sum|pages)\b.*""", total.toDouble())
             if (total > 0 && robot.find(total.toString()) != null) robot.reveal(total.toString(), null)
             check(screenshot("$image-total"))
             verifyLogRows(original, expectedRows)
@@ -280,7 +436,7 @@ internal class Plan5WorkflowChecks(
             step(image) {
                 editGeneratedInput(generatedInput("input", "book|title|name"), name)
                 editGeneratedInput(generatedInput("numberInput", """\bpages?\b"""), pages.toString())
-                button("""^\s*(?:add|log|record)(?:\s+.*)?$""")
+                button("""^\s*(?:add|log|record|save)(?:\s+.*)?$""")
                 expectedRows[name] = pages
                 verify(total, image)
             }
@@ -327,7 +483,7 @@ internal class Plan5WorkflowChecks(
         step("coffee_initial") { verify(0, "coffee-initial") }
         for (count in 1..2) {
             step("coffee_add_$count") {
-                button("""^\s*(?:(?:add|log|record)(?:\s+.*)?|\+\s*1(?:\s+cup)?)\s*$""")
+                button("""^\s*(?:(?:add|log|record|save)(?:\s+.*)?|\+\s*1(?:\s+cup)?)\s*$""")
                 verify(count, "coffee-$count")
             }
         }
@@ -359,13 +515,26 @@ internal class Plan5WorkflowChecks(
         refineVictory: ((String) -> Unit)? = null) = ToolStore(context, toolDatabase).use { store ->
         val spec = ToolSpec.parsePersisted(saved().spec)
         fun cellControl(cell: Int) = controls().singleOrNull {
-            matching("""^\s*$cell(?:[^\p{L}\p{N}]|$)""").containsMatchIn(controlLabel(it))
+            // A cell label may name the cell first, such as "Клетка 1".
+            matching("""^\s*(?:\p{L}+\s+)?$cell(?:[^\p{L}\p{N}]|$)""").containsMatchIn(controlLabel(it))
         }
         val drawnBoard = (1..9).none { cellControl(it) != null }
         check(if (drawnBoard) spec.surfaces.size == 1 else (1..9).all { cellControl(it) != null })
+        // A cell keeps its action after a move, also when the app shows a mark in place of the number.
+        val cellActions = (1..9).associateWith { cellControl(it)?.optString("action").orEmpty() }
+        fun currentCell(cell: Int) = cellControl(cell) ?: cellActions.getValue(cell)
+            .takeIf { action -> action.isNotEmpty() && cellActions.values.count { it == action } == 1 }
+            ?.let { action -> controls().singleOrNull { it.optString("action") == action } }
         fun tapCell(cell: Int) {
             if (!drawnBoard) {
-                clickControl(checkNotNull(cellControl(cell)))
+                val control = currentCell(cell) ?: error("Cell $cell no longer shows its number.")
+                // An app can disable an opened cell. A blocked repeated tap is then the expected result.
+                if (!ToolUiCatalog.enabled(control, currentState())) {
+                    actions.put(JSONObject().put("step", proof.getString("step"))
+                        .put("action", control.optString("action")).put("delivery", "blocked"))
+                    return
+                }
+                clickControl(control)
                 return
             }
             val bounds = canvas()
@@ -393,7 +562,8 @@ internal class Plan5WorkflowChecks(
                 ((placement.y + y) / (placement.y + placement.surface.height)).toFloat())
         }
         fun score(value: Int): String {
-            val label = "очки|сч[её]т|баллы"
+            // Each star gives one point, so a star count is also the score.
+            val label = "очки|сч[её]т|баллы|зв[её]зд\\p{L}*"
             if (!drawnBoard) return visibleValue(label, value.toDouble())
             canvas()
             robot.waitUntil { gameNumber(label) == value }
@@ -408,10 +578,12 @@ internal class Plan5WorkflowChecks(
             tapCell(2)
             score(1)
             val before = JSONObject(saved().state)
+            val openedLabel = "2 ★".takeIf { robot.find(it) != null }
             refineVictory("После победы показывай «$victoryMessage». Сохрани текущие очки и открытые клетки.")
             check(sameToolJson(before, JSONObject(saved().state)))
             score(1)
-            robot.waitFor("2 ★")
+            openedLabel?.let(robot::waitFor)
+            "Score 1 and the opened cell stayed after the edit"
         }
         step("score") {
             val scores = mutableListOf(score(if (refineVictory == null) 0 else 1))
@@ -434,7 +606,8 @@ internal class Plan5WorkflowChecks(
             if (refineVictory != null) check(robot.texts().any { victoryMessage in it })
             for (cell in listOf(7, 2)) {
                 if (drawnBoard) tapCell(cell) else {
-                    val control = checkNotNull(cellControl(cell))
+                    // A board that the app hides after the victory also blocks moves.
+                    val control = currentCell(cell)?.takeIf { ToolUiCatalog.enabled(it, currentState()) } ?: continue
                     val label = controlLabel(control)
                     val node = robot.reveal(label, null)
                     val target = generateSequence(node) { it.parent }.firstOrNull { it.isClickable }
@@ -475,7 +648,9 @@ internal class Plan5WorkflowChecks(
         val teams = listOf("Янтарь", "Мел")
         fun teamName(text: String): String? {
             val label = text.trim().replace(matching("^(?:баланс +)?(?:команда +|команды +)?"), "")
-                .trim('«', '»', ' ', '"')
+                .replace(Regex("""\s*\([^)]*\)$"""), "")
+                // A balance label can name the unit after the team, for example "Мел, очки".
+                .replace(matching("""\s*[,:–—-]\s*(?:очки|баллы|сч[её]т|points|score)$"""), "").trim('«', '»', ' ', '"')
             return teams.singleOrNull { it.equals(label, true) }
         }
         fun toolUi() = JSONObject(saved().ui)
@@ -532,6 +707,8 @@ internal class Plan5WorkflowChecks(
             val scoped = labels.size > 1
             val label = labels.firstOrNull() ?: error("Ledger action not rendered.")
             robot.reveal(label, null)
+            // A reopened app can keep a lower scroll position, so search down from the top.
+            for (page in 0..20) if (!robot.scrollBackward()) break
             repeat(8) {
                 val visible = nodes()
                 fun buttonNode(node: AccessibilityNodeInfo) = generateSequence(node) { it.parent }.firstOrNull {
@@ -560,17 +737,25 @@ internal class Plan5WorkflowChecks(
                 .filter { it.has("bind") && it.optString("type") in setOf("metric", "text", "fact", "badge") }.toList()
             if (metrics.isEmpty()) return visibleValue(team, expected.toDouble())
             val metric = metrics.single()
-            robot.reveal(metric.getString("text"), null)
+            val label = metric.getString("text")
             robot.waitUntil {
-                val record = saved()
-                val value = ToolUiCatalog.value(JSONObject(record.state), metric.getString("bind"))
-                (value as? Number)?.toInt() == expected && nodes().any { node ->
-                    val label = metric.getString("text")
-                    nodeText(node) == label && accessibility(node.parent).any {
-                        it.isVisibleToUser && numeric(nodeText(it)).singleOrNull() == expected.toDouble()
-                    } || nodeText(node) == "$label: $value"
-                }
+                // A balance can be bound to a number or to a text such as "0 очк.".
+                ToolUiCatalog.value(JSONObject(saved().state), metric.getString("bind"))
+                    .let { (it as? Number)?.toDouble() ?: shownNumber(it.toString()) } == expected.toDouble()
             }
+            fun shown() = nodes().any { node ->
+                nodeText(node) == label && accessibility(node.parent).any {
+                    it.isVisibleToUser && numeric(nodeText(it)).singleOrNull() == expected.toDouble()
+                } || nodeText(node) == ToolUiCatalog.display(metric, JSONObject(saved().state))
+            }
+            // The team name can also head its action section, so search the whole screen for the name beside its balance.
+            for (page in 0..20) if (!robot.scrollBackward()) break
+            var found = false
+            for (page in 0..10) {
+                found = runCatching { robot.waitUntil(2_000) { shown() } }.isSuccess
+                if (found || !robot.scrollForward()) break
+            }
+            check(found) { "The balance of $team is not visible." }
             return "$team = $expected"
         }
         data class History(val team: String, val operation: String, val points: Int, val rendered: Map<String, String>)
@@ -588,29 +773,67 @@ internal class Plan5WorkflowChecks(
                 val columns = collection.optJSONArray("columns")?.let { fields ->
                     (0 until fields.length()).map(fields::getJSONObject)
                 }
+                // A list row shows the bound texts of its template. A metric shows its value under a fixed label.
+                val template = if (columns != null) emptyList() else collection.optJSONObject("rowTemplate")?.let(::uiNodes)
+                    ?.filter { it.has("bind") && it.optString("type") in setOf("text", "metric", "badge", "fact") }?.toList().orEmpty()
                 val rows = ToolUiCatalog.records(collection, JSONObject(record.state))
+                // A fixed badge such as «Отменено» marks a row only through its visibility.
+                val marks = collection.optJSONObject("rowTemplate")?.let(::uiNodes)?.filter {
+                    !it.has("bind") && it.has("visibleBind") && it.optString("text").isNotBlank()
+                }?.toList().orEmpty()
                 val visibleRows = mutableListOf<List<String>>()
+                val templateRows = mutableListOf<List<String>>()
                 val history = (0 until rows.length()).map { index ->
                     val row = rows.getJSONObject(index)
-                    val rendered = if (columns == null) {
-                        row.keys().asSequence().filter { it != "id" }.associateWith { row.get(it).toString() }
-                    } else columns.associate { column ->
-                        column.getString("text") to ToolUiCatalog.value(row, column.getString("field")).toString()
-                    }.also { check(it.size == columns.size) }
+                    val stored = row.keys().asSequence().filter { it != "id" }.associateWith { row.get(it).toString() }
+                    val rendered = when {
+                        columns != null -> columns.associate { column ->
+                            column.getString("text") to ToolUiCatalog.value(row, column.getString("field")).toString()
+                        }.also { check(it.size == columns.size) }
+                        template.isNotEmpty() -> template.associate {
+                            it.optString("text").ifEmpty { it.getString("bind") } to ToolUiCatalog.boundText(it, row)
+                        }
+                        else -> stored
+                    } + marks.filter { ToolUiCatalog.visible(it, row) }.associate { it.getString("text") to it.getString("text") }
                     fun field(expression: String): String? {
                         val pattern = matching(expression)
-                        return rendered.entries.singleOrNull { pattern.containsMatchIn(it.key) }?.value
+                        return (rendered.entries.singleOrNull { pattern.containsMatchIn(it.key) }
+                            ?: stored.entries.singleOrNull { pattern.containsMatchIn(it.key) })?.value
                     }
-                    val operation = checkNotNull(field("действ|операц|событи|^action$|^operation$|^kind$"))
-                    val owner = field("команд|^team$")?.let(::teamName) ?: sectionTeam
-                    val points = field("очк|изменен|разниц|сумм|^points$|^change$|^delta$") ?: operation
+                    // A row title can hold the team and the operation, for example "Мел · Пазл +2".
+                    val title = rendered.values.firstOrNull { value -> teams.any { value.contains(it, ignoreCase = true) } }
+                    // Otherwise the row texts together name it, for example a team line and a line "Викторина · 06:16".
+                    val operation = field("действ|операц|событи|^action$|^operation$|^kind$")
+                        ?: rendered.values.joinToString(" · ").ifBlank { error("No row text names the operation: $rendered") }
+                    val owner = field("команд|^team$")?.let(::teamName)
+                        ?: teams.singleOrNull { operation.contains(it, ignoreCase = true) } ?: sectionTeam
+                    val points = field("очк|изменен|разниц|сумм|^points$|^change$|^delta$") ?: title ?: operation
                     val signed = points.replace('−', '-')
                     val delta = signed.trim().toIntOrNull()
                         ?: Regex("""[+-]\s*\d+""").findAll(signed).singleOrNull()?.value?.replace(" ", "")?.toIntOrNull()
-                    if (verifyRendered) visibleRows += if (columns == null) {
-                        listOf(rendered.entries.joinToString(" · ") { "${it.key}: ${it.value}" })
-                    } else rendered.values.toList()
+                    if (verifyRendered) when {
+                        columns != null -> visibleRows += rendered.values.toList()
+                        template.isNotEmpty() -> templateRows += template.map {
+                            if (it.optString("type") == "metric") ToolUiCatalog.boundText(it, row) else ToolUiCatalog.display(it, row)
+                        }
+                        else -> visibleRows += listOf(rendered.entries.joinToString(" · ") { "${it.key}: ${it.value}" })
+                    }
                     History(checkNotNull(owner), operation, checkNotNull(delta), rendered)
+                }
+                for ((texts, count) in templateRows.groupingBy { it }.eachCount()) {
+                    robot.reveal(title, null)
+                    // The first text of a row and the other texts of that row share a near ancestor.
+                    fun shownRows() = nodes().filter { nodeText(it) == texts.first() }.count { node ->
+                        generateSequence(node.parent) { it.parent }.take(3).any { ancestor ->
+                            accessibility(ancestor).filter { it.isVisibleToUser }.map(::nodeText).toSet().containsAll(texts)
+                        }
+                    }
+                    var shown = 0
+                    for (page in 0..10) {
+                        shown = maxOf(shown, shownRows())
+                        if (shown >= count || !robot.scrollForward()) break
+                    }
+                    check(shown >= count) { "Required ledger history rows are not visible." }
                 }
                 for ((fields, count) in visibleRows.groupingBy { it }.eachCount()) {
                     robot.reveal(title, null)
@@ -659,8 +882,10 @@ internal class Plan5WorkflowChecks(
             check(amber.count { it.points == 3 && matching("викторин").containsMatchIn(it.operation) } == 2)
             check(amber.count { it.points == -5 && matching("подсказ").containsMatchIn(it.operation) } == 1)
             val chalk = original.filter { it.team == "Мел" }
-            check(chalk.size <= 1 && chalk.all {
-                matching("пазл").containsMatchIn(it.operation) && matching("отмен").containsMatchIn(it.operation)
+            // The cancel mark can be in any text of the row, such as a status line under the operation.
+            check(chalk.size <= 1 && chalk.all { row ->
+                val text = (row.rendered.values + row.operation).joinToString(" ")
+                matching("пазл").containsMatchIn(row.operation) && matching("отмен").containsMatchIn(text)
             })
             check(screenshot("ledger-history"))
             original.joinToString()
@@ -693,8 +918,10 @@ internal class Plan5WorkflowChecks(
 
     private fun stopwatch() {
         fun elapsed(): Double? {
-            val values = robot.texts()
-            val clock = Regex("""^(?:(\d+):)?(\d+):(\d+)(?:[.,](\d+))?$""")
+            // A drawing describes its text after its name, separated by ". ".
+            val values = robot.texts().flatMap { it.split(". ") }.map(String::trim)
+            // A timer node can show its label and a unit word, for example "Elapsed time: 00:00:07 elapsed".
+            val clock = Regex("""^(?:[^\d:]+:\s*)?(?:(\d+):)?(\d+):(\d+)(?:[.,](\d+))?(?:\s+\p{L}+)?$""")
             val formatted = values.firstNotNullOfOrNull { clock.matchEntire(it.trim()) }
             if (formatted != null) {
                 val (h, m, s, fraction) = formatted.destructured
@@ -725,10 +952,13 @@ internal class Plan5WorkflowChecks(
 
     private fun canvas(): Rect {
         val title = ToolSpec.parsePersisted(saved().spec).title
+        // The host describes a drawing with the canvas text, or with the app title when the canvas has no text.
+        val names = listOf(title) + uiNodes(JSONObject(saved().ui)).filter { it.optString("type") == "canvas" }
+            .map { it.optString("text") }.filter(String::isNotEmpty)
         var bounds = Rect()
         robot.waitUntil {
-            val node = accessibility(robot.diagnostics.freshRoot()).firstOrNull {
-                it.isVisibleToUser && it.contentDescription?.startsWith("$title.") == true
+            val node = accessibility(robot.diagnostics.freshRoot()).firstOrNull { node ->
+                node.isVisibleToUser && names.any { node.contentDescription?.startsWith("$it.") == true }
             }
             bounds = Rect().also { node?.getBoundsInScreen(it) }
             if (bounds.width() >= 64 && bounds.height() >= 64) true
@@ -754,31 +984,29 @@ internal class Plan5WorkflowChecks(
     }
 
     private fun drawing() {
-        data class CanvasInk(val blank: Boolean, val marks: List<Rect>)
+        // A drawing area without an orange mark counts as blank. A gray hint such as "Touch the canvas" is allowed.
+        data class CanvasInk(val marks: List<Rect>)
 
         fun inspect(bounds: Rect): CanvasInk {
             val bitmap = checkNotNull(robot.automation.takeScreenshot())
             try {
                 val stride = 4
+                // A frame drawn along the edge is decoration, not a mark.
+                val margin = maxOf(stride, minOf(bounds.width(), bounds.height()) / 20)
                 val interior = Rect(bounds).apply {
-                    inset(stride, stride)
+                    inset(margin, margin)
                     check(intersect(0, 0, bitmap.width, bitmap.height))
                 }
                 val width = interior.width() / stride
                 val height = interior.height() / stride
                 check(width > 0 && height > 0)
                 val orange = mutableSetOf<Int>()
-                val background = bitmap.getPixel(interior.left, interior.top)
-                var blank = true
                 for (y in 0 until height) {
                     for (x in 0 until width) {
                         val pixel = bitmap.getPixel(interior.left + x * stride, interior.top + y * stride)
                         val red = Color.red(pixel)
                         val green = Color.green(pixel)
                         val blue = Color.blue(pixel)
-                        if (maxOf(kotlin.math.abs(red - Color.red(background)),
-                                kotlin.math.abs(green - Color.green(background)),
-                                kotlin.math.abs(blue - Color.blue(background))) > 16) blank = false
                         if (red >= 180 && green in 65..192 && red - green >= 30 && green - blue >= 35)
                             orange.add(y * width + x)
                     }
@@ -803,7 +1031,7 @@ internal class Plan5WorkflowChecks(
                     }
                     if (boundsOfMark.width() >= 2 * stride && boundsOfMark.height() >= 2 * stride) marks += boundsOfMark
                 }
-                return CanvasInk(blank, marks)
+                return CanvasInk(marks)
             } finally {
                 bitmap.recycle()
             }
@@ -818,7 +1046,11 @@ internal class Plan5WorkflowChecks(
             val shown = visibleValue(countLabel, count)
             robot.waitUntil {
                 val visible = canvas()
-                val mark = inspect(visible).marks.singleOrNull()
+                // A mark can be a ring or a dot with ticks, so it has several orange parts.
+                // One small box around all parts also proves that the previous mark is gone.
+                val parts = inspect(visible).marks
+                val mark = parts.firstOrNull()?.let { first -> parts.fold(Rect(first)) { all, part -> all.apply { union(part) } } }
+                    ?.takeIf { it.width() <= visible.width() / 4 && it.height() <= visible.height() / 4 }
                 val x = visible.left + visible.width() * fractionX
                 val y = visible.top + visible.height() * fractionY
                 val tolerance = maxOf(8f, minOf(visible.width(), visible.height()) * 0.06f)
@@ -828,7 +1060,7 @@ internal class Plan5WorkflowChecks(
             return shown
         }
         step("initial") {
-            robot.waitUntil { inspect(canvas()).blank }
+            robot.waitUntil { inspect(canvas()).marks.isEmpty() }
             visibleValue(countLabel, 0.0).also { check(screenshot("drawing-initial")) }
         }
         step("touch") {
@@ -840,7 +1072,7 @@ internal class Plan5WorkflowChecks(
         }
         step("reset") {
             button("^сброс")
-            robot.waitUntil { inspect(canvas()).blank }
+            robot.waitUntil { inspect(canvas()).marks.isEmpty() }
             visibleValue(countLabel, 0.0).also { check(screenshot("drawing-reset")) }
         }
     }

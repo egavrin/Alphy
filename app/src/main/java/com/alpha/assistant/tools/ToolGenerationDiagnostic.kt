@@ -162,6 +162,17 @@ internal sealed interface ToolGenerationTraceEvent {
         val failure: GenerationTransportFailure,
     ) : ToolGenerationTraceEvent
 
+    /** One agent step. The text stays in memory for an opt-in test observer. */
+    data class AgentStep(
+        override val operationId: UUID,
+        override val attempt: Int,
+        override val atNanos: Long,
+        val tool: String,
+        val reply: String,
+        val result: String,
+        val durationNanos: Long,
+    ) : ToolGenerationTraceEvent
+
     /** VALIDATED marks the candidate boundary. The caller owns publication. */
     data class Finished(
         override val operationId: UUID,
@@ -186,31 +197,10 @@ internal class ToolGenerationTrace(
 
     inner class Run {
         private var lastAttempt = 1
-        var partsOnly: Boolean? = null
-        var route: ToolGenerationRoute? = null
 
-        fun stage(attempt: Int, stage: ToolGenerationStage, started: Boolean, selectorBatch: String?,
-            providerStage: CloudGenerationStage?) {
-            lastAttempt = maxOf(lastAttempt, attempt)
-            emit { ToolGenerationTraceEvent.Stage(operationId, attempt, it, stage, started,
-                safeSelectorBatch(selectorBatch), providerStage) }
-        }
-
-        fun diagnostic(diagnostic: ToolGenerationAttemptDiagnostic) {
-            lastAttempt = maxOf(lastAttempt, diagnostic.attempt)
-            emit { ToolGenerationTraceEvent.Attempt(operationId, diagnostic.attempt, it, diagnostic.stage,
-                diagnostic.outcome, diagnostic.disposition, diagnostic.failureCode,
-                diagnostic.category, diagnostic.ui?.rule ?: diagnostic.safeSchemaRule,
-                safeSelectorBatch(diagnostic.selectorBatch), diagnostic.planPath?.takeIf(needsPlanPath::matches),
-                diagnostic.planShape?.takeIf { needsPlanPath.matches(it.path) }, diagnostic.behavior, diagnostic.safeSmoke(),
-                diagnostic.behaviorBinding) }
-        }
-
-        fun repair(attempt: Int, stage: CloudGenerationStage, repairNumber: Int, mode: GenerationRepair.Mode,
-            result: String, responseBytes: Int?, candidateBytes: Int?, changes: Int?, sourceEdits: Int?, durationNanos: Long) {
-            lastAttempt = maxOf(lastAttempt, attempt)
-            emit { ToolGenerationTraceEvent.Repair(operationId, attempt, it, stage, repairNumber, mode, result,
-                responseBytes, candidateBytes, changes, sourceEdits, durationNanos) }
+        fun agentStep(step: Int, tool: String, reply: String, result: String, durationNanos: Long) {
+            lastAttempt = maxOf(lastAttempt, step)
+            emit { ToolGenerationTraceEvent.AgentStep(operationId, step, it, tool, reply, result, durationNanos) }
         }
 
         fun transport(failure: GenerationTransportFailure) {
@@ -229,30 +219,12 @@ internal class ToolGenerationTrace(
                 ToolGenerationTraceOutcome.CANCELED -> "cancelled"
                 ToolGenerationTraceOutcome.FAILED -> ToolGenerationAttemptDiagnostic.safeCode(cloudCode ?: "unknown")
             }
-            emit { ToolGenerationTraceEvent.Finished(operationId, lastAttempt, it, outcome, code, partsOnly, route) }
+            emit { ToolGenerationTraceEvent.Finished(operationId, lastAttempt, it, outcome, code, partsOnly = null) }
         }
     }
 }
 
-internal inline fun <T> ToolGenerationTrace.Run?.timed(
-    attempt: Int,
-    stage: ToolGenerationStage,
-    selectorBatch: String? = null,
-    providerStage: CloudGenerationStage? = null,
-    block: () -> T,
-): T {
-    this?.stage(attempt, stage, true, selectorBatch, providerStage)
-    try {
-        return block()
-    } finally {
-        this?.stage(attempt, stage, false, selectorBatch, providerStage)
-    }
-}
-
 private fun safeSelectorBatch(batch: String?) = batch?.takeIf { it == "sections" || it == "parts" }
-private val needsPlanPath = Regex(
-    """\$(?:\.(?:wholeScreen|scene|checks|checkEvidence|visualReview|requiredCapabilities|excerpt|behavior|scenario|steps|title|description|language|inputs|constants|needs|questions|id|label|type|value|uses|sourceIds|stops|bands|items|ideas|name|minutes|min|max|step|control|expression|example|unit|date|offsetDays|repeatDays|effort|ask|options|count|maxFrames|milliseconds)(?:\[\d{1,2}])?)*|\$\.(?:behavior|scene\.checks)\.scenario\.slots\[\d{1,2}](?:\.(?:valueType|rowValueType))?"""
-)
 
 /** No candidate, exception message, private field name, or generated identifier enters this record.
  * Binding subrules come from validator checks, not candidate text or exception messages.

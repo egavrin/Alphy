@@ -3,6 +3,7 @@ package com.alpha.assistant.tools
 import com.alpha.assistant.timer.ForegroundTimerSpec
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.roundToInt
 import java.time.LocalDate
 import kotlin.math.max
 import kotlin.math.min
@@ -1058,9 +1059,23 @@ object ToolUiCatalog {
     fun display(node: JSONObject, state: JSONObject): String {
         val label=node.optString("text")
         if(!node.has("bind")) return label
+        val text=boundText(node,state)
+        // A label that is empty or ends a sentence needs no colon before its value.
+        return when {
+            label.isBlank() -> text
+            label.trimEnd().last() in ".!?:" -> "${label.trimEnd()} $text"
+            else -> "$label: $text"
+        }
+    }
+    /** The bound value as the UI shows it, without the label. */
+    fun boundText(node: JSONObject, state: JSONObject): String {
         val v=value(state,node.getString("bind"))
-        val text=if(node.optString("format") == "clock" && v is Number) "%02d:%02d".format(java.util.Locale.ROOT,v.toInt()/60,v.toInt()%60) else v.toString()
-        return "$label: $text"
+        if(node.getString("type") in setOf("progress","progressRing") && v is Number) {
+            // A progress label shows the filled share of its range, as the bar does.
+            val (low,high)=bounds(node)
+            return "${(((v.toDouble()-low)/(high-low)).coerceIn(0.0,1.0)*100).roundToInt()}%"
+        }
+        return if(node.optString("format") == "clock" && v is Number) "%02d:%02d".format(java.util.Locale.ROOT,v.toInt()/60,v.toInt()%60) else v.toString()
     }
     fun widgetNodes(root: JSONObject,state: JSONObject? = null): List<JSONObject> = buildList {
         fun visit(node: JSONObject, parentEnabled: Boolean) {

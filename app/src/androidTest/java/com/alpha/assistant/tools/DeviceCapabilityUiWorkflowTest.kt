@@ -38,6 +38,23 @@ class DeviceCapabilityUiWorkflowTest {
         }
     }
 
+    // Failure case: an English coffee counter showed the Russian beep receipt of the host above the app after each cup.
+    @Test fun aSuccessfulEffectAddsNoShellLineAboveTheApp() {
+        val spec = """
+            {"formatVersion":3,"title":"Beep fixture","description":"","capabilities":["audio.tone"],"capabilityResults":true,
+            "stateSchema":{"beeps":"number"},"initialState":{"beeps":0},
+            "ui":{"type":"column","children":[{"type":"button","text":"Beep once","action":"go"},{"type":"metric","text":"Beeps heard","bind":"beeps"}]},
+            "source":"const s=input.state,e=input.event;if(e.type==='action')return {state:s,effects:[{id:'beep',capability:'audio.tone',args:{tone:'beep',durationMillis:120}}]};if(e.type==='capabilityResults')s.beeps+=1;return {state:s};"}
+        """.trimIndent()
+        withApp(spec) { tools, record ->
+            robot.click("Beep once")
+            robot.waitUntil { tools.effects(record.id).singleOrNull()?.result?.status == "succeeded" }
+            robot.waitUntil { JSONObject(checkNotNull(tools.tool(record.id)).state).getInt("beeps") == 1 }
+            robot.waitFor("1")
+            assertNull(robot.find(tools.effects(record.id).single().result.message))
+        }
+    }
+
     @Test fun tiltChangesTheSavedGameStateAndNativeStopEndsDelivery() {
         val spec = """
             {"formatVersion":3,"title":"Tilt fixture","description":"","capabilities":["sensor.accelerometer.stream"],

@@ -14,7 +14,6 @@ import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.ToolExecutionPolicy
 import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolPreview
-import com.alpha.assistant.tools.ToolRecord
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -86,12 +85,12 @@ class LessonRouteWorkflowTest {
 
     private suspend fun generate(
         provider: Provider,
-        kind: CourseSlideKind? = null,
+        kind: CourseSlideKind,
         policy: ToolExecutionPolicy? = null,
         request: String = privateRequest,
-    ): ToolPreview = ToolGenerationService(provider, SandboxClient(context)).generate(
-        "fixture", request, null, emptyList(), CloudSession(), "lesson", policy = policy, lessonTarget = kind,
-    )
+    ): ToolPreview = ToolGenerationService(provider, SandboxClient(context)).generateLesson(
+        "fixture", request, CloudSession(), "lesson", kind, emptySet(), policy = policy,
+    ).preview
 
     @Test fun lessonPictogramsAreValidatedAndRenderThroughTheNativePart(): Unit = runBlocking {
         for (pictogram in listOf("🦉", "☀️")) {
@@ -160,17 +159,6 @@ class LessonRouteWorkflowTest {
         }
     }
 
-    @Test fun neitherPromptNorPolicySelectsLessonMode(): Unit = runBlocking {
-        val provider = Provider(plan("choice_exercise", choice))
-        val policy = ToolExecutionPolicy(validateDefinition = {}, validateResult = {})
-        val preview = generate(provider, policy = policy, request = "The host selected a CHOICE course slide.")
-        val planning = provider.requests.first().systemInstructions
-        assertTrue(planning.startsWith(NeedsPlan.prompt + "\n\n"))
-        assertFalse(JSONObject(preview.state).has(EXERCISE_FIELD))
-        assertNotNull(preview.spec.nativePresentation)
-        assertNotNull(preview.spec.action(JSONObject(preview.ui), "p4_main_select"))
-    }
-
     @Test fun invalidLessonNeedsCannotReachCodeOrSmoke(): Unit = runBlocking {
         val cases = listOf(
             Triple(Provider(plan("fill_exercise", listOf("accepted1" to "answer"))),
@@ -193,16 +181,6 @@ class LessonRouteWorkflowTest {
     @Test fun lessonRejectsHostImagesAndRefinementBeforeProviderAndPreservesPolicyAndCancellation(): Unit = runBlocking {
         val plan = plan("choice_exercise", choice)
         val provider = Provider(plan)
-        val service = ToolGenerationService(provider, SandboxClient(context))
-        val old = ToolRecord("existing", 1, 1, "PRIVATE_SPEC", "PRIVATE_STATE", "", null, true)
-        for ((base, images) in listOf(old to emptyList(), null to listOf("PRIVATE_IMAGE"))) {
-            val failure = runCatching {
-                service.generate("fixture", privateRequest, base, images, CloudSession(), "lesson",
-                    lessonTarget = CourseSlideKind.CHOICE)
-            }.exceptionOrNull() as CloudFailure
-            assertEquals("widget_incomplete", failure.code)
-        }
-        assertTrue(provider.requests.isEmpty())
 
         var rawResultSeen = false
         val rejecting = ToolExecutionPolicy(validateDefinition = { error("Definition is disallowed.") },

@@ -25,186 +25,115 @@ class TestFixWorkflowTest {
         {"type":"button","text":"Double","action":"apply"},{"type":"metric","text":"Result","bind":"result"}]},
         "source":"const {state:s,event:e}=input;if(e.type==='action'){if(e.actionId==='amount')s.amount=e.value;if(e.actionId==='apply'){if(s.amount===7)throw Error('bad');s.result=s.amount;}}return {state:s};"}
     """.trimIndent()
+    private val working = definition.replace("if(s.amount===7)throw Error('bad');s.result=s.amount;", "s.result=s.amount*2;")
 
-    private fun scenario(expected: Int) = """
-        {"behavior":{"status":"checkable","scenario":{"slots":{"enter":{"kind":"action"},"apply":{"kind":"action"},
-        "result":{"kind":"value"}},"steps":[{"op":"action","slot":"enter","value":7},
-        {"op":"action","slot":"apply"},{"op":"assert","slot":"result","test":"equals","value":$expected}]}},
-        "targets":{"enter":"action1","apply":"action2","result":"value4"},"authoredReproduction":null}
-    """.trimIndent()
-
-    private val naturalRequest = "Test and fix the app. Put 7 in Amount, tap Double, and check that Result is 14."
-    private val authoredReproduction = """
-        [{"text":"Put 7 in Amount","target":"action1","value":"7"},
-        {"text":"tap Double","target":"action2"},
-        {"text":"Result is 14","target":"value4","value":"14"}]
-    """.trimIndent()
-
-    private fun patch() = JSONObject().put("sourceEdits", JSONArray()
-        .put(JSONObject().put("search", "if(s.amount===7)throw Error('bad');").put("replace", ""))
-        .put(JSONObject().put("search", "s.result=s.amount;").put("replace", "s.result=s.amount*2;"))).toString()
-
-    private class Provider(private vararg val outputs: String) : ChatProvider {
+    /** Replies in order. After the last one, the provider repeats it. */
+    private class Provider(private vararg val replies: String) : ChatProvider {
         val calls = mutableListOf<CloudRequest>()
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
             calls += request
-            emit(CloudEvent.Text(outputs[calls.lastIndex]))
-            emit(CloudEvent.RoundComplete(outputs[calls.lastIndex], false))
+            val reply = replies[minOf(calls.lastIndex, replies.lastIndex)]
+            emit(CloudEvent.Text(reply))
+            emit(CloudEvent.RoundComplete(reply, false))
         }
+        fun feedback(call: Int) = calls[call].turns.last().text
     }
+
+    private fun run(vararg steps: String) = """{"tool":"run","steps":[${steps.joinToString(",")}]}"""
+    private fun finish(vararg steps: String) =
+        """{"tool":"finish","summary":"Checked.","checks":[{"name":"double","steps":[${steps.joinToString(",")}]}]}"""
+    private fun edit(vararg edits: Pair<String, String>) = JSONObject().put("tool", "edit_app").put("source_edits",
+        JSONArray(edits.map { (find, replace) -> JSONObject().put("find", find).put("replace", replace) })).toString()
+
+    private val enterSeven = """{"set":"amount","value":7}"""
+    private val tapDouble = """{"tap":"apply"}"""
+    private fun resultIs(value: Int) = """{"expect":"value","target":"result","equals":$value}"""
+    private val fixDouble = edit("if(s.amount===7)throw Error('bad');" to "", "s.result=s.amount;" to "s.result=s.amount*2;")
+
+    private fun repairReplies() = arrayOf(run(enterSeven, tapDouble), fixDouble, finish(enterSeven, tapDouble, resultIs(14)))
 
     private fun tool(raw: String = definition): ToolRecord {
         val spec = ToolSpec.parse(raw)
         return ToolRecord("double", 1, 1, spec.json, """{"amount":3,"result":6}""", spec.ui.toString(), null, true)
     }
 
+    private suspend fun testAndFix(provider: Provider, base: ToolRecord, request: String = "Test and fix this app.") =
+        ToolGenerationService(provider, SandboxClient(context)).testAndFix("fixture", request, base, false, CloudSession())
+
     @Test fun reproducesScriptFailureAndKeepsRealStateSeparateFromTestState(): Unit = runBlocking {
-        val provider = Provider(scenario(14), patch())
-        val result = ToolGenerationService(provider, SandboxClient(context))
-            .testAndFix("fixture", "Test and fix this app.", tool(), false, CloudSession())
+        val provider = Provider(*repairReplies())
+        val result = testAndFix(provider, tool())
+        assertEquals(result.detail, TestFixStatus.VERIFIED, result.status)
         val candidate = checkNotNull(result.candidate)
-        assertEquals(TestFixStatus.VERIFIED, result.status)
-        assertEquals(1, result.patchAttempts)
         assertEquals(3, JSONObject(candidate.state).getInt("amount"))
         assertEquals(6, JSONObject(candidate.state).getInt("result"))
         assertTrue(candidate.spec.source.contains("s.amount*2"))
-        assertEquals(2, provider.calls.size)
-        assertFalse(provider.calls.first().turns.joinToString().contains("throw Error"))
+        assertEquals(3, provider.calls.size)
+        assertTrue(provider.feedback(1), provider.feedback(1).contains("This confirms the problem."))
     }
 
-    @Test fun reproducesAndRemovesAnUnsupportedTimerSubscription(): Unit = runBlocking {
-        val working = definition.replace("if(s.amount===7)throw Error('bad');s.result=s.amount;", "s.result=s.amount*2;")
+    @Test fun aSavedAppThatFailsTheHostCheckCanBeRepaired(): Unit = runBlocking {
         val subscription = "if(e.type==='action'&&e.actionId==='apply')return {state:s,timers:[{id:'tick',intervalMs:50}]};"
         val broken = working.replace("return {state:s};", subscription + "return {state:s};")
-        val patch = JSONObject().put("sourceEdits", JSONArray().put(
-            JSONObject().put("search", subscription).put("replace", ""))).toString()
-        val provider = Provider(scenario(14), patch)
-        val result = ToolGenerationService(provider, SandboxClient(context))
-            .testAndFix("fixture", "Test and fix this app.", tool(broken), false, CloudSession())
+        val provider = Provider(edit(subscription to ""), finish(enterSeven, tapDouble, resultIs(14)))
+        val result = testAndFix(provider, tool(broken))
         assertEquals(result.detail, TestFixStatus.VERIFIED, result.status)
-        assertEquals(1, result.patchAttempts)
-        assertTrue(provider.calls.last().turns.last().text.contains("action at $.timers[0]: widget_timer_host"))
+        assertTrue(provider.calls.first().turns.first().text.contains("The current app fails the host check"))
         assertFalse(checkNotNull(result.candidate).spec.source.contains("intervalMs"))
     }
 
-    @Test fun modelInventedExpectationCannotAuthorizeAnEdit(): Unit = runBlocking {
-        val provider = Provider(scenario(-156))
-        val working = definition.replace("if(s.amount===7)throw Error('bad');s.result=s.amount;", "s.result=s.amount*2;")
-        val result = ToolGenerationService(provider, SandboxClient(context))
-            .testAndFix("fixture", "Test and fix this app.", tool(working), false, CloudSession())
-        assertEquals(TestFixStatus.UNVERIFIED, result.status)
+    @Test fun anInventedExpectationCannotAuthorizeAnEdit(): Unit = runBlocking {
+        val provider = Provider(run(enterSeven, tapDouble, resultIs(-156)), edit("s.amount*2" to "s.amount*3"),
+            finish(enterSeven, tapDouble, resultIs(14)))
+        val result = testAndFix(provider, tool(working))
+        assertEquals(result.detail, TestFixStatus.PASSED, result.status)
         assertNull(result.candidate)
-        assertEquals(1, provider.calls.size)
+        assertTrue(provider.feedback(1), provider.feedback(1).contains("This does not confirm a problem."))
+        assertTrue(provider.feedback(2), provider.feedback(2).contains("edit_app: REJECTED. Reproduce the reported problem"))
     }
 
-    @Test fun threeUnappliedPatchesExhaustTheOperation(): Unit = runBlocking {
-        val provider = Provider(scenario(14), "{}", "{}", "{}")
-        val result = ToolGenerationService(provider, SandboxClient(context))
-            .testAndFix("fixture", "Test and fix this app.", tool(), false, CloudSession())
-        assertEquals(TestFixStatus.UNREPAIRED, result.status)
-        assertEquals(3, result.patchAttempts)
-        assertNull(result.candidate)
-        assertEquals(4, provider.calls.size)
+    @Test fun anExpectedValueFromTheUsersReportConfirmsTheProblem(): Unit = runBlocking {
+        val noCrash = definition.replace("if(s.amount===7)throw Error('bad');", "")
+        val provider = Provider(run(enterSeven, tapDouble, resultIs(14)), edit("s.result=s.amount;" to "s.result=s.amount*2;"),
+            finish(enterSeven, tapDouble, resultIs(14)))
+        val result = testAndFix(provider, tool(noCrash), "Put 7 in Amount, tap Double, and check that Result is 14.")
+        assertEquals(result.detail, TestFixStatus.VERIFIED, result.status)
+        assertTrue(provider.feedback(1), provider.feedback(1).contains("This confirms the problem."))
     }
 
-    @Test fun confirmsAndRepairsAnAssertionFromNaturalLanguage(): Unit = runBlocking {
-        val proposal = JSONObject(scenario(14)).put("authoredReproduction", JSONArray(authoredReproduction))
-        val provider = Provider(proposal.toString(), patch())
-        val workingWithoutCrash = definition.replace("if(s.amount===7)throw Error('bad');", "")
-        val assertionPatch = """{"sourceEdits":[{"search":"s.result=s.amount;","replace":"s.result=s.amount*2;"}]}"""
-        val repairProvider = Provider(proposal.toString(), assertionPatch)
-        val result = ToolGenerationService(repairProvider, SandboxClient(context)).testAndFix(
-            "fixture", naturalRequest, tool(workingWithoutCrash), false, CloudSession())
-        assertEquals(TestFixStatus.VERIFIED, result.status)
-        assertEquals(2, repairProvider.calls.size)
-        assertNotNull(result.candidate)
-
-        val alteredRequest = naturalRequest.replace("Result is 14", "Result is 140")
-        val unverified = ToolGenerationService(provider, SandboxClient(context)).testAndFix(
-            "fixture", alteredRequest, tool(workingWithoutCrash), false, CloudSession())
-        assertEquals(TestFixStatus.UNVERIFIED, unverified.status)
-        assertEquals(1, provider.calls.size)
-        assertNull(unverified.candidate)
-    }
-
-    @Test fun omittedInputCannotTurnAnAuthoredExpectationIntoPermissionToPatch(): Unit = runBlocking {
-        val proposal = JSONObject(scenario(14)).apply {
-            val scenario = getJSONObject("behavior").getJSONObject("scenario")
-            scenario.getJSONObject("slots").remove("enter")
-            scenario.getJSONArray("steps").remove(0)
-            getJSONObject("targets").remove("enter")
-            put("authoredReproduction", JSONArray(authoredReproduction))
-        }.toString()
-        val provider = Provider(proposal)
-        val working = definition.replace("if(s.amount===7)throw Error('bad');s.result=s.amount;", "s.result=s.amount*2;")
-        val result = ToolGenerationService(provider, SandboxClient(context)).testAndFix(
-            "fixture", naturalRequest, tool(working), false, CloudSession())
-        assertEquals(TestFixStatus.UNVERIFIED, result.status)
-        assertEquals(1, provider.calls.size)
-        assertNull(result.candidate)
-    }
-
-    @Test fun generatedSurfaceAndFrameEventsCannotChangeTheUsersExpectedSetup(): Unit = runBlocking {
-        val graphics = JSONObject(definition)
-        graphics.put("surfaces", JSONArray("""[{"id":"board","width":64,"height":64}]"""))
-        graphics.getJSONObject("ui").getJSONArray("children").getJSONObject(1).put("text", "Reset")
-        graphics.put("source", """
-            const s=input.state,e=input.event;
-            if(e.type==='action'&&e.actionId==='apply')s.result=0;
-            if(e.type==='pointer'&&e.phase==='down'||e.type==='frame')s.result++;
-            return {state:s,frames:['board'],surfaces:{board:{commands:[]}}};
-        """.trimIndent())
-        val extraEvents = listOf(
-            """{"op":"surface","slot":"board","event":"pointer","phase":"down","x":0.5,"y":0.5}""",
-            """{"op":"frames","slot":"board","count":1}""",
-        )
-        for (event in extraEvents) {
-            val proposal = """
-                {"behavior":{"status":"checkable","scenario":{"slots":{"reset":{"kind":"action"},
-                "board":{"kind":"surface"},"result":{"kind":"value"}},
-                "steps":[{"op":"action","slot":"reset"},$event,{"op":"assert","slot":"result","test":"equals","value":0}]}},
-                "targets":{"reset":"action2","board":"surface5","result":"value4"},
-                "authoredReproduction":[{"text":"Press Reset","target":"action2"},
-                {"text":"Expected Result = 0","target":"value4","value":"0"}]}
-            """.trimIndent()
-            val provider = Provider(proposal)
-            val result = ToolGenerationService(provider, SandboxClient(context)).testAndFix(
-                "fixture", "Test and fix this app.\nPress Reset\nExpected Result = 0", tool(graphics.toString()), false, CloudSession())
-            assertEquals(TestFixStatus.UNVERIFIED, result.status)
-            assertTrue(result.detail, result.detail.contains("model-proposed expectation"))
-            assertEquals(1, provider.calls.size)
-            assertNull(result.candidate)
-        }
-    }
-
-    @Test fun removingTheFailingControlDoesNotPassTheOriginalReproduction(): Unit = runBlocking {
+    @Test fun removingTheFailingControlDoesNotPassTheReproduction(): Unit = runBlocking {
         val original = JSONObject(definition)
-        val ui = original.getJSONObject("ui")
-        val ordinary = JSONObject(ui.toString())
-        ui.getJSONArray("children").put(JSONObject("""{"type":"button","text":"Broken","action":"broken"}"""))
+        val ordinary = JSONObject(original.getJSONObject("ui").toString())
+        original.getJSONObject("ui").getJSONArray("children").put(JSONObject("""{"type":"button","text":"Broken","action":"broken"}"""))
         original.put("source", original.getString("source").replace("if(s.amount===7)throw Error('bad');", "")
             .replace("if(e.type==='action'){", "if(e.type==='action'){if(e.actionId==='broken')throw Error('bad');"))
-        val hide = JSONObject().put("fields", JSONObject().put("ui", ordinary)).toString()
-        val provider = Provider(scenario(7), hide, "{}", "{}")
-        val result = ToolGenerationService(provider, SandboxClient(context)).testAndFix(
-            "fixture", "Test and fix this app.", tool(original.toString()), false, CloudSession())
+        val hide = JSONObject().put("tool", "edit_app").put("set", JSONObject().put("ui", ordinary)).toString()
+        val provider = Provider(run("""{"tap":"broken"}"""), hide, finish(enterSeven, tapDouble, resultIs(7)))
+        val result = testAndFix(provider, tool(original.toString()))
         assertEquals(TestFixStatus.UNREPAIRED, result.status)
         assertNull(result.candidate)
-        assertTrue(provider.calls[2].turns.last().text.contains("original failing event sequence"))
+        assertTrue(provider.feedback(3), provider.feedback(3).contains("finish: FAILED. The reproduced problem still fails"))
     }
 
-    @Test fun checksTheActionsAtTheRevisionThatWillBeSaved(): Unit = runBlocking {
-        val conditional = patch().replace("\"replace\":\"\"", "\"replace\":\"if(s.amount===7&&input.revision===2)throw Error('next revision');\"")
-        val provider = Provider(scenario(14), conditional, "{}", "{}")
-        val result = ToolGenerationService(provider, SandboxClient(context)).testAndFix(
-            "fixture", "Test and fix this app.", tool(), false, CloudSession())
+    @Test fun theReproductionRunsAtTheRevisionThatWillBeSaved(): Unit = runBlocking {
+        val conditional = edit("if(s.amount===7)throw Error('bad');" to "if(s.amount===7&&input.revision===2)throw Error('next revision');",
+            "s.result=s.amount;" to "s.result=s.amount*2;")
+        val provider = Provider(run(enterSeven, tapDouble), conditional, finish(enterSeven, tapDouble, resultIs(14)))
+        val result = testAndFix(provider, tool())
         assertEquals(TestFixStatus.UNREPAIRED, result.status)
+        assertTrue(provider.feedback(3), provider.feedback(3).contains("finish: FAILED"))
+    }
+
+    @Test fun noConfirmedProblemAndNoFinishIsUnverified(): Unit = runBlocking {
+        val provider = Provider(run(enterSeven, tapDouble, resultIs(14)))
+        val result = testAndFix(provider, tool(working))
+        assertEquals(TestFixStatus.UNVERIFIED, result.status)
         assertNull(result.candidate)
     }
 
     @Test fun aDependentAutomationBlocksTheVerifiedSaveWithoutChangingEitherRecord(): Unit = runBlocking {
         val name = "test-fix-guard-${java.util.UUID.randomUUID()}.db"
-        val service = ToolGenerationService(Provider(scenario(14), patch()), SandboxClient(context))
+        val service = ToolGenerationService(Provider(*repairReplies()), SandboxClient(context))
         ToolStore(context, name).use { store ->
             try {
                 val base = tool()
@@ -235,7 +164,7 @@ class TestFixWorkflowTest {
 
     @Test fun cancellationAndAConcurrentStateChangeLeaveNoRepairDraftOrRevision(): Unit = runBlocking {
         val name = "test-fix-conflict-${java.util.UUID.randomUUID()}.db"
-        val service = ToolGenerationService(Provider(scenario(14), patch()), SandboxClient(context))
+        val service = ToolGenerationService(Provider(*repairReplies()), SandboxClient(context))
         ToolStore(context, name).use { store ->
             try {
                 val base = tool()

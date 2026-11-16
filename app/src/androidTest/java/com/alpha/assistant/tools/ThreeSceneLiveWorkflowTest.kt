@@ -2,25 +2,16 @@ package com.alpha.assistant.tools
 
 import android.app.AlertDialog
 import android.graphics.Bitmap
-import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.MainActivity
-import com.alpha.assistant.cloud.ChatProvider
-import com.alpha.assistant.cloud.CloudEvent
-import com.alpha.assistant.cloud.CloudRequest
-import com.alpha.assistant.cloud.CloudSession
-import com.alpha.assistant.cloud.DeepSeekProvider
-import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.three.ThreeSceneForeground
 import com.alpha.assistant.tools.three.ThreeSceneSession
 import java.io.File
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -36,74 +27,6 @@ class ThreeSceneLiveWorkflowTest {
     private val name get() = requireNotNull(args.getString("threeScene"))
     private val runId get() = requireNotNull(args.getString("threeRun"))
     private val out get() = File(context.getExternalFilesDir(null), "three-live/$runId").apply { mkdirs() }
-
-    @Test fun generateFromLiveProvider() = runBlocking {
-        assumeTrue(args.getString("threeLive") == "true")
-        val key = OneUseCredential.receive(runId) { File(out, "phase.txt").writeText("credentialReady") }
-        val prompt = if (name == "earth") {
-            "Create a Three.js mini app with a blue Earth fixed at the center and a small white Moon on a circular orbit. " +
-                "Use an angled camera, enable camera dragging, and support pause and resume. The Moon should pass in front " +
-                "of and behind Earth and take eight seconds to complete one orbit. Use a dark background and show both bodies clearly."
-        } else {
-            "Создай Three.js мини-приложение «Мастерская слов». Поставь светлый кубик с большой буквой М слева, " +
-                "а пустую ячейку справа. Перетаскивание кубика в ячейку должно показать «Готово», " +
-                "проиграть локальный cue.wav и запустить взмах руки у локального robot.glb. " +
-                "Сохрани завершение задания, чтобы оно восстановилось после открытия карточки."
-        }
-        File(out, "prompt.txt").writeText(prompt)
-        val confirmation = launch(Dispatchers.IO) {
-            while (true) {
-                val root = instrumentation.uiAutomation.rootInActiveWindow
-                val button = root?.findAccessibilityNodeInfosByText("Save scene")
-                    ?.firstOrNull { it.isClickable && it.isEnabled }
-                if (button != null && button.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                    File(out, "preview-accepted.txt").writeText("Clicked the enabled scene-preview Save button.")
-                    break
-                }
-                delay(350)
-            }
-        }
-        val cloud = CloudSession()
-        try {
-            ActivityScenario.launch(MainActivity::class.java).use {
-                ToolStore(context, "three-live-$runId.db").use { store ->
-                    val live = DeepSeekProvider()
-                    val provider = object : ChatProvider by live {
-                        private var sequence = 0
-
-                        override suspend fun respond(
-                            key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit,
-                        ) {
-                            val capture = File(out, "model-${++sequence}-${request.generationStage}.json")
-                            if (request.turns.size > 1) {
-                                File(out, "instruction-$sequence.txt").writeText(request.turns.last().text)
-                            }
-                            live.respond(key, request, session) { event ->
-                                if (event is CloudEvent.Text) capture.appendText(event.value)
-                                emit(event)
-                            }
-                        }
-                    }
-                    val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context)))
-                    try {
-                        val draft = engine.createDraft(prompt, null)
-                        val trace = ToolGenerationTrace(java.util.UUID.fromString(draft.id), onEvent = { event ->
-                            synchronized(this) { File(out, "trace.txt").appendText(event.toString() + "\n") }
-                        })
-                        engine.generate(draft.id, key, emptyList(), cloud, previewObserver = null, trace = trace)
-                        val record = engine.accept(draft.id)
-                        check(ToolSpec.parsePersisted(record.spec).threeScene)
-                        File(out, "scene.json").writeText(record.spec)
-                        File(out, "scene-id.txt").writeText(record.id)
-                        File(out, "phase.txt").writeText("accepted")
-                    } finally { engine.closeArtifacts() }
-                }
-            }
-        } finally {
-            cloud.cancel()
-            confirmation.cancelAndJoin()
-        }
-    }
 
     @Test fun reopenLiveFromDisk() = runBlocking {
         assumeTrue(args.getString("threeLive") == "true")

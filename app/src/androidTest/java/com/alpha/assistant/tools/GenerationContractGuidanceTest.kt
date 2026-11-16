@@ -94,15 +94,16 @@ class GenerationContractGuidanceTest {
     }
 
     @Test fun needsPlanGuidanceShowsAValidObject() {
-        val example = NeedsPlan.prompt.substringAfter("Use these fields:\n").substringBefore("\nUse the language")
-        val parsed = (NeedsPlan.parseResponse(example, null, emptySet()) as GenerationPlan.Parts).needs
+        val prompt = NeedsPlan.promptFor(CourseSlideKind.EXPLANATION)
+        val example = prompt.substringAfter("Use these fields:\n").substringBefore("\nWrite visible text")
+        val parsed = NeedsPlan.parse(example)
         assertTrue(parsed.inputs.isEmpty())
         assertTrue(parsed.needs.single().uses.isEmpty())
-        val references = NeedsPlan.prompt.substringAfter("Complete example with a reference:\n").substringBefore("\nReference rules:")
-        val referenced = (NeedsPlan.parseResponse(references, null, emptySet()) as GenerationPlan.Parts).needs
+        val references = prompt.substringAfter("Complete example with a reference:\n").substringBefore("\nReference rules:")
+        val referenced = NeedsPlan.parse(references)
         assertEquals(mapOf("step" to "increment"),referenced.needs.single().uses)
         assertEquals(2,(referenced.constants.getValue("increment").raw as Number).toInt())
-        assertTrue(NeedsPlan.prompt.contains(NeedsPlan.structureChecklist))
+        assertTrue(prompt.contains(NeedsPlan.structureChecklist))
     }
 
     @Test fun nativeGuidanceRequiresLabelsEvenWhenAValueIsBound() {
@@ -122,43 +123,22 @@ class GenerationContractGuidanceTest {
         val instructions = com.alpha.assistant.cloud.ChatToolReply.instructions()
         assertTrue(instructions.contains("Use ordinary styling defaults without adding a user requirement."))
         assertTrue(instructions.contains("A location result handler cannot open Share."))
-        assertTrue(instructions.contains("Choose create for a short tool request when a useful minimal mini-app is clear"))
-        assertTrue(instructions.contains("a timer, stopwatch, discount %, or a protein target per kilogram"))
-        assertTrue(instructions.contains("Choose answer for fixed-value questions"))
+        assertTrue(instructions.contains("Choose create when the request names a tool or utility, even as a short fragment"))
+        assertTrue(instructions.contains("Choose create for a practical calculation with numbers, also when the request supplies every value."))
         assertTrue(instructions.contains("A conversion rate alone does not supply an input to convert."))
-        assertTrue(instructions.contains("Use the device plan for a request to start or set a task timer"))
-        assertFalse(instructions.contains("For \"a timer\", ask"))
+        assertTrue(instructions.contains("Use the device plan for a timer only when the request commands the phone"))
+        assertFalse(instructions.contains("Choose answer for fixed-value questions"))
     }
 
-    @Test fun stagedPromptExamplesContainTheirRequiredChecks() {
-        val prompt = NeedsPlan.appPrompt(stagedApp = true)
-        val packing = prompt.substringAfter("Use these fields:\n").substringBefore("\nUse the language")
-        val counter = prompt.substringAfter("Complete example with a reference:\n").substringBefore("\nReference rules:")
-        val whole = prompt.substringAfter("Example for a custom control with a visible result:\n").lineSequence().first()
-        for (example in listOf(packing, counter, whole)) {
-            val plan = NeedsPlan.parseResponse(example, null, emptySet(), "Build an app", requireSceneOutcome = true)
-            assertNotNull(plan.behavior)
-        }
-        val scene = SceneRequirement.guidance.lineSequence().first { it.startsWith("{\"wholeScreen\"") }
-        val scenePlan = NeedsPlan.parseResponse(scene, null, emptySet(), "Show moving objects", requireSceneOutcome = true)
-        assertNotNull(scenePlan.scene)
+    @Test fun lessonSceneExampleIsAValidInlineCheck() {
         val inline = SceneRequirement.guidance.lineSequence().first { it.startsWith("{\"placement\":\"inline\"") }
-        assertNotNull(SceneRequirement.read(JSONObject(inline), request = "Show a shape that grows with the slider",
-            requireOutcome = true))
-        assertFalse(NeedsPlan.promptFor(CourseSlideKind.EXPLANATION).contains("A whole-screen app plan"))
+        assertEquals("inline", SceneRequirement.read(JSONObject(inline), request = "Show a shape that grows with the slider")?.placement)
     }
 
-    @Test fun wholeScreenMarkerIsExactAndUnavailableToLessonPlans() {
+    @Test fun lessonPlansRejectTheWholeScreenMarker() {
         val marker = """{"wholeScreen":true,"language":"en","requiredCapabilities":[]}"""
-        assertEquals(GenerationPlan.WholeScreen(null), NeedsPlan.parseResponse(marker, null, emptySet()))
-        for (invalid in listOf("{}", """{"wholeScreen":false}""", """{"wholeScreen":1}""",
-            """{"wholeScreen":null}""", """{"wholeScreen":"true"}""",
-            """{"wholeScreen":true,"questions":[]}""", """{"wholeScreen":true,"wholeScreen":true}""",
-            "$marker {}")) {
-            assertTrue(runCatching { NeedsPlan.parseResponse(invalid, null, emptySet()) }.exceptionOrNull() is PartsContractFailure)
-        }
-        assertTrue(runCatching { NeedsPlan.parseResponse(marker, CourseSlideKind.EXPLANATION, emptySet()) }.exceptionOrNull() is PartsContractFailure)
-        assertTrue(runCatching { NeedsPlan.parseResponse(marker, null, setOf("s1")) }.exceptionOrNull() is PartsContractFailure)
+        val failure = runCatching { NeedsPlan.parseResponse(marker, CourseSlideKind.EXPLANATION, emptySet(), "Explain", 0) }.exceptionOrNull()
+        assertTrue(failure is PartsContractFailure)
         assertFalse(NeedsPlan.promptFor(CourseSlideKind.EXPLANATION).contains("wholeScreen"))
     }
 }

@@ -202,14 +202,20 @@ class CapabilityResultsWorkflowTest {
         val capture=object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests.add(request)
-                val reply = if (request.generationStage == CloudGenerationStage.PLAN) """{"requiredCapabilities":[]}"""
-                    else request.withFixtureLanguage("""{"fields":{"title":"Updated results"}}""")
+                // A private app cannot replace its layout: the host rejects write_app, and edit_app changes the title.
+                val reply = when (requests.size) {
+                    1 -> agentWrite(spec().json)
+                    2 -> """{"tool":"edit_app","set":{"title":"Updated results"}}"""
+                    else -> agentFixtureFinish
+                }
                 emit(CloudEvent.Text(reply))
             }
         }
         val result=ToolGenerationService(capture,SandboxClient(context)).generate("fixture","Rename to Updated results",base,emptyList(),CloudSession(),tool.id)
-        assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.REFINE), requests.map { it.generationStage })
+        assertEquals(List(3) { CloudGenerationStage.AGENT }, requests.map { it.generationStage })
+        assertTrue(requests[1].turns.last().text.contains("write_app: REJECTED. This app keeps private device data."))
         assertFalse(requests.any { marker in it.systemInstructions || it.turns.any { turn -> marker in turn.text } })
+        assertFalse(requests.any { request -> request.turns.any { it.text.contains("First screen") || it.text.contains("Screen:") } })
         assertEquals("Updated results", result.spec.title)
         assertEquals(marker,JSONObject(result.state).getString("secret"))
     } }

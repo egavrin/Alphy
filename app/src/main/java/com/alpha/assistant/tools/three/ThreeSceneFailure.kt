@@ -50,9 +50,6 @@ internal enum class ThreeSceneOperation { INIT, OPEN, EVENT, FRAME, DISPOSE, CHE
 internal class ThreeSceneFailure(
     val problem: ThreeSceneProblem,
     val operation: ThreeSceneOperation? = null,
-    val step: Int? = null,
 ) : IllegalStateException(listOfNotNull(
-    step?.let { "Step $it." }, operation?.let { "Operation ${it.name.lowercase()}." }, problem.guidance,
-).joinToString(" ")) {
-    fun atStep(index: Int) = ThreeSceneFailure(problem, operation, index)
-}
+    operation?.let { "Operation ${it.name.lowercase()}." }, problem.guidance,
+).joinToString(" "))

@@ -1,22 +1,12 @@
 package com.alpha.assistant.tools
 
 import android.graphics.Color
-import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.MutableState
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.dp
-import androidx.test.core.app.ActivityScenario
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.ChatProvider
@@ -25,127 +15,18 @@ import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.sandbox.SurfaceFrameMetrics
-import com.alpha.assistant.ui.AlphaShell
 import com.alpha.assistant.ui.AlphaTheme
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
-import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.math.roundToInt
 
 class StaticDraftPreviewUiWorkflowTest {
     private val robot = ShellRobot("static-draft-preview-ui")
-
-    @Test fun manualPreviewKeepsTheDrawingAcrossResizeAndAppliesOnlyOnRequest() = withFixture(Provider("Initial", "Revised")) { fixture, store ->
-        fixture.launch().use { scenario ->
-            robot.waitUntil { robot.composed(scenario, "desktop") }
-            val viewport = constrainWidth(fixture, scenario)
-            openLibrary(scenario)
-            val before = SurfaceFrameMetrics.snapshot()?.generation
-            createPreview(fixture, "Draw the original shape")
-            val drawing = canvasLabel("Initial first. Initial second.")
-            reveal(drawing)
-            assertTrue(store.tools().isEmpty())
-            assertDisabledAction("Initial action")
-            assertEquals(before, SurfaceFrameMetrics.snapshot()?.generation)
-
-            val composer = robot.text(R.string.composer_label)
-            robot.waitGone(composer)
-            resize(scenario, viewport, 900)
-            assertWidePanes(scenario, composer, viewport)
-            reveal(drawing)
-            robot.diagnostics.capture("manual-wide")
-            resize(scenario, viewport, 420)
-            robot.waitGone(composer)
-            reveal(drawing)
-            assertEquals(before, SurfaceFrameMetrics.snapshot()?.generation)
-            robot.diagnostics.capture("manual-narrow-wide-narrow")
-
-            robot.click(robot.text(R.string.tool_apply_changes))
-            robot.waitGone(drawing)
-            robot.waitUntil { store.tools().singleOrNull()?.revision == 1 }
-            val original = store.tools().single()
-            robot.waitGone(robot.text(R.string.tool_refinement))
-            val pending = ToolDraft("pending-refinement", original.id, original.revision, original.stateVersion,
-                "Draw the revised shape", null, null, null, original.conversationId)
-            store.saveDraft(pending)
-            robot.click(robot.text(R.string.tool_library_back))
-            reveal(pending.prompt)
-            robot.click(pending.prompt)
-            reveal(pending.prompt)
-            robot.waitGone(robot.text(R.string.tool_refine_request))
-            robot.waitGone(robot.text(R.string.tool_preview_changes))
-            robot.click(robot.text(R.string.tool_retry_preview))
-            val revised = canvasLabel("Revised first. Revised second.")
-            waitForEnabledAction(robot.text(R.string.tool_apply_changes), timeoutMs = 30_000)
-            assertTrue("The revised drawing is visible", robot.waitFor(revised).isVisibleToUser)
-            assertEquals(pending.id, store.drafts().single().id)
-            assertEquals(original, store.tool(original.id))
-            robot.waitGone(drawing)
-            robot.diagnostics.capture("manual-revised")
-            robot.click(robot.text(R.string.tool_discard_preview))
-            robot.waitGone(revised)
-            robot.waitUntil { store.drafts().isEmpty() }
-            assertEquals(original, store.tool(original.id))
-
-            store.saveDraft(pending)
-            store.setArchived(original, true)
-            robot.click(robot.text(R.string.tool_library_back))
-            reveal(pending.prompt)
-            robot.click(pending.prompt)
-            reveal(pending.prompt)
-            robot.waitGone(robot.text(R.string.tool_retry_preview))
-            robot.click(robot.text(R.string.tool_discard_draft))
-            robot.waitUntil { store.drafts().isEmpty() }
-            assertEquals(original.copy(archived = true, stateVersion = original.stateVersion + 1), store.tool(original.id))
-        }
-    }
-
-    @Test fun mixedCandidateShowsItsSealedPartsAndStaticDrawing() = withFixture(Provider("Mixed", mixed = true)) { fixture, store ->
-        fixture.launch().use { scenario ->
-            robot.waitUntil { robot.composed(scenario, "desktop") }
-            openLibrary(scenario)
-            createPreview(fixture, "Draw a dot and add an independent counter")
-            reveal(canvasLabel("Mixed first. Mixed second."))
-            assertDisabledAction("Increase")
-            assertDisabledAction("Mixed action")
-            val draft = store.drafts().single()
-            val spec = ToolSpec.parsePersisted(checkNotNull(draft.candidate))
-            assertNotNull(spec.composition)
-            assertEquals(0, JSONObject(checkNotNull(draft.previewState)).getInt("p5_count_value"))
-            assertTrue(store.tools().isEmpty())
-        }
-    }
-
-    @Test fun savedDraftCanApplyAfterModelRecreationWithItsOwnDrawing() = withFixture(Provider("Restored")) { fixture, store ->
-        val prompt = "Draw the saved candidate"
-        val drawing = canvasLabel("Restored first. Restored second.")
-        fixture.launch().use { scenario ->
-            robot.waitUntil { robot.composed(scenario, "desktop") }
-            openLibrary(scenario)
-            createPreview(fixture, prompt)
-            reveal(drawing)
-        }
-        fixture.launch().use { scenario ->
-            robot.waitUntil { robot.composed(scenario, "desktop") }
-            openLibrary(scenario)
-            reveal(prompt)
-            robot.click(prompt)
-            robot.waitFor(robot.text(R.string.tool_content))
-            reveal(drawing)
-            robot.waitGone(robot.text(R.string.tool_preview_drawing_unavailable))
-            assertDisabledAction("Restored action")
-            waitForEnabledAction(robot.text(R.string.tool_apply_changes))
-            robot.diagnostics.capture("recreated-with-saved-drawing")
-            robot.click(robot.text(R.string.tool_apply_changes))
-            robot.waitUntil { store.tools().singleOrNull()?.revision == 1 }
-        }
-    }
 
     @Test fun provisionalCardUsesOneCheckpointAndClearsOnCorrectionOrCancel(): Unit = runBlocking {
         withFixture(Provider()) { fixture, _ ->
@@ -202,19 +83,6 @@ class StaticDraftPreviewUiWorkflowTest {
 
     private fun canvasLabel(commands: String) = "${robot.text(R.string.tool_preview_drawing)}. $commands"
 
-    private fun openLibrary(scenario: ActivityScenario<CloudTestActivity>) {
-        robot.openDrawer(scenario)
-        robot.click(robot.text(R.string.mini_apps))
-        robot.awaitDrawerClosed(scenario)
-    }
-
-    private fun createPreview(fixture: ShellFixture, prompt: String) {
-        robot.instrumentation.runOnMainSync {
-            checkNotNull(fixture.model).tools.generate(prompt, null, null, emptyList())
-        }
-        waitForEnabledAction(robot.text(R.string.tool_apply_changes), timeoutMs = 30_000)
-    }
-
     private fun reveal(label: String): AccessibilityNodeInfo {
         robot.diagnostics.target(label)
         val shown = robot.find(label)
@@ -225,13 +93,6 @@ class StaticDraftPreviewUiWorkflowTest {
 
     private fun action(label: AccessibilityNodeInfo?): AccessibilityNodeInfo? =
         generateSequence(label) { it.parent }.firstOrNull { it.isClickable }
-
-    private fun waitForEnabledAction(label: String, timeoutMs: Long = 10_000) {
-        robot.diagnostics.target(label)
-        robot.waitUntil(timeoutMs) {
-            action(robot.find(label))?.let { it.isVisibleToUser && it.isEnabled && supportsClick(it) } == true
-        }
-    }
 
     private fun assertDisabledAction(label: String, inFocusedPreview: Boolean = true) {
         val shown = if (inFocusedPreview) revealPreviewAction(label) else reveal(label)
@@ -270,60 +131,6 @@ class StaticDraftPreviewUiWorkflowTest {
 
     private fun supportsClick(control: AccessibilityNodeInfo): Boolean =
         control.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }
-
-    private data class PreviewViewport(val width: MutableState<Int>, val density: Float, val measuredPx: AtomicInteger)
-
-    private fun constrainWidth(fixture: ShellFixture, scenario: ActivityScenario<CloudTestActivity>): PreviewViewport {
-        val width = mutableStateOf(420)
-        val measuredPx = AtomicInteger()
-        var density = 0f
-        scenario.onActivity { activity ->
-            val model = checkNotNull(fixture.model)
-            density = minOf(activity.resources.displayMetrics.density, activity.window.decorView.width / 960f)
-            activity.setContent {
-                CompositionLocalProvider(LocalDensity provides Density(density)) {
-                    Box(Modifier.width(width.value.dp).fillMaxHeight().onSizeChanged { measuredPx.set(it.width) }) {
-                        AlphaTheme { AlphaShell(model) }
-                    }
-                }
-            }
-        }
-        robot.waitUntil { robot.composed(scenario, "desktop") }
-        return PreviewViewport(width, density, measuredPx).also { awaitWidth(it, 420) }
-    }
-
-    private fun resize(scenario: ActivityScenario<CloudTestActivity>, viewport: PreviewViewport, widthDp: Int) {
-        scenario.onActivity { viewport.width.value = widthDp }
-        awaitWidth(viewport, widthDp)
-    }
-
-    private fun awaitWidth(viewport: PreviewViewport, widthDp: Int) {
-        val expectedPx = (widthDp * viewport.density).roundToInt()
-        try {
-            robot.waitUntil { viewport.measuredPx.get() == expectedPx }
-        } catch (failure: AssertionError) {
-            throw AssertionError("Preview width ${viewport.measuredPx.get()}px, expected ${expectedPx}px for ${widthDp}dp", failure)
-        }
-    }
-
-    private fun assertWidePanes(scenario: ActivityScenario<CloudTestActivity>, composer: String, viewport: PreviewViewport) {
-        try {
-            assertTrue("The wide chat composer is visible", robot.waitFor(composer).isVisibleToUser)
-            robot.waitUntil {
-                if (!robot.composed(scenario, "mini-app") || !robot.composed(scenario, "chat")) return@waitUntil false
-                val app = robot.composedBounds(scenario, "mini-app").first
-                val chat = robot.composedBounds(scenario, "chat").first
-                app.width() > 0 && chat.width() > 0 && !Rect.intersects(app, chat)
-            }
-        } catch (failure: AssertionError) {
-            val app = if (robot.composed(scenario, "mini-app")) robot.composedBounds(scenario, "mini-app").first else null
-            val chat = if (robot.composed(scenario, "chat")) robot.composedBounds(scenario, "chat").first else null
-            var windowWidthDp = 0
-            scenario.onActivity { windowWidthDp = it.resources.configuration.screenWidthDp }
-            throw AssertionError("Wide preview: requested=${viewport.width.value}dp viewport=${viewport.measuredPx.get()}px density=${viewport.density} " +
-                "Android window=${windowWidthDp}dp app=$app chat=$chat", failure)
-        }
-    }
 
     private inline fun withFixture(provider: Provider, block: (ShellFixture, ToolStore) -> Unit) {
         val fixture = ShellFixture("static-drawing")

@@ -19,8 +19,8 @@ import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
-import com.alpha.assistant.tools.patchSavedFixture
-import com.alpha.assistant.tools.replyWithFixturePlan
+import com.alpha.assistant.tools.agentAppAccepted
+import com.alpha.assistant.tools.agentReply
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import kotlinx.coroutines.runBlocking
@@ -132,9 +132,8 @@ class MiniAppPortabilityWorkflowTest {
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 stages += request.generationStage
-                if (request.replyWithFixturePlan(emit)) return
-                val response = request.patchSavedFixture(answer)
-                if (request.generationStage == CloudGenerationStage.REFINE) assertTrue(response.toByteArray().size > 65536)
+                val response = request.agentReply(answer)
+                if (!request.agentAppAccepted) assertTrue(response.toByteArray().size > 65536)
                 emit(CloudEvent.Text(response))
             }
         }
@@ -174,7 +173,7 @@ class MiniAppPortabilityWorkflowTest {
                     assertEquals(interacted, destination.tool(interacted.id))
                 }
             }
-            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.REFINE), stages)
+            assertEquals(List(4) { CloudGenerationStage.AGENT }, stages)
         } finally {
             databases.forEach(app::deleteDatabase)
         }

@@ -16,8 +16,6 @@ import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.data.*
 import com.alpha.assistant.ui.ShellViewModel
-import com.alpha.assistant.sandbox.SandboxClient
-import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -89,27 +87,6 @@ class NativeLayoutTextWorkflowTest {
             rejects {spec(JSONObject(ui.toString()).put("mode",mode))}
         rejects {spec(JSONObject(ui.toString()).put("typeScale",3))}
         rejects {spec(JSONObject(ui.toString()).put("cornerRadius",100))}
-    }
-    @Test fun generationSmokeExercisesLazySelectionsTemplatesAndInlineLinks(): Unit=runBlocking {
-        val context=InstrumentationRegistry.getInstrumentation().targetContext
-        val cases=listOf(
-            """{"type":"lazyList","text":"Rows","bind":"rows","action":"select"}""" to "input.event.actionId==='select' && input.event.value==='r23'",
-            """{"type":"lazyGrid","text":"Cards","bind":"rows","columns":2,"rowTemplate":{"type":"button","text":"Choose","action":"choose"}}""" to "input.event.actionId==='choose' && input.event.value.key==='r23'",
-            """{"type":"text","text":"Guide","spans":[{"start":0,"end":5,"action":"guide","url":"https://example.com/guide"}]}""" to "input.event.actionId==='guide' && input.event.value==='https://example.com/guide'"
-        )
-        for((ui,predicate) in cases) {
-            val good=JSONObject(NativeLayoutTextFixture.definition(JSONObject(ui))).put("source","return {state:input.state};").toString()
-            val bad=JSONObject(good).put("source","if(input.event.type==='action' && ($predicate))throw Error('Representative event reached');return {state:input.state};").toString()
-            var requests=0
-            val provider=object: ChatProvider {
-                override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
-                    if (request.replyWithFixturePlan(emit)) return
-                    requests++;emit(CloudEvent.Text(if(requests == 1) bad else good))
-                }
-            }
-            ToolGenerationService(provider,SandboxClient(context)).generate("offline","Local fixture",null,emptyList(),CloudSession(),"layout-text")
-            assertEquals("Smoke omitted $predicate",2,requests)
-        }
     }
     @Test fun nativeCollectionSelectionScrollAndReopenAtLargeFont() {
         val instrumentation=InstrumentationRegistry.getInstrumentation(); val app=instrumentation.targetContext

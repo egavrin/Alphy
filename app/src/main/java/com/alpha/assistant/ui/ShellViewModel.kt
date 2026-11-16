@@ -1839,7 +1839,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                     val prompt = ChatToolReply.generationPrompt(
                         user.text,decoded.brief,decoded.text,sources,selectedText)
                     tools.generateAutomatic(prompt,target.takeIf { decoded.kind == "refine" },conversationId,operationId,key,images,request.session,
-                        cancelRequest = ::cancelRequest, originalRequest = user.text, sceneAttachments = sceneAttachments,
+                        cancelRequest = ::cancelRequest, sceneAttachments = sceneAttachments,
                         prepared = { prepareToolOperation() },
                         onPublicUpdate = { note -> if (canCommit()) publicGenerationUpdate = note },
                         canCommit = canCommit,

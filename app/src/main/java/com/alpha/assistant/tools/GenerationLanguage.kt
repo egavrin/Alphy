@@ -83,6 +83,10 @@ internal object GenerationLanguage {
         visit(ui)
     }
 
+    /** The language tag of [text], or null when the text is too short or the identification is not confident. */
+    // A one-word request such as "stopwatch" needs a statement too. The confidence limit rejects ambiguous words such as "bmi".
+    suspend fun identifyText(text: String): String? = identify(text, minLetters = 4)
+
     private suspend fun identify(text: String, minLetters: Int = 12, confidence: Float = 0.85f): String? {
         val sample = text.take(1024)
         if (sample.count(Char::isLetter) < minLetters) return null

@@ -80,7 +80,7 @@ internal class NativeRecordReorder {
     val key = ToolUiCatalog.stableKey(record)
     val index = eligibleKeys.indexOf(key)
     val available = enabled && index >= 0 && eligibleKeys.size > 1
-    val label = stringResource(R.string.tool_reorder_handle, ToolUiCatalog.value(record, reorder.getString("labelField")))
+    val label = miniAppString(R.string.tool_reorder_handle, ToolUiCatalog.value(record, reorder.getString("labelField")))
     val action = reorder.getString("action")
     val latestEvent by rememberUpdatedState(event)
     var menuOpen by remember(eligibleKeys) { mutableStateOf(false) }
@@ -135,10 +135,10 @@ internal class NativeRecordReorder {
             }
             if (available) DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 eligibleKeys.getOrNull(index - 1)?.let { target ->
-                    DropdownMenuItem(text = { Text(stringResource(R.string.tool_reorder_move_up)) }, onClick = { dispatch(target) })
+                    DropdownMenuItem(text = { Text(miniAppString(R.string.tool_reorder_move_up)) }, onClick = { dispatch(target) })
                 }
                 eligibleKeys.getOrNull(index + 1)?.let { target ->
-                    DropdownMenuItem(text = { Text(stringResource(R.string.tool_reorder_move_down)) }, onClick = { dispatch(target) })
+                    DropdownMenuItem(text = { Text(miniAppString(R.string.tool_reorder_move_down)) }, onClick = { dispatch(target) })
                 }
             }
         }

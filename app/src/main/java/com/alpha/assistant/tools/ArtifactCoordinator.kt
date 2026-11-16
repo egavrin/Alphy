@@ -33,6 +33,9 @@ internal class ArtifactCoordinator private constructor() {
     private var timers=emptyMap<String,Int>()
     private var sequence=0L
     private var controlVersion=0
+    // The state version of the last commit that a timer or frame tick did not cause.
+    private var quietVersion=-1
+    private var quietControl=-1
     private var flushJob: Job?=null
     @Volatile private var failure: String?=null
     private var liveRecoveryRequired=false
@@ -76,9 +79,15 @@ internal class ArtifactCoordinator private constructor() {
             if(previous!=null && (previous.revision!=saved.revision || previous.spec!=saved.spec)) invalidate()
             durable=saved;live=saved
             ++controlVersion
+            quietVersion=saved.stateVersion;quietControl=controlVersion
             updateInputView()
         }
         return checkNotNull(live)
+    }
+    /** True when only timer or frame ticks committed after [stateVersion], so an action that the UI showed at it still applies. */
+    fun ticksOnlySince(store: ToolStore,id: String,stateVersion: Int): Boolean {
+        val saved=store.tool(id) ?: return false
+        return durable==saved && stateVersion in quietVersion..saved.stateVersion
     }
     fun ensureAvailable() {check(failure==null) {checkNotNull(failure)}}
     private fun resetOutput() {
@@ -102,7 +111,10 @@ internal class ArtifactCoordinator private constructor() {
         result?.frames?.let {frames=it};result?.timers?.let {timers=it}
         updateInputView()
     }
-    fun committed(next: ToolRecord,result: ToolPreview?=null) {durable=next;publish(next,result);flushJob?.cancel();flushJob=null}
+    fun committed(next: ToolRecord,result: ToolPreview?=null) {
+        durable=next;publish(next,result);flushJob?.cancel();flushJob=null
+        quietVersion=next.stateVersion;quietControl=controlVersion
+    }
     private fun effectiveViewport() = effectiveSurfaces.values.singleOrNull()?.takeIf { it.sizing=="viewport" }
     fun snapshot(store: ToolStore)=snapshot(store.artifactWorkPending(checkNotNull(live).id))
     private fun snapshot(fenced: Boolean)=ArtifactSnapshot(checkNotNull(live),sequence,JSONObject(surfaces.toString()),
@@ -528,6 +540,7 @@ internal class ArtifactCoordinator private constructor() {
         val old=checkNotNull(durable);val next=checkNotNull(live).copy(stateVersion=old.stateVersion+1)
         check(!store.artifactWorkPending(old.id)) {"A native result must finish before local state can commit."}
         store.commitTool(next,old,false,autonomous=true);durable=next;live=next
+        if(quietControl!=controlVersion) {quietVersion=next.stateVersion;quietControl=controlVersion}
         updateInputView()
     }
     fun close(store: ToolStore,revision: Int) {

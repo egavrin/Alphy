@@ -57,9 +57,9 @@ class CapabilityWorkflowTest {
         var generationPrompt = ""
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if (request.replyWithFixturePlan(emit)) return
+                if (request.replyWithAgentFinish(emit)) return
                 generationPrompt = request.systemInstructions + request.turns.joinToString { it.text }
-                emit(CloudEvent.Text(spec()))
+                emit(CloudEvent.Text(agentWrite(spec())))
             }
         }
         ToolStore(context,name).use { store ->
@@ -67,12 +67,11 @@ class CapabilityWorkflowTest {
             val draft = engine.createDraft("Create a shopping list with a button that posts an Android notification.",null)
             engine.generate(draft.id,"fixture",emptyList(),CloudSession())
             assertFalse(generationPrompt.contains(guidance))
-            val callable = JSONArray(generationPrompt.substringAfter("Alphy Android callable shortlist (device availability is checked at execution): ")
-                .substringBefore(". Declare only these implemented IDs."))
-            val callableIds = (0 until callable.length()).map { callable.getJSONObject(it).getString("id") }.toSet()
-            assertTrue("notification.post" in callableIds)
-            assertTrue(callableIds.size <= 5 && CapabilityCatalog.ids.containsAll(callableIds))
-            CapabilityCatalog.planned.forEach { assertFalse(it.id in callableIds) }
+            // The agent lists every callable ID in one line and full schemas only on describe_capability.
+            val listed = Regex("(?m)^- ([a-z]+\\.[A-Za-z]+): ").findAll(generationPrompt).map { it.groupValues[1] }.toSet()
+            assertTrue("notification.post" in listed)
+            assertTrue(CapabilityCatalog.ids.containsAll(listed))
+            CapabilityCatalog.planned.forEach { assertFalse(it.id in listed) }
             assertTrue(store.effects(draft.id).isEmpty())
             val before = AndroidCapabilities(context).discover().toString()
             assertEquals(before,AndroidCapabilities(context).discover().toString())
@@ -127,9 +126,9 @@ class CapabilityWorkflowTest {
         val name = "catalog-picker-${UUID.randomUUID()}.db"
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if (request.replyWithFixturePlan(emit)) return
-                emit(CloudEvent.Text(spec().replace("notification.post","photo.pick")
-                    .replace("args:{title:'List',text:'Updated'}","args:{}")))
+                if (request.replyWithAgentFinish(emit)) return
+                emit(CloudEvent.Text(agentWrite(spec().replace("notification.post","photo.pick")
+                    .replace("args:{title:'List',text:'Updated'}","args:{}"))))
             }
         }
         ToolStore(context,name).use { store ->
@@ -193,8 +192,8 @@ class CapabilityWorkflowTest {
         var answer = spec()
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if (request.replyWithFixturePlan(emit)) return
-                emit(CloudEvent.Text(answer))
+                if (request.replyWithAgentFinish(emit)) return
+                emit(CloudEvent.Text(agentWrite(answer)))
             }
         }
         val store = ToolStore(context,name)
@@ -254,8 +253,8 @@ class CapabilityWorkflowTest {
         var answer = spec("return {state:input.state,effects:[{id:'notice',capability:'notification.post',args:{title:'x',text:'y'}}]};")
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if (request.replyWithFixturePlan(emit)) return
-                emit(CloudEvent.Text(answer))
+                if (request.replyWithAgentFinish(emit)) return
+                emit(CloudEvent.Text(agentWrite(answer)))
             }
         }
         ToolStore(context,name).use { store ->

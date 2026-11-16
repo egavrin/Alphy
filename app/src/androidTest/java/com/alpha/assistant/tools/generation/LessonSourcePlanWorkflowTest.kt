@@ -43,8 +43,6 @@ class LessonSourcePlanWorkflowTest {
         assertTrue(prompt.contains("sourceIds"))
         assertTrue(prompt.contains("""["s1","s2","s3"]"""))
         assertFalse(NeedsPlan.promptFor(kind).contains("sourceIds"))
-        assertEquals(NeedsPlan.prompt, NeedsPlan.promptFor(null))
-        reject { NeedsPlan.promptFor(null, allowlist) }
         reject { NeedsPlan.promptFor(kind, setOf("https://example.invalid")) }
         reject { NeedsPlan.promptFor(kind, setOf("s21")) }
     }

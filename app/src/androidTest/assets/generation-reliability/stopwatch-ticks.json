@@ -1,0 +1,206 @@
+{
+ "artifact_id": "ticking_stopwatch",
+ "artifact_revision": 1,
+ "spec": {
+  "title": "Stopwatch",
+  "description": "A simple stopwatch with tenths, start, stop, reset and lap times.",
+  "capabilities": [],
+  "surfaces": [
+   {
+    "id": "ticker",
+    "width": 64,
+    "height": 64
+   }
+  ],
+  "stateSchema": {
+   "running": "boolean",
+   "notRunning": "boolean",
+   "startAt": "number",
+   "elapsedMs": "number",
+   "elapsedText": "string",
+   "statusText": "string",
+   "lapCountText": "string",
+   "hasLaps": "boolean",
+   "noLaps": "boolean",
+   "canReset": "boolean",
+   "nextLap": "number",
+   "lastLapMs": "number",
+   "laps": {
+    "type": "list",
+    "maxItems": 50,
+    "fields": {
+     "id": "string",
+     "name": "string",
+     "split": "string",
+     "total": "string"
+    }
+   }
+  },
+  "initialState": {
+   "running": false,
+   "notRunning": true,
+   "startAt": 0,
+   "elapsedMs": 0,
+   "elapsedText": "00:00:00.0",
+   "statusText": "Ready",
+   "lapCountText": "0",
+   "hasLaps": false,
+   "noLaps": true,
+   "canReset": false,
+   "nextLap": 1,
+   "lastLapMs": 0,
+   "laps": []
+  },
+  "ui": {
+   "type": "theme",
+   "preset": "technical",
+   "cornerRadius": 22,
+   "children": [
+    {
+     "type": "column",
+     "style": {
+      "gap": "medium",
+      "padding": "medium"
+     },
+     "children": [
+      {
+       "type": "card",
+       "children": [
+        {
+         "type": "row",
+         "wrap": false,
+         "style": {
+          "gap": "small",
+          "crossAlign": "center"
+         },
+         "children": [
+          {
+           "type": "column",
+           "style": {
+            "gap": "small"
+           },
+           "layout": {
+            "weight": 1
+           },
+           "children": [
+            {
+             "type": "metric",
+             "text": "Elapsed",
+             "bind": "elapsedText",
+             "style": {
+              "emphasis": "number"
+             }
+            },
+            {
+             "type": "text",
+             "text": "Status",
+             "bind": "statusText",
+             "style": {
+              "tone": "muted"
+             }
+            }
+           ]
+          },
+          {
+           "type": "canvas",
+           "text": "Running indicator",
+           "surfaces": [
+            "ticker"
+           ],
+           "layout": {
+            "width": 64,
+            "height": 64
+           }
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "row",
+       "wrap": true,
+       "style": {
+        "gap": "small"
+       },
+       "children": [
+        {
+         "type": "button",
+         "text": "Start",
+         "action": "start",
+         "variant": "filled",
+         "visibleBind": "notRunning"
+        },
+        {
+         "type": "button",
+         "text": "Stop",
+         "action": "stop",
+         "variant": "tonal",
+         "visibleBind": "running"
+        },
+        {
+         "type": "button",
+         "text": "Lap",
+         "action": "lap",
+         "variant": "outlined",
+         "visibleBind": "running"
+        },
+        {
+         "type": "button",
+         "text": "Reset",
+         "action": "reset",
+         "variant": "text",
+         "enabledBind": "canReset"
+        }
+       ]
+      },
+      {
+       "type": "metric",
+       "text": "Laps recorded",
+       "bind": "lapCountText"
+      },
+      {
+       "type": "emptyState",
+       "text": "No laps yet",
+       "visibleBind": "noLaps",
+       "children": [
+        {
+         "type": "text",
+         "text": "Tap Lap while the stopwatch runs.",
+         "style": {
+          "tone": "muted"
+         }
+        }
+       ]
+      },
+      {
+       "type": "list",
+       "text": "Laps",
+       "bind": "laps",
+       "visibleBind": "hasLaps",
+       "columns": [
+        {
+         "text": "Lap",
+         "field": "name"
+        },
+        {
+         "text": "Split",
+         "field": "split"
+        },
+        {
+         "text": "Total",
+         "field": "total"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "source": "const s=input.state,e=input.event;\nif(e.type==='preview'||e.type==='render')return {state:input.state};\nfunction pad(n){return n<10?'0'+n:String(n);}\nfunction fmt(ms){let v=Math.floor(Number(ms)/100);if(!isFinite(v)||v<0)v=0;const t=v%10;const secs=Math.floor(v/10);const sec=secs%60;const mins=Math.floor(secs/60);const min=mins%60;const hr=Math.floor(mins/60);return pad(hr)+':'+pad(min)+':'+pad(sec)+'.'+t;}\nif(e.type==='action'){\n const a=e.actionId;\n if(a==='start'&&!s.running){s.startAt=Date.now();s.running=true;}\n else if(a==='stop'&&s.running){s.elapsedMs=Math.max(0,Date.now()-s.startAt);s.startAt=0;s.running=false;}\n else if(a==='reset'){s.running=false;s.startAt=0;s.elapsedMs=0;s.laps=[];s.nextLap=1;s.lastLapMs=0;}\n else if(a==='lap'&&s.running){\n  const total=Math.max(0,Date.now()-s.startAt);\n  const split=Math.max(0,total-s.lastLapMs);\n  s.laps.push({id:'l'+s.nextLap,name:'Lap '+s.nextLap,split:fmt(split),total:fmt(total)});\n  while(s.laps.length>50)s.laps.shift();\n  s.lastLapMs=total;s.nextLap=s.nextLap+1;\n }\n}\nif(s.running&&s.startAt>0)s.elapsedMs=Math.max(0,Date.now()-s.startAt);\ns.elapsedText=fmt(s.elapsedMs);\ns.statusText=s.running?'Running':(s.elapsedMs>0?'Paused':'Ready');\ns.lapCountText=String(s.laps.length);\ns.hasLaps=s.laps.length>0;s.noLaps=!s.hasLaps;s.notRunning=!s.running;\ns.canReset=s.elapsedMs>0||s.laps.length>0;\nconst commands=[{type:'circle',x:32,y:32,radius:22,color:s.running?'accent':'muted'},{type:'circle',x:32,y:32,radius:13,color:'default'}];\nconst out={state:s,surfaces:{ticker:{commands:commands}}};\nif(e.type==='action'||e.type==='open'||e.type==='timer')out.timers=s.running?[{id:'tick',intervalMs:100}]:[];\nreturn out;",
+  "formatVersion": 3,
+  "appLanguage": "en"
+ },
+ "state_version": 1,
+ "state": "{\"running\": false, \"notRunning\": true, \"startAt\": 0, \"elapsedMs\": 0, \"elapsedText\": \"00:00:00.0\", \"statusText\": \"Ready\", \"lapCountText\": \"0\", \"hasLaps\": false, \"noLaps\": true, \"canReset\": false, \"nextLap\": 1, \"lastLapMs\": 0, \"laps\": []}",
+ "ui": "{\"type\": \"theme\", \"preset\": \"technical\", \"cornerRadius\": 22, \"children\": [{\"type\": \"column\", \"style\": {\"gap\": \"medium\", \"padding\": \"medium\"}, \"children\": [{\"type\": \"card\", \"children\": [{\"type\": \"row\", \"wrap\": false, \"style\": {\"gap\": \"small\", \"crossAlign\": \"center\"}, \"children\": [{\"type\": \"column\", \"style\": {\"gap\": \"small\"}, \"layout\": {\"weight\": 1}, \"children\": [{\"type\": \"metric\", \"text\": \"Elapsed\", \"bind\": \"elapsedText\", \"style\": {\"emphasis\": \"number\"}}, {\"type\": \"text\", \"text\": \"Status\", \"bind\": \"statusText\", \"style\": {\"tone\": \"muted\"}}]}, {\"type\": \"canvas\", \"text\": \"Running indicator\", \"surfaces\": [\"ticker\"], \"layout\": {\"width\": 64, \"height\": 64}}]}]}, {\"type\": \"row\", \"wrap\": true, \"style\": {\"gap\": \"small\"}, \"children\": [{\"type\": \"button\", \"text\": \"Start\", \"action\": \"start\", \"variant\": \"filled\", \"visibleBind\": \"notRunning\"}, {\"type\": \"button\", \"text\": \"Stop\", \"action\": \"stop\", \"variant\": \"tonal\", \"visibleBind\": \"running\"}, {\"type\": \"button\", \"text\": \"Lap\", \"action\": \"lap\", \"variant\": \"outlined\", \"visibleBind\": \"running\"}, {\"type\": \"button\", \"text\": \"Reset\", \"action\": \"reset\", \"variant\": \"text\", \"enabledBind\": \"canReset\"}]}, {\"type\": \"metric\", \"text\": \"Laps recorded\", \"bind\": \"lapCountText\"}, {\"type\": \"emptyState\", \"text\": \"No laps yet\", \"visibleBind\": \"noLaps\", \"children\": [{\"type\": \"text\", \"text\": \"Tap Lap while the stopwatch runs.\", \"style\": {\"tone\": \"muted\"}}]}, {\"type\": \"list\", \"text\": \"Laps\", \"bind\": \"laps\", \"visibleBind\": \"hasLaps\", \"columns\": [{\"text\": \"Lap\", \"field\": \"name\"}, {\"text\": \"Split\", \"field\": \"split\"}, {\"text\": \"Total\", \"field\": \"total\"}]}]}]}"
+}

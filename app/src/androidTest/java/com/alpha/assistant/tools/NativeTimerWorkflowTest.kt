@@ -139,6 +139,31 @@ class NativeTimerWorkflowTest {
         } finally { fixture.remove() }
     }
 
+    @Test fun anEnglishAppShowsEnglishTimerText() {
+        val fixture = ShellFixture("timer-english")
+        try {
+            fixture.install()
+            fixture.launch().use { scenario ->
+                val ui = JSONObject().put("type", "column").put("children", JSONArray()
+                    .put(timer("Warm-up", "countdown", "time")).put(timer("Workout", "stopwatch", "start")))
+                val spec = spec(ui, 0)
+                val running = JSONObject(spec.initialState).put("start", System.currentTimeMillis()).toString()
+                scenario.onActivity { activity ->
+                    activity.setContent {
+                        AlphaTheme {
+                            Column(Modifier.safeDrawingPadding()) {
+                                ToolContent(spec.ui.toString(), running, enabled = true, appLanguage = "en") { _, _ -> }
+                            }
+                        }
+                    }
+                }
+                robot.waitFor("Warm-up: Not started")
+                robot.waitUntil { robot.texts().any { it.startsWith("Workout: ") && it.endsWith(" elapsed") } }
+                assertFalse(robot.texts().any { Regex("\\p{IsCyrillic}").containsMatchIn(it) })
+            }
+        } finally { fixture.remove() }
+    }
+
     private fun awaitSecondBoundary() {
         val deadline = SystemClock.elapsedRealtime() + 1_100
         robot.waitUntil { SystemClock.elapsedRealtime() >= deadline }
@@ -150,8 +175,10 @@ class NativeTimerWorkflowTest {
         var reading: String? = null
         scenario.onActivity { activity ->
             reading = root(activity.window.decorView)?.semanticsOwner?.getAllSemanticsNodes(mergingEnabled = false)
-                ?.flatMap { it.config.getOrNull(SemanticsProperties.Text).orEmpty() }
-                ?.firstOrNull { it.text.startsWith("Тренировка: Прошло ") }?.text
+                // The timer speaks its whole state as a content description. Its clock text has no label.
+                ?.flatMap { node -> node.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty() +
+                    node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text } }
+                ?.firstOrNull { it.startsWith("Тренировка: Прошло ") }
         }
         return reading
     }

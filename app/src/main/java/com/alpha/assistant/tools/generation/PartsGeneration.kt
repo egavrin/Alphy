@@ -59,42 +59,33 @@ internal object PartsGeneration {
 
     private data class PresentationChoice(val profile: NativePresentationProfile, val preset: String, val needId: String)
 
+    /** Assembles a validated lesson plan without a selector. */
+    fun lesson(plan: NeedsPlan, requests: List<PartRequest>): PartsAssembly {
+        // Each typed lesson need has one native part. The plan already supplies its content.
+        val selected = requests.filter { it.type != NeedType.SCENE }.associate { request ->
+            request.slotFailure?.let { throw it }
+            request.id to (request.candidates.singleOrNull()
+                ?: throw PartsContractFailure("$.needs", "one native part per lesson need"))
+        }
+        return assemble(plan, requests, selected, emptyList(), emptyList(), null)
+    }
+
     suspend fun build(
         plan: NeedsPlan,
         lessonTarget: CourseSlideKind? = null,
         selectPresentation: Boolean = false,
         clock: PartClockSample? = null,
         preparedParts: List<PartRequest>? = null,
-        workflow: GenerationBehavior.Scenario? = null,
         ask: JevAsk,
     ): PartsAssembly {
         if (lessonTarget != null) {
-            val requests = preparedParts ?: run {
+            return lesson(plan, preparedParts ?: run {
                 plan.validateLesson(lessonTarget)
                 ToolParts.requests(plan, lessonTarget)
-            }
-            // Each typed lesson need has one native part. The plan already supplies its content.
-            val selected = requests.filter { it.type != NeedType.SCENE }.associate { request ->
-                request.slotFailure?.let { throw it }
-                request.id to (request.candidates.singleOrNull()
-                    ?: throw PartsContractFailure("$.needs", "one native part per lesson need"))
-            }
-            return assemble(plan, requests, selected, emptyList(), emptyList(), null)
+            })
         }
         val requests = preparedParts ?: ToolParts.requests(plan, clock = clock)
-        val clockNeeds = workflow?.steps.orEmpty().filterIsInstance<GenerationBehavior.Step.Clock>()
-            .mapNotNull { workflow?.slots?.get(it.slot)?.part }.toSet()
-        val fixedClocks = requests.mapNotNull { request ->
-            if (request.id !in clockNeeds || request.slotFailure != null ||
-                request.type !in setOf(NeedType.STOPWATCH, NeedType.COUNTDOWN)) return@mapNotNull null
-            val candidate = request.candidates.singleOrNull() ?: return@mapNotNull null
-            val targets = candidate.behaviorTargets(request.id)
-            if (workflow?.slots.orEmpty().values.filter { it.part == request.id }.any { targets.binding(it) == null }) {
-                return@mapNotNull null
-            }
-            request.id to candidate
-        }.toMap()
-        val sections = requests.filter { it.id !in fixedClocks && it.candidates.isNotEmpty() }.associateWith { request ->
+        val sections = requests.filter { it.candidates.isNotEmpty() }.associateWith { request ->
             request.candidates.map(PartCandidate::section).distinct()
         }
         val sectionQuestions = sections.map { (request, options) ->
@@ -113,7 +104,7 @@ internal object PartsGeneration {
         val partQuestions = candidates.map { (request, options) ->
             JevQuestion("p_${request.id}", request.prompt(), options.map(PartCandidate::description) + NO_MATCH)
         }
-        val focalNeeds = if (selectPresentation) requests.filter { it.id in fixedClocks || it in candidates } else emptyList()
+        val focalNeeds = if (selectPresentation) requests.filter { it in candidates } else emptyList()
         val profiles = NativePresentationProfile.entries
         val presets = ToolUiCatalog.presets.sorted()
         val presentationQuestions = if (focalNeeds.isEmpty()) emptyList() else listOf(
@@ -123,7 +114,7 @@ internal object PartsGeneration {
                 focalNeeds.map { "${it.label}. ${it.description}" } + "Use no focal part.")
         )
         val partResult = JevSelector.ask(ask, "parts", plan, partQuestions, presentationQuestions)
-        val picked = fixedClocks + candidates.mapNotNull { (request, options) ->
+        val picked = candidates.mapNotNull { (request, options) ->
             partResult.choice("p_${request.id}")?.let(options::getOrNull)?.let { request.id to it }
         }.toMap()
         val needsHostProjection = picked.values.any { it.fragment.readProjection != null }

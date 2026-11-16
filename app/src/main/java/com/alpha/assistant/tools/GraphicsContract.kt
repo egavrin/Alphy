@@ -18,6 +18,11 @@ object GraphicsContract {
         internal var stops=0
         internal var bytes=0
         internal val bitmapHandles=mutableSetOf<String>()
+        /** The transformed extent of the drawn points, for the app agent's screen text. */
+        internal var left=Double.POSITIVE_INFINITY
+        internal var top=Double.POSITIVE_INFINITY
+        internal var right=Double.NEGATIVE_INFINITY
+        internal var bottom=Double.NEGATIVE_INFINITY
     }
     private fun keys(o: JSONObject)=o.keys().asSequence().toSet()
     private fun number(o: JSONObject,key: String,min: Double = -8192.0,max: Double = 8192.0): Double = scalar(o.get(key),min,max)
@@ -99,8 +104,11 @@ object GraphicsContract {
         require(keys(o)==setOf("commands"))
         fun point(x: Double,y: Double,m: DoubleArray,count: Boolean=true) {
             if(count)require(++budget.pairs<=2048)
-            require((m[0]*x+m[2]*y+m[4]).let {it.isFinite() && it in -8192.0..8192.0})
-            require((m[1]*x+m[3]*y+m[5]).let {it.isFinite() && it in -8192.0..8192.0})
+            val tx=m[0]*x+m[2]*y+m[4];val ty=m[1]*x+m[3]*y+m[5]
+            require(tx.isFinite() && tx in -8192.0..8192.0)
+            require(ty.isFinite() && ty in -8192.0..8192.0)
+            budget.left=minOf(budget.left,tx);budget.right=maxOf(budget.right,tx)
+            budget.top=minOf(budget.top,ty);budget.bottom=maxOf(budget.bottom,ty)
         }
         fun bounds(x: Double,y: Double,w: Double,h: Double,m: DoubleArray) {
             point(x,y,m);point(x+w,y,m,false);point(x,y+h,m,false);point(x+w,y+h,m,false)

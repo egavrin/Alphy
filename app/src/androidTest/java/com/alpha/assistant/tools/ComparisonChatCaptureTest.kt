@@ -148,6 +148,8 @@ class ComparisonChatCaptureTest {
         require(runId.matches(Regex("[a-f0-9]{32}")) && slotId.matches(Regex("[A-Za-z0-9:_-]{1,168}:candidate:[1-3]")))
         require(request.isNotBlank() && request.trim() == request && request.length <= MAX_CHAT_INPUT && '\u0000' !in request)
         require(reviewSeconds in 5..180)
+        val chatSeconds = input.optInt("chat_seconds", 240)
+        require(chatSeconds in 60..900)
         require(!verifyTip || caseId == "bench:tip")
         require(!verifyWorkflow || caseId == "bench:tip" || canvasWorkflow || caseId in Plan5WorkflowChecks.cases)
         val report = JSONObject().put("run_id", runId).put("slot_id", slotId)
@@ -320,7 +322,7 @@ class ComparisonChatCaptureTest {
             save("sent")
             failureAt = "chat-terminal"
             var previewObserved = false
-            val settled = waitFor(240_000) {
+            val settled = waitFor(chatSeconds * 1_000L) {
                 if (!previewObserved && visible(R.string.tool_preview_provisional) != null) {
                     previewObserved = true
                     report.put("provisional_visible_elapsed_ns", SystemClock.elapsedRealtimeNanos())
@@ -486,9 +488,11 @@ class ComparisonChatCaptureTest {
             terminal = "complete"
         } catch (failure: Exception) {
             report.put("failure_stage", failureAt).put("failure_type", failure.javaClass.simpleName)
+                .put("failure_frame", failure.stackTrace.firstOrNull { it.className.startsWith("com.alpha") }?.toString())
             if (canvasWorkflow) report.put("failure_detail", failure.message?.take(400))
         } catch (failure: AssertionError) {
             report.put("failure_stage", failureAt).put("failure_type", failure.javaClass.simpleName)
+                .put("failure_frame", failure.stackTrace.firstOrNull { it.className.startsWith("com.alpha") }?.toString())
             if (canvasWorkflow) report.put("failure_detail", failure.message?.take(400))
         } finally {
             try {
@@ -587,7 +591,17 @@ class ComparisonChatCaptureTest {
         val editable = controls.filter { it.optString("type") in setOf("numberInput", "input") }
         proof.put("step", "find-controls")
         val bill = editable.single { matches(it, "bill|amount|subtotal|cost") }
-        val people = editable.single { matches(it, "people|person|guest|diner|party|split") }
+        val peoplePattern = "people|person|guest|diner|party|split"
+        // The people count can also be a value between − and + buttons.
+        val stepper = if (editable.any { matches(it, peoplePattern) }) null else controls.filter { it.optString("type") == "row" }
+            .firstNotNullOfOrNull { row ->
+                val children = row.optJSONArray("children")?.let { array -> (0 until array.length()).map(array::getJSONObject) }.orEmpty()
+                val count = children.singleOrNull { it.has("bind") && it.optString("type") in setOf("metric", "text") && matches(it, peoplePattern) }
+                val down = children.singleOrNull { it.optString("type") == "button" && matches(it, "^\\s*[−–-]\\s*$|fewer|less|decrease|minus") }
+                val up = children.singleOrNull { it.optString("type") == "button" && matches(it, "^\\s*\\+\\s*$|more|increase|plus") }
+                if (count != null && down != null && up != null) Triple(count, down, up) else null
+            }
+        val people = stepper?.first ?: editable.single { matches(it, peoplePattern) }
         val slider = controls.single { it.optString("type") == "slider" }
         check(bill != people)
         val numberOrCurrency = Regex("""\s*\p{Sc}?\s*(-?\d+(?:\.\d+)?)\s*\p{Sc}?\s*""")
@@ -607,6 +621,18 @@ class ComparisonChatCaptureTest {
             robot.click(text)
         }
         fun edit(node: JSONObject, amount: Number) {
+            if (stepper != null && node === stepper.first) {
+                repeat(20) {
+                    val current = checkNotNull(value(node, state()))
+                    if (equal(current, amount.toDouble())) return
+                    val button = label(if (current < amount.toDouble()) stepper.third else stepper.second)
+                    robot.reveal(button, null)
+                    robot.click(button)
+                    await(5_000) { !equal(value(node, state()), current) }
+                    robot.waitGone(robot.text(R.string.tool_working))
+                }
+                error("The people count did not reach $amount.")
+            }
             if (equal(value(node, state()), amount.toDouble())) return
             robot.reveal(label(node), null)
             robot.edit(label(node), amount.toString())
@@ -716,9 +742,11 @@ class ComparisonChatCaptureTest {
         robot.click(close)
         robot.waitGone(close)
         scenario.recreate()
-        proof.put("step", "reopen-library-item")
-        robot.reveal(spec.title, null)
-        robot.click(spec.title)
+        // The app was opened from its chat card, so closing it returns to that chat.
+        proof.put("step", "reopen-chat-card")
+        val open = robot.text(R.string.tool_open)
+        robot.reveal(open, null)
+        robot.click(open)
         robot.waitFor(close)
         proof.put("step", "reopen-values")
         val reopened = state()
@@ -757,6 +785,10 @@ class ComparisonChatCaptureTest {
                     put("kind", "transport").put("provider_stage", failure.stage.name)
                     put("http_attempt", failure.httpAttempt).put("phase", failure.phase.wire)
                     put("failure_code", failure.code).put("retry_requested", failure.retryRequested)
+                }
+                is ToolGenerationTraceEvent.AgentStep -> {
+                    put("kind", "agent-step").put("tool", event.tool).put("reply", event.reply).put("result", event.result)
+                        .put("duration_ms", event.durationNanos / 1_000_000)
                 }
                 is ToolGenerationTraceEvent.Finished -> {
                     put("kind", "finished").put("outcome", event.outcome.name).put("failure_code", event.failureCode)

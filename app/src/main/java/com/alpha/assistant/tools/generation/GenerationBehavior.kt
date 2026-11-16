@@ -165,12 +165,12 @@ internal sealed interface GenerationBehavior {
                 ResponseShape("behavior.$rule", path, BehaviorValueShape.of(value)?.id ?: "unknown"))
 
         internal fun resolveValueTypes(
-            scenario: Scenario, nativeTypes: Map<String, BehaviorValueShape>, inferWriterTypes: Boolean,
+            scenario: Scenario, nativeTypes: Map<String, BehaviorValueShape>,
             field: String = FIELD,
         ): Scenario {
             val types = mutableMapOf<String, BehaviorValueShape>()
             fun checksType(slot: String) = scenario.slots.getValue(slot).kind == Kind.VALUE &&
-                (inferWriterTypes || slot in nativeTypes || scenario.slots.getValue(slot).valueType != null)
+                (slot in nativeTypes || scenario.slots.getValue(slot).valueType != null)
             fun requireType(slot: String, type: BehaviorValueShape, path: String, value: Any? = null) {
                 val existing = types.putIfAbsent(slot, type)
                 if (type !in scalarTypes || existing != null && existing != type) {

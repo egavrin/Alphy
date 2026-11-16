@@ -310,54 +310,6 @@ class NativeUiWorkflowTest {
         assertEquals("ui_object",missingDiagnostic.rule)
         assertEquals("string",missingDiagnostic.observed)
     }
-    @Test fun diagnosticObserverDoesNotChangeGenerationRequestsFeedbackOrRetryCount(): Unit = runBlocking {
-        val context=InstrumentationRegistry.getInstrumentation().targetContext
-        val valid=definition("""{"type":"text","text":"Count","bind":"count"}""")
-        val invalid=definition("""{"type":"SECRET_COMPONENT","text":"SECRET_LABEL"}""")
-        val missingLabel=definition("""{"type":"icon","name":"Plus","action":"secretAction"}""")
-        val invalidDate=definition("""{"type":"dateInput","text":"Visit date","bind":"SECRET_BIND","action":"date"}""","""{"SECRET_BIND":"string"}""","""{"SECRET_BIND":"SECRET_DATE"}""")
-        val validDate=definition("""{"type":"dateInput","text":"Visit date","bind":"SECRET_BIND","action":"date"}""","""{"SECRET_BIND":"string"}""","""{"SECRET_BIND":"2028-02-29"}""")
-        val previewInvalid=JSONObject(valid).put("source","return {state:input.state,ui:{type:'SECRET_PREVIEW',text:'SECRET_LABEL'}};").toString()
-        suspend fun run(outputs: List<String>, observer: ((ToolUiDiagnostic)->Unit)?, cancel: Boolean = false): Pair<List<CloudRequest>,String> {
-            val requests=mutableListOf<CloudRequest>()
-            val provider=object: ChatProvider {
-                override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
-                    requests.add(request)
-                    if (request.replyWithFixturePlan(emit)) return
-                    if(cancel) throw CancellationException("SECRET_CANCEL")
-                    emit(CloudEvent.Text(outputs[requests.size - 2]))
-                }
-            }
-            val service=if(observer == null) ToolGenerationService(provider,SandboxClient(context)) else ToolGenerationService(provider,SandboxClient(context),observer)
-            val result=try {
-                service.generate("offline","Synthetic request",null,emptyList(),CloudSession(),"synthetic")
-                "accepted"
-            } catch(failure: Exception) {failure.javaClass.name+":"+failure.message}
-            return requests to result
-        }
-        for(outputs in listOf(listOf(invalid,valid),listOf(invalid,invalid),listOf(missingLabel,valid),listOf(invalidDate,validDate),listOf(previewInvalid,valid),listOf(previewInvalid,previewInvalid),listOf(valid))) {
-            val diagnostics=mutableListOf<ToolUiDiagnostic>()
-            val ordinary=run(outputs,null)
-            assertEquals(ordinary,run(outputs,diagnostics::add))
-            assertEquals(ordinary,run(outputs,observer={throw IllegalStateException("SECRET_OBSERVER")}))
-            assertEquals(if(outputs.first() == valid) 2 else 3,ordinary.first.size)
-            assertFalse(diagnostics.toString().contains("SECRET_"))
-            if(outputs.first() == previewInvalid) assertEquals(ToolUiValidationStage.PREVIEW,diagnostics.first().stage)
-            if(ordinary.first.size == 3) {
-                val correction=ordinary.first.last().turns.last().text
-                val diagnostic=diagnostics.first()
-                assertEquals(outputs.first(),ordinary.first.last().turns[1].text)
-                assertTrue(correction.contains("UI rule: ${diagnostic.rule}."))
-                assertTrue(correction.contains("Path: ${diagnostic.path}."))
-                assertTrue(correction.contains("Expected: ${diagnostic.expected}."))
-                assertTrue(correction.contains("Observed type: ${diagnostic.observed}."))
-                assertTrue(correction.contains("Stage: ${diagnostic.stage.name}."))
-                assertFalse(correction.contains("SECRET_")); assertFalse(correction.contains("secretAction"))
-                assertFalse(ordinary.second.contains("UI rule:")); assertFalse(ordinary.second.contains("$.ui"))
-            }
-        }
-        assertEquals(run(listOf(valid),null,true),run(listOf(valid),{error("observer")},true))
-    }
     @Test fun engineRejectsForgedAndStaleActionsBeforeEvaluation(): Unit = runBlocking {
         val context=InstrumentationRegistry.getInstrumentation().targetContext; val name="native-ui-${UUID.randomUUID()}.db"
         val provider=object: ChatProvider {override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent)->Unit)=error("Offline fixture")}

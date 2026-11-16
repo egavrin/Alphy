@@ -393,7 +393,7 @@ class StructuredStateWorkflowTest {
         val provider=object: ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent)->Unit) {
                 requests.add(request)
-                if (!request.replyWithFixturePlan(emit)) emit(CloudEvent.Text(request.patchSavedFixture(
+                emit(CloudEvent.Text(request.agentReply(
                     JSONObject(definition.json).apply { getJSONObject("ui").put("text", "Updated button") }.toString())))
             }
         }
@@ -508,10 +508,13 @@ class StructuredStateWorkflowTest {
         val name="structured-engine-${UUID.randomUUID()}.db"; val store=ToolStore(context,name)
         var capturedRequest: CloudRequest?=null
         var answer=spec("""if(input.event.type==='action')return {state:input.state,records:[{id:'save',collection:'history',op:'put',key:'a',expectedToken:null,value:{at:1793577600000,dose:'PRIVATE_MEDICATION'}}]}; if(input.event.type==='recordResults'){input.state.count=input.event.entries.length;} return {state:input.state};""").json
+        var refining=false
         val provider=object: ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent)->Unit) {
-                if (request.replyWithFixturePlan(emit)) return
-                capturedRequest=request; emit(CloudEvent.Text(request.patchSavedFixture(answer)))
+                capturedRequest=request
+                // The host keeps the layout of a private app, so its refinement edits only the source.
+                val edit=JSONObject().put("tool","edit_app").put("set",JSONObject().put("source",JSONObject(answer).getString("source"))).toString()
+                emit(CloudEvent.Text(if(refining && request.turns.size == 1) edit else request.agentReply(answer)))
             }
         }
         val service=ToolGenerationService(provider,SandboxClient(context)); val engine=ToolEngine(store,service)
@@ -520,7 +523,7 @@ class StructuredStateWorkflowTest {
             val live=engine.interact(old.id,old.revision,old.stateVersion,"save",null)
             assertEquals(1,JSONObject(live.state).getInt("count"))
             assertNull(ToolRecords(store).pending(old.id))
-            answer=spec().json
+            answer=spec().json; refining=true
             val refine=engine.createDraft("rename",old.id); engine.generate(refine.id,"fixture",emptyList(),CloudSession())
             val refinement=checkNotNull(capturedRequest).turns.first().text
             assertFalse(refinement.contains("Current state:"))

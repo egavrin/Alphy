@@ -49,6 +49,14 @@ internal class BehaviorCheckFailure(val step: Int?, val reason: String,
         }
 }
 
+internal const val MAX_PROBE_EVENTS = 600
+private const val PROBE_FRAME_MS = 50L
+
+/** Replaces Date in a disposable probe isolate. It reads __alphyNow from the current evaluation. */
+private const val DATE_SHIM = "(function(){const g=globalThis;const D=g.__alphyDate||(g.__alphyDate=g.Date);" +
+    "function F(...a){if(!new.target)return new D(__alphyNow).toString();return a.length?new D(...a):new D(__alphyNow);}" +
+    "F.prototype=D.prototype;F.now=function(){return __alphyNow;};F.UTC=D.UTC;F.parse=D.parse;g.Date=F;})();"
+
 /** No store, broker, launcher, permission, grant, scheduler, or native result producer is available here. */
 internal class ToolGenerationSmoke(
     private val sandbox: SandboxClient,
@@ -65,7 +73,7 @@ internal class ToolGenerationSmoke(
     private val observeReplay: ((List<String>) -> Unit)? = null,
 ) {
     private data class Control(val event: JSONObject,val path: String)
-    private inner class Branch(private val execute: suspend (String,String)->SandboxResult,initialUi: String, seedState: String,
+    internal inner class Branch(private val execute: suspend (String,String)->SandboxResult,initialUi: String, seedState: String,
         private val freezeClock: Boolean) {
         var state=seedState
         var ui=initialUi
@@ -84,6 +92,7 @@ internal class ToolGenerationSmoke(
             val sample = checkNotNull(clock)
             clock = sample.copy(elapsedMillis = sample.elapsedMillis + milliseconds)
         }
+        fun advanceClockIfPresent(milliseconds: Int) { if (clock != null) advanceClock(milliseconds) }
         suspend fun event(event: JSONObject,path: String): ToolPreview {
             checkActive()
             replay?.add(event.toString())
@@ -568,6 +577,114 @@ internal class ToolGenerationSmoke(
         }
         return preview
     }
+    /**
+     * Runs agent steps on a disposable copy of the app from [seedState].
+     * A test clock replaces Date for the script and drives native timer displays.
+     */
+    internal suspend fun <T> probe(seedState: String = spec.initialState, block: suspend AppProbe.() -> T): T {
+        var now = System.currentTimeMillis() / 1000 * 1000
+        suspend fun start(branch: Branch): T {
+            val probe = AppProbe(branch, { now }) { now += it }
+            probe.open()
+            return probe.block()
+        }
+        return if (spec.isSealedStandalone) start(Branch({ _, _ -> error("A sealed standalone app has no executor.") }, spec.ui.toString(), seedState, false))
+        else sandbox.disposable { execute ->
+            start(Branch({ source, input -> execute("const __alphyNow=$now;$DATE_SHIM\n$source", input) }, spec.ui.toString(), seedState, false))
+        }
+    }
+
+    internal inner class AppProbe(private val branch: Branch, private val clock: () -> Long, private val advance: (Long) -> Unit) {
+        val ui: JSONObject get() = JSONObject(branch.ui)
+        val state: JSONObject get() = branch.displayState()
+        val surfaces: JSONObject get() = branch.surfaces
+        val nowMillis: Long get() = clock()
+        val surfaceIds: Set<String> get() = branch.effectiveSurfaces.keys
+        val surfaceSizes: Map<String, ToolSurface> get() = branch.effectiveSurfaces
+        /** Effects and record requests from the latest operation. The probe does not run them. */
+        var requested: List<String> = emptyList()
+            private set
+
+        internal suspend fun open() {
+            branch.event(JSONObject().put("type", "open"), "$.ui")
+            for ((index, surface) in spec.surfaces.values.withIndex()) {
+                if (surface.sizing == "viewport") branch.event(GraphicsContract.viewport(surface), "$.surfaces[$index]")
+            }
+            val userStart = spec.hostControls.playback && ArtifactPlayback.primaryControl(branch.playback.value) == "start"
+            if (!userStart && branch.playback.automaticStart) for ((index, surface) in spec.surfaces.values.withIndex()) {
+                branch.event(GraphicsContract.event("start", surfaceId = surface.id), "$.surfaces[$index]")
+            }
+            settle()
+        }
+
+        private fun settle() {
+            requested = branch.fencedEffects.map { it.capability } + if (branch.fenced && branch.fencedEffects.isEmpty()) listOf("records") else emptyList()
+            // Native results are outside this probe. Later steps continue as if the request finished without a result event.
+            branch.fenced = false
+        }
+
+        /** Sends a control event. [payload] is already in the control's wire shape. */
+        suspend fun control(id: String, payload: Any?) {
+            val root = ui
+            val live = ToolUiCatalog.actionTarget(root, id)?.node?.let(ToolUiCatalog::isLiveInput) == true
+            val event = controlEvent(root, state, id, payload, live)
+            branch.event(event, "$.ui")
+            settle()
+        }
+
+        suspend fun playback(type: String) {
+            for ((index, surface) in spec.surfaces.values.withIndex()) {
+                branch.event(GraphicsContract.event(type, surfaceId = surface.id), "$.surfaces[$index]")
+            }
+            settle()
+        }
+
+        suspend fun pointer(surfaceId: String, x: Double, y: Double) {
+            val surface = checkNotNull(branch.effectiveSurfaces[surfaceId])
+            val px = x * surface.width
+            val py = y * surface.height
+            for (phase in listOf("down", "up")) {
+                branch.event(GraphicsContract.event("pointer", x = px, y = py, phase = phase, surfaceId = surfaceId),
+                    "$.surfaces[${spec.surfaces.keys.toList().indexOf(surfaceId)}]")
+            }
+            settle()
+        }
+
+        suspend fun control(surfaceId: String, direction: String) {
+            branch.event(GraphicsContract.event("control", direction = direction, surfaceId = surfaceId),
+                "$.surfaces[${spec.surfaces.keys.toList().indexOf(surfaceId)}]")
+            settle()
+        }
+
+        /** Advances the clock in 50 ms ticks and delivers subscribed frames and timers. Returns the delivered event count. */
+        suspend fun wait(milliseconds: Long, maxEvents: Int = MAX_PROBE_EVENTS): Int {
+            var delivered = 0
+            var elapsed = 0L
+            val due = branch.timers.mapValues { it.value.toLong() }.toMutableMap()
+            while (elapsed < milliseconds) {
+                val tick = minOf(PROBE_FRAME_MS, milliseconds - elapsed)
+                elapsed += tick
+                advance(tick)
+                branch.advanceClockIfPresent(tick.toInt())
+                if (branch.playback.value != "playing" || delivered >= maxEvents) continue
+                for ((index, surface) in spec.surfaces.values.withIndex()) if (surface.id in branch.frames && delivered < maxEvents) {
+                    branch.event(GraphicsContract.event("frame", tick.toInt(), surfaceId = surface.id), "$.surfaces[$index]")
+                    delivered++
+                }
+                for ((timer, interval) in branch.timers) {
+                    val next = due[timer] ?: interval.toLong()
+                    if (elapsed >= next && delivered < maxEvents) {
+                        branch.event(JSONObject().put("type", "timer").put("timerId", timer), "$.timers")
+                        delivered++
+                        due[timer] = next + interval
+                    }
+                }
+            }
+            settle()
+            return delivered
+        }
+    }
+
     private fun controlEvent(root: JSONObject, state: JSONObject, id: String, payload: Any?, liveInput: Boolean): JSONObject {
         val selected = if (liveInput) ToolUiCatalog.validateLiveInput(root,id,payload,state)
             else ToolUiCatalog.validateAction(root,id,payload,state)

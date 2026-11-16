@@ -180,19 +180,12 @@ class NativePresentationWorkflowTest {
         val candidate = ToolSpec.parse(revised.toString())
         original.validateUi(candidate.ui)
         reject { ToolSpec.stateForRevision(original, candidate, original.initialState) }
-        val refined = original.preserveNativePresentation(candidate)
-        assertEquals(recipe.primaryActionId, refined.nativePresentation?.primaryActionId)
-        assertEquals("Новый заголовок", refined.title)
-        assertEquals(original.initialState, ToolSpec.stateForRevision(original, refined, original.initialState))
-        assertFalse(refined.providerDefinition().contains("nativePresentation"))
 
         val moved = JSONObject(original.ui.toString())
         val children = moved.getJSONArray("children")
         val first = children.getJSONObject(0)
         children.put(0, children.getJSONObject(1)).put(1, first)
         reject { original.validateUi(moved) }
-        reject { original.preserveNativePresentation(ToolSpec.parse(JSONObject(original.providerDefinition())
-            .put("ui", moved).toString())) }
         val missing = JSONObject(original.ui.toString())
         val controls = missing.getJSONArray("children").getJSONObject(0).getJSONArray("children")
             .getJSONObject(1).getJSONArray("children")

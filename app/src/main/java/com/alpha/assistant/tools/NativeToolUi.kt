@@ -85,6 +85,12 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.foundation.text.modifiers.TextAutoSizeLayoutScope
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.isSpecified
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -92,6 +98,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.Lifecycle
@@ -379,7 +386,69 @@ internal fun ColorScheme.toolInk(name: String, background: Color): Color {
     }
 }
 
+private val rowTextTypes = setOf("text", "metric", "badge", "fact")
+
+/** A metric value up to this length is a number with a unit or a short phrase, so it stays on one line. */
+private const val COMPACT_METRIC_LENGTH = 24
+
+/**
+ * Shrinks a label until it fits without a line break inside a word. StepBased accepts a break inside a word.
+ * With [oneLineFirst], the label first shrinks to fit one line. It breaks between words only when one line cannot fit at [min].
+ */
+private data class WholeWordAutoSize(val min: TextUnit, val max: TextUnit, val oneLineFirst: Boolean = false) : TextAutoSize {
+    override fun TextAutoSizeLayoutScope.getFontSize(constraints: Constraints, text: AnnotatedString): TextUnit {
+        val sizes = generateSequence(if (max.isSpecified) max.value else 14f) { it - 1f }.takeWhile { it >= min.value }.map { it.sp }
+        fun fits(size: TextUnit, oneLine: Boolean): Boolean {
+            val layout = performLayout(constraints, text, size)
+            if (layout.hasVisualOverflow) return false
+            return if (oneLine) layout.lineCount == 1 else (0 until layout.lineCount - 1).all { line ->
+                val end = layout.getLineEnd(line)
+                end >= text.length || text[end - 1].isWhitespace() || text[end - 1] == '-' || text[end].isWhitespace()
+            }
+        }
+        if (oneLineFirst) sizes.firstOrNull { fits(it, true) }?.let { return it }
+        return sizes.firstOrNull { fits(it, false) } ?: min
+    }
+}
+
 private val LocalMiniAppControlsLanguage = staticCompositionLocalOf<String?> { null }
+
+private val miniAppEnglish = mapOf(
+    R.string.tool_timer_idle to R.string.tool_timer_idle_en,
+    R.string.tool_timer_expired to R.string.tool_timer_expired_en,
+    R.string.tool_timer_unavailable to R.string.tool_timer_unavailable_en,
+    R.string.tool_timer_remaining to R.string.tool_timer_remaining_en,
+    R.string.tool_timer_elapsed to R.string.tool_timer_elapsed_en,
+    R.string.tool_timer_clock_days to R.string.tool_timer_clock_days_en,
+    R.string.foreground_timer_start to R.string.foreground_timer_start_en,
+    R.string.foreground_timer_resume to R.string.foreground_timer_resume_en,
+    R.string.foreground_timer_reset to R.string.foreground_timer_reset_en,
+    R.string.foreground_timer_ready to R.string.foreground_timer_ready_en,
+    R.string.foreground_timer_paused to R.string.foreground_timer_paused_en,
+    R.string.foreground_timer_vibration to R.string.foreground_timer_vibration_en,
+    R.string.foreground_timer_notification to R.string.foreground_timer_notification_en,
+    R.string.foreground_timer_denied to R.string.foreground_timer_denied_en,
+    R.string.foreground_timer_unavailable to R.string.foreground_timer_unavailable_en,
+    R.string.foreground_timer_uncertain to R.string.foreground_timer_uncertain_en,
+    R.string.foreground_timer_suppressed to R.string.foreground_timer_suppressed_en,
+    R.string.foreground_timer_failed to R.string.foreground_timer_failed_en,
+    R.string.tool_records_empty to R.string.tool_records_empty_en,
+    R.string.tool_generated_dialog_close to R.string.tool_generated_dialog_close_en,
+    R.string.tool_route_back to R.string.tool_route_back_en,
+    R.string.tool_page to R.string.tool_page_en,
+    R.string.tool_page_previous to R.string.tool_page_previous_en,
+    R.string.tool_page_next to R.string.tool_page_next_en,
+    R.string.tool_reorder_handle to R.string.tool_reorder_handle_en,
+    R.string.tool_reorder_move_up to R.string.tool_reorder_move_up_en,
+    R.string.tool_reorder_move_down to R.string.tool_reorder_move_down_en,
+    R.string.tool_image_unavailable to R.string.tool_image_unavailable_en,
+)
+
+/** Host text inside a mini-app. An app in a language other than Russian gets the English text. */
+@Composable internal fun miniAppString(resource: Int, vararg args: Any): String {
+    val tag = LocalMiniAppControlsLanguage.current
+    return stringResource(if (tag == null || tag == "ru") resource else miniAppEnglish[resource] ?: resource, *args)
+}
 
 @Composable private fun miniAppEditorAction(resource: Int, label: String): String {
     val tag = LocalMiniAppControlsLanguage.current
@@ -751,7 +820,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 Text(text, style = MaterialTheme.typography.titleMedium)
                 content()
                 TextButton(onClick = { event(node.getString("dismissAction"), null) }, enabled = enabled,
-                    modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.tool_generated_dialog_close, text)) }
+                    modifier = Modifier.heightIn(min = 48.dp)) { Text(miniAppString(R.string.tool_generated_dialog_close, text)) }
             }
         }
         return
@@ -772,12 +841,12 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             text={Column(Modifier.heightIn(max=480.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 CompositionLocalProvider(LocalToolBackground provides MaterialTheme.colorScheme.surfaceContainerHigh, content = content)
             }},
-            confirmButton={TextButton(onClick={event(node.getString("dismissAction"),null)},enabled=enabled) {Text(stringResource(R.string.tool_generated_dialog_close, text))}})
+            confirmButton={TextButton(onClick={event(node.getString("dismissAction"),null)},enabled=enabled) {Text(miniAppString(R.string.tool_generated_dialog_close, text))}})
         "bottomSheet" -> ModalBottomSheet(onDismissRequest={if(enabled)event(node.getString("dismissAction"),null)},sheetGesturesEnabled=enabled) {
             Column(modifier.heightIn(max=640.dp).verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 Text(text,style=MaterialTheme.typography.titleLarge)
                 content()
-                TextButton(onClick={event(node.getString("dismissAction"),null)},enabled=enabled) {Text(stringResource(R.string.tool_generated_dialog_close, text))}
+                TextButton(onClick={event(node.getString("dismissAction"),null)},enabled=enabled) {Text(miniAppString(R.string.tool_generated_dialog_close, text))}
             }
         }
         "transition" -> NativeTransition(node,state,modifier) {content()}
@@ -789,7 +858,10 @@ private fun courseSceneSlot(root: JSONObject): Int? {
         "theme" -> NativePreset(node.getString("preset"), node.optInt("cornerRadius", -1).takeIf { it >= 0 }, node.optDouble("typeScale",1.0)) {
             Column(modifier,verticalArrangement=verticalArrangement(style,gap),horizontalAlignment=alignment(style),content={content()})
         }
-        "motion" -> NativeMotion(node,state,modifier) {content()}
+        // Motion animates its children as one group. A Box would draw them on top of each other.
+        "motion" -> NativeMotion(node,state,modifier) {
+            Column(verticalArrangement=verticalArrangement(style,gap),horizontalAlignment=alignment(style),content={content()})
+        }
         "transform" -> NativeTransform(node,state,modifier) {content()}
         "stage" -> NativeStage(node,state,modifier) {leaf -> NativeNode(leaf,state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,event=event)}
         "column","form" -> TonedContainer(modifier, tone) { containerModifier ->
@@ -804,19 +876,24 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 } else NativeNode(child,state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,
                     placement=slot,secondaryButton = index in secondary,event=event)
             }
+            val weighted = type == "column" && (0 until items.length()).any { items.getJSONObject(it).optJSONObject("layout")?.has("weight") == true }
             val column: @Composable (Modifier) -> Unit = { position ->
-                Column(position,verticalArrangement=verticalArrangement(style,gap),horizontalAlignment=alignment(style)) {
-                    if(type == "form" && showsToolHeading(text, heading)) Text(text,Modifier.semantics {heading()},style=MaterialTheme.typography.titleMedium)
-                    repeat(items.length()) { index ->
-                        val layout = items.getJSONObject(index).optJSONObject("layout")
-                        var slot: Modifier=Modifier
-                        if(type == "column") {
-                            if(layout?.has("weight") == true) slot=slot.weight(layout.getDouble("weight").toFloat())
-                            if(layout?.has("align") == true) slot=slot.align(alignment(JSONObject().put("align",layout.getString("align"))))
+                @Composable fun body(modifier: Modifier, useWeights: Boolean) =
+                    Column(modifier,verticalArrangement=verticalArrangement(style,gap),horizontalAlignment=alignment(style)) {
+                        if(type == "form" && showsToolHeading(text, heading)) Text(text,Modifier.semantics {heading()},style=MaterialTheme.typography.titleMedium)
+                        repeat(items.length()) { index ->
+                            val layout = items.getJSONObject(index).optJSONObject("layout")
+                            var slot: Modifier=Modifier
+                            if(type == "column") {
+                                if(useWeights && layout?.has("weight") == true) slot=slot.weight(layout.getDouble("weight").toFloat())
+                                if(layout?.has("align") == true) slot=slot.align(alignment(JSONObject().put("align",layout.getString("align"))))
+                            }
+                            renderChild(index, slot)
                         }
-                        renderChild(index, slot)
                     }
-                }
+                // A weight shares a bounded height. In a scrolling screen the height is unbounded, and a weight would give its child 0 dp.
+                if (weighted) BoxWithConstraints(position, propagateMinConstraints = true) { body(Modifier, constraints.hasBoundedHeight) }
+                else body(position, false)
             }
             when (presentation?.profile) {
                 NativePresentationProfile.READING -> Box(containerModifier, contentAlignment = Alignment.TopCenter) {
@@ -850,6 +927,8 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                         val child=items.getJSONObject(index); val layout=child.optJSONObject("layout")
                         var slot: Modifier=Modifier
                         if(layout?.has("weight") == true) slot=slot.weight(layout.getDouble("weight").toFloat())
+                        // Text without a weight shares the free width, so one long text cannot squeeze the next to one letter per line.
+                        else if(child.optString("type") in rowTextTypes) slot=slot.weight(1f, fill = false)
                         if(layout?.has("align") == true) slot=slot.align(verticalAlignment(layout.getString("align")))
                         NativeNode(child,state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,true,heading,placement=slot,
                             secondaryButton = index in secondary,event=event)
@@ -869,7 +948,8 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 child.optString("type") == "button" && child.optString("text").length in 1..3 && !child.has("icon")
             }
             val scaledButtonWidth = if (shortButtons) 48 * LocalDensity.current.fontScale.coerceAtLeast(1f) else 0f
-            val minWidth = maxOf(scaledButtonWidth, node.optInt("minCellWidth", if (shortButtons) 48 else 144).toFloat())
+            // An explicit column count, for example a 3 by 3 board, keeps its columns while each cell keeps 80 dp.
+            val minWidth = maxOf(scaledButtonWidth, node.optInt("minCellWidth", if (shortButtons) 48 else if (node.has("columns")) 80 else 144).toFloat())
             val fittingColumns = ((maxWidth.value + gap.value) / (minWidth + gap.value)).toInt().coerceAtLeast(1)
             val columns = minOf(node.optInt("columns", 2), fittingColumns)
             Column(verticalArrangement=Arrangement.spacedBy(gap)) {
@@ -921,7 +1001,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             }
         }
         "fact" -> BoxWithConstraints(modifier) {
-            val value=if(binding.isNotEmpty()) ToolUiCatalog.display(node,state).removePrefix("$text: ") else ""
+            val value=if(binding.isNotEmpty()) ToolUiCatalog.boundText(node,state) else ""
             if(maxWidth < 220.dp) Column(verticalArrangement=Arrangement.spacedBy(4.dp)) {
                 Text(text,style=MaterialTheme.typography.labelLarge,color=toolInk("muted"))
                 Text(value,style=MaterialTheme.typography.bodyLarge)
@@ -982,7 +1062,14 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 }
             } else if(type == "metric" && node.has("bind")) Column(modifier,verticalArrangement=Arrangement.spacedBy(4.dp), horizontalAlignment = alignment(style)) {
                 if (showsToolHeading(text, heading)) Text(text,style=MaterialTheme.typography.labelLarge,color=toolInk("muted"))
-                Text(label.removePrefix("$text: "),style=metricStyle(style),color=toolInk(tone),textAlign=align)
+                val value=ToolUiCatalog.boundText(node,state)
+                // A short value, such as 56.7–76.3 or 10,000 steps, shrinks to fit one line instead of breaking between a number and its unit.
+                // At a large font scale it can break between words. The line height follows the shrunk font, so no empty space stays.
+                val compact = value.length <= COMPACT_METRIC_LENGTH
+                val base=metricStyle(style)
+                val metric=if (compact && base.lineHeight.isSp && base.fontSize.isSp) base.copy(lineHeight = (base.lineHeight.value / base.fontSize.value).em) else base
+                Text(value,style=metric,color=toolInk(tone),textAlign=align,maxLines=if(compact) 2 else Int.MAX_VALUE,
+                    overflow=TextOverflow.Ellipsis,autoSize=if(compact) WholeWordAutoSize(12.sp,base.fontSize,oneLineFirst=true) else null)
             } else if(node.has("bind") || showsToolHeading(text, heading)) {
                 if(type == "text") NativeReadableText(node,label,enabled,modifier,event)
                 else Text(label,modifier,style=textStyle(style),color=toolInk(style?.optString("tone")),textAlign=align)
@@ -1052,7 +1139,8 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             val label=Modifier.semantics {contentDescription=text}
             if(type == "toggle") Switch(checked,{event(action,it)},label,enabled=enabled)
             else Checkbox(checked,{event(action,it)},label,enabled=enabled)
-            Text(text,Modifier.padding(start=10.dp).weight(1f))
+            // The label wraps inside the free width but does not fill it, so a row keeps width for its other children.
+            Text(text,Modifier.padding(start=10.dp).weight(1f, fill = false))
         }
         "chip" -> {
             val checked=ToolUiCatalog.value(state,binding) as Boolean
@@ -1107,7 +1195,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             var draft by remember(original,binding) {mutableDoubleStateOf(original)}
             val value = (editor?.shown(original) as? Number)?.toDouble() ?: draft
             Column(modifier) {
-                Text("$text: $value")
+                Text("$text: ${BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()}")
                 Slider(value=((value-low)/(high-low)).toFloat().coerceIn(0f,1f),onValueChange={ fraction ->
                     val next = nativeSliderValue(node,fraction)
                     if (editor == null) draft = next else editor.change(next)
@@ -1183,7 +1271,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                     observeNativeImage(lifecycle,available={available(handle)},load={loader(handle)},display={value=it})
                 }
                 if(image == null) Surface(modifier.height(160.dp),color=MaterialTheme.colorScheme.surfaceVariant) {
-                    Box(contentAlignment=Alignment.Center) {Text(stringResource(R.string.tool_image_unavailable, text),Modifier.padding(16.dp))}
+                    Box(contentAlignment=Alignment.Center) {Text(miniAppString(R.string.tool_image_unavailable, text),Modifier.padding(16.dp))}
                 } else Image(checkNotNull(image).asImageBitmap(),text,modifier.heightIn(min=80.dp,max=280.dp),contentScale=if(node.optString("fit") == "crop") ContentScale.Crop else ContentScale.Fit)
             }
         }
@@ -1271,29 +1359,36 @@ private fun courseSceneSlot(root: JSONObject): Int? {
     val now = if (active) clock.nowMillis else lastShownMillis
     SideEffect { lastShownMillis = now }
     val seconds = timer?.secondsAt(now)
-    val status = when {
-        timer == null -> stringResource(R.string.tool_timer_unavailable)
-        seconds == null -> stringResource(R.string.tool_timer_idle)
-        timer.countdown && seconds == 0L -> stringResource(R.string.tool_timer_expired)
-        else -> {
-            val days = seconds / 86_400
-            val hours = seconds / 3600 % 24
-            val minutes = seconds / 60 % 60
-            val remainder = seconds % 60
-            val duration = if (days > 0) stringResource(R.string.tool_timer_clock_days, days, hours, minutes, remainder)
-                else stringResource(R.string.tool_timer_clock, hours, minutes, remainder)
-            stringResource(if (timer.countdown) R.string.tool_timer_remaining else R.string.tool_timer_elapsed, duration)
-        }
+    val duration = seconds?.let {
+        val days = it / 86_400
+        val hours = it / 3600 % 24
+        val minutes = it / 60 % 60
+        val remainder = it % 60
+        if (days > 0) miniAppString(R.string.tool_timer_clock_days, days, hours, minutes, remainder)
+            else stringResource(R.string.tool_timer_clock, hours, minutes, remainder)
     }
+    val note = when {
+        timer == null -> miniAppString(R.string.tool_timer_unavailable)
+        seconds == null -> miniAppString(R.string.tool_timer_idle)
+        timer.countdown && seconds == 0L -> miniAppString(R.string.tool_timer_expired)
+        else -> null
+    }
+    val status = note ?: miniAppString(if (checkNotNull(timer).countdown) R.string.tool_timer_remaining else R.string.tool_timer_elapsed,
+        checkNotNull(duration))
     val style = node.optJSONObject("style")
-    val align = when (style?.optString("align")) {
-        "center" -> TextAlign.Center
-        "end" -> TextAlign.End
-        else -> TextAlign.Start
+    TimerDisplay(node.getString("text"), duration, note, stringResource(R.string.tool_timer_value, node.getString("text"), status),
+        modifier.onGloballyPositioned { inWindow = !it.boundsInWindow().isEmpty }, style?.optString("tone"), alignment(style))
+}
+
+/** A timer shows its label, a large clock, and a short status. Assistive technology reads the whole state as one sentence. */
+@Composable internal fun TimerDisplay(label: String, clock: String?, status: String?, spoken: String, modifier: Modifier = Modifier,
+    tone: String? = null, align: Alignment.Horizontal = Alignment.Start) {
+    Column(modifier.semantics(mergeDescendants = true) { contentDescription = spoken },
+        verticalArrangement = Arrangement.spacedBy(2.dp), horizontalAlignment = align) {
+        if (label.isNotBlank()) Text(label, style = MaterialTheme.typography.labelLarge, color = toolInk("muted"))
+        if (clock != null) Text(clock, style = metricStyle(null), color = toolInk(tone), maxLines = 1)
+        if (status != null) Text(status, style = MaterialTheme.typography.bodyMedium, color = toolInk("muted"))
     }
-    Text(stringResource(R.string.tool_timer_value, node.getString("text"), status),
-        modifier.onGloballyPositioned { inWindow = !it.boundsInWindow().isEmpty },
-        color = toolInk(style?.optString("tone")), style = textStyle(style), textAlign = align)
 }
 
 /** Cache pixels only while resumed. Access metadata is checked each second without decoding again. */
@@ -1509,16 +1604,19 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
     }
     Column(modifier,verticalArrangement=Arrangement.spacedBy(8.dp)) {
         if(showsToolHeading(node.getString("text"), heading)) Text(node.getString("text"),style=MaterialTheme.typography.titleMedium,modifier=Modifier.semantics {heading()})
-        if(rows.length() == 0) Text(node.optString("emptyText",stringResource(R.string.tool_records_empty)),
+        if(rows.length() == 0) Text(node.optString("emptyText",miniAppString(R.string.tool_records_empty)),
             Modifier.padding(vertical = 12.dp), color = toolInk("muted"))
-        if(type == "table") {
+        if(type == "table") BoxWithConstraints {
+            val count=checkNotNull(columns).length()
+            // Columns share the width when each keeps 80 dp. A wider table scrolls sideways.
+            val cell=if(constraints.hasBoundedWidth && maxWidth/count >= 80.dp) maxWidth/count else 140.dp
             Column(Modifier.horizontalScroll(rememberScrollState())) {
-                Row {repeat(checkNotNull(columns).length()) {Text(columns.getJSONObject(it).getString("text"),Modifier.width(160.dp).padding(10.dp),style=MaterialTheme.typography.labelLarge)}}
+                Row {repeat(count) {Text(columns.getJSONObject(it).getString("text"),Modifier.width(cell).padding(10.dp),style=MaterialTheme.typography.labelLarge)}}
                 repeat(rows.length()) {index -> val record=rows.getJSONObject(index)
                     HorizontalDivider()
                     val rowModifier=if(action.isNotEmpty()) Modifier.clickable(enabled=enabled,role=Role.Button) {event(action,ToolUiCatalog.stableKey(record))} else Modifier
                     Row(rowModifier.heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically) {
-                        repeat(checkNotNull(columns).length()) {Text(ToolUiCatalog.value(record,columns.getJSONObject(it).getString("field")).toString(),Modifier.width(160.dp).padding(10.dp))}
+                        repeat(count) {Text(ToolUiCatalog.value(record,columns.getJSONObject(it).getString("field")).toString(),Modifier.width(cell).padding(10.dp))}
                     }
                 }
             }
@@ -1767,10 +1865,15 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
     Column(modifier,verticalArrangement=Arrangement.spacedBy(6.dp)) {
         Text(node.getString("text"),style=MaterialTheme.typography.labelLarge)
         when(type) {
-            "segmented" -> SingleChoiceSegmentedButtonRow(Modifier.horizontalScroll(rememberScrollState())) {
+            // The options share the width. A scrolling row looked cut off at the screen edge.
+            "segmented" -> SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 values.forEachIndexed {index,option -> SegmentedButton(selected(option.get("value")),{choose(option.get("value"))},
-                    SegmentedButtonDefaults.itemShape(index,values.size),modifier=Modifier.sizeIn(minWidth=48.dp,minHeight=48.dp),
-                    enabled=enabled) {Text(option.getString("text"))} }
+                    SegmentedButtonDefaults.itemShape(index,values.size),modifier=Modifier.weight(1f).sizeIn(minHeight=48.dp),
+                    enabled=enabled) {
+                        // A narrow option shrinks its label, so a word such as "Quarterly" does not break.
+                        Text(option.getString("text"),maxLines=2,overflow=TextOverflow.Ellipsis,textAlign=TextAlign.Center,
+                            autoSize=WholeWordAutoSize(10.sp,LocalTextStyle.current.fontSize))
+                    } }
             }
             "navigationBar" -> NavigationBar(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                 values.forEach {option -> NavigationBarItem(selected(option.get("value")),{choose(option.get("value"))},icon={AlphaIcon(Glyph.Grid, color = LocalContentColor.current)},label={Text(option.getString("text"))},enabled=enabled)}
@@ -1984,7 +2087,7 @@ private fun NativeSceneChoices(
     BackHandler(enabled = enabled && canPop && LocalRouteSystemBack.current && !inModalWindow, onBack = back)
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (canPop) TextButton(onClick = back, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp)) {
-            Text(stringResource(R.string.tool_route_back))
+            Text(miniAppString(R.string.tool_route_back))
         }
         key(stack) { render(ToolUiCatalog.routeChild(node, stack.last())) }
     }
@@ -1998,12 +2101,12 @@ private fun NativeSceneChoices(
     LaunchedEffect(current,count) {programmatic=true;try {pages.scrollToPage(current)} finally {programmatic=false}}
     LaunchedEffect(pages) {snapshotFlow {pages.settledPage}.distinctUntilChanged().collect {if(active && !programmatic && it!=target)dispatch(node.getString("action"),it)}}
     Column(modifier,verticalArrangement=Arrangement.spacedBy(8.dp)) {
-        val pageLabel = stringResource(R.string.tool_page, current + 1, count)
+        val pageLabel = miniAppString(R.string.tool_page, current + 1, count)
         Text("${node.getString("text")}: ${current+1} / $count",Modifier.semantics {stateDescription=pageLabel})
         HorizontalPager(pages,Modifier.fillMaxWidth().height(node.optInt("viewportHeight",320).dp),userScrollEnabled=enabled,key={it}) {page->Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {render(page)}}
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
-            TextButton(onClick={event(node.getString("action"),current-1)},enabled=enabled && current>0) {Text(stringResource(R.string.tool_page_previous, node.getString("text")))}
-            TextButton(onClick={event(node.getString("action"),current+1)},enabled=enabled && current<count-1) {Text(stringResource(R.string.tool_page_next, node.getString("text")))}
+            TextButton(onClick={event(node.getString("action"),current-1)},enabled=enabled && current>0) {Text(miniAppString(R.string.tool_page_previous, node.getString("text")))}
+            TextButton(onClick={event(node.getString("action"),current+1)},enabled=enabled && current<count-1) {Text(miniAppString(R.string.tool_page_next, node.getString("text")))}
         }
     }
 }

@@ -21,13 +21,10 @@ import com.alpha.assistant.agent.AgentPhase
 import com.alpha.assistant.data.*
 import com.alpha.assistant.surfaces.AssistContext
 import com.alpha.assistant.tools.ToolGenerationTraceEvent
-import com.alpha.assistant.tools.Plan5WorkflowChecks
-import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
-import com.alpha.assistant.tools.firstSelectorChoices
-import com.alpha.assistant.tools.generation.GenerationRepair
-import com.alpha.assistant.tools.generation.sameToolJson
-import com.alpha.assistant.tools.replyWithFixturePlan
+import com.alpha.assistant.tools.agentFixtureFinish
+import com.alpha.assistant.tools.agentReply
+import com.alpha.assistant.tools.agentWrite
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
 import org.json.JSONArray
@@ -52,8 +49,8 @@ class CloudWorkflowTest {
     private val app get() = instrumentation.targetContext.applicationContext as Application
     private val automation get() = instrumentation.uiAutomation
     private fun main(action: () -> Unit) = instrumentation.runOnMainSync(action)
-    private fun waitUntil(condition: () -> Boolean) {
-        val deadline = SystemClock.uptimeMillis() + 15000
+    private fun waitUntil(timeoutMs: Long = 15000, condition: () -> Boolean) {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
         while (SystemClock.uptimeMillis() < deadline) { if (condition()) return; SystemClock.sleep(50) }
         fail("Workflow condition timed out")
     }
@@ -129,7 +126,8 @@ class CloudWorkflowTest {
             waitUntil { !model.loading }
         }
         fun submit(text: String, search: Boolean = false) { main { model.editDraft(model.snapshot.draft.copy(text = text)); model.send(search = search) } }
-        fun idle() { waitUntil { model.activeConversationId == null } }
+        // A first generation also loads the embedding model, which takes over 15 s on a loaded emulator.
+        fun idle() { waitUntil(60_000) { model.activeConversationId == null } }
         fun restart() {
             val previous = model
             store.seedOpenChat(previous.snapshot.selectedId)
@@ -336,6 +334,53 @@ class CloudWorkflowTest {
         }
     }
 
+    // Failure case: a decision connection that closes before response headers ends the request with a network error.
+    @Test fun decisionConnectionLostBeforeHeadersIsSentAgainOnce() = kotlinx.coroutines.runBlocking {
+        for (drops in 1..2) {
+            var calls = 0
+            Server { request, output ->
+                assertTrue(request.classifying)
+                // Closing without a status line is a connection failure before headers.
+                if (++calls <= drops) return@Server
+                output.classification(decision("What should I make?", kind = "clarify"))
+            }.use { server ->
+                val events = mutableListOf<CloudEvent>()
+                val failure = runCatching {
+                    DeepSeekProvider(server.url).respond("alpha-test-only",
+                        CloudRequest(listOf(CloudTurn("user", "a thing")), false, ChatToolReply.instructions(), chatDecision = true),
+                        CloudSession()) { events += it }
+                }.exceptionOrNull()
+                if (drops == 1) {
+                    assertNull(failure)
+                    assertEquals("clarify", ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text).kind)
+                } else {
+                    assertTrue("$failure", failure is java.io.IOException && failure !is CloudFailure)
+                    assertTrue(events.isEmpty())
+                }
+                assertEquals(2, calls)
+                assertTrue(server.failures.toString(), server.failures.isEmpty())
+            }
+        }
+    }
+
+    /** Failure case: on a Russian device, the decision wrote Russian text for "text my partner when my timer finishes". */
+    @Test fun decisionPromptStatesTheIdentifiedRequestLanguage() = kotlinx.coroutines.runBlocking {
+        var system = ""
+        Server { request, output ->
+            system = request.json.getJSONArray("messages").getJSONObject(0).getString("content")
+            output.classification(decision("What should I make?", kind = "clarify"))
+        }.use { server ->
+            // Failure case: the one-word request "stopwatch" got no statement, and the reply and the app followed the Russian device.
+            for (text in listOf("text my partner when my timer finishes", "stopwatch")) {
+                DeepSeekProvider(server.url).respond("alpha-test-only",
+                    CloudRequest(listOf(CloudTurn("user", text)), false,
+                        ChatToolReply.instructions(), chatDecision = true), CloudSession()) {}
+                assertTrue("$text: $system", "The latest request is in English (en)." in system)
+            }
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+        }
+    }
+
     @Test fun successfulHeadersThenAStalledBodyReportStreamTimeout() = kotlinx.coroutines.runBlocking {
         val release = CountDownLatch(1)
         val calls = AtomicInteger()
@@ -462,21 +507,17 @@ class CloudWorkflowTest {
 
     @Test fun generationTransportRetryPublishesOneArtifact() {
         val prompt = "Build a local counter that adds one."
-        val plan = """{"wholeScreen":true,"language":"en","behavior":{"status":"checkable","scenario":{
-            "slots":{"add":{"kind":"action"},"count":{"kind":"value"}},
-            "steps":[{"op":"action","slot":"add"},{"op":"assert","slot":"count","test":"equals","value":1}]}}}"""
         val writer = """{"formatVersion":3,"title":"Counter","description":"Add one","capabilities":[],
             "stateSchema":{"count":"number"},"initialState":{"count":0},
             "ui":{"type":"column","children":[{"type":"metric","text":"Count","bind":"count"},{"type":"button","text":"Add","action":"add"}]},
-            "behaviorBindings":{"add":"add","count":[0]},
             "source":"const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='add')s.count++;return {state:s};"}"""
         val calls = AtomicInteger()
         Server { request, output ->
             if (request.classifying) output.classification(decision("I can build that.", "create", "none", prompt))
             else when (calls.incrementAndGet()) {
                 1 -> output.interruptedGeneration()
-                2 -> output.answer(JSONObject(plan).put("requiredCapabilities", JSONArray()).toString())
-                3 -> output.answer(writer)
+                2 -> output.answer(agentWrite(writer))
+                3 -> output.answer(agentFixtureFinish)
                 else -> error("Unexpected generation call.")
             }
         }.use { server ->
@@ -492,7 +533,7 @@ class CloudWorkflowTest {
                 assertEquals(generation[0].json.toString(), generation[1].json.toString())
                 val transport = trace.filterIsInstance<ToolGenerationTraceEvent.Transport>().single()
                 assertEquals(fixture.last.toolOperationId, transport.operationId.toString())
-                assertEquals(GenerationTransportFailure(CloudGenerationStage.PLAN, 1,
+                assertEquals(GenerationTransportFailure(CloudGenerationStage.AGENT, 1,
                     GenerationTransportPhase.RESPONSE_BODY, "stream_io", true), transport.failure)
                 assertTrue(trace.none { it is ToolGenerationTraceEvent.Repair })
                 ToolStore(app, "${fixture.name}.db-tools.db").use { store ->
@@ -537,39 +578,9 @@ class CloudWorkflowTest {
         }
     }
 
-    @Test fun recordedCaloriePlanFailureStartsFromSend() = recordedPromptReplay("calorie-budget")
-
-    @Test fun caloriePlanRepairSavesUsableAppFromSend() = recordedPromptReplay("calorie-budget",
-        listOf("goal -> goal", "name -> food", "calories -> food", "add -> food", "remove -> food", "records -> food"))
-
-    @Test fun recordedRecipePlanFailureStartsFromSend() = recordedPromptReplay("recipe-scaler")
-
-    @Test fun recipePlanRepairSavesUsableAppFromSend() = recordedPromptReplay("recipe-scaler",
-        listOf("editName -> ingredients", "editAmount -> ingredients", "add -> ingredients", "list -> ingredients"))
-
     @Test fun recordedRecipeAnswerStopsAtTheArtifactGate() = recordedPromptReplay("recipe-scaler-answer")
 
-    @Test fun recordedReadingLogPlanFailureStartsFromSend() = recordedPromptReplay("reading-log")
-
-    @Test fun readingLogPlanRepairSavesUsableAppFromSend() = recordedPromptReplay("reading-log",
-        listOf("bookName -> log", "bookPages -> log", "add -> log", "records -> log"))
-
-    @Test fun coffeeCounterReceiptRepairSavesUsableAppFromSend() =
-        recordedPromptReplay("coffee-counter", repaired = true, retainsWriter = true)
-
-    @Test fun recordedLiveCoffeeCounterSavesAndBeepsFromSend() =
-        recordedPromptReplay("coffee-counter-live", retainsWriter = true)
-
-    @Test fun coffeeTogglePayloadRepairSavesAndBeepsFromSend() = recordedPromptReplay("coffee-toggle", repaired = true)
-
-    @Test fun coffeeReceiptPlanRepairKeepsWriterRouteFromSend() =
-        recordedPromptReplay("coffee-receipt", repaired = true, retainsWriter = true)
-
-    @Test fun recordedCoffeeReceiptRepairKeepsValidatedWriterFromSend() =
-        recordedPromptReplay("coffee-receipt-live", retainsWriter = true)
-
-    private fun recordedPromptReplay(name: String, unresolvedOwners: List<String>? = null,
-        repaired: Boolean = unresolvedOwners != null, retainsWriter: Boolean = false) {
+    private fun recordedPromptReplay(name: String) {
         fun asset(name: String) = instrumentation.context.assets.open("generation-reliability/$name")
             .bufferedReader().use { JSONObject(it.readText()) }
         fun replies(data: JSONObject) = data.getJSONArray("replies").let { rows ->
@@ -577,24 +588,16 @@ class CloudWorkflowTest {
         }
         val recorded = asset("$name-recorded.json")
         val prompt = recorded.getString("request")
-        val answerReplay = recorded.optString("expected_route") == "answer"
-        val correction = if (repaired) asset("$name-repair.json") else null
-        val retention = recorded.optJSONObject("retention").takeIf { retainsWriter }
-        val savesArtifact = retainsWriter || repaired || recorded.optBoolean("expected_artifact")
-        val prefix = replies(recorded)
-        val prefixCount = correction?.optInt("prefix_replies", 4) ?: 4
-        val fullSequence = correction?.let { prefix.take(prefixCount) + replies(it) } ?: prefix
-        val sequence = if (retainsWriter) fullSequence.dropLast(1) else fullSequence
+        check(recorded.optString("expected_route") == "answer")
+        val sequence = replies(recorded)
         val calls = AtomicInteger()
         val trace = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
         val stages = CopyOnWriteArrayList<String>()
-        val directory = File(app.getExternalFilesDir(null),
-            "$name-e2e/${if (repaired) "repaired" else "recorded"}")
+        val directory = File(app.getExternalFilesDir(null), "$name-e2e/recorded")
         check(!directory.exists() || directory.deleteRecursively())
         check(directory.mkdirs())
         val proof = JSONObject().put("case", recorded.getString("case")).put("request", prompt)
             .put("recording", recorded.getJSONObject("source")).put("status", "failed")
-        correction?.let { proof.put("correction", it.getJSONObject("source")) }
         fun screenshot(name: String): Boolean {
             val bitmap = automation.takeScreenshot() ?: return false
             return try {
@@ -610,58 +613,10 @@ class CloudWorkflowTest {
                 val stage = reply.getString("stage")
                 val messages = request.json.getJSONArray("messages")
                 val last = messages.getJSONObject(messages.length() - 1).getString("content")
-                reply.optJSONArray("feedback_contains")?.let { expected ->
-                    repeat(expected.length()) { assertTrue(last, expected.getString(it) in last) }
-                }
-                retention?.getJSONObject("feedback")?.optJSONArray("${index + 1}")?.let { expected ->
-                    repeat(expected.length()) { assertTrue(last, expected.getString(it) in last) }
-                }
                 when (stage) {
                     "CHAT_DECISION" -> {
                         request.requireStrictDecision(image = true)
                         assertEquals(prompt, last)
-                    }
-                    "SELECTOR" -> {
-                        val questions = JSONObject(last).getJSONArray("questions")
-                        val ids = List(questions.length()) { questions.getJSONObject(it).getString("id") }
-                        val expected = reply.getJSONArray("questions")
-                        assertEquals(List(expected.length(), expected::getString), ids)
-                    }
-                    "PLAN" -> when (index) {
-                        1 -> assertEquals(prompt, JSONObject(last).getString("request"))
-                        prefixCount -> {
-                            val expectedFeedback = (correction ?: recorded).optJSONArray("feedback_contains")
-                            if (expectedFeedback == null) {
-                                assertTrue(last, "The preceding assistant plan" in last)
-                            } else {
-                                repeat(expectedFeedback.length()) { assertTrue(last, expectedFeedback.getString(it) in last) }
-                            }
-                            if (unresolvedOwners != null) {
-                                assertTrue(last, "These slot owners were not selected" in last)
-                                unresolvedOwners.forEach { assertTrue(last, it in last) }
-                            }
-                        }
-                    }
-                    "COMPLETE" -> {
-                        assertTrue(request.json.has("response_format"))
-                        retention?.let {
-                            val guidance = (0 until messages.length()).joinToString("\n") { message ->
-                                messages.getJSONObject(message).getString("content")
-                            }
-                            assertTrue("Missing host Close guidance.", "host supplies a Close control" in guidance)
-                            assertTrue("Missing separate Cancel guidance.", "Cancel button its own action ID" in guidance)
-                        }
-                        if (reply.has("required_capability")) {
-                            val capability = reply.getString("required_capability")
-                            assertTrue("The rebuilt writer must retain $capability.", (0 until messages.length()).any {
-                                val contract = messages.getJSONObject(it).optString("content")
-                                "Required operations and prerequisites:" in contract && capability in contract
-                            })
-                        } else {
-                            assertTrue("Expected the writer's binding contract.", (0 until messages.length()).any {
-                                "behaviorBindings" in messages.getJSONObject(it).optString("content")
-                            })
-                        }
                     }
                     "ANSWER" -> {
                         assertTrue(request.answering)
@@ -693,114 +648,18 @@ class CloudWorkflowTest {
                     proof.put("assistant_status", message.status)
                     assertTrue(server.failures.toString(), server.failures.isEmpty())
                     assertEquals(sequence.size, calls.get())
-                    val rejections = trace.filterIsInstance<ToolGenerationTraceEvent.Attempt>()
-                        .filter { it.outcome.name == "REJECTED" }
-                    fun rejectionReport(event: ToolGenerationTraceEvent.Attempt) = JSONObject()
-                        .put("stage", event.stage.id).put("failure_code", event.failureCode)
-                        .put("validation_category", event.validationCategory?.id).put("validation_rule", event.validationRule)
-                        .put("plan_rule", event.planShape?.rule).put("behavior_rule", event.behaviorBinding?.rule?.id)
-                        .put("smoke_path", event.smoke?.optString("path"))
-                    (retention ?: correction ?: recorded).optJSONArray("rejections")?.let { expected ->
-                        assertEquals(expected.length(), rejections.size)
-                        rejections.forEachIndexed { index, rejection ->
-                            val row = expected.getJSONObject(index)
-                            val actual = rejectionReport(rejection)
-                            row.keys().forEach { key -> assertEquals("Rejection ${index + 1} $key", row.get(key), actual.opt(key)) }
-                        }
-                    }
-                    val repairs = trace.filterIsInstance<ToolGenerationTraceEvent.Repair>()
-                    if (answerReplay) {
-                        assertTrue(trace.isEmpty())
-                    } else {
-                        val planRejection = rejections.first { it.planShape != null }
-                        assertEquals(recorded.optString("first_plan_rule", "behavior.native_owner"), planRejection.planShape?.rule)
-                        val expectedRepairs = (correction ?: recorded).optJSONArray("repair_stages")?.let { stages ->
-                            List(stages.length()) { CloudGenerationStage.valueOf(stages.getString(it)) }
-                        } ?: List(if (repaired) 1 else 3) { CloudGenerationStage.PLAN }
-                        assertEquals(expectedRepairs, repairs.map { it.providerStage })
-                        correction?.optJSONArray("expected_plan_paths")?.let { paths ->
-                            val planRejections = rejections.filter { it.planShape != null }
-                            val rules = correction.getJSONArray("expected_plan_rules")
-                            assertEquals(List(paths.length(), paths::getString), planRejections.map { it.planPath })
-                            assertEquals(List(rules.length(), rules::getString), planRejections.map { it.planShape?.rule })
-                            assertEquals(correction.optString("expected_plan_observed_type", "missing"),
-                                planRejections.last().planShape?.observedType)
-                        }
-                    }
+                    assertTrue(trace.isEmpty())
                     ToolStore(app, database).use { store ->
-                        if (answerReplay) {
-                            assertEquals("complete", message.status)
-                            assertTrue(message.text, Regex("""\b450\s+g\s+flour\b""").containsMatchIn(message.text))
-                            assertNull(message.toolId)
-                            assertTrue(store.tools().isEmpty())
-                            val scenario = checkNotNull(fixture.scenario)
-                            robot.waitUntil { !robot.composed(scenario, "desktop") }
-                            robot.awaitFrames(2)
-                            robot.waitFor(message.text)
-                            proof.put("observed_route", "answer").put("artifact_gate", "missed")
-                            check(screenshot("recorded-answer"))
-                        } else if (savesArtifact) {
-                            assertEquals(message.error, "complete", message.status)
-                            val original = store.tools().single()
-                            assertTrue(original.saved)
-                            assertEquals(original.id, message.toolId)
-                            assertEquals(original.revision, message.toolRevision)
-                            if (retainsWriter) {
-                                val writerReplies = sequence.filter { it.getString("stage") == "COMPLETE" }
-                                val repair = GenerationRepair.writer(ToolSpec.generatedFields + "behaviorBindings", null)
-                                var raw = writerReplies.first().getString("reply").also { repair.retain(it) }
-                                for (patch in writerReplies.drop(1)) raw = repair.apply(patch.getString("reply")).text
-                                val expected = JSONObject(raw).apply { remove("behaviorBindings") }
-                                val actual = JSONObject(ToolSpec.parsePersisted(original.spec).providerDefinition())
-                                assertTrue("The saved definition must match the accumulated writer reply.", sameToolJson(expected, actual))
-                                assertTrue("The saved state must start at the writer's initial state.",
-                                    sameToolJson(expected.getJSONObject("initialState"), JSONObject(original.state)))
-                                assertTrue("The saved UI must match the writer's UI.",
-                                    sameToolJson(expected.getJSONObject("ui"), JSONObject(original.ui)))
-                            }
-                            if (correction == null) {
-                                File(directory, "artifact.json").writeText(JSONObject()
-                                    .put("spec", JSONObject(original.spec)).put("state", JSONObject(original.state))
-                                    .put("ui", JSONObject(original.ui)).toString())
-                            }
-                            fun saved() = checkNotNull(store.tool(original.id))
-                            robot.click(robot.text(R.string.tool_open))
-                            robot.waitFor(robot.text(R.string.tool_refine))
-                            correction?.optJSONObject("verify_toggle")?.let { toggle ->
-                                val label = toggle.getString("label")
-                                val field = toggle.getString("state_field")
-                                val states = JSONArray()
-                                for ((index, expected) in listOf(false, true, false).withIndex()) {
-                                    proof.put("step", "toggle_$index")
-                                    if (index > 0) robot.click(label)
-                                    robot.waitUntil {
-                                        val control = generateSequence(robot.find(label)) { it.parent }
-                                            .firstOrNull { it.isCheckable }
-                                        control?.let { it.isVisibleToUser && it.isChecked == expected } == true &&
-                                            JSONObject(saved().state).opt(field) == expected
-                                    }
-                                    states.put(expected)
-                                    check(screenshot("toggle-$index"))
-                                }
-                                proof.put("visible_toggle_states", states)
-                            }
-                            Plan5WorkflowChecks(robot, proof, ::saved, ::screenshot, database).run(
-                                recorded.getString("case"),
-                                reopen = { Plan5WorkflowChecks.reopenSaved(robot, ToolSpec.parsePersisted(original.spec).title, fromChat = true) },
-                                verifyCoffeeDismissals = retention != null,
-                                refine = { error("Unexpected refinement.") },
-                            )
-                            assertEquals(sequence.size, calls.get())
-                        } else {
-                            assertEquals("error", message.status)
-                            assertEquals(recorded.optString("terminal_failure", "widget_patch"), rejections.last().failureCode)
-                            recorded.optJSONObject("terminal_binding")?.let { expected ->
-                                val actual = checkNotNull(rejections.last().behaviorBinding).report()
-                                expected.keys().forEach { key -> assertEquals(key, expected.get(key), actual.get(key)) }
-                            }
-                            assertTrue(store.tools().isEmpty())
-                            check(screenshot("recorded-rejection"))
-                        }
+                        assertEquals("complete", message.status)
+                        assertTrue(message.text, Regex("""\b450\s+g\s+flour\b""").containsMatchIn(message.text))
+                        assertNull(message.toolId)
+                        assertTrue(store.tools().isEmpty())
+                        val scenario = checkNotNull(fixture.scenario)
+                        robot.waitUntil { !robot.composed(scenario, "desktop") }
+                        robot.awaitFrames(2)
+                        robot.waitFor(message.text)
+                        proof.put("observed_route", "answer").put("artifact_gate", "missed")
+                        check(screenshot("recorded-answer"))
                     }
                 }
             }
@@ -814,14 +673,6 @@ class CloudWorkflowTest {
             throw failure
         } finally {
             proof.put("provider_stages", JSONArray(stages.toList()))
-                .put("rejections", JSONArray(trace.filterIsInstance<ToolGenerationTraceEvent.Attempt>()
-                    .filter { it.outcome.name == "REJECTED" }.map {
-                        JSONObject().put("attempt", it.attempt).put("stage", it.stage.name)
-                            .put("failure_code", it.failureCode).put("plan_path", it.planPath).put("plan_rule", it.planShape?.rule)
-                            .put("validation_category", it.validationCategory?.id).put("validation_rule", it.validationRule)
-                            .put("smoke", it.smoke)
-                            .put("behavior_rule", it.behaviorBinding?.rule?.id).put("behavior_binding", it.behaviorBinding?.report())
-                    }))
             File(directory, "workflow.json").writeText(proof.toString(2))
         }
     }
@@ -857,12 +708,19 @@ class CloudWorkflowTest {
                 }
                 "create" -> {
                     val app = authored.getJSONObject("apps").getJSONObject(case.getString("app"))
+                    assertEquals("json_object", request.json.getJSONObject("response_format").getString("type"))
                     when (callNumber) {
                         2 -> {
-                            assertEquals(prompt, JSONObject(message).getString("request"))
-                            output.answer(JSONObject(app.getJSONObject("plan").toString()).put("requiredCapabilities", JSONArray()).toString())
+                            assertTrue(message, message.startsWith("User request:\n"))
+                            assertTrue(message, message.contains(prompt))
+                            output.answer(agentWrite(app.getJSONObject("app").toString()))
                         }
-                        3 -> output.answer(app.getJSONObject("writer").toString())
+                        3 -> {
+                            assertTrue(message, message.startsWith("write_app: OK."))
+                            val check = JSONObject().put("name", "authored behavior").put("steps", app.getJSONArray("checks"))
+                            output.answer(JSONObject().put("tool", "finish").put("summary", "Done.")
+                                .put("checks", JSONArray().put(check)).toString())
+                        }
                         else -> error("Unexpected generation request.")
                     }
                 }
@@ -902,15 +760,16 @@ class CloudWorkflowTest {
                                     val saved = store.tools().single { it.id !in before }
                                     assertEquals(id, saved.id, last.toolId)
                                     assertEquals(id, 1, saved.revision)
-                                    val expected = authored.getJSONObject("apps").getJSONObject(case.getString("app"))
-                                        .getJSONObject("plan").getJSONObject("behavior").getJSONObject("scenario").getJSONArray("steps")
-                                    main { fixture.model.tools.interact(saved, "enter", expected.getJSONObject(0).getInt("value")) }
+                                    // The first check step enters the amount. Each later step names an expected output.
+                                    val expected = authored.getJSONObject("apps").getJSONObject(case.getString("app")).getJSONArray("checks")
+                                    val input = expected.getJSONObject(0)
+                                    main { fixture.model.tools.interact(saved, input.getString("set"), input.getInt("value")) }
                                     waitUntil { JSONObject(store.tools().single { it.id == saved.id }.state).getInt("amount") ==
-                                        expected.getJSONObject(0).getInt("value") }
+                                        input.getInt("value") }
                                     val state = JSONObject(store.tools().single { it.id == saved.id }.state)
                                     for (i in 1 until expected.length()) {
                                         val assertion = expected.getJSONObject(i)
-                                        assertEquals(id, assertion.getDouble("value"), state.getDouble(assertion.getString("slot")), 0.0)
+                                        assertEquals(id, assertion.getDouble("equals"), state.getDouble(assertion.getString("target")), 0.0)
                                     }
                                 }
                                 "device_plan" -> main {
@@ -1191,8 +1050,7 @@ class CloudWorkflowTest {
                         return
                     }
                     generated += request
-                    if (request.replyWithFixturePlan(emit)) return
-                    emit(CloudEvent.Text("""{"formatVersion":3,"title":"Planner","description":"","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"text","text":"Count","bind":"count"},"source":"return {state:input.state};"}"""))
+                    emit(CloudEvent.Text(request.agentReply("""{"formatVersion":3,"title":"Planner","description":"","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"text","text":"Count","bind":"count"},"source":"return {state:input.state};"}""")))
                 }
             }
             Fixture(provider) { shell ->
@@ -1232,7 +1090,7 @@ class CloudWorkflowTest {
         val prompt = "Какие растения я выращиваю в моём саду?"
         Server { request, output ->
             assertFalse(request.searching)
-            if (!request.answering) request.requireStrictDecision()
+            if (!request.answering) request.requireStrictDecision(image = true)
             val body = request.json.toString()
             assertFalse(body.contains("UNRELATED_FACT"))
             if (request.answering) output.answer("Ответ о садоводстве")
@@ -1269,7 +1127,7 @@ class CloudWorkflowTest {
             val cleanReceived = CountDownLatch(1)
             val resume = CountDownLatch(1)
             Server { request, output ->
-                request.requireStrictDecision()
+                request.requireStrictDecision(image = true)
                 assertFalse("STALE_MEMORY_MARKER" in request.json.toString())
                 cleanReceived.countDown()
                 check(resume.await(10, TimeUnit.SECONDS))
@@ -1350,7 +1208,7 @@ class CloudWorkflowTest {
             Server { request, output ->
                 assertFalse(request.json.toString().contains("localMemory"))
                 if (request.answering) output.answer("Обычный ответ") else {
-                    request.requireStrictDecision()
+                    request.requireStrictDecision(image = true)
                     output.classification(decision("Clean decision"))
                 }
             }.use { server ->
@@ -1519,30 +1377,33 @@ class CloudWorkflowTest {
                 output.classification(decision("Ready.", if (number == 0) "create" else "refine", brief = "Prepare the counter."))
             } else {
                 assertEquals("json_object", request.json.getJSONObject("response_format").getString("type"))
+                val messages = request.json.getJSONArray("messages")
+                val last = messages.getJSONObject(messages.length() - 1).getString("content")
                 when (number) {
-                    1 -> output.answer("""{"publicUpdate":null,"wholeScreen":true,"language":"en"}""")
-                    2 -> {
+                    1 -> {
+                        // The host reads the note only from a complete step, so a partial step shows nothing.
+                        val step = JSONObject(agentWrite(candidate)).put("note", first).toString()
                         output.headers()
                         output.event(JSONObject("""{"choices":[{"delta":{"reasoning_content":"$privateReasoning"}}]}"""))
-                        output.event(textChunk("{\"pub"))
-                        output.event(textChunk("licUpdate\":\"I will wire the \\u00"))
-                        output.event(textChunk("22Add\\u0022 button.\""))
+                        output.event(textChunk(step.take(24)))
                         partial.countDown()
                         check(finishNote.await(20, TimeUnit.SECONDS))
-                        output.event(textChunk(","))
-                        check(finishCreate.await(20, TimeUnit.SECONDS))
-                        output.event(textChunk(candidate.removePrefix("{")))
+                        output.event(textChunk(step.drop(24)))
                         output.event(end())
                         output.write("data: [DONE]\n\n".toByteArray())
                     }
-                    4 -> {
-                        output.headers()
-                        output.event(textChunk("{\"publicUpdate\":${JSONObject.quote(second)},"))
+                    2 -> {
+                        assertTrue(last, last.startsWith("write_app: OK."))
+                        check(finishCreate.await(20, TimeUnit.SECONDS))
+                        output.answer(agentFixtureFinish)
+                    }
+                    4 -> output.answer(JSONObject().put("note", second).put("tool", "edit_app")
+                        .put("set", JSONObject().put("description", "Updated local counter")).toString())
+                    5 -> {
+                        assertTrue(last, last.startsWith("edit_app: OK."))
                         refineStreaming.countDown()
                         check(finishRefine.await(20, TimeUnit.SECONDS))
-                        output.event(textChunk(""""appLanguage":"en","fields":{"description":"Updated local counter"}}"""))
-                        output.event(end())
-                        output.write("data: [DONE]\n\n".toByteArray())
+                        output.answer(agentFixtureFinish)
                     }
                     else -> error("Unexpected generation request $number")
                 }
@@ -1558,7 +1419,7 @@ class CloudWorkflowTest {
                 val note = robot.waitFor(first)
                 robot.diagnostics.capture("streaming-public-update", note)
                 assertEquals("", fixture.persisted().selected!!.messages.last().text)
-                assertTrue(robot.texts().none { privateReasoning in it || "publicUpdate" in it })
+                assertTrue(robot.texts().none { privateReasoning in it || "write_app" in it || "\"note\"" in it })
                 finishCreate.countDown()
                 fixture.idle()
                 assertEquals(fixture.last.error, "complete", fixture.last.status)
@@ -1579,9 +1440,9 @@ class CloudWorkflowTest {
                 assertEquals(2, fixture.last.toolRevision)
                 assertEquals("Ready.", fixture.persisted().selected!!.messages.last().text)
                 robot.waitGone(second)
-                assertEquals(5, calls.get())
+                assertEquals(6, calls.get())
                 assertTrue(server.requests.filterNot { it.classifying }.all {
-                    it.json.getJSONArray("messages").getJSONObject(0).getString("content").contains("publicUpdate")
+                    it.json.getJSONArray("messages").getJSONObject(0).getString("content").contains("\"note\"")
                 })
                 assertTrue(server.failures.toString(), server.failures.isEmpty())
             } finally {
@@ -1828,7 +1689,7 @@ class CloudWorkflowTest {
         val calls = java.util.concurrent.atomic.AtomicInteger()
         Server { request, output ->
             if (calls.getAndIncrement() == 0) {
-                val kinds = request.requireStrictDecision().kinds()
+                val kinds = request.requireStrictDecision(image = true).kinds()
                 assertTrue("automation" in kinds)
                 assertFalse("course" in kinds || "test_fix" in kinds)
                 output.classification(automationDecision())
@@ -1980,7 +1841,9 @@ class CloudWorkflowTest {
                 assertTrue(events.filterIsInstance<CloudEvent.Text>().isEmpty())
                 val requests = server.requests.drop(start)
                 assertEquals(if(value == "dsml") 0 else 1,requests.count { it.path == "/v1/tools/search" })
-                assertEquals(if(value == "dsml") listOf("/beta/chat/completions","/chat/completions") else listOf("/beta/chat/completions","/chat/completions","/v1/tools/search","/chat/completions"),requests.map { it.path })
+                val grounded = listOf("/beta/chat/completions","/chat/completions","/v1/tools/search","/chat/completions")
+                // A downgrade gets one grounded correction without a second search. The repeated downgrade still fails.
+                assertEquals(when(value) { "dsml" -> grounded.take(2); "downgrade" -> grounded + "/chat/completions"; else -> grounded },requests.map { it.path })
                 if(value == "valid") {
                     assertNull(failure)
                     val terminal = events.filterIsInstance<CloudEvent.RoundComplete>().single()
@@ -2440,7 +2303,7 @@ class CloudWorkflowTest {
         }
     }
 
-    @Test fun correctedChatDecisionStillLetsTheNativePlanCorrectOnce() = recoverCounter(false)
+    @Test fun correctedChatDecisionStillLetsTheAppAgentCorrectItsApp() = recoverCounter(false)
 
     @Test fun groundedMiniAppBriefFitsTheActualBudgetWithoutAnotherSearch(): Unit = kotlinx.coroutines.runBlocking {
         val prompt = "Create a sourced dashboard. Preserve the first section. " +
@@ -2499,21 +2362,92 @@ class CloudWorkflowTest {
         }
     }
 
+    /** Failure case: a grounded reply without search was corrected with a generic example and then changed the operation. */
+    @Test fun groundedFieldCorrectionKeepsTheOriginalOperation(): Unit = kotlinx.coroutines.runBlocking {
+        val prompt = "Make a dashboard with the current gold price"
+        var grounded = 0
+        Server { request, output ->
+            when {
+                request.path == "/v1/tools/search" -> {
+                    val hit = JSONObject().put("title", "Gold price").put("url", "https://example.com/gold")
+                    output.headers(type = "application/json")
+                    output.write(JSONObject().put("results", JSONArray().put(hit)).toString().toByteArray())
+                }
+                request.searching -> output.calls(call(0))
+                request.grounded -> {
+                    val system = request.json.getJSONArray("messages").getJSONObject(0).getString("content")
+                    if (++grounded == 1) output.answer("""{"kind":"create","text":"I can build it.","brief":"Show the gold price [1]."}""")
+                    else {
+                        val notice = system.substringAfter("The prior response failed")
+                        assertTrue(notice, notice.contains("original kind and search policy"))
+                        assertFalse(notice, notice.contains("\"search\":\"none\""))
+                        output.answer(decision("I can build it.", "create", "optional", "Show the gold price [1]."))
+                    }
+                }
+                else -> output.classification(decision("I can build it.", "create", "optional", "Show the gold price."))
+            }
+        }.use { server ->
+            val events = mutableListOf<CloudEvent>()
+            val result = runCatching {
+                DeepSeekProvider(server.url).respond("alpha-test-only", cleanChatRequest(prompt), CloudSession()) { events += it }
+            }
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+            result.getOrThrow()
+            val accepted = ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text)
+            assertEquals("create", accepted.kind)
+            assertEquals("optional", accepted.search)
+            assertEquals(2, grounded)
+        }
+    }
+
+    /** Failure case: a live grounded reply after search changed the operation once, and the request failed without a correction. */
+    @Test fun groundedOperationChangeCorrectsOnce(): Unit = kotlinx.coroutines.runBlocking {
+        var grounded = 0
+        var searches = 0
+        Server { request, output ->
+            when {
+                request.path == "/v1/tools/search" -> {
+                    searches++
+                    val hit = JSONObject().put("title", "Gold price").put("url", "https://example.com/gold")
+                    output.headers(type = "application/json")
+                    output.write(JSONObject().put("results", JSONArray().put(hit)).toString().toByteArray())
+                }
+                request.searching -> output.calls(call(0))
+                request.grounded -> {
+                    val system = request.json.getJSONArray("messages").getJSONObject(0).getString("content")
+                    if (++grounded == 1) output.answer(decision("The gold price is shown in the sources [1].", "answer", "none"))
+                    else {
+                        val notice = system.substringAfter("The prior response failed")
+                        assertTrue(notice, notice.contains("original kind and search policy"))
+                        output.answer(decision("I can build it.", "create", "required", "Show the gold price [1]."))
+                    }
+                }
+                else -> output.classification(decision("I can build it.", "create", "required", "Show the gold price."))
+            }
+        }.use { server ->
+            val events = mutableListOf<CloudEvent>()
+            val result = runCatching {
+                DeepSeekProvider(server.url).respond("alpha-test-only", cleanChatRequest("Make an app with the latest gold price"), CloudSession()) { events += it }
+            }
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+            result.getOrThrow()
+            val accepted = ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text)
+            assertEquals("create", accepted.kind)
+            assertEquals("required", accepted.search)
+            assertEquals(2, grounded)
+            assertEquals(1, searches)
+        }
+    }
+
     @Test fun sourcedMiniAppAttributionCorrectsOnceWithoutRepeatingSearch() {
         val url = "https://example.com/docs?a=1&b=2"
         val brief = "Show [Add] and the Verified status. Two plus three is 5. Use [Docs](https://example.com/docs?a=1&amp;b=2) [1]."
         val rejected = "Rejected brief [2]."
-        val plan = """
-            {"wholeScreen":true,"language":"en","requiredCapabilities":[],"behavior":{"status":"checkable","scenario":{
-              "slots":{"add":{"kind":"action"},"count":{"kind":"value"}},
-              "steps":[{"op":"action","slot":"add"},{"op":"assert","slot":"count","test":"equals","value":1}]}}}
-        """.trimIndent()
         val candidate = """
             {"formatVersion":3,"title":"Counter","description":"Local counter","capabilities":[],
             "stateSchema":{"count":"number"},"initialState":{"count":0},
             "ui":{"type":"column","children":[{"type":"metric","text":"Count","bind":"count"},
             {"type":"button","text":"Add","action":"add"}]},
-            "behaviorBindings":{"add":"add","count":[0]},
             "source":"if(input.event.type==='action' && input.event.actionId==='add')input.state.count++;return {state:input.state};"}
         """.trimIndent()
         val classification = AtomicInteger()
@@ -2561,19 +2495,16 @@ class CloudWorkflowTest {
                     }
                 }
                 else -> {
-                    val capabilityPlan = messages.getJSONObject(0).getString("content").contains("Plan required Android capabilities")
                     assertTrue(userMessage.contains("Widget brief:"))
-                    val prompt = if (userMessage.startsWith("{")) JSONObject(userMessage).getString("context") else userMessage
-                    assertTrue(prompt.contains(brief))
-                    assertFalse(prompt.contains(rejected))
-                    val attempt = generation.incrementAndGet()
-                    if (!capabilityPlan && (kind.get() == "refine" || attempt > 1)) assertEquals(131_072, request.json.getInt("max_tokens"))
-                    else assertFalse(request.json.has("max_tokens"))
+                    assertTrue(userMessage.contains(brief))
+                    assertFalse(userMessage.contains(rejected))
+                    generation.incrementAndGet()
+                    assertEquals(131_072, request.json.getInt("max_tokens"))
+                    val last = messages.getJSONObject(messages.length() - 1).getString("content")
                     output.answer(when {
-                        capabilityPlan -> """{"requiredCapabilities":[]}"""
-                        kind.get() == "refine" -> """{"appLanguage":"en","fields":{"description":"Updated local counter"}}"""
-                        attempt == 1 -> plan
-                        else -> candidate
+                        messages.length() > 2 && Regex("^(write_app|edit_app): OK").containsMatchIn(last) -> agentFixtureFinish
+                        kind.get() == "refine" -> """{"tool":"edit_app","set":{"description":"Updated local counter"}}"""
+                        else -> agentWrite(candidate)
                     })
                 }
             }
@@ -2641,14 +2572,12 @@ class CloudWorkflowTest {
 
     private fun recoverCounter(malformedDraft: Boolean) {
         val prompt = "Build a counter that starts at zero and adds one."
-        val plan = JSONObject("""{"title":"Counter","description":"Add one and reset","language":"en",
-            "inputs":[],"constants":[],"questions":[],"requiredCapabilities":[],
-            "behavior":{"status":"checkable","scenario":{"slots":{
-                "add":{"kind":"action","part":"count","member":"add"},
-                "count":{"kind":"value","part":"count","member":"value"}},
-                "steps":[{"op":"action","slot":"add"},{"op":"assert","slot":"count","test":"equals","value":1}]}},
-            "needs":[{"id":"count","type":"counter","label":"Count","description":"Add one and reset"}]}""")
-        val rejected = JSONObject(plan.toString()).put("constants", JSONArray().put(JSONObject().put("id", "unused").put("value", 2)))
+        val app = JSONObject("""{"formatVersion":3,"title":"Counter","description":"Add one","capabilities":[],
+            "stateSchema":{"count":"number"},"initialState":{"count":0},
+            "ui":{"type":"column","children":[{"type":"metric","text":"Count","bind":"count"},{"type":"button","text":"Add","action":"add"}]},
+            "source":"if(input.event.type==='action'&&input.event.actionId==='add')input.state.count++;return {state:input.state};"}""")
+        // A button without text fails UI validation before the smoke test.
+        val rejected = JSONObject(app.toString()).apply { getJSONObject("ui").getJSONArray("children").getJSONObject(1).remove("text") }
         val calls = java.util.concurrent.atomic.AtomicInteger()
         Server { request, output ->
             val messages = request.json.getJSONArray("messages")
@@ -2666,12 +2595,18 @@ class CloudWorkflowTest {
                     assertFalse(messages.getJSONObject(0).getString("content").contains("raw draft argument object"))
                     decision("I can build that.", "create", "none", prompt)
                 }
-                2 -> rejected.toString()
-                3 -> {
-                    assertTrue(messages.getJSONObject(messages.length() - 1).getString("content").contains("constants referenced by a need"))
-                    JSONObject().put("fields", JSONObject().put("constants", plan.getJSONArray("constants"))).toString()
+                2 -> {
+                    assertTrue(messages.getJSONObject(1).getString("content").contains(prompt))
+                    agentWrite(rejected.toString())
                 }
-                4, 5 -> firstSelectorChoices(messages.getJSONObject(messages.length() - 1).getString("content"))
+                3 -> {
+                    assertTrue(messages.getJSONObject(messages.length() - 1).getString("content").startsWith("write_app: REJECTED."))
+                    agentWrite(app.toString())
+                }
+                4 -> {
+                    assertTrue(messages.getJSONObject(messages.length() - 1).getString("content").startsWith("write_app: OK."))
+                    agentFixtureFinish
+                }
                 else -> error("Unexpected provider call after native generation.")
             }
             if (number <= 1) output.classification(reply) else output.answer(reply)
@@ -2683,7 +2618,7 @@ class CloudWorkflowTest {
             assertEquals(1, saved.toolRevision)
             assertEquals(saved.toolId, fixture.persisted().selected!!.messages.last().toolId)
             main { assertNull(fixture.model.chatAutomationSetup) }
-            assertEquals(6, server.requests.size)
+            assertEquals(5, server.requests.size)
             assertTrue(server.failures.toString(), server.failures.isEmpty())
         } }
     }
@@ -2694,7 +2629,7 @@ class CloudWorkflowTest {
         val calls = java.util.concurrent.atomic.AtomicInteger()
         Server { request, output ->
             when (calls.getAndIncrement()) {
-                0 -> { request.requireStrictDecision(); output.classification(automationDecision()) }
+                0 -> { request.requireStrictDecision(image = true); output.classification(automationDecision()) }
                 1 -> { request.requireDraftTool(); output.calls(call(0, name = "draft_automation", arguments = "{}")) }
                 2 -> { request.requireDraftTool(); output.calls(call(0, name = "draft_automation", arguments = draft)) }
                 else -> error("Unexpected automation request.")
@@ -2721,7 +2656,7 @@ class CloudWorkflowTest {
         Server { request, output ->
             when (calls.getAndIncrement()) {
                 0 -> {
-                    request.requireStrictDecision()
+                    request.requireStrictDecision(image = true)
                     output.classification(automationDecision())
                 }
                 1, 2 -> { request.requireDraftTool(); output.answer(explanation) }
@@ -2749,11 +2684,11 @@ class CloudWorkflowTest {
             Server { request, output ->
                 val number = calls.getAndIncrement()
                 if (expected == "tool_invalid") {
-                    request.requireStrictDecision()
+                    request.requireStrictDecision(image = true)
                     output.calls(call(0, name = "draft_automation", arguments = forgedDraft))
                 } else when (number) {
-                    0 -> { request.requireStrictDecision(); output.classification("""{"kind":"automation"}""") }
-                    1 -> { request.requireStrictDecision(); output.classification(automationDecision()) }
+                    0 -> { request.requireStrictDecision(image = true); output.classification("""{"kind":"automation"}""") }
+                    1 -> { request.requireStrictDecision(image = true); output.classification(automationDecision()) }
                     2 -> { request.requireDraftTool(); output.calls(call(0, name = "draft_automation", arguments = forgedDraft)) }
                     else -> error("Draft must not get another correction.")
                 }
@@ -2828,7 +2763,7 @@ class CloudWorkflowTest {
 
     @Test fun unknownRefinementTargetCannotRunSearch() {
         Server { request, output ->
-            request.requireStrictDecision()
+            request.requireStrictDecision(image = true)
             output.classification(JSONObject(decision("Ready.",kind = "refine",search = "required",brief = "Change a planner"))
                 .put("targetId","unknown-planner").toString())
         }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
@@ -3298,14 +3233,13 @@ class CloudWorkflowTest {
                 val input = messages.getJSONObject(1).getString("content")
                 if (input.contains("Widget brief:")) {
                     assertTrue(input.contains("Show Unavailable and provide a working local counter."))
-                    if (request.json.getJSONObject("thinking").getString("type") == "enabled" && !request.json.has("max_tokens")) {
-                        output.answer("""{"wholeScreen":true,"language":"en","requiredCapabilities":[],
-                            "behavior":{"status":"unchecked","reason":"unsupported_observation"}}""")
-                    } else output.answer("""{"formatVersion":3,"title":"Dashboard","description":"","capabilities":[],
+                    val last = messages.getJSONObject(messages.length() - 1).getString("content")
+                    if (messages.length() > 2 && last.startsWith("write_app: OK.")) output.answer(agentFixtureFinish)
+                    else output.answer(agentWrite("""{"formatVersion":3,"title":"Dashboard","description":"","capabilities":[],
                         "stateSchema":{"count":"number"},"initialState":{"count":0},
                         "ui":{"type":"column","children":[{"type":"text","text":"Unavailable"},
                         {"type":"text","text":"Count","bind":"count"},{"type":"button","text":"Add","action":"add"}]},
-                        "source":"if(input.event.actionId==='add') input.state.count++; return {state:input.state};"}""")
+                        "source":"if(input.event.actionId==='add') input.state.count++; return {state:input.state};"}"""))
                 } else if (messages.getJSONObject(messages.length() - 1).getString("role") == "tool") output.answer("Результаты не найдены")
                 else {
                     output.headers(); output.event(JSONObject().put("choices", JSONArray().put(JSONObject().put("delta", JSONObject().put("tool_calls", JSONArray().put(JSONObject()

@@ -14,9 +14,8 @@ import com.alpha.assistant.capabilities.CapabilityRequest
 import com.alpha.assistant.capabilities.CapabilityResult
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.data.*
-import com.alpha.assistant.tools.expectsSavedPatch
-import com.alpha.assistant.tools.patchSavedFixture
 import com.alpha.assistant.tools.*
+import com.alpha.assistant.tools.agent.AppAgentGuide
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
 import kotlinx.coroutines.CompletableDeferred
@@ -120,10 +119,9 @@ class AutomaticToolWorkflowTest {
         val stages = CopyOnWriteArrayList<CloudGenerationStage?>()
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if(request.jsonObject) {
+                if(request.generationStage != null) {
                     stages += request.generationStage
-                    if (request.replyWithFixturePlan(emit)) return
-                    generatedPrompt = request.turns.first().text; emit(CloudEvent.Text(spec()))
+                    generatedPrompt = request.turns.first().text; emit(CloudEvent.Text(request.agentReply(spec())))
                 } else {
                     assertTrue(request.chatDecision)
                     emit(CloudEvent.Text(decision("WRONG INTERMEDIATE")))
@@ -139,15 +137,14 @@ class AutomaticToolWorkflowTest {
             main { f.model.tools.generationTraceObserver = { trace += it } }
             f.send("Create a day planner"); f.idle()
             assertEquals("complete",f.last.status); assertEquals("Ready.",f.last.text)
-            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE),stages)
+            assertEquals(listOf(CloudGenerationStage.AGENT, CloudGenerationStage.AGENT),stages)
             assertEquals(1,f.toolStore.tools().size)
             assertFalse(generatedPrompt.contains("WRONG INTERMEDIATE"))
             assertTrue(generatedPrompt.contains("Use the verified stop for 30 minutes"))
             assertEquals("https://example.com/verified",f.last.sources.single().url)
             assertTrue(trace.isNotEmpty())
             assertEquals(setOf(f.last.toolOperationId), trace.map { it.operationId.toString() }.toSet())
-            assertEquals(stages, trace.filterIsInstance<ToolGenerationTraceEvent.Stage>()
-                .filter { it.started && it.providerStage != null }.map { it.providerStage })
+            assertEquals(listOf("write_app", "finish"), trace.filterIsInstance<ToolGenerationTraceEvent.AgentStep>().map { it.tool })
             assertEquals(ToolGenerationTraceOutcome.VALIDATED,
                 (trace.last() as ToolGenerationTraceEvent.Finished).outcome)
         }
@@ -158,17 +155,20 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 val result = when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"wholeScreen":true,"language":"en"}"""
-                    CloudGenerationStage.COMPLETE -> {
+                    CloudGenerationStage.AGENT -> {
                         completions += request
-                        if (completions.size == 1) {
-                            val italian = JSONObject(spec()).getJSONObject("ui")
-                            val controls = italian.getJSONArray("children")
-                            controls.getJSONObject(0).put("text", "Conteggio totale delle operazioni eseguite")
-                            controls.getJSONObject(1).put("text", "Aggiungi una nuova operazione al conteggio")
-                            JSONObject(spec()).put("source",
-                                "const ui=$italian; return {state:input.state,ui:ui};").toString()
-                        } else writerFixturePatch(request.turns[1].text, spec())
+                        when (completions.size) {
+                            1 -> {
+                                val italian = JSONObject(spec()).getJSONObject("ui")
+                                val controls = italian.getJSONArray("children")
+                                controls.getJSONObject(0).put("text", "Conteggio totale delle operazioni eseguite")
+                                controls.getJSONObject(1).put("text", "Aggiungi una nuova operazione al conteggio")
+                                agentWrite(JSONObject(spec()).put("language", "en").put("source",
+                                    "const ui=$italian; return {state:input.state,ui:ui};").toString())
+                            }
+                            2 -> agentWrite(JSONObject(spec()).put("language", "en").toString())
+                            else -> agentFixtureFinish
+                        }
                     }
                     else -> decision("Crea un contatore con un pulsante per aggiungere operazioni")
                 }
@@ -178,10 +178,13 @@ class AutomaticToolWorkflowTest {
         Fixture(provider).use { f ->
             f.send("Create a counter with a button that adds one to the total every time I press it.")
             f.idle()
-            assertEquals(2, completions.size)
-            assertTrue(completions.all { it.systemInstructions.contains("English (en)") })
+            assertEquals(3, completions.size)
+            val feedback = completions[1].turns.last().text
+            assertTrue(feedback, feedback.startsWith("write_app: REJECTED. The visible text is not in English (en)."))
             assertEquals("complete", f.last.status)
-            assertEquals("Counter", ToolSpec.parsePersisted(f.toolStore.tools().single().spec).title)
+            val saved = ToolSpec.parsePersisted(f.toolStore.tools().single().spec)
+            assertEquals("Counter", saved.title)
+            assertEquals("en", saved.appLanguage)
         }
     }
 
@@ -190,16 +193,16 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 val result = when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"wholeScreen":true,"language":"ru"}"""
-                    CloudGenerationStage.COMPLETE -> {
+                    CloudGenerationStage.AGENT -> {
                         completions += request
-                        if (completions.size > 1) """{"fields":{"description":"Travel expense total ${completions.size}"}}"""
-                        else JSONObject(spec("Trip expenses for Moscow")).apply {
+                        if (completions.size > 1) agentStall
+                        else agentWrite(JSONObject(spec("Trip expenses for Moscow")).apply {
+                            put("language", "ru")
                             put("description", "Record your travel expenses and review the current total")
                             val controls = getJSONObject("ui").getJSONArray("children")
                             controls.getJSONObject(0).put("text", "Total expenses for this trip")
                             controls.getJSONObject(1).put("text", "Add another expense to the trip")
-                        }.toString()
+                        }.toString())
                     }
                     else -> decision("Make an expense counter for a trip to Moscow")
                 }
@@ -209,9 +212,11 @@ class AutomaticToolWorkflowTest {
         Fixture(provider).use { f ->
             f.send("Make an expense counter for Moscow. Use Russian for the interface.")
             f.idle()
-            assertEquals(4, completions.size)
-            assertTrue(completions.all { it.systemInstructions.contains("Russian (ru)") })
-            assertEquals("widget_language", f.last.errorCode)
+            assertEquals(AppAgentGuide.MAX_STEPS, completions.size)
+            assertTrue(completions.first().turns.first().text.contains("Use Russian for the interface."))
+            val feedback = completions[1].turns.last().text
+            assertTrue(feedback, feedback.startsWith("write_app: REJECTED. The visible text is not in Russian (ru)."))
+            assertEquals("widget_agent_incomplete", f.last.errorCode)
             assertTrue(f.toolStore.tools().isEmpty())
             assertTrue(f.toolStore.drafts().isEmpty())
         }
@@ -223,8 +228,7 @@ class AutomaticToolWorkflowTest {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
                 val result = when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"wholeScreen":true,"language":"en","literals":["Use French for the interface."]}"""
-                    CloudGenerationStage.COMPLETE -> spec("Moscow expenses")
+                    CloudGenerationStage.AGENT -> request.agentReply(JSONObject(spec("Moscow expenses")).put("language", "en").toString())
                     else -> decision("Счётчик расходов в Москве")
                 }
                 emit(CloudEvent.Text(result))
@@ -233,26 +237,25 @@ class AutomaticToolWorkflowTest {
         Fixture(provider).use { f ->
             f.send("Create a counter for a trip to Moscow. Use Russian rubles. Label the note «Use French for the interface.»")
             f.idle()
-            val planInput = JSONObject(requests.single { it.generationStage == CloudGenerationStage.PLAN }.turns.single().text)
-            assertTrue(planInput.getString("request").contains("Use Russian rubles."))
-            assertTrue(planInput.getJSONObject("languageContext").has("deviceLocales"))
-            assertTrue(requests.single { it.generationStage == CloudGenerationStage.COMPLETE }.systemInstructions.contains("English (en)"))
-            assertEquals("Moscow expenses", ToolSpec.parsePersisted(f.toolStore.tools().single().spec).title)
+            val task = requests.first { it.generationStage == CloudGenerationStage.AGENT }.turns.first().text
+            assertTrue(task.contains("Use Russian rubles."))
+            assertTrue(task.contains("«Use French for the interface.»"))
+            val saved = ToolSpec.parsePersisted(f.toolStore.tools().single().spec)
+            assertEquals("Moscow expenses", saved.title)
+            assertEquals("en", saved.appLanguage)
         }
     }
 
     @Test fun languageTopicAndNegationDoNotOverrideInterfaceButExplicitInstructionDoes() {
-        val plans = CopyOnWriteArrayList<CloudRequest>()
-        var candidate = spec()
-        var language = "en"
+        val writes = CopyOnWriteArrayList<CloudRequest>()
+        var candidate = JSONObject(spec()).put("language", "en").toString()
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 val result = when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> {
-                        plans += request
-                        """{"wholeScreen":true,"language":"$language"}"""
+                    CloudGenerationStage.AGENT -> {
+                        if (request.turns.size == 1) writes += request
+                        request.agentReply(candidate)
                     }
-                    CloudGenerationStage.COMPLETE -> candidate
                     else -> decision()
                 }
                 emit(CloudEvent.Text(result))
@@ -268,16 +271,16 @@ class AutomaticToolWorkflowTest {
             assertEquals("en", ToolSpec.parsePersisted(f.toolStore.tools().first().spec).appLanguage)
             assertEquals("complete", f.last.status)
             candidate = JSONObject(spec("Conteggio delle ordinazioni")).apply {
+                put("language", "it")
                 put("description", "Conserva il conteggio delle ordinazioni in questo dispositivo")
                 val controls = getJSONObject("ui").getJSONArray("children")
                 controls.getJSONObject(0).put("text", "Conteggio totale delle ordinazioni")
                 controls.getJSONObject(1).put("text", "Aggiungi una nuova ordinazione")
             }.toString()
-            language = "it"
             f.send("Create a counter app in Italian.")
             f.idle()
             assertEquals("it", ToolSpec.parsePersisted(f.toolStore.tools().first().spec).appLanguage)
-            assertEquals(3, plans.size)
+            assertEquals(3, writes.size)
             assertEquals("complete", f.last.status)
         }
     }
@@ -293,12 +296,16 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 val result = when (request.generationStage) {
-                    CloudGenerationStage.REFINE -> {
-                        refinements += request
-                        request.patchSavedFixture(if (refinements.size == 1)
-                            JSONObject(russian).put("description", "Обновлённый счётчик выполненных задач").toString() else spec(),
-                            language = if (refinements.size == 1) "ru" else "en",
-                            languageChange = "use English for the interface".takeIf { refinements.size > 1 })
+                    CloudGenerationStage.AGENT -> {
+                        if (request.turns.size == 1) refinements += request
+                        when {
+                            request.agentAppAccepted -> agentFixtureFinish
+                            request.turns.size > 1 -> agentStall
+                            // An edit without language keeps the saved language. A rewrite can name a new one.
+                            refinements.size == 1 -> JSONObject().put("tool", "edit_app")
+                                .put("set", JSONObject().put("description", "Обновлённый счётчик выполненных задач")).toString()
+                            else -> agentWrite(JSONObject(spec()).put("language", "en").toString())
+                        }
                     }
                     else -> decision("Refine the existing counter", kind = "refine")
                 }
@@ -312,7 +319,7 @@ class AutomaticToolWorkflowTest {
         }.use { f ->
             f.send("Update the counter so the current total is more prominent.")
             f.idle()
-            assertTrue(refinements.last().turns.first().text.contains("\"savedLanguage\":\"ru\""))
+            assertTrue(refinements.last().turns.first().text.contains("The app language is Russian (ru)."))
             assertEquals("ru", ToolSpec.parsePersisted(f.toolStore.tools().single().spec).appLanguage)
             assertEquals("complete", f.last.status)
             f.send("Do not change the layout and use English for the interface.")
@@ -335,8 +342,7 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 emit(CloudEvent.Text(when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"wholeScreen":true,"language":"en"}"""
-                    CloudGenerationStage.COMPLETE -> definition
+                    CloudGenerationStage.AGENT -> request.agentReply(JSONObject(definition).put("language", "en").toString())
                     else -> decision("Build a bill calculator with two fields")
                 }))
             }
@@ -370,55 +376,6 @@ class AutomaticToolWorkflowTest {
         }
     }
 
-    @Test fun aDefinitionAtTheSizeLimitRepairsBeforeSavingItsLanguage() {
-        val large = JSONObject(spec())
-        val schema = large.getJSONObject("stateSchema")
-        val initial = large.getJSONObject("initialState")
-        val fields = JSONObject().put("id", "string").apply {
-            repeat(11) { put("field$it" + "x".repeat(40), "string") }
-        }
-        val recordList = JSONObject().put("type", "list").put("maxItems", 1).put("fields", fields)
-        repeat(26) {
-            schema.put("records$it", recordList)
-            initial.put("records$it", JSONArray())
-        }
-        repeat(12) {
-            schema.put("note$it", "string")
-            initial.put("note$it", "\"".repeat(2000))
-        }
-        val controls = large.getJSONObject("ui").getJSONArray("children")
-        val label = JSONObject().put("type", "text").put("text", "x".repeat(300))
-        repeat(4) {
-            controls.put(JSONObject().put("type", "column").put("children", JSONArray(List(50) { label })))
-        }
-        val prefix = "/*"
-        val suffix = "*/ " + large.getString("source")
-        large.put("source", prefix + suffix)
-        val count = (262_138 - large.toString().toByteArray().size) / 2
-        large.put("source", prefix + "\"".repeat(count) + suffix)
-        assertTrue(large.toString().toByteArray().size in 262_137..262_138)
-        assertNotNull(ToolSpec.parse(large.toString()))
-        var completions = 0
-        val provider = object : SingleRoundProvider() {
-            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                emit(CloudEvent.Text(when (request.generationStage) {
-                    CloudGenerationStage.PLAN -> """{"wholeScreen":true,"language":"en"}"""
-                    CloudGenerationStage.COMPLETE -> if (++completions == 1) large.toString() else
-                        JSONObject().put("sourceEdits", org.json.JSONArray().put(JSONObject()
-                            .put("search", prefix + "\"".repeat(32)).put("replace", prefix))).toString()
-                    else -> decision()
-                }))
-            }
-        }
-        Fixture(provider).use { f ->
-            f.send("Make a counter. Use English for the interface.")
-            f.idle()
-            assertEquals(2, completions)
-            assertEquals("complete", f.last.status)
-            assertEquals("en", ToolSpec.parsePersisted(f.toolStore.tools().single().spec).appLanguage)
-        }
-    }
-
     @Test fun interruptedRoundCannotExecuteEvenACompleteDecision() {
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
@@ -439,13 +396,12 @@ class AutomaticToolWorkflowTest {
         val reply = decision("Create a counter labelled \"count >> total\"",text = "Ready.\nChoose Add to increase the count.")
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if (request.replyWithFixturePlan(emit)) return
-                if(request.systemInstructions.isNotEmpty()) {
+                if(request.generationStage == null) {
                     assertFalse(request.jsonObject)
                     reply.forEach { emit(CloudEvent.Text(it.toString())) }
                 } else {
                     assertTrue(request.jsonObject)
-                    emit(CloudEvent.Text(JSONObject(spec()).put("stateSchema",JSONObject("""{"count":{"type":"number"}}""")).toString()))
+                    emit(CloudEvent.Text(request.agentReply(JSONObject(spec()).put("stateSchema",JSONObject("""{"count":{"type":"number"}}""")).toString())))
                 }
             }
         }
@@ -482,20 +438,22 @@ class AutomaticToolWorkflowTest {
         val planning = "I will use a counter and an Add button."
         val building = "I will connect Add to the count."
         val refining = "I will rename the counter to Total."
+        var agentCalls = 0
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
-                if (request.generationStage == CloudGenerationStage.PLAN) {
-                    emit(CloudEvent.PublicUpdate(planning))
-                    releasePlanning.await()
+                if(request.generationStage == null) { emit(CloudEvent.Text(reply.take(9))); emit(CloudEvent.Text(reply.drop(9))); return }
+                // The host shows the note of a step after the step. The next step waits so the test can see it.
+                val step = when (++agentCalls) {
+                    1 -> JSONObject(agentWrite(generated)).put("note", planning)
+                    2 -> {
+                        releasePlanning.await()
+                        JSONObject("""{"tool":"run","steps":[{"tap":"add"},{"expect":"value","target":"count","equals":1}]}""").put("note", building)
+                    }
+                    4 -> JSONObject(agentWrite(generated)).put("note", refining)
+                    else -> { releaseGeneration.await(); JSONObject(agentFixtureFinish) }
                 }
-                if (request.replyWithFixturePlan(emit)) return
-                if(request.systemInstructions.isEmpty()) {
-                    emit(CloudEvent.PublicUpdate(if (request.generationStage == CloudGenerationStage.REFINE) refining else building))
-                    releaseGeneration.await()
-                    emit(CloudEvent.Text(request.patchSavedFixture(generated)))
-                }
-                else { emit(CloudEvent.Text(reply.take(9))); emit(CloudEvent.Text(reply.drop(9))) }
+                emit(CloudEvent.Text(step.toString()))
             }
         }
         Fixture(provider).use { f ->
@@ -540,8 +498,7 @@ class AutomaticToolWorkflowTest {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 if(request.generationStage != null) {
                     generatorCalls++
-                    if (request.replyWithFixturePlan(emit)) return
-                    emit(CloudEvent.Text(spec()))
+                    emit(CloudEvent.Text(request.agentReply(spec())))
                 }
                 else emit(CloudEvent.Text(reply))
             }
@@ -566,10 +523,10 @@ class AutomaticToolWorkflowTest {
         val started = CountDownLatch(1); val release = CountDownLatch(1)
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if(request.systemInstructions.isNotEmpty()) {
+                if(request.generationStage == null) {
                     emit(CloudEvent.Text(decision().take(15))); started.countDown(); release.await(10,TimeUnit.SECONDS)
                     withContext(NonCancellable) { emit(CloudEvent.Text(decision().drop(15))) }
-                } else emit(CloudEvent.Text(spec()))
+                } else emit(CloudEvent.Text(request.agentReply(spec())))
             }
         }
         Fixture(provider).use { f ->
@@ -585,19 +542,21 @@ class AutomaticToolWorkflowTest {
         val started = CountDownLatch(1); val release = CountDownLatch(1)
         var block = true
         var generated = spec()
-        var repairs = 0
+        val feedback = CopyOnWriteArrayList<String>()
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if (request.replyWithFixturePlan(emit)) return
-                if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
+                if(request.generationStage == null) emit(CloudEvent.Text(decision()))
                 else if(block) {
                     started.countDown(); release.await(10,TimeUnit.SECONDS)
-                    withContext(NonCancellable) { emit(CloudEvent.Text(request.patchSavedFixture(generated))) }
+                    withContext(NonCancellable) { emit(CloudEvent.Text(request.agentReply(generated))) }
                 } else {
-                    val output = if (request.turns.last().text.contains("Return one JSON patch object only")) {
-                        """{"fields":{"description":"Rejected repair ${++repairs}"}}"""
-                    } else generated
-                    emit(CloudEvent.Text(output))
+                    if (request.turns.size == 3) feedback += request.turns.last().text
+                    emit(CloudEvent.Text(when {
+                        request.turns.size > 1 -> agentStall
+                        generated.startsWith("{") -> agentWrite(generated)
+                        // Raw text keeps the invalid reply exactly as the model wrote it.
+                        else -> generated
+                    }))
                 }
             }
         }
@@ -606,19 +565,19 @@ class AutomaticToolWorkflowTest {
             main { f.model.cancelRequest() }; release.countDown(); f.idle()
             assertEquals("cancelled",f.last.status); assertTrue(f.toolStore.tools().isEmpty()); assertTrue(f.toolStore.drafts().isEmpty())
             block = false
-            generated = JSONObject(spec()).put("source","return {state:{count:999}};").toString()
-            f.send("Create counter"); f.idle(); assertEquals("error",f.last.status); assertTrue(f.toolStore.tools().isEmpty())
-            assertEquals("widget_preview_state",f.last.errorCode)
-            generated = JSONObject(spec()).put("source","return {state:input.state,effects:[{id:'bad',capability:'vibration.play',args:{milliseconds:1}}]};").toString()
-            f.send("Create counter"); f.idle(); assertEquals("error",f.last.status); assertTrue(f.toolStore.tools().isEmpty())
-            assertEquals("widget_preview_effects",f.last.errorCode)
-            generated = JSONObject(spec()).put("source","while(true){};").toString()
-            f.send("Create counter"); f.idle(); assertEquals("error",f.last.status); assertTrue(f.toolStore.tools().isEmpty())
-            assertEquals("widget_preview",f.last.errorCode)
-            assertFalse(f.last.error.contains("while(true)"))
-            generated = "not a tool definition"
-            f.send("Create counter"); f.idle()
-            assertEquals("widget_spec",f.last.errorCode); assertTrue(f.toolStore.tools().isEmpty())
+            listOf(
+                JSONObject(spec()).put("source","return {state:{count:999}};").toString() to "widget_preview_state",
+                JSONObject(spec()).put("source","return {state:input.state,effects:[{id:'bad',capability:'vibration.play',args:{milliseconds:1}}]};").toString() to "widget_preview_effects",
+                JSONObject(spec()).put("source","while(true){};").toString() to "The smoke test failed",
+                "not a tool definition" to "reply: REJECTED. Reply with one JSON object that names a tool."
+            ).forEach { (candidate, problem) ->
+                generated = candidate; feedback.clear()
+                f.send("Create counter"); f.idle(); assertEquals("error",f.last.status); assertTrue(f.toolStore.tools().isEmpty())
+                assertEquals("widget_agent_incomplete",f.last.errorCode)
+                assertTrue(feedback.single(), feedback.single().contains(problem))
+                assertFalse(f.last.error.contains("while(true)"))
+            }
+            assertTrue(f.toolStore.drafts().isEmpty())
         }
     }
     @Test fun ordinaryCreationPlansOnlyTheApp() {
@@ -629,13 +588,12 @@ class AutomaticToolWorkflowTest {
                 assertFalse(request.systemInstructions.contains("executable check"))
                 when (request.generationStage) {
                     null -> emit(CloudEvent.Text(decision(brief = "Create an editable local counter")))
-                    CloudGenerationStage.PLAN -> {
-                        val input = JSONObject(request.turns.first().text)
-                        assertEquals(original, input.getString("request"))
-                        assertTrue(input.getString("context").contains("Widget brief:"))
-                        emit(CloudEvent.Text("""{"wholeScreen":true,"language":"en"}"""))
+                    CloudGenerationStage.AGENT -> {
+                        val task = request.turns.first().text
+                        assertTrue(task.contains(original))
+                        assertTrue(task.contains("Widget brief:"))
+                        emit(CloudEvent.Text(request.agentReply(spec())))
                     }
-                    CloudGenerationStage.COMPLETE -> emit(CloudEvent.Text(spec()))
                     else -> error("Unexpected generation stage.")
                 }
             }
@@ -704,16 +662,14 @@ class AutomaticToolWorkflowTest {
                     emit(CloudEvent.RoundComplete("", false, MessageProvenance.CLEAN, testFix = CloudEvent.TestFixRequest(null)))
                     return
                 }
+                val steps = """[{"tap":"add"},{"expect":"value","target":"count","equals":1}]"""
+                // The agent reproduces the problem, fixes the source, and finish runs the reproduction again.
                 val response = when {
-                    request.generationStage == CloudGenerationStage.REFINE -> """{"sourceEdits":[
-                        {"search":"return {state:input.state};","replace":"if(input.event.type==='action')input.state.count++;return {state:input.state};"}
+                    request.agentAppAccepted -> """{"tool":"finish","summary":"Fixed.","checks":[{"name":"adds","steps":$steps}]}"""
+                    request.turns.size == 1 -> """{"tool":"run","steps":$steps}"""
+                    else -> """{"tool":"edit_app","source_edits":[
+                        {"find":"return {state:input.state};","replace":"if(input.event.type==='action')input.state.count++;return {state:input.state};"}
                     ]}"""
-                    else -> """{"behavior":{"status":"checkable","scenario":{"slots":{"add":{"kind":"action"},
-                        "count":{"kind":"value"}},"steps":[{"op":"action","slot":"add"},
-                        {"op":"assert","slot":"count","test":"equals","value":1}]}},
-                        "targets":{"add":"action2","count":"value1"},
-                        "authoredReproduction":[{"text":"Tap Add","target":"action2"},
-                        {"text":"Count should be 1","target":"value1","value":"1"}]}"""
                 }
                 emit(CloudEvent.Text(response))
             }
@@ -731,7 +687,7 @@ class AutomaticToolWorkflowTest {
             assertEquals(0, JSONObject(saved.state).getInt("count"))
             assertEquals(2, f.toolStore.revisions("counter").size)
             assertEquals(2, f.last.toolRevision)
-            assertEquals(listOf(null, null, CloudGenerationStage.REFINE), calls.map { it.generationStage })
+            assertEquals(listOf(null) + List(3) { CloudGenerationStage.AGENT }, calls.map { it.generationStage })
             assertTrue(calls.first().chatDecision)
             assertFalse(calls[1].chatDecision)
         }
@@ -809,22 +765,23 @@ class AutomaticToolWorkflowTest {
     }
 
     /** Recovery failures: excess calls, leaked rejected output, effects, late commits, stale state, or lost request context. */
-    @Test fun invalidGeneratedOutputRepairsOnceAndProducesAnInteractiveTool() {
+    @Test fun invalidGeneratedOutputRecoversToAnInteractiveTool() {
         val requests = CopyOnWriteArrayList<CloudRequest>()
         val sessions = CopyOnWriteArrayList<CloudSession>()
         var firstAnswer = ""
+        var firstReply = ""
         var attempts = 0
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if (request.replyWithFixturePlan(emit)) return
                 assertEquals("isolated-auto-test",key)
-                if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
+                if(request.generationStage == null) emit(CloudEvent.Text(decision()))
                 else {
                     requests += request; sessions += session
-                    val output = when {
-                        ++attempts == 1 -> firstAnswer
-                        firstAnswer.startsWith("{") -> writerFixturePatch(firstAnswer, spec())
-                        else -> spec()
+                    val output = when (++attempts) {
+                        // Raw text keeps a non-JSON reply exactly as the model wrote it.
+                        1 -> (if (firstAnswer.startsWith("{")) agentWrite(firstAnswer) else firstAnswer).also { firstReply = it }
+                        2 -> agentWrite(spec())
+                        else -> agentFixtureFinish
                     }
                     emit(CloudEvent.Text(output))
                 }
@@ -842,45 +799,40 @@ class AutomaticToolWorkflowTest {
             invalid.forEachIndexed { index, answer ->
                 firstAnswer = answer; attempts = 0; requests.clear(); sessions.clear()
                 f.send("Create counter $index"); f.idle()
-                assertEquals("complete",f.last.status); assertEquals(2,attempts)
+                assertEquals("complete",f.last.status); assertEquals(3,attempts)
                 assertEquals(index+1,f.toolStore.tools().size)
                 val tool = f.toolStore.tool(f.last.toolId!!)!!
                 assertEquals(1,tool.revision); assertEquals(1,f.toolStore.revisions(tool.id).size)
                 assertEquals(0,JSONObject(tool.state).getInt("count")); assertTrue(f.toolStore.effects(tool.id).isEmpty())
                 main { f.model.tools.interact(tool,"add",null) }; waitUntil { !f.model.tools.busy }
                 assertEquals(1,JSONObject(f.toolStore.tool(tool.id)!!.state).getInt("count"))
-                assertSame(sessions[0],sessions[1])
-                assertEquals(requests[0].turns.first(),requests[1].turns.first())
-                assertTrue(requests.all { !it.search && it.systemInstructions.isEmpty() })
-                if (answer.startsWith("{")) {
-                    assertEquals(listOf("user","assistant","user"),requests[1].turns.map { it.role })
-                    assertEquals(answer,requests[1].turns[1].text)
-                    assertTrue(requests[1].turns[1].images.isEmpty())
-                } else {
-                    assertEquals(listOf("user", "user"), requests[1].turns.map { it.role })
-                    assertFalse(requests[1].turns.any { it.text.contains("REJECTED_OUTPUT_ONLY") })
-                }
-                assertFalse(requests[1].turns.last().text.contains("REJECTED_OUTPUT_ONLY"))
+                assertTrue(sessions.all { it === sessions[0] })
+                assertTrue(requests.all { it.turns.first() == requests[0].turns.first() })
+                assertTrue(requests.all { !it.search && it.generationStage == CloudGenerationStage.AGENT })
+                assertEquals(listOf("user","assistant","user"),requests[1].turns.map { it.role })
+                assertEquals(firstReply,requests[1].turns[1].text)
+                assertTrue(requests[1].turns[1].images.isEmpty())
+                val correction = requests[1].turns.last().text
+                assertTrue(correction, correction.contains(": REJECTED."))
+                assertFalse(correction, correction.contains("REJECTED_OUTPUT_ONLY"))
                 assertTrue(requests.all { it.jsonObject })
                 assertFalse(f.last.text.contains("REJECTED_OUTPUT_ONLY")); assertTrue(f.toolStore.drafts().isEmpty())
             }
         }
     }
-    @Test fun twoInvalidCandidatesFailWithoutAcceptedStateOrRejectedOutput() {
+    @Test fun invalidCandidatesFailWithoutAcceptedStateOrRejectedOutput() {
         val robot = ShellRobot("failed-public-update")
         val update = "I will build the counter controls."
         val release = CompletableDeferred<Unit>()
         var calls = 0
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if (request.replyWithFixturePlan(emit)) return
-                if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
-                else {
-                    if (++calls == 1) {
-                        emit(CloudEvent.PublicUpdate(update))
-                        release.await()
-                    }
-                    emit(CloudEvent.Text("REJECTED_OUTPUT_ONLY"))
+                if(request.generationStage == null) emit(CloudEvent.Text(decision()))
+                else if (++calls == 1) {
+                    emit(CloudEvent.Text(JSONObject().put("note",update).put("tool","write_app").put("app","REJECTED_OUTPUT_ONLY").toString()))
+                } else {
+                    if (calls == 2) release.await()
+                    emit(CloudEvent.Text(agentStall))
                 }
             }
         }
@@ -889,80 +841,10 @@ class AutomaticToolWorkflowTest {
             try { robot.waitFor(update) } finally { release.complete(Unit) }
             f.idle()
             robot.waitGone(update)
-            assertEquals(2,calls); assertEquals("error",f.last.status); assertEquals("widget_spec",f.last.errorCode)
+            assertEquals(AppAgentGuide.MAX_STEPS,calls); assertEquals("error",f.last.status); assertEquals("widget_agent_incomplete",f.last.errorCode)
             assertEquals("", f.last.text)
             assertFalse(f.last.error.contains("REJECTED_OUTPUT_ONLY")); assertNull(f.last.toolId)
             assertTrue(f.toolStore.tools().isEmpty()); assertTrue(f.toolStore.drafts().isEmpty())
-        }
-    }
-    @Test fun schemaRepairUsesSpecificSafeValidationCategoriesAndReportsTheFinalRule() {
-        val requests = CopyOnWriteArrayList<CloudRequest>()
-        var rejected = ""
-        var expectedCategory = ""
-        var repairSucceeds = true
-        var calls = 0
-        val provider = object : SingleRoundProvider() {
-            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if (request.replyWithFixturePlan(emit)) return
-                if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
-                else {
-                    requests += request
-                    assertTrue("The supplied schema example must use a valid scalar type",
-                        request.turns.first().text.contains("\"stateSchema\":{\"field\":\"number\"}"))
-                    val attempt = ++calls
-                    if(attempt == 2) {
-                        val feedback = request.turns.last().text
-                        assertTrue(feedback,feedback.contains("Validation category: $expectedCategory."))
-                        assertFalse(feedback.contains("REJECTED_PRIVATE_VALUE"))
-                        assertEquals(requests.first().turns.first(),request.turns.first())
-                        if (rejected.startsWith("{")) {
-                            assertEquals(rejected,request.turns[1].text)
-                            assertEquals("assistant",request.turns[1].role)
-                        }
-                    }
-                    val output = when {
-                        attempt == 1 -> rejected
-                        !rejected.startsWith("{") -> if (repairSucceeds) spec() else rejected
-                        repairSucceeds -> writerFixturePatch(rejected, spec())
-                        else -> """{"fields":{"description":"Rejected repair $attempt"}}"""
-                    }
-                    emit(CloudEvent.Text(output))
-                }
-            }
-        }
-        val privateSpec = JSONObject(spec()).put("description","REJECTED_PRIVATE_VALUE")
-        val cases = listOf(
-            "not JSON REJECTED_PRIVATE_VALUE" to "tool_json",
-            JSONObject(privateSpec.toString()).put("formatVersion",1).toString() to "tool_version",
-            JSONObject(privateSpec.toString()).put("extra","REJECTED_PRIVATE_VALUE").toString() to "tool_fields",
-            JSONObject(privateSpec.toString()).put("stateSchema",JSONObject("""{"count":{"type":"number","extra":true}}""")).toString() to "tool_state_schema",
-            JSONObject(privateSpec.toString()).put("initialState",JSONObject().put("count","REJECTED_PRIVATE_VALUE")).toString() to "tool_initial_state",
-            JSONObject(privateSpec.toString()).put("ui",JSONObject("""{"type":"text","text":"Count","style":"REJECTED_PRIVATE_VALUE"}""")).toString() to "tool_ui_properties",
-            JSONObject(privateSpec.toString()).put("ui",JSONObject("""{"type":"text","text":"Count","bind":"REJECTED_PRIVATE_VALUE"}""")).toString() to "tool_ui_bindings",
-            JSONObject(privateSpec.toString()).put("ui",JSONObject("""{"type":"column","children":[{"type":"button","text":"Add","action":"add"},{"type":"button","text":"Reset","action":"add"}]}""")).toString() to "tool_ui_actions"
-        )
-        Fixture(provider).use { f ->
-            listOf(true,false).forEach { succeeds ->
-                repairSucceeds = succeeds
-                cases.forEach { (candidate, category) ->
-                    rejected = candidate; expectedCategory = category; calls = 0; requests.clear()
-                    val before = f.toolStore.tools()
-                    f.send("Create a counter"); f.idle()
-                    assertEquals(category, if (succeeds || !candidate.startsWith("{")) 2 else 4, calls)
-                    if(succeeds) {
-                        assertEquals("complete",f.last.status); assertEquals(before.size+1,f.toolStore.tools().size)
-                        val accepted = f.toolStore.tool(f.last.toolId!!)!!
-                        assertEquals(0,JSONObject(accepted.state).getInt("count"))
-                        assertTrue(f.toolStore.effects(accepted.id).isEmpty())
-                    } else {
-                        assertEquals("error",f.last.status); assertEquals("widget_spec",f.last.errorCode)
-                        assertTrue(f.last.error,f.last.error.contains("Validation category: $category."))
-                        assertTrue("The terminal error must include a fixed correction rule",f.last.error.length > category.length+40)
-                        assertEquals(before,f.toolStore.tools()); assertNull(f.last.toolId)
-                    }
-                    assertFalse(f.last.error.contains("REJECTED_PRIVATE_VALUE")); assertTrue(f.toolStore.drafts().isEmpty())
-                }
-            }
         }
     }
     // Failure cases: a generated 200-item list must receive an exact correction, never be clamped,
@@ -974,17 +856,13 @@ class AutomaticToolWorkflowTest {
         val requests=CopyOnWriteArrayList<CloudRequest>()
         val provider=object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if (request.replyWithFixturePlan(emit)) return
-                if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision("Create a synthetic medication log with user-entered values",kind = if(target == null) "create" else "refine")))
+                if(request.generationStage == null) emit(CloudEvent.Text(decision("Create a synthetic medication log with user-entered values",kind = if(target == null) "create" else "refine")))
                 else {
                     requests += request
                     val original=request.turns.first().text
-                    if (request.expectsSavedPatch) {
-                        assertTrue(original.contains("Preserve every existing state field, type, collection definition, and record ID."))
-                    } else {
-                        assertTrue(original.contains("maxItems must be an integer in 1..100"))
-                        assertTrue(original.contains("maxItems must be an integer in 1..512"))
-                        assertTrue(original.contains("Never discard prior history"))
+                    assertTrue(request.systemInstructions.contains("maxItems is an integer in 1..100"))
+                    if (target != null) {
+                        assertTrue(original.contains("Keep every existing state field with its type so saved data stays."))
                     }
                     assertFalse(original.contains("5mg"))
                     if(++calls == 2) {
@@ -994,22 +872,23 @@ class AutomaticToolWorkflowTest {
                         assertTrue(correction,correction.contains("Path: stateSchema.observations.maxItems."))
                         assertTrue(correction,correction.contains("Expected: integer 1..100."))
                         assertTrue(correction,correction.contains("Observed: integer 200."))
-                        if (target == null) {
-                            assertEquals(boundedListSpec(200),request.turns[1].text)
-                            assertEquals(requests.first().turns.first(),request.turns.first())
-                        } else {
-                            assertTrue(request.turns.first().text.contains("Current tool definition (data): "))
-                        }
+                        assertEquals(agentWrite(boundedListSpec(200)),request.turns[1].text)
+                        assertEquals(requests.first().turns.first(),request.turns.first())
+                        if (target != null) assertTrue(request.turns.first().text.contains("Current app definition:"))
                     }
-                    val output = if (calls == 2 && repair) writerFixturePatch(boundedListSpec(200), boundedListSpec(100))
-                        else boundedListSpec(200)
-                    emit(CloudEvent.Text(request.patchSavedFixture(output)))
+                    // The failing agent repeats the invalid list. Each reply fails before the smoke test.
+                    val output = when {
+                        request.agentAppAccepted -> agentFixtureFinish
+                        calls == 2 && repair -> agentWrite(boundedListSpec(100))
+                        else -> agentWrite(boundedListSpec(200))
+                    }
+                    emit(CloudEvent.Text(output))
                 }
             }
         }
         Fixture(provider).use { f ->
             f.send("Create a synthetic log"); f.idle()
-            assertEquals(2,calls); assertEquals("complete",f.last.status)
+            assertEquals(3,calls); assertEquals("complete",f.last.status)
             val created=f.toolStore.tool(f.last.toolId!!)!!
             assertEquals(100,ToolSpec.parsePersisted(created.spec).schema.getJSONObject("observations").getInt("maxItems"))
             main {f.model.tools.interact(created,"add",null)}; waitUntil {!f.model.tools.busy}
@@ -1017,9 +896,9 @@ class AutomaticToolWorkflowTest {
             assertEquals(1,JSONObject(saved.state).getInt("count"))
             target=saved.id; repair=false; calls=0; requests.clear()
             f.send("Update the log"); f.idle()
-            assertEquals(4,calls); assertEquals("error",f.last.status); assertEquals("widget_spec",f.last.errorCode)
+            assertEquals(AppAgentGuide.MAX_STEPS,calls); assertEquals("error",f.last.status); assertEquals("widget_agent_incomplete",f.last.errorCode)
+            // The terminal error keeps the first 300 characters of the last problem, so it names the path but not the observed value.
             assertTrue(f.last.error,f.last.error.contains("Path: stateSchema.observations.maxItems."))
-            assertTrue(f.last.error,f.last.error.contains("Observed: integer 200."))
             assertEquals(saved,f.toolStore.tool(saved.id)); assertEquals(1,f.toolStore.revisions(saved.id).size)
             assertTrue(f.toolStore.drafts().isEmpty()); assertTrue(f.toolStore.effects(saved.id).isEmpty())
         }
@@ -1032,33 +911,35 @@ class AutomaticToolWorkflowTest {
         var calls=0
         val provider=object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if (request.replyWithFixturePlan(emit)) return
-                if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
+                if(request.generationStage == null) emit(CloudEvent.Text(decision()))
                 else {
                     if(++calls == 2) {
                         val correction=request.turns.last().text
                         assertTrue(correction,correction.contains("Validation category: tool_state_schema."))
                         assertTrue(correction,correction.contains("Observed: integer."))
                         assertFalse(correction,correction.contains(privateNumber))
-                        assertEquals(candidate,request.turns[1].text)
+                        assertEquals(agentWrite(candidate),request.turns[1].text)
                     }
-                    emit(CloudEvent.Text(if (calls == 1) candidate else """{"fields":{"description":"Repair $calls"}}"""))
+                    // The failing agent repeats the invalid schema, so the last problem stays a schema error.
+                    emit(CloudEvent.Text(agentWrite(candidate)))
                 }
             }
         }
         Fixture(provider).use { f ->
             for(value in listOf(123456789,1234567890123L)) {
                 privateNumber=value.toString()
-                val malformed=listOf(value,JSONObject().put("type",value),JSONObject().put("type","object").put("fields",value))
+                // The host reads a bare number in stateSchema as the type "number", so only nested integers are invalid.
+                val malformed=listOf(JSONObject().put("type",value),JSONObject().put("type","object").put("fields",value))
                 malformed.forEach { node ->
                     calls=0
                     candidate=JSONObject(spec()).put("stateSchema",JSONObject().put("count",node)).toString()
                     f.send("Create a counter"); f.idle()
-                    assertEquals(4,calls); assertEquals("error",f.last.status); assertEquals("widget_spec",f.last.errorCode)
-                    assertTrue(f.last.error,f.last.error.contains("Observed: integer."))
+                    assertEquals(AppAgentGuide.MAX_STEPS,calls); assertEquals("error",f.last.status); assertEquals("widget_agent_incomplete",f.last.errorCode)
+                    // The terminal error keeps the first 300 characters of the last problem, so it names the path but not the observed type.
+                    assertTrue(f.last.error,f.last.error.contains("Path: stateSchema.count"))
                     assertFalse(f.last.error,f.last.error.contains(privateNumber))
                     val messageId=f.last.id
-                    waitUntil {f.store.load().conversations.single { it.id == f.model.snapshot.selectedId }.messages.last().let {it.id == messageId && it.errorCode == "widget_spec"}}
+                    waitUntil {f.store.load().conversations.single { it.id == f.model.snapshot.selectedId }.messages.last().let {it.id == messageId && it.errorCode == "widget_agent_incomplete"}}
                     val persisted=f.store.load().conversations.single { it.id == f.model.snapshot.selectedId }.messages.last()
                     assertEquals(f.last.error,persisted.error)
                     assertFalse(persisted.error,persisted.error.contains(privateNumber))
@@ -1073,9 +954,12 @@ class AutomaticToolWorkflowTest {
         var answer = spec()
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if (request.replyWithFixturePlan(emit)) return
-                if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
-                else { calls++; failure?.let { throw it }; emit(CloudEvent.Text(answer)) }
+                if(request.generationStage == null) emit(CloudEvent.Text(decision()))
+                else {
+                    calls++; failure?.let { throw it }
+                    // Raw text keeps an oversized reply exactly as the model wrote it.
+                    emit(CloudEvent.Text(if (answer.startsWith("{")) request.agentReply(answer) else answer))
+                }
             }
         }
         Fixture(provider).use { f ->
@@ -1090,7 +974,9 @@ class AutomaticToolWorkflowTest {
                 CloudFailure("javascript_memory_limit","Fixture memory limit")
             ).forEach { problem ->
                 calls = 0; failure = problem; f.send("Create a counter"); f.idle()
-                assertEquals(problem.javaClass.simpleName,1,calls)
+                // The agent retries a lost connection and a blank completion twice. Other provider failures stop at once.
+                val transient = problem is java.io.IOException && problem !is CloudFailure || (problem as? CloudFailure)?.code == "empty_response"
+                assertEquals(problem.javaClass.simpleName,if (transient) 3 else 1,calls)
                 assertTrue(f.toolStore.tools().isEmpty()); assertTrue(f.toolStore.drafts().isEmpty())
             }
             failure = null
@@ -1116,12 +1002,15 @@ class AutomaticToolWorkflowTest {
         val requests = CopyOnWriteArrayList<CloudRequest>()
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if (request.replyWithFixturePlan(emit)) return
-                if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision("Update the counter",kind = "refine")))
+                if(request.generationStage == null) emit(CloudEvent.Text(decision("Update the counter",kind = "refine")))
                 else {
                     requests += request
-                    emit(CloudEvent.Text(request.patchSavedFixture(if(++calls == 2 && repair)
-                        spec(recoveredTitle) else rejected)))
+                    emit(CloudEvent.Text(when {
+                        request.agentAppAccepted -> agentFixtureFinish
+                        ++calls == 1 -> agentWrite(rejected)
+                        calls == 2 && repair -> agentWrite(spec(recoveredTitle))
+                        else -> agentStall
+                    }))
                 }
             }
         }
@@ -1143,18 +1032,19 @@ class AutomaticToolWorkflowTest {
                     val before = f.toolStore.tool("existing")!!
                     val revisions = f.toolStore.revisions(before.id)
                     f.send("Update the counter"); f.idle()
-                    assertEquals(if (succeeds) 2 else 4,calls)
-                    assertTrue(requests[1].turns.first().text.contains("REJECTED_OUTPUT_ONLY"))
+                    assertEquals(if (succeeds) 3 else AppAgentGuide.MAX_STEPS,requests.size)
+                    assertTrue(requests[1].turns[1].text.contains("REJECTED_OUTPUT_ONLY"))
                     val feedback = requests[1].turns.last().text
+                    assertTrue(feedback,feedback.startsWith("write_app: REJECTED. The smoke test failed."))
                     assertTrue(feedback,feedback.contains("Smoke event: preview."))
-                    assertFalse(feedback.contains("REJECTED_OUTPUT_ONLY")); assertFalse(feedback.contains("while(true)"))
+                    assertFalse(feedback.contains("while(true)"))
                     if(succeeds) {
                         assertEquals("complete",f.last.status); assertEquals(before.id,f.last.toolId)
                         val accepted = f.toolStore.tool(before.id)!!
                         assertEquals(before.revision+1,accepted.revision); assertEquals(before.state,accepted.state)
                         assertEquals(revisions.size+1,f.toolStore.revisions(before.id).size)
                     } else {
-                        assertEquals("error",f.last.status); assertEquals("widget_preview",f.last.errorCode)
+                        assertEquals("error",f.last.status); assertEquals("widget_agent_incomplete",f.last.errorCode)
                         assertNull(f.last.toolId); assertEquals(before,f.toolStore.tool(before.id))
                         assertEquals(revisions,f.toolStore.revisions(before.id))
                     }
@@ -1180,15 +1070,13 @@ class AutomaticToolWorkflowTest {
             var calls = 0
             val provider = object : SingleRoundProvider() {
                 override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                    if (request.replyWithFixturePlan(emit)) return
-                    if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision()))
-                    else if(++calls == 1) emit(CloudEvent.Text(boundedListSpec(200)))
+                    if(request.generationStage == null) emit(CloudEvent.Text(decision()))
+                    // The host shows a step note after the step, so the rejected first step carries the repair note.
+                    else if(++calls == 1) emit(CloudEvent.Text(JSONObject(agentWrite(boundedListSpec(200))).put("note",repairing).toString()))
                     else {
-                        emit(CloudEvent.PublicUpdate(repairing))
                         entered.countDown(); check(release.await(20,TimeUnit.SECONDS))
                         withContext(NonCancellable) {
-                            emit(CloudEvent.PublicUpdate(lateUpdate))
-                            emit(CloudEvent.Text(boundedListSpec(100)))
+                            emit(CloudEvent.Text(JSONObject(agentWrite(boundedListSpec(100))).put("note",lateUpdate).toString()))
                         }
                     }
                 }
@@ -1215,12 +1103,12 @@ class AutomaticToolWorkflowTest {
             var calls = 0
             val provider = object : SingleRoundProvider() {
                 override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                    if(request.systemInstructions.isNotEmpty()) emit(CloudEvent.Text(decision("Rename counter",kind = "refine")))
-                    else if(++calls == 1) emit(CloudEvent.Text(request.patchSavedFixture(JSONObject(spec()).put("stateSchema",JSONObject().put("count","string"))
+                    if(request.generationStage == null) emit(CloudEvent.Text(decision("Rename counter",kind = "refine")))
+                    else if(++calls == 1) emit(CloudEvent.Text(agentWrite(JSONObject(spec()).put("stateSchema",JSONObject().put("count","string"))
                         .put("initialState",JSONObject().put("count","bad")).toString())))
-                    else {
-                        entered.countDown(); check(release.await(10,TimeUnit.SECONDS)); emit(CloudEvent.Text(request.patchSavedFixture(spec("Repaired"))))
-                    }
+                    else if(calls == 2) {
+                        entered.countDown(); check(release.await(10,TimeUnit.SECONDS)); emit(CloudEvent.Text(agentWrite(spec("Repaired"))))
+                    } else emit(CloudEvent.Text(request.agentReply(spec("Repaired"))))
                 }
             }
             Fixture(provider) { shell, tools ->
@@ -1235,7 +1123,7 @@ class AutomaticToolWorkflowTest {
                         ToolEngine(f.toolStore,ToolGenerationService(provider,com.alpha.assistant.sandbox.SandboxClient(app)))
                             .interact(before.id,before.revision,before.stateVersion,"add",null)
                     } else before
-                    release.countDown(); f.idle(); assertEquals(2,calls)
+                    release.countDown(); f.idle(); assertEquals(3,calls)
                     if(changeState) {
                         assertEquals("error",f.last.status); assertEquals(expected,f.toolStore.tool("existing"))
                         assertEquals(1,f.toolStore.revisions("existing").size)
@@ -1254,8 +1142,11 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
-                if (request.replyWithFixturePlan(emit)) return
-                if(request.systemInstructions.isEmpty()) emit(CloudEvent.Text(if(++generationCalls == 1) "invalid" else spec()))
+                if(request.generationStage != null) emit(CloudEvent.Text(when (++generationCalls) {
+                    1 -> "invalid"
+                    2 -> agentWrite(spec())
+                    else -> request.agentReply(spec())
+                }))
                 else {
                     if(request.search) emit(CloudEvent.Search("found",listOf(Source("Source","https://example.com/value","Verified value: 12"))))
                     emit(CloudEvent.Text(decision("Show the verified value 12 in a counter")))
@@ -1274,19 +1165,16 @@ class AutomaticToolWorkflowTest {
                 main { f.model.editDraft(Draft("Create an app from this image",listOf(Attachment(uri.toString(),"auto-reference.png","image/png")))); f.model.send() }
                 f.idle(); assertEquals("complete",f.last.status)
                 assertEquals("https://example.com/value",f.last.sources.single().url)
-                assertEquals(listOf(null, CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.COMPLETE),
-                    requests.map { it.generationStage })
-                assertEquals(requests[2].turns.single(),requests[3].turns.first())
+                assertEquals(listOf(null) + List(3) { CloudGenerationStage.AGENT }, requests.map { it.generationStage })
                 val originalBytes = resolver.openInputStream(uri)!!.use { it.readBytes() }
                 requests.drop(1).forEach { request ->
                     val input = request.turns.first()
+                    assertEquals(requests[1].turns.first(),input)
+                    assertTrue(request.turns.drop(1).all { it.images.isEmpty() })
                     assertEquals(requests[0].turns.last().images,input.images)
                     assertArrayEquals(originalBytes,android.util.Base64.decode(input.images.single().substringAfter(','),android.util.Base64.DEFAULT))
-                    val context = if (request.generationStage == CloudGenerationStage.PLAN) {
-                        val planning = JSONObject(input.text)
-                        assertEquals("Create an app from this image", planning.getString("request"))
-                        planning.getString("context")
-                    } else input.text
+                    val context = input.text
+                    assertTrue(context.contains("Create an app from this image"))
                     assertTrue(context.contains("Verified value: 12"))
                     assertTrue(context.contains("https://example.com/value")); assertFalse(request.search)
                 }
@@ -1311,25 +1199,25 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
-                if (request.replyWithFixturePlan(emit)) return
-                if(request.systemInstructions.isEmpty()) emit(CloudEvent.Text(if(++generationCalls == 1) "invalid" else spec()))
+                if(request.generationStage != null) emit(CloudEvent.Text(when (++generationCalls) {
+                    1 -> "invalid"
+                    2 -> agentWrite(spec())
+                    else -> request.agentReply(spec())
+                }))
                 else { emit(CloudEvent.Search("found",sources)); emit(CloudEvent.Text(decision(brief))) }
             }
         }
         Fixture(provider).use { f ->
             f.send(longRequest); f.idle()
             assertEquals("complete",f.last.status)
-            assertEquals(listOf(null, CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE, CloudGenerationStage.COMPLETE),
-                requests.map { it.generationStage })
-            assertEquals(requests[2].turns.single(),requests[3].turns.first())
-            val prompts = listOf(
-                JSONObject(requests[1].turns.single().text).getString("context"),
-                requests[2].turns.single().text.substringAfter("Request: ",missingDelimiterValue = "")
-            )
+            assertEquals(listOf(null) + List(3) { CloudGenerationStage.AGENT }, requests.map { it.generationStage })
+            assertTrue(requests.drop(2).all { it.turns.first() == requests[1].turns.first() })
+            val prompts = listOf(requests[1].turns.first().text.substringAfter("User request:\n",missingDelimiterValue = "")
+                .substringBefore("\n\nToday is "))
             prompts.forEach { prompt ->
                 assertTrue("The generator must contain the bounded draft prompt",prompt.isNotEmpty())
                 assertTrue(prompt.length in 16_001..64_000)
-                assertEquals(ChatToolReply.generationPrompt(longRequest,brief,"Ready.",sources),prompt)
+                assertEquals(ChatToolReply.generationPrompt(longRequest,brief,"Ready.",sources).trim(),prompt)
                 assertTrue(prompt.contains(longRequest))
                 assertTrue(prompt.contains("Counter starts at verified value 12"))
                 sources.forEach { source -> assertTrue(prompt.contains(source.url)) }
@@ -1408,11 +1296,10 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
-                if(request.jsonObject) {
+                if(request.generationStage != null) {
                     assertTrue(request.turns.first().text.contains("untrusted_selected_text"))
                     assertTrue(request.turns.first().text.contains("user-entered amount 7"))
-                    if (request.replyWithFixturePlan(emit)) return
-                    emit(CloudEvent.Text(spec()))
+                    emit(CloudEvent.Text(request.agentReply(spec())))
                 } else {
                     assertEquals(selected,request.selectedText)
                     assertFalse(request.turns.last().text.contains("SECRET_QUERY"))
@@ -1428,7 +1315,7 @@ class AutomaticToolWorkflowTest {
             main { f.model.editDraft(Draft("Create a local app from the selected note",listOf(attachment))); f.model.send() }; f.idle()
             assertEquals("complete",f.last.status); assertNotNull(f.last.toolId)
             assertEquals(1,f.toolStore.tools().size)
-            assertEquals(listOf(null, null, CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE),requests.map { it.generationStage })
+            assertEquals(listOf(null, null, CloudGenerationStage.AGENT, CloudGenerationStage.AGENT),requests.map { it.generationStage })
         }
     }
     @Test fun chatReferencesUseThePickerAndKeepDuplicateChoicesDistinct() {
@@ -1436,7 +1323,7 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
-                if(request.jsonObject) emit(CloudEvent.Text(request.patchSavedFixture(spec("Counter Plus"))))
+                if(request.generationStage != null) emit(CloudEvent.Text(request.agentReply(spec("Counter Plus"))))
                 else emit(CloudEvent.Text(decision("Change the counter",kind = "refine")))
             }
         }
@@ -1477,7 +1364,7 @@ class AutomaticToolWorkflowTest {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
-                emit(CloudEvent.Text(if(request.jsonObject) request.patchSavedFixture(spec("Updated")) else decision("Change it",kind = "refine")))
+                emit(CloudEvent.Text(if(request.generationStage != null) request.agentReply(spec("Updated")) else decision("Change it",kind = "refine")))
             }
         }
         Fixture(provider) { shell, tools ->
@@ -1521,10 +1408,12 @@ class AutomaticToolWorkflowTest {
         val prompts = CopyOnWriteArrayList<String>()
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if(request.jsonObject) {
-                    prompts += request.turns.first().text
-                    if(prompts.size == 1) { entered.countDown(); release.await() }
-                    emit(CloudEvent.Text(request.patchSavedFixture(spec("Version ${prompts.size + 1}"))))
+                if(request.generationStage != null) {
+                    if(request.turns.size == 1) {
+                        prompts += request.turns.first().text
+                        if(prompts.size == 1) { entered.countDown(); release.await() }
+                    }
+                    emit(CloudEvent.Text(request.agentReply(spec("Version ${prompts.size + 1}"))))
                 } else emit(CloudEvent.Text(decision(request.turns.last().text,kind = "refine")))
             }
         }
@@ -1556,7 +1445,7 @@ class AutomaticToolWorkflowTest {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 requests += request
                 val text = request.turns.last().text
-                if(request.jsonObject) emit(CloudEvent.Text(request.patchSavedFixture(spec("Updated"))))
+                if(request.generationStage != null) emit(CloudEvent.Text(request.agentReply(spec("Updated"))))
                 else {
                     if(text == "Change 1") { entered.countDown(); gate.await() }
                     if(text == "Change 2") throw CloudFailure("fixture","Fixture failure")
@@ -1605,7 +1494,7 @@ class AutomaticToolWorkflowTest {
         val requests = CopyOnWriteArrayList<String>()
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                if(request.jsonObject) emit(CloudEvent.Text(request.patchSavedFixture(spec("Updated"))))
+                if(request.generationStage != null) emit(CloudEvent.Text(request.agentReply(spec("Updated"))))
                 else {
                     val text = request.turns.last().text
                     requests += text
@@ -1659,9 +1548,9 @@ class AutomaticToolWorkflowTest {
             var generationCalls = 0
             val provider = object : SingleRoundProvider() {
                 override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                    if(request.jsonObject) {
+                    if(request.generationStage != null) {
                         generationCalls++
-                        emit(CloudEvent.Text(request.patchSavedFixture(spec("Updated"))))
+                        emit(CloudEvent.Text(request.agentReply(spec("Updated"))))
                         return
                     }
                     val text = request.turns.last().text
@@ -1736,9 +1625,8 @@ class AutomaticToolWorkflowTest {
         Fixture(provider) { shell, tools ->
             val generation = object : SingleRoundProvider() {
                 override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                    if (request.replyWithFixturePlan(emit)) return
-                    val definition = if (request.generationStage == CloudGenerationStage.REFINE) spec("Updated counter") else spec()
-                    emit(CloudEvent.Text(request.patchSavedFixture(definition)))
+                    val definition = if (request.turns.first().text.contains("Keep current counter")) spec("Updated counter") else spec()
+                    emit(CloudEvent.Text(request.agentReply(definition)))
                 }
             }
             val engine = ToolEngine(tools,ToolGenerationService(generation,com.alpha.assistant.sandbox.SandboxClient(app)))

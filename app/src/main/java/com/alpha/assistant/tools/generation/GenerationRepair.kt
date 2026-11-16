@@ -13,10 +13,6 @@ internal class GenerationRepair private constructor(
     private val editableFields: Set<String>,
     private val targetField: String?,
     private val expectedHoles: List<String>?,
-    private val writer: Boolean,
-    private val refinement: Boolean = false,
-    private val protectedUi: Boolean = false,
-    private val allowSourceEdits: Boolean = writer,
 ) {
     enum class Mode(val wire: String) { PATCH("patch"), REWRITE("rewrite") }
 
@@ -28,7 +24,6 @@ internal class GenerationRepair private constructor(
         SIZE("size", "Return a smaller patch within the output limit."),
         NO_CHANGE("no_change", "Make a change that addresses the failure."),
         REPEATED_CANDIDATE("repeated_candidate", "The result repeats a previously rejected candidate."),
-        PROTECTED_UI("protected_ui", "The saved layout cannot be replaced or removed. Use only the layout edit described in the patch instructions."),
     }
 
     class Rejected(val problem: Problem, val path: String? = null) : IllegalArgumentException() {
@@ -41,11 +36,8 @@ internal class GenerationRepair private constructor(
     private data class Candidate(val text: String, val json: JsonObject)
     private data class SourceEdit(val start: Int, val end: Int, val replacement: String)
 
-    private val maxBytes = if (writer) ToolSpec.MAX_DEFINITION_BYTES else SandboxContract.MAX_BYTES
+    private val maxBytes = ToolSpec.MAX_DEFINITION_BYTES
     private var base: Candidate? = null
-    private var prependBase: JsonObject? = null
-    var prependedText: String? = null
-        private set
     private val seen = mutableListOf<JsonObject>()
     private var rewritten = false
     private data class Turn(val result: String, var validation: String? = null)
@@ -66,7 +58,7 @@ internal class GenerationRepair private constructor(
             else -> "$result."
         }
         history += Turn("Repair ${request.repairNumber} (${request.mode.wire}) on candidate ${request.baseVersion}: $outcome")
-        if (writer && !refinement && request.mode == Mode.PATCH && rejected != null && raw != null) {
+        if (request.mode == Mode.PATCH && rejected != null && raw != null) {
             repeatedPatch = strictObject(raw, maxBytes)?.let { !rejectedPatches.add(request.baseVersion to it) } ?: false
         }
     }
@@ -75,47 +67,28 @@ internal class GenerationRepair private constructor(
         separator = "\n", prefix = "\nRepair history (host results):\n",
     ) { it.result + (it.validation?.let { failure -> " Validation: $failure" } ?: "") }
 
-    fun retain(raw: String, rejectRepeated: Boolean = false) {
+    fun retain(raw: String) {
         val json = strictObject(raw, maxBytes) ?: return
-        if (!writer && json.keys.none { it in editableFields }) return
-        if (writer) {
-            if (targetField == null && ("fill" in json || "holes" in json)) return
-            if (targetField != null && (json.keys.any { it !in mixedKeys } ||
-                    json["holes"] != expectedHoles?.let { JsonArray(it.map(::JsonPrimitive)) })) return
-            val definition = if (targetField == null) json else json[targetField] as? JsonObject ?: return
-            if (string(definition["source"]).isNullOrBlank()) return
-        }
-        if (rejectRepeated && json in seen) reject(Problem.REPEATED_CANDIDATE)
+        if (targetField == null && ("fill" in json || "holes" in json)) return
+        if (targetField != null && (json.keys.any { it !in mixedKeys } ||
+                json["holes"] != expectedHoles?.let { JsonArray(it.map(::JsonPrimitive)) })) return
+        val definition = if (targetField == null) json else json[targetField] as? JsonObject ?: return
+        if (string(definition["source"]).isNullOrBlank()) return
         base = Candidate(raw, json)
         seen += json
     }
 
-    fun firstRefinement(): Request = patch(0, "Apply the requested edit to the current saved definition.", checkNotNull(base))
-
-    fun testPatch(number: Int, feedback: String): Request? = base?.let { patch(number, feedback, it) }
-
-    fun next(feedback: String, rewriteInstructions: String, finalPlanRewrite: Boolean = false, patchRejected: Boolean = false,
-        claim: () -> Int?): Request? {
+    fun next(feedback: String, rewriteInstructions: String, patchRejected: Boolean = false, claim: () -> Int?): Request? {
         if (!patchRejected) history.lastOrNull()?.validation = feedback
         if (repeatedPatch) return null
         val candidate = base
-        if (candidate == null && (rewritten || protectedUi)) return null
+        if (candidate == null && rewritten) return null
         val number = claim() ?: return null
-        val replacePlan = !writer && !rewritten && finalPlanRewrite && number == 3
-        if (candidate == null || refinement && !protectedUi && number == 3 || replacePlan) {
-            if (replacePlan) base = null
+        if (candidate == null) {
             rewritten = true
             return Request(Mode.REWRITE, number, rewriteInstructions + historyContext(), null, baseVersion = seen.size)
         }
         return patch(number, feedback, candidate)
-    }
-
-    fun planRemovalGuidance(): String {
-        val keys = base?.json?.keys ?: return ""
-        val partsOnly = keys.intersect(setOf("title", "description", "inputs", "constants", "needs", "questions"))
-        if (partsOnly.isEmpty()) return ""
-        return " If the corrected plan uses wholeScreen, remove these fields present in the current candidate: " +
-            partsOnly.sorted().joinToString() + "."
     }
 
     fun correctBindings(feedback: String, claim: () -> Int?): Request? {
@@ -128,62 +101,39 @@ internal class GenerationRepair private constructor(
     }
 
     private fun patch(number: Int, feedback: String, candidate: Candidate): Request {
-        val allowedFields = if (prependBase != null) editableFields + "prependText" else editableFields
         val structure = "Use fields, a JSON object, to set named fields in ${targetField ?: "the candidate root"}. " +
-            "Allowed fields: ${allowedFields.joinToString()}. " +
+            "Allowed fields: ${editableFields.joinToString()}. " +
             "Use removeFields, an array of strings, to delete existing fields. Do not set and remove the same field."
-        val source = if (allowSourceEdits) {
-            " Use sourceEdits, an array of objects, for JavaScript. Each object has exactly search and replace strings. " +
-                "Copy a short, unique search fragment exactly from the decoded source. Use nonoverlapping edits. " +
-                "Keep source outside fields and removeFields. " +
-                "Preserve native ownership and hole order."
-        } else ""
-        val layout = when {
-            prependBase != null ->
-                " The host keeps the existing UI private. To add one line at the top, put prependText inside fields, as in {\"fields\":{\"prependText\":\"Status ready\"}}. " +
-                    "Use the exact visible text from the request (1 to 300 characters). " +
-                    "The host inserts one text node and keeps every existing control and section. Omit ui from fields and removeFields. " +
-                    "If JavaScript returns its own UI, use sourceEdits to insert the same text as the first child of the root column or its first section. Keep all existing children."
-            protectedUi -> " The host keeps the existing UI private. Layout edits are unavailable for this app. Omit ui from fields and removeFields."
-            else -> ""
-        }
+        val source = " Use sourceEdits, an array of objects, for JavaScript. Each object has exactly search and replace strings. " +
+            "Copy a short, unique search fragment exactly from the decoded source. Use nonoverlapping edits. " +
+            "Keep source outside fields and removeFields. " +
+            "Preserve native ownership and hole order."
         return Request(Mode.PATCH, number,
             "$feedback${historyContext()}\nReturn one JSON patch object only. This replaces the earlier full-output instruction. " +
-                "$structure$source$layout Make at least one change. Do not return the complete candidate.",
+                "$structure$source Make at least one change. Do not return the complete candidate.",
             candidate.text, baseVersion = seen.size)
     }
 
-    fun apply(raw: String, restrictRemovals: Boolean = false, bindingsOnly: Boolean = false): Applied {
+    fun apply(raw: String, bindingsOnly: Boolean = false): Applied {
         if (byteSize(raw) > maxBytes) reject(Problem.SIZE)
         val patch = strictObject(raw, maxBytes) ?: reject()
-        val sections = buildSet {
-            addAll(planPatchKeys)
-            if (allowSourceEdits) add("sourceEdits")
-        }
-        if (patch.keys.any { it !in sections }) reject(path = "$")
-        val values = patch["fields"]?.let { it as? JsonObject ?: reject(path = "$.fields") }.orEmpty()
-        if (bindingsOnly && (patch.keys != setOf("fields") || values.keys != setOf("behaviorBindings") ||
-                values["behaviorBindings"] !is JsonObject)) reject()
+        if (patch.keys.any { it !in patchKeys }) reject(path = "$")
+        val fields = patch["fields"]?.let { it as? JsonObject ?: reject(path = "$.fields") }.orEmpty()
+        if (bindingsOnly && (patch.keys != setOf("fields") || fields.keys != setOf("behaviorBindings") ||
+                fields["behaviorBindings"] !is JsonObject)) reject()
         val removals = patch["removeFields"]?.let { value ->
             (value as? JsonArray ?: reject()).map { string(it) ?: reject() }
         }.orEmpty()
         val edits = patch["sourceEdits"]?.let { it as? JsonArray ?: reject(path = "$.sourceEdits") }.orEmpty()
-        if (protectedUi && ("ui" in values || "ui" in removals)) reject(Problem.PROTECTED_UI)
-        val topText = values["prependText"]?.let { string(it)?.takeIf(String::isNotBlank) ?: reject() }
-        val layout = topText?.let(::prependText)
-        val fields = if (layout == null) values else values - "prependText"
-        val changes = values.size + removals.size + edits.size
+        val changes = fields.size + removals.size + edits.size
         if (fields.keys.any { it !in editableFields }) reject(path = "$.fields")
         if (changes !in 1..32 || edits.size > 16 ||
-            removals.toSet().size != removals.size || removals.any {
-                it in fields || writer && it == "source" || restrictRemovals && it !in editableFields
-            }) reject()
+            removals.toSet().size != removals.size || removals.any { it in fields || it == "source" }) reject()
 
         val previous = checkNotNull(base).json
         val original = if (targetField == null) previous else previous.getValue(targetField) as JsonObject
         if (removals.any { it !in original }) reject()
         val definition = (original - removals.toSet() + fields).toMutableMap()
-        if (layout != null) definition["ui"] = layout
         if (edits.isNotEmpty()) {
             definition["source"] = JsonPrimitive(editSource(checkNotNull(string(original["source"])), edits))
         }
@@ -196,17 +146,8 @@ internal class GenerationRepair private constructor(
         if (json == previous) reject(Problem.NO_CHANGE)
         if (json in seen) reject(Problem.REPEATED_CANDIDATE)
         base = Candidate(text, json)
-        if (topText != null) prependedText = topText
         seen += json
-        return Applied(text, changes, edits.size, values.keys.toList() + removals.filter { it in editableFields })
-    }
-
-    private fun prependText(text: String): JsonObject {
-        val original = prependBase ?: reject(Problem.PROTECTED_UI)
-        val node = JsonObject(mapOf("type" to JsonPrimitive("text"), "text" to JsonPrimitive(text)))
-        // Use the saved layout so that a retry replaces its own addition.
-        val children = original.getValue("children") as JsonArray
-        return JsonObject(original + ("children" to JsonArray(listOf(node) + children)))
+        return Applied(text, changes, edits.size, fields.keys.toList() + removals.filter { it in editableFields })
     }
 
     private fun editSource(source: String, edits: List<JsonElement>): String {
@@ -227,33 +168,13 @@ internal class GenerationRepair private constructor(
     }
 
     companion object {
-        const val FORMAT_OVERRIDE = "\n\nFor this repair, use the JSON patch format described in the final user turn. " +
-            "It replaces the complete output schema above. Keep the original task and ownership rules."
-
-        private val planPatchKeys = setOf("fields", "removeFields")
+        private val patchKeys = setOf("fields", "removeFields", "sourceEdits")
         private val protectedFields = setOf("source")
         private val sourceEditKeys = setOf("search", "replace")
         private val mixedKeys = setOf("holes", "fill")
-        private val planFields = setOf("wholeScreen", "title", "description", "language", "inputs", "constants", "needs", "questions", "literals", "iconId", "scene", "runtime", "imageRequests", "removeImageSlots", "behavior", "visualReview", "assetRequest", "requiredCapabilities")
 
-        fun plan(capabilitiesOnly: Boolean = false) = GenerationRepair(
-            if (capabilitiesOnly) setOf("requiredCapabilities") else planFields, null, null, false)
-
-        fun writer(fields: Set<String>, holes: List<String>?, allowSourceEdits: Boolean = true) =
-            GenerationRepair(fields - protectedFields, "fill".takeIf { holes != null }, holes, true,
-                allowSourceEdits = allowSourceEdits)
-
-        fun refinement(fields: Set<String>, mixed: Boolean, saved: String,
-            protectedUi: Boolean = false, allowPrepend: Boolean = false) =
-            GenerationRepair(fields - protectedFields - if (protectedUi) setOf("ui") else emptySet(),
-                "fill".takeIf { mixed }, null, true, refinement = true, protectedUi = protectedUi).apply {
-                retain(saved)
-                if (protectedUi && allowPrepend && !mixed) {
-                    prependBase = (base?.json?.get("ui") as? JsonObject)?.takeIf {
-                        string(it["type"]) == "column" && it["children"] is JsonArray
-                    }
-                }
-            }
+        fun writer(fields: Set<String>, holes: List<String>?) =
+            GenerationRepair(fields - protectedFields, "fill".takeIf { holes != null }, holes)
 
         fun byteSize(text: String) = text.toByteArray(Charsets.UTF_8).size
 

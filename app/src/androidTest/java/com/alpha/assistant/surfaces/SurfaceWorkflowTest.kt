@@ -52,7 +52,7 @@ class SurfaceWorkflowTest {
                 assertTrue("$width x $height: $labels",labels.contains("Count: 4"))
                 if(height >= 180) assertTrue("Primary action must remain visible: $labels",labels.contains("Add"))
                 if(height >= 319) {
-                    assertTrue(labels.contains("Goal: 4"))
+                    assertTrue(labels.contains("Goal: 50%"))
                     assertTrue(rendered.filterIsInstance<ProgressBar>().any { it.progress * 2 == it.max })
                     assertTrue(labels.contains(context.getString(R.string.widget_open_content, "Note")))
                 }

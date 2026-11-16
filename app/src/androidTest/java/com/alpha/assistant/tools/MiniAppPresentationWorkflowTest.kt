@@ -1095,68 +1095,6 @@ class MiniAppPresentationWorkflowTest {
         }
     }
 
-    /** Regression: a duplicate board or an implicit host control must never be needed to play. */
-    @Test fun generatedBoardUsesDirectTouchAndOneGameStatus() {
-        val request = RequestGameplayExamples.TIC_TAC_TOE
-        val provider = object : ChatProvider {
-            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                val result = if (request.generationStage == CloudGenerationStage.PLAN)
-                    JSONObject("""{"wholeScreen":true,"language":"en"}""").put("scene", fixtureScene()).toString()
-                else JSONObject(RequestGameplayExamples.ticTacToeSpec()).withFixtureDrawingBinding("board").toString()
-                emit(CloudEvent.Text(request.withFixtureCheckEvidence(result)))
-            }
-        }
-        val generated = kotlinx.coroutines.runBlocking {
-            ToolGenerationService(provider, com.alpha.assistant.sandbox.SandboxClient(instrumentation.targetContext))
-                .generate("offline", request, null, emptyList(), CloudSession(), "board-fixture")
-        }
-        fixture(specJson = generated.spec.providerDefinition()) { _, store, _ ->
-            fun canvases(node: AccessibilityNodeInfo?): List<AccessibilityNodeInfo> {
-                if (node == null) return emptyList()
-                if (node.contentDescription?.startsWith("Крестики-нолики.") == true) return listOf(node)
-                return (0 until node.childCount).flatMap { canvases(node.getChild(it)) }
-            }
-            fun board() = JSONObject(checkNotNull(store.tool("lake")).state).getJSONArray("board")
-            fun tap(column: Int, row: Int) {
-                val bounds = Rect().also { canvases(diagnostics.freshRoot()).single().getBoundsInScreen(it) }
-                val now = SystemClock.uptimeMillis()
-                for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
-                    val event = android.view.MotionEvent.obtain(now, SystemClock.uptimeMillis(), action,
-                        bounds.left + bounds.width() * (column + 0.5f) / 3,
-                        bounds.top + bounds.height() * (row + 0.5f) / 3, 0)
-                    event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
-                    try { assertTrue(injectTouch(event)) } finally { event.recycle() }
-                }
-            }
-            click("Открыть"); shown("Статус: Ваш ход")
-            waitUntil { canvases(diagnostics.freshRoot()).size == 1 }
-            for (label in listOf("Влево", "Вправо", "Игра идёт", "Пауза", "Сначала")) {
-                assertNull("Unexpected host control: $label", find(label))
-            }
-            assertEquals(1, canvases(diagnostics.freshRoot()).size)
-            tap(1, 1)
-            waitUntil { board().getString(4) == "X" }
-            assertEquals("O", board().getString(0))
-            assertEquals(2, (0..8).count { board().getString(it).isNotEmpty() })
-            screenshot("direct-board-first-move")
-            val beforeOccupied = board().toString()
-            tap(0, 0)
-            tap(0, 1)
-            waitUntil { board().getString(3) == "X" }
-            assertEquals(JSONArray(beforeOccupied).getString(0), board().getString(0))
-            assertEquals(4, (0..8).count { board().getString(it).isNotEmpty() })
-            tap(2, 1); shown("Статус: Вы победили")
-            waitUntil { board().getString(5) == "X" }
-            val terminal = board().toString()
-            tap(2, 2)
-            SystemClock.sleep(350)
-            assertEquals(terminal, board().toString())
-            click("Новая партия"); shown("Статус: Ваш ход")
-            waitUntil { (0..8).all { board().getString(it).isEmpty() } }
-            println("DIRECT_BOARD request=$request firstTap=PASS occupied=PASS terminal=PASS restart=PASS")
-        }
-    }
-
     @Test fun graphicsRetryWorksWithoutGameplayControls() {
         val definition = JSONObject(RequestGameplayExamples.ticTacToeSpec())
         definition.put("source", "if(input.event.type==='pointer')throw new Error('fixture');\n" + definition.getString("source"))
@@ -1778,5 +1716,4 @@ class MiniAppPresentationWorkflowTest {
             instrumentation.removeMonitor(monitor)
         }
     }
-
 }
