@@ -16,7 +16,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import java.io.Closeable
-import java.security.MessageDigest
 import java.util.UUID
 
 /** Stores memory facts in an independent, private database. */
@@ -61,28 +60,6 @@ class MemoryStore(context: Context, name: String = "alpha-memory.db") : Closeabl
     fun saveExplicitFact(text: String): MemoryFact = withOpenStore {
         require(text.isNotBlank()) { "The memory fact requires text." }
         transaction { insertFact(text, MemorySource.EXPLICIT_SAVE_COMMAND) }.also { changes.trySend(Unit) }
-    }
-
-    /** Use one host-generated ID for the accepted offer, including every retry. */
-    internal fun saveAcceptedSuggestion(acceptanceId: String, text: String): Unit = withOpenStore {
-        require(acceptanceId.isNotBlank()) { "The memory suggestion requires an acceptance ID." }
-        require(text.isNotBlank()) { "The memory fact requires text." }
-        val fingerprint = suggestionFingerprint(acceptanceId, text)
-        transaction<Unit> {
-            val previous = rawQuery(
-                "SELECT fingerprint FROM $RECEIPTS WHERE acceptance_id=?", arrayOf(acceptanceId),
-            ).use { row -> if (row.moveToFirst()) row.getBlob(0) else null }
-            if (previous != null) {
-                if (!MessageDigest.isEqual(previous, fingerprint)) throw MemorySuggestionConflictException()
-                return@transaction
-            }
-            insertFact(text, MemorySource.ACCEPTED_SUGGESTION)
-            val receipt = insertOrThrow(RECEIPTS, null, ContentValues().apply {
-                put("acceptance_id", acceptanceId)
-                put("fingerprint", fingerprint)
-            })
-            check(receipt != -1L) { "The memory suggestion receipt write failed." }
-        }.also { changes.trySend(Unit) }
     }
 
     fun list(): List<MemoryFact> = withOpenStore { readFacts() }
@@ -206,18 +183,6 @@ class MemoryStore(context: Context, name: String = "alpha-memory.db") : Closeabl
         return verifyWrite(fact)
     }
 
-    private fun suggestionFingerprint(acceptanceId: String, text: String): ByteArray {
-        val digest = MessageDigest.getInstance("SHA-256")
-        digest.update(acceptanceId.toByteArray(Charsets.UTF_8))
-        digest.update(0.toByte())
-        // Hash exact UTF-16 code units so the receipt needs no copy of the fact text.
-        for (character in text) {
-            digest.update((character.code ushr 8).toByte())
-            digest.update(character.code.toByte())
-        }
-        return digest.digest()
-    }
-
     private fun SQLiteDatabase.verifyWrite(fact: MemoryFact): MemoryFact {
         // An SQLite write can succeed even when Android cannot read the row through a cursor.
         check(read(fact.id) == fact) { "The memory write failed verification." }
@@ -296,9 +261,10 @@ class MemoryStore(context: Context, name: String = "alpha-memory.db") : Closeabl
     private companion object {
         const val VERSION = 2
         const val TABLE = "memory_facts"
-        const val RECEIPTS = "memory_suggestion_receipts"
         const val COLUMNS = "id, text, source, revision"
         const val SCHEMA_QUERY = "SELECT sql FROM sqlite_master WHERE substr(name, 1, 7) <> 'sqlite_'"
+        // Alpha 12 created this schema, and onOpen compares it exactly. The unused suggestion source and the empty
+        // receipts table stay because a schema change would make every existing memory database unavailable.
         const val CREATE_TABLE = """CREATE TABLE memory_facts(
             id TEXT PRIMARY KEY NOT NULL,
             text TEXT NOT NULL,

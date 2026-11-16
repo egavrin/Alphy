@@ -2,7 +2,6 @@ package com.alpha.assistant.memory
 
 enum class MemorySource {
     EXPLICIT_SAVE_COMMAND,
-    ACCEPTED_SUGGESTION,
 }
 
 data class MemoryFact(
@@ -27,6 +26,3 @@ enum class MemoryRejection {
 }
 
 class MemoryStoreException(val reason: MemoryRejection) : IllegalStateException(reason.name)
-
-internal class MemorySuggestionConflictException :
-    IllegalStateException("This memory suggestion was accepted with different text.")
