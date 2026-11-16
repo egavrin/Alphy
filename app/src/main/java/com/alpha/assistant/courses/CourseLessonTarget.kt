@@ -37,9 +37,12 @@ private fun lessonGuide(kind: CourseSlideKind): String = buildString {
         - This slide is $kind.
         - Use no capabilities, no collections, no device controls (calendar, medicine, navigation, image, video), and no immersive presentation.
         - Use no actions, row actions, or interactions in the slide, except live inputs on a scene slide.
+        - Show the words, letters, numbers, and facts that the slide goal names as visible text in the first screen. No input may hide them.
+        - For a picture of one object (a fruit, an animal, the sun, a cloud), put its emoji in a text node with "style":{"emphasis":"headline"} next to its name.
     """.trimIndent())
     append('\n')
-    append(if (kind.allowsScene) "- This slide can use a scene: a canvas with declared surfaces. It must draw visible content in the first screen. " +
+    append(if (kind.allowsScene) "- When the goal needs a diagram or a live model, this slide can use a scene: a canvas with declared surfaces. " +
+        "It must draw visible content in the first screen. " +
         "Live inputs (slider, numberInput, toggle, checkbox, button, select, segmented) can change it. Use no answer control on a scene slide."
         else "- This slide cannot use a canvas or surfaces.")
     if (!kind.requiresAnswer) {

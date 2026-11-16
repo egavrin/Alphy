@@ -229,7 +229,9 @@ class LiveCourseWorkflowTest {
                         if (label.isNotEmpty()) {
                             val (upper, lower) = label.split("/")
                             val pair = Regex("""(?<!\p{L})${Regex.escape(upper)}[\s/·—–,]*${Regex.escape(lower)}(?!\p{L})""")
-                            robot.waitUntil { robot.texts().any(pair::containsMatchIn) }
+                            // Both letters can also stand in their own text nodes, such as a capital and a small letter side by side.
+                            fun alone(letter: String) = robot.texts().any { it.trim() == letter }
+                            robot.waitUntil { robot.texts().any(pair::containsMatchIn) || alone(upper) && alone(lower) }
                         }
                         robot.waitUntil { robot.texts().any { it.contains(expected.getString(1), ignoreCase = true) } }
                         val choices = expected.getJSONArray(2)
