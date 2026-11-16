@@ -66,7 +66,7 @@ class ComposeScenarioAcceptanceTest {
         var repaired=false
         val report=JSONObject().put("runId",runId).put("mode",mode).put("scenario",scenario).put("repetition",repetition)
             .put("revision",revision).put("sourceSha256",sourceHash).put("request",case.getString("request"))
-            .put("generation","pending").put("responses",responses).put("generationAttempts",JSONArray()).put("phase","generation")
+            .put("generation","pending").put("responses",responses).put("phase","generation")
             .put("interactions","UNREVIEWED").put("externalResults","UNVERIFIED")
         fun save() {File(directory,"report.json").writeText(report.toString(2))}
         fun screenshot(name: String) {

@@ -1611,7 +1611,6 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                                         raw.clear()
                                     }
                                     is CloudEvent.Search -> updateMessage(request, assistant.id) { it.copy(searchStatus = if (event.status == "empty" && it.sources.isNotEmpty()) "found" else event.status, sources = (it.sources + event.sources).distinctBy { source -> source.url }) }
-                                    is CloudEvent.PublicUpdate -> Unit
                                 }
                             }
                         }

@@ -224,13 +224,6 @@ object CapabilityCatalog {
     ) + MedicineContract.definitions + DeviceReadContract.definitions + AudioContract.definitions + NetworkEffectContract.definition + VideoContract.definitions + TiltContract.definition
     val ids = definitions.map { it.id }.toSet()
 
-    internal fun requiredClosure(operations: Set<String>): Set<String> = buildSet {
-        fun include(id: String) {
-            if (add(id)) definition(id).prerequisites.forEach(::include)
-        }
-        operations.forEach(::include)
-    }
-
     internal fun miniAppPlanningGuidance() = "Implemented MINI_APP operations: " +
         definitions.joinToString { "${it.id} (${it.title}, ${it.resultStatus})" } + ". " +
         "Device availability and permissions are checked at execution. Use location.once for current location, then a separate foreground Share action. " +

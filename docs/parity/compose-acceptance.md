@@ -2,7 +2,7 @@
 
 The runner tests one exact original request per run.
 Each request needs three independent real generations. Each generation uses a fresh draft, artifact, session, and test database.
-New app generation permits up to three repairs each for PLAN and COMPLETE within the same run.
+New app generation uses the app agent loop, with at most 20 steps in one run.
 Failed runs retain evidence and do not count as accepted artifacts.
 
 The canonical fixture contains the exact requests and observable interaction requirements.
@@ -105,19 +105,13 @@ The run creates these records:
 | --- | --- |
 | identity.json | Git base revision, source SHA-256 map and aggregate hash, and application/test APK hashes |
 | manifest.json | Exact request, scenario/repetition, command, device, evidence hashes, and required interaction results |
-| report.json | Terminal generation diagnostics, response counts, first-attempt/correction outcomes, accepted artifact identity/hash, final state hash, safe effect statuses, and failure type |
+| report.json | Response counts, first-attempt/correction outcomes, accepted artifact identity/hash, final state hash, safe effect statuses, and failure type |
 | artifact.json | The accepted generated specification for this test-owned artifact |
 | before.png, after.png | Native screen before and after the review window |
 | motion.mp4 | Continuous screen recording during the review window |
 | instrumentation.log, capture.log | Repeatable runner output and artifact-copy result |
 
 The response record contains counts and fixed outcomes. It contains no raw provider response or exception text.
-The `generationAttempts` array records each terminal attempt with its number, outcome, stage, failure code, and actual validation category.
-Outcomes are `accepted`, `rejected`, `providerFailure`, `runtimeUnavailable`, or `canceled`.
-Stages are `availability`, `provider`, `definition`, `state`, or `smoke`.
-Attempt 1 also records an availability or saved-state failure before a provider request. Response counts distinguish those cases.
-Rejected model output can request a repair. PLAN and COMPLETE have separate limits of three repairs each.
-The observer cannot change validation, cancellation, or retries, including when the observer throws.
 
 UI failures retain the existing safe rule, structural path, expected type or limit, observed type, and count.
 Schema failures retain an allowlisted rule. Their path is `unknown` because existing schema paths can contain private field names.

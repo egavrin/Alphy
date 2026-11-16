@@ -27,9 +27,7 @@ class HarnessBoundaries(unittest.TestCase):
             (directory / name).unlink()
         for name in ("instrumentation.log", "capture.log"):
             (directory / name).write_text("Synthetic failed generation evidence\n")
-        report.update(generation="failed", phase="failed", failureType="CloudFailure",
-                      generationAttempts=[{"attempt": index, "outcome": "rejected", "stage": "definition",
-                                           "failureCode": "widget_spec", "category": "tool_json"} for index in (1, 2)])
+        report.update(generation="failed", phase="failed", failureType="CloudFailure")
         for key in ("artifactId", "specSha256", "database"):
             report.pop(key)
         (directory / "report.json").write_text(json.dumps(report))
@@ -50,10 +48,8 @@ class HarnessBoundaries(unittest.TestCase):
             with self.assertRaises(ValueError):
                 harness.verify(directory)
 
-    def test_failed_evidence_rejects_incomplete_attempts_false_success_and_rebound_identity(self):
-        changes = [("phase", "generation"), ("generation", "accepted"), ("request", "wrong"),
-                   ("generationAttempts", []), ("generationAttempts", [{"attempt": 2, "outcome": "rejected"}]),
-                   ("generationAttempts", [{"attempt": 1, "outcome": "accepted", "stage": "smoke", "failureCode": "none", "category": "unknown"}])]
+    def test_failed_evidence_rejects_false_success_and_rebound_identity(self):
+        changes = [("phase", "generation"), ("generation", "accepted"), ("request", "wrong")]
         for key, value in changes:
             with self.subTest(key=key, value=value), tempfile.TemporaryDirectory() as temporary:
                 directory = Path(temporary)
@@ -64,72 +60,6 @@ class HarnessBoundaries(unittest.TestCase):
                 (directory / "manifest.json").write_text(json.dumps(manifest))
                 with self.assertRaises(ValueError):
                     harness.verify_failed(directory)
-
-    def test_failed_evidence_checks_staged_generation_order(self):
-        def record(stage, outcome, code, disposition, attempt=1, **extra):
-            return dict(attempt=attempt, outcome=outcome, stage=stage, failureCode=code,
-                        category="unknown", disposition=disposition, **extra)
-
-        planned = record("plan", "completed", "none", "continue")
-        invalid_plan = record("plan", "rejected", "widget_plan", "correct")
-        sections = record("selector", "completed", "none", "continue", selectorBatch="sections")
-        parts = record("selector", "completed", "none", "continue", selectorBatch="parts")
-        unavailable_parts = record("selector", "providerFailure", "incomplete", "continue", selectorBatch="parts")
-        fallback = record("selector", "rejected", "widget_selector", "continue")
-        question = record("selector", "rejected", "widget_questions", "finish")
-        mixed = record("assembly", "rejected", "widget_incomplete", "finish")
-        auth = record("provider", "providerFailure", "auth", "finish")
-        too_long = record("provider", "providerFailure", "response_length", "correct")
-        validated = record("smoke", "validated", "none", "finish")
-        plan_repairs = [{**invalid_plan, "attempt": number} for number in range(1, 4)]
-        writer = record("behavior", "rejected", "widget_behavior", "correct")
-        writer_repairs = [{**writer, "attempt": number} for number in range(4, 7)]
-        both_budgets = plan_repairs + [{**planned, "attempt": 4}] + writer_repairs
-        bad_patch = record("provider", "rejected", "widget_patch", "correct", attempt=4)
-        cases = [
-            (True, both_budgets + [{**writer, "attempt": 7, "disposition": "finish"}], "CloudFailure"),
-            (True, plan_repairs + [{**planned, "attempt": 4}, bad_patch, {**auth, "attempt": 5}], "CloudFailure"),
-            (False, plan_repairs + [{**invalid_plan, "attempt": 4}, {**planned, "attempt": 5},
-                                    {**auth, "attempt": 5}], "CloudFailure"),
-            (False, both_budgets + [{**writer, "attempt": 7}, {**auth, "attempt": 8}], "CloudFailure"),
-            (True, [record("plan", "providerFailure", "auth", "finish")], "CloudFailure"),
-            (True, [invalid_plan, {**invalid_plan, "attempt": 2, "disposition": "finish"}], "CloudFailure"),
-            (True, [invalid_plan, {**planned, "attempt": 2}, {**auth, "attempt": 2}], "CloudFailure"),
-            (True, [planned, sections, fallback, question], "CloudFailure"),
-            (True, [planned, sections, record("selector", "providerFailure", "unknown", "finish")], "IllegalArgumentException"),
-            (True, [planned, sections, parts, mixed], "CloudFailure"),
-            (True, [planned, sections, unavailable_parts, fallback, auth], "CloudFailure"),
-            (True, [planned, sections, fallback, too_long, {**auth, "attempt": 2}], "CloudFailure"),
-            (True, [planned, validated], "SQLiteException"),
-            (False, [planned, validated], ""),
-            (False, [planned], "CloudFailure"),
-            (False, [planned, parts, auth], "CloudFailure"),
-            (False, [planned, sections, fallback, parts, auth], "CloudFailure"),
-            (False, [planned, sections, mixed], "CloudFailure"),
-            (False, [planned, sections, unavailable_parts, auth], "CloudFailure"),
-            (False, [planned, sections, question, auth], "CloudFailure"),
-            (False, [invalid_plan, planned, auth], "CloudFailure"),
-            (False, [invalid_plan, {**planned, "attempt": 2}, {**too_long, "attempt": 2}], "CloudFailure"),
-            (False, [planned, {**auth, "disposition": "correct"}, {**auth, "attempt": 2}], "CloudFailure"),
-            (False, [planned, {key: value for key, value in auth.items() if key != "disposition"}], "CloudFailure"),
-            (False, [planned, {**auth, "attempt": 2}], "CloudFailure"),
-        ]
-        for valid, attempts, failure_type in cases:
-            with self.subTest(valid=valid, attempts=attempts), tempfile.TemporaryDirectory() as temporary:
-                directory = Path(temporary)
-                manifest, report = self.failed_fixture(directory)
-                report.update(generationAttempts=attempts, failureType=failure_type)
-                (directory / "report.json").write_text(json.dumps(report))
-                manifest["artifacts"]["report.json"] = harness.digest(directory / "report.json")
-                (directory / "manifest.json").write_text(json.dumps(manifest))
-                if valid:
-                    output = io.StringIO()
-                    with contextlib.redirect_stdout(output):
-                        self.assertEqual("FAILED", harness.verify_failed(directory))
-                    self.assertNotIn("PASS", output.getvalue())
-                else:
-                    with self.assertRaises(ValueError):
-                        harness.verify_failed(directory)
 
     def test_failed_evidence_requires_hashed_report_identity_and_capture_records(self):
         for name in ("report.json", "identity.json", "instrumentation.log", "capture.log"):

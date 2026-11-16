@@ -66,10 +66,6 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
     constructor(provider: ChatProvider, sandbox: SandboxClient): this(provider,sandbox,ImageGeneration(sandbox.context))
     internal fun retainedSession()=sandbox.retainedSession()
 
-    private var uiDiagnosticObserver: ((ToolUiDiagnostic)->Unit)?=null
-    internal constructor(provider: ChatProvider,sandbox: SandboxClient,observer: ((ToolUiDiagnostic)->Unit)?): this(provider,sandbox) {
-        uiDiagnosticObserver=observer
-    }
     private enum class GenerationProblem(val code: String, val message: String, val correction: String) {
         SPEC("widget_spec", "The generator returned an invalid tool definition, state schema, or controls. Retry the request.",
             "The tool definition was invalid. Follow the exact schema and native control limits."),
@@ -149,28 +145,17 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
     }
 
     internal suspend fun response(key: String, turns: List<CloudTurn>, session: CloudSession, stage: CloudGenerationStage?,
-        instructions: String = "", expandedWriterOutput: Boolean = false, capabilityDiscovery: (() -> JSONObject)? = null,
-        originalRequest: String = "", onPublicUpdate: (suspend (String) -> Unit)? = null): String {
+        instructions: String = "", expandedWriterOutput: Boolean = false): String {
         val maxBytes = if (expandedWriterOutput) ToolSpec.MAX_DEFINITION_BYTES else SandboxContract.MAX_BYTES
-        val updateContext = if (onPublicUpdate != null && stage != null) originalRequest.take(256) else null
-        val maxResponseChars = maxBytes + if (updateContext != null) PublicGenerationUpdate.MAX_BYTES else 0
         val output = StringBuilder()
         fun tooLarge() = CloudFailure("widget_response_size", "The generator response exceeds the allowed size. Request a smaller tool.")
         session.checkActive(currentCoroutineContext())
         try {
             provider.respond(key, CloudRequest(turns, false, systemInstructions = instructions, jsonObject = true,
-                generationStage = stage, expandedWriterOutput = expandedWriterOutput, capabilityDiscovery = capabilityDiscovery,
-                publicUpdateContext = updateContext), session) { event ->
-                when (event) {
-                    is CloudEvent.Text -> {
-                        if (event.value.length > maxResponseChars - output.length) throw tooLarge()
-                        output.append(event.value)
-                    }
-                    is CloudEvent.PublicUpdate -> if (updateContext != null) {
-                        session.checkActive(currentCoroutineContext())
-                        onPublicUpdate?.invoke(event.text)
-                    }
-                    else -> Unit
+                generationStage = stage, expandedWriterOutput = expandedWriterOutput), session) { event ->
+                if (event is CloudEvent.Text) {
+                    if (event.value.length > maxBytes - output.length) throw tooLarge()
+                    output.append(event.value)
                 }
             }
         } catch (failure: java.io.IOException) {
@@ -179,9 +164,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             throw CloudFailure("widget_generation", "The tool generation connection failed. Retry the request.")
         }
         session.checkActive(currentCoroutineContext())
-        val raw = output.toString()
-        val payload = if (updateContext == null) raw else PublicGenerationUpdate.payload(raw, maxBytes, ::tooLarge)
-        return payload.also { if (it.toByteArray(Charsets.UTF_8).size > maxBytes) throw tooLarge() }
+        return output.toString().also { if (it.toByteArray(Charsets.UTF_8).size > maxBytes) throw tooLarge() }
     }
 
     suspend fun generate(key: String, prompt: String, base: ToolRecord?, images: List<String>, session: CloudSession, artifactId: String,
@@ -299,7 +282,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             SandboxContract.validateResult(raw,liveInput=event.getString("type")==SandboxContract.LIVE_INPUT_EVENT)
             val json = JSONObject(raw)
             val next = spec.validateState(json.getJSONObject("state").toString())
-            val ui = spec.validateUi(json.optJSONObject("ui") ?: JSONObject(fallbackUi),next,ToolUiValidationStage.PREVIEW,uiDiagnosticObserver).toString()
+            val ui = spec.validateUi(json.optJSONObject("ui") ?: JSONObject(fallbackUi),next,ToolUiValidationStage.PREVIEW,null).toString()
             val requestedEffects = json.optJSONArray("effects") ?: JSONArray()
             val records=json.optJSONArray("records") ?: JSONArray()
             ToolRecords.validateOperations(records)

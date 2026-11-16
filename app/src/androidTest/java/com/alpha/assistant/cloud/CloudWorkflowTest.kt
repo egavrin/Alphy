@@ -208,7 +208,7 @@ class CloudWorkflowTest {
                     output.flush()
                 }
                 "malformed" -> { output.headers(); output.write("data: not-json\n\n".toByteArray()) }
-                "plan" -> {
+                "thinking" -> {
                     output.headers()
                     output.event(JSONObject("""{"choices":[{"delta":{"reasoning_content":"PRIVATE_REASONING"}}]}"""))
                     val reasoning = JSONObject().put("choices", JSONArray().put(JSONObject().put("delta",
@@ -218,7 +218,7 @@ class CloudWorkflowTest {
                     output.event(end())
                     output.write("data: [DONE]\n\n".toByteArray())
                 }
-                "refine" -> {
+                "large" -> {
                     output.headers()
                     val wire = buildString {
                         for (chunk in largePatch.chunked(4)) {
@@ -250,20 +250,14 @@ class CloudWorkflowTest {
             assertEquals("disabled", server.requests.last().json.getJSONObject("thinking").getString("type"))
             request(false); assertFalse(server.requests.last().json.has("response_format"))
             request(false,true); assertFalse(server.requests.last().json.has("response_format")); assertTrue(server.requests.last().json.has("tools"))
-            mode = "plan"
-            for (stage in listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE)) {
-                assertEquals("{\"wholeScreen\":true}", request(true, stage = stage))
-                assertEquals("enabled", server.requests.last().json.getJSONObject("thinking").getString("type"))
-                assertEquals("low", server.requests.last().json.getString("reasoning_effort"))
-                assertFalse(server.requests.last().json.has("max_tokens"))
-                assertFalse(server.requests.last().json.has("tools"))
-            }
-            mode = "valid"
-            assertEquals("{\"count\":1}", request(true, stage = CloudGenerationStage.REFINE))
-            assertEquals("disabled", server.requests.last().json.getJSONObject("thinking").getString("type"))
+            mode = "thinking"
+            assertEquals("{\"wholeScreen\":true}", request(true, stage = CloudGenerationStage.AGENT))
+            assertEquals("enabled", server.requests.last().json.getJSONObject("thinking").getString("type"))
+            assertEquals("low", server.requests.last().json.getString("reasoning_effort"))
             assertFalse(server.requests.last().json.has("max_tokens"))
-            mode = "refine"
-            assertEquals(largePatch, request(true, stage = CloudGenerationStage.REFINE, expanded = true))
+            assertFalse(server.requests.last().json.has("tools"))
+            mode = "large"
+            assertEquals(largePatch, request(true, stage = CloudGenerationStage.AGENT, expanded = true))
             assertEquals(131_072, server.requests.last().json.getInt("max_tokens"))
             listOf("blank" to "empty_response","truncated" to "incomplete","disconnect" to "incomplete",
                 "stream_io" to "stream_io","malformed" to "stream_invalid","auth" to "auth").forEach { (response,code) ->
@@ -271,7 +265,7 @@ class CloudWorkflowTest {
                 val failure = runCatching { request(true) }.exceptionOrNull()
                 assertTrue(response,failure is CloudFailure); assertEquals(code,(failure as CloudFailure).code)
             }
-            assertEquals(13, server.requests.size)
+            assertEquals(11, server.requests.size)
             assertEquals(server.requests.size, httpCalls.get())
             assertTrue(server.failures.toString(),server.failures.isEmpty())
         }
@@ -396,11 +390,11 @@ class CloudWorkflowTest {
                 val received = mutableListOf<String>()
                 DeepSeekProvider(server.url, responseReadTimeoutMillis = 1500, recordEmptyCompletion = {}).respond("alpha-test-only",
                     CloudRequest(listOf(CloudTurn("user", "Return a plan.")), false,
-                        jsonObject = true, generationStage = CloudGenerationStage.PLAN), session) {
+                        jsonObject = true, generationStage = CloudGenerationStage.AGENT), session) {
                     if (it is CloudEvent.Text) received += it.value
                 }
                 assertEquals(listOf("{}"), received)
-                assertEquals(listOf(GenerationTransportFailure(CloudGenerationStage.PLAN, 1,
+                assertEquals(listOf(GenerationTransportFailure(CloudGenerationStage.AGENT, 1,
                     GenerationTransportPhase.RESPONSE_BODY, "stream_timeout", true)), failures)
                 assertEquals(2, server.requests.size)
             } finally {
@@ -417,14 +411,9 @@ class CloudWorkflowTest {
     }
 
     @Test fun interruptedGenerationReplaysTheSameRequestOnce() = kotlinx.coroutines.runBlocking {
-        val cases = listOf(
-            Triple("fresh:goals-1", CloudGenerationStage.COMPLETE, false),
-            Triple("fresh:terse-4", CloudGenerationStage.COMPLETE, false),
-            Triple("fresh:logs-6", CloudGenerationStage.COMPLETE, true),
-            Triple("compose:notes", CloudGenerationStage.COMPLETE, true),
-            Triple("compose:mortgage", CloudGenerationStage.PLAN, true),
-        )
-        for ((id, stage, headers) in cases) {
+        val cases = listOf("fresh:goals-1" to false, "fresh:terse-4" to false, "fresh:logs-6" to true,
+            "compose:notes" to true, "compose:mortgage" to true)
+        for ((id, headers) in cases) {
             val calls = AtomicInteger()
             val failures = mutableListOf<GenerationTransportFailure>()
             val session = CloudSession().apply { generationTransportObserver = { failures += it } }
@@ -435,16 +424,14 @@ class CloudWorkflowTest {
             }.use { server ->
                 val text = mutableListOf<String>()
                 DeepSeekProvider(server.url).respond("alpha-test-only",
-                    CloudRequest(listOf(CloudTurn("user", id)), false, jsonObject = true, generationStage = stage), session
+                    CloudRequest(listOf(CloudTurn("user", id)), false, jsonObject = true, generationStage = CloudGenerationStage.AGENT), session
                 ) { if (it is CloudEvent.Text) text += it.value }
                 assertEquals(id, listOf("{}"), text)
                 assertEquals(id, 2, server.requests.size)
                 assertEquals(id, 1, server.requests.map { it.json.toString() }.distinct().size)
-                assertEquals(id, listOf(GenerationTransportFailure(stage, 1,
+                assertEquals(id, listOf(GenerationTransportFailure(CloudGenerationStage.AGENT, 1,
                     if (headers) GenerationTransportPhase.RESPONSE_BODY else GenerationTransportPhase.BEFORE_HEADERS,
                     if (headers) "stream_io" else "pre_headers_io", true)), failures)
-                assertEquals(id, 1, session.claimGenerationRepair(CloudGenerationStage.PLAN))
-                assertEquals(id, 1, session.claimGenerationRepair(CloudGenerationStage.COMPLETE))
                 assertTrue(server.failures.toString(), server.failures.isEmpty())
             }
         }
@@ -452,8 +439,8 @@ class CloudWorkflowTest {
 
     @Test fun transportRetryStopsAfterOneAttemptPartialOutputOrCancellation() = kotlinx.coroutines.runBlocking {
         val request = CloudRequest(listOf(CloudTurn("user", "Return the plan.")), false,
-            jsonObject = true, generationStage = CloudGenerationStage.PLAN)
-        for (mode in listOf("exhausted", "partial", "buffered", "public-update", "cancelled")) {
+            jsonObject = true, generationStage = CloudGenerationStage.AGENT)
+        for (mode in listOf("exhausted", "partial", "buffered", "cancelled")) {
             val session = CloudSession()
             val failures = mutableListOf<GenerationTransportFailure>()
             session.generationTransportObserver = { failures += it }
@@ -461,31 +448,22 @@ class CloudWorkflowTest {
             session.beforeHttp = {
                 if (admissions.incrementAndGet() == 2 && mode == "cancelled") session.cancel()
             }
-            val update = "Checking the workflow."
             Server { _, output ->
-                output.interruptedGeneration(when (mode) {
-                    "partial", "buffered" -> "partial"
-                    "public-update" -> "{\"publicUpdate\":${JSONObject.quote(update)},"
-                    else -> null
-                })
+                output.interruptedGeneration(if (mode in setOf("partial", "buffered")) "partial" else null)
             }.use { server ->
                 val received = mutableListOf<String>()
-                val updates = mutableListOf<String>()
                 val provider = DeepSeekProvider(server.url)
-                val call = if (mode in setOf("buffered", "public-update")) request.copy(
-                    capabilityDiscovery = { error("The interrupted request cannot discover capabilities.") },
-                    publicUpdateContext = "Build a local counter."
+                val call = if (mode == "buffered") request.copy(
+                    capabilityDiscovery = { error("The interrupted request cannot discover capabilities.") }
                 ) else request
                 val failure = runCatching {
                     provider.respond("alpha-test-only", call, session) {
                         if (it is CloudEvent.Text) received += it.value
-                        if (it is CloudEvent.PublicUpdate) updates += it.text
                     }
                 }.exceptionOrNull() as CloudFailure
                 assertEquals(mode, if (mode == "cancelled") "cancelled" else "stream_io", failure.code)
                 assertEquals(mode, if (mode == "exhausted") 2 else 1, server.requests.size)
                 assertEquals(mode, if (mode == "partial") listOf("partial") else emptyList<String>(), received)
-                assertEquals(mode, if (mode == "public-update") listOf(update) else emptyList<String>(), updates)
                 assertEquals(mode, when (mode) {
                     "exhausted" -> listOf(true, false)
                     "cancelled" -> listOf(true)
@@ -493,11 +471,11 @@ class CloudWorkflowTest {
                 }, failures.map { it.retryRequested })
                 if (mode == "exhausted") {
                     val complete = runCatching {
-                        provider.respond("alpha-test-only", request.copy(generationStage = CloudGenerationStage.COMPLETE), session) {}
+                        provider.respond("alpha-test-only", request, session) {}
                     }.exceptionOrNull() as CloudFailure
                     assertEquals("stream_io", complete.code)
                     assertEquals(3, server.requests.size)
-                    assertEquals(GenerationTransportFailure(CloudGenerationStage.COMPLETE, 1,
+                    assertEquals(GenerationTransportFailure(CloudGenerationStage.AGENT, 1,
                         GenerationTransportPhase.RESPONSE_BODY, "stream_io", false), failures.last())
                 }
                 assertTrue(server.failures.toString(), server.failures.isEmpty())
@@ -1452,111 +1430,6 @@ class CloudWorkflowTest {
         } }
     }
 
-    @Test fun discoveryContinuesThinkingWriterOnceWithoutLeakingIntermediateText() = kotlinx.coroutines.runBlocking {
-        var round = 0
-        val checking = "I will check which device tools are available."
-        val writing = "I will connect the local controls."
-        val updateReceived = CountDownLatch(1)
-        Server { request, output ->
-            assertEquals("enabled", request.json.getJSONObject("thinking").getString("type"))
-            if (round++ == 0) {
-                assertEquals("discover_capabilities", request.json.getJSONArray("tools").getJSONObject(0)
-                    .getJSONObject("function").getString("name"))
-                output.headers()
-                for (fragment in listOf("a ", "b")) {
-                    output.event(JSONObject().put("choices", JSONArray().put(JSONObject().put("delta",
-                        JSONObject().put("reasoning_content", fragment)))))
-                }
-                output.event(textChunk(JSONObject().put("publicUpdate", checking).toString()))
-                check(updateReceived.await(10, TimeUnit.SECONDS))
-                output.event(toolDelta(call(0, id = "discovery-id", name = "discover_capabilities", arguments = "{}")))
-                output.event(end("tool_calls"))
-                output.write("data: [DONE]\n\n".toByteArray())
-            } else {
-                assertEquals("none", request.json.getString("tool_choice"))
-                val messages = request.json.getJSONArray("messages")
-                assertEquals("a b", messages.getJSONObject(messages.length()-2).getString("reasoning_content"))
-                val result = messages.getJSONObject(messages.length()-1)
-                assertEquals("discovery-id", result.getString("tool_call_id"))
-                assertEquals("""{"caller":"miniApp"}""", result.getString("content"))
-                output.headers()
-                output.event(textChunk(JSONObject().put("publicUpdate", writing).put("done", true).toString()))
-                output.event(end())
-                output.write("data: [DONE]\n\n".toByteArray())
-            }
-        }.use { server ->
-            val events = mutableListOf<CloudEvent>()
-            DeepSeekProvider(server.url).respond("alpha-test-only", CloudRequest(listOf(CloudTurn("user", "Build an app.")),
-                search = false, jsonObject = true, generationStage = CloudGenerationStage.COMPLETE,
-                capabilityDiscovery = { JSONObject().put("caller", "miniApp") }, publicUpdateContext = "Build an app."), CloudSession()) {
-                events += it
-                if (it == CloudEvent.PublicUpdate(checking)) updateReceived.countDown()
-            }
-            assertEquals(2, round)
-            assertEquals(listOf(CloudEvent.PublicUpdate(checking), CloudEvent.PublicUpdate(writing)), events.filterIsInstance<CloudEvent.PublicUpdate>())
-            assertEquals(listOf(JSONObject().put("publicUpdate", writing).put("done", true).toString()),
-                events.filterIsInstance<CloudEvent.Text>().map { it.value })
-            assertTrue(server.failures.toString(), server.failures.isEmpty())
-        }
-    }
-
-    // Exercise wire and validation boundaries that the chat display cannot observe.
-    @Test fun publicUpdateMetadataPreservesStrictPayloads() = kotlinx.coroutines.runBlocking {
-        val sandbox = com.alpha.assistant.sandbox.SandboxContract
-        val depthLimit = "{\"levels\":" + "[".repeat(23) + "0" + "]".repeat(23) + "}"
-        val fullPayload = "{\"data\":\"" + "x".repeat(sandbox.MAX_BYTES - "{\"data\":\"\"}".length) + "\"}"
-        val exact = """{"number":1e2, "source":"escaped\\nline"}"""
-        val note = "Build the controls."
-        fun withNote(payload: String, metadata: String = JSONObject.quote(note)) =
-            "{\"publicUpdate\":$metadata," + payload.removePrefix("{")
-        val accepted = listOf(
-            Triple(withNote(exact), exact, listOf(note)),
-            Triple(exact, exact, emptyList()),
-            Triple(withNote(depthLimit), depthLimit, listOf(note)),
-            Triple(withNote(fullPayload, JSONObject.quote("🎛".repeat(240))), fullPayload, listOf("🎛".repeat(240))),
-            Triple(withNote(exact, "17"), exact, emptyList()),
-            Triple(withNote(exact, JSONObject.quote("x".repeat(241))), exact, emptyList()),
-            Triple(withNote(exact, "\"line\\nline\""), exact, emptyList()),
-        )
-        val malformed = listOf(
-            withNote("""{"publicUpdate":"duplicate","value":1}"""),
-            withNote("""{"value":1,"value":2}"""),
-            withNote(exact) + " trailing",
-            withNote("{\"levels\":" + "[".repeat(24) + "0" + "]".repeat(24) + "}"),
-            """{"publicUpdate":"Bad \q escape","value":1}""",
-        )
-        val oversized = listOf(
-            withNote(fullPayload.replaceFirst("xxx", "xxxx")),
-            withNote(exact, JSONObject.quote("x".repeat(4096))),
-        )
-        val outputs = accepted.map { it.first } + malformed + oversized
-        val calls = AtomicInteger()
-        Server { _, output -> output.answer(outputs[calls.getAndIncrement()]) }.use { server ->
-            val generator = com.alpha.assistant.tools.ToolGenerationService(DeepSeekProvider(server.url),
-                com.alpha.assistant.sandbox.SandboxClient(app))
-            val updates = mutableListOf<String>()
-            suspend fun response() = generator.response("alpha-test-only", listOf(CloudTurn("user", "Make a control.")),
-                CloudSession(), CloudGenerationStage.PLAN, originalRequest = "Make a control.", onPublicUpdate = { updates += it })
-            accepted.forEach { (_, expected, notes) ->
-                updates.clear()
-                val payload = response()
-                assertEquals(expected, payload)
-                assertEquals(notes, updates)
-                sandbox.objectFrom(payload)
-            }
-            malformed.forEach { invalid ->
-                val payload = response()
-                assertEquals(invalid, payload)
-                assertTrue(runCatching { sandbox.objectFrom(payload) }.isFailure)
-            }
-            oversized.forEach { _ ->
-                assertEquals("widget_response_size", (runCatching { response() }.exceptionOrNull() as? CloudFailure)?.code)
-            }
-            assertEquals(outputs.size, calls.get())
-            assertTrue(server.failures.toString(), server.failures.isEmpty())
-        }
-    }
-
     @Test fun oneStrictDecisionCanAuthorizeACourseRepairMemoryOrDevicePlan() = kotlinx.coroutines.runBlocking {
         val latest = "Set alarms for 7:00 AM and 9:00 AM."
         var candidate = "course"
@@ -2219,7 +2092,6 @@ class CloudWorkflowTest {
             assertEquals(listOf(result),authorizations)
             assertEquals(2,server.requests.size)
             assertEquals(2,session.chatAttempt)
-            assertEquals(1,session.generationAttempt)
             assertEquals(DecisionRejection("DECISION",1,ResponseShape("decision.fields","$","object",
                 DecisionFieldShape(listOf("search"), 0, DecisionKindShape.ORDINARY, false)),true),
                 rejections.single())

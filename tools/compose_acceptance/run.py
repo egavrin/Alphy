@@ -332,109 +332,6 @@ def verify(directory):
     return passed and manifest["mode"] == "real"
 
 
-def validate_failed_generation(attempts, failure_type):
-    failure_outcomes = {"rejected", "providerFailure", "runtimeUnavailable", "canceled"}
-    candidate_stages = {"provider", "definition", "state", "smoke", "behavior"}
-    if not isinstance(attempts, list) or not attempts or any(
-        not isinstance(row, dict) or type(row.get("attempt")) is not int or any(
-            not isinstance(row.get(key), str) or not row[key]
-            for key in ("outcome", "stage", "failureCode", "category")
-        ) for row in attempts
-    ):
-        raise ValueError("Failed attempt identity or terminal diagnostic is incomplete.")
-
-    # Historical reports recorded only terminal candidate attempts.
-    if all("disposition" not in row and "selectorBatch" not in row for row in attempts):
-        if len(attempts) > 2 or any(
-            row["attempt"] != number or row["outcome"] not in failure_outcomes
-            or row["stage"] not in candidate_stages | {"availability"}
-            for number, row in enumerate(attempts, 1)
-        ):
-            raise ValueError("Failed attempt identity or terminal diagnostic is incomplete.")
-        if len(attempts) == 2 and attempts[0]["outcome"] != "rejected":
-            raise ValueError("Only rejected model output permits a correction.")
-        return
-
-    number = 1
-    plan_repairs = 0
-    writer_repairs = 0
-    phase = "plan"
-    next_batch = "sections"
-    parts_completed = False
-    transport_failed = False
-    fallback = False
-    for index, row in enumerate(attempts):
-        stage, outcome, code = row["stage"], row["outcome"], row["failureCode"]
-        disposition = row.get("disposition")
-        batch = row.get("selectorBatch")
-        valid = (row["attempt"] == number
-                 and disposition in ("continue", "correct", "finish")
-                 and (disposition == "finish") == (index == len(attempts) - 1)
-                 and (code == "none") == (outcome in ("completed", "validated"))
-                 and ("selectorBatch" not in row or (stage == "selector" and batch in ("sections", "parts"))))
-        if stage == "availability":
-            valid = valid and index == 0 and disposition == "finish" and outcome in ("runtimeUnavailable", "canceled")
-        elif stage == "plan":
-            correctable = (outcome, code) in (
-                ("rejected", "widget_plan"), ("rejected", "widget_patch"), ("providerFailure", "response_length")
-            )
-            valid = valid and phase == "plan" and (
-                (outcome == "completed" and disposition == "continue")
-                or (correctable and plan_repairs < 3 and disposition == "correct")
-                or (disposition == "finish" and (outcome in ("providerFailure", "canceled") or correctable)
-                    and (not correctable or plan_repairs > 0))
-            )
-            if disposition == "continue":
-                phase = "selector"
-            elif disposition == "correct":
-                plan_repairs += 1
-        elif stage == "selector":
-            valid = valid and phase == "selector"
-            if batch is not None:
-                valid = valid and batch == next_batch and not fallback and (
-                    (disposition == "continue" and outcome in ("completed", "providerFailure"))
-                    or (disposition == "finish" and outcome == "canceled" and code == "cancelled")
-                )
-                next_batch = "parts" if batch == "sections" and outcome == "completed" else None
-                parts_completed = batch == "parts" and outcome == "completed"
-                transport_failed = outcome == "providerFailure"
-            elif disposition == "continue":
-                valid = valid and next_batch != "sections" and not fallback and (outcome, code) == ("rejected", "widget_selector")
-                fallback = True
-            else:
-                valid = valid and disposition == "finish" and (
-                    (outcome, code) in (("canceled", "cancelled"), ("providerFailure", "unknown"))
-                    or (next_batch != "sections" and (not transport_failed or fallback)
-                        and (outcome, code) == ("rejected", "widget_questions"))
-                )
-        elif stage == "assembly":
-            valid = (valid and phase == "selector" and parts_completed and disposition == "finish"
-                     and (outcome, code) == ("rejected", "widget_incomplete"))
-        elif stage in candidate_stages:
-            valid = valid and phase in ("selector", "candidate") and (not transport_failed or fallback)
-            phase = "candidate"
-            if disposition == "correct":
-                valid = valid and writer_repairs < 3 and (
-                    (stage != "provider" and outcome == "rejected")
-                    or (stage == "provider" and (outcome, code) in (
-                        ("providerFailure", "response_length"), ("rejected", "widget_patch")
-                    ))
-                )
-                writer_repairs += 1
-            elif outcome == "validated":
-                # Candidate validation can finish before preview or artifact publication fails.
-                valid = (valid and disposition == "finish" and stage in {"smoke", "behavior"}
-                         and isinstance(failure_type, str) and bool(failure_type))
-            else:
-                valid = valid and disposition == "finish" and outcome in failure_outcomes
-        else:
-            valid = False
-        if not valid:
-            raise ValueError("Failed generation diagnostic stage, outcome, or correction order is invalid.")
-        if disposition == "correct":
-            number += 1
-
-
 def verify_failed(directory):
     """Validate a complete failed generation record. This never verifies workflow success."""
     manifest = json.loads((directory / "manifest.json").read_text())
@@ -456,7 +353,6 @@ def verify_failed(directory):
     tested = json.loads((directory / "identity.json").read_text())
     if any(report.get(key) != tested.get(key) or not tested.get(key) for key in ("revision", "sourceSha256")):
         raise ValueError("Tested source identity differs.")
-    validate_failed_generation(report.get("generationAttempts"), report.get("failureType"))
     rows = manifest["checks"]
     validate_results(case, rows)
     if any(row["status"] == "PASS" for row in rows):
@@ -641,7 +537,7 @@ def main():
     execute = commands.add_parser("run")
     execute.add_argument("--scenario", type=int, choices=range(1, 7), required=True)
     execute.add_argument("--repetition", type=int, choices=range(1, 4), required=True)
-    execute.add_argument("--live", action="store_true", help="Authorize one real generation with up to three PLAN and three COMPLETE repairs.")
+    execute.add_argument("--live", action="store_true", help="Authorize one real generation with the app agent loop.")
     execute.add_argument("--credential-check", action="store_true", help="Transfer a synthetic sentinel without a provider call or artifact generation.")
     execute.add_argument("--seconds", type=int, choices=range(1, 181), default=30)
     execute.add_argument("--adb", default=ADB)
