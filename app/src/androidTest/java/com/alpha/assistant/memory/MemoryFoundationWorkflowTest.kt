@@ -248,33 +248,6 @@ class MemoryFoundationWorkflowTest {
     }
 
     @Test
-    fun versionOneUpgradePreservesExistingIdsTextSourcesAndRevisions() = withDatabase { name, file ->
-        val existing = MemoryFact("existing-id", "  Сохранённый факт.\n", MemorySource.EXPLICIT_SAVE_COMMAND, 4)
-        val versionOneSchema = """CREATE TABLE memory_facts(
-            id TEXT PRIMARY KEY NOT NULL,
-            text TEXT NOT NULL,
-            source TEXT NOT NULL CHECK(source = 'EXPLICIT_SAVE_COMMAND'),
-            revision INTEGER NOT NULL CHECK(revision >= 1)
-        )"""
-        openFixture(file).use { database ->
-            database.execSQL(versionOneSchema)
-            database.execSQL(
-                "INSERT INTO memory_facts VALUES (?, ?, ?, ?)",
-                arrayOf<Any>(existing.id, existing.text, existing.source.name, existing.revision),
-            )
-            database.version = 1
-        }
-        MemoryStore(context, name).use { store ->
-            assertEquals(listOf(existing), store.list())
-            store.saveAcceptedSuggestion("offer-new", "Новый факт.")
-        }
-        MemoryStore(context, name).use { store ->
-            assertEquals(existing, store.list().single { it.source == MemorySource.EXPLICIT_SAVE_COMMAND })
-            assertEquals("Новый факт.", store.list().single { it.source == MemorySource.ACCEPTED_SUGGESTION }.text)
-        }
-    }
-
-    @Test
     fun unknownVersionAndUnknownSchemaPreserveTheDatabase() {
         for (version in listOf(0, 1, 2, 42)) {
             withDatabase { name, file ->

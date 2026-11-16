@@ -49,7 +49,7 @@ class OnboardingWorkflowTest {
             robot.waitUntil { greetings("Анна").any { robot.find(it) != null } }
             robot.waitUntil { robot.field(composer).text?.toString() == example }
             assertNull(robot.find(robot.text(R.string.onboarding_ready_title)))
-            robot.waitUntil { fixture.store.hasSetting("onboarded") }
+            robot.waitUntil { fixture.store.load().onboarded }
             assertEquals(0, fixture.provider.calls)
             robot.click(robot.text(R.string.composer_send))
             robot.waitFor("Fixture response")
@@ -66,7 +66,7 @@ class OnboardingWorkflowTest {
             robot.click(robot.text(R.string.onboarding_later))
             robot.waitFor(robot.text(R.string.desktop_prompt))
             robot.reveal(robot.text(R.string.desktop_empty))
-            robot.waitUntil { fixture.store.hasSetting("onboarded") }
+            robot.waitUntil { fixture.store.load().onboarded }
         }
         fixture.launch().use {
             robot.waitFor(robot.text(R.string.desktop_prompt))

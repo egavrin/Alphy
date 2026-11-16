@@ -606,7 +606,7 @@ class AutomaticToolWorkflowTest {
         }
     }
 
-    @Test fun manualSaveAndUpgradeUseOneDurableCardPerLinkedApp() {
+    @Test fun manualSaveUsesOneDurableCardPerLinkedApp() {
         val provider = object : SingleRoundProvider() {
             override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 error("A prepared manual draft must save locally.")
@@ -615,14 +615,12 @@ class AutomaticToolWorkflowTest {
         Fixture(provider) { shell, tools ->
             seedChat(shell,"already-linked")
             seedTool(tools,"already-linked","Existing card")
-            seedTool(tools,"orphan","Missing card")
-            seedTool(tools,"deleted-chat","Deleted chat","missing-chat")
             val candidate = ToolSpec.parse(spec())
             for ((id, chat) in listOf("manual" to "chat","library" to null)) {
                 tools.saveDraft(ToolDraft(id,null,0,0,"Counter",candidate.json,candidate.initialState,candidate.ui.toString(),chat))
             }
         }.use { f ->
-            assertEquals(listOf("already-linked","orphan"),f.model.snapshot.selected?.cardIds)
+            assertEquals(listOf("already-linked"),f.model.snapshot.selected?.cardIds)
             assertEquals(1L,f.model.snapshot.selected?.updatedAt)
             f.store.writableDatabase.execSQL("""
                 CREATE TRIGGER fixture_interrupt_card BEFORE UPDATE ON conversations
@@ -646,7 +644,7 @@ class AutomaticToolWorkflowTest {
             assertNotNull(f.toolStore.tool("library"))
             f.restart()
             val chat = checkNotNull(f.model.snapshot.selected)
-            assertEquals(listOf("already-linked","orphan","manual"),chat.messages.mapNotNull { it.toolId })
+            assertEquals(listOf("already-linked","manual"),chat.messages.mapNotNull { it.toolId })
             assertEquals(2,chat.messages.single { it.toolId == "manual" }.toolRevision)
             assertEquals(2,f.toolStore.revisions("manual").size)
             assertNull(f.toolStore.tool("manual")?.conversationId)

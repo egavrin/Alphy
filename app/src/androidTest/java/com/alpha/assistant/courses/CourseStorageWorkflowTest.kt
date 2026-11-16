@@ -22,28 +22,6 @@ import java.util.concurrent.TimeoutException
 
 @RunWith(AndroidJUnit4::class)
 class CourseStorageWorkflowTest {
-    @Test fun upgradingCourseStoragePreservesSlidesAndAnswers() = withDatabase { context, name ->
-        val wrong = CourseAnswer.Choice("imperfect")
-        val id = CourseStore(context, name).use { store ->
-            val course = store.create(setup, outline())
-            val saved = store.commitGeneration(store.beginGeneration(course.id, course.revision, "practice"), content)
-            store.commitAnswer(course.id, answer(saved, "wrong", wrong, false, 1)).id
-        }
-        SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use { database ->
-            database.execSQL("DROP TABLE IF EXISTS slide_scene_settings")
-            database.version = 1
-        }
-        CourseStore(context, name).use { store ->
-            assertEquals(id, store.course(id)?.id)
-            assertEquals(feedbackUi(1), store.slide(id, "practice")?.content?.uiJson)
-            assertEquals(wrong, store.answers(id).single().answer)
-        }
-        SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READONLY).use { database ->
-            assertEquals(2, database.version)
-            database.rawQuery("SELECT version FROM slide_scene_settings", null).use { assertFalse(it.moveToFirst()) }
-        }
-    }
-
     @Test
     fun resumesGeneratedWorkAndKeepsWrongThenCorrectAnswersInOrder() = withDatabase { context, name ->
         val wrong = CourseAnswer.Choice("imperfect")
@@ -185,17 +163,19 @@ class CourseStorageWorkflowTest {
     }
 
     @Test
-    fun refusesUnknownSchemaWithoutDeletingData() = withDatabase { context, name ->
-        val course = CourseStore(context, name).use { it.create(setup, outline()) }
-        openFixtureDatabase(context, name).use { it.version = 200 }
-        CourseStore(context, name).use { store ->
-            assertThrows(IllegalStateException::class.java) { store.course(course.id) }
+    fun refusesOlderAndUnknownVersionsWithoutDeletingData() {
+        for (version in listOf(1, 200)) withDatabase { context, name ->
+            val course = CourseStore(context, name).use { it.create(setup, outline()) }
+            openFixtureDatabase(context, name).use { it.version = version }
+            CourseStore(context, name).use { store ->
+                assertThrows(IllegalStateException::class.java) { store.course(course.id) }
+            }
+            openFixtureDatabase(context, name).use { db ->
+                assertEquals(version, db.version)
+                db.version = 2
+            }
+            CourseStore(context, name).use { store -> assertEquals(course, store.course(course.id)) }
         }
-        openFixtureDatabase(context, name).use { db ->
-            assertEquals(200, db.version)
-            db.version = 2
-        }
-        CourseStore(context, name).use { store -> assertEquals(course, store.course(course.id)) }
     }
 
     @Test

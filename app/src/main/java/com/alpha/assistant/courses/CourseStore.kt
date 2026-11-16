@@ -390,10 +390,6 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
                 FOREIGN KEY(course_id, slide_id) REFERENCES slides(course_id, slide_id)
             )""")
             db.execSQL("CREATE INDEX answers_course_sequence ON answers(course_id, sequence)")
-            createSceneSettings(db)
-        }
-
-        private fun createSceneSettings(db: SQLiteDatabase) {
             db.execSQL("""CREATE TABLE slide_scene_settings(
                 course_id TEXT NOT NULL,
                 slide_id TEXT NOT NULL,
@@ -406,10 +402,7 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
             )""")
         }
 
-        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            if (oldVersion == 1 && newVersion == 2) createSceneSettings(db)
-            else unknownVersion(oldVersion)
-        }
+        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = unknownVersion(oldVersion)
         override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = unknownVersion(oldVersion)
 
         private fun unknownVersion(version: Int): Unit = error("Unknown course database version $version. Course data was kept.")

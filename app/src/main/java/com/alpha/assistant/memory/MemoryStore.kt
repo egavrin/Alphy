@@ -277,17 +277,7 @@ class MemoryStore(context: Context, name: String = "alpha-memory.db") : Closeabl
             db.requireSchema(CREATE_TABLE, CREATE_RECEIPTS)
         }
 
-        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            // Another helper can complete this upgrade before this helper starts its transaction.
-            if (db.version == VERSION) return
-            if (oldVersion != 1 || newVersion != VERSION) unknownVersion(oldVersion)
-            db.requireSchema(CREATE_TABLE_V1)
-            db.execSQL("ALTER TABLE $TABLE RENAME TO memory_facts_v1")
-            db.execSQL(CREATE_TABLE)
-            db.execSQL("INSERT INTO $TABLE($COLUMNS) SELECT $COLUMNS FROM memory_facts_v1")
-            db.execSQL("DROP TABLE memory_facts_v1")
-            db.execSQL(CREATE_RECEIPTS)
-        }
+        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int): Unit = unknownVersion(oldVersion)
 
         override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int): Unit = unknownVersion(oldVersion)
 
@@ -309,12 +299,6 @@ class MemoryStore(context: Context, name: String = "alpha-memory.db") : Closeabl
         const val RECEIPTS = "memory_suggestion_receipts"
         const val COLUMNS = "id, text, source, revision"
         const val SCHEMA_QUERY = "SELECT sql FROM sqlite_master WHERE substr(name, 1, 7) <> 'sqlite_'"
-        const val CREATE_TABLE_V1 = """CREATE TABLE memory_facts(
-            id TEXT PRIMARY KEY NOT NULL,
-            text TEXT NOT NULL,
-            source TEXT NOT NULL CHECK(source = 'EXPLICIT_SAVE_COMMAND'),
-            revision INTEGER NOT NULL CHECK(revision >= 1)
-        )"""
         const val CREATE_TABLE = """CREATE TABLE memory_facts(
             id TEXT PRIMARY KEY NOT NULL,
             text TEXT NOT NULL,

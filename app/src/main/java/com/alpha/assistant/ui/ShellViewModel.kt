@@ -846,33 +846,10 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                     conversation.copy(messages = manualReceipts.fold(messages, ::mergeManualCard))
                 })
                 val before = loaded.conversations.associateBy { it.id }
-                val upgraded = try {
-                    withContext(Dispatchers.IO) {
-                        val marker = tools.toolCardUpgradeMarker
-                        if (store.hasSetting(marker) || recovered.conversations.any { chat ->
-                            chat.messages.any { it.toolOperationId != null && it.errorCode == "tool_storage" }
-                        }) return@withContext null
-                        val origins = tools.savedCardOrigins().groupBy { it.conversationId }
-                        val chats = recovered.conversations.map { chat ->
-                            val cards = origins[chat.id].orEmpty().asReversed().filter { it.id !in chat.cardIds }.map { tool ->
-                                Message("tool-card:${tool.id}","assistant","",tool.createdAt,"complete",
-                                    toolId = tool.id,toolRevision = tool.revision)
-                            }
-                            if (cards.isEmpty()) chat else chat.copy(messages = chat.messages + cards)
-                        }
-                        store.completeToolCardUpgrade(marker,chats.filter { it != before[it.id] })
-                        recovered.copy(conversations = chats)
-                    }
-                } catch (cancel: CancellationException) {
-                    throw cancel
-                } catch (_: Exception) {
-                    saveFailed = true
-                    null
-                }
-                if (upgraded == null) recovered.conversations.filter { it != before[it.id] }.forEach { chat ->
+                recovered.conversations.filter { it != before[it.id] }.forEach { chat ->
                     writes.trySend { store.updateConversation(chat) }
                 }
-                upgraded ?: recovered
+                recovered
             }
             result.onSuccess {
                 snapshot = it

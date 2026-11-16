@@ -2,6 +2,7 @@ package com.alpha.assistant.automations
 
 import android.Manifest
 import android.app.NotificationManager
+import android.database.sqlite.SQLiteDatabase
 import android.os.SystemClock
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.ChatProvider
@@ -249,8 +250,8 @@ class AgentAutomationWorkflowTest {
         }
     }
 
-    @Test fun upgradeKeepsAnApprovedNativeRuleItsHistoryAndExistingChat() {
-        val prefix = "automation-upgrade-${UUID.randomUUID()}"
+    @Test fun olderRuleAndChatDatabasesAreRefusedAndKept() {
+        val prefix = "automation-old-${UUID.randomUUID()}"
         val rules = "$prefix-rules.db"
         val chats = "$prefix-chat.db"
         val definition = JSONObject("""{"name":"Local reminder","trigger":{"type":"manual"},"conditions":{},
@@ -258,15 +259,11 @@ class AgentAutomationWorkflowTest {
         try {
             val rule = AutomationStore(context, rules).use { store ->
                 val draft = store.save(null, definition)
-                store.approve(draft.id, draft.revision)
-                val approved = checkNotNull(store.rule(draft.id))
-                val run = checkNotNull(store.begin(approved, AutomationEvent("manual", "legacy-run"), 1, false))
-                store.finish(run, "succeeded", "Existing history")
                 // Version 2 had no agent runs and no retired rules.
                 store.writableDatabase.execSQL("DROP TABLE agent_runs")
                 store.writableDatabase.execSQL("ALTER TABLE rules DROP COLUMN retired_reason")
                 store.writableDatabase.version = 2
-                approved
+                draft
             }
             ShellStore(context, chats).use { shell ->
                 shell.saveConversation(Conversation("chat", "Existing chat", 1, 1,
@@ -274,17 +271,16 @@ class AgentAutomationWorkflowTest {
                 shell.writableDatabase.execSQL("DROP TABLE automation_messages")
                 shell.writableDatabase.version = 1
             }
-            AutomationStore(context, rules).use { upgraded ->
-                val restored = checkNotNull(upgraded.rule(rule.id))
-                assertTrue(restored.enabled)
-                assertEquals(rule.approvedRevision, restored.approvedRevision)
-                assertEquals(rule.definition.json, restored.definition.json)
-                assertEquals("Existing history", upgraded.history(rule.id).single().message)
-                assertTrue(upgraded.unfinishedAgentRuns().isEmpty())
-            }
-            ShellStore(context, chats).use { upgraded ->
-                assertEquals("Existing message", upgraded.load().conversations.single().messages.single().text)
-                assertTrue(upgraded.automationMessages().isEmpty())
+            AutomationStore(context, rules).use { old -> assertThrows(IllegalStateException::class.java) { old.rule(rule.id) } }
+            ShellStore(context, chats).use { old -> assertThrows(IllegalStateException::class.java) { old.load() } }
+            for ((name, table) in listOf(rules to "rules", chats to "conversations")) {
+                SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READONLY).use { database ->
+                    assertEquals(if (name == rules) 2 else 1, database.version)
+                    database.rawQuery("SELECT id FROM $table", null).use {
+                        assertTrue(it.moveToFirst())
+                        assertEquals(if (name == rules) rule.id else "chat", it.getString(0))
+                    }
+                }
             }
         } finally {
             context.deleteDatabase(rules)

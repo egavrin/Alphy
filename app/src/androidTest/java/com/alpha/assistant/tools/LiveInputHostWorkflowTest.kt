@@ -11,9 +11,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.Lifecycle
 import com.alpha.assistant.R
+import com.alpha.assistant.data.Conversation
+import com.alpha.assistant.data.Message
 import com.alpha.assistant.ui.AlphaTheme
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
+import com.alpha.assistant.ui.seedOpenChat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -28,7 +31,10 @@ class LiveInputHostWorkflowTest {
 
     @Test fun aChatCardAndFullAppShareDurableLiveState() = withFixture { fixture, store ->
         val tool = seed(store, "shared", "Shared", conversationId = "chat")
-        fixture.seedChat("chat", "Discussion", "Live editor discussion", selected = true)
+        fixture.store.saveConversation(Conversation("chat", "Discussion", 1, 1, messages = listOf(
+            Message("chat-u", "user", "Live editor discussion", 1, "sent"),
+            Message("chat-card", "assistant", "", 1, "complete", toolId = tool.id, toolRevision = tool.revision))))
+        fixture.store.seedOpenChat("chat")
         fixture.install()
         fixture.launch().use {
             finishText(store, tool.id, "Shared note", "from chat")

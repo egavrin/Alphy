@@ -45,19 +45,14 @@ class ShellStore(private val context: Context, name: String = "alpha.db") : SQLi
         internal val deliveryLock = Any()
     }
 
-    private fun createAutomationMessages(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE automation_messages(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, delivered_at INTEGER NOT NULL, body TEXT NOT NULL)")
-        db.execSQL("CREATE INDEX automation_messages_conversation ON automation_messages(conversation_id, delivered_at)")
-    }
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE conversations (id TEXT PRIMARY KEY, updated_at INTEGER NOT NULL, body TEXT NOT NULL)")
         db.execSQL("CREATE TABLE settings (name TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        createAutomationMessages(db)
+        db.execSQL("CREATE TABLE automation_messages(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, delivered_at INTEGER NOT NULL, body TEXT NOT NULL)")
+        db.execSQL("CREATE INDEX automation_messages_conversation ON automation_messages(conversation_id, delivered_at)")
     }
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion == 1 && newVersion == 2) { "A migration is required for Alphy database version $newVersion" }
-        createAutomationMessages(db)
-    }
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int): Unit =
+        error("Unknown chat database version $oldVersion. Chats were kept.")
 
     internal fun hasConversation(id: String): Boolean =
         readableDatabase.rawQuery("SELECT 1 FROM conversations WHERE id=?", arrayOf(id)).use { it.moveToFirst() }
@@ -157,22 +152,6 @@ class ShellStore(private val context: Context, name: String = "alpha.db") : SQLi
     fun saveSetting(name: String, value: String) {
         writableDatabase.insertWithOnConflict("settings", null, ContentValues().apply { put("name", name); put("value", value) }, SQLiteDatabase.CONFLICT_REPLACE)
             .also { check(it != -1L) { "Setting write failed" } }
-    }
-    internal fun hasSetting(name: String): Boolean =
-        readableDatabase.query("settings",arrayOf("name"),"name=?",arrayOf(name),null,null,null).use { it.moveToFirst() }
-
-    internal fun completeToolCardUpgrade(marker: String, chats: List<Conversation>) {
-        val db = writableDatabase
-        db.beginTransaction()
-        try {
-            if (!hasSetting(marker)) {
-                chats.forEach(::updateConversation)
-                saveSetting(marker,"1")
-            }
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
-        }
     }
     fun createFromNewDraft(conversation: Conversation, nextDraft: Draft = Draft()) {
         writableDatabase.beginTransaction()

@@ -70,12 +70,6 @@ class ToolStore private constructor(internal val context: Context, internal val 
                         val opened = context.openOrCreateDatabase(databaseName, Context.MODE_PRIVATE, null, ToolLibraryStorage.preserveOnCorruption)
                         try {
                             initialize(opened)
-                            val obsolete = "capability<>?"
-                            val network = arrayOf(NETWORK_GRANT)
-                            val hasObsoleteGrants = opened.rawQuery(
-                                "SELECT 1 FROM capability_grants WHERE $obsolete LIMIT 1",network,
-                            ).use { it.moveToFirst() }
-                            if (hasObsoleteGrants) opened.delete("capability_grants",obsolete,network)
                         } catch (failure: Exception) {
                             opened.close()
                             if (failure is SQLiteDatabaseLockedException) throw failure
@@ -126,32 +120,24 @@ class ToolStore private constructor(internal val context: Context, internal val 
         if (currentStructure(db)) return
         db.beginTransaction()
         try {
-            val tables = tables(db)
-            check(tables.isEmpty() || tables.containsAll(listOf("tools", "revisions", "drafts")))
-            if ("capability_effects" in tables) {
-                check(columns(db, "capability_effects").containsAll(listOf("phase", "session")))
+            // Another store can finish creation before this transaction starts.
+            if (!currentStructure(db)) {
+                // An earlier library structure is kept as it is and stays unavailable.
+                check(tables(db).isEmpty())
+                db.execSQL("CREATE TABLE IF NOT EXISTS tools(id TEXT PRIMARY KEY, revision INTEGER NOT NULL, state_version INTEGER NOT NULL, spec TEXT NOT NULL, state TEXT NOT NULL, ui TEXT NOT NULL, conversation_id TEXT, saved INTEGER NOT NULL, archived INTEGER NOT NULL, created_at INTEGER NOT NULL, last_conversation_id TEXT, on_desktop INTEGER NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS revisions(tool_id TEXT NOT NULL, revision INTEGER NOT NULL, spec TEXT NOT NULL, state TEXT NOT NULL, ui TEXT NOT NULL, label TEXT NOT NULL, created_at INTEGER NOT NULL, stopped_automations TEXT NOT NULL, PRIMARY KEY(tool_id,revision))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS deleted_tools(id TEXT PRIMARY KEY, cleanup_pending INTEGER NOT NULL, widget_ids TEXT NOT NULL)")
+                createCapabilities(db)
+                createResultTables(db)
+                NavigationLedger.createTables(db)
+                OwnedCalendarLedger.createTables(db)
+                ToolRecords.createTables(db)
+                WidgetLayoutStore.createTable(db)
+                SourceRefresh.createTables(db)
+                RecurringSearch.createTables(db)
+                db.execSQL("CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY, tool_id TEXT, base_revision INTEGER NOT NULL, base_state_version INTEGER NOT NULL, prompt TEXT NOT NULL, candidate TEXT, preview_state TEXT, preview_ui TEXT, conversation_id TEXT, preview_surfaces TEXT)")
+                check(currentStructure(db))
             }
-            db.execSQL("CREATE TABLE IF NOT EXISTS tools(id TEXT PRIMARY KEY, revision INTEGER NOT NULL, state_version INTEGER NOT NULL, spec TEXT NOT NULL, state TEXT NOT NULL, ui TEXT NOT NULL, conversation_id TEXT, saved INTEGER NOT NULL, archived INTEGER NOT NULL, created_at INTEGER NOT NULL, last_conversation_id TEXT, on_desktop INTEGER NOT NULL)")
-            db.execSQL("CREATE TABLE IF NOT EXISTS revisions(tool_id TEXT NOT NULL, revision INTEGER NOT NULL, spec TEXT NOT NULL, state TEXT NOT NULL, ui TEXT NOT NULL, label TEXT NOT NULL, created_at INTEGER NOT NULL, stopped_automations TEXT NOT NULL, PRIMARY KEY(tool_id,revision))")
-            db.execSQL("CREATE TABLE IF NOT EXISTS deleted_tools(id TEXT PRIMARY KEY, cleanup_pending INTEGER NOT NULL, widget_ids TEXT NOT NULL)")
-            createCapabilities(db)
-            createResultTables(db)
-            NavigationLedger.createTables(db)
-            OwnedCalendarLedger.createTables(db)
-            ToolRecords.createTables(db)
-            WidgetLayoutStore.createTable(db)
-            SourceRefresh.createTables(db)
-            RecurringSearch.createTables(db)
-            db.execSQL("CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY, tool_id TEXT, base_revision INTEGER NOT NULL, base_state_version INTEGER NOT NULL, prompt TEXT NOT NULL, candidate TEXT, preview_state TEXT, preview_ui TEXT, conversation_id TEXT)")
-            addColumn(db, "drafts", "preview_surfaces", "TEXT")
-            if (addColumn(db, "tools", "last_conversation_id", "TEXT")) {
-                db.execSQL("UPDATE tools SET last_conversation_id=conversation_id")
-            }
-            addColumn(db, "tools", "on_desktop", "INTEGER NOT NULL DEFAULT 0")
-            addColumn(db, "revisions", "label", "TEXT NOT NULL DEFAULT ''")
-            addColumn(db, "revisions", "created_at", "INTEGER NOT NULL DEFAULT 0")
-            addColumn(db, "revisions", "stopped_automations", "TEXT NOT NULL DEFAULT '[]'")
-            check(currentStructure(db))
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -174,12 +160,6 @@ class ToolStore private constructor(internal val context: Context, internal val 
             val nameIndex = cursor.getColumnIndexOrThrow("name")
             buildSet { while (cursor.moveToNext()) add(cursor.getString(nameIndex)) }
         }
-
-    private fun addColumn(db: SQLiteDatabase, table: String, column: String, declaration: String): Boolean {
-        if (column in columns(db, table)) return false
-        db.execSQL("ALTER TABLE $table ADD COLUMN $column $declaration")
-        return true
-    }
 
     private fun createCapabilities(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE IF NOT EXISTS capability_grants(owner TEXT NOT NULL, capability TEXT NOT NULL, granted INTEGER NOT NULL, PRIMARY KEY(owner,capability))")

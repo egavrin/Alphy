@@ -13,7 +13,7 @@ import org.junit.runner.RunWith
 class ToolStorageRecoveryWorkflowTest {
     private val robot = ShellRobot("tool-storage")
 
-    @Test fun publishedLibraryOpensWithItsAppsDraftAndChat() {
+    @Test fun olderLibraryIsRefusedAndKept() {
         val fixture = ShellFixture("published-library")
         val name = "${fixture.name}.db-tools.db"
         val spec = ToolSpec.parse("""
@@ -24,42 +24,24 @@ class ToolStorageRecoveryWorkflowTest {
             "source":"if (input.event.actionId === 'increment') input.state.count++; return {state:input.state};"}
         """.trimIndent())
         val state = """{"count":5}"""
-        fixture.seedChat("stored-chat", "Stored chat", "Stored message")
-        fixture.install()
+        fixture.install(saveKey = false)
         try {
-            fixture.context.openOrCreateDatabase(name, 0, null).use { published ->
-                seedPublishedLibrary(published, spec, state)
-                fixture.launch().use { scenario ->
-                    robot.openDrawer(scenario)
-                    robot.click(robot.text(R.string.mini_apps))
-                    robot.reveal(spec.title)
-                    robot.click(spec.title)
-                    robot.waitFor("Increase")
-                    robot.click("Increase")
-                    robot.waitFor("6")
-                    robot.waitUntil {
-                        ToolStore(fixture.context, name).use { store ->
-                            store.tool("saved")?.state == """{"count":6}""" &&
-                                store.revisions("saved").single().state == state &&
-                                store.draft("pending")?.prompt == "Saved draft"
-                        }
-                    }
-                    robot.click(robot.text(R.string.tool_options))
-                    robot.click("Закрепить")
-                    robot.click(robot.text(R.string.tool_desktop_add))
-                    robot.waitUntil { fixture.model?.tools?.tools?.single()?.onDesktop == true }
-                    robot.click(robot.text(R.string.tool_options))
-                    robot.click(robot.text(R.string.tool_chat))
-                    robot.reveal(robot.text(R.string.desktop_open_tile, spec.title))
-                    robot.click(robot.text(R.string.desktop_open_tile, spec.title))
-                    robot.waitFor("6")
-                    assertEquals(0, fixture.provider.calls)
-                    robot.diagnostics.capture("published-library-desktop")
+            fixture.context.openOrCreateDatabase(name, 0, null).use { seedPublishedLibrary(it, spec, state) }
+            fixture.launch().use { scenario ->
+                robot.openDrawer(scenario)
+                robot.click(robot.text(R.string.mini_apps))
+                robot.waitFor(robot.text(R.string.tool_library_unavailable))
+            }
+            fixture.context.openOrCreateDatabase(name, 0, null).use { db ->
+                assertEquals(7, db.version)
+                db.rawQuery("SELECT state FROM tools WHERE id='saved'", null).use {
+                    assertTrue(it.moveToFirst())
+                    assertEquals(state, it.getString(0))
                 }
-                // The first open adds one durable card for the saved app to its chat.
-                val messages = fixture.store.load().conversations.single().messages
-                assertEquals("Stored message", messages.first().text)
-                assertEquals(listOf("saved"), messages.mapNotNull { it.toolId })
+                db.rawQuery("SELECT prompt FROM drafts WHERE id='pending'", null).use {
+                    assertTrue(it.moveToFirst())
+                    assertEquals("Saved draft", it.getString(0))
+                }
             }
         } finally { fixture.remove() }
     }

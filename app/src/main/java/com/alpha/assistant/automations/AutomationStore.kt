@@ -25,32 +25,11 @@ class AutomationStore(private val context: Context, name: String = ToolLibrarySt
         db.execSQL("CREATE TABLE runs(id TEXT PRIMARY KEY, rule_id TEXT NOT NULL, revision INTEGER NOT NULL, token TEXT NOT NULL, time INTEGER NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, details TEXT NOT NULL, UNIQUE(rule_id,token))")
         db.execSQL("CREATE TABLE effects(run_id TEXT NOT NULL, action_id TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(run_id,action_id))")
         db.execSQL("CREATE TABLE trigger_state(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        createAgentRuns(db)
-    }
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 2..3 && newVersion == 4) { "Неизвестная схема автоматизаций. Данные сохранены." }
-        if (oldVersion == 2) createAgentRuns(db)
-        db.execSQL("ALTER TABLE rules ADD COLUMN retired_reason TEXT")
-        // SQLiteOpenHelper runs this upgrade in one transaction. Only the upgrade reads the retired action ID.
-        val retired = db.rawQuery("""
-            SELECT id FROM rules WHERE EXISTS (
-                SELECT 1 FROM json_each(rules.definition, '$.actions')
-                WHERE json_extract(value, '$.capability') = 'tool.records.calendar'
-            )
-        """.trimIndent(), null).use { cursor ->
-            buildList { while (cursor.moveToNext()) add(cursor.getString(0)) }
-        }
-        for (id in retired) {
-            db.execSQL("UPDATE rules SET retired_reason='calendar_sync', revision=revision+1, approved=0, enabled=0, next_at=NULL WHERE id=?",
-                arrayOf(id))
-            db.execSQL("INSERT OR REPLACE INTO trigger_state(key,value) VALUES (?,?)",
-                arrayOf("approval-archive:$id", UUID.randomUUID().toString()))
-        }
-    }
-
-    private fun createAgentRuns(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE agent_runs(slot INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL UNIQUE, target INTEGER NOT NULL, zone TEXT NOT NULL, prepare_at INTEGER NOT NULL, approval TEXT NOT NULL, credential TEXT NOT NULL, process TEXT, result TEXT)")
     }
+    // Rules that the alpha.10 to alpha.12 upgrade retired stay saved and visible with their history.
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int): Unit =
+        error("Неизвестная схема автоматизаций. Данные сохранены.")
 
     internal fun agentRun(id: String): AgentOccurrence? = agentRuns("runs.id=?", arrayOf(id)).singleOrNull()
 

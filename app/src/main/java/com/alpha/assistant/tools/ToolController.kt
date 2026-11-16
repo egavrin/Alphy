@@ -251,10 +251,6 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         ids.mapNotNull { id -> store.tool(id)?.takeIf { it.saved && !it.archived && ToolSpec.availablePersisted(it) != null } }
     }
 
-    internal val toolCardUpgradeMarker get() = "message-backed-tool-cards:${store.databaseName}"
-
-    internal fun savedCardOrigins() = store.tools().filter { it.saved && it.conversationId != null }
-
     internal fun importPortable(uri: Uri) = run {
         require(uri.scheme == android.content.ContentResolver.SCHEME_CONTENT) { "Выберите файл через Android." }
         val imported = checkNotNull(app.contentResolver.openInputStream(uri)) { "Не удалось открыть файл." }
