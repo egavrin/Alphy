@@ -17,6 +17,8 @@ import com.alpha.assistant.tools.ToolGenerationProgress
 import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolGenerationSmoke
 import com.alpha.assistant.tools.ToolPreview
+import com.alpha.assistant.tools.canvasSurfaceIds
+import com.alpha.assistant.tools.observeSurfaceGeometry
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSmokeFailure
 import com.alpha.assistant.tools.ToolSpec
@@ -59,6 +61,10 @@ internal class AppAgentRequest(
     val sceneAssets: List<ThreeSceneAssetRef> = emptyList(),
     /** The optional screenshot review: draws the first screen as an image data URL. Null when the review is off. */
     val screenshot: (suspend (ToolPreview) -> String)? = null,
+    /** A course slide. Null for a mini-app. */
+    val lesson: AppLessonTarget? = null,
+    /** A lesson finish can request one illustration. True only when pictures are on. */
+    val lessonIllustration: Boolean = false,
 )
 
 /** Each call submits one new image operation. The host checks consent before each submission. */
@@ -66,7 +72,8 @@ internal fun interface AppImageMaker {
     suspend fun make(intents: List<ImageIntent>): List<GeneratedImage>
 }
 
-internal class AppAgentResult(val preview: ToolPreview, val summary: String, val steps: Int, val changed: Boolean)
+internal class AppAgentResult(val preview: ToolPreview, val summary: String, val steps: Int, val changed: Boolean,
+    val lesson: AppLessonResult? = null)
 
 /**
  * One generation: the model calls one tool in each step, and the host replies with the tool result.
@@ -81,7 +88,7 @@ internal class AppAgent(
 
     private class Candidate(val definition: JSONObject, val spec: ToolSpec, val state: String, val preview: ToolPreview)
 
-    private class Finished(val summary: String)
+    private class Finished(val summary: String, val lesson: AppLessonResult? = null)
 
     private class Review(val image: String) {
         override fun toString() = SCREENSHOT_REVIEW
@@ -99,11 +106,15 @@ internal class AppAgent(
         val previous = request.base?.let { ToolSpec.parsePersisted(it.spec) }
         // Device results, collections, and live state stay local. The model never sees their values or the saved layout.
         val privateApp = previous != null && (request.privateState || previous.capabilityResults || previous.collections.length() > 0)
-        val threeD = ThreeSceneWebView.available()
-        val instructions = AppAgentGuide.system(capabilityGuidance(request.prompt), request.extraInstructions,
+        val lesson = request.lesson
+        // The course player has no 3D renderer, and course slides have no capabilities.
+        val threeD = lesson == null && ThreeSceneWebView.available()
+        val instructions = AppAgentGuide.system(if (lesson != null) "" else capabilityGuidance(request.prompt),
+            listOfNotNull(request.extraInstructions.ifBlank { null }, lesson?.let { lessonGuide(it, request.lessonIllustration) })
+                .joinToString("\n\n"),
             pictures = request.imageMaker != null, threeD = threeD)
         // shortcut: reads the "User request: ...\nWidget brief:" format of ChatToolReply.generationPrompt; a direct prompt is used whole.
-        val requestLanguage = if (previous != null) null else
+        val requestLanguage = if (previous != null || lesson != null) null else
             GenerationLanguage.identifyText(request.prompt.substringAfter("User request: ").substringBefore("\nWidget brief:"))
         var task = taskMessage(request, previous, privateApp, requestLanguage)
         val history = mutableListOf<CloudTurn>()
@@ -186,6 +197,10 @@ internal class AppAgent(
                 throw Feedback("The new state schema cannot hold the saved data. Keep every existing state field with its type, " +
                     "and give new fields initial values. ${failure.message.orEmpty()}")
             }
+            lesson?.let { target ->
+                try { target.policy.validateDefinition(spec.json) } catch (failure: CancellationException) { throw failure }
+                    catch (failure: Exception) { throw Feedback("The slide breaks the course rules: ${failure.message.orEmpty()}") }
+            }
             checkActive()
             if (spec.threeScene) {
                 val preview = try {
@@ -201,7 +216,7 @@ internal class AppAgent(
                 return Candidate(definition, spec, state, preview)
             }
             val smoke = ToolGenerationSmoke(sandbox, spec, request.artifactId, (request.base?.revision ?: 0) + 1, state,
-                checkActive = { checkActive() }, generation = service,
+                checkActive = { checkActive() }, generation = service, policy = lesson?.policy,
                 observeReplay = onReplay?.let { { _: List<String> -> } })
             val preview = try {
                 smoke.run()
@@ -223,6 +238,7 @@ internal class AppAgent(
                 throw Feedback("The visible text is not in ${GenerationLanguage.name(language.tag)}. Translate every title, label, option, and message.")
             }
             presentationProblem(JSONObject(preview.ui), JSONObject(preview.state))?.let { throw Feedback(it) }
+            lesson?.let { checkLessonSlide(it, spec, preview) }
             return Candidate(definition, spec, state, preview)
         }
 
@@ -296,7 +312,7 @@ internal class AppAgent(
                             (outcome.final?.takeUnless { privateApp }?.let { "\nScreen:\n${it.text}" } ?: "")
                     }
                     val finished = finish(reply, candidate, request, privateApp)
-                    val shot = request.screenshot
+                    val shot = request.screenshot.takeIf { lesson == null }
                     if (finished !is Finished || shot == null || reviewed || privateApp || candidate.spec.threeScene) finished
                     else {
                         // One review for each generation keeps the added time to one model step.
@@ -383,7 +399,7 @@ internal class AppAgent(
             runCatching { request.onStep?.invoke(step, tool, reply, if (result is Finished) "finish: PASSED" else result.toString(), System.nanoTime() - started) }
             if (result is Finished) {
                 val accepted = checkNotNull(current)
-                return AppAgentResult(accepted.preview, result.summary, step, edited)
+                return AppAgentResult(accepted.preview, result.summary, step, edited, result.lesson)
             }
             val remaining = AppAgentGuide.MAX_STEPS - step
             val footer = when {
@@ -424,7 +440,7 @@ internal class AppAgent(
             }
         }
         val summary = reply.optString("summary").trim().take(600)
-        return Finished(summary)
+        return Finished(summary, request.lesson?.let { lessonResult(reply, it, request.lessonIllustration) })
     }
 
     /** Names the model's own keys or bind for a rejected node. The diagnostic itself holds only catalog terms. */
@@ -451,7 +467,53 @@ internal class AppAgent(
 
     private fun smokeFor(candidate: Candidate, request: AppAgentRequest) = ToolGenerationSmoke(sandbox, candidate.spec,
         request.artifactId, (request.base?.revision ?: 0) + 1, candidate.spec.initialState,
-        checkActive = {}, generation = service)
+        checkActive = {}, generation = service, policy = request.lesson?.policy)
+
+    /** Runs the course contract on an accepted version. A scene slide must also draw something in its first screen. */
+    private fun checkLessonSlide(lesson: AppLessonTarget, spec: ToolSpec, preview: ToolPreview) {
+        try { lesson.checkSlide(spec, preview) } catch (failure: CancellationException) { throw failure }
+            catch (failure: Exception) { throw Feedback(failure.message ?: "The slide breaks the course rules.") }
+        if (!lesson.scene) return
+        for (id in canvasSurfaceIds(JSONObject(preview.ui), JSONObject(preview.state))) {
+            val surface = spec.surfaces[id] ?: continue
+            val commands = preview.surfaces?.optJSONObject(id)?.optJSONArray("commands")
+            if (commands == null || observeSurfaceGeometry(surface, commands, emptyList())?.hasInk != true) {
+                throw Feedback("The canvas \"$id\" draws nothing visible in the first screen. Draw the illustration in the first preview.")
+            }
+        }
+    }
+
+    /** Reads the lesson arguments of a passing finish. The host checks each cited source against the course. */
+    private fun lessonResult(reply: JSONObject, lesson: AppLessonTarget, illustrations: Boolean): AppLessonResult {
+        val raw = reply.opt("sources")
+        val sources = when (raw) {
+            null, JSONObject.NULL -> emptyList()
+            is JSONArray -> List(raw.length()) { raw.opt(it) as? String ?: throw Feedback("sources must hold source ID strings.") }
+            else -> throw Feedback("sources must be an array of source IDs.")
+        }
+        val allowed = lesson.allowedSourceIds
+        if (allowed.isEmpty() && sources.isNotEmpty()) throw Feedback("This course has no sources. Omit sources.")
+        if (allowed.isNotEmpty() && sources.isEmpty()) throw Feedback("Give sources: the IDs of the search results that the slide uses. Available: ${allowed.joinToString()}.")
+        sources.firstOrNull { it !in allowed }?.let { throw Feedback("Unknown source \"$it\". Available: ${allowed.joinToString()}.") }
+        if (sources.distinct().size != sources.size) throw Feedback("Give each source once.")
+        val illustration = reply.opt("illustration")?.takeUnless { it == JSONObject.NULL }?.let { value ->
+            if (!illustrations) throw Feedback("Pictures are off. Remove illustration.")
+            try { ImageIntent.list(JSONArray().put(value), 1).single() } catch (failure: CancellationException) { throw failure }
+                catch (_: Exception) { throw Feedback("illustration must be one image request. ${ImageIntent.GUIDANCE}") }
+        }
+        return AppLessonResult(sources, illustration)
+    }
+
+    /** Tells the model the host's lesson arguments of finish. The course code adds the slide rules. */
+    private fun lessonGuide(lesson: AppLessonTarget, illustrations: Boolean): String = buildString {
+        append(lesson.guide)
+        append("\n\nWhen you call finish for this slide, add \"sources\": ")
+        if (lesson.allowedSourceIds.isEmpty()) append("leave it out, because this course has no sources.")
+        else append("the IDs of the trusted search results that the slide uses, in the order that the slide uses them. ")
+            .append("Available IDs: ").append(lesson.allowedSourceIds.joinToString()).append('.')
+        if (illustrations) append("\nYou can add \"illustration\": one image request for a picture above the slide. ")
+            .append(ImageIntent.GUIDANCE)
+    }
 
     /** Runs [block] on a fresh copy of the app: in the sandbox, or for a 3D app in a foreground scene preview. */
     private suspend fun <T> drive(candidate: Candidate, request: AppAgentRequest, block: suspend AppTarget.() -> T): T =
@@ -594,6 +656,11 @@ internal class AppAgent(
                 .append(previous.generatedImages.joinToString { "\"${it.slot}\" (${it.alt})" }).append(". Keep their image nodes unless the request removes them.")
             if (privateApp) append("\n").append(PRIVATE_EDIT).append(' ').append(PRIVATE_SCREEN)
             append("\nCurrent app definition:\n").append(modelView(JSONObject(previous.providerDefinition()).apply { remove("formatVersion") }, privateApp))
+        } else if (request.lesson != null) {
+            append("\n\nBuild the reached course slide. Write it in the language that the course requests. ")
+            append("If the course names no language, use the language of the reached slide goal")
+            request.lesson.languageHint?.let { append(", which is ").append(GenerationLanguage.name(it)) }
+            append('.')
         } else {
             append("\n\nBuild a new app. Write the interface in the language of the user's request text, unless that text names another language. ")
             append("The widget brief and reply excerpt can be in a different language. They do not set the interface language.")

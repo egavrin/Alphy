@@ -19,8 +19,6 @@ import com.alpha.assistant.ui.openSeededChat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -229,18 +227,8 @@ class ShellCourseCreationWorkflowTest {
                     val outline = """{"lessons":[{"id":null,"title":"$lesson","slides":[{"id":null,"kind":"EXPLANATION","goal":"$goal"}]}]}"""
                     emit(CloudEvent.RoundComplete(if (invalidOutline) "{}" else outline, false))
                 }
-                CloudGenerationStage.PLAN -> emit(CloudEvent.Text("""{"title":"Spanish","description":"","language":"en",
-                    "inputs":[],"constants":[{"id":"body","value":"$slide"}],"needs":[{"id":"lesson","type":"explanation",
-                    "label":"Spanish","description":"Explain the greeting","uses":{"body":"body"}}],"questions":[]}"""))
-                CloudGenerationStage.SELECTOR -> {
-                    val questions = JSONObject(request.turns.single().text).getJSONArray("questions")
-                    val answers = JSONArray()
-                    repeat(questions.length()) { index ->
-                        answers.put(JSONObject().put("id", questions.getJSONObject(index).getString("id"))
-                            .put("choice", "A").put("confidence", 1).put("probabilities", JSONObject().put("A", 1).put("B", 0)))
-                    }
-                    emit(CloudEvent.Text(JSONObject().put("answers", answers).toString()))
-                }
+                CloudGenerationStage.AGENT ->
+                    emit(CloudEvent.Text(request.lessonAgentReply(lessonSlide(CourseSlideKind.EXPLANATION, slide))))
                 else -> error("Unexpected request")
             }
         }

@@ -50,7 +50,6 @@ import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.data.ShellStore
 import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import com.alpha.assistant.tools.agentReply
-import com.alpha.assistant.tools.replyWithFixturePlan
 import com.alpha.assistant.voice.VoiceSession
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -100,8 +99,6 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
             emit(CloudEvent.Text(request.agentReply(app)))
             return
         }
-        // Course lessons still use the staged generation pipeline.
-        if (request.replyWithFixturePlan(emit)) return
         if (request.generationStage != null) {
             emit(CloudEvent.Text(app))
             return

@@ -23,7 +23,6 @@ import com.alpha.assistant.ui.KeyStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
-import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -73,7 +72,7 @@ class ShellCourseHostWorkflowTest {
             robot.waitFor(robot.text(R.string.shell_course_continue))
             click(R.string.shell_course_continue)
             robot.waitFor(slideText)
-            val plan = provider.calls.single { it.request.generationStage == CloudGenerationStage.PLAN }
+            val plan = provider.calls.first { it.request.generationStage == CloudGenerationStage.AGENT }
             assertTrue(plan.request.turns.single().text.contains("Explain the next fraction with an example"))
             robot.back()
             robot.waitFor(robot.text(R.string.shell_course_continue))
@@ -149,7 +148,7 @@ class ShellCourseHostWorkflowTest {
             robot.waitFor(provider.source.url)
             assertEquals(listOf(cancelledQuery, submittedQuery), provider.searches.map { it.query })
             val completedCalls = provider.calls.toList()
-            assertEquals(listOf(CloudGenerationStage.PLAN),
+            assertEquals(listOf(CloudGenerationStage.AGENT, CloudGenerationStage.AGENT),
                 completedCalls.map { it.request.generationStage })
             assertTrue(completedCalls.all { it.session === provider.searches.last().session })
             assertEquals(listOf(CourseSourceReference(provider.source.title, provider.source.url)),
@@ -290,13 +289,13 @@ class ShellCourseHostWorkflowTest {
             robot.waitFor(slideText)
             assertNotNull(store.slide(saved.id, "current"))
             assertNull(store.slide(saved.id, "future"))
-            robot.waitUntil { provider.calls.any { it.reachedSlideGoal() == "Explain the next fraction" } }
+            // Each slide takes two agent steps: write_app, then finish.
+            robot.waitUntil { provider.calls.count { it.reachedSlideGoal() == "Explain the next fraction" } == 2 }
             val slideCalls = provider.calls.toList()
-            assertEquals(listOf(CloudGenerationStage.PLAN, CloudGenerationStage.PLAN),
-                slideCalls.map { it.request.generationStage })
-            assertEquals("Explain the current fraction", slideCalls[0].reachedSlideGoal())
-            assertEquals("Explain the next fraction", slideCalls[1].reachedSlideGoal())
-            assertNotSame(slideCalls[0].session, slideCalls[1].session)
+            assertEquals(List(4) { CloudGenerationStage.AGENT }, slideCalls.map { it.request.generationStage })
+            assertEquals(List(2) { "Explain the current fraction" } + List(2) { "Explain the next fraction" },
+                slideCalls.map { it.reachedSlideGoal() })
+            assertNotSame(slideCalls[0].session, slideCalls[2].session)
 
             openTutor("Why do the denominators match?")
             click(R.string.composer_add_context)
@@ -336,7 +335,7 @@ class ShellCourseHostWorkflowTest {
 
     @Test fun leavingPlayerDisconnectsGenerationAndDiscardsTheLateSlide() {
         val transport = BlockingTransport()
-        val provider = CourseProvider(CloudGenerationStage.PLAN).apply { block = transport }
+        val provider = CourseProvider(CloudGenerationStage.AGENT).apply { block = transport }
         withShell(provider) { scenario, _, store, saved ->
             try {
                 openOutline(scenario)
@@ -349,7 +348,7 @@ class ShellCourseHostWorkflowTest {
                 robot.waitUntil { store.course(saved.id)?.generationFailure == CourseGenerationFailure.INTERRUPTED }
                 assertNull(store.slide(saved.id, "current"))
                 assertEquals(saved.progress, store.course(saved.id)?.progress)
-                assertEquals(listOf(CloudGenerationStage.PLAN), provider.calls.map { it.request.generationStage })
+                assertEquals(listOf(CloudGenerationStage.AGENT), provider.calls.map { it.request.generationStage })
             } finally { transport.release.countDown() }
         }
     }
@@ -464,8 +463,8 @@ class ShellCourseHostWorkflowTest {
 
     private data class Call(val request: CloudRequest, val session: CloudSession) {
         fun reachedSlideGoal(): String? {
-            if (request.generationStage != CloudGenerationStage.PLAN) return null
-            val context = request.turns.single().text.substringAfter("\nCourse and reached slide:\n")
+            if (request.generationStage != CloudGenerationStage.AGENT) return null
+            val context = request.turns.first().text.substringAfter("\nCourse and reached slide:\n")
                 .substringBefore("\nEarlier answers in order, including errors:\n")
             return JSONObject(context).getString("reachedSlideGoal")
         }
@@ -481,12 +480,10 @@ class ShellCourseHostWorkflowTest {
             calls += Call(request, session)
             if (request.generationStage == blockedStage) block?.waitForRelease(session)
             when (request.generationStage) {
-                CloudGenerationStage.PLAN -> {
-                    val plan = JSONObject("""{"title":"Fractions","description":"","language":"en",
-                    "inputs":[],"constants":[{"id":"body","value":"$slideText"}],"needs":[{"id":"lesson",
-                    "type":"explanation","label":"Fractions","description":"Explain the form","uses":{"body":"body"}}],"questions":[]}""")
-                    if (sourceIds.isNotEmpty()) plan.getJSONArray("needs").getJSONObject(0).put("sourceIds", JSONArray(sourceIds))
-                    emit(CloudEvent.Text(plan.toString()))
+                CloudGenerationStage.AGENT -> {
+                    // Cite the search result only when the course gave it to this slide.
+                    val cited = sourceIds.filter { request.turns.first().text.contains(""""id":"$it"""") }
+                    emit(CloudEvent.Text(request.lessonAgentReply(lessonSlide(CourseSlideKind.EXPLANATION, slideText), cited)))
                 }
                 null -> emit(CloudEvent.RoundComplete(if (request.jsonObject) """{"lessons":[{"id":1,"title":"Common denominators",
                     "slides":[{"id":1,"kind":"EXPLANATION","goal":"Explain the current fraction"},

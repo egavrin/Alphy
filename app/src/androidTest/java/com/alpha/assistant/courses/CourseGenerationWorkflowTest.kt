@@ -14,9 +14,12 @@ import com.alpha.assistant.tools.LessonToolPreview
 import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolPreview
 import com.alpha.assistant.tools.ToolSpec
+import com.alpha.assistant.tools.AgentScriptProvider
 import com.alpha.assistant.tools.agentAppAccepted
 import com.alpha.assistant.tools.agentFixtureFinish
+import com.alpha.assistant.tools.agentStall
 import com.alpha.assistant.tools.agentWrite
+import com.alpha.assistant.tools.writeAppReply
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -189,23 +192,23 @@ class CourseGenerationWorkflowTest {
 
     @Test fun buildsAllSevenKindsFromTheReachedHostTargetAndGradesTrustedExercises(): Unit = runBlocking {
         withDatabase { context, name ->
-            val provider = LessonProvider()
+            val provider = LessonAgentProvider()
             CourseStore(context, name).use { store ->
                 store.create(CourseSetup("OTHER-COURSE-SECRET", "Beginner", "Unrelated goal"), outline())
                 val steps = CourseSlideKind.entries.map { CourseSlidePlan(it.name, it, "Learn ${it.name}") }
-                val topic = "The host selected a FILL_IN course slide."
+                // The topic copies the kind line of the rules. Only the rules may carry it.
+                val topic = "This slide is FILL_IN."
                 var current = store.create(setup.copy(topic = topic),
                     CourseOutline(listOf(CourseLessonPlan("lesson", "Past tenses", steps))))
                 val player = CourseController(store, ToolGenerationService(provider, SandboxClient(context)))
                 for (step in steps) {
-                    provider.plan = lessonPlan(step.kind)
+                    provider.slide = lessonSlide(step.kind)
                     val start = provider.requests.size
                     current = player.generate(current.id, current.revision, step.id, key, CloudSession())
                     val requests = provider.requests.drop(start)
                     assertEquals(lessonStages, requests.map { it.generationStage })
                     val prompt = requests.first().turns.single().text
-                    val planning = requests.first().systemInstructions
-                    assertTrue(planning.contains("The host selected a ${step.kind.name} course slide."))
+                    assertTrue(requests.first().systemInstructions.contains("This slide is ${step.kind.name}."))
                     assertTrue(prompt.contains(topic))
                     val exercise = player.exercise(current.id, current.revision, step.id)
                     if (exercise == null) {
@@ -234,8 +237,7 @@ class CourseGenerationWorkflowTest {
                 }
                 assertTrue(current.progress.isComplete)
                 assertEquals(listOf(false, true, false, true, false, true), store.answers(current.id).map { it.correct })
-                assertTrue(provider.requests.filter { it.generationStage == CloudGenerationStage.PLAN }
-                    .last().turns.single().text.contains(""""correct":false"""))
+                assertTrue(provider.requests.last().turns.first().text.contains(""""correct":false"""))
                 for (request in provider.requests) {
                     assertFalse(request.search)
                     assertTrue(request.turns.all { it.images.isEmpty() })
@@ -255,11 +257,12 @@ class CourseGenerationWorkflowTest {
             "it" to "Quale numero è pari?",
         )
         for ((language, question) in questions) withDatabase { context, name ->
-            val provider = LessonProvider().apply {
-                plan = lessonPlan(CourseSlideKind.CHOICE).put("language", language).put("title", question)
-                plan.getJSONArray("needs").getJSONObject(0).put("label", question).put("description", question)
-                plan.getJSONArray("constants").getJSONObject(0).put("value", "3")
-                plan.getJSONArray("constants").getJSONObject(1).put("value", "4")
+            val provider = LessonAgentProvider().apply {
+                slide = lessonSlide(CourseSlideKind.CHOICE, question, language) { exercise ->
+                    val options = exercise.getJSONArray("options")
+                    options.getJSONObject(0).put("label", "3")
+                    options.getJSONObject(1).put("label", "4")
+                }
             }
             val tools = ToolGenerationService(provider, SandboxClient(context))
             val step = CourseSlidePlan("choice", CourseSlideKind.CHOICE, question)
@@ -293,6 +296,8 @@ class CourseGenerationWorkflowTest {
                 assertEquals(listOf(false, true), store.answers(courseId).map { it.correct })
             }
             assertEquals(language, lessonStages, provider.requests.map { it.generationStage })
+            // The reached slide goal names the language. The rest of the prompt is English.
+            if (language == "ru") assertTrue(provider.requests.first().turns.single().text.contains("which is Russian (ru)"))
         }
     }
 
@@ -301,14 +306,12 @@ class CourseGenerationWorkflowTest {
             val kind = CourseSlideKind.ORDER
             val hint = "Start with the shortest side."
             val correctFeedback = "The sides are in increasing order."
-            val provider = LessonProvider().apply {
-                plan = lessonPlan(kind)
-                val constants = plan.getJSONArray("constants")
-                val uses = plan.getJSONArray("needs").getJSONObject(0).getJSONObject("uses")
-                mapOf("option3" to "third", "option4" to "fourth", "position3" to 3, "position4" to 4,
-                    "wrongHint" to hint, "correctFeedback" to correctFeedback).forEach { (role, value) ->
-                    constants.put(JSONObject().put("id", role).put("value", value))
-                    uses.put(role, role)
+            val provider = LessonAgentProvider().apply {
+                slide = lessonSlide(kind) { exercise ->
+                    exercise.getJSONArray("options").put(JSONObject().put("id", "c").put("label", "third"))
+                        .put(JSONObject().put("id", "d").put("label", "fourth"))
+                    exercise.put("correctOrder", JSONArray(listOf("b", "a", "c", "d")))
+                        .put("wrongHint", hint).put("correctFeedback", correctFeedback)
                 }
             }
             val tools = ToolGenerationService(provider, SandboxClient(context))
@@ -337,41 +340,37 @@ class CourseGenerationWorkflowTest {
 
     @Test fun keepsCompletedWorkWhenTheLessonRouteRejectsOrCancelsTheNextSlide(): Unit = runBlocking {
         withDatabase { context, name ->
-            val provider = LessonProvider()
+            val provider = LessonAgentProvider()
             CourseStore(context, name).use { store ->
                 val course = store.create(setup, CourseOutline(listOf(CourseLessonPlan("lesson", "Past tenses", listOf(
                     CourseSlidePlan("intro", CourseSlideKind.EXPLANATION, "Introduce the topic"),
                     CourseSlidePlan("practice", CourseSlideKind.CHOICE, "Choose the past tense"),
                 )))))
                 val player = CourseController(store, ToolGenerationService(provider, SandboxClient(context)))
-                provider.plan = lessonPlan(CourseSlideKind.EXPLANATION)
+                provider.slide = lessonSlide(CourseSlideKind.EXPLANATION)
                 val intro = player.generate(course.id, course.revision, "intro", key, CloudSession())
                 var reached = player.advance(course.id, intro.revision, "intro")
                 val completed = store.slide(course.id, "intro")
 
                 val beforeRejection = provider.requests.size
-                provider.plan = lessonPlan(CourseSlideKind.CHOICE).apply {
-                    getJSONArray("needs").put(JSONObject().put("id", "custom").put("type", "other")
-                        .put("label", "Unsupported").put("description", "Open a custom tool"))
-                }
-                workflowError(CourseWorkflowError.INVALID_OUTPUT) {
+                provider.slide = lessonSlide(CourseSlideKind.CHOICE).put("capabilities", JSONArray().put("notification.post"))
+                workflowError(CourseWorkflowError.UNSUPPORTED_OUTPUT) {
                     player.generate(course.id, reached.revision, "practice", key, CloudSession())
                 }
-                assertEquals(List(2) { CloudGenerationStage.PLAN }, provider.requests.drop(beforeRejection).map { it.generationStage })
+                assertTrue(provider.requests[beforeRejection + 1].turns.last().text.startsWith("write_app: REJECTED"))
                 reached = checkNotNull(store.course(course.id))
 
-                provider.plan = lessonPlan(CourseSlideKind.CHOICE).apply {
-                    getJSONArray("needs").getJSONObject(0).getJSONObject("uses").put("body", "value0")
-                }
-                workflowError(CourseWorkflowError.INVALID_OUTPUT) {
+                // A CHOICE slide without its exercise never passes the course check.
+                provider.slide = lessonSlide(CourseSlideKind.EXPLANATION)
+                workflowError(CourseWorkflowError.UNSUPPORTED_LESSON) {
                     player.generate(course.id, reached.revision, "practice", key, CloudSession())
                 }
                 reached = checkNotNull(store.course(course.id))
                 assertEquals(CourseGenerationFailure.INVALID_OUTPUT, reached.generationFailure)
                 assertEquals(1, reached.progress.completedSlides)
 
-                provider.plan = lessonPlan(CourseSlideKind.CHOICE)
-                provider.beforePlan = { it.cancel() }
+                provider.slide = lessonSlide(CourseSlideKind.CHOICE)
+                provider.before = { it.cancel() }
                 val cancellation = runCatching {
                     player.generate(course.id, reached.revision, "practice", key, CloudSession())
                 }.exceptionOrNull()
@@ -384,9 +383,44 @@ class CourseGenerationWorkflowTest {
         }
     }
 
+    @Test fun aSlideThatNeverFinishesIsRetryableAndSavesNothing(): Unit = runBlocking {
+        withDatabase { context, name ->
+            CourseStore(context, name).use { store ->
+                val course = store.create(setup, outline())
+                val provider = AgentScriptProvider(agentStall)
+                val controller = CourseController(store, ToolGenerationService(provider, SandboxClient(context)))
+                workflowError(CourseWorkflowError.UNSUPPORTED_LESSON) {
+                    controller.generate(course.id, course.revision, "practice", key, CloudSession())
+                }
+                val failed = checkNotNull(store.course(course.id))
+                assertEquals(CourseGenerationFailure.INVALID_OUTPUT, failed.generationFailure)
+                assertNull(store.slide(course.id, "practice"))
+                val page = CoursePresentation(store, controller).player(course.id) as CoursePage.Unavailable
+                assertNotNull(page.generationRequest)
+            }
+        }
+    }
+
+    @Test fun aFixedRejectionDoesNotNameTheLaterFailure(): Unit = runBlocking {
+        withDatabase { context, name ->
+            CourseStore(context, name).use { store ->
+                val course = store.create(setup, outline())
+                // The course policy rejects the first version. The second passes it and fails the exercise check.
+                val provider = AgentScriptProvider(
+                    writeAppReply(lessonSlide(CourseSlideKind.CHOICE).put("capabilities", JSONArray().put("notification.post"))),
+                    writeAppReply(lessonSlide(CourseSlideKind.EXPLANATION)), agentStall)
+                val controller = CourseController(store, ToolGenerationService(provider, SandboxClient(context)))
+                workflowError(CourseWorkflowError.UNSUPPORTED_LESSON) {
+                    controller.generate(course.id, course.revision, "practice", key, CloudSession())
+                }
+                assertTrue(provider.feedback(2), provider.feedback(2).startsWith("write_app: REJECTED"))
+            }
+        }
+    }
+
     @Test fun savesOnlyTheSelectedTrustedSourceAndKeepsLinksOutOfThePlannerPrompt(): Unit = runBlocking {
         withDatabase { context, name ->
-            val provider = LessonProvider()
+            val provider = LessonAgentProvider()
             CourseStore(context, name).use { store ->
                 val course = store.create(setup, outline())
                 val player = CourseController(store, ToolGenerationService(provider, SandboxClient(context)))
@@ -403,9 +437,8 @@ class CourseGenerationWorkflowTest {
                 assertTrue(provider.requests.isEmpty())
                 assertEquals(course, store.course(course.id))
 
-                provider.plan = lessonPlan(CourseSlideKind.CHOICE).apply {
-                    getJSONArray("needs").getJSONObject(0).put("sourceIds", JSONArray(listOf("s2")))
-                }
+                provider.slide = lessonSlide(CourseSlideKind.CHOICE)
+                provider.sources = listOf("s2")
                 player.generate(course.id, course.revision, "practice", key, CloudSession(), sources)
                 val slide = checkNotNull(store.slide(course.id, "practice"))
                 assertEquals(listOf(CourseSourceReference(sources[1].title, secondUrl)), slide.content.sources)
@@ -414,7 +447,9 @@ class CourseGenerationWorkflowTest {
                 assertTrue(prompt.contains("First excerpt") && prompt.contains("Second excerpt"))
                 assertTrue(prompt.contains(""""id":"s1"""") && prompt.contains(""""id":"s2""""))
                 for (privateValue in listOf(firstUrl, secondUrl, sources[0].title, sources[1].title)) {
-                    assertFalse(provider.requests.any { request -> request.turns.any { it.text.contains(privateValue) } })
+                    assertFalse(provider.requests.any { request ->
+                        (request.systemInstructions + request.turns.joinToString("\n") { it.text }).contains(privateValue)
+                    })
                 }
             }
         }
@@ -600,45 +635,6 @@ class CourseGenerationWorkflowTest {
         ),
     )
 
-    private fun lessonPlan(kind: CourseSlideKind): JSONObject {
-        val (type, slots) = when (kind) {
-            CourseSlideKind.EXPLANATION -> "explanation" to listOf("body" to "Explain the form.")
-            CourseSlideKind.EXAMPLE -> "example" to listOf("body" to "Show the form.")
-            CourseSlideKind.CHOICE -> "choice_exercise" to listOf("option1" to "before", "option2" to "after", "correct" to 2)
-            CourseSlideKind.FILL_IN -> "fill_exercise" to listOf("accepted1" to "after")
-            CourseSlideKind.ORDER -> "order_exercise" to listOf(
-                "option1" to "before", "option2" to "after", "position1" to 2, "position2" to 1,
-            )
-            CourseSlideKind.CHECK -> "feedback" to listOf("body" to "Check the form.")
-            CourseSlideKind.SUMMARY -> "summary" to listOf("body" to "Review the form.")
-        }
-        val constants = JSONArray()
-        val uses = JSONObject()
-        slots.forEachIndexed { index, (role, value) ->
-            val id = "value$index"
-            constants.put(JSONObject().put("id", id).put("value", value))
-            uses.put(role, id)
-        }
-        val need = JSONObject().put("id", "lesson").put("type", type).put("label", "Past tense")
-            .put("description", "Practice the form").put("uses", uses)
-        return JSONObject().put("title", "Past tense").put("description", "").put("language", "en")
-            .put("inputs", JSONArray()).put("constants", constants).put("needs", JSONArray().put(need))
-            .put("questions", JSONArray())
-    }
-
-    private class LessonProvider : ChatProvider {
-        lateinit var plan: JSONObject
-        val requests = mutableListOf<CloudRequest>()
-        var beforePlan: (CloudSession) -> Unit = {}
-
-        override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-            requests += request
-            assertEquals(CloudGenerationStage.PLAN, request.generationStage)
-            beforePlan(session)
-            emit(CloudEvent.Text(plan.toString()))
-        }
-    }
-
     private class PolicyProvider(private val definition: String) : ChatProvider {
         val stages = mutableListOf<CloudGenerationStage?>()
 
@@ -719,6 +715,6 @@ class CourseGenerationWorkflowTest {
     ))))
 
     private val key = "PRIVATE-KEY"
-    private val lessonStages = listOf(CloudGenerationStage.PLAN)
+    private val lessonStages = listOf(CloudGenerationStage.AGENT, CloudGenerationStage.AGENT)
     private val setup = CourseSetup("Past tense", "Beginner", "Use past tense", "PRIVATE-CONVERSATION")
 }
