@@ -165,6 +165,38 @@ The shell above the app shows the message of the last effect only when the
 effect did not succeed. A successful beep or an opened share sheet adds no line.
 The access panel keeps the full effect history.
 
+### Visual design
+
+A comparison with design mocks found gray apps, text-only cards and rows, and
+long descriptions. These changes close the gap:
+
+- Each app sets `theme.palette`. The guide maps app topics to the 11 curated
+  palettes, and `"dark":true` is for night, space, or arcade apps.
+- Cards, list items, metrics, badges, chips, banners, and empty states take an
+  `icon`. A card or a row shows its icon in a tinted circle.
+- Template rows are separate cards on the page. Five to seven short choices,
+  such as weekdays, share one row of circles.
+- A saved app shows only itself, like an installed app. The library row keeps
+  its description.
+- The full view of an app with a root `theme` uses the app colors from edge to
+  edge: the status bar, the top bar, and the margins. A dark app gets light
+  system bar icons. In a two-pane layout, only the app pane changes.
+- A 3D scene keeps at least 55% of the stage height above its controls.
+- An accepted version gets "Design hints" when the theme has no palette, when
+  a card, list item, or empty state has no icon, or when a card holds more than
+  3 metrics. Hints never reject a version.
+- Lists start empty. A generated app holds no sample data, because the user
+  fills it.
+
+The screenshot review is optional, because it adds one model step with an
+image to each generation. The setting is in the DeepSeek section and is off by
+default. When it is on, the first passing `finish` returns "finish: REVIEW" with
+a screenshot of the first screen. `AppSnapshot` draws the app with its pictures
+on a private virtual display, so the user does not see it. The agent fixes real
+problems with `edit_app` and calls `finish` again. The second passing `finish`
+ends the generation. Apps with private data and 3D apps get no review. A
+failed capture skips the review. Only the newest screenshot goes to the model.
+
 ### Pictures and 3D scenes
 
 `generate_image` is available only when image generation is turned on in the
@@ -172,7 +204,10 @@ settings and the provider key is saved. The host then gives the agent the
 picture guide, and the tool list names the tool. The tool calls
 `ImageGeneration.generate` with one operation for each call. One generation
 can make at most 4 pictures, because each picture takes about 20 seconds and
-costs money. The agent shows a picture with an `image` node and its
+costs money. The host adds a style text to each picture request: a clear
+photo or a soft illustration, natural light, a clean background, and no
+text. Equirectangular textures get no style text. The agent shows a picture
+with an `image` node and its
 `assetSlot`. A slot that has no picture is rejected. A follow-up keeps the
 saved pictures, and its task message lists them.
 
@@ -424,9 +459,8 @@ before the agent change.
   failed results. A failed result in an English app still shows a Russian line.
   A host change can give each result a message in the app language.
 - The shell around a mini-app (for example "Изменить" in the top bar) uses the
-  device language, also for an English app. The shell theme is grayscale, so
-  apps look gray unless they set tones. Both are shell decisions outside the
-  agent loop.
+  device language, also for an English app. This is a shell decision outside
+  the agent loop.
 - A row with `"wrap":false` can hold more fixed controls than a phone width
   holds. A dose row with a time field, a labeled switch, and a delete icon left
   11 dp for its name. Shrinking cannot fix this, and the renderer does not move

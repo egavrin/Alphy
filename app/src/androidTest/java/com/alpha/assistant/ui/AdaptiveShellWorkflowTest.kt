@@ -336,7 +336,7 @@ class AdaptiveShellWorkflowTest {
         assertEquals(0, tools.readableDatabase.rawQuery("SELECT COUNT(*) FROM maps_reached", null).use { it.moveToFirst(); it.getInt(0) })
 
         scenario.onActivity { checkNotNull(fixture.model).openSurface(null, settings = true) }
-        robot.reveal(robot.text(R.string.key_label))
+        robot.reveal(robot.text(R.string.key_label), forward = null)
         assertTrue(robot.composed(scenario, "settings-detail"))
         robot.withBackInput(scenario) { input -> scenario.onActivity { input.complete() } }
         robot.waitUntil { !robot.composed(scenario, "settings-pane") }
@@ -354,7 +354,7 @@ class AdaptiveShellWorkflowTest {
         robot.reveal(label)
         robot.edit(label, "Евгений")
         robot.waitUntil { fixture.store.load().userName == "Евгений" }
-        robot.reveal(robot.text(R.string.key_label))
+        robot.reveal(robot.text(R.string.key_label), forward = null)
     }
 
     @Test fun wideNewChatKeepsDesktopBackPath() = withTool(selectedChat = false) { fixture, _, scenario ->

@@ -21,6 +21,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -600,9 +602,18 @@ catch (_: Exception) { null }
 @Composable internal fun ToolsPane(controller: ToolController, conversationId: String?, actions: MiniAppActions,
     requests: MutableState<Map<String, String>>, accept: (String) -> Unit, refine: (String) -> Unit, immersive: Boolean,
     alignDetailStart: Boolean, standalone: Boolean, exitImmersive: () -> Unit, settings: () -> Unit,
-    close: () -> Unit, goToChat: () -> Unit) {
+    close: () -> Unit, goToChat: () -> Unit, appBackground: (Color?) -> Unit = {}) {
     val draft=controller.drafts.find {it.id == controller.selectedDraftId}
     val tool=controller.tools.find {it.id == (controller.selectedId ?: draft?.toolId)}
+    // The whole screen takes the colors of the app, not only the app content inside the margins.
+    val shell = MaterialTheme.colorScheme
+    val ui = draft?.let { controller.previewFor(it.id)?.uiJson ?: it.previewUi } ?: tool?.ui
+    val appColors = remember(ui, shell) { ui?.let { rootThemeColors(it, shell.background.luminance() < 0.5f) } }
+    val reportBackground by rememberUpdatedState(appBackground)
+    DisposableEffect(appColors) {
+        reportBackground(appColors?.background)
+        onDispose { reportBackground(null) }
+    }
     val contextId=tool?.id ?: draft?.toolId ?: "new"
     val prompt=requests.value[contextId] ?: draft?.prompt.orEmpty()
     val edit: (String) -> Unit = {requests.value=requests.value + (contextId to it)}
@@ -616,8 +627,12 @@ catch (_: Exception) { null }
         controller.generate(prompt,tool?.id,conversationId,emptyList())
     }
     if (tool != null || draft != null) key(tool?.id, draft?.id) {
-        FocusedToolPane(controller,tool,draft,prompt,edit,submit,accept,{archiveConfirm=true},actions,refine,immersive,exitImmersive,settings,close,goToChat,
-            hostCovered = archiveConfirm, alignDetailStart = alignDetailStart, standalone = standalone)
+        MaterialTheme(colorScheme = appColors ?: shell) {
+            Surface(Modifier.fillMaxSize(), color = appColors?.background ?: shell.surface) {
+                FocusedToolPane(controller,tool,draft,prompt,edit,submit,accept,{archiveConfirm=true},actions,refine,immersive,exitImmersive,settings,close,goToChat,
+                    hostCovered = archiveConfirm, alignDetailStart = alignDetailStart, standalone = standalone)
+            }
+        }
     }
     if(archiveConfirm && tool != null && !tool.archived) AlertDialog(onDismissRequest = { archiveConfirm = false },
         title = { Text(stringResource(R.string.tool_archive_title, ToolSpec.storedTitle(tool.spec))) },text = {
@@ -798,7 +813,8 @@ catch (_: Exception) { null }
             .padding(horizontal = detailGutter, vertical = 20.dp),verticalArrangement=Arrangement.spacedBy(20.dp)) {
             val description = candidate?.description ?: spec?.description
             val showBadge = preview != null || tool?.archived == true
-            val descriptionAfterContent = preview == null && tool?.saved == true && !tool.archived
+            // A saved app shows only itself, like an installed app. The library row keeps its description.
+            val savedApp = preview == null && tool?.saved == true && !tool.archived
             if (showBadge) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     MiniAppBadge(candidate?.iconId ?: spec?.iconId, size = 56.dp, draft = preview != null)
@@ -812,7 +828,7 @@ catch (_: Exception) { null }
                 Text(stringResource(if (readyDraft == null) R.string.tool_preview_provisional else R.string.tool_preview_label),
                     style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             }
-            if (!showBadge && !descriptionAfterContent && !description.isNullOrBlank()) {
+            if (!showBadge && !savedApp && !description.isNullOrBlank()) {
                 Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if(preview != null && spec != null) Text(stringResource(R.string.tool_preview_changes_label, spec.title),style=MaterialTheme.typography.bodySmall)
@@ -860,9 +876,6 @@ catch (_: Exception) { null }
             if (standaloneStage && details == null) AccessAndEffects()
             if (tool != null && spec != null && draft == null && tool.saved && !tool.archived) {
                 SourceRefreshControl(controller, tool)
-            }
-            if (descriptionAfterContent && !description.isNullOrBlank()) {
-                Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         }

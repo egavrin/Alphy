@@ -38,7 +38,8 @@ def adb(serial, *args, timeout=30):
                           timeout=timeout, env=child_environment())
 
 
-def run_case(serial, case, corpus_hash, output, chat_seconds, review_seconds, verify_workflow=False, saved_edit=False):
+def run_case(serial, case, corpus_hash, output, chat_seconds, review_seconds, verify_workflow=False, saved_edit=False,
+             images=False, screenshot_review=False):
     run_id = uuid.uuid4().hex
     payload = {
         "run_id": run_id, "slot_id": case["id"] + ":candidate:1", "request": case["request"],
@@ -51,6 +52,10 @@ def run_case(serial, case, corpus_hash, output, chat_seconds, review_seconds, ve
         payload["verify_workflow"] = True
     if saved_edit:
         payload["saved_edit"] = True
+    if images:
+        payload["images"] = True
+    if screenshot_review:
+        payload["screenshot_review"] = True
     encoded = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii").rstrip("=")
     command = adb_command(ADB, "shell", "am", "instrument", "-w", "-r", "-e", "class", TEST,
                           "-e", "comparisonEnvelope", encoded, RUNNER, serial=serial)
@@ -60,6 +65,7 @@ def run_case(serial, case, corpus_hash, output, chat_seconds, review_seconds, ve
     started = time.monotonic()
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=child_environment())
     key = read_live_key()
+    image_key = read_live_key(name="OPENROUTER_API_KEY") if images else None
     transferred = False
     deadline = started + chat_seconds + review_seconds + 120
     try:
@@ -71,20 +77,25 @@ def run_case(serial, case, corpus_hash, output, chat_seconds, review_seconds, ve
                         phase = json.loads(result.stdout).get("phase")
                     except ValueError:
                         phase = None
-                    if phase == "credentialReady":
+                    if phase == "credentialReady" and key is not None:
                         transfer_key(ADB, run_id, key, serial=serial)
-                        transferred = True
                         key = None
+                        transferred = image_key is None
+                    elif phase == "imageCredentialReady" and image_key is not None:
+                        transfer_key(ADB, run_id + "-openrouter", image_key, serial=serial)
+                        image_key = None
+                        transferred = True
             time.sleep(0.5)
     finally:
-        key = None
+        key = image_key = None
         if process.poll() is None:
             process.kill()
         stdout = process.communicate(timeout=30)[0].decode("utf-8", "replace")
     (directory / "instrumentation.txt").write_text(stdout)
     adb(serial, "pull", remote + "/.", str(directory), timeout=120)
     adb(serial, "shell", "rm", "-rf", remote)
-    summary = {"case": case["id"], "expected": case["expected_outcome"], "seconds": round(time.monotonic() - started)}
+    summary = {"case": case["id"], "expected": case["expected_outcome"], "seconds": round(time.monotonic() - started),
+               "images": images, "screenshot_review": screenshot_review}
     report_path = directory / "report.json"
     if report_path.exists():
         report = json.loads(report_path.read_text())
@@ -124,6 +135,10 @@ def main():
                         help="Start from the frozen saved app of the case and send --request as a follow-up edit inside the "
                              "workflow check. Requires --verify-workflow and --request.")
     parser.add_argument("--request", help="The follow-up edit text for --saved-edit. It replaces the corpus request.")
+    parser.add_argument("--images", action="store_true",
+                        help="Turn on pictures. OPENROUTER_API_KEY goes to the device through a second one-use transfer. "
+                             "Each generation makes at most 4 pictures.")
+    parser.add_argument("--screenshot-review", action="store_true", help="Turn on the optional screenshot review.")
     parser.add_argument("cases", nargs="*", help="Case IDs. Empty runs every case.")
     args = parser.parse_args()
     if args.saved_edit != bool(args.request) or args.saved_edit and not args.verify_workflow:
@@ -144,7 +159,7 @@ def main():
     with (args.output / f"summary-{args.serial}.jsonl").open("a") as stream:
         for case in cases:
             summary = run_case(args.serial, case, sha256(raw), args.output, args.chat_seconds, args.review_seconds,
-                               args.verify_workflow, args.saved_edit)
+                               args.verify_workflow, args.saved_edit, args.images, args.screenshot_review)
             stream.write(json.dumps(summary, ensure_ascii=False) + "\n")
             stream.flush()
             print(json.dumps(summary, ensure_ascii=False), flush=True)

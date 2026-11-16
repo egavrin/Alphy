@@ -69,7 +69,7 @@ internal fun galleryCaptureChecks(context: Context): Map<String, GalleryCaptureC
             targets = listOf(context.getString(R.string.tool_generated_search, "Поиск продуктов")), editable = "Поиск продуктов"),
         "forms/number" to GalleryCaptureCheck(listOf("Количество"), editable = "Количество"),
         "forms/slider" to GalleryCaptureCheck(listOf("Лимит: 2"), adjust = "Лимит"),
-        "forms/range" to GalleryCaptureCheck(listOf("Диапазон цены: 2.0 – 8.0"), adjust = "Диапазон цены"),
+        "forms/range" to GalleryCaptureCheck(listOf("Диапазон цены: 2 – 8"), adjust = "Диапазон цены"),
         "forms/date" to platformPicker("День покупки: 2028-06-03"),
         "forms/time" to platformPicker("Время покупки: 09:00"),
         // The timer draws its label, clock, and status as separate texts. Its whole state is the content description.

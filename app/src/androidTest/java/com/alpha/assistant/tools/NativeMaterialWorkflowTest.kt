@@ -61,7 +61,7 @@ class NativeMaterialWorkflowTest {
         // Failure case: a menu showed a Close X on "Remove one Espresso", because the catalog had no minus icon.
         spec(JSONObject("""{"type":"icon","name":"Minus","text":"Remove one","action":"less"}"""))
         spec(JSONObject("""{"type":"button","text":"Remove one","action":"less","icon":"Minus"}"""))
-        for(name in ToolUiCatalog.icons)com.alpha.assistant.ui.Glyph.valueOf(name)
+        for(name in ToolUiCatalog.icons)assertTrue(name,com.alpha.assistant.ui.Glyph.entries.any {it.name == name} || name in ToolIcons.paths)
     }
     @Test fun progressTextShowsTheShareOfItsRange() {
         // Failure case: a raw value such as "Goal: 62.5" or "Goal: 3" next to a bar that shows a share.

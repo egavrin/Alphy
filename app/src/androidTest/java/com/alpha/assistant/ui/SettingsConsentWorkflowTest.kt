@@ -11,6 +11,7 @@ import com.alpha.assistant.data.Conversation
 import com.alpha.assistant.data.Message
 import com.alpha.assistant.tools.ToolController
 import com.alpha.assistant.tools.ToolStore
+import com.alpha.assistant.tools.agent.GenerationSettings
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -37,7 +38,8 @@ class SettingsConsentWorkflowTest {
         if (section != null) robot.click(robot.text(section))
     }
     private fun saveKey() {
-        robot.reveal(robot.text(R.string.key_label))
+        // The page can scroll before it settles, so the field can be above or below the viewport.
+        robot.reveal(robot.text(R.string.key_label), forward = null)
         robot.enter(robot.text(R.string.key_label), "alpha-test-only")
         robot.reveal(robot.text(R.string.consent_and_save))
         robot.click(robot.text(R.string.consent_and_save))
@@ -54,6 +56,28 @@ class SettingsConsentWorkflowTest {
             started
         }
         return tools
+    }
+
+    @Test fun theScreenshotReviewIsOffUntilTheUserTurnsItOn() {
+        val settings = GenerationSettings(fixture.context)
+        val before = settings.screenshotReview
+        try {
+            settings.screenshotReview = false
+            fixture.install()
+            fixture.launch().use { scenario ->
+                openSettings(scenario)
+                val label = robot.text(R.string.settings_screenshot_review)
+                robot.reveal(label)
+                robot.waitFor(robot.text(R.string.settings_screenshot_review_hint))
+                // The switch row shows the stored value. A click acts on the shown value, so each check waits for both.
+                fun shown() = generateSequence(robot.find(label)) { it.parent }.firstOrNull { it.isCheckable }?.isChecked
+                robot.waitUntil { shown() == false }
+                robot.click(label)
+                robot.waitUntil { settings.screenshotReview && shown() == true }
+                robot.click(label)
+                robot.waitUntil { !settings.screenshotReview && shown() == false }
+            }
+        } finally { settings.screenshotReview = before }
     }
 
     @Test fun keyEntryRecordsConsentAndEnablesCloud() {
@@ -224,7 +248,7 @@ class SettingsConsentWorkflowTest {
         fixture.install(saveKey = false)
         fixture.launch().use { scenario ->
             openSettings(scenario)
-            robot.reveal(robot.text(R.string.key_label))
+            robot.reveal(robot.text(R.string.key_label), forward = null)
             // A password field shows dots, so the check compares the field text with its text before the entry.
             fun keyText() = robot.field(robot.text(R.string.key_label)).text?.toString()
             val empty = keyText()
@@ -232,7 +256,7 @@ class SettingsConsentWorkflowTest {
             robot.waitUntil { keyText() != empty }
             scenario.recreate()
             robot.waitUntil { robot.composed(scenario, "settings-pane") }
-            robot.reveal(robot.text(R.string.key_label))
+            robot.reveal(robot.text(R.string.key_label), forward = null)
             robot.waitUntil { keyText() == empty }
         }
     }

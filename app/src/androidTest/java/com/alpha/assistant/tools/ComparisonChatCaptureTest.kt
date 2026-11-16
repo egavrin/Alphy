@@ -9,6 +9,9 @@ import android.util.Base64
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
+import com.alpha.assistant.images.ImageModel
+import com.alpha.assistant.images.ImageSettings
+import com.alpha.assistant.tools.agent.GenerationSettings
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
 import com.alpha.assistant.chat.MAX_CHAT_INPUT
@@ -143,6 +146,10 @@ class ComparisonChatCaptureTest {
         val canvasWorkflow = caseId in setOf("canvas:arkanoid", "canvas:wave")
         val savedEdit = input.optBoolean("saved_edit")
         val verifyWorkflow = input.optBoolean("verify_workflow")
+        // Opt-in pictures and screenshot review for a showcase run. The cleanup restores both settings.
+        val pictures = input.optBoolean("images")
+        val screenshotReview = input.optBoolean("screenshot_review")
+        val imageSettings = ImageSettings(app)
         require(!savedEdit || verifyWorkflow && caseId in setOf("extra:reference-points-ledger", "extra:russian-grid-game"))
         val verifyTip = input.optBoolean("verify_tip") || verifyWorkflow && caseId == "bench:tip"
         require(runId.matches(Regex("[a-f0-9]{32}")) && slotId.matches(Regex("[A-Za-z0-9:_-]{1,168}:candidate:[1-3]")))
@@ -204,6 +211,15 @@ class ComparisonChatCaptureTest {
             report.put("fresh_store", database)
             failureAt = "credential"
             val credential = OneUseCredential.receive(runId) { save("credentialReady") }
+            if (pictures) {
+                failureAt = "image-credential"
+                check(!imageSettings.hasKey) { "The emulator already has an image key." }
+                imageSettings.saveKey(OneUseCredential.receive("$runId-openrouter") { save("imageCredentialReady") }).getOrThrow()
+                imageSettings.select(ImageModel.QWEN)
+                imageSettings.setEnabled(true).getOrThrow()
+            }
+            GenerationSettings(app).screenshotReview = screenshotReview
+            report.put("pictures", pictures).put("screenshot_review", screenshotReview)
             val provider = object : ChatProvider {
                 override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                     check(key == marker)
@@ -504,6 +520,8 @@ class ComparisonChatCaptureTest {
                     vm.courseStore.close()
                     vm.memoryStore.close()
                 }
+                GenerationSettings(app).screenshotReview = false
+                if (pictures) imageSettings.clearKey().getOrThrow()
                 if (ownsStore) {
                     store.close()
                     keys.clear().getOrThrow()

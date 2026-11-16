@@ -37,7 +37,10 @@ object ToolUiCatalog {
     internal class InvalidBooleanActionPayload(val control: JSONObject) : IllegalArgumentException("Invalid action value.")
     internal val tones=setOf("default","muted","accent","success","warning","error")
     val presets=setOf("clean","soft","expressive","editorial","technical","playful")
-    val icons=setOf("Menu","History","Plus","Minus","Arrow","Close","Back","Cloud","Mic","Grid","Spark","Calendar","Repeat","Settings","File","Link","Chevron","Search","Screen","Camera","Bell","Check")
+    /** Shell glyphs that apps may use. ToolIcons adds the domain icons. */
+    private val shellIcons=setOf("Menu","History","Plus","Minus","Arrow","Close","Back","Cloud","Mic","Grid","Spark","Calendar","Repeat","Settings","File","Link","Chevron","Search","Screen","Camera","Bell","Check",
+        "Alarm","Clock","Timer","Cart","Calculator","Bolt","Pin","Filter","Play","Pause","Stop","Trash","Info","Layers","Notebook","Photo","Shield","Flask","Refresh")
+    val icons=shellIcons+ToolIcons.paths.keys
     private val unlabeledLeaves = setOf("spacer", "divider", "skeleton", "spinner", "navigation", "calendar", "medicine")
 
     private fun entry(type: String, props: Set<String> = emptySet(), projection: Projection = Projection.SUMMARY,
@@ -46,6 +49,7 @@ object ToolUiCatalog {
             when(type) {
                 "text","metric","timer" -> setOf("tone","emphasis","align","padding")
                 "badge" -> setOf("tone","align","padding")
+                "icon" -> setOf("tone","padding")
                 "column","theme" -> setOf("align","padding","gap","arrangement")
                 "box" -> setOf("align","padding")
                 "row","flowRow" -> setOf("padding","gap","arrangement","crossAlign")
@@ -56,7 +60,7 @@ object ToolUiCatalog {
             })
     val components: Map<String,Component> = buildList {
         for(type in listOf("column","row","flowRow","box","grid","scroll","theme","card","section","listItem","form","listGroup","facts","timeline","banner","emptyState","motion","transform","stage")) add(entry(type,
-            setOf("children") + when(type) {"grid" -> setOf("columns","minCellWidth"); "row" -> setOf("wrap"); "theme" -> setOf("preset","typeScale","cornerRadius"); "listItem" -> setOf("action"); "motion" -> setOf("preset","trigger","animateInitial"); "transform" -> setOf("pose","poseBind","durationMs","size","solid"); "stage" -> setOf("height","perspective","floor"); else -> emptySet()},
+            setOf("children") + when(type) {"grid" -> setOf("columns","minCellWidth"); "row" -> setOf("wrap"); "theme" -> setOf("preset","palette","dark","typeScale","cornerRadius"); "listItem" -> setOf("action","icon"); "card","banner","emptyState" -> setOf("icon"); "motion" -> setOf("preset","trigger","animateInitial"); "transform" -> setOf("pose","poseBind","durationMs","size","solid"); "stage" -> setOf("height","perspective","floor"); else -> emptySet()},
             Projection.CONTAINER,container=true))
         for(type in listOf("appBar","bottomBar","dialog","bottomSheet","pager","transition")) add(entry(type,
             setOf("children") + when(type) {
@@ -70,7 +74,7 @@ object ToolUiCatalog {
         add(entry("canvas", setOf("surfaces")).let { it.copy(properties = it.properties - "interactions") })
         add(entry("spacer",setOf("size"),Projection.OMIT))
         add(entry("text",setOf("bind","format","maxLines","overflow","softWrap","lineHeight","selectable","spans"),Projection.TEXT,scalar))
-        add(entry("metric",setOf("bind","format"),Projection.TEXT,setOf("number","string")))
+        add(entry("metric",setOf("bind","format","icon"),Projection.TEXT,setOf("number","string")))
         add(entry("timer", setOf("bind", "mode", "action", "foreground"), binding = setOf("number")).let { it.copy(properties = it.properties - "interactions") })
         add(entry("calendar",setOf("action","capability","args"),Projection.SUMMARY,action=true).let {it.copy(properties=it.properties-"text")})
         add(entry("medicine",setOf("action","capability","args"),Projection.SUMMARY,action=true).let {it.copy(properties=it.properties-"text")})
@@ -80,7 +84,7 @@ object ToolUiCatalog {
         add(entry("icon",setOf("name","action"),Projection.SUMMARY))
         for(type in listOf("input","numberInput","timeInput","dateInput","toggle","checkbox","slider","select","tabs","chip","singleChoice","multiChoice","segmented","navigationBar","navigationRail","menu","rangeSlider","dateRangeInput","search")) {
             val binding=when(type) {"input","search","dateInput" -> setOf("string"); "rangeSlider","dateRangeInput","multiChoice" -> setOf("array"); in booleanInputTypes -> setOf("boolean"); "numberInput","timeInput","slider" -> setOf("number"); else -> scalar}
-            val props=when(type) {"chip" -> setOf("variant","dismissAction"); "input","search" -> setOf("maxLength","keyboard","imeAction","maxLines"); "numberInput","slider","rangeSlider" -> setOf("min","max","step"); "singleChoice" -> setOf("options","variant"); in choiceTypes -> setOf("options"); else -> emptySet()}
+            val props=when(type) {"chip" -> setOf("variant","dismissAction","icon"); "input","search" -> setOf("maxLength","keyboard","imeAction","maxLines"); "numberInput","slider","rangeSlider" -> setOf("min","max","step"); "singleChoice" -> setOf("options","variant"); in choiceTypes -> setOf("options"); else -> emptySet()}
             val inputProps = if (type in liveInputTypes) props + "inputMode" else props
             add(entry(type,setOf("bind","action")+inputProps,if(type == "toggle") Projection.LOCAL_ACTION else Projection.SUMMARY,binding,action=true))
         }
@@ -98,7 +102,7 @@ object ToolUiCatalog {
         add(entry("video", setOf("bind", "action"), binding = setOf("string"), action = true)
             .let { it.copy(properties = it.properties - "interactions") })
         for(type in listOf("divider","skeleton","spinner")) add(entry(type,projection=Projection.OMIT))
-        add(entry("badge",setOf("bind"),Projection.TEXT,scalar))
+        add(entry("badge",setOf("bind","icon"),Projection.TEXT,scalar))
         add(entry("snackbar",setOf("action")))
     }.associateBy {it.type}
     fun component(type: String) = requireNotNull(components[type]) {"Unsupported native component: $type"}
@@ -213,6 +217,9 @@ object ToolUiCatalog {
                         }
                     }
                     require(ToolValueSchema.keys(node).all {it in definition.properties}) {"Unsupported component property."}
+                    if(node.has("icon")) trace.checking("component_icon","$location.icon","catalog_icon",node.opt("icon")) {
+                        require(node.get("icon") is String && node.getString("icon") in icons)
+                    }
                     if (node.has("inputMode")) {
                         val mode = node.get("inputMode")
                         trace.checking("input_mode", "$location.inputMode", "apply_or_live", mode) {
@@ -392,9 +399,6 @@ object ToolUiCatalog {
                 "button" -> {
                     if(node.has("variant"))require(node.get("variant") is String && node.getString("variant") in setOf("filled","outlined","text","tonal","elevated","fab","extendedFab"))
                     if(node.optString("variant") == "fab")require(node.has("icon")) {"An icon FAB requires an icon and label."}
-                    trace.checking("button_icon","$location.icon","catalog_icon",node.opt("icon")) {
-                        if(node.has("icon")) require(node.get("icon") is String && node.getString("icon") in icons)
-                    }
                 }
                 "input","search" -> {
                     trace.checking("input_length","$location.maxLength","integer_1_2048",node.opt("maxLength")) {
@@ -674,7 +678,11 @@ object ToolUiCatalog {
         if(layout.has("insets")) require(layout.get("insets") is String && layout.getString("insets") in setOf("none","safeDrawing","ime","safeDrawingAndIme"))
     }
     private fun validateTheme(node: JSONObject) {
-        require(!node.has("palette") && !node.has("mode")) {"Theme uses the system color scheme. Remove palette and mode."}
+        require(!node.has("mode")) {"Remove mode. Use \"dark\":true for a dark app."}
+        if(node.has("palette")) require(node.get("palette") is String && node.getString("palette") in ToolPalettes.names) {
+            "palette must be one of ${ToolPalettes.names.joinToString()}."
+        }
+        if(node.has("dark")) require(node.get("dark") is Boolean) {"dark must be true or false."}
         if(node.has("typeScale")) require(numeric(node,"typeScale",1.0) in 0.85..1.5)
         if(node.has("cornerRadius")) require(node.get("cornerRadius") is Int && node.getInt("cornerRadius") in 0..32)
     }
@@ -1130,11 +1138,11 @@ video requires text, action, and bind to a declared string. Use an empty string 
 timer requires text, mode countdown or stopwatch, and bind to a declared number. Store an integer Unix timestamp in milliseconds between 0 and $MAX_TIMER_TIMESTAMP. Zero means idle. Bind the end time for countdown or the start time for stopwatch. Countdown shows remaining time and expiry. Stopwatch shows elapsed time from the start. Native code reads the clock while the control is visible, including on ordinary desktop tiles. A timer sends no events and does not change state. Use a separate native action to write a new timestamp. Home-screen widgets show a summary. For a saved foreground countdown with a terminal alert, omit bind and use mode countdown, a unique action ID, and foreground:{durationMs:1000..86400000,vibrationMs:1..2000?,toneMs:1..1000?,notification:{title,text}?}. Supply at least one alert. Declare each alert capability in the mini-app. The host displays Start, Reset, and Resume and owns the timer state. Do not handle this action ID in JavaScript. The host pauses the timer when the control is hidden and waits for an explicit Resume. Preview, chat, desktop, and widgets show a summary.
 A dateInput validates the bound state value as a real ISO calendar date. Illustrative example only: stateSchema={"visitDate":"string"}, initialState={"visitDate":"2028-02-29"}, ui={"type":"dateInput","text":"Visit date","bind":"visitDate","action":"visitDate"}. Keep existing saved dates unchanged. Do not invent dates or copy the illustrative date as a default. When the date is unknown, keep an ordinary string field and use a labeled input or text control. Empty strings, impossible dates, and timestamps cannot bind dateInput.
 Bindings use declared dotted object paths, never indices, expressions, missing fields, prototype or constructor. text/badge/fact bind scalars. metric binds number or string. metric/text support format number or clock (minute number). list requires stable id records or array page records {key,token,value}. table binds an object array or list and requires columns:[{text:'Label',field:'relative.path'}], at most 8 columns, 50 rows, 400 cells. Optional list columns use the same relative paths. Optional list/table action receives only the currently present stable id/key. Lists also support rowActions:[{action:'searchStop',text:'Search maps',emphasis:'primary',enabledField:'available'},{action:'calendarStop',text:'Open calendar form',emphasis:'secondary'}], at most 3. Every row action ID is unique across the UI, including the optional list selection action. emphasis defaults to secondary. Optional enabledField is a declared relative boolean field in that row. Each row button sends only its current stable id/key in event.value. Resolve the key against current state. Expanded row buttons consume the shared rendered-work budget. Row actions project to a widget summary that opens this mini-app, without record contents. Page values use fields such as value.name. Table arrays without selection do not require keys.
-chart requires kind line, bar, area or pie, categories:'arrayPath' (strings or numbers), and series:[{text:'Label',bind:'numericArrayPath'}]. Line, bar and area accept 1..2 series. Pie requires one nonnegative series and shows an empty state when all values are zero. Series lengths must match the category length and total points must not exceed 256. text describes the chart. progress/progressRing bind number within min/max (defaults 0..100). image requires text and either resourceId or string bind containing only an owner-scoped 64-character lowercase hex resource handle (empty bind value shows placeholder), optional fit fit/crop. Images never accept URLs, paths, or URIs. Missing/revoked resources show a placeholder. grid columns 1..4 adapt to width; optional minCellWidth is 48..512 dp. row wraps horizontally by default; wrap:false uses a true Row. flowRow always wraps. scroll provides a bounded viewport. theme preset: ${presets.joinToString(", ")}. icon name/button icon: ${icons.joinToString(", ")}. Use only the style keys listed for that type. Style values: tone default/muted/accent/success/warning/error, padding none/small/medium/large, align start/center/end; gap none/small/medium/large, emphasis body/title/headline/label/number. No arbitrary style properties.
+chart requires kind line, bar, area or pie, categories:'arrayPath' (strings or numbers), and series:[{text:'Label',bind:'numericArrayPath'}]. Line, bar and area accept 1..2 series. Pie requires one nonnegative series and shows an empty state when all values are zero. Series lengths must match the category length and total points must not exceed 256. text describes the chart. progress/progressRing bind number within min/max (defaults 0..100). image requires text and either resourceId or string bind containing only an owner-scoped 64-character lowercase hex resource handle (empty bind value shows placeholder), optional fit fit/crop. Images never accept URLs, paths, or URIs. Missing/revoked resources show a placeholder. grid columns 1..4 adapt to width; optional minCellWidth is 48..512 dp. row wraps horizontally by default; wrap:false uses a true Row. flowRow always wraps. scroll provides a bounded viewport. theme preset: ${presets.joinToString(", ")}. icon names (icon node name, and icon of button, card, listItem, metric, badge, chip, banner, emptyState): ${icons.joinToString(", ")}. Use only the style keys listed for that type. Style values: tone default/muted/accent/success/warning/error, padding none/small/medium/large, align start/center/end; gap none/small/medium/large, emphasis body/title/headline/label/number. No arbitrary style properties.
 Layout extensions: box overlays children. flowRow wraps children. row wrap:false uses a true horizontal Row. All nodes accept layout with width/minWidth/maxWidth 0..1024 dp, height/minHeight/maxHeight 0..2048 dp, aspectRatio 0.1..10, fillWidth boolean, insets none/safeDrawing/ime/safeDrawingAndIme. Constraints must agree. Only direct column or nonwrapping row children accept weight 0.1..10. Only direct column/nonwrapping row/box children accept layout.align start/center/end. Box alignment means top-start/center/bottom-end. style.arrangement start/center/end/between/around/evenly applies to column/row/flowRow/theme; style.crossAlign start/center/end applies to row/flowRow. Ordered modifiers apply parent weight/alignment, size bounds, width/height, aspect ratio, insets, then padding. They never execute code.
 Text supports maxLines 1..100, overflow clip/ellipsis, softWrap boolean, lineHeight 8..96 sp, selectable boolean. Optional spans has 1..32 ordered nonoverlapping ranges with integer start/end inside static text, emphasis bold/italic/code, tone default/muted/accent/success/warning/error. Spans require static text without bind/format. A link span has both action (globally unique) and url, validated by the existing link.open public-HTTPS argument contract. Click sends that exact URL string as an ordinary action value. Return a link.open effect through the existing broker and declared capability. A span never opens a URI or grants privileged authority. Disabled/hidden links reject actions. Rich text uses an exact-app widget summary.
 lazyList and lazyGrid bind the same stable record collections as list and accept rowTemplate and rowActions with the same current-key typed events and aggregate work budget. lazyList supports columns and groupBy. lazyGrid columns is an integer 1..4, minCellWidth 48..512 dp; it supports groupBy and spanField, without column descriptors. Both use viewportHeight 96..1024 dp (default 360). selectedKeyBind and scrollToKeyBind refer to declared string fields containing a current stable key or empty string. Selection marks the current row without changing it. A changed scroll target moves the native viewport to that record; empty target issues no command. Host saveable viewport state survives ordinary recomposition/recreation, while a nonempty declared target applies on open. Virtualization does not remove aggregate validation limits. Lazy collections project only an exact-app widget summary without row contents.
-Theme requires preset. It uses the system light or dark color scheme. Do not include palette or mode. Optional typeScale is 0.85..1.5 and cornerRadius is 0..32 dp. Font scaling remains active. Shapes and typography apply only inside the theme subtree.
+Theme requires preset. Optional palette sets the app colors: ${ToolPalettes.names.joinToString()}. Without palette, the preset chooses one. Optional dark true makes a dark app. Otherwise the system light or dark mode applies. Optional typeScale is 0.85..1.5 and cornerRadius is 0..32 dp. Font scaling remains active. Shapes and typography apply only inside the theme subtree.
 Material controls: button variant filled/outlined/text/tonal/elevated/fab/extendedFab chooses a native button. fab requires icon and text. actionChip variant assist/suggestion sends null. chip variant filter/input binds boolean and sends boolean; optional dismissAction sends null through a separate remove affordance. singleChoice uses radio buttons by default. Optional variant scene shows a responsive group of equal-width choices with one selected value. segmented uses 1..6 typed options. navigationBar/navigationRail/menu use typed options like select. multiChoice binds an array of scalar option values and sends the complete unique selected array, including empty. Other choice controls send one option value. All options remain finite, typed, unique, and current. rangeSlider binds exactly two ordered finite numbers inside min/max (defaults 0..100), optional positive step, and sends both on Apply. dateRangeInput binds exactly two real ordered ISO dates in years 0001..9999 and sends both on native confirmation. search is a labeled bounded input with Search action. input/search accept keyboard text/email/uri/phone/number/password, imeAction done/next/search, maxLines 1..8. These configure input only and never grant access. progress/progressRing can use indeterminate:true without bind.
 appBar/bottomBar contain native children for local actions. dialog/bottomSheet require text, visibleBind to a declared boolean, dismissAction, and children. The host supplies a Close control and sends null through dismissAction. Add a Cancel button only if needed. Give that Cancel button its own action ID. Handle both IDs in source if both close the modal. Child actions are unavailable while hidden. The script controls visibility. pager requires text, numeric bind to integer page index, action, 1..10 children, viewportHeight 96..1024. Page changes send the index. Only current page child actions are available. Native previous/next buttons provide accessible alternatives to swipe. Each page retains its normal node validation and work cost.
 routeStack requires text, bind, action, routes and children. Declare one stack per mini-app. routes has 1..$MAX_ROUTES distinct ASCII IDs, with the root first, and children has one native subtree per ID in the same order. Bind a declared string array with maxItems at most $MAX_ROUTES. The nonempty stack starts at the root and contains only declared IDs. Repeated visits are valid. Use ordinary active-route actions to push routes. Back is available only above the root and sends the exact current stack array in event.value. Pop the last entry in the script and keep the root. All routes validate and share the native UI limits. Only the active route can send actions. Widgets show a summary and open the exact mini-app.

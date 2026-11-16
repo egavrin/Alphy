@@ -41,6 +41,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -116,6 +118,7 @@ import kotlinx.coroutines.launch
 import com.alpha.assistant.ui.AlphaIcon
 import com.alpha.assistant.ui.Glyph
 import com.alpha.assistant.ui.StatusLine
+import com.alpha.assistant.ui.StrokeIcon
 import com.alpha.assistant.capabilities.OwnedCalendarUiHost
 import com.alpha.assistant.capabilities.OwnedCalendarSnapshot
 import com.alpha.assistant.tools.generation.NativePresentation
@@ -347,8 +350,8 @@ private data class ToolRole(val ink: Color, val background: Color, val foregroun
 private fun ColorScheme.toolRole(name: String?) = when (name) {
     "muted" -> ToolRole(onSurfaceVariant, surfaceVariant, onSurfaceVariant)
     "accent" -> ToolRole(primary, primaryContainer, onPrimaryContainer)
-    "success" -> ToolRole(secondary, secondaryContainer, onSecondaryContainer)
-    "warning" -> ToolRole(tertiary, tertiaryContainer, onTertiaryContainer)
+    // Success and warning keep green and amber in every palette, so a red palette does not turn success red.
+    "success", "warning" -> checkNotNull(ToolPalettes.status(name, background.luminance() < 0.5f)).let { (ink, back, fore) -> ToolRole(ink, back, fore) }
     "error" -> ToolRole(error, errorContainer, onErrorContainer)
     else -> ToolRole(onSurface, surfaceContainer, onSurface)
 }
@@ -592,6 +595,17 @@ private fun showsToolHeading(text: String, hostHeading: String?) =
     }
     if (glyph == null) Text(text, modifier, style = style)
     else ProvideTextStyle(style) { StatusLine(glyph, LocalContentColor.current, text, modifier) }
+}
+
+/** Draws a catalog icon: a shell glyph or a domain icon. */
+@Composable private fun ToolGlyph(name: String, modifier: Modifier = Modifier, color: Color = LocalContentColor.current) =
+    StrokeIcon(Glyph.entries.firstOrNull { it.name == name }?.path ?: checkNotNull(ToolIcons.paths[name]), modifier, color)
+
+/** A decorative icon in a tinted circle, at the start of a card, a row, or an empty state. The text beside it is the label. */
+@Composable private fun IconBadge(name: String, color: Color, size: Dp = 40.dp) {
+    Box(Modifier.size(size).background(color.copy(alpha = 0.14f), CircleShape), contentAlignment = Alignment.Center) {
+        ToolGlyph(name, Modifier.size(size * 0.55f), color)
+    }
 }
 
 private fun secondaryButtons(children: JSONArray, state: JSONObject, groupEnabled: Boolean): Set<Int> {
@@ -859,7 +873,8 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 NativeNode(checkNotNull(children).getJSONObject(page),state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,event=event)
             }
         }
-        "theme" -> NativePreset(node.getString("preset"), node.optInt("cornerRadius", -1).takeIf { it >= 0 }, node.optDouble("typeScale",1.0)) {
+        "theme" -> NativePreset(node.getString("preset"), node.optInt("cornerRadius", -1).takeIf { it >= 0 }, node.optDouble("typeScale",1.0),
+            node.optString("palette").ifEmpty { null }, node.optBoolean("dark")) {
             Column(modifier,verticalArrangement=verticalArrangement(style,gap),horizontalAlignment=alignment(style),content={content()})
         }
         // Motion animates its children as one group. A Box would draw them on top of each other.
@@ -1021,13 +1036,15 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 val child = checkNotNull(children).getJSONObject(index)
                 child.getString("type") == "icon" && !child.has("action") && ToolUiCatalog.visible(child, state)
             }
+            val ownIcon = node.optString("icon")
             val message: @Composable (Modifier) -> Unit = { box ->
                 Column(box.padding(horizontal = if (neutral) 0.dp else 16.dp, vertical = if (empty) 20.dp else 16.dp),
                     horizontalAlignment = if (empty) Alignment.CenterHorizontally else Alignment.Start,
                     verticalArrangement = Arrangement.spacedBy(gap)) {
+                    if (ownIcon.isNotEmpty()) IconBadge(ownIcon, if (neutral) MaterialTheme.colorScheme.primary else LocalContentColor.current, if (empty) 64.dp else 40.dp)
                     if (text.isNotBlank()) {
                         val titleStyle = MaterialTheme.typography.titleMedium.copy(textAlign = if (empty) TextAlign.Center else TextAlign.Start)
-                        ToolStatusText(text, if (explicitIcon) "" else tone, titleStyle, Modifier.semantics { heading() })
+                        ToolStatusText(text, if (explicitIcon || ownIcon.isNotEmpty()) "" else tone, titleStyle, Modifier.semantics { heading() })
                     }
                     content()
                 }
@@ -1042,16 +1059,24 @@ private fun courseSceneSlot(root: JSONObject): Int? {
         }
         "card" -> ToolRoleSurface(modifier, MaterialTheme.colorScheme.toolRole(tone)) {
             Column(Modifier.padding(space(style?.optString("padding"), 16)), verticalArrangement = Arrangement.spacedBy(gap), horizontalAlignment = alignment(style)) {
-                if (showsToolHeading(text, heading)) Text(text, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)
+                val icon = node.optString("icon")
+                val title = showsToolHeading(text, heading)
+                if (icon.isNotEmpty() || title) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (icon.isNotEmpty()) IconBadge(icon, if (tone in setOf("", "default", "muted")) MaterialTheme.colorScheme.primary else LocalContentColor.current)
+                    if (title) Text(text, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)
+                }
                 content()
             }
         }
         "listItem" -> Column(modifier) {
             val click = if (action.isNotEmpty()) Modifier.clickable(enabled = enabled, role = Role.Button) { event(action, null) } else Modifier
-            Column(click.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(gap), horizontalAlignment = alignment(style)) {
-                if (showsToolHeading(text, heading)) Text(text, style = MaterialTheme.typography.titleMedium, color = toolInk(tone))
-                content()
+            Row(click.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                node.optString("icon").takeIf { it.isNotEmpty() }?.let { IconBadge(it, MaterialTheme.colorScheme.primary) }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(gap), horizontalAlignment = alignment(style)) {
+                    if (showsToolHeading(text, heading)) Text(text, style = MaterialTheme.typography.titleMedium, color = toolInk(tone))
+                    content()
+                }
             }
             HorizontalDivider()
         }
@@ -1062,10 +1087,20 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             if(type == "badge") {
                 val role = MaterialTheme.colorScheme.toolRole(tone)
                 Surface(modifier,shape=MaterialTheme.shapes.small,color=role.background,contentColor=role.foreground) {
-                    ToolStatusText(label, tone, MaterialTheme.typography.labelLarge.copy(textAlign = align), Modifier.padding(horizontal=10.dp,vertical=6.dp))
+                    val icon = node.optString("icon")
+                    if (icon.isEmpty()) ToolStatusText(label, tone, MaterialTheme.typography.labelLarge.copy(textAlign = align), Modifier.padding(horizontal=10.dp,vertical=6.dp))
+                    // An own icon replaces the tone glyph.
+                    else Row(Modifier.padding(horizontal=10.dp,vertical=6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        ToolGlyph(icon, Modifier.size(16.dp))
+                        Text(label, style = MaterialTheme.typography.labelLarge.copy(textAlign = align))
+                    }
                 }
             } else if(type == "metric" && node.has("bind")) Column(modifier,verticalArrangement=Arrangement.spacedBy(4.dp), horizontalAlignment = alignment(style)) {
-                if (showsToolHeading(text, heading)) Text(text,style=MaterialTheme.typography.labelLarge,color=toolInk("muted"))
+                val icon = node.optString("icon")
+                if (icon.isNotEmpty() || showsToolHeading(text, heading)) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (icon.isNotEmpty()) ToolGlyph(icon, Modifier.size(18.dp), MaterialTheme.colorScheme.primary)
+                    if (showsToolHeading(text, heading)) Text(text,style=MaterialTheme.typography.labelLarge,color=toolInk("muted"))
+                }
                 val value=ToolUiCatalog.boundText(node,state)
                 // A short value, such as 56.7–76.3 or 10,000 steps, shrinks to fit one line instead of breaking between a number and its unit.
                 // At a large font scale it can break between words. The line height follows the shrunk font, so no empty space stays.
@@ -1110,7 +1145,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
         }
         "button" -> {
             val label: @Composable () -> Unit = {
-                if(node.has("icon")) {AlphaIcon(Glyph.valueOf(node.getString("icon")), color = LocalContentColor.current);Spacer(Modifier.width(8.dp))}
+                if(node.has("icon")) {ToolGlyph(node.getString("icon"));Spacer(Modifier.width(8.dp))}
                 // A narrow button shrinks its label, so a word such as "Down" does not break.
                 Text(text,textAlign=TextAlign.Center,autoSize=WholeWordAutoSize(10.sp,LocalTextStyle.current.fontSize))
             }
@@ -1126,7 +1161,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 "tonal" -> FilledTonalButton(click,buttonModifier,enabled=enabled) {label()}
                 "elevated" -> ElevatedButton(click,buttonModifier,enabled=enabled) {label()}
                 "fab","extendedFab" -> if(enabled) {
-                    if(node.getString("variant")=="fab") FloatingActionButton(click,modifier.semantics {contentDescription=text}) {AlphaIcon(Glyph.valueOf(node.getString("icon")))}
+                    if(node.getString("variant")=="fab") FloatingActionButton(click,modifier.semantics {contentDescription=text}) {ToolGlyph(node.getString("icon"))}
                     else ExtendedFloatingActionButton(click,buttonModifier) {label()}
                 } else FilledTonalButton(click,buttonModifier,enabled=false) {label()}
                 else -> Button(click,buttonModifier,enabled=enabled) {label()}
@@ -1135,7 +1170,8 @@ private fun courseSceneSlot(root: JSONObject): Int? {
         "actionChip" -> if(node.optString("variant")=="suggestion") SuggestionChip(onClick={event(action,null)},label={Text(text)},enabled=enabled,modifier=modifier.heightIn(min=48.dp))
             else AssistChip(onClick={event(action,null)},label={Text(text)},enabled=enabled,modifier=modifier.heightIn(min=48.dp))
         "icon" -> {
-            val icon: @Composable () -> Unit = {AlphaIcon(Glyph.valueOf(node.getString("name")),Modifier.semantics {contentDescription=text})}
+            val icon: @Composable () -> Unit = {ToolGlyph(node.getString("name"),Modifier.semantics {contentDescription=text},
+                if(style?.has("tone") == true) toolInk(style.optString("tone")) else MaterialTheme.colorScheme.onSurfaceVariant)}
             if(action.isNotEmpty()) IconButton(onClick={event(action,null)},enabled=enabled,modifier=modifier.sizeIn(minWidth=48.dp,minHeight=48.dp)) {icon()}
             else Box(modifier) {icon()}
         }
@@ -1151,14 +1187,15 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             val checked=ToolUiCatalog.value(state,binding) as Boolean
             val removeLabel = miniAppString(R.string.tool_generated_remove, text)
             val dismiss: (@Composable () -> Unit)?=node.optString("dismissAction").takeIf {it.isNotEmpty()}?.let {id -> {IconButton(onClick={event(id,null)},enabled=enabled,modifier=Modifier.size(48.dp)) {AlphaIcon(Glyph.Close,Modifier.semantics {contentDescription=removeLabel})}}}
-            if(node.optString("variant")=="input") InputChip(selected=checked,onClick={event(action,!checked)},label={Text(text)},trailingIcon=dismiss,enabled=enabled,modifier=modifier.heightIn(min=48.dp))
-            else FilterChip(selected=checked,onClick={event(action,!checked)},label={Text(text)},trailingIcon=dismiss,enabled=enabled,modifier=modifier.heightIn(min=48.dp))
+            val leading: (@Composable () -> Unit)? = node.optString("icon").takeIf { it.isNotEmpty() }?.let { icon -> { ToolGlyph(icon, Modifier.size(18.dp)) } }
+            if(node.optString("variant")=="input") InputChip(selected=checked,onClick={event(action,!checked)},label={Text(text)},leadingIcon=leading,trailingIcon=dismiss,enabled=enabled,modifier=modifier.heightIn(min=48.dp))
+            else FilterChip(selected=checked,onClick={event(action,!checked)},label={Text(text)},leadingIcon=leading,trailingIcon=dismiss,enabled=enabled,modifier=modifier.heightIn(min=48.dp))
         }
         "rangeSlider" -> {
             val original=ToolUiCatalog.value(state,binding) as JSONArray;val (low,high)=ToolUiCatalog.bounds(node)
             var range by remember(original.toString(),binding) {mutableStateOf(original.getDouble(0)..original.getDouble(1))}
             Column(modifier) {
-                Text("$text: ${range.start} – ${range.endInclusive}")
+                Text("$text: ${BigDecimal.valueOf(range.start).stripTrailingZeros().toPlainString()} – ${BigDecimal.valueOf(range.endInclusive).stripTrailingZeros().toPlainString()}")
                 RangeSlider(value=((range.start-low)/(high-low)).toFloat().coerceIn(0f,1f)..((range.endInclusive-low)/(high-low)).toFloat().coerceIn(0f,1f),
                     onValueChange={range=nativeSliderValue(node,it.start)..nativeSliderValue(node,it.endInclusive)},enabled=enabled,modifier=Modifier.semantics {contentDescription=text})
                 if (range.start!=original.getDouble(0) || range.endInclusive!=original.getDouble(1))
@@ -1657,8 +1694,13 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
     val template=node.optJSONObject("rowTemplate")
     if(template != null) {
         val key = ToolUiCatalog.stableKey(record)
-        CompositionLocalProvider(LocalLiveRow provides key) {
-            renderTemplate(template,record) {id,value -> event(id,JSONObject().put("key",key).put("value",value ?: JSONObject.NULL))}
+        // Each template row is a card on the page, as in phone list apps.
+        Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+            Box(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                CompositionLocalProvider(LocalLiveRow provides key) {
+                    renderTemplate(template,record) {id,value -> event(id,JSONObject().put("key",key).put("value",value ?: JSONObject.NULL))}
+                }
+            }
         }
         return
     }
@@ -1787,17 +1829,29 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
         }
     }
 }
-@Composable private fun NativePreset(preset: String, cornerRadius: Int? = null, typeScale: Double = 1.0, content: @Composable () -> Unit) {
+/** The palette of a preset without its own palette. */
+internal fun presetPalette(preset: String) = when (preset) {
+    "clean" -> "blue"; "soft" -> "teal"; "expressive" -> "purple"; "editorial" -> "brown"; "technical" -> "indigo"; else -> "orange"
+}
+
+private fun themeColors(preset: String, palette: String?, dark: Boolean, shellDark: Boolean): ColorScheme {
+    val darkColors = dark || shellDark
+    // Graphite has no scheme: it keeps the shell's gray colors.
+    return ToolPalettes.scheme(palette ?: presetPalette(preset), darkColors)
+        ?: if (darkColors) com.alpha.assistant.ui.AlphaDarkColors else com.alpha.assistant.ui.AlphaLightColors
+}
+
+/** The colors of an app whose root node is a theme, so the host around the app can use them. Null for other apps. */
+internal fun rootThemeColors(ui: String, shellDark: Boolean): ColorScheme? =
+    runCatching { JSONObject(ui) }.getOrNull()?.takeIf { it.optString("type") == "theme" && it.has("preset") }?.let {
+        themeColors(it.getString("preset"), it.optString("palette").ifEmpty { null }, it.optBoolean("dark"), shellDark)
+    }
+
+@Composable private fun NativePreset(preset: String, cornerRadius: Int? = null, typeScale: Double = 1.0, palette: String? = null,
+    dark: Boolean = false, content: @Composable () -> Unit) {
     val radius=(cornerRadius ?: when(preset) {"clean" -> 12; "soft" -> 24; "expressive" -> 28; "editorial" -> 4; "technical" -> 0; else -> 32}).dp
     val typography=MaterialTheme.typography
-    val shell = MaterialTheme.colorScheme
-    val colors = when (preset) {
-        "soft", "editorial" -> shell.copy(primary = shell.secondary, onPrimary = shell.onSecondary,
-            primaryContainer = shell.secondaryContainer, onPrimaryContainer = shell.onSecondaryContainer)
-        "expressive", "playful" -> shell.copy(primary = shell.tertiary, onPrimary = shell.onTertiary,
-            primaryContainer = shell.tertiaryContainer, onPrimaryContainer = shell.onTertiaryContainer)
-        else -> shell
-    }
+    val colors = themeColors(preset, palette, dark, MaterialTheme.colorScheme.background.luminance() < 0.5f)
     val scale=typeScale.toFloat()
     fun scaled(style: androidx.compose.ui.text.TextStyle) = style.copy(fontSize=style.fontSize*scale,lineHeight=style.lineHeight*scale)
     fun heading(style: androidx.compose.ui.text.TextStyle) =
@@ -1812,7 +1866,10 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
             labelLarge=scaled(typography.labelLarge),labelMedium=scaled(typography.labelMedium),labelSmall=scaled(typography.labelSmall),
         )) {
         val metricFont = if (preset == "technical") FontFamily.Monospace else null
-        CompositionLocalProvider(LocalToolMetricFont provides metricFont, content = content)
+        // The app draws its own background, so its palette shows, not the gray shell card around it.
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(radius), color = colors.background, contentColor = colors.onBackground) {
+            CompositionLocalProvider(LocalToolMetricFont provides metricFont, content = content)
+        }
     }
 }
 
@@ -1897,7 +1954,23 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
                     }
                 }
             }
-            "multiChoice" -> FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+            // Five to seven short options, such as weekdays, are one row of circles.
+            "multiChoice" -> if (values.size in 5..7 && values.all { it.getString("text").length <= 3 }) Row(Modifier.fillMaxWidth()) {
+                values.forEach { option ->
+                    val on = selected(option.get("value"))
+                    Box(Modifier.weight(1f).heightIn(min = 48.dp).toggleable(on, enabled = enabled, role = Role.Checkbox) { choose(option.get("value")) },
+                        contentAlignment = Alignment.Center) {
+                        Surface(Modifier.size(40.dp), shape = CircleShape,
+                            color = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            contentColor = if (on) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(option.getString("text"), maxLines = 1, style = MaterialTheme.typography.labelLarge,
+                                    autoSize = WholeWordAutoSize(8.sp, MaterialTheme.typography.labelLarge.fontSize))
+                            }
+                        }
+                    }
+                }
+            } else FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
                 values.forEach {option->FilterChip(selected(option.get("value")),{choose(option.get("value"))},label={Text(option.getString("text"))},
                     modifier=Modifier.sizeIn(minWidth=48.dp,minHeight=48.dp),enabled=enabled)}
             }

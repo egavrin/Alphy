@@ -43,11 +43,15 @@ class AgentImageWorkflowTest {
     private val finish = JSONObject().put("tool", "finish").put("summary", "The recipe is ready.").put("checks", JSONArray("""
         [{"name":"done","steps":[{"set":"done","value":true},{"expect":"value","target":"done","equals":true}]}]""")).toString()
 
+    /** The prompts that reached the image provider. */
+    private val prompts = java.util.concurrent.CopyOnWriteArrayList<String>()
+
     private fun withImages(enabled: Boolean, body: suspend (ImageGeneration, AtomicInteger) -> Unit) = runBlocking {
         val settings = ImageSettings(context, "agent-image-${UUID.randomUUID()}")
         val count = AtomicInteger()
         val images = ImageGeneration(context, settings, mapOf("openrouter" to ImageProvider { _, _, intent ->
             count.incrementAndGet()
+            prompts += intent.prompt
             val bitmap = if (intent.aspect == ImageAspect.LANDSCAPE) Bitmap.createBitmap(24, 16, Bitmap.Config.ARGB_8888)
                 else Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888)
             val bytes = ByteArrayOutputStream()
@@ -81,6 +85,8 @@ class AgentImageWorkflowTest {
             val saved = engine.accept(draft.id)
             assertEquals(listOf("salad"), ToolSpec.parsePersisted(saved.spec).generatedImages.map { it.slot })
             assertEquals(1, count.get())
+            // Failure case: app pictures looked unlike product art. The host adds the style, and the content stays first.
+            assertTrue(prompts.toString(), prompts.single().startsWith("A tomato salad in a white bowl") && prompts.single().contains("no text"))
 
             val edit = engine.createDraft("Rename it to Summer salad", saved.id)
             engine.generate(edit.id, "fixture", emptyList(), CloudSession())

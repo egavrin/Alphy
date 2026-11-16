@@ -47,6 +47,8 @@ import com.alpha.assistant.tools.agent.AppAgentGuide
 import com.alpha.assistant.tools.agent.AppAgentRequest
 import com.alpha.assistant.tools.agent.AppAgentResult
 import com.alpha.assistant.tools.agent.AppImageMaker
+import com.alpha.assistant.tools.agent.AppSnapshot
+import com.alpha.assistant.tools.agent.GenerationSettings
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -425,8 +427,12 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         onPublicUpdate: (suspend (String) -> Unit)?, extraInstructions: String = "",
         onStep: ((Int, String, String, String, Long) -> Unit)? = null, imageMaker: AppImageMaker? = null,
         sceneAssets: List<ThreeSceneAssetRef> = emptyList()): AppAgentResult {
+        val screenshot: (suspend (ToolPreview) -> String)? = if (!GenerationSettings(sandbox.context).screenshotReview) null else { preview ->
+            val shot = AppSnapshot.capture(sandbox.context, preview)
+            try { AppSnapshot.dataUrl(shot) } finally { shot.recycle() }
+        }
         return appAgent(key, session).run(AppAgentRequest(prompt, base, images, artifactId, privateState, policy, extraInstructions,
-            onPublicUpdate, progress, onStep, imageMaker = imageMaker, sceneAssets = sceneAssets), session)
+            onPublicUpdate, progress, onStep, imageMaker = imageMaker, sceneAssets = sceneAssets, screenshot = screenshot), session)
     }
 
     /** Accepts scalar schema objects from model output. Stored artifacts keep the strict canonical contract. */

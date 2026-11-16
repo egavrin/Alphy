@@ -27,7 +27,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.asImageBitmap
 import android.graphics.BitmapFactory
 import com.alpha.assistant.agent.AgentChatHost
@@ -41,6 +43,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -282,6 +285,7 @@ private data class MiniAppOrigin(
         selectedSpec?.presentation == "immersive" && !immersiveExited
     val libraryVisible = destination == ShellDestination.MiniApps && !model.tools.storageUnavailable
     val systemInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
+    var miniAppBackground by remember { mutableStateOf<Color?>(null) }
     VoiceVisibility(model.voice)
     WeatherLocationAccess(model)
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -330,7 +334,10 @@ private data class MiniAppOrigin(
                     paneLayout.tabletopGap != null -> Modifier.windowInsetsPadding(systemInsets)
                     else -> Modifier.windowInsetsPadding(systemInsets).imePadding()
                 }
-                Column(Modifier.fillMaxSize().then(drawingInsets).onGloballyPositioned {
+                // An open app alone on the screen also colors the system bar areas.
+                val screenBackground = miniAppBackground.takeIf { detailVisible && !paneLayout.paired }
+                SystemBarIcons(screenBackground)
+                Column(Modifier.fillMaxSize().then(screenBackground?.let { Modifier.background(it) } ?: Modifier).then(drawingInsets).onGloballyPositioned {
                     if (chatVisible) contextPaneTop = it.boundsInWindow().top
                 }) {
                     if (!detailVisible && !compact && (!libraryVisible || narrowRefinement) && destination != ShellDestination.Search) {
@@ -462,7 +469,8 @@ private data class MiniAppOrigin(
                                                 standalone = !currentLayout.paired,
                                                 exitImmersive = { immersiveExited = true },
                                                 settings = { openSettings(SettingsSection.DeepSeek) },
-                                                close = ::closeMiniApp, goToChat = { navigate(null) })
+                                                close = ::closeMiniApp, goToChat = { navigate(null) },
+                                                appBackground = { miniAppBackground = it })
                                         }
                                     }
                                     ShellDestination.Search -> SearchPane(
@@ -787,4 +795,26 @@ private data class MiniAppOrigin(
     }
     if (preview != null) Image(preview!!, contentDescription = stringResource(R.string.image_preview, attachment.name), modifier = modifier.clip(RoundedCornerShape(12.dp)))
     else Text(stringResource(R.string.image_preview_unavailable, attachment.name), style = MaterialTheme.typography.bodySmall)
+}
+
+/** Light or dark system bar icons for an app background that differs from the shell. */
+@Composable private fun SystemBarIcons(background: Color?) {
+    val view = LocalView.current
+    DisposableEffect(view, background) {
+        val window = generateSequence(view.context) { (it as? android.content.ContextWrapper)?.baseContext }
+            .filterIsInstance<android.app.Activity>().firstOrNull()?.window
+        val bars = if (background == null || window == null) null else androidx.core.view.WindowCompat.getInsetsController(window, view)
+        val statusBefore = bars?.isAppearanceLightStatusBars
+        val navigationBefore = bars?.isAppearanceLightNavigationBars
+        if (bars != null && background != null) {
+            bars.isAppearanceLightStatusBars = background.luminance() >= 0.5f
+            bars.isAppearanceLightNavigationBars = background.luminance() >= 0.5f
+        }
+        onDispose {
+            if (bars != null && statusBefore != null && navigationBefore != null) {
+                bars.isAppearanceLightStatusBars = statusBefore
+                bars.isAppearanceLightNavigationBars = navigationBefore
+            }
+        }
+    }
 }

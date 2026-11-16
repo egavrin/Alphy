@@ -43,32 +43,32 @@ def child_environment():
     return {key: value for key, value in os.environ.items() if key != "DEEPSEEK_API_KEY"}
 
 
-def read_live_key(environment=None):
+def read_live_key(environment=None, name="DEEPSEEK_API_KEY"):
     environment = os.environ if environment is None else environment
-    if environment.get("DEEPSEEK_API_KEY"):
-        return environment["DEEPSEEK_API_KEY"]
+    if environment.get(name):
+        return environment[name]
     try:
         lines = (Path.home() / ".env").read_text().splitlines()
     except FileNotFoundError:
         lines = []
     except OSError:
-        raise RuntimeError("Cannot read DEEPSEEK_API_KEY from ~/.env.") from None
+        raise RuntimeError(f"Cannot read {name} from ~/.env.") from None
     for line in lines:
-        match = re.match(r"^\s*(?:export\s+)?DEEPSEEK_API_KEY\s*=\s*(.*)$", line)
+        match = re.match(r"^\s*(?:export\s+)?" + re.escape(name) + r"\s*=\s*(.*)$", line)
         if match:
             try:
                 values = shlex.split(match.group(1), comments=True)
             except ValueError:
-                raise RuntimeError("Cannot parse the DEEPSEEK_API_KEY dotenv entry.") from None
+                raise RuntimeError(f"Cannot parse the {name} dotenv entry.") from None
             if len(values) == 1 and values[0]:
                 return values[0]
-    raise RuntimeError("DEEPSEEK_API_KEY is absent from the process environment and ~/.env.")
+    raise RuntimeError(f"{name} is absent from the process environment and ~/.env.")
 
 
 def transfer_key(adb, run_id, key, *, serial="emulator-5556"):
     payload = bytearray(key.encode("utf-8"))
     if not 1 <= len(payload) <= 8192 or not key.strip() or "\n" in key or "\r" in key:
-        raise RuntimeError("DEEPSEEK_API_KEY has an invalid credential envelope.")
+        raise RuntimeError("The key has an invalid credential envelope.")
     port = None
     try:
         result = subprocess.run(adb_command(adb, "forward", "tcp:0", "localabstract:compose-credential-" + run_id, serial=serial),

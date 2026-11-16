@@ -32,7 +32,7 @@ class OnboardingWorkflowTest {
             robot.waitFor(robot.text(R.string.key_missing))
             assertTrue(robot.composedLink(scenario, robot.text(R.string.key_help), "https://platform.deepseek.com/api_keys"))
             robot.diagnostics.capture("onboarding-key")
-            robot.reveal(robot.text(R.string.key_label))
+            robot.reveal(robot.text(R.string.key_label), forward = null)
             robot.enter(robot.text(R.string.key_label), "alpha-test-only")
             robot.reveal(robot.text(R.string.consent_and_save))
             robot.click(robot.text(R.string.consent_and_save))

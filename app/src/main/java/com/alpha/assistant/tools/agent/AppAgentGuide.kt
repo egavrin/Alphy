@@ -52,8 +52,10 @@ Do not ask the user questions. Choose practical defaults. Build only what the re
 
     val design = """
 Design rules. The app must look finished and good on a phone:
-- Wrap the root in {"type":"theme","preset":p,"children":[...]} with one column child. Choose the preset by mood: clean (utilities, converters), soft (health, home, habits), expressive (games, fun), editorial (reading, lists of text), technical (money, numbers, data), playful (kids, quizzes). Use cornerRadius 16 to 24.
-- Put the main result first or directly after its inputs, in a card with a metric that has style emphasis "number". Show secondary results as metrics in a grid with columns 2.
+- Wrap the root in {"type":"theme","preset":p,"palette":c,"children":[...]} with one column child. Choose the preset by mood: clean (utilities, converters), soft (health, home, habits), expressive (games, fun), editorial (reading, lists of text), technical (money, numbers, data), playful (kids, quizzes). Use cornerRadius 16 to 24.
+- Choose the palette by topic: blue (water, weather, travel), teal (health, money), green (plants, habits, nature), amber (cooking, energy), orange (fitness, food), red (alarms, sport), pink (beauty, care), purple (learning, music, kids), indigo (sleep, focus, study), brown (coffee, books, home), graphite (neutral tools). Add "dark":true only for a night, space, or arcade app.
+- Icons: give the main card, each listItem, each key metric, and each emptyState an icon that names its topic, for example {"type":"metric","text":"Water","icon":"Drop",...}. A button may have an icon when its meaning is clear, such as Plus for Add.
+- Put the main result first or directly after its inputs, in a card with a metric that has style emphasis "number". Show at most 2 secondary results as metrics in a grid with columns 2. Do not show the same value twice, for example as a percent beside its progress bar.
 - Group inputs in a section or form with a short heading. Use one section for each topic. Do not put every control in one flat column.
 - Choose the control that fits the value: segmented for 2 to 4 short exclusive options, singleChoice (a radio list) for 5 or more, chip for on/off filters, slider with inputMode live for a bounded range, numberInput with step for exact amounts and counts, input with inputMode live for text before an Add button, timeInput for times, dateInput for dates, checkbox in list rows. Use few typed fields: each one shows an Apply button after an edit.
 - Give each group one filled primary button. Use outlined or text variants for secondary actions. Put Reset or Clear last.
@@ -63,7 +65,7 @@ Design rules. The app must look finished and good on a phone:
 - A text or badge with bind shows "Label: value", or only the value when its label is empty. A metric shows the label above the value. Do not repeat the label words in the value: use "Done" with "3 of 5", not "Done" with "3 done". Read the screen text after each write.
 - A metric value is one short number or word with its unit, such as "12.5 km" or "Normal". Put phrases such as "None yet" in text or emptyState.
 - Labels are short and in sentence case. Name values with the words of the request, for example "Points" when the request counts points. Put units in labels, for example "Weight (kg)". Do not repeat the app title inside the UI.
-- Format numbers for people. Round in the source. Show money with 2 decimals, percentages and measurements with at most 2 decimals. Never show long floating point values such as 0.30000000000000004. Use a string state field for formatted text when a number needs a unit, currency sign, or fixed decimals.
+- Format numbers for people. Round in the source. Show money with 2 decimals, percentages and measurements with at most 2 decimals. Never show long floating point values such as 0.30000000000000004. Use a string state field for formatted text when a number needs a unit, currency sign, or fixed decimals. Format money, decimals, and dates for the interface language with Intl in the source, for example new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(5.5) gives "5,50 €".
 - Show results immediately after an input changes. Do not require an extra Calculate button unless the user asks for one.
 - Calculators and converters: start every number input and slider at a sample value, from the request or else a typical value. Compute the results for these values in initialState, so the first screen shows a real result, not empty fields and dashes.
 - Drawings: the screen text gives each surface size and the extent of the drawing. Give a touch area a background that differs from the page, so the user sees where to touch. Show numbers and words as text or metric nodes, not as drawn text. Show a progress bar or a ring with a progress or progressRing node, not with a drawing. Center the main drawing and fill most of the surface. Use 2 to 4 colors that suit the topic. The drawing tones default, muted, accent, success, warning, and error are ink colors. The tone default is the text color, not the background, so a circle in default is a dark disk. A shape in muted is a light tint for tracks, empty cells, and grid lines.
@@ -75,9 +77,9 @@ Design rules. The app must look finished and good on a phone:
 {"title":"Hike time","description":"Estimate the time for a hike","language":"en",
 "stateSchema":{"distance":"number","pace":"number","rest":"number","totalText":"string","movingText":"string","restText":"string"},
 "initialState":{"distance":10,"pace":12,"rest":5,"totalText":"2 h 10 min","movingText":"2 h 0 min","restText":"10 min"},
-"ui":{"type":"theme","preset":"soft","cornerRadius":20,"children":[{"type":"column","style":{"gap":"medium","padding":"medium"},"children":[
- {"type":"card","children":[{"type":"metric","text":"Total time","bind":"totalText","style":{"emphasis":"number","tone":"accent"}},
-  {"type":"grid","columns":2,"children":[{"type":"metric","text":"Walking","bind":"movingText"},{"type":"metric","text":"Rest","bind":"restText"}]}]},
+"ui":{"type":"theme","preset":"soft","palette":"green","cornerRadius":20,"children":[{"type":"column","style":{"gap":"medium","padding":"medium"},"children":[
+ {"type":"card","children":[{"type":"metric","text":"Total time","icon":"Clock","bind":"totalText","style":{"emphasis":"number","tone":"accent"}},
+  {"type":"grid","columns":2,"children":[{"type":"metric","text":"Walking","icon":"Steps","bind":"movingText"},{"type":"metric","text":"Rest","icon":"Coffee","bind":"restText"}]}]},
  {"type":"section","text":"Route","children":[
   {"type":"numberInput","text":"Distance (km)","bind":"distance","action":"distance","min":0,"max":200,"step":0.5},
   {"type":"slider","text":"Pace (min per km)","bind":"pace","action":"pace","min":8,"max":30,"step":1,"inputMode":"live"}]},
@@ -93,12 +95,12 @@ Design rules. The app must look finished and good on a phone:
 {"title":"Packing list","description":"Things to pack for a trip","language":"en",
 "stateSchema":{"draft":"string","items":{"type":"list","maxItems":100,"fields":{"id":"string","name":"string","packed":"boolean"}},"packedText":"string","progress":"number","nextId":"number","hasItems":"boolean","empty":"boolean"},
 "initialState":{"draft":"","items":[],"packedText":"0 of 0","progress":0,"nextId":1,"hasItems":false,"empty":true},
-"ui":{"type":"theme","preset":"soft","cornerRadius":20,"children":[{"type":"column","style":{"gap":"medium","padding":"medium"},"children":[
- {"type":"card","children":[{"type":"metric","text":"Packed","bind":"packedText","style":{"emphasis":"number"}},{"type":"progress","text":"Packing progress","bind":"progress"}]},
+"ui":{"type":"theme","preset":"soft","palette":"blue","cornerRadius":20,"children":[{"type":"column","style":{"gap":"medium","padding":"medium"},"children":[
+ {"type":"card","children":[{"type":"metric","text":"Packed","icon":"Luggage","bind":"packedText","style":{"emphasis":"number"}},{"type":"progress","text":"Packing progress","bind":"progress"}]},
  {"type":"row","wrap":false,"style":{"gap":"small","crossAlign":"center"},"children":[
   {"type":"input","text":"New item","bind":"draft","action":"draft","inputMode":"live","maxLength":80,"layout":{"weight":1}},
-  {"type":"button","text":"Add","action":"add","variant":"filled"}]},
- {"type":"emptyState","text":"Nothing to pack yet","visibleBind":"empty","children":[{"type":"text","text":"Add the first item above.","style":{"tone":"muted"}}]},
+  {"type":"button","text":"Add","action":"add","variant":"filled","icon":"Plus"}]},
+ {"type":"emptyState","text":"Nothing to pack yet","icon":"Luggage","visibleBind":"empty","children":[{"type":"text","text":"Add the first item above.","style":{"tone":"muted"}}]},
  {"type":"list","text":"Items","bind":"items","visibleBind":"hasItems","rowTemplate":{"type":"row","wrap":false,"style":{"crossAlign":"center"},"children":[
   {"type":"checkbox","text":"Packed","bind":"packed","action":"pack"},
   {"type":"text","text":"Item","bind":"name","layout":{"weight":1}},

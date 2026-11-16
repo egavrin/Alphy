@@ -18,4 +18,6 @@
     <string name="semantic_preparing">Подготавливаем модель поиска…</string>
     <string name="semantic_searching">Ищем на устройстве…</string>
     <string name="semantic_search_unavailable">Поиск недоступен. Очистите запрос, чтобы открыть список.</string>
+    <string name="settings_screenshot_review">Проверять вид приложений по снимку экрана</string>
+    <string name="settings_screenshot_review_hint">Медленнее: DeepSeek получает снимок первого экрана и может поправить оформление. Приложения с личными данными так не проверяются.</string>
 </resources>

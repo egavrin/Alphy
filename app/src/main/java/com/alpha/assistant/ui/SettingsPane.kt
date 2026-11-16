@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -57,6 +58,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import com.alpha.assistant.tools.agent.GenerationSettings
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -368,7 +370,29 @@ private fun ImageSettingsPane(model: ShellViewModel) {
 @Composable
 private fun DeepSeekSettings(model: ShellViewModel) {
     val scroll = rememberScrollState()
-    SettingsDetail(SettingsSection.DeepSeek, scroll) { DeepSeekKeyPanel(model, scroll) }
+    SettingsDetail(SettingsSection.DeepSeek, scroll) {
+        DeepSeekKeyPanel(model, scroll)
+        ScreenshotReviewPanel()
+    }
+}
+
+/** Off by default, because the review adds one model step to each new app. */
+@Composable
+private fun ScreenshotReviewPanel() {
+    val context = LocalContext.current
+    val settings = remember(context) { GenerationSettings(context) }
+    var enabled by remember(settings) { mutableStateOf(settings.screenshotReview) }
+    SettingsPanel {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(enabled, role = Role.Switch) { value ->
+            settings.screenshotReview = value
+            enabled = value
+        }, verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.settings_screenshot_review), Modifier.weight(1f))
+            Switch(checked = enabled, onCheckedChange = null)
+        }
+        Text(stringResource(R.string.settings_screenshot_review_hint), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }
 
 internal const val DEEPSEEK_KEYS_URL = "https://platform.deepseek.com/api_keys"

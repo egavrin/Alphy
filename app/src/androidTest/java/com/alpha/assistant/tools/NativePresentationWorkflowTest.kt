@@ -130,8 +130,10 @@ class NativePresentationWorkflowTest {
             val status = robot.bounds("Пауза")
             val empty = robot.bounds("Нет заметок")
             capture("status-empty-$dark") { image ->
-                val ink = scheme.onTertiaryContainer.toArgb()
-                val background = scheme.tertiaryContainer.toArgb()
+                // Warning keeps its amber in every palette. The reading app has its own palette background.
+                val (_, warning, onWarning) = checkNotNull(ToolPalettes.status("warning", dark))
+                val ink = onWarning.toArgb()
+                val background = warning.toArgb()
                 assertTrue("Visible status glyph", pixels(image, Rect(status.left - dp(33), status.top - dp(4), status.left - dp(3), status.bottom + dp(4)), ink) > 0)
                 assertTrue("Rendered status text", pixels(image, status, ink) > 0)
                 assertTrue("Status text contrast", ColorUtils.calculateContrast(ink, background) >= 4.5)
@@ -216,7 +218,7 @@ class NativePresentationWorkflowTest {
                                         val visibleScore = robot.bounds("Очки")
                                         assertTrue("Focus uses a visible wallpaper accent",
                                             pixels(image, Rect(visibleScore.left, visibleScore.top - dp(24),
-                                                visibleScore.left + dp(48), visibleScore.top), colors.secondary.toArgb()) > 0)
+                                                visibleScore.left + dp(48), visibleScore.top), appColors(recipe.preset, dark).primary.toArgb()) > 0)
                                     }
                                 }
                                 revealInPreview("Музей")
@@ -249,7 +251,7 @@ class NativePresentationWorkflowTest {
         val scene = PresentationFixtures.recipe
         val actions = CopyOnWriteArrayList<Pair<String, Any?>>()
         val spec = scene.spec()
-        val colors = preview(scenario, scene, dark = false, presentation = recipe(spec, NativePresentationProfile.FOCUS)) { id, value, current ->
+        preview(scenario, scene, dark = false, presentation = recipe(spec, NativePresentationProfile.FOCUS)) { id, value, current ->
             actions += id to value
             when (id) {
                 "advance" -> current.put("points", current.getInt("points") + 1)
@@ -259,7 +261,7 @@ class NativePresentationWorkflowTest {
                 "close" -> current.put("dialog", false)
             }
         }
-        val palette = colors.copy(primary = colors.secondary)
+        val palette = appColors("editorial", dark = false)
         fun filled(label: String, expected: Boolean, stem: String) {
             revealInPreview(label)
             val target = robot.assertTarget(label)
@@ -296,7 +298,7 @@ class NativePresentationWorkflowTest {
             // The dialog's semantics arrive before the Android window becomes opaque.
             val image = robot.automation.takeScreenshot() ?: return@waitUntil false
             try {
-                image.getPixel(bounds.left - dp(8), bounds.centerY()) == colors.surfaceContainerHigh.toArgb()
+                image.getPixel(bounds.left - dp(8), bounds.centerY()) == palette.surfaceContainerHigh.toArgb()
             } finally { image.recycle() }
         }
         filled("Внутри", true, "recipe-modal-primary")
@@ -307,6 +309,9 @@ class NativePresentationWorkflowTest {
         assertEquals(1, actions.count { it.first == "advance" })
         assertEquals(1, actions.count { it.first == "close" })
     }
+
+    /** The colors of an app whose theme preset has no palette of its own. */
+    private fun appColors(preset: String, dark: Boolean) = checkNotNull(ToolPalettes.scheme(presetPalette(preset), dark))
 
     private fun recipe(spec: ToolSpec, profile: NativePresentationProfile): NativePresentation =
         NativePresentation.parse(NativePresentation.json(profile, "editorial", 0, "advance"), spec.ui)

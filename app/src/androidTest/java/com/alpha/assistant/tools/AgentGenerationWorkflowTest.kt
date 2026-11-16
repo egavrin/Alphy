@@ -10,6 +10,7 @@ import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.agent.AppAgentGuide
+import com.alpha.assistant.tools.agent.GenerationSettings
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -69,6 +70,60 @@ class AgentGenerationWorkflowTest {
         assertTrue(provider.feedback(1), provider.feedback(1).contains("write_app: OK"))
         assertTrue(provider.feedback(1), provider.feedback(1).contains("Bill"))
         assertTrue(provider.feedback(2), provider.feedback(2).contains("92"))
+    }
+
+    @Test fun appSourceCanFormatMoneyForTheAppLanguage(): Unit = runBlocking {
+        // The guide tells the model to format money with Intl.NumberFormat, so the sandbox must support it.
+        val app = JSONObject("""
+            {"title":"Price","description":"Shows a price","language":"de",
+            "stateSchema":{"amount":"number","price":"string"},"initialState":{"amount":0,"price":"0,00 €"},
+            "ui":{"type":"column","children":[{"type":"numberInput","text":"Betrag","bind":"amount","action":"amount","min":0,"max":100000},
+              {"type":"text","text":"Preis","bind":"price"}]},
+            "source":"const s=input.state,e=input.event;if(e.type==='action'){s.amount=e.value;s.price=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(s.amount);}return {state:s};"}
+        """.trimIndent())
+        val check = JSONArray().put(JSONObject().put("name", "price").put("steps", JSONArray("""[{"set":"amount","value":5.5},{"expect":"text","contains":"5,50"}]""")))
+        val provider = AgentScriptProvider(writeAppReply(app), run("""[{"set":"amount","value":1234.5},{"expect":"text","contains":"1.234,50"}]"""), finish(check))
+        generate(provider, "Zeige einen Preis in Euro")
+        assertTrue(provider.feedback(2), provider.feedback(2).contains("run: OK"))
+    }
+
+    @Test fun anAcceptedAppGetsDesignHintsWithoutARejection(): Unit = runBlocking {
+        // Failure case: generated apps were gray and had no icons, and nothing in the feedback said so.
+        val plain = tipApp().apply {
+            put("ui", JSONObject().put("type", "theme").put("preset", "clean").put("children", JSONArray().put(
+                JSONObject().put("type", "card").put("text", "Result").put("children", JSONArray().put(getJSONObject("ui"))))))
+        }
+        val styled = JSONObject(plain.toString()).apply {
+            getJSONObject("ui").put("palette", "teal").getJSONArray("children").getJSONObject(0).put("icon", "Receipt")
+        }
+        val provider = AgentScriptProvider(writeAppReply(plain), writeAppReply(styled), finish(splitCheck))
+        generate(provider)
+        val hinted = provider.feedback(1)
+        assertTrue(hinted, hinted.contains("write_app: OK") && hinted.contains("Design hints:"))
+        assertTrue(hinted, hinted.contains("palette") && hinted.contains("icon"))
+        assertFalse(provider.feedback(2), provider.feedback(2).contains("Design hints:"))
+    }
+
+    @Test fun theOptionalScreenshotReviewShowsTheFirstScreenOnceBeforeFinish(): Unit = runBlocking {
+        // The model judged the design only from a text screen. The review is optional, because it adds a step.
+        val settings = GenerationSettings(context)
+        val before = settings.screenshotReview
+        try {
+            settings.screenshotReview = true
+            val provider = AgentScriptProvider(writeAppReply(tipApp()), finish(splitCheck), run("""[{"set":"bill","value":80}]"""), finish(splitCheck))
+            generate(provider)
+            assertEquals(4, provider.calls.size)
+            val review = provider.calls[2].turns.last()
+            assertTrue(review.text, review.text.contains("finish: REVIEW"))
+            assertEquals(1, review.images.size)
+            assertTrue(review.images.single().startsWith("data:image/jpeg;base64,"))
+            // Only the newest screenshot is sent again. The second finish ends the generation without a new review.
+            assertTrue(provider.calls[3].turns.drop(1).all { it.images.isEmpty() })
+            settings.screenshotReview = false
+            val off = AgentScriptProvider(writeAppReply(tipApp()), finish(splitCheck))
+            generate(off)
+            assertEquals(2, off.calls.size)
+        } finally { settings.screenshotReview = before }
     }
 
     @Test fun validationErrorReachesTheModelAndAnEditFixesIt(): Unit = runBlocking {

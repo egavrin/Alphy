@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -76,11 +77,15 @@ internal enum class Glyph(val path: String) {
 }
 
 @Composable internal fun AlphaIcon(glyph: Glyph, modifier: Modifier = Modifier, accent: Boolean = false,
-    color: Color = if (accent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) {
+    color: Color = if (accent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) =
+    StrokeIcon(glyph.path, modifier, color)
+
+/** Draws a 24-unit stroke path, such as a [Glyph] or a domain icon of a generated app. */
+@Composable internal fun StrokeIcon(path: String, modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.onSurfaceVariant) {
+    val shape = remember(path) { PathParser().parsePathString(path).toPath() }
     Canvas(modifier.size(21.dp)) {
-        val path = PathParser().parsePathString(glyph.path).toPath()
         scale(size.width / 24f, size.height / 24f, pivot = androidx.compose.ui.geometry.Offset.Zero) {
-            drawPath(path, color, style = Stroke(1.7f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawPath(shape, color, style = Stroke(1.7f, cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
     }
 }

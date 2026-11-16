@@ -430,9 +430,14 @@ class MiniAppVisualWorkflowTest {
                                     "device" -> alphaColorScheme(dark)
                                     else -> galleryWallpaperColors(scheme, dark)
                                 }
-                                val backgrounds = mapOf("default" to colors.surfaceContainer, "muted" to colors.surfaceVariant,
-                                    "accent" to colors.primaryContainer, "success" to colors.secondaryContainer,
-                                    "warning" to colors.tertiaryContainer, "error" to colors.errorContainer).mapValues { it.value.toArgb() }
+                                // Success and warning keep green and amber in every scheme.
+                                fun roleSurfaces(roles: androidx.compose.material3.ColorScheme) = mapOf("default" to roles.surfaceContainer,
+                                    "muted" to roles.surfaceVariant, "accent" to roles.primaryContainer, "error" to roles.errorContainer)
+                                    .mapValues { it.value.toArgb() } + listOf("success", "warning")
+                                    .associateWith { checkNotNull(ToolPalettes.status(it, dark)).second.toArgb() }
+                                val backgrounds = roleSurfaces(colors)
+                                // The swatches are inside a theme node, so they use the palette of its preset, not the shell scheme.
+                                val themed = roleSurfaces(checkNotNull(ToolPalettes.scheme(presetPalette("clean"), dark)))
                                 val captures = JSONArray()
                                 val row = JSONObject().put("scheme", scheme).put("dark", dark)
                                     .put("fontScale", fontScale.toDouble()).put("expanded", expanded)
@@ -476,7 +481,7 @@ class MiniAppVisualWorkflowTest {
                                                 else -> emptyMap()
                                             }
                                             capture(captures, destination, stem, check, safe, colors.surface.toArgb(), roleLabels.mapValues {
-                                                backgrounds.getValue(it.value)
+                                                (if (key == "roles/swatches") themed else backgrounds).getValue(it.value)
                                             }, expectedFontScale = fontScale)
                                             if (key == "presentation/snackbar") {
                                                 val message = visible(check.body.single(), textOnly = true).screenBounds()

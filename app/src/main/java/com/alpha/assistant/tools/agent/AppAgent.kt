@@ -6,6 +6,7 @@ import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.cloud.CloudTurn
 import com.alpha.assistant.images.GeneratedImage
 import com.alpha.assistant.images.ImageFailure
+import com.alpha.assistant.images.ImageAspect
 import com.alpha.assistant.images.ImageIntent
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.semantic.SemanticRuntime
@@ -58,6 +59,8 @@ internal class AppAgentRequest(
     val imageMaker: AppImageMaker? = null,
     /** 3D models that the user attached to this request. */
     val sceneAssets: List<ThreeSceneAssetRef> = emptyList(),
+    /** The optional screenshot review: draws the first screen as an image data URL. Null when the review is off. */
+    val screenshot: (suspend (ToolPreview) -> String)? = null,
 )
 
 /** Each call submits one new image operation. The host checks consent before each submission. */
@@ -81,6 +84,10 @@ internal class AppAgent(
     private class Candidate(val definition: JSONObject, val spec: ToolSpec, val state: String, val preview: ToolPreview)
 
     private class Finished(val summary: String)
+
+    private class Review(val image: String) {
+        override fun toString() = SCREENSHOT_REVIEW
+    }
 
     /** True after the host accepted a changed version. Read it also after a failed run. */
     var edited = false
@@ -117,6 +124,7 @@ internal class AppAgent(
             ". Load one in createScene with (await new context.addons.GLTFLoader().parseAsync(await context.readAsset(id), \"\")).scene."
         val madeImages = mutableListOf<GeneratedImage>()
         var submittedImages = 0
+        var reviewed = false
 
         suspend fun checkActive() = session.checkActive(currentCoroutineContext())
 
@@ -234,7 +242,9 @@ internal class AppAgent(
             current = candidate
             edited = true
             if (privateApp) return "$tool: OK. The app passed validation and the smoke test. $PRIVATE_SCREEN"
-            return "$tool: OK. The app passed validation and the smoke test.\nFirst screen:\n${firstScreen(candidate)}\n$REVIEW_SCREEN"
+            val hints = designHints(JSONObject(candidate.preview.ui))
+            return "$tool: OK. The app passed validation and the smoke test.\nFirst screen:\n${firstScreen(candidate)}\n$REVIEW_SCREEN" +
+                if (hints.isEmpty()) "" else "\nDesign hints: ${hints.joinToString(" ")}"
         }
 
         suspend fun handle(reply: JSONObject): Any {
@@ -291,7 +301,15 @@ internal class AppAgent(
                         if (outcome.failure != null) return "finish: FAILED. The reproduced problem still fails: ${shown(outcome.failure, outcome, privateApp)}" +
                             (outcome.final?.takeUnless { privateApp }?.let { "\nScreen:\n${it.text}" } ?: "")
                     }
-                    finish(reply, candidate, request, privateApp)
+                    val finished = finish(reply, candidate, request, privateApp)
+                    val shot = request.screenshot
+                    if (finished !is Finished || shot == null || reviewed || privateApp || candidate.spec.threeScene) finished
+                    else {
+                        // One review for each generation keeps the added time to one model step.
+                        reviewed = true
+                        // A capture failure skips the review. It must not block an app that passed its checks.
+                        try { Review(shot(candidate.preview)) } catch (failure: CancellationException) { throw failure } catch (_: Exception) { finished }
+                    }
                 }
                 "generate_image" -> {
                     val maker = request.imageMaker ?: throw Feedback("Pictures are off for this request. Build the app without image nodes.")
@@ -302,7 +320,7 @@ internal class AppAgent(
                     if (intents.isNullOrEmpty()) throw Feedback("images must hold 1 to $remaining requests with distinct slots. ${ImageIntent.GUIDANCE}")
                     request.progress?.invoke(ToolGenerationProgress.IMAGES)
                     submittedImages += intents.size
-                    val made = try { maker.make(intents) } catch (failure: ImageFailure) {
+                    val made = try { maker.make(intents.map(::appPicture)) } catch (failure: ImageFailure) {
                         throw Feedback("The pictures could not be made: ${failure.message} Build the app without them.")
                     }
                     madeImages.removeAll { old -> made.any { it.slot == old.slot } }
@@ -342,7 +360,12 @@ internal class AppAgent(
             val turns = buildList {
                 add(CloudTurn("user", task, request.images))
                 history.forEachIndexed { index, turn ->
-                    add(if (turn.role == "assistant" && index != lastWriteIndex) CloudTurn("assistant", compact(turn.text)) else turn)
+                    add(when {
+                        turn.role == "assistant" && index != lastWriteIndex -> CloudTurn("assistant", compact(turn.text))
+                        // Only the newest screenshot is sent. An older one shows a screen that has changed.
+                        turn.images.isNotEmpty() && index != history.lastIndex -> turn.copy(images = emptyList())
+                        else -> turn
+                    })
                 }
                 if (!draftMatchesLastWrite && draft != null && isNotEmpty()) {
                     val last = removeAt(lastIndex)
@@ -374,7 +397,7 @@ internal class AppAgent(
                 remaining <= 3 -> "\n\n$remaining steps remain. Fix the app and call finish."
                 else -> "\n\nStep $step of ${AppAgentGuide.MAX_STEPS} used."
             }
-            history += CloudTurn("user", result.toString() + footer)
+            history += CloudTurn("user", result.toString() + footer, listOfNotNull((result as? Review)?.image))
         }
         throw CloudFailure("widget_agent_incomplete",
             "Alphy could not finish this app in ${AppAgentGuide.MAX_STEPS} steps." +
@@ -621,6 +644,25 @@ internal class AppAgent(
     private fun formatNumber(value: Number): String = java.math.BigDecimal(value.toString()).stripTrailingZeros().toPlainString()
 
     /** First-screen problems that validation does not see: a placeholder word as a value, and grid buttons that look alike. */
+    /** An app picture gets a product art style from the host, so the model writes only the content. A 3D texture keeps its prompt. */
+    private fun appPicture(intent: ImageIntent) = if (intent.aspect == ImageAspect.EQUIRECTANGULAR) intent
+        else intent.copy(prompt = intent.prompt.take(1500 - APP_PICTURE_STYLE.length) + APP_PICTURE_STYLE)
+
+    /** Advice about the look of an accepted app. A hint never rejects the app, because each rejection costs a model turn. */
+    private fun designHints(ui: JSONObject): List<String> {
+        fun descendants(node: JSONObject): List<JSONObject> = listOf(node) + (node.optJSONArray("children")?.let { children ->
+            (0 until children.length()).mapNotNull(children::optJSONObject).flatMap(::descendants)
+        } ?: emptyList())
+        val nodes = descendants(ui)
+        return buildList {
+            if (nodes.none { it.optString("type") == "theme" && it.has("palette") }) add("Set a palette on the theme that suits the topic.")
+            if (nodes.any { it.optString("type") in setOf("card", "listItem", "emptyState") && !it.has("icon") })
+                add("Give each card, listItem, and emptyState an icon that names its topic.")
+            if (nodes.any { node -> node.optString("type") == "card" && descendants(node).count { it.optString("type") == "metric" } > 3 })
+                add("Show one main metric in a card and at most 2 more. Remove repeated or minor values.")
+        }
+    }
+
     private fun presentationProblem(ui: JSONObject, state: JSONObject): String? {
         // A list row template repeats its buttons on purpose, so the walk follows children only.
         fun descendants(node: JSONObject): List<JSONObject> = listOf(node) + (node.optJSONArray("children")?.let { children ->
@@ -650,8 +692,12 @@ internal class AppAgent(
         const val PRIVATE_EDIT = "This app keeps private device data. The host keeps its ui and initialState private and unchanged. " +
             "Use edit_app without ui or initialState."
         const val REVIEW_SCREEN = "Review this screen as the user: a calculator shows real results for sample inputs, not 0 or dashes, and no label or value repeats."
+        const val SCREENSHOT_REVIEW = "finish: REVIEW. The checks passed. The attached image is a screenshot of the first screen on a phone. " +
+            "Look at it as the user: colors, icons, spacing, pictures, text that is cut or breaks inside a word, and large empty areas. " +
+            "Fix real problems with edit_app, then call finish again. If the screen looks good, call finish again now."
         const val PRIVATE_SCREEN = "The host shows no screen text for this private app."
         const val MAX_NEW_IMAGES = 4
+        const val APP_PICTURE_STYLE = ". Polished app artwork: a clear photo or a soft illustration, natural light, simple clean background, no text, no letters, no watermark."
         const val NO_THREE = "3D scenes are not available on this device. Remove runtime and draw the app with a canvas."
         val editableFields = setOf("title", "description", "language", "capabilities", "stateSchema", "initialState", "ui", "source", "runtime",
             "surfaces", "presentation", "hostControls", "capabilityResults", "collections")

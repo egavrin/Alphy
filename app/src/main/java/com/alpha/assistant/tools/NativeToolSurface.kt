@@ -437,9 +437,10 @@ internal fun ToolStageLayout(
         val loose = constraints.copy(minHeight = 0)
         val controlsPlaceable = children[1].measure(loose)
         val gap = 8.dp.roundToPx()
+        // The stage keeps at least 55% of the screen. Taller controls scroll below it.
         val stageHeight = availableHeight?.let {
             (it.roundToPx() - controlsPlaceable.height - gap)
-                .coerceAtLeast(160.dp.roundToPx()).coerceAtMost(loose.maxHeight)
+                .coerceAtLeast(maxOf(160.dp.roundToPx(), it.roundToPx() * 55 / 100)).coerceAtMost(loose.maxHeight)
         } ?: loose.maxHeight
         val stagePlaceable = children[0].measure(loose.copy(maxHeight = stageHeight))
         layout(constraints.maxWidth, constraints.constrainHeight(stagePlaceable.height + gap + controlsPlaceable.height)) {
