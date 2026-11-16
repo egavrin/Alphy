@@ -62,5 +62,6 @@ private fun lessonGuide(kind: CourseSlideKind): String = buildString {
     append("\n  Accepted answers: 1 to 20, without spaces at the start or end.")
     append("\n- The host adds the answer control and the Check button. Do not add actionId, an answer control, or a node bound to $EXERCISE_FIELD.")
     append("\n  Show only the instruction and the content that the learner needs to answer. ")
-        .append("Do not repeat the option labels or the answer, and do not say how to enter the answer: the host control shows it.")
+        .append("Do not repeat the option labels or the answer, and do not say how to enter the answer: the host control shows it. ")
+        .append("Put a hint in wrongHint, not in the slide: the learner sees it after a wrong answer.")
 }
