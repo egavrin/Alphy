@@ -263,7 +263,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         session: CloudSession): TestFixResult {
         val agent = appAgent(key, session)
         val result = try {
-            agent.run(AppAgentRequest(request, base, emptyList(), base.id, privateState, policy = null,
+            agent.run(AppAgentRequest(request, base, emptyList(), base.id, privateState,
                 extraInstructions = AppAgentGuide.testFix, testFix = true), session)
         } catch (failure: CloudFailure) {
             if (failure.code != "widget_agent_incomplete") throw failure
@@ -388,12 +388,12 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
     }
 
     suspend fun generate(key: String, prompt: String, base: ToolRecord?, images: List<String>, session: CloudSession, artifactId: String,
-        privateState: Boolean = false, policy: ToolExecutionPolicy? = null,
+        privateState: Boolean = false,
         progress: ((ToolGenerationProgress) -> Unit)? = null): ToolPreview =
-        generate(key,prompt,base,images,session,artifactId,privateState,policy,progress,trace=null)
+        generate(key,prompt,base,images,session,artifactId,privateState,progress,trace=null)
 
     internal suspend fun generate(key: String, prompt: String, base: ToolRecord?, images: List<String>, session: CloudSession, artifactId: String,
-        privateState: Boolean, policy: ToolExecutionPolicy? = null,
+        privateState: Boolean,
         progress: ((ToolGenerationProgress) -> Unit)? = null, trace: ToolGenerationTrace?,
         onPublicUpdate: (suspend (String) -> Unit)? = null, checkOwner: suspend () -> Unit = {},
         imageOperation: String? = null, imageSelection: ImageSettings.Selection? = null,
@@ -410,7 +410,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             val imageMaker = if (imageOperation == null || imageSelection == null) null else AppImageMaker { intents ->
                 imageGeneration.generate("$imageOperation:${++imageCalls}", intents, imageSelection, intents.size)
             }
-            return generateWithAgent(key, prompt, base, images, session, artifactId, privateState, policy, progress, onPublicUpdate,
+            return generateWithAgent(key, prompt, base, images, session, artifactId, privateState, progress, onPublicUpdate,
                 onStep = run?.let { { step, tool, reply, result, nanos -> it.agentStep(step, tool, reply, result, nanos) } },
                 imageMaker = imageMaker, sceneAssets = sceneAssets)
                 .preview.also { checkOwner(); run?.finish() }
@@ -423,7 +423,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
     }
 
     private suspend fun generateWithAgent(key: String, prompt: String, base: ToolRecord?, images: List<String>, session: CloudSession,
-        artifactId: String, privateState: Boolean, policy: ToolExecutionPolicy?, progress: ((ToolGenerationProgress) -> Unit)?,
+        artifactId: String, privateState: Boolean, progress: ((ToolGenerationProgress) -> Unit)?,
         onPublicUpdate: (suspend (String) -> Unit)?, extraInstructions: String = "",
         onStep: ((Int, String, String, String, Long) -> Unit)? = null, imageMaker: AppImageMaker? = null,
         sceneAssets: List<ThreeSceneAssetRef> = emptyList()): AppAgentResult {
@@ -431,7 +431,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             val shot = AppSnapshot.capture(sandbox.context, preview)
             try { AppSnapshot.dataUrl(shot) } finally { shot.recycle() }
         }
-        return appAgent(key, session).run(AppAgentRequest(prompt, base, images, artifactId, privateState, policy, extraInstructions,
+        return appAgent(key, session).run(AppAgentRequest(prompt, base, images, artifactId, privateState, extraInstructions,
             onPublicUpdate, progress, onStep, imageMaker = imageMaker, sceneAssets = sceneAssets, screenshot = screenshot), session)
     }
 

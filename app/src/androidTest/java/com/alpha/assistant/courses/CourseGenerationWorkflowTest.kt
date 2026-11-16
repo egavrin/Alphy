@@ -1,8 +1,6 @@
 package com.alpha.assistant.courses
 
 import android.content.Context
-import androidx.javascriptengine.IsolateStartupParameters
-import androidx.javascriptengine.JavaScriptIsolate
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.ChatProvider
@@ -11,8 +9,6 @@ import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.data.Source
-import com.alpha.assistant.sandbox.AndroidJsRuntime
-import com.alpha.assistant.sandbox.RuntimeSandbox
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.LessonToolPreview
 import com.alpha.assistant.tools.ToolGenerationService
@@ -144,56 +140,6 @@ class CourseGenerationWorkflowTest {
                 }
                 assertTrue(runtime.events.isEmpty())
                 assertEquals(listOf("disable"), store.answers(course.id).map { it.operationId })
-            }
-        }
-    }
-
-    @Test fun rejectsCourseSurfaceBeforeCreatingASmokeIsolate(): Unit = runBlocking {
-        withDatabase { context, name ->
-            val provider = PolicyProvider(JSONObject(definition(choice()).json)
-                .put("surfaces", JSONArray("""[{"id":"board","width":64,"height":64}]""")).toString())
-            var opens = 0
-            val connection = object : RuntimeSandbox {
-                override fun isFeatureSupported(feature: String) = true
-                override fun createIsolate(parameters: IsolateStartupParameters): JavaScriptIsolate {
-                    opens++
-                    error("Rejected course code reached the sandbox.")
-                }
-                override fun close() {}
-            }
-            val sandbox = SandboxClient(context, AndroidJsRuntime(context, supported = { true }, connect = { connection }))
-            CourseStore(context, name).use { store ->
-                val course = store.create(setup, outline())
-                val player = policyFixtureController(store, ToolGenerationService(provider, sandbox))
-                workflowError(CourseWorkflowError.UNSUPPORTED_OUTPUT) {
-                    player.generate(course.id, course.revision, "practice", key, CloudSession())
-                }
-                assertEquals(0, opens)
-                assertTrue(provider.stages.isNotEmpty() && provider.stages.all { it == CloudGenerationStage.AGENT })
-                assertNull(store.slide(course.id, "practice"))
-                assertEquals(CourseGenerationFailure.INVALID_OUTPUT, store.course(course.id)?.generationFailure)
-            }
-        }
-    }
-
-    @Test fun rejectsAForbiddenSmokeResultAfterACleanPreview(): Unit = runBlocking {
-        withDatabase { context, name ->
-            val provider = PolicyProvider(JSONObject(definition(choice()).json).put("source", """
-                if (input.event.type === 'render') return {state:input.state,effects:[]};
-                return {state:input.state};
-            """.trimIndent()).toString())
-            val service = ToolGenerationService(provider, SandboxClient(context))
-            CourseStore(context, name).use { store ->
-                val course = store.create(setup, outline())
-                val player = policyFixtureController(store, service)
-                workflowError(CourseWorkflowError.UNSUPPORTED_OUTPUT) {
-                    player.generate(course.id, course.revision, "practice", key, CloudSession())
-                }
-                assertTrue(provider.stages.isNotEmpty() && provider.stages.all { it == CloudGenerationStage.AGENT })
-                // The agent loop returns the smoke rejection to the model as feedback.
-                assertTrue(provider.feedback.toString(), provider.feedback.any { "Smoke event: render." in it })
-                assertNull(store.slide(course.id, "practice"))
-                assertEquals(CourseGenerationFailure.INVALID_OUTPUT, store.course(course.id)?.generationFailure)
             }
         }
     }
@@ -643,7 +589,10 @@ class CourseGenerationWorkflowTest {
     private fun policyFixtureController(store: CourseStore, tools: ToolGenerationService) = CourseController(
         store, CourseGeneration(
             generateTool = { key, input, session, id, policy, _ ->
-                LessonToolPreview(tools.generate(key, input.prompt, null, emptyList(), session, id, policy = policy), emptyList())
+                val preview = tools.generate(key, input.prompt, null, emptyList(), session, id)
+                policy.validateDefinition(preview.spec.json)
+                policy.validateResult(JSONObject().put("state", JSONObject(preview.state)).put("ui", JSONObject(preview.ui)).toString())
+                LessonToolPreview(preview, emptyList())
             },
             evaluateTool = { spec, id, revision, state, event, ui, policy ->
                 tools.evaluate(spec, id, revision, state, event, ui, policy = policy)
@@ -692,11 +641,9 @@ class CourseGenerationWorkflowTest {
 
     private class PolicyProvider(private val definition: String) : ChatProvider {
         val stages = mutableListOf<CloudGenerationStage?>()
-        val feedback = mutableListOf<String>()
 
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
             stages += request.generationStage
-            if (request.turns.size > 1) feedback += request.turns.last().text
             check(request.generationStage == CloudGenerationStage.AGENT) { "Unexpected provider call." }
             // The app agent writes the definition until the host accepts it, then finishes.
             emit(CloudEvent.Text(if (request.agentAppAccepted) agentFixtureFinish else agentWrite(definition)))

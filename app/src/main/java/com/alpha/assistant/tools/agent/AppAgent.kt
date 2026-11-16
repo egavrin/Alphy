@@ -13,7 +13,6 @@ import com.alpha.assistant.semantic.SemanticRuntime
 import com.alpha.assistant.semantic.SemanticUnavailable
 import com.alpha.assistant.tools.AppLanguage
 import com.alpha.assistant.tools.GenerationLanguage
-import com.alpha.assistant.tools.ToolExecutionPolicy
 import com.alpha.assistant.tools.ToolGenerationProgress
 import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolGenerationSmoke
@@ -48,7 +47,6 @@ internal class AppAgentRequest(
     val images: List<String>,
     val artifactId: String,
     val privateState: Boolean,
-    val policy: ToolExecutionPolicy?,
     val extraInstructions: String = "",
     val onNote: (suspend (String) -> Unit)? = null,
     val progress: ((ToolGenerationProgress) -> Unit)? = null,
@@ -180,10 +178,6 @@ internal class AppAgent(
                     throw Feedback("The 3D app definition is invalid: ${failure.message ?: failure.javaClass.simpleName}")
                 }
             }
-            request.policy?.let { policy ->
-                try { policy.validateDefinition(spec.json) } catch (failure: CancellationException) { throw failure }
-                catch (failure: Exception) { throw Feedback("The app breaks this request's policy: ${failure.message}") }
-            }
             val state = if (previous == null || request.base == null) spec.initialState else try {
                 ToolSpec.stateForRevision(previous, spec, request.base.state)
             } catch (failure: CancellationException) {
@@ -207,7 +201,7 @@ internal class AppAgent(
                 return Candidate(definition, spec, state, preview)
             }
             val smoke = ToolGenerationSmoke(sandbox, spec, request.artifactId, (request.base?.revision ?: 0) + 1, state,
-                checkActive = { checkActive() }, generation = service, policy = request.policy,
+                checkActive = { checkActive() }, generation = service,
                 observeReplay = onReplay?.let { { _: List<String> -> } })
             val preview = try {
                 smoke.run()
@@ -457,7 +451,7 @@ internal class AppAgent(
 
     private fun smokeFor(candidate: Candidate, request: AppAgentRequest) = ToolGenerationSmoke(sandbox, candidate.spec,
         request.artifactId, (request.base?.revision ?: 0) + 1, candidate.spec.initialState,
-        checkActive = {}, generation = service, policy = request.policy)
+        checkActive = {}, generation = service)
 
     /** Runs [block] on a fresh copy of the app: in the sandbox, or for a 3D app in a foreground scene preview. */
     private suspend fun <T> drive(candidate: Candidate, request: AppAgentRequest, block: suspend AppTarget.() -> T): T =
