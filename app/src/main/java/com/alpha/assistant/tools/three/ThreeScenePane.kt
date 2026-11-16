@@ -33,6 +33,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,6 +59,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import com.alpha.assistant.R
 import com.alpha.assistant.tools.ImmersiveSystemBars
+import com.alpha.assistant.tools.LocalMiniAppControlsLanguage
 import com.alpha.assistant.tools.InlineToolViewportCornerRadius
 import com.alpha.assistant.tools.ToolContent
 import com.alpha.assistant.tools.ToolController
@@ -66,6 +68,7 @@ import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStageLayout
 import com.alpha.assistant.tools.ToolUiCatalog
+import com.alpha.assistant.tools.miniAppString
 import com.alpha.assistant.ui.AlphaIcon
 import com.alpha.assistant.ui.Glyph
 import kotlinx.coroutines.CancellationException
@@ -74,6 +77,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.withLock
+import org.json.JSONArray
 import org.json.JSONObject
 
 @Composable
@@ -219,15 +223,16 @@ internal fun ThreeScenePane(
     }
 
     val playback: @Composable () -> Unit = {
-        ToolPlaybackControls(if (paused) "resume" else "pause") { event ->
+        ToolPlaybackControls(if (paused) "resume" else "pause", appLanguage = spec.appLanguage) { event ->
             events.trySend(JSONObject().put("type", event))
         }
     }
     val wideControls = remember(snapshot.ui) { ToolUiCatalog.isSceneChoice(JSONObject(snapshot.ui)) }
+    val controlsUi = remember(snapshot.ui) { withoutLiveMode(snapshot.ui) }
     val sceneControls: @Composable (String?) -> Unit = { heading ->
         val width = if (wideControls) Modifier else Modifier.widthIn(max = 640.dp)
         Box(width.fillMaxWidth()) {
-            ToolContent(snapshot.ui, snapshot.state, session != null && visible, heading = heading, embedded = true,
+            ToolContent(controlsUi, snapshot.state, session != null && visible, heading = heading, embedded = true,
                 appLanguage = spec.appLanguage) { id, value ->
                 events.trySend(JSONObject().put("type", "action").put("actionId", id).put("value", value ?: JSONObject.NULL))
             }
@@ -247,7 +252,7 @@ internal fun ThreeScenePane(
                 }, modifier = Modifier.fillMaxSize(), update = { container ->
                     if (container.outlineProvider !== inlineOutline) container.outlineProvider = inlineOutline
                 })
-                if (!fullscreen) SceneOverlay(paused, expanded = false, onFullscreen = { fullscreen = true })
+                if (!fullscreen) SceneOverlay(paused, expanded = false, spec.appLanguage, onFullscreen = { fullscreen = true })
             }
         }, controls = {
             sceneControls(spec.title)
@@ -278,7 +283,7 @@ internal fun ThreeScenePane(
                                     viewportPending = true
                                     expanded.apply { attachSceneView(view) }
                                 }, modifier = Modifier.fillMaxSize())
-                                SceneOverlay(paused, expanded = true, onFullscreen = { fullscreen = false })
+                                SceneOverlay(paused, expanded = true, spec.appLanguage, onFullscreen = { fullscreen = false })
                             }
                             Column(Modifier.fillMaxWidth()
                                 .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
@@ -305,13 +310,15 @@ internal fun ThreeScenePane(
 }
 
 @Composable
-private fun BoxScope.SceneOverlay(paused: Boolean, expanded: Boolean, onFullscreen: () -> Unit) {
+private fun BoxScope.SceneOverlay(paused: Boolean, expanded: Boolean, appLanguage: String?, onFullscreen: () -> Unit) {
     val insets = if (expanded) Modifier.windowInsetsPadding(WindowInsets.displayCutout) else Modifier
     val colors = MaterialTheme.colorScheme
     if (paused) Surface(Modifier.align(Alignment.TopStart).then(insets).padding(8.dp),
         color = colors.surfaceContainerHigh, shape = MaterialTheme.shapes.small) {
-        Text(stringResource(R.string.tool_scene_paused), Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            style = MaterialTheme.typography.labelLarge)
+        CompositionLocalProvider(LocalMiniAppControlsLanguage provides appLanguage) {
+            Text(miniAppString(R.string.tool_scene_paused), Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.labelLarge)
+        }
     }
     val fullscreenLabel = stringResource(if (expanded) R.string.tool_full_screen_exit else R.string.tool_full_screen_enter)
     Surface(Modifier.align(Alignment.TopEnd).then(insets).padding(8.dp),
@@ -325,4 +332,21 @@ private fun BoxScope.SceneOverlay(paused: Boolean, expanded: Boolean, onFullscre
 private fun FrameLayout.attachSceneView(view: View) {
     (view.parent as? ViewGroup)?.removeView(view)
     addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+}
+
+/**
+ * The scene host has no live input channel, so a live control here edits a draft and sends its value with Apply.
+ * The session still delivers that value to the scene as a liveInput event.
+ */
+private fun withoutLiveMode(ui: String): String {
+    fun visit(value: Any?) {
+        when (value) {
+            is JSONObject -> {
+                if (value.opt("inputMode") == "live") value.remove("inputMode")
+                value.keys().forEach { visit(value.opt(it)) }
+            }
+            is JSONArray -> for (index in 0 until value.length()) visit(value.opt(index))
+        }
+    }
+    return JSONObject(ui).also(::visit).toString()
 }

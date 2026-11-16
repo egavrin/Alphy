@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.tools.agent.AppTarget
 import com.alpha.assistant.cloud.CloudFailure
 
 import com.alpha.assistant.capabilities.MedicineContract
@@ -594,15 +595,14 @@ internal class ToolGenerationSmoke(
         }
     }
 
-    internal inner class AppProbe(private val branch: Branch, private val clock: () -> Long, private val advance: (Long) -> Unit) {
-        val ui: JSONObject get() = JSONObject(branch.ui)
-        val state: JSONObject get() = branch.displayState()
-        val surfaces: JSONObject get() = branch.surfaces
-        val nowMillis: Long get() = clock()
-        val surfaceIds: Set<String> get() = branch.effectiveSurfaces.keys
-        val surfaceSizes: Map<String, ToolSurface> get() = branch.effectiveSurfaces
-        /** Effects and record requests from the latest operation. The probe does not run them. */
-        var requested: List<String> = emptyList()
+    internal inner class AppProbe(private val branch: Branch, private val clock: () -> Long, private val advance: (Long) -> Unit) : AppTarget {
+        override val ui: JSONObject get() = JSONObject(branch.ui)
+        override val state: JSONObject get() = branch.displayState()
+        override val surfaces: JSONObject get() = branch.surfaces
+        override val nowMillis: Long get() = clock()
+        override val surfaceIds: Set<String> get() = branch.effectiveSurfaces.keys
+        override val surfaceSizes: Map<String, ToolSurface> get() = branch.effectiveSurfaces
+        override var requested: List<String> = emptyList()
             private set
 
         internal suspend fun open() {
@@ -623,8 +623,7 @@ internal class ToolGenerationSmoke(
             branch.fenced = false
         }
 
-        /** Sends a control event. [payload] is already in the control's wire shape. */
-        suspend fun control(id: String, payload: Any?) {
+        override suspend fun control(id: String, payload: Any?) {
             val root = ui
             val live = ToolUiCatalog.actionTarget(root, id)?.node?.let(ToolUiCatalog::isLiveInput) == true
             val event = controlEvent(root, state, id, payload, live)
@@ -632,14 +631,14 @@ internal class ToolGenerationSmoke(
             settle()
         }
 
-        suspend fun playback(type: String) {
+        override suspend fun playback(type: String) {
             for ((index, surface) in spec.surfaces.values.withIndex()) {
                 branch.event(GraphicsContract.event(type, surfaceId = surface.id), "$.surfaces[$index]")
             }
             settle()
         }
 
-        suspend fun pointer(surfaceId: String, x: Double, y: Double) {
+        override suspend fun pointer(surfaceId: String, x: Double, y: Double) {
             val surface = checkNotNull(branch.effectiveSurfaces[surfaceId])
             val px = x * surface.width
             val py = y * surface.height
@@ -650,14 +649,15 @@ internal class ToolGenerationSmoke(
             settle()
         }
 
-        suspend fun control(surfaceId: String, direction: String) {
+        override suspend fun control(surfaceId: String, direction: String) {
             branch.event(GraphicsContract.event("control", direction = direction, surfaceId = surfaceId),
                 "$.surfaces[${spec.surfaces.keys.toList().indexOf(surfaceId)}]")
             settle()
         }
 
-        /** Advances the clock in 50 ms ticks and delivers subscribed frames and timers. Returns the delivered event count. */
-        suspend fun wait(milliseconds: Long, maxEvents: Int = MAX_PROBE_EVENTS): Int {
+        /** Advances the clock in 50 ms ticks and delivers subscribed frames and timers. */
+        override suspend fun wait(milliseconds: Long): Int {
+            val maxEvents = MAX_PROBE_EVENTS
             var delivered = 0
             var elapsed = 0L
             val due = branch.timers.mapValues { it.value.toLong() }.toMutableMap()

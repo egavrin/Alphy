@@ -204,7 +204,10 @@ self.addEventListener('message', ({data: {surface, port, assets, textures = []}}
         } catch (failure) {
             closed = true;
             releaseTextures();
-            post({type: 'failed', sequence: data.sequence, code: failure instanceof TextureBindingError ? 'texture_binding' : code});
+            // The detail goes only to the app builder. It names the error and its place in the scene module.
+            const place = String(failure?.stack ?? '').match(/scene\.js:\d+:\d+/)?.[0];
+            const detail = (String(failure?.name ?? 'Error') + ': ' + String(failure?.message ?? '') + (place ? ' at ' + place : '')).slice(0, 300);
+            post({type: 'failed', sequence: data.sequence, code: failure instanceof TextureBindingError ? 'texture_binding' : code, detail});
         }
     };
 }, {once: true});

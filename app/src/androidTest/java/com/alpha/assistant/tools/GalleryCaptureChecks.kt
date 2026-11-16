@@ -63,13 +63,13 @@ internal fun galleryCaptureChecks(context: Context): Map<String, GalleryCaptureC
         "catalog/empty" to GalleryCaptureCheck(listOf("Покупок пока нет", "Добавьте покупку")),
         "forms/checks" to GalleryCaptureCheck(listOf("Покупки на неделю", "Включить напоминание"),
             listOf("Купить хлеб"), listOf("Включить напоминание")),
-        "forms/input" to GalleryCaptureCheck(listOf("Продукт"), disabled = listOf(apply("Продукт")), editable = "Продукт"),
+        // An unchanged field shows no Apply button.
+        "forms/input" to GalleryCaptureCheck(listOf("Продукт"), editable = "Продукт"),
         "forms/search" to GalleryCaptureCheck(listOf("Поиск продуктов"),
             targets = listOf(context.getString(R.string.tool_generated_search, "Поиск продуктов")), editable = "Поиск продуктов"),
-        "forms/number" to GalleryCaptureCheck(listOf("Количество"), disabled = listOf(apply("Количество")), editable = "Количество"),
-        "forms/slider" to GalleryCaptureCheck(listOf("Лимит: 2"), disabled = listOf(apply("Лимит")), adjust = "Лимит"),
-        "forms/range" to GalleryCaptureCheck(listOf("Диапазон цены: 2.0 – 8.0"),
-            disabled = listOf(apply("Диапазон цены")), adjust = "Диапазон цены"),
+        "forms/number" to GalleryCaptureCheck(listOf("Количество"), editable = "Количество"),
+        "forms/slider" to GalleryCaptureCheck(listOf("Лимит: 2"), adjust = "Лимит"),
+        "forms/range" to GalleryCaptureCheck(listOf("Диапазон цены: 2.0 – 8.0"), adjust = "Диапазон цены"),
         "forms/date" to platformPicker("День покупки: 2028-06-03"),
         "forms/time" to platformPicker("Время покупки: 09:00"),
         // The timer draws its label, clock, and status as separate texts. Its whole state is the content description.

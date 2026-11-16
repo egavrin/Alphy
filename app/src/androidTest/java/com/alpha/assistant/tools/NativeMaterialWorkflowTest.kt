@@ -57,6 +57,12 @@ class NativeMaterialWorkflowTest {
         for(type in listOf("progress","progressRing"))spec(JSONObject("""{"type":"$type","text":"Loading","indeterminate":true}"""))
         rejects {spec(JSONObject("""{"type":"progress","text":"Loading","indeterminate":"true"}"""))}
     }
+    @Test fun decrementControlsHaveAMinusIcon() {
+        // Failure case: a menu showed a Close X on "Remove one Espresso", because the catalog had no minus icon.
+        spec(JSONObject("""{"type":"icon","name":"Minus","text":"Remove one","action":"less"}"""))
+        spec(JSONObject("""{"type":"button","text":"Remove one","action":"less","icon":"Minus"}"""))
+        for(name in ToolUiCatalog.icons)com.alpha.assistant.ui.Glyph.valueOf(name)
+    }
     @Test fun progressTextShowsTheShareOfItsRange() {
         // Failure case: a raw value such as "Goal: 62.5" or "Goal: 3" next to a bar that shows a share.
         val node=JSONObject("""{"type":"progress","text":"Goal","bind":"n","max":8}""")

@@ -25,14 +25,14 @@ let failed = false;
 const queued = [];
 const assetFetches = new AbortController();
 
-function fail(code) {
+function fail(code, detail) {
     if (failed) return;
     failed = true;
     assetFetches.abort();
     queued.length = 0;
     worker?.terminate();
     port?.close();
-    send('failed', pending ?? 0, {code});
+    send('failed', pending ?? 0, typeof detail === 'string' ? {code, detail: detail.slice(0, 300)} : {code});
 }
 
 function queueAsset({id, request}) {
@@ -103,7 +103,7 @@ try {
             return;
         }
         if (data.type === 'failed') {
-            fail(workerFailures.has(data.code) ? data.code : 'worker_failed');
+            fail(workerFailures.has(data.code) ? data.code : 'worker_failed', data.detail);
             return;
         }
         if (data.type !== 'snapshot') {

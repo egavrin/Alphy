@@ -208,8 +208,8 @@ internal class ThreeSceneWebView(
                 }
                 "failed" -> {
                     require(message.get("sequence") == if (pending == null) 0 else sequence)
-                    require(payload.keys().asSequence().toSet() == setOf("code"))
-                    fail(ThreeSceneProblem.fromWorker(payload.getString("code")))
+                    require(payload.keys().asSequence().toSet() in setOf(setOf("code"), setOf("code", "detail")))
+                    fail(ThreeSceneProblem.fromWorker(payload.getString("code")), (payload.opt("detail") as? String)?.take(300))
                 }
                 else -> fail(ThreeSceneProblem.INVALID_RESPONSE)
             }
@@ -218,9 +218,9 @@ internal class ThreeSceneWebView(
         }
     }
 
-    private fun fail(problem: ThreeSceneProblem) {
+    private fun fail(problem: ThreeSceneProblem, detail: String? = null) {
         if (failure != null) return
-        val error = ThreeSceneFailure(problem, operation)
+        val error = ThreeSceneFailure(problem, operation, detail)
         failure = error
         ready.completeExceptionally(error)
         pending?.completeExceptionally(error)

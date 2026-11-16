@@ -17,14 +17,27 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 
-/** A renderer adapter for the shared generation scenario and binding contract. */
+/** Starts the scene in a foreground preview and checks that its first frame is not blank. */
 internal suspend fun checkThreeScene(
     spec: ToolSpec,
     id: String,
     revision: Int,
     initialState: String,
     checkActive: suspend () -> Unit,
-): ToolPreview = withContext(Dispatchers.Main.immediate) {
+): ToolPreview = withThreeScene(spec, id, revision, initialState, checkActive) { _, initial -> ToolPreview(spec, initial.state, initial.ui) }
+
+/**
+ * Runs [block] on a started scene in a foreground preview after its first frame shows content.
+ * [block] gets the snapshot from the start. The user can decline the preview, which stops the work.
+ */
+internal suspend fun <T> withThreeScene(
+    spec: ToolSpec,
+    id: String,
+    revision: Int,
+    initialState: String,
+    checkActive: suspend () -> Unit,
+    block: suspend (ThreeSceneSession, ThreeSceneSnapshot) -> T,
+): T = withContext(Dispatchers.Main.immediate) {
     val activity = ThreeSceneForeground.activity()
     val session = ThreeSceneSession(activity, spec, id, revision, initialState, spec.ui.toString())
     val accepted = CompletableDeferred<Boolean>()
@@ -83,7 +96,9 @@ internal suspend fun checkThreeScene(
             }
         }
         if (!firstFrame.visible) throw ThreeSceneFailure(ThreeSceneProblem.BLANK_FRAME)
-        ToolPreview(spec, initial.state, initial.ui)
+        checkOpen()
+        // A declined preview closes the session, and the block can end with that as an ordinary step failure.
+        block(session, initial).also { checkOpen() }
     } catch (cancel: CancellationException) {
         throw cancel
     } catch (failure: Exception) {

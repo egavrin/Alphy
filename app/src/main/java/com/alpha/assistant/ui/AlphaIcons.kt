@@ -23,6 +23,7 @@ internal enum class Glyph(val path: String) {
     Menu("M4 6H20M4 12H20M4 18H20"),
     History("M3 11A9 9 0 1 1 5.5 18M3 4V11H10M12 7V12L15 14"),
     Plus("M12 5V19M5 12H19"),
+    Minus("M5 12H19"),
     Arrow("M12 19V5M5 12L12 5L19 12"),
     Close("M6 6L18 18M18 6L6 18"),
     Back("M19 12H5M12 5L5 12L12 19"),

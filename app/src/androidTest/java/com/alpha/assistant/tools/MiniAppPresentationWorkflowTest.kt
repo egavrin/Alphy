@@ -225,6 +225,52 @@ class MiniAppPresentationWorkflowTest {
             java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null); deleteEntry(name)}
         }
     }
+    /** Failure case: a live slider in an open 3D app showed "Open the mini-app to edit" and a disabled Apply, so the scene value never changed. */
+    @Test fun savedSceneLiveSliderSendsItsValue() {
+        org.junit.Assume.assumeTrue(com.alpha.assistant.tools.three.ThreeSceneWebView.available())
+        val robot = ShellRobot("scene-live-slider")
+        val spec = JSONObject("""{"formatVersion":3,"title":"Spinner","description":"A cube with a speed","capabilities":[],
+            "runtime":{"kind":"threejs-worker","version":1},"stateSchema":{"speed":"number"},"initialState":{"speed":1},
+            "ui":{"type":"column","children":[{"type":"metric","text":"Speed now","bind":"speed"},
+            {"type":"slider","text":"Speed","bind":"speed","action":"speed","min":0,"max":10,"step":1,"inputMode":"live"}]}}""")
+            .put("source", """
+                export async function createScene(context) {
+                    const {THREE} = context;
+                    const renderer = new THREE.WebGLRenderer({canvas: context.canvas});
+                    renderer.setSize(context.viewport.width, context.viewport.height, false);
+                    const scene = new THREE.Scene();
+                    scene.add(new THREE.AmbientLight(0xffffff, 2));
+                    const camera = new THREE.PerspectiveCamera(50, context.viewport.width / context.viewport.height, 0.1, 50);
+                    camera.position.z = 3;
+                    scene.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({color: 0xffffff})));
+                    const state = {...context.state};
+                    const draw = () => renderer.render(scene, camera);
+                    draw();
+                    return {
+                        event(e) { if (e.type === 'liveInput' && e.actionId === 'speed') state.speed = e.value; draw(); },
+                        frame() { draw(); },
+                        snapshot() { return {state}; },
+                        dispose() { renderer.dispose(); }
+                    };
+                }
+            """.trimIndent())
+        // The host adds the Three.js library when it accepts a 3D app, so the saved definition is a persisted one.
+        val saved = ToolSpec.parse(spec.toString()).withThreeAssets(emptyList())
+        fixture(specJson = saved.json, initialState = saved.initialState) { _, store, _ ->
+            click(robot.text(R.string.tool_open))
+            shown("Speed now")
+            val slider = checkNotNull(generateSequence(shown("Speed")) { it.parent }.firstOrNull { it.rangeInfo != null })
+            assertNull(find(robot.text(R.string.tool_live_input_unavailable)))
+            val range = checkNotNull(slider.rangeInfo)
+            val progress = Bundle().apply {
+                putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, range.min + 0.4f * (range.max - range.min))
+            }
+            assertTrue("The slider accepts a value", slider.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id, progress))
+            click(robot.text(R.string.tool_generated_apply, "Speed"))
+            waitUntil("The scene keeps speed 4") { JSONObject(checkNotNull(store.tool("lake")).state).optDouble("speed") == 4.0 }
+        }
+    }
+
     @Test fun savedObservatoryUsesOnePaneAndKeepsCameraThroughFullscreenAndRotation() = savedObservatory(4)
 
     /** Failure cases: clipped labels, moved targets, wrong saved choice, stale paused frames, or a replaced fullscreen scene. */

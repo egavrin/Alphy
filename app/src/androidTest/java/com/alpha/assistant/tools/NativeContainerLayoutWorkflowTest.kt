@@ -131,6 +131,28 @@ class NativeContainerLayoutWorkflowTest {
         assertTrue("lines ${layouts.map { it.lineCount }}", layouts.all(::wholeWords))
     }
 
+    /** Failure case: four weighted direction buttons of a 2048 game showed "Dow/n" in a section of a phone screen. */
+    @Test fun narrowButtonLabelsDoNotBreakInsideAWord() {
+        val labels = listOf("Up", "Down", "Left", "Right")
+        val buttons = labels.joinToString(",") { """{"type":"button","text":"$it","action":"${it.lowercase()}","variant":"tonal","layout":{"weight":1}}""" }
+        val ui = """{"type":"column","layout":{"width":320},"children":[{"type":"row","wrap":false,"style":{"gap":"small"},"children":[$buttons]}]}"""
+        val layouts = textLayouts(ui, JSONObject(), labels)
+        assertTrue("lines ${layouts.map { it.lineCount }}", layouts.all(::wholeWords))
+        // A label that fits keeps the size of the button text.
+        assertTrue("sizes ${layouts.map { it.layoutInput.style.fontSize }}", layouts[0].layoutInput.style.fontSize.value >= 14f)
+    }
+
+    /** Failure case: at font scale 2, a menu row with a stepper showed the drink name as "Espress/o". */
+    @Test fun aShortNameInAStepperRowDoesNotBreakInsideAWord() {
+        val ui = """{"type":"column","layout":{"width":320},"children":[{"type":"row","wrap":false,"style":{"crossAlign":"center","gap":"small"},"children":[
+            {"type":"column","style":{"gap":"none"},"layout":{"weight":1},"children":[{"type":"text","text":"Espresso"},{"type":"text","text":"","bind":"price"}]},
+            {"type":"icon","name":"Minus","text":"Remove one","action":"less"},{"type":"badge","text":"","bind":"count"},
+            {"type":"icon","name":"Plus","text":"Add one","action":"more"}]}]}"""
+        val state = JSONObject().put("price", "3.00").put("count", "0")
+        val layout = textLayouts(ui, state, listOf("Espresso"), fontScale = 2f).single()
+        assertTrue("lines ${layout.lineCount}", wholeWords(layout))
+    }
+
     /** Failure case: a countdown showed its time as body text, "Rest: Remaining 00:04:59", not as a large clock. */
     @Test fun aTimerShowsItsTimeAsALargeClock() {
         val fixture = ShellFixture("timer-layout")

@@ -1,9 +1,10 @@
 package com.alpha.assistant.tools.agent
 
-import com.alpha.assistant.tools.ToolGenerationSmoke
+import com.alpha.assistant.tools.ToolSurface
 import com.alpha.assistant.tools.GeneratedOutputDetail
 import com.alpha.assistant.tools.ToolSmokeFailure
 import com.alpha.assistant.tools.ToolUiCatalog
+import com.alpha.assistant.tools.three.ThreeSceneFailure
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.sandbox.RuntimeFailure
 import com.alpha.assistant.sandbox.SandboxResult
@@ -11,6 +12,25 @@ import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.abs
+
+/** What app steps drive: a disposable app copy in the sandbox, or a 3D scene in a foreground preview. */
+internal interface AppTarget {
+    val ui: JSONObject
+    val state: JSONObject
+    val surfaces: JSONObject
+    val nowMillis: Long
+    val surfaceIds: Set<String>
+    val surfaceSizes: Map<String, ToolSurface>
+    /** Effects and record requests from the latest operation. The target does not run them. */
+    val requested: List<String>
+    /** Sends a control event. [payload] is already in the control's wire shape. */
+    suspend fun control(id: String, payload: Any?)
+    suspend fun control(surfaceId: String, direction: String)
+    suspend fun playback(type: String)
+    suspend fun pointer(surfaceId: String, x: Double, y: Double)
+    /** Advances the clock and delivers frames and timers. Returns the delivered event count. */
+    suspend fun wait(milliseconds: Long): Int
+}
 
 /**
  * The executable behavior checker for generated apps.
@@ -97,7 +117,7 @@ internal object AppSteps {
     class Outcome(val screens: List<Pair<Int, AppScreen>>, val failure: String?, val final: AppScreen?, val expectations: Int,
         val failedStep: Int? = null, val failureKind: FailureKind? = null)
 
-    suspend fun run(probe: ToolGenerationSmoke.AppProbe, steps: List<AppStep>, everyStep: Boolean): Outcome {
+    suspend fun run(probe: AppTarget, steps: List<AppStep>, everyStep: Boolean): Outcome {
         val screens = mutableListOf<Pair<Int, AppScreen>>()
         var expectations = 0
         fun screen() = AppScreen.render(probe.ui, probe.state, probe.surfaces, probe.nowMillis, probe.surfaceSizes)
@@ -115,6 +135,9 @@ internal object AppSteps {
                 sandboxFailure(failure.cause)?.let { throw it }
                 kind = FailureKind.APP
                 "the app failed while handling ${failure.event}: ${failureText(failure.cause)}"
+            } catch (failure: ThreeSceneFailure) {
+                kind = FailureKind.APP
+                "the scene failed: ${failureText(failure)}"
             } catch (failure: Exception) {
                 sandboxFailure(failure)?.let { throw it }
                 kind = FailureKind.STEP
@@ -130,7 +153,7 @@ internal object AppSteps {
         return Outcome(screens, null, screen(), expectations)
     }
 
-    private suspend fun execute(probe: ToolGenerationSmoke.AppProbe, step: AppStep): String? = when (step) {
+    private suspend fun execute(probe: AppTarget, step: AppStep): String? = when (step) {
         is AppStep.Tap -> {
             try {
                 probe.control(step.id, payload(probe, step.id, null, step.key, step.row))
@@ -155,7 +178,7 @@ internal object AppSteps {
         is AppStep.Expect -> expect(probe, step)
     }
 
-    private fun expect(probe: ToolGenerationSmoke.AppProbe, step: AppStep.Expect): String? {
+    private fun expect(probe: AppTarget, step: AppStep.Expect): String? {
         val screen = AppScreen.render(probe.ui, probe.state, probe.surfaces, probe.nowMillis, probe.surfaceSizes)
         return when (step.kind) {
             "text" -> if (screen.shows(checkNotNull(step.text))) null else "the screen does not show \"${step.text}\""
@@ -208,7 +231,7 @@ internal object AppSteps {
     }
 
     /** Converts a step into the control's wire payload, including the row key for collection controls. */
-    private fun payload(probe: ToolGenerationSmoke.AppProbe, id: String, value: Any?, key: String?, row: Int?): Any? {
+    private fun payload(probe: AppTarget, id: String, value: Any?, key: String?, row: Int?): Any? {
         val root = probe.ui
         val target = ToolUiCatalog.actionTarget(root, id)
             ?: throw AppStepError("No control has action ID \"$id\". Available: ${actionIds(root).joinToString().ifEmpty { "none" }}.")
@@ -282,12 +305,13 @@ internal object AppSteps {
         is RuntimeFailure -> CloudFailure("javascript_${failure.status.lowercase(java.util.Locale.ROOT)}", SandboxResult(failure.status).message)
         is CloudFailure -> failure
         else -> null
-    }?.takeIf { it.code in sandboxCodes }
+    }?.takeIf { it.code in sandboxCodes || it.code == "three_declined" }
 
     fun failureText(failure: Throwable?): String {
         val cause = failure?.cause?.takeIf { failure is ToolSmokeFailure } ?: failure
         return when (cause) {
             is GeneratedOutputDetail -> cause.detail
+            is ThreeSceneFailure -> listOfNotNull(cause.message, cause.detail?.let { "Error: $it" }).joinToString(" ")
             // The engine names every non-action event a preview, so the agent needs the rule and the alternative.
             is CloudFailure -> "${cause.code}: ${cause.message}" + if (cause.code != "widget_preview_effects") "" else
                 " Only action events may request effects. Frame, timer, and live input events cannot. " +

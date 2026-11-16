@@ -50,6 +50,8 @@ internal enum class ThreeSceneOperation { INIT, OPEN, EVENT, FRAME, DISPOSE, CHE
 internal class ThreeSceneFailure(
     val problem: ThreeSceneProblem,
     val operation: ThreeSceneOperation? = null,
+    /** The scene's own error text. Only the app builder sees it, because generated code wrote it. */
+    val detail: String? = null,
 ) : IllegalStateException(listOfNotNull(
     operation?.let { "Operation ${it.name.lowercase()}." }, problem.guidance,
 ).joinToString(" "))

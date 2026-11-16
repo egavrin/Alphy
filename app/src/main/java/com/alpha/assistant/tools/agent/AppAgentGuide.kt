@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools.agent
 
+import com.alpha.assistant.images.ImageIntent
 import com.alpha.assistant.sandbox.SandboxContract
 import com.alpha.assistant.tools.ArtifactProtocol
 import com.alpha.assistant.tools.ToolSpec
@@ -54,18 +55,18 @@ Design rules. The app must look finished and good on a phone:
 - Wrap the root in {"type":"theme","preset":p,"children":[...]} with one column child. Choose the preset by mood: clean (utilities, converters), soft (health, home, habits), expressive (games, fun), editorial (reading, lists of text), technical (money, numbers, data), playful (kids, quizzes). Use cornerRadius 16 to 24.
 - Put the main result first or directly after its inputs, in a card with a metric that has style emphasis "number". Show secondary results as metrics in a grid with columns 2.
 - Group inputs in a section or form with a short heading. Use one section for each topic. Do not put every control in one flat column.
-- Choose the control that fits the value: segmented for 2 to 4 short exclusive options, singleChoice (a radio list) for 5 or more, chip for on/off filters, slider with inputMode live for a bounded range, numberInput with step for exact amounts and counts, input with inputMode live for text before an Add button, timeInput for times, dateInput for dates, checkbox in list rows. Use few typed fields: each one adds an Apply button.
+- Choose the control that fits the value: segmented for 2 to 4 short exclusive options, singleChoice (a radio list) for 5 or more, chip for on/off filters, slider with inputMode live for a bounded range, numberInput with step for exact amounts and counts, input with inputMode live for text before an Add button, timeInput for times, dateInput for dates, checkbox in list rows. Use few typed fields: each one shows an Apply button after an edit.
 - Give each group one filled primary button. Use outlined or text variants for secondary actions. Put Reset or Clear last.
-- Lists and logs: start them empty in initialState, without sample rows. A total that adds up logged entries starts at 0. Use a list with rowTemplate for rows with controls, columns for read-only tables. Give a table 2 to 4 short columns so it fits a phone. Show saved rows as text, not as input fields. To change a row, load it into the form or open a dialog. Show an emptyState with a short message when a list is empty.
+- Lists and logs: start them empty in initialState, without sample rows. A total that adds up logged entries starts at 0. Use a list with rowTemplate for rows with controls, columns for read-only tables. Give a table 2 to 4 short columns so it fits a phone. Show saved rows as text, not as input fields. In a row template, put the item name first and its values in short texts or badges, for example "250 ml" or "08:30", not "Amount: 250 ml". Give these bound texts and badges an empty text label ("text":""), so the row shows only the values. A phone row is about 320 dp wide: a row with "wrap":false holds the weighted name and at most two controls, such as a switch and a delete icon. Put a time field or a third control on a second line. To change a row, load it into the form or open a dialog. Show an emptyState with a short message when a list is empty.
 - Status: use a banner or badge with tone success, warning, or error only for a real status. Use text with style tone muted for hints.
 - Write status, error, and empty texts in the user's words. Do not name endpoints, JSON paths, value types, state fields, or capabilities. When a value has no source, say only that it is not available yet.
-- A text or badge with bind shows "Label: value", and a metric shows the label above the value. Do not repeat the label words in the value: use "Done" with "3 of 5", not "Done" with "3 done". Read the screen text after each write.
+- A text or badge with bind shows "Label: value", or only the value when its label is empty. A metric shows the label above the value. Do not repeat the label words in the value: use "Done" with "3 of 5", not "Done" with "3 done". Read the screen text after each write.
 - A metric value is one short number or word with its unit, such as "12.5 km" or "Normal". Put phrases such as "None yet" in text or emptyState.
 - Labels are short and in sentence case. Name values with the words of the request, for example "Points" when the request counts points. Put units in labels, for example "Weight (kg)". Do not repeat the app title inside the UI.
 - Format numbers for people. Round in the source. Show money with 2 decimals, percentages and measurements with at most 2 decimals. Never show long floating point values such as 0.30000000000000004. Use a string state field for formatted text when a number needs a unit, currency sign, or fixed decimals.
 - Show results immediately after an input changes. Do not require an extra Calculate button unless the user asks for one.
 - Calculators and converters: start every number input and slider at a sample value, from the request or else a typical value. Compute the results for these values in initialState, so the first screen shows a real result, not empty fields and dashes.
-- Drawings: the screen text gives each surface size and the extent of the drawing. Give a touch area a background that differs from the page, so the user sees where to touch. Show numbers and words as text or metric nodes, not as drawn text. Show a progress bar or a ring with a progress or progressRing node, not with a drawing. Center the main drawing and fill most of the surface. Use 2 to 4 colors that suit the topic. The drawing tones default, muted, accent, success, warning, and error are ink colors. The tone default is the text color, not the background, so a circle in default is a dark disk.
+- Drawings: the screen text gives each surface size and the extent of the drawing. Give a touch area a background that differs from the page, so the user sees where to touch. Show numbers and words as text or metric nodes, not as drawn text. Show a progress bar or a ring with a progress or progressRing node, not with a drawing. Center the main drawing and fill most of the surface. Use 2 to 4 colors that suit the topic. The drawing tones default, muted, accent, success, warning, and error are ink colors. The tone default is the text color, not the background, so a circle in default is a dark disk. A shape in muted is a light tint for tracks, empty cells, and grid lines.
 - Games: show the score and status as metrics or a banner, a clear board (a grid of buttons for cell games, or a canvas for drawing and motion), and a Restart button. Give a board grid as many columns as the board has, for example columns 3 for a 3 by 3 board. Keep the number or name of each cell visible after a move, so the user can still find the cell. Block moves after the game ends.
 - Timers: for a countdown that must alert the user (vibration, sound, notification), use a timer node with foreground (the host owns Start, Reset, and alerts). For a countdown that only shows time, store the end time with Date.now() and bind a timer node.
 """.trimIndent()
@@ -131,7 +132,7 @@ Events: {type:'open'}, {type:'preview'}, {type:'render'}, {type:'action',actionI
 Only action events may request effects: effects:[{id:'uniqueId',capability:'catalog.id',args:{...}}], at most 3. Effect IDs match [A-Za-z][A-Za-z0-9_]{0,47}. Declare each capability in capabilities. Never claim that an external action finished because you requested it. Set capabilityResults:true to receive {type:'capabilityResults',entries:[...]} after effects finish. The message of an entry is for app logic. Do not show it. Show your own short status in the interface language.
 No network, files, imports, host APIs, JavaScript timers, or promises. Date.now() and Math.random() are available.
 The smoke test presses every visible control with sample values, including numeric bounds. Results must stay finite and inside the numeric range.
-Apply buttons: numberInput, and input or slider without inputMode, show an Apply button under the field. An input or slider with "inputMode":"live" sends each change at once, with no Apply button. Use live for text drafts before an Add button and for sliders that drive a result. Use numberInput for exact amounts. Handle both event types with if(e.type==='action'||e.type==='liveInput'). A liveInput event cannot request effects. Store the value and recalculate in the same event.
+Apply buttons: numberInput, and input or slider without inputMode, show an Apply button under the field after the user changes the value. An input or slider with "inputMode":"live" sends each change at once, with no Apply button. Use live for text drafts before an Add button and for sliders that drive a result. Use numberInput for exact amounts. Handle both event types with if(e.type==='action'||e.type==='liveInput'). A liveInput event cannot request effects. Store the value and recalculate in the same event.
 When a request needs continuous updates, use a drawing surface with frame or timer subscriptions.
 If the user requests a live JSON value and network.request is available, use one foreground Refresh action with network.request (GET, no headers or body, extract:{kind,path}). Store the value, source, and time together. Keep the last valid value when refresh fails, and show the error.
 Optional collections declare private native record stores for long histories. Prefer bounded state lists for normal apps.
@@ -148,8 +149,34 @@ This is a test-and-fix request for the user's saved app:
 3. When you cannot confirm a problem, do not change the app. Call finish with checks of the reported workflow, and say in the summary that no problem was confirmed.
 """.trimIndent()
 
-    fun system(capabilities: String, extra: String): String = buildString {
+    val pictures = """
+Pictures are available for this request:
+- generate_image: {"tool":"generate_image","images":[{"slot":"hero","prompt":"visual description only","alt":"short description in the app language","aspect":"3:2"}]}. Makes pictures for this app, at most 4 in one request. Each picture takes about 20 seconds and costs the user money.
+- Make pictures only when they help the request: a recipe or lesson illustration, flash cards, a picture book, a catalog of items, a game backdrop. Do not make pictures for calculators, trackers, timers, or forms unless the user asks for them.
+- Make the pictures first. Then show each one with {"type":"image","assetSlot":"hero","text":"short description"}. Add "fit":"crop" for a wide banner. A row template cannot hold an image node.
+- ${ImageIntent.GUIDANCE}
+""".trimIndent()
+
+    private val textures = """- A texture needs a picture: make it with generate_image (aspect 2:1 for a sphere map, 1:1 for other meshes), then in createScene call await context.bindTexture("slot", mesh) for a mesh with a MeshStandardMaterial before the first render. Keep that material color white, because the color multiplies the texture. Bind each picture once.""".trim()
+
+    val threeScene = """
+3D scenes are available on this device. Use one when the request needs real 3D: a model viewer, a planet or a solar system, a molecule, a 3D shape to rotate, or a 3D game. Use a canvas for flat drawings and 2D games.
+- Add "runtime":{"kind":"threejs-worker","version":1}. Use "capabilities":[] and no surfaces, hostControls, collections, capabilityResults, or canvas node. Alphy shows the scene in a viewport above the native ui.
+- source is an ES module, not a function body: export async function createScene(context){...}. context has THREE, addons (GLTFLoader, OrbitControls, EffectComposer, RenderPass, ShaderPass, OutputPass), canvas, input, state, viewport {width,height}, readAsset(id), and bindTexture(slot, mesh).
+- In createScene: const renderer=new context.THREE.WebGLRenderer({canvas:context.canvas,antialias:true}); renderer.setSize(context.viewport.width,context.viewport.height,false); add an AmbientLight and a DirectionalLight; build the scene; render the first frame before you return. The host rejects a first frame that shows only the background.
+- Return {event(e){}, frame(f){}, snapshot(){return {state};}, dispose(){renderer.dispose();}}. event gets open, viewport (width,height), pointerdown, pointermove, pointerup, pointercancel (x and y from 0 to 1), action and liveInput (actionId,value), pause, resume, start, and restart. frame gets {timeMs,dtMs}: animate with dtMs and render. Render again after each change.
+- Keep app values in state, with the same stateSchema rules. Native controls in ui send action events to event(e). Change state there, and snapshot() returns it. Do not change state values in createScene or open.
+- For rotate and zoom use new context.addons.OrbitControls(camera, context.input), and call controls.update() in frame.
+- Do not use the DOM, fetch, import, or URLs.
+- Steps for run and finish: native controls work as usual. {"pointer":"scene","x":0.5,"y":0.5} taps the viewport. {"wait":1000} advances frames. Expectations read the native ui and state.
+""".trimIndent()
+
+    fun system(capabilities: String, extra: String, pictures: Boolean = false, threeD: Boolean = false): String = buildString {
         append(protocol).append("\n\n").append(design).append("\n\n").append(examples).append("\n\n").append(format)
+        if (pictures) append("\n\n").append(this@AppAgentGuide.pictures)
+        if (threeD) append("\n\n").append(threeScene)
+        // A texture needs generate_image, so the texture rule comes only with pictures.
+        if (threeD && pictures) append('\n').append(textures)
         append("\n\n").append(capabilities)
         if (extra.isNotBlank()) append("\n\n").append(extra)
     }

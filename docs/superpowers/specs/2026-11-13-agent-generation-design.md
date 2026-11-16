@@ -32,6 +32,16 @@ Source: the user in this session.
   good-looking app. The corpus is
   `alphy-deal-comparison-evidence-2026-11-10/frozen/final.json`.
 
+Source: the user on 2026-11-16.
+
+- Restore 3D scene generation and image generation. An app or a lesson
+  sometimes needs them.
+- An app uses the language of the request, for example Italian for an Italian
+  request.
+- Add more diverse prompts that show and test all UI node types, 3D scenes,
+  and pictures.
+- Fix the visible UI defects of generated apps.
+
 Source: `AGENTS.md`.
 
 - Use one executable behavior checker for generated apps and games.
@@ -86,6 +96,7 @@ replies. Native function calling is also permitted later.
 | `edit_app` | `set`: top-level fields to replace, `source_edits`: find and replace pairs for `source` | Validation result and the first screen |
 | `run` | `steps`: operations from the initial state | The screen after each step, or the first error |
 | `finish` | `checks`: scenarios with expectations, `summary`: the chat reply | Pass, or the failed expectation and the observed screen |
+| `generate_image` | `images`: 1 to 4 picture requests (`slot`, `prompt`, `alt`, `aspect`) | The slots that are ready, or the failure |
 
 Each write or edit runs the full host validation:
 
@@ -93,7 +104,8 @@ Each write or edit runs the full host validation:
 2. Policy and capability checks (`ToolExecutionPolicy`, approved capabilities).
 3. For a follow-up, `ToolSpec.stateForRevision` with the saved state.
 4. The safe smoke test (`ToolGenerationSmoke.run`): preview, open, and every
-   visible control once.
+   visible control once. A 3D app gets the scene check
+   (`checkThreeScene`) instead: the first frame must show content.
 5. The interface language check (`GenerationLanguage`).
 
 A failure returns the validation message and its correction text. The model
@@ -152,6 +164,37 @@ endpoints, JSON paths, value types, state fields, or capability names.
 The shell above the app shows the message of the last effect only when the
 effect did not succeed. A successful beep or an opened share sheet adds no line.
 The access panel keeps the full effect history.
+
+### Pictures and 3D scenes
+
+`generate_image` is available only when image generation is turned on in the
+settings and the provider key is saved. The host then gives the agent the
+picture guide, and the tool list names the tool. The tool calls
+`ImageGeneration.generate` with one operation for each call. One generation
+can make at most 4 pictures, because each picture takes about 20 seconds and
+costs money. The agent shows a picture with an `image` node and its
+`assetSlot`. A slot that has no picture is rejected. A follow-up keeps the
+saved pictures, and its task message lists them.
+
+3D scenes are available only when `ThreeSceneWebView.available()` is true,
+that is, on a qualified WebView. The agent then gets the 3D guide: the runtime
+field, the `createScene(context)` module contract, the lights, the event and
+frame handlers, and the forbidden APIs. The scene check runs the scene in the
+worker. A script error reaches the model with its name, message, and the
+`scene.js` line and column. A 3D app without a qualified WebView gets the
+feedback to draw the app with a canvas.
+
+A generated picture can be a texture. The agent binds it with
+`context.bindTexture(slot, mesh)`. The host adds each slot that the source
+quotes to `sceneAssets` and `generatedImages`. The texture rule tells the
+agent to use a white material, because a colored material multiplies the
+texture color. The texture rule appears only when pictures are available.
+Attached 3D models from the chat are listed in the task with the
+`GLTFLoader.parseAsync` hint.
+
+`run` and `finish` use the same steps for a 3D app (`ThreeSceneTarget`). A tap
+or a set goes to the scene as an action. A pointer on the surface "scene"
+sends a pointer down and up. A wait advances frames of 50 ms.
 
 ### Screen observation
 
@@ -284,6 +327,48 @@ renderer:
 - The image placeholder and the vibration note used Russian text in English
   apps. They now follow the language of the app controls.
 
+The review on 2026-11-16 found these defects:
+
+- A number field that is not a live input showed a disabled "Apply: X" button
+  under the field. A calculator then repeated this button under each field.
+  The button now shows only after the user changes the value.
+- Host texts in an app used English for every language except Russian. The
+  app controls now have strings in Italian, German, French, Spanish,
+  Portuguese, Ukrainian, Polish, Turkish, Chinese, Japanese, and Korean.
+- A drawn shape in tone "muted" used the dark text ink. A progress track at 0%
+  then looked full. A muted shape is now a light tint (alpha 64). Muted text
+  keeps its ink.
+- In a 5-option segmented control, an option with a long label was taller than
+  the others. All options now have the height of the tallest one.
+- The detail title showed one line next to the edit action. It now shows up to
+  2 lines.
+- A list row showed "Model: Trek Domane" or "Rank: Rank 1", because a bound
+  text needed a label of 1 to 300 characters. A bound text or badge can now
+  have an empty label, and then it shows only its value. The guide tells the
+  agent to use this in row templates.
+
+The live showcase run found these host defects:
+
+- The 3D pane gave its controls no live input channel. A live slider in a 3D
+  app showed "Open the mini-app to edit" and a disabled Apply. The pane now
+  shows live controls as ordinary controls with Apply after a change. The
+  session still sends the value to the scene as a liveInput event.
+- The playback buttons and the "paused" label of a 3D scene or a drawing
+  surface used the device language, for example "Пауза" in a French app. They
+  now use the app language.
+- A card always added 16 dp inside, and its style padding was an outer margin.
+  A 56 dp tile with padding "small" then clipped its title text (a 2048 board
+  showed only the tops of its numbers). The style padding of a card is now its
+  inner padding.
+- The icon catalog had no minus icon, so a menu stepper used the Close X for
+  "Remove one". The catalog now has a Minus icon.
+- A narrow button or a short text broke inside a word, for example "Dow/n" in
+  four direction buttons and "Espress/o" at font scale 2. Button labels, and
+  texts of up to 24 characters in a row with `"wrap":false`, now shrink to
+  10 sp before a word breaks. Other text keeps its size and wraps. The text
+  shrink applied to all short texts first, and then the date range dialog of
+  the gallery lost its keyboard focus at font scale 2.
+
 ### Model settings
 
 Each step uses `deepseek-flash` with thinking enabled. A write can use the
@@ -302,7 +387,6 @@ The staged pipeline for mini-apps is removed:
 
 - The app plan prompt, the whole-screen route, and the staged selector,
   complete, refine, and polish stages for apps.
-- Three.js scene generation and the generated-image slots in new apps.
 - The replay and reliability tests of the staged app path, with their
   recorded fixtures.
 
@@ -314,7 +398,6 @@ and the Three.js renderer.
 
 Some code is dead or almost dead after the removal, but kept tests use it:
 
-- `ToolSpec.withThreeAssets` and `withGeneratedImages`.
 - The draft preview publisher and the preview observer chain in
   `ToolGenerationService.generate`.
 - The trace event types Stage, Attempt, and Repair, and 7 of the 9
@@ -329,28 +412,30 @@ before the agent change.
 
 ## Unresolved decisions
 
-- 3D scene generation (`generateThreeScene`) depends on the PLAN stage. No corpus
-  case uses it. This rewrite removes 3D generation. Saved 3D apps still open.
-  A later agent tool can add it back. The chat decision prompt no longer
-  says that 3D scenes are available.
-- Generated images inside apps (`imageRequests`, image polish) depend on the
-  PLAN and REFINE stages. No corpus case uses them. This rewrite removes them.
-  Saved images still show.
-- A number field that is not a live input shows a disabled "Apply: X" button
-  under the field. Calculator apps then repeat this button under each field.
-  A live input for every number field removes the button, but it changes the
-  input contract and the tests that use the button.
+- `ThreeSceneWebView.available()` accepts only two WebView versions. The
+  Android 16 emulators have WebView 133, so they cannot run 3D apps. The 3D
+  checks run on an Android 17 emulator with WebView 145 and the host GPU. A
+  wider list of qualified versions is a product decision.
+- Live runs of the picture cases need the OpenRouter key on the device. The
+  harness delivers only the DeepSeek key. Without the image key, the picture
+  cases build apps without pictures.
 - Host capability results, for example the audio result message, are in
   Russian. The guide rule hides them from the app, and the shell shows only
   failed results. A failed result in an English app still shows a Russian line.
   A host change can give each result a message in the app language.
-- A canvas drawing in tone "muted" uses the text ink color, a dark gray. A
-  drawn progress track at 0% then looks full. The guide tells the agent to use
-  progress and progressRing nodes instead, but some apps still draw bars.
 - The shell around a mini-app (for example "Изменить" in the top bar) uses the
   device language, also for an English app. The shell theme is grayscale, so
   apps look gray unless they set tones. Both are shell decisions outside the
   agent loop.
+- A row with `"wrap":false` can hold more fixed controls than a phone width
+  holds. A dose row with a time field, a labeled switch, and a delete icon left
+  11 dp for its name. Shrinking cannot fix this, and the renderer does not move
+  controls to a second line. The guide tells the agent to keep a weighted name
+  and at most two controls in such a row. A renderer fallback to a wrapping row
+  is a product decision.
+- The host shows a dateInput value as an ISO date ("2026-11-21") and a slider
+  value with a decimal point ("0.3" in a German app). Formats in the app
+  language need a host change.
 
 ## Verification
 
@@ -368,6 +453,9 @@ before the agent change.
    controls by label pattern, so one scenario works for every generated
    version. The host judges the final visible text. Scenarios stay outside
    product code.
+5. Live runs of `tools/agent_corpus/showcase.json`: 32 public cases for 3D
+   scenes, pictures, 12 interface languages, the UI node types, and games.
+   The tags of each case name what it exercises.
 
 ### Evidence
 
@@ -417,4 +505,43 @@ Workflow checker gaps found on new app variants are regression fixtures in
 `Plan5SavedArtifactWorkflowTest`: a text balance ("0 очк."), an amount
 "300 g → 450 g", an ingredient row beside a hidden empty state, and a grid
 with list-item cells.
+
+The showcase runs used the same emulators and provider, without the image key.
+The 3D cases ran on an Android 17 emulator with WebView 145 and the host GPU.
+
+| Run | Build | Cases | Apps | Steps (median, max) | Seconds (median) |
+| --- | --- | --- | --- | --- | --- |
+| showcase1 | before the showcase fixes, last 6 cases on fix3 | 32 | 32 | 4, 15 | 103 |
+| showcase2 | fix3 (card padding, empty labels) | 6 reruns | 6 | 4, 6 | 78 |
+| showcase3 | fix4 (Minus icon) | 3 reruns | 3 | 5, 5 | 142 |
+| showcase4 | fix5 (whole-word shrink, row guide) | 2 reruns | 2 | 6.5, 8 | 86.5 |
+
+In showcase1, three cases on one emulator ran at font scale 2.0, which an
+earlier visual test left set. All apps used the language of the request. The 6
+3D apps showed their scene in the first frame. The picture cases drew canvas
+illustrations, because no image key was on the device. The longest runs were
+the drawing game (15 steps), a German workout (11), and a Chinese pomodoro
+timer (10). The reruns confirmed these fixes on screen: readable 2048 tiles,
+list rows without a "Label:" prefix, a Minus icon in the menu stepper, and a
+live slider in a 3D app without "Open the mini-app to edit", and French
+playback buttons in a French 3D app. On fix5, the 2048 direction buttons kept
+whole words, and the dose rows kept the name, a switch, and a delete icon on one
+line with the time field on a second line.
+
+The instrumentation classes for the native UI, the agent loop, pictures, 3D,
+and app language pass on the last build that each one ran on. The 3D, agent,
+layout, and visual classes ran on fix6. The other UI classes ran on fix5, and
+fix6 only narrows the text shrink of fix5. These failures also occur on the base commit
+600f595 with the same message, so they are not from this change:
+`MiniAppVisualWorkflowTest` (4), `MiniAppPresentationWorkflowTest` (4),
+`NativePresentationHostWorkflowTest` (2),
+`NativePresentationWorkflowTest#mixedCounterAndRecordActionsSaveAndReopenThroughTheNativeHost`,
+`Plan5SavedArtifactWorkflowTest#capturedGridDistinguishesGraphicsRestartFromGeneratedRestart`,
+`RecordReorderWorkflowTest#dragAndAccessibleMoveCommitOnlyThroughTheSavedAction`,
+and `LibraryManagementWorkflowTest#searchOpenArchiveCancelConfirmAndRestoreThroughNativeUi`.
+`LibraryManagementWorkflowTest#deletionKeepsOwnedEventInAndroidCalendar` needs
+calendar grants that the new emulators do not have. Some tests failed once in
+a full class run and passed alone, for example the immersive viewport and the
+Arkanoid touch tests. `galleryDateRangeAcceptsSoftwareKeyboardAtSystemFont200`
+failed in 1 of 4 fix6 runs, when the keyboard did not open within 10 seconds.
 

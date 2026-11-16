@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tool_generated_apply_en">Zastosuj: %1$s</string>
+    <string name="tool_generated_search_en">Szukaj: %1$s</string>
+    <string name="tool_generated_remove_en">Usuń: %1$s</string>
+    <string name="tool_number_increase_en">Zwiększ: %1$s</string>
+    <string name="tool_number_decrease_en">Zmniejsz: %1$s</string>
+    <string name="tool_live_input_finish_en">Zakończ edycję: %1$s</string>
+    <string name="tool_live_input_pending_en">Zapisywanie zmian</string>
+    <string name="tool_live_input_unsaved_en">Zmiany nie zostały zapisane</string>
+    <string name="tool_live_input_unavailable_en">Otwórz miniaplikację, aby edytować</string>
+    <string name="tool_live_input_finish_first_en">Zakończ edycję i poczekaj na zapisanie zmian</string>
+    <string name="tool_timer_idle_en">Nie uruchomiono</string>
+    <string name="tool_timer_expired_en">Czas minął</string>
+    <string name="tool_timer_unavailable_en">Czas niedostępny</string>
+    <string name="tool_timer_remaining_en">Pozostało %1$s</string>
+    <string name="tool_timer_elapsed_en">Upłynęło %1$s</string>
+    <string name="tool_timer_clock_days_en">%1$d d %2$02d:%3$02d:%4$02d</string>
+    <string name="foreground_timer_start_en">Uruchom minutnik</string>
+    <string name="foreground_timer_resume_en">Wznów minutnik</string>
+    <string name="foreground_timer_reset_en">Zresetuj minutnik</string>
+    <string name="foreground_timer_ready_en">Gotowe: %1$s</string>
+    <string name="foreground_timer_paused_en">Wstrzymano: %1$s</string>
+    <string name="foreground_timer_vibration_en">Telefon zawibruje, gdy czas minie</string>
+    <string name="tool_image_unavailable_en">%1$s · brak obrazu</string>
+    <string name="foreground_timer_notification_en">Na końcu: powiadomienie „%1$s”. %2$s</string>
+    <string name="foreground_timer_denied_en">Czas minął. Android nie zezwolił na alert.</string>
+    <string name="foreground_timer_unavailable_en">Czas minął. Alert jest niedostępny.</string>
+    <string name="foreground_timer_uncertain_en">Czas minął. Wynik alertu nie został potwierdzony.</string>
+    <string name="foreground_timer_suppressed_en">Czas minął. Osiągnięto limit alertów.</string>
+    <string name="foreground_timer_failed_en">Nie udało się zapisać stanu minutnika.</string>
+    <string name="tool_records_empty_en">Brak wpisów</string>
+    <string name="tool_generated_dialog_close_en">Zamknij: %1$s</string>
+    <string name="tool_route_back_en">Powrót do miniaplikacji</string>
+    <string name="tool_page_en">Strona %1$d z %2$d</string>
+    <string name="tool_page_previous_en">Wstecz: %1$s</string>
+    <string name="tool_page_next_en">Dalej: %1$s</string>
+    <string name="tool_reorder_handle_en">Zmień kolejność: %1$s</string>
+    <string name="tool_reorder_move_up_en">Przenieś w górę</string>
+    <string name="tool_reorder_move_down_en">Przenieś w dół</string>
+    <string name="tool_game_start_en">Start</string>
+    <string name="tool_game_pause_en">Pauza</string>
+    <string name="tool_game_resume_en">Wznów</string>
+    <string name="tool_game_restart_en">Od nowa</string>
+    <string name="tool_scene_paused_en">Wstrzymano</string>
+</resources>

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tool_generated_apply_en">適用：%1$s</string>
+    <string name="tool_generated_search_en">検索：%1$s</string>
+    <string name="tool_generated_remove_en">削除：%1$s</string>
+    <string name="tool_number_increase_en">増やす：%1$s</string>
+    <string name="tool_number_decrease_en">減らす：%1$s</string>
+    <string name="tool_live_input_finish_en">編集を完了：%1$s</string>
+    <string name="tool_live_input_pending_en">変更を保存中</string>
+    <string name="tool_live_input_unsaved_en">変更は保存されていません</string>
+    <string name="tool_live_input_unavailable_en">編集するにはミニアプリを開いてください</string>
+    <string name="tool_live_input_finish_first_en">編集を完了し、変更が保存されるまでお待ちください</string>
+    <string name="tool_timer_idle_en">未開始</string>
+    <string name="tool_timer_expired_en">時間になりました</string>
+    <string name="tool_timer_unavailable_en">時間を取得できません</string>
+    <string name="tool_timer_remaining_en">残り %1$s</string>
+    <string name="tool_timer_elapsed_en">経過 %1$s</string>
+    <string name="tool_timer_clock_days_en">%1$d日 %2$02d:%3$02d:%4$02d</string>
+    <string name="foreground_timer_start_en">タイマーを開始</string>
+    <string name="foreground_timer_resume_en">タイマーを再開</string>
+    <string name="foreground_timer_reset_en">タイマーをリセット</string>
+    <string name="foreground_timer_ready_en">準備完了：%1$s</string>
+    <string name="foreground_timer_paused_en">一時停止中：%1$s</string>
+    <string name="foreground_timer_vibration_en">時間になるとスマートフォンが振動します</string>
+    <string name="tool_image_unavailable_en">%1$s · 画像なし</string>
+    <string name="foreground_timer_notification_en">終了時：通知「%1$s」。%2$s</string>
+    <string name="foreground_timer_denied_en">時間になりました。Androidがアラートを許可しませんでした。</string>
+    <string name="foreground_timer_unavailable_en">時間になりました。アラートを利用できません。</string>
+    <string name="foreground_timer_uncertain_en">時間になりました。アラートの結果は未確認です。</string>
+    <string name="foreground_timer_suppressed_en">時間になりました。アラートの上限に達しました。</string>
+    <string name="foreground_timer_failed_en">タイマーの状態を保存できませんでした。</string>
+    <string name="tool_records_empty_en">記録はまだありません</string>
+    <string name="tool_generated_dialog_close_en">閉じる：%1$s</string>
+    <string name="tool_route_back_en">ミニアプリに戻る</string>
+    <string name="tool_page_en">%1$d / %2$d ページ</string>
+    <string name="tool_page_previous_en">戻る：%1$s</string>
+    <string name="tool_page_next_en">次へ：%1$s</string>
+    <string name="tool_reorder_handle_en">並べ替え：%1$s</string>
+    <string name="tool_reorder_move_up_en">上へ移動</string>
+    <string name="tool_reorder_move_down_en">下へ移動</string>
+    <string name="tool_game_start_en">開始</string>
+    <string name="tool_game_pause_en">一時停止</string>
+    <string name="tool_game_resume_en">再開</string>
+    <string name="tool_game_restart_en">最初から</string>
+    <string name="tool_scene_paused_en">一時停止中</string>
+</resources>

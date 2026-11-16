@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tool_generated_apply_en">Appliquer : %1$s</string>
+    <string name="tool_generated_search_en">Rechercher : %1$s</string>
+    <string name="tool_generated_remove_en">Supprimer : %1$s</string>
+    <string name="tool_number_increase_en">Augmenter : %1$s</string>
+    <string name="tool_number_decrease_en">Diminuer : %1$s</string>
+    <string name="tool_live_input_finish_en">Terminer la saisie : %1$s</string>
+    <string name="tool_live_input_pending_en">Enregistrement des modifications</string>
+    <string name="tool_live_input_unsaved_en">Modifications non enregistrées</string>
+    <string name="tool_live_input_unavailable_en">Ouvrez la mini-app pour modifier</string>
+    <string name="tool_live_input_finish_first_en">Terminez la saisie et attendez l\'enregistrement des modifications</string>
+    <string name="tool_timer_idle_en">Non démarré</string>
+    <string name="tool_timer_expired_en">Temps écoulé</string>
+    <string name="tool_timer_unavailable_en">Temps indisponible</string>
+    <string name="tool_timer_remaining_en">%1$s restant(s)</string>
+    <string name="tool_timer_elapsed_en">%1$s écoulé(es)</string>
+    <string name="tool_timer_clock_days_en">%1$d j %2$02d:%3$02d:%4$02d</string>
+    <string name="foreground_timer_start_en">Démarrer le minuteur</string>
+    <string name="foreground_timer_resume_en">Reprendre le minuteur</string>
+    <string name="foreground_timer_reset_en">Réinitialiser le minuteur</string>
+    <string name="foreground_timer_ready_en">Prêt : %1$s</string>
+    <string name="foreground_timer_paused_en">En pause : %1$s</string>
+    <string name="foreground_timer_vibration_en">Le téléphone vibre à la fin du temps</string>
+    <string name="tool_image_unavailable_en">%1$s · aucune image</string>
+    <string name="foreground_timer_notification_en">À la fin : notification « %1$s ». %2$s</string>
+    <string name="foreground_timer_denied_en">Temps écoulé. Android n\'a pas autorisé l\'alerte.</string>
+    <string name="foreground_timer_unavailable_en">Temps écoulé. L\'alerte est indisponible.</string>
+    <string name="foreground_timer_uncertain_en">Temps écoulé. Le résultat de l\'alerte n\'est pas confirmé.</string>
+    <string name="foreground_timer_suppressed_en">Temps écoulé. La limite d\'alertes est atteinte.</string>
+    <string name="foreground_timer_failed_en">Impossible d\'enregistrer l\'état du minuteur.</string>
+    <string name="tool_records_empty_en">Aucun enregistrement pour l\'instant</string>
+    <string name="tool_generated_dialog_close_en">Fermer : %1$s</string>
+    <string name="tool_route_back_en">Retour dans la mini-app</string>
+    <string name="tool_page_en">Page %1$d sur %2$d</string>
+    <string name="tool_page_previous_en">Précédent : %1$s</string>
+    <string name="tool_page_next_en">Suivant : %1$s</string>
+    <string name="tool_reorder_handle_en">Réorganiser : %1$s</string>
+    <string name="tool_reorder_move_up_en">Monter</string>
+    <string name="tool_reorder_move_down_en">Descendre</string>
+    <string name="tool_game_start_en">Démarrer</string>
+    <string name="tool_game_pause_en">Pause</string>
+    <string name="tool_game_resume_en">Reprendre</string>
+    <string name="tool_game_restart_en">Recommencer</string>
+    <string name="tool_scene_paused_en">En pause</string>
+</resources>

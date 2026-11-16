@@ -37,7 +37,7 @@ object ToolUiCatalog {
     internal class InvalidBooleanActionPayload(val control: JSONObject) : IllegalArgumentException("Invalid action value.")
     internal val tones=setOf("default","muted","accent","success","warning","error")
     val presets=setOf("clean","soft","expressive","editorial","technical","playful")
-    val icons=setOf("Menu","History","Plus","Arrow","Close","Back","Cloud","Mic","Grid","Spark","Calendar","Repeat","Settings","File","Link","Chevron","Search","Screen","Camera","Bell","Check")
+    val icons=setOf("Menu","History","Plus","Minus","Arrow","Close","Back","Cloud","Mic","Grid","Spark","Calendar","Repeat","Settings","File","Link","Chevron","Search","Screen","Camera","Bell","Check")
     private val unlabeledLeaves = setOf("spacer", "divider", "skeleton", "spinner", "navigation", "calendar", "medicine")
 
     private fun entry(type: String, props: Set<String> = emptySet(), projection: Projection = Projection.SUMMARY,
@@ -230,7 +230,9 @@ object ToolUiCatalog {
                     }
                     if(node.has("text")) {
                         trace.checking("component_text","$location.text","string_length_1_300",node.opt("text"),(node.opt("text") as? String)?.length) {
-                            require(node.get("text") is String && node.getString("text").length in 1..300)
+                            // A bound text or badge with an empty label shows only its value, for example a name in a list row.
+                            val shortest = if (type in setOf("text", "badge") && node.has("bind")) 0 else 1
+                            require(node.get("text") is String && node.getString("text").length in shortest..300)
                         }
                     }
                     if(node.has("layout")) trace.checking("component_layout", "$location.layout", "catalog_layout", node.opt("layout")) {
@@ -1112,7 +1114,7 @@ object ToolUiCatalog {
         }
         return if(resourceHandle.containsMatchIn(label)) "${widgetText(node.optString("text"))} · Open in Alphy" else label
     }
-    fun modelGuidance(): String = """Give every non-container node a nonempty text label, even when the node is hidden. A bind supplies a value. It does not supply the text label. The only non-container exceptions are ${unlabeledLeaves.joinToString(", ")}.
+    fun modelGuidance(): String = """Give every non-container node a nonempty text label, even when the node is hidden. A bind supplies a value. It does not supply the text label. A bound text or badge may have an empty text label: it then shows only its value. The only non-container exceptions are ${unlabeledLeaves.joinToString(", ")}.
 Use native choice controls bound to state for selections. Use buttons for commands. Store the selected value when the action succeeds. Show feedback from the changed state, such as the selected option, updated result, or game status.
 Give the workflow a clear focal element, such as its form, result, or scene. Group related controls in a form, section, or row. Use one prominent action in a group when the task has a primary command. Use the host defaults for spacing and button emphasis unless the workflow requires a different treatment.
 Place allowed tone and emphasis inside the component's style object. For example, use {"type":"metric","text":"Total","bind":"total","style":{"emphasis":"number"}}. Omit style if it is unnecessary.

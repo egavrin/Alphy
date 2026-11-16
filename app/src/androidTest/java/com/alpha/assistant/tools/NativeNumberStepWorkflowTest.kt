@@ -79,6 +79,8 @@ class NativeNumberStepWorkflowTest {
     @Test fun narrowLargeTextStepperOnlyCommitsOnApplyAndClampsBothEnds() = withSaved(node(), enabled = true, fontScale = 2f) { store, saved ->
         robot.assertTarget(increase)
         robot.assertTarget(decrease)
+        // Failure case: a calculator showed a disabled Apply button under every unchanged number field.
+        assertNull(robot.find(apply))
         robot.click(increase)
         awaitDraft("0.3")
         robot.click(increase)
@@ -92,7 +94,7 @@ class NativeNumberStepWorkflowTest {
         robot.waitUntil { store.tool(saved.id)?.let { JSONObject(it.state).getDouble("amount") == 0.28 } == true }
         val committed = checkNotNull(store.tool(saved.id))
         assertEquals(saved.stateVersion + 1, committed.stateVersion)
-        assertDisabled(apply)
+        robot.waitUntil { robot.find(apply) == null }
 
         robot.edit(field, "99")
         assertDisabled(increase)
@@ -108,7 +110,8 @@ class NativeNumberStepWorkflowTest {
 
     @Test fun disabledPreviewCannotStepAndOrdinaryFieldKeepsApply() {
         withSaved(node(), enabled = false) { store, saved ->
-            for (label in listOf(increase, decrease, apply)) assertDisabled(label)
+            for (label in listOf(increase, decrease)) assertDisabled(label)
+            assertNull(robot.find(apply))
             assertEquals(saved, store.tool(saved.id))
         }
         withSaved(node().apply { remove("step") }, enabled = true) { store, saved ->

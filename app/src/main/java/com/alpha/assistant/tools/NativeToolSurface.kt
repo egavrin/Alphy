@@ -308,7 +308,7 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
     }
     val playbackControls: @Composable () -> Unit = {
         ToolPlaybackControls(ArtifactPlayback.primaryControl(snapshot?.playback), enabled && !covered,
-            restartEnabled = snapshot != null) { event ->
+            restartEnabled = snapshot != null, appLanguage = spec.appLanguage) { event ->
             for (id in spec.surfaces.keys) enqueue(GraphicsContract.event(event, surfaceId = id))
         }
     }
@@ -389,8 +389,9 @@ internal fun ToolPlaybackControls(
     primary: String?,
     enabled: Boolean = true,
     restartEnabled: Boolean = true,
+    appLanguage: String? = null,
     onControl: (String) -> Unit,
-) {
+) = CompositionLocalProvider(LocalMiniAppControlsLanguage provides appLanguage) {
     val colors = MaterialTheme.colorScheme
     val target = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -407,14 +408,14 @@ internal fun ToolPlaybackControls(
                     colors = ButtonDefaults.buttonColors(containerColor = colors.surfaceContainerHighest, contentColor = colors.onSurface)) {
                     AlphaIcon(if (primary == "pause") Glyph.Pause else Glyph.Play, color = LocalContentColor.current)
                     Spacer(Modifier.width(8.dp))
-                    Text(stringResource(label))
+                    Text(miniAppString(label))
                 }
             }
             TextButton(onClick = { onControl("restart") }, modifier = target, enabled = enabled && restartEnabled,
                 colors = ButtonDefaults.textButtonColors(contentColor = colors.onSurfaceVariant)) {
                 AlphaIcon(Glyph.Refresh, color = LocalContentColor.current)
                 Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.tool_game_restart))
+                Text(miniAppString(R.string.tool_game_restart))
             }
         }
     }

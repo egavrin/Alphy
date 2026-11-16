@@ -156,6 +156,8 @@ private fun drawSurface(canvas: Canvas,commands: JSONArray,roleColors: Map<Strin
         val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style=Paint.Style.FILL
             if(c.has("color"))color=drawingColor(c.getString("color"),roleColors) else shader=gradient(c.getJSONObject("gradient"),roleColors)
+            // Muted text keeps its readable ink. A muted shape is a light tint, so an empty track or a grid line stays in the background.
+            if(c.optString("color")=="muted" && c.getString("type")!="text") alpha=MUTED_SHAPE_ALPHA
         }
         when(c.getString("type")) {
             "rect" -> canvas.drawRect(f("x"),f("y"),f("x")+f("width"),f("y")+f("height"),paint)
@@ -214,6 +216,8 @@ private fun gradient(g: JSONObject,roleColors: Map<String,Int>): Shader {
     return if(g.getString("type")=="linear")LinearGradient(f("x"),f("y"),f("x2"),f("y2"),colors,positions,Shader.TileMode.CLAMP)
     else RadialGradient(f("x"),f("y"),f("radius"),colors,positions,Shader.TileMode.CLAMP)
 }
+
+private const val MUTED_SHAPE_ALPHA = 64
 
 private fun drawingColor(value: String,roleColors: Map<String,Int>) = roleColors[value] ?: android.graphics.Color.parseColor(value)
 

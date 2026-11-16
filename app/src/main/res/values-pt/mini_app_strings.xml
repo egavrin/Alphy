@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tool_generated_apply_en">Aplicar: %1$s</string>
+    <string name="tool_generated_search_en">Pesquisar: %1$s</string>
+    <string name="tool_generated_remove_en">Remover: %1$s</string>
+    <string name="tool_number_increase_en">Aumentar: %1$s</string>
+    <string name="tool_number_decrease_en">Diminuir: %1$s</string>
+    <string name="tool_live_input_finish_en">Concluir edição: %1$s</string>
+    <string name="tool_live_input_pending_en">Salvando alterações</string>
+    <string name="tool_live_input_unsaved_en">Alterações não salvas</string>
+    <string name="tool_live_input_unavailable_en">Abra o miniapp para editar</string>
+    <string name="tool_live_input_finish_first_en">Conclua a edição e aguarde as alterações serem salvas</string>
+    <string name="tool_timer_idle_en">Não iniciado</string>
+    <string name="tool_timer_expired_en">O tempo acabou</string>
+    <string name="tool_timer_unavailable_en">Tempo indisponível</string>
+    <string name="tool_timer_remaining_en">Restam %1$s</string>
+    <string name="tool_timer_elapsed_en">Decorridos %1$s</string>
+    <string name="tool_timer_clock_days_en">%1$d d %2$02d:%3$02d:%4$02d</string>
+    <string name="foreground_timer_start_en">Iniciar temporizador</string>
+    <string name="foreground_timer_resume_en">Retomar temporizador</string>
+    <string name="foreground_timer_reset_en">Redefinir temporizador</string>
+    <string name="foreground_timer_ready_en">Pronto: %1$s</string>
+    <string name="foreground_timer_paused_en">Em pausa: %1$s</string>
+    <string name="foreground_timer_vibration_en">O telefone vibra quando o tempo acabar</string>
+    <string name="tool_image_unavailable_en">%1$s · sem imagem</string>
+    <string name="foreground_timer_notification_en">No final: notificação “%1$s”. %2$s</string>
+    <string name="foreground_timer_denied_en">O tempo acabou. O Android não permitiu o aviso.</string>
+    <string name="foreground_timer_unavailable_en">O tempo acabou. O aviso está indisponível.</string>
+    <string name="foreground_timer_uncertain_en">O tempo acabou. O resultado do aviso não foi confirmado.</string>
+    <string name="foreground_timer_suppressed_en">O tempo acabou. O limite de avisos foi atingido.</string>
+    <string name="foreground_timer_failed_en">Não foi possível salvar o estado do temporizador.</string>
+    <string name="tool_records_empty_en">Ainda não há registros</string>
+    <string name="tool_generated_dialog_close_en">Fechar: %1$s</string>
+    <string name="tool_route_back_en">Voltar ao miniapp</string>
+    <string name="tool_page_en">Página %1$d de %2$d</string>
+    <string name="tool_page_previous_en">Voltar: %1$s</string>
+    <string name="tool_page_next_en">Próximo: %1$s</string>
+    <string name="tool_reorder_handle_en">Reordenar: %1$s</string>
+    <string name="tool_reorder_move_up_en">Mover para cima</string>
+    <string name="tool_reorder_move_down_en">Mover para baixo</string>
+    <string name="tool_game_start_en">Iniciar</string>
+    <string name="tool_game_pause_en">Pausar</string>
+    <string name="tool_game_resume_en">Retomar</string>
+    <string name="tool_game_restart_en">Recomeçar</string>
+    <string name="tool_scene_paused_en">Em pausa</string>
+</resources>

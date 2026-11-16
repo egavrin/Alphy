@@ -4,6 +4,9 @@ import com.alpha.assistant.capabilities.CapabilityCatalog
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.cloud.CloudTurn
+import com.alpha.assistant.images.GeneratedImage
+import com.alpha.assistant.images.ImageFailure
+import com.alpha.assistant.images.ImageIntent
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.semantic.SemanticRuntime
 import com.alpha.assistant.semantic.SemanticUnavailable
@@ -21,6 +24,13 @@ import com.alpha.assistant.tools.ToolUiCatalog
 import com.alpha.assistant.tools.ToolUiDiagnostic
 import com.alpha.assistant.tools.ToolUiValidationStage
 import com.alpha.assistant.tools.ToolValidationFailure
+import com.alpha.assistant.tools.imageSlots
+import com.alpha.assistant.tools.three.ThreeSceneAssetRef
+import com.alpha.assistant.tools.three.ThreeSceneFailure
+import com.alpha.assistant.tools.three.ThreeSceneProblem
+import com.alpha.assistant.tools.three.ThreeSceneWebView
+import com.alpha.assistant.tools.three.checkThreeScene
+import com.alpha.assistant.tools.three.withThreeScene
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import org.json.JSONArray
@@ -44,7 +54,16 @@ internal class AppAgentRequest(
     val onStep: ((step: Int, tool: String, reply: String, result: String, durationNanos: Long) -> Unit)? = null,
     /** Test and fix: finish may keep the app unchanged, and edits need a reproduced problem first. */
     val testFix: Boolean = false,
+    /** Makes pictures for this generation. Null when pictures are off. */
+    val imageMaker: AppImageMaker? = null,
+    /** 3D models that the user attached to this request. */
+    val sceneAssets: List<ThreeSceneAssetRef> = emptyList(),
 )
+
+/** Each call submits one new image operation. The host checks consent before each submission. */
+internal fun interface AppImageMaker {
+    suspend fun make(intents: List<ImageIntent>): List<GeneratedImage>
+}
 
 internal class AppAgentResult(val preview: ToolPreview, val summary: String, val steps: Int, val changed: Boolean)
 
@@ -75,7 +94,9 @@ internal class AppAgent(
         val previous = request.base?.let { ToolSpec.parsePersisted(it.spec) }
         // Device results, collections, and live state stay local. The model never sees their values or the saved layout.
         val privateApp = previous != null && (request.privateState || previous.capabilityResults || previous.collections.length() > 0)
-        val instructions = AppAgentGuide.system(capabilityGuidance(request.prompt), request.extraInstructions)
+        val threeD = ThreeSceneWebView.available()
+        val instructions = AppAgentGuide.system(capabilityGuidance(request.prompt), request.extraInstructions,
+            pictures = request.imageMaker != null, threeD = threeD)
         // shortcut: reads the "User request: ...\nWidget brief:" format of ChatToolReply.generationPrompt; a direct prompt is used whole.
         val requestLanguage = if (previous != null) null else
             GenerationLanguage.identifyText(request.prompt.substringAfter("User request: ").substringBefore("\nWidget brief:"))
@@ -87,6 +108,15 @@ internal class AppAgent(
         var lastWriteIndex = -1
         var draftMatchesLastWrite = true
         var lastProblem = ""
+        val savedImages = previous?.generatedImages.orEmpty()
+        // Saved scene assets hold the user's models and the textures. Textures follow the pictures that the source binds.
+        val models = (previous?.sceneAssets.orEmpty().filter { asset -> savedImages.none { it.asset.id == asset.id } } +
+            request.sceneAssets).distinctBy { it.id }
+        if (models.isNotEmpty() && threeD) task += "\n\nAttached 3D models: " +
+            JSONArray(models.map { JSONObject().put("id", it.id).put("name", it.name).put("mime", it.mime) }) +
+            ". Load one in createScene with (await new context.addons.GLTFLoader().parseAsync(await context.readAsset(id), \"\")).scene."
+        val madeImages = mutableListOf<GeneratedImage>()
+        var submittedImages = 0
 
         suspend fun checkActive() = session.checkActive(currentCoroutineContext())
 
@@ -113,7 +143,7 @@ internal class AppAgent(
             }
             if (!definition.has("description")) definition.put("description", "")
             if (!definition.has("capabilities")) definition.put("capabilities", JSONArray())
-            val spec = try {
+            val parsed = try {
                 ToolSpec.parse(service.normalizeAgentDefinition(definition.toString()))
                     .withAppLanguage(language?.tag).withIcon(previous?.iconId)
             } catch (failure: ToolValidationFailure) {
@@ -124,6 +154,23 @@ internal class AppAgent(
             } catch (failure: Exception) {
                 if (failure !is IllegalArgumentException && failure !is IllegalStateException && failure !is JSONException) throw failure
                 throw Feedback("The app definition is invalid: ${failure.message ?: failure.javaClass.simpleName}")
+            }
+            // The model sees image nodes, not the saved image records. The host attaches the records for the slots in use.
+            val pictures = (savedImages + madeImages).associateBy { it.slot }
+            val used = imageSlots(parsed.ui)
+            (used - pictures.keys).firstOrNull()?.let { slot ->
+                throw Feedback("The picture \"$slot\" does not exist. " + if (request.imageMaker != null)
+                    "Make it with generate_image first, or remove the image node." else "Pictures are off. Remove the image node.")
+            }
+            val spec = if (!parsed.threeScene) parsed.withGeneratedImages(pictures.values.filter { it.slot in used }) else {
+                if (!threeD) throw Feedback(NO_THREE)
+                // The worker requires a binding for every listed texture, so only the slots that the source names are listed.
+                val textures = pictures.values.filter { "\"${it.slot}\"" in parsed.source || "'${it.slot}'" in parsed.source }
+                try {
+                    parsed.withThreeAssets((models + textures.map { it.asset }).distinctBy { it.id }).withGeneratedImages(textures)
+                } catch (failure: CancellationException) { throw failure } catch (failure: Exception) {
+                    throw Feedback("The 3D app definition is invalid: ${failure.message ?: failure.javaClass.simpleName}")
+                }
             }
             request.policy?.let { policy ->
                 try { policy.validateDefinition(spec.json) } catch (failure: CancellationException) { throw failure }
@@ -138,6 +185,19 @@ internal class AppAgent(
                     "and give new fields initial values. ${failure.message.orEmpty()}")
             }
             checkActive()
+            if (spec.threeScene) {
+                val preview = try {
+                    checkThreeScene(spec, request.artifactId, (request.base?.revision ?: 0) + 1, state, checkActive = { checkActive() })
+                } catch (failure: ThreeSceneFailure) {
+                    if (failure.problem == ThreeSceneProblem.FOREGROUND) throw CloudFailure(failure.problem.code, failure.problem.guidance)
+                    throw Feedback("The 3D scene check failed. ${AppSteps.failureText(failure)}")
+                }
+                if (language != null && GenerationLanguage.Check(language).mismatches(JSONObject(preview.ui), spec.title, spec.description)) {
+                    throw Feedback("The visible text is not in ${GenerationLanguage.name(language.tag)}. Translate every title, label, option, and message.")
+                }
+                presentationProblem(JSONObject(preview.ui), JSONObject(preview.state))?.let { throw Feedback(it) }
+                return Candidate(definition, spec, state, preview)
+            }
             val smoke = ToolGenerationSmoke(sandbox, spec, request.artifactId, (request.base?.revision ?: 0) + 1, state,
                 checkActive = { checkActive() }, generation = service, policy = request.policy,
                 observeReplay = onReplay?.let { { _: List<String> -> } })
@@ -164,9 +224,11 @@ internal class AppAgent(
             return Candidate(definition, spec, state, preview)
         }
 
-        suspend fun firstScreen(candidate: Candidate): String = smokeFor(candidate, request).probe {
-            AppScreen.render(ui, state, surfaces, nowMillis, surfaceSizes).text
-        }
+        // The 3D check already started the scene, so its first screen comes from that snapshot.
+        suspend fun firstScreen(candidate: Candidate): String = if (candidate.spec.threeScene)
+            "3D viewport \"${ThreeSceneTarget.SCENE}\": the first frame shows content.\n" + AppScreen.render(JSONObject(candidate.preview.ui),
+                JSONObject(candidate.preview.state), JSONObject(), System.currentTimeMillis(), emptyMap()).text
+        else smokeFor(candidate, request).probe { AppScreen.render(ui, state, surfaces, nowMillis, surfaceSizes).text }
 
         suspend fun accepted(tool: String, candidate: Candidate): String {
             current = candidate
@@ -204,7 +266,7 @@ internal class AppAgent(
                     request.progress?.invoke(ToolGenerationProgress.VALIDATING)
                     val candidate = current ?: throw Feedback(noValidApp(draft))
                     val steps = try { AppSteps.parse(reply.opt("steps")) } catch (failure: AppStepError) { throw Feedback(failure.message.orEmpty()) }
-                    val outcome = smokeFor(candidate, request).probe { AppSteps.run(this, steps, everyStep = false) to requested }
+                    val outcome = drive(candidate, request) { AppSteps.run(this, steps, everyStep = false) to requested }
                     val (result, requested) = outcome
                     val confirms = request.testFix && !edited && result.failure != null && confirmsProblem(steps, result, request.prompt)
                     if (confirms) {
@@ -225,11 +287,28 @@ internal class AppAgent(
                     val candidate = current ?: throw Feedback(noValidApp(draft))
                     if (!edited && !request.testFix) throw Feedback("Change the app before finish. The request asks for a change.")
                     if (edited) for (steps in reproductions) {
-                        val outcome = smokeFor(candidate, request).probe { AppSteps.run(this, steps, everyStep = false) }
+                        val outcome = drive(candidate, request) { AppSteps.run(this, steps, everyStep = false) }
                         if (outcome.failure != null) return "finish: FAILED. The reproduced problem still fails: ${shown(outcome.failure, outcome, privateApp)}" +
                             (outcome.final?.takeUnless { privateApp }?.let { "\nScreen:\n${it.text}" } ?: "")
                     }
                     finish(reply, candidate, request, privateApp)
+                }
+                "generate_image" -> {
+                    val maker = request.imageMaker ?: throw Feedback("Pictures are off for this request. Build the app without image nodes.")
+                    val remaining = MAX_NEW_IMAGES - submittedImages
+                    if (remaining <= 0) throw Feedback("This request already made $MAX_NEW_IMAGES pictures. Use them.")
+                    val intents = try { ImageIntent.list(reply.opt("images"), remaining) } catch (failure: CancellationException) { throw failure }
+                        catch (_: Exception) { null }
+                    if (intents.isNullOrEmpty()) throw Feedback("images must hold 1 to $remaining requests with distinct slots. ${ImageIntent.GUIDANCE}")
+                    request.progress?.invoke(ToolGenerationProgress.IMAGES)
+                    submittedImages += intents.size
+                    val made = try { maker.make(intents) } catch (failure: ImageFailure) {
+                        throw Feedback("The pictures could not be made: ${failure.message} Build the app without them.")
+                    }
+                    madeImages.removeAll { old -> made.any { it.slot == old.slot } }
+                    madeImages += made
+                    "generate_image: OK. Pictures ready: ${made.joinToString { "\"${it.slot}\" (${it.aspect.wire})" }}. " +
+                        "Show one with {\"type\":\"image\",\"assetSlot\":\"${made.first().slot}\",\"text\":\"${made.first().alt}\"}."
                 }
                 "describe_capability" -> {
                     val ids = reply.optJSONArray("ids") ?: throw Feedback("describe_capability needs ids.")
@@ -239,7 +318,8 @@ internal class AppAgent(
                         known[id]?.json()?.apply { remove("title") }?.toString() ?: "$id is not available. Available: ${known.keys.joinToString()}"
                     }
                 }
-                else -> throw Feedback("Unknown tool \"$tool\". Use write_app, edit_app, run, describe_capability, or finish.")
+                else -> throw Feedback("Unknown tool \"$tool\". Use write_app, edit_app, run, describe_capability, " +
+                    (if (request.imageMaker != null) "generate_image, " else "") + "or finish.")
             }
         }
 
@@ -313,9 +393,8 @@ internal class AppAgent(
             if (steps.lastOrNull() !is AppStep.Expect) throw Feedback("check \"$name\" must end with an expectation after its last operation.")
             name to steps
         }
-        val smoke = smokeFor(candidate, request)
         for ((name, steps) in parsed) {
-            val outcome = smoke.probe { AppSteps.run(this, steps, everyStep = false) }
+            val outcome = drive(candidate, request) { AppSteps.run(this, steps, everyStep = false) }
             if (outcome.failure != null) {
                 return "finish: FAILED. check \"$name\": ${shown(outcome.failure, outcome, privateApp)}" +
                     (outcome.final?.takeUnless { privateApp }?.let { "\nScreen at the failure:\n${it.text}" } ?: "") +
@@ -356,6 +435,12 @@ internal class AppAgent(
     private fun smokeFor(candidate: Candidate, request: AppAgentRequest) = ToolGenerationSmoke(sandbox, candidate.spec,
         request.artifactId, (request.base?.revision ?: 0) + 1, candidate.spec.initialState,
         checkActive = {}, generation = service, policy = request.policy)
+
+    /** Runs [block] on a fresh copy of the app: in the sandbox, or for a 3D app in a foreground scene preview. */
+    private suspend fun <T> drive(candidate: Candidate, request: AppAgentRequest, block: suspend AppTarget.() -> T): T =
+        if (!candidate.spec.threeScene) smokeFor(candidate, request).probe { block() }
+        else withThreeScene(candidate.spec, request.artifactId, (request.base?.revision ?: 0) + 1, candidate.spec.initialState,
+            checkActive = {}) { session, _ -> ThreeSceneTarget(session).block() }
 
     private suspend fun completeWithRetry(turns: List<CloudTurn>, instructions: String, session: CloudSession): String {
         var attempt = 0
@@ -405,6 +490,7 @@ internal class AppAgent(
             reply.has("app") -> "write_app"
             reply.has("steps") -> "run"
             reply.has("set") || reply.has("source_edits") -> "edit_app"
+            reply.has("images") -> "generate_image"
             else -> return null
         })
         return reply
@@ -487,6 +573,8 @@ internal class AppAgent(
             append("Keep every existing state field with its type so saved data stays. Give new fields initial values. ")
             append("Use edit_app for small changes.")
             previous.appLanguage?.let { append("\nThe app language is ").append(GenerationLanguage.name(it)).append('.') }
+            if (previous.generatedImages.isNotEmpty()) append("\nSaved pictures: ")
+                .append(previous.generatedImages.joinToString { "\"${it.slot}\" (${it.alt})" }).append(". Keep their image nodes unless the request removes them.")
             if (privateApp) append("\n").append(PRIVATE_EDIT).append(' ').append(PRIVATE_SCREEN)
             append("\nCurrent app definition:\n").append(modelView(JSONObject(previous.providerDefinition()).apply { remove("formatVersion") }, privateApp))
         } else {
@@ -563,7 +651,9 @@ internal class AppAgent(
             "Use edit_app without ui or initialState."
         const val REVIEW_SCREEN = "Review this screen as the user: a calculator shows real results for sample inputs, not 0 or dashes, and no label or value repeats."
         const val PRIVATE_SCREEN = "The host shows no screen text for this private app."
-        val editableFields = setOf("title", "description", "language", "capabilities", "stateSchema", "initialState", "ui", "source",
+        const val MAX_NEW_IMAGES = 4
+        const val NO_THREE = "3D scenes are not available on this device. Remove runtime and draw the app with a canvas."
+        val editableFields = setOf("title", "description", "language", "capabilities", "stateSchema", "initialState", "ui", "source", "runtime",
             "surfaces", "presentation", "hostControls", "capabilityResults", "collections")
         // Float artifacts such as 0.30000000000000004 have many digits. Conversion constants such as 0.621371 have six or fewer.
         private const val NATIVE = "<[\\uFF5C|]+\\s*DSML\\s*[\\uFF5C|]+\\s*"

@@ -358,8 +358,8 @@ class AutomaticToolWorkflowTest {
             fun open() {
                 main { f.model.openSurface(saved.id) }
                 robot.waitFor(stored.title)
-                robot.reveal("Apply: Bill amount", null)
-                robot.reveal("Apply: Number of people", null)
+                // An unchanged field shows no Apply button. The English label is checked after the edit below.
+                robot.reveal("Number of people", null)
                 assertNull(robot.find("Применить: Bill amount"))
             }
             open()

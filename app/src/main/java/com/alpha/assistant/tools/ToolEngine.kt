@@ -46,6 +46,7 @@ import com.alpha.assistant.tools.agent.AppAgent
 import com.alpha.assistant.tools.agent.AppAgentGuide
 import com.alpha.assistant.tools.agent.AppAgentRequest
 import com.alpha.assistant.tools.agent.AppAgentResult
+import com.alpha.assistant.tools.agent.AppImageMaker
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -392,7 +393,9 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
     internal suspend fun generate(key: String, prompt: String, base: ToolRecord?, images: List<String>, session: CloudSession, artifactId: String,
         privateState: Boolean, policy: ToolExecutionPolicy? = null,
         progress: ((ToolGenerationProgress) -> Unit)? = null, trace: ToolGenerationTrace?,
-        onPublicUpdate: (suspend (String) -> Unit)? = null, checkOwner: suspend () -> Unit = {}): ToolPreview {
+        onPublicUpdate: (suspend (String) -> Unit)? = null, checkOwner: suspend () -> Unit = {},
+        imageOperation: String? = null, imageSelection: ImageSettings.Selection? = null,
+        sceneAssets: List<ThreeSceneAssetRef> = emptyList()): ToolPreview {
         val run = trace?.Run()
         val previousTransportObserver = session.generationTransportObserver
         if (run != null) session.generationTransportObserver = {
@@ -400,8 +403,14 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             previousTransportObserver?.invoke(it)
         }
         try {
+            // Each generate_image call is one new operation, so a repeated call cannot resubmit an earlier one.
+            var imageCalls = 0
+            val imageMaker = if (imageOperation == null || imageSelection == null) null else AppImageMaker { intents ->
+                imageGeneration.generate("$imageOperation:${++imageCalls}", intents, imageSelection, intents.size)
+            }
             return generateWithAgent(key, prompt, base, images, session, artifactId, privateState, policy, progress, onPublicUpdate,
-                onStep = run?.let { { step, tool, reply, result, nanos -> it.agentStep(step, tool, reply, result, nanos) } })
+                onStep = run?.let { { step, tool, reply, result, nanos -> it.agentStep(step, tool, reply, result, nanos) } },
+                imageMaker = imageMaker, sceneAssets = sceneAssets)
                 .preview.also { checkOwner(); run?.finish() }
         } catch (failure: Throwable) {
             run?.finish(failure)
@@ -414,9 +423,10 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
     private suspend fun generateWithAgent(key: String, prompt: String, base: ToolRecord?, images: List<String>, session: CloudSession,
         artifactId: String, privateState: Boolean, policy: ToolExecutionPolicy?, progress: ((ToolGenerationProgress) -> Unit)?,
         onPublicUpdate: (suspend (String) -> Unit)?, extraInstructions: String = "",
-        onStep: ((Int, String, String, String, Long) -> Unit)? = null): AppAgentResult {
+        onStep: ((Int, String, String, String, Long) -> Unit)? = null, imageMaker: AppImageMaker? = null,
+        sceneAssets: List<ThreeSceneAssetRef> = emptyList()): AppAgentResult {
         return appAgent(key, session).run(AppAgentRequest(prompt, base, images, artifactId, privateState, policy, extraInstructions,
-            onPublicUpdate, progress, onStep), session)
+            onPublicUpdate, progress, onStep, imageMaker = imageMaker, sceneAssets = sceneAssets), session)
     }
 
     /** Accepts scalar schema objects from model output. Stored artifacts keep the strict canonical contract. */
@@ -1159,7 +1169,7 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
             val preview = generation.generate(key, draft.prompt, base, images, session, draft.toolId ?: draft.id,
                 privateState = base?.let { store.privateResults(it.id) } == true, progress = progress,
                 trace = trace?.takeIf { it.operationId.toString() == draftId }, onPublicUpdate = onPublicUpdate,
-                checkOwner = checkOwner)
+                checkOwner = checkOwner, imageOperation = "app:$draftId", imageSelection = imageSelection, sceneAssets = sceneAssets)
             val existingImages = base?.let { ToolSpec.parsePersisted(it.spec).generatedImages }.orEmpty()
             val newImages = preview.spec.generatedImages - existingImages.toSet()
             val approval = imageSelection?.takeIf { newImages.isNotEmpty() }

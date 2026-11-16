@@ -25,17 +25,6 @@ import org.junit.runner.RunWith
 class AgentGenerationWorkflowTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
 
-    private class Provider(private vararg val replies: String) : ChatProvider {
-        val calls = mutableListOf<CloudRequest>()
-        override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-            calls += request
-            val reply = replies.getOrElse(calls.lastIndex) { replies.last() }
-            emit(CloudEvent.Text(reply))
-            emit(CloudEvent.RoundComplete(reply, false))
-        }
-        fun feedback(call: Int) = calls[call].turns.last().text
-    }
-
     private val tipSource = "const s=input.state,e=input.event;" +
         "if(e.type==='action'){if(e.actionId==='reset'){s.bill=0;s.people=1;}else s[e.actionId]=e.value;}" +
         "s.total=Math.round(s.bill*(1+s.tip/100)*100)/100;s.share=Math.round(s.total/s.people*100)/100;return {state:s};"
@@ -59,18 +48,17 @@ class AgentGenerationWorkflowTest {
          {"expect":"value","target":"total","equals":92},{"expect":"text","contains":"23"}]
     """.trimIndent())))
 
-    private fun write(app: JSONObject) = JSONObject().put("tool", "write_app").put("app", app).toString()
     private fun run(steps: String) = JSONObject().put("tool", "run").put("steps", JSONArray(steps)).toString()
     private fun finish(checks: JSONArray) = JSONObject().put("tool", "finish").put("checks", checks)
         .put("summary", "The bill split is ready.").toString()
 
-    private suspend fun generate(provider: Provider, prompt: String = "Split a restaurant bill with a 15% tip",
+    private suspend fun generate(provider: AgentScriptProvider, prompt: String = "Split a restaurant bill with a 15% tip",
         base: ToolRecord? = null): ToolPreview =
         ToolGenerationService(provider, SandboxClient(context))
             .generate("fixture", prompt, base, emptyList(), CloudSession(), "agent-workflow")
 
     @Test fun newAppRunsAndFinishesWithHostChecks(): Unit = runBlocking {
-        val provider = Provider(write(tipApp()), run("""[{"set":"bill","value":80}]"""), finish(splitCheck))
+        val provider = AgentScriptProvider(writeAppReply(tipApp()), run("""[{"set":"bill","value":80}]"""), finish(splitCheck))
         val preview = generate(provider)
         assertEquals("Bill split", preview.spec.title)
         assertEquals(3, provider.calls.size)
@@ -89,7 +77,7 @@ class AgentGenerationWorkflowTest {
         }
         val fixedUi = tipApp(withReset = true).getJSONObject("ui")
         val edit = JSONObject().put("tool", "edit_app").put("set", JSONObject().put("ui", fixedUi)).toString()
-        val provider = Provider(write(broken), edit, finish(splitCheck))
+        val provider = AgentScriptProvider(writeAppReply(broken), edit, finish(splitCheck))
         val preview = generate(provider)
         assertTrue(provider.feedback(1), provider.feedback(1).contains("write_app: REJECTED"))
         assertTrue(provider.feedback(2), provider.feedback(2).contains("edit_app: OK"))
@@ -98,7 +86,7 @@ class AgentGenerationWorkflowTest {
 
     @Test fun anUnsupportedPropertyIsNamedWithTheAllowedOnes(): Unit = runBlocking {
         val broken = tipApp().apply { getJSONObject("ui").getJSONArray("children").getJSONObject(2).put("tone", "accent") }
-        val provider = Provider(write(broken), write(tipApp()), finish(splitCheck))
+        val provider = AgentScriptProvider(writeAppReply(broken), writeAppReply(tipApp()), finish(splitCheck))
         generate(provider)
         val feedback = provider.feedback(1)
         assertTrue(feedback, feedback.contains("This metric has unsupported properties: tone."))
@@ -111,7 +99,7 @@ class AgentGenerationWorkflowTest {
                 .put("replace", """{"type":"metric","text":"Each person pays","bind":"share"}"""))).toString()
         val broken = JSONObject().put("tool", "edit_app").put("source_edits", JSONArray().put(
             JSONObject().put("find", """"text":"Total","bind":"total"}""").put("replace", """"text":"Total""""))).toString()
-        val provider = Provider(write(tipApp()), edit, broken, finish(splitCheck))
+        val provider = AgentScriptProvider(writeAppReply(tipApp()), edit, broken, finish(splitCheck))
         val preview = generate(provider)
         assertTrue(provider.feedback(2), provider.feedback(2).contains("edit_app: OK"))
         assertTrue(provider.feedback(3), provider.feedback(3).contains("breaks the ui JSON"))
@@ -121,14 +109,14 @@ class AgentGenerationWorkflowTest {
     @Test fun aSmokeFailureNamesTheRejectedResult(): Unit = runBlocking {
         val invalidUi = tipSource.replace("return {state:s};",
             "return e.type==='open'?{state:s,ui:{type:'text',text:'Hi',sparkle:true}}:{state:s};")
-        val provider = Provider(write(tipApp(invalidUi)), write(tipApp()), finish(splitCheck))
+        val provider = AgentScriptProvider(writeAppReply(tipApp(invalidUi)), writeAppReply(tipApp()), finish(splitCheck))
         generate(provider)
         assertTrue(provider.feedback(1), provider.feedback(1).contains("Remove unsupported properties"))
     }
 
     @Test fun stateSchemaValuesBecomeTheirTypes(): Unit = runBlocking {
         val app = tipApp().apply { getJSONObject("stateSchema").put("tip", 15).put("bill", 0) }
-        val provider = Provider(write(app), finish(splitCheck))
+        val provider = AgentScriptProvider(writeAppReply(app), finish(splitCheck))
         generate(provider)
         assertTrue(provider.feedback(1), provider.feedback(1).contains("write_app: OK"))
     }
@@ -138,14 +126,14 @@ class AgentGenerationWorkflowTest {
             getJSONObject("stateSchema").put("note", "Tip is 15%")
             getJSONObject("initialState").put("note", "Tip is 15%")
         }
-        val provider = Provider(write(app), finish(splitCheck))
+        val provider = AgentScriptProvider(writeAppReply(app), finish(splitCheck))
         generate(provider)
         assertTrue(provider.feedback(1), provider.feedback(1).contains("write_app: OK"))
     }
 
     @Test fun aMissingBindIsNamed(): Unit = runBlocking {
         val broken = tipApp().apply { getJSONObject("ui").getJSONArray("children").getJSONObject(3).put("bind", "perPerson") }
-        val provider = Provider(write(broken), write(tipApp()), finish(splitCheck))
+        val provider = AgentScriptProvider(writeAppReply(broken), writeAppReply(tipApp()), finish(splitCheck))
         generate(provider)
         assertTrue(provider.feedback(1), provider.feedback(1).contains("bind \"perPerson\" is not a field"))
     }
@@ -154,7 +142,7 @@ class AgentGenerationWorkflowTest {
         val buggy = tipSource.replace("s.tip/100", "s.tip")
         val fix = JSONObject().put("tool", "edit_app").put("source_edits", JSONArray().put(
             JSONObject().put("find", "(1+s.tip)").put("replace", "(1+s.tip/100)"))).toString()
-        val provider = Provider(write(tipApp(buggy)), finish(splitCheck), fix, finish(splitCheck))
+        val provider = AgentScriptProvider(writeAppReply(tipApp(buggy)), finish(splitCheck), fix, finish(splitCheck))
         val preview = generate(provider)
         val failure = provider.feedback(2)
         assertTrue(failure, failure.contains("finish: FAILED"))
@@ -169,13 +157,13 @@ class AgentGenerationWorkflowTest {
         val check = JSONArray().put(JSONObject().put("name", "line").put("steps", JSONArray("""
             [{"set":"bill","value":80},{"expect":"text","contains":"Total: 92"}]
         """.trimIndent())))
-        val provider = Provider(write(tipApp()), finish(check))
+        val provider = AgentScriptProvider(writeAppReply(tipApp()), finish(check))
         generate(provider)
         assertEquals(2, provider.calls.size)
     }
 
     @Test fun tapOnAValueControlSaysToUseSet(): Unit = runBlocking {
-        val provider = Provider(write(tipApp()), run("""[{"tap":"bill"},{"expect":"text","contains":"Bill"}]"""), finish(splitCheck))
+        val provider = AgentScriptProvider(writeAppReply(tipApp()), run("""[{"tap":"bill"},{"expect":"text","contains":"Bill"}]"""), finish(splitCheck))
         generate(provider)
         assertTrue(provider.feedback(2), provider.feedback(2).contains("Use set with a value"))
     }
@@ -184,7 +172,7 @@ class AgentGenerationWorkflowTest {
         val constant = tipApp().apply {
             getJSONObject("ui").getJSONArray("children").put(JSONObject().put("type", "text").put("text", "1 km = 0.621371 mi"))
         }
-        val provider = Provider(write(constant), finish(splitCheck))
+        val provider = AgentScriptProvider(writeAppReply(constant), finish(splitCheck))
         generate(provider)
         assertEquals(2, provider.calls.size)
     }
@@ -194,7 +182,7 @@ class AgentGenerationWorkflowTest {
         val total = JSONArray().put(JSONObject().put("name", "total").put("steps", JSONArray("""
             [{"set":"bill","value":80},{"expect":"value","target":"total","equals":92}]
         """.trimIndent())))
-        val provider = Provider(write(tipApp(artifact)), finish(total), write(tipApp()), finish(splitCheck))
+        val provider = AgentScriptProvider(writeAppReply(tipApp(artifact)), finish(total), writeAppReply(tipApp()), finish(splitCheck))
         generate(provider)
         assertTrue(provider.feedback(2), provider.feedback(2).contains("the screen shows 30.666"))
     }
@@ -205,14 +193,14 @@ class AgentGenerationWorkflowTest {
         val markup = "\n\n   " + splitCheck + "</${bar}DSML${bar} parameter>\n" +
             "<${bar}DSML${bar} parameter name=\"summary\" string=\"true\">The bill split is ready.</${bar}DSML${bar} parameter>\n" +
             "</${bar}DSML${bar} invoke>\n</${bar}DSML${bar} calls>"
-        val provider = Provider(write(tipApp()), markup)
+        val provider = AgentScriptProvider(writeAppReply(tipApp()), markup)
         val preview = generate(provider)
         assertEquals("Bill split", preview.spec.title)
         assertEquals(2, provider.calls.size)
     }
 
     @Test fun invalidJsonNamesThePositionWithoutTheReply(): Unit = runBlocking {
-        val provider = Provider(write(tipApp()), """{"tool":"finish","checks":[{"name":"x" "steps":[]}]}""", finish(splitCheck))
+        val provider = AgentScriptProvider(writeAppReply(tipApp()), """{"tool":"finish","checks":[{"name":"x" "steps":[]}]}""", finish(splitCheck))
         generate(provider)
         val feedback = provider.feedback(2)
         assertTrue(feedback, feedback.contains("character"))
@@ -221,14 +209,14 @@ class AgentGenerationWorkflowTest {
 
     @Test fun finishNeedsAnExpectationAfterTheLastOperation(): Unit = runBlocking {
         val weak = JSONArray().put(JSONObject().put("name", "weak").put("steps", JSONArray("""[{"set":"bill","value":80}]""")))
-        val provider = Provider(write(tipApp()), finish(weak), finish(splitCheck))
+        val provider = AgentScriptProvider(writeAppReply(tipApp()), finish(weak), finish(splitCheck))
         generate(provider)
         assertTrue(provider.feedback(2), provider.feedback(2).contains("finish: REJECTED"))
         assertEquals(3, provider.calls.size)
     }
 
     @Test fun stepLimitEndsWithAReadableFailure(): Unit = runBlocking {
-        val provider = Provider(run("""[{"tap":"go"}]"""))
+        val provider = AgentScriptProvider(run("""[{"tap":"go"}]"""))
         try {
             generate(provider)
             fail("The loop must stop at its step limit.")
@@ -248,7 +236,7 @@ class AgentGenerationWorkflowTest {
         val resetCheck = JSONArray().put(JSONObject().put("name", "reset").put("steps", JSONArray("""
             [{"set":"bill","value":80},{"tap":"reset"},{"expect":"value","target":"bill","equals":0}]
         """.trimIndent())))
-        val provider = Provider(edit.toString(), finish(resetCheck))
+        val provider = AgentScriptProvider(edit.toString(), finish(resetCheck))
         val preview = generate(provider, "Add a reset button", base)
         val first = provider.calls.first().turns.joinToString("\n") { it.text }
         assertTrue(first, first.contains("Add a reset button"))
@@ -275,7 +263,7 @@ class AgentGenerationWorkflowTest {
             [{"pointer":"board","x":0.2,"y":0.2},{"pointer":"board","x":0.8,"y":0.8},
              {"expect":"value","target":"taps","equals":2},{"tap":"clear"},{"expect":"value","target":"taps","equals":0}]
         """.trimIndent())))
-        val provider = Provider(write(app), run("""[{"pointer":"board","x":0.5,"y":0.5}]"""), finish(checks))
+        val provider = AgentScriptProvider(writeAppReply(app), run("""[{"pointer":"board","x":0.5,"y":0.5}]"""), finish(checks))
         generate(provider, "Tap the board to place one orange mark")
         assertTrue(provider.feedback(2), provider.feedback(2).contains("board 300x300: 1 drawing command within x 142..158, y 142..158"))
     }
@@ -297,7 +285,7 @@ class AgentGenerationWorkflowTest {
         val checks = JSONArray().put(JSONObject().put("name", "start").put("steps", JSONArray("""
             [{"tap":"start"},{"expect":"value","target":"done","equals":false}]
         """.trimIndent())))
-        val provider = Provider(write(app), run("""[{"tap":"start"},{"wait":2000}]"""), finish(checks))
+        val provider = AgentScriptProvider(writeAppReply(app), run("""[{"tap":"start"},{"wait":2000}]"""), finish(checks))
         generate(provider, "Buzz once a second after start")
         assertTrue(provider.feedback(1), provider.feedback(1).contains("write_app: OK"))
         assertTrue(provider.feedback(2), provider.feedback(2).contains("Only action events may request effects"))
@@ -318,7 +306,7 @@ class AgentGenerationWorkflowTest {
         val checks = JSONArray().put(JSONObject().put("name", "open").put("steps", JSONArray("""
             [{"tap":"c1"},{"expect":"value","target":"opened","equals":1}]
         """.trimIndent())))
-        val provider = Provider(write(board { "Open" }), write(board { "Open $it" }), finish(checks))
+        val provider = AgentScriptProvider(writeAppReply(board { "Open" }), writeAppReply(board { "Open $it" }), finish(checks))
         generate(provider, "A 3 by 3 board where I open cells")
         assertTrue(provider.feedback(1), provider.feedback(1).contains("write_app: REJECTED"))
         assertTrue(provider.feedback(1), provider.feedback(1).contains("\"Open\""))
@@ -335,7 +323,7 @@ class AgentGenerationWorkflowTest {
         val checks = JSONArray().put(JSONObject().put("name", "amount").put("steps", JSONArray("""
             [{"set":"usd","value":50},{"expect":"value","target":"usd","equals":50}]
         """.trimIndent())))
-        val provider = Provider(write(converter("None")), write(converter("Rate unavailable")), finish(checks))
+        val provider = AgentScriptProvider(writeAppReply(converter("None")), writeAppReply(converter("Rate unavailable")), finish(checks))
         generate(provider, "Convert USD to EUR")
         assertTrue(provider.feedback(1), provider.feedback(1).contains("write_app: REJECTED"))
         assertTrue(provider.feedback(1), provider.feedback(1).contains("You get (EUR)"))
@@ -354,7 +342,7 @@ class AgentGenerationWorkflowTest {
         val checks = JSONArray().put(JSONObject().put("name", "countdown").put("steps", JSONArray("""
             [{"tap":"start"},{"wait":30000},{"expect":"text","contains":"0:30"},{"expect":"text","contains":"Running"}]
         """.trimIndent())))
-        val provider = Provider(write(app), finish(checks))
+        val provider = AgentScriptProvider(writeAppReply(app), finish(checks))
         generate(provider, "One minute countdown")
         assertEquals(2, provider.calls.size)
     }

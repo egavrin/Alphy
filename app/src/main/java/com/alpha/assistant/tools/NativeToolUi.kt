@@ -388,7 +388,7 @@ internal fun ColorScheme.toolInk(name: String, background: Color): Color {
 
 private val rowTextTypes = setOf("text", "metric", "badge", "fact")
 
-/** A metric value up to this length is a number with a unit or a short phrase, so it stays on one line. */
+/** A metric value or a text up to this length is a number with a unit, a name, or a short phrase. */
 private const val COMPACT_METRIC_LENGTH = 24
 
 /**
@@ -411,9 +411,23 @@ private data class WholeWordAutoSize(val min: TextUnit, val max: TextUnit, val o
     }
 }
 
-private val LocalMiniAppControlsLanguage = staticCompositionLocalOf<String?> { null }
+internal val LocalMiniAppControlsLanguage = staticCompositionLocalOf<String?> { null }
 
-private val miniAppEnglish = mapOf(
+// True inside a row without wrap. Its children share a fixed width, so a short text there shrinks before a word breaks.
+private val LocalFixedRow = staticCompositionLocalOf { false }
+
+// The text for an app in another language than Russian. values/ holds English, and values-<language>/ holds translations.
+private val miniAppOtherLanguage = mapOf(
+    R.string.tool_generated_apply to R.string.tool_generated_apply_en,
+    R.string.tool_generated_search to R.string.tool_generated_search_en,
+    R.string.tool_generated_remove to R.string.tool_generated_remove_en,
+    R.string.tool_live_input_finish to R.string.tool_live_input_finish_en,
+    R.string.tool_number_increase to R.string.tool_number_increase_en,
+    R.string.tool_number_decrease to R.string.tool_number_decrease_en,
+    R.string.tool_live_input_pending to R.string.tool_live_input_pending_en,
+    R.string.tool_live_input_unsaved to R.string.tool_live_input_unsaved_en,
+    R.string.tool_live_input_unavailable to R.string.tool_live_input_unavailable_en,
+    R.string.tool_live_input_finish_first to R.string.tool_live_input_finish_first_en,
     R.string.tool_timer_idle to R.string.tool_timer_idle_en,
     R.string.tool_timer_expired to R.string.tool_timer_expired_en,
     R.string.tool_timer_unavailable to R.string.tool_timer_unavailable_en,
@@ -442,43 +456,26 @@ private val miniAppEnglish = mapOf(
     R.string.tool_reorder_move_up to R.string.tool_reorder_move_up_en,
     R.string.tool_reorder_move_down to R.string.tool_reorder_move_down_en,
     R.string.tool_image_unavailable to R.string.tool_image_unavailable_en,
+    R.string.tool_game_start to R.string.tool_game_start_en,
+    R.string.tool_game_pause to R.string.tool_game_pause_en,
+    R.string.tool_game_resume to R.string.tool_game_resume_en,
+    R.string.tool_game_restart to R.string.tool_game_restart_en,
+    R.string.tool_scene_paused to R.string.tool_scene_paused_en,
 )
 
-/** Host text inside a mini-app. An app in a language other than Russian gets the English text. */
+/** Host text inside a mini-app in the app language. A language without a translation gets English. */
 @Composable internal fun miniAppString(resource: Int, vararg args: Any): String {
     val tag = LocalMiniAppControlsLanguage.current
-    return stringResource(if (tag == null || tag == "ru") resource else miniAppEnglish[resource] ?: resource, *args)
-}
-
-@Composable private fun miniAppEditorAction(resource: Int, label: String): String {
-    val tag = LocalMiniAppControlsLanguage.current
-    if (tag == null || tag == "ru") return stringResource(resource, label)
-    if (tag == "en") return stringResource(when (resource) {
-        R.string.tool_generated_apply -> R.string.tool_generated_apply_en
-        R.string.tool_generated_search -> R.string.tool_generated_search_en
-        R.string.tool_generated_remove -> R.string.tool_generated_remove_en
-        R.string.tool_live_input_finish -> R.string.tool_live_input_finish_en
-        R.string.tool_number_increase -> R.string.tool_number_increase_en
-        R.string.tool_number_decrease -> R.string.tool_number_decrease_en
-        else -> resource
-    }, label)
-
-    // The platform supplies a confirmation and search label for additional locales.
+    val other = miniAppOtherLanguage[resource]
+    if (tag == null || tag == "ru" || other == null) return stringResource(resource, *args)
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
-    val localized = remember(context, configuration, tag) {
+    val resources = remember(context, configuration, tag) {
         context.createConfigurationContext(android.content.res.Configuration(configuration).apply {
             setLocale(java.util.Locale.forLanguageTag(tag))
-        })
+        }).resources
     }
-    val action = when (resource) {
-        R.string.tool_generated_search -> localized.getString(android.R.string.search_go)
-        R.string.tool_generated_remove -> "×"
-        R.string.tool_number_increase -> "+"
-        R.string.tool_number_decrease -> "−"
-        else -> localized.getString(android.R.string.ok)
-    }
-    return "$action: $label"
+    return resources.getString(other, *args)
 }
 
 @Composable internal fun ToolContent(ui: String, state: String, enabled: Boolean,
@@ -722,12 +719,17 @@ private fun verticalArrangement(style: JSONObject?,gap: Dp): Arrangement.Vertica
     }
     val selectable=enabled && node.optBoolean("selectable")
     val textModifier=if(selectable) Modifier else modifier
+    // A short text in a row, such as a name beside a stepper, shrinks so that no word breaks. Other text keeps its size and wraps.
+    val short=LocalFixedRow.current && label.length <= COMPACT_METRIC_LENGTH
+    val base=textStyle(style)
+    val shortStyle=if(short && base.lineHeight.isSp && base.fontSize.isSp) base.copy(lineHeight=(base.lineHeight.value / base.fontSize.value).em) else base
     val content: @Composable () -> Unit = {
-        Text(annotated.toAnnotatedString(),if(!enabled && spans != null) textModifier.semantics {disabled()} else textModifier,style=textStyle(style),color=toolInk(style?.optString("tone")),
+        Text(annotated.toAnnotatedString(),if(!enabled && spans != null) textModifier.semantics {disabled()} else textModifier,style=shortStyle,color=toolInk(style?.optString("tone")),
             textAlign=when(style?.optString("align")) {"center" -> TextAlign.Center; "end" -> TextAlign.End; else -> TextAlign.Start},
             maxLines=node.optInt("maxLines",Int.MAX_VALUE),softWrap=node.optBoolean("softWrap",true),
             overflow=if(node.optString("overflow") == "ellipsis") TextOverflow.Ellipsis else TextOverflow.Clip,
-            lineHeight=if(node.has("lineHeight")) node.getDouble("lineHeight").sp else androidx.compose.ui.unit.TextUnit.Unspecified)
+            lineHeight=if(node.has("lineHeight")) node.getDouble("lineHeight").sp else androidx.compose.ui.unit.TextUnit.Unspecified,
+            autoSize=if(short) WholeWordAutoSize(10.sp,base.fontSize) else null)
     }
     if(selectable) SelectionContainer(modifier=modifier) {content()} else content()
 }
@@ -795,7 +797,9 @@ private fun courseSceneSlot(root: JSONObject): Int? {
     val style=node.optJSONObject("style")
     val tone=style?.optString("tone").orEmpty()
     val binding=node.optString("bind")
-    val modifier=nativeInteractions(node,enabled,event,nativeLayout(node,placement,compact || type in setOf("spacer","icon")).padding(space(style?.optString("padding"))))
+    // A card draws a background, so its padding is inside it. For other nodes, padding is outside.
+    val outerPadding=if(type == "card") 0.dp else space(style?.optString("padding"))
+    val modifier=nativeInteractions(node,enabled,event,nativeLayout(node,placement,compact || type in setOf("spacer","icon")).padding(outerPadding))
     val gap=space(style?.optString("gap"),12)
     val action=node.optString("action")
     val children=node.optJSONArray("children")
@@ -923,7 +927,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             val secondary = secondaryButtons(items, state, enabled)
             if(type == "row" && !node.optBoolean("wrap",true)) {
                 Row(modifier,horizontalArrangement=horizontalArrangement(style,gap),verticalAlignment=verticalAlignment(style?.optString("crossAlign"))) {
-                    repeat(items.length()) {index ->
+                    CompositionLocalProvider(LocalFixedRow provides true) { repeat(items.length()) {index ->
                         val child=items.getJSONObject(index); val layout=child.optJSONObject("layout")
                         var slot: Modifier=Modifier
                         if(layout?.has("weight") == true) slot=slot.weight(layout.getDouble("weight").toFloat())
@@ -932,7 +936,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                         if(layout?.has("align") == true) slot=slot.align(verticalAlignment(layout.getString("align")))
                         NativeNode(child,state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,true,heading,placement=slot,
                             secondaryButton = index in secondary,event=event)
-                    }
+                    } }
                 }
             } else FlowRow(modifier,horizontalArrangement=horizontalArrangement(style,gap),verticalArrangement=Arrangement.spacedBy(gap)) {
                 repeat(items.length()) {index ->
@@ -1037,7 +1041,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             content()
         }
         "card" -> ToolRoleSurface(modifier, MaterialTheme.colorScheme.toolRole(tone)) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(gap), horizontalAlignment = alignment(style)) {
+            Column(Modifier.padding(space(style?.optString("padding"), 16)), verticalArrangement = Arrangement.spacedBy(gap), horizontalAlignment = alignment(style)) {
                 if (showsToolHeading(text, heading)) Text(text, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)
                 content()
             }
@@ -1107,7 +1111,8 @@ private fun courseSceneSlot(root: JSONObject): Int? {
         "button" -> {
             val label: @Composable () -> Unit = {
                 if(node.has("icon")) {AlphaIcon(Glyph.valueOf(node.getString("icon")), color = LocalContentColor.current);Spacer(Modifier.width(8.dp))}
-                Text(text)
+                // A narrow button shrinks its label, so a word such as "Down" does not break.
+                Text(text,textAlign=TextAlign.Center,autoSize=WholeWordAutoSize(10.sp,LocalTextStyle.current.fontSize))
             }
             val click={event(action,null)}
             val buttonModifier=modifier.heightIn(min=48.dp)
@@ -1144,7 +1149,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
         }
         "chip" -> {
             val checked=ToolUiCatalog.value(state,binding) as Boolean
-            val removeLabel = miniAppEditorAction(R.string.tool_generated_remove, text)
+            val removeLabel = miniAppString(R.string.tool_generated_remove, text)
             val dismiss: (@Composable () -> Unit)?=node.optString("dismissAction").takeIf {it.isNotEmpty()}?.let {id -> {IconButton(onClick={event(id,null)},enabled=enabled,modifier=Modifier.size(48.dp)) {AlphaIcon(Glyph.Close,Modifier.semantics {contentDescription=removeLabel})}}}
             if(node.optString("variant")=="input") InputChip(selected=checked,onClick={event(action,!checked)},label={Text(text)},trailingIcon=dismiss,enabled=enabled,modifier=modifier.heightIn(min=48.dp))
             else FilterChip(selected=checked,onClick={event(action,!checked)},label={Text(text)},trailingIcon=dismiss,enabled=enabled,modifier=modifier.heightIn(min=48.dp))
@@ -1156,8 +1161,9 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 Text("$text: ${range.start} – ${range.endInclusive}")
                 RangeSlider(value=((range.start-low)/(high-low)).toFloat().coerceIn(0f,1f)..((range.endInclusive-low)/(high-low)).toFloat().coerceIn(0f,1f),
                     onValueChange={range=nativeSliderValue(node,it.start)..nativeSliderValue(node,it.endInclusive)},enabled=enabled,modifier=Modifier.semantics {contentDescription=text})
-                TextButton(onClick={event(action,JSONArray().put(range.start).put(range.endInclusive))},
-                    modifier=Modifier.heightIn(min=48.dp),enabled=enabled && (range.start!=original.getDouble(0) || range.endInclusive!=original.getDouble(1))) {Text(miniAppEditorAction(R.string.tool_generated_apply, text))}
+                if (range.start!=original.getDouble(0) || range.endInclusive!=original.getDouble(1))
+                    TextButton(onClick={event(action,JSONArray().put(range.start).put(range.endInclusive))},
+                        modifier=Modifier.heightIn(min=48.dp),enabled=enabled) {Text(miniAppString(R.string.tool_generated_apply, text))}
             }
         }
         "dateRangeInput" -> NativeDateRange(node,state,enabled,modifier,event)
@@ -1202,8 +1208,8 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 },onValueChangeFinished=editor?.takeIf { it.automatic }?.let { live -> { live.finish(explicit = false) } },
                     enabled=editor?.canEdit ?: enabled,modifier=Modifier.semantics {contentDescription=text})
                 if (editor == null) {
-                    TextButton(onClick={event(action,value)},modifier=Modifier.heightIn(min=48.dp),enabled=enabled && value != original) {
-                        Text(miniAppEditorAction(R.string.tool_generated_apply, text))
+                    if (value != original) TextButton(onClick={event(action,value)},modifier=Modifier.heightIn(min=48.dp),enabled=enabled) {
+                        Text(miniAppString(R.string.tool_generated_apply, text))
                     }
                 } else NativeLiveActions(editor, text, finishButton = false)
             }
@@ -1467,14 +1473,7 @@ private class NativeLiveEditor(private val ui: NativeLiveUi, val draft: NativeLi
 }
 
 @Composable private fun NativeLiveMessage(resource: Int) {
-    val message = if (LocalMiniAppControlsLanguage.current == "en") when (resource) {
-        R.string.tool_live_input_pending -> R.string.tool_live_input_pending_en
-        R.string.tool_live_input_unsaved -> R.string.tool_live_input_unsaved_en
-        R.string.tool_live_input_unavailable -> R.string.tool_live_input_unavailable_en
-        R.string.tool_live_input_finish_first -> R.string.tool_live_input_finish_first_en
-        else -> resource
-    } else resource
-    Text(stringResource(message), Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+    Text(miniAppString(resource), Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         color = toolInk(if (resource == R.string.tool_live_input_pending) "muted" else "warning"),
         style = MaterialTheme.typography.bodyMedium)
 }
@@ -1489,7 +1488,7 @@ private class NativeLiveEditor(private val ui: NativeLiveUi, val draft: NativeLi
     if (apply || finishButton && editor.draft.open) {
         TextButton(onClick = { editor.finish(explicit = true) }, modifier = Modifier.heightIn(min = 48.dp),
             enabled = editor.canEdit && (editor.draft.open || editor.draft.status == NativeLiveStatus.Unsaved)) {
-            Text(miniAppEditorAction(if (apply) R.string.tool_generated_apply else R.string.tool_live_input_finish, label))
+            Text(miniAppString(if (apply) R.string.tool_generated_apply else R.string.tool_live_input_finish, label))
         }
     }
 }
@@ -1515,9 +1514,11 @@ private class NativeLiveEditor(private val ui: NativeLiveUi, val draft: NativeLi
             onSearch = { editor.finish(explicit = true); defaultKeyboardAction(ImeAction.Search) },
         )
     val label = node.getString("text")
+    // Apply shows only for an unsaved edit, so a form of unchanged fields has no disabled buttons.
     @Composable fun ApplyDraft() {
+        if (!changed && !search) return
         TextButton(onClick = apply, modifier = Modifier.heightIn(min = 48.dp), enabled = enabled && valid && (changed || search)) {
-            Text(miniAppEditorAction(if (search) R.string.tool_generated_search else R.string.tool_generated_apply, label))
+            Text(miniAppString(if (search) R.string.tool_generated_search else R.string.tool_generated_apply, label))
         }
     }
     val field: @Composable (Modifier) -> Unit = { fieldModifier ->
@@ -1533,7 +1534,7 @@ private class NativeLiveEditor(private val ui: NativeLiveUi, val draft: NativeLi
         if (numeric && node.has("step")) {
             val current = payload as? Double
             @Composable fun StepButton(increase: Boolean) {
-                val description = miniAppEditorAction(if (increase) R.string.tool_number_increase else R.string.tool_number_decrease, label)
+                val description = miniAppString(if (increase) R.string.tool_number_increase else R.string.tool_number_decrease, label)
                 val next = nativeNumberStep(node, current, increase)
                 FilledTonalIconButton(onClick = {
                     nativeNumberStep(node, ordinaryDraft.toDoubleOrNull(), increase)?.let {
@@ -1866,9 +1867,10 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
         Text(node.getString("text"),style=MaterialTheme.typography.labelLarge)
         when(type) {
             // The options share the width. A scrolling row looked cut off at the screen edge.
-            "segmented" -> SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            // All options take the height of the tallest one, so a two-line label does not stand out.
+            "segmented" -> SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                 values.forEachIndexed {index,option -> SegmentedButton(selected(option.get("value")),{choose(option.get("value"))},
-                    SegmentedButtonDefaults.itemShape(index,values.size),modifier=Modifier.weight(1f).sizeIn(minHeight=48.dp),
+                    SegmentedButtonDefaults.itemShape(index,values.size),modifier=Modifier.weight(1f).fillMaxHeight().sizeIn(minHeight=48.dp),
                     enabled=enabled) {
                         // A narrow option shrinks its label, so a word such as "Quarterly" does not break.
                         Text(option.getString("text"),maxLines=2,overflow=TextOverflow.Ellipsis,textAlign=TextAlign.Center,
@@ -1999,7 +2001,7 @@ private fun NativeSceneChoices(
                 },
                 enabled = valid,
                 modifier = Modifier.heightIn(min = 48.dp),
-            ) { Text(miniAppEditorAction(R.string.tool_generated_apply, text)) }
+            ) { Text(miniAppString(R.string.tool_generated_apply, text)) }
         }
         if (narrowWindow || shortWindow || largeText) {
             val start = rememberDatePickerState(initialSelectedDateMillis = initialStart, yearRange = 1..9999, initialDisplayMode = DisplayMode.Input)

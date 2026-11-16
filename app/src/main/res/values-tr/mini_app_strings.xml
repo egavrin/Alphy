@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tool_generated_apply_en">Uygula: %1$s</string>
+    <string name="tool_generated_search_en">Ara: %1$s</string>
+    <string name="tool_generated_remove_en">Kaldır: %1$s</string>
+    <string name="tool_number_increase_en">Artır: %1$s</string>
+    <string name="tool_number_decrease_en">Azalt: %1$s</string>
+    <string name="tool_live_input_finish_en">Düzenlemeyi bitir: %1$s</string>
+    <string name="tool_live_input_pending_en">Değişiklikler kaydediliyor</string>
+    <string name="tool_live_input_unsaved_en">Değişiklikler kaydedilmedi</string>
+    <string name="tool_live_input_unavailable_en">Düzenlemek için mini uygulamayı açın</string>
+    <string name="tool_live_input_finish_first_en">Düzenlemeyi bitirin ve değişikliklerin kaydedilmesini bekleyin</string>
+    <string name="tool_timer_idle_en">Başlatılmadı</string>
+    <string name="tool_timer_expired_en">Süre doldu</string>
+    <string name="tool_timer_unavailable_en">Süre kullanılamıyor</string>
+    <string name="tool_timer_remaining_en">%1$s kaldı</string>
+    <string name="tool_timer_elapsed_en">%1$s geçti</string>
+    <string name="tool_timer_clock_days_en">%1$d g %2$02d:%3$02d:%4$02d</string>
+    <string name="foreground_timer_start_en">Zamanlayıcıyı başlat</string>
+    <string name="foreground_timer_resume_en">Zamanlayıcıya devam et</string>
+    <string name="foreground_timer_reset_en">Zamanlayıcıyı sıfırla</string>
+    <string name="foreground_timer_ready_en">Hazır: %1$s</string>
+    <string name="foreground_timer_paused_en">Duraklatıldı: %1$s</string>
+    <string name="foreground_timer_vibration_en">Süre dolunca telefon titreşir</string>
+    <string name="tool_image_unavailable_en">%1$s · görsel yok</string>
+    <string name="foreground_timer_notification_en">Sonunda: “%1$s” bildirimi. %2$s</string>
+    <string name="foreground_timer_denied_en">Süre doldu. Android uyarıya izin vermedi.</string>
+    <string name="foreground_timer_unavailable_en">Süre doldu. Uyarı kullanılamıyor.</string>
+    <string name="foreground_timer_uncertain_en">Süre doldu. Uyarı sonucu doğrulanmadı.</string>
+    <string name="foreground_timer_suppressed_en">Süre doldu. Uyarı sınırına ulaşıldı.</string>
+    <string name="foreground_timer_failed_en">Zamanlayıcı durumu kaydedilemedi.</string>
+    <string name="tool_records_empty_en">Henüz kayıt yok</string>
+    <string name="tool_generated_dialog_close_en">Kapat: %1$s</string>
+    <string name="tool_route_back_en">Mini uygulamaya dön</string>
+    <string name="tool_page_en">Sayfa %1$d / %2$d</string>
+    <string name="tool_page_previous_en">Geri: %1$s</string>
+    <string name="tool_page_next_en">İleri: %1$s</string>
+    <string name="tool_reorder_handle_en">Yeniden sırala: %1$s</string>
+    <string name="tool_reorder_move_up_en">Yukarı taşı</string>
+    <string name="tool_reorder_move_down_en">Aşağı taşı</string>
+    <string name="tool_game_start_en">Başlat</string>
+    <string name="tool_game_pause_en">Duraklat</string>
+    <string name="tool_game_resume_en">Devam et</string>
+    <string name="tool_game_restart_en">Yeniden başlat</string>
+    <string name="tool_scene_paused_en">Duraklatıldı</string>
+</resources>

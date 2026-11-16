@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tool_generated_apply_en">Застосувати: %1$s</string>
+    <string name="tool_generated_search_en">Знайти: %1$s</string>
+    <string name="tool_generated_remove_en">Прибрати: %1$s</string>
+    <string name="tool_number_increase_en">Збільшити: %1$s</string>
+    <string name="tool_number_decrease_en">Зменшити: %1$s</string>
+    <string name="tool_live_input_finish_en">Завершити введення: %1$s</string>
+    <string name="tool_live_input_pending_en">Введення зберігається</string>
+    <string name="tool_live_input_unsaved_en">Введення не збережено</string>
+    <string name="tool_live_input_unavailable_en">Відкрийте міні-застосунок, щоб ввести дані</string>
+    <string name="tool_live_input_finish_first_en">Спершу завершіть введення й дочекайтеся збереження</string>
+    <string name="tool_timer_idle_en">Очікує запуску</string>
+    <string name="tool_timer_expired_en">Час вийшов</string>
+    <string name="tool_timer_unavailable_en">Час недоступний</string>
+    <string name="tool_timer_remaining_en">Залишилося %1$s</string>
+    <string name="tool_timer_elapsed_en">Минуло %1$s</string>
+    <string name="tool_timer_clock_days_en">%1$d д %2$02d:%3$02d:%4$02d</string>
+    <string name="foreground_timer_start_en">Запустити таймер</string>
+    <string name="foreground_timer_resume_en">Продовжити таймер</string>
+    <string name="foreground_timer_reset_en">Скинути таймер</string>
+    <string name="foreground_timer_ready_en">Готово: %1$s</string>
+    <string name="foreground_timer_paused_en">На паузі: %1$s</string>
+    <string name="foreground_timer_vibration_en">Наприкінці телефон завібрує</string>
+    <string name="tool_image_unavailable_en">%1$s · зображення недоступне</string>
+    <string name="foreground_timer_notification_en">Наприкінці — сповіщення «%1$s». %2$s</string>
+    <string name="foreground_timer_denied_en">Час вийшов. Android не дозволив сповіщення.</string>
+    <string name="foreground_timer_unavailable_en">Час вийшов. Сповіщення недоступне.</string>
+    <string name="foreground_timer_uncertain_en">Час вийшов. Результат сповіщення не підтверджено.</string>
+    <string name="foreground_timer_suppressed_en">Час вийшов. Досягнуто ліміт сповіщень.</string>
+    <string name="foreground_timer_failed_en">Не вдалося зберегти стан таймера.</string>
+    <string name="tool_records_empty_en">Записів поки немає</string>
+    <string name="tool_generated_dialog_close_en">Закрити: %1$s</string>
+    <string name="tool_route_back_en">Назад у міні-застосунок</string>
+    <string name="tool_page_en">Сторінка %1$d з %2$d</string>
+    <string name="tool_page_previous_en">Назад: %1$s</string>
+    <string name="tool_page_next_en">Далі: %1$s</string>
+    <string name="tool_reorder_handle_en">Змінити порядок: %1$s</string>
+    <string name="tool_reorder_move_up_en">Перемістити вище</string>
+    <string name="tool_reorder_move_down_en">Перемістити нижче</string>
+    <string name="tool_game_start_en">Почати</string>
+    <string name="tool_game_pause_en">Пауза</string>
+    <string name="tool_game_resume_en">Продовжити</string>
+    <string name="tool_game_restart_en">Спочатку</string>
+    <string name="tool_scene_paused_en">На паузі</string>
+</resources>

@@ -749,8 +749,9 @@ catch (_: Exception) { null }
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = detailGutter - 8.dp),verticalAlignment=Alignment.CenterVertically) {
             IconButton(onClick = ::back,
                 modifier = Modifier.size(48.dp).semantics { contentDescription = backLabel }) { AlphaIcon(Glyph.Back) }
+            // Two lines keep most titles whole next to the edit action.
             Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (tool != null && spec != null && tool.saved && !tool.archived && draft == null) {
                 TextButton(onClick = { refine(tool.id) }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp)) {

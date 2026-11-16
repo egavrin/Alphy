@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tool_generated_apply_en">Applica: %1$s</string>
+    <string name="tool_generated_search_en">Cerca: %1$s</string>
+    <string name="tool_generated_remove_en">Rimuovi: %1$s</string>
+    <string name="tool_number_increase_en">Aumenta: %1$s</string>
+    <string name="tool_number_decrease_en">Diminuisci: %1$s</string>
+    <string name="tool_live_input_finish_en">Termina modifica: %1$s</string>
+    <string name="tool_live_input_pending_en">Salvataggio delle modifiche</string>
+    <string name="tool_live_input_unsaved_en">Modifiche non salvate</string>
+    <string name="tool_live_input_unavailable_en">Apri la mini-app per modificare</string>
+    <string name="tool_live_input_finish_first_en">Termina la modifica e attendi il salvataggio delle modifiche</string>
+    <string name="tool_timer_idle_en">Non avviato</string>
+    <string name="tool_timer_expired_en">Tempo scaduto</string>
+    <string name="tool_timer_unavailable_en">Tempo non disponibile</string>
+    <string name="tool_timer_remaining_en">Rimangono %1$s</string>
+    <string name="tool_timer_elapsed_en">Trascorsi %1$s</string>
+    <string name="tool_timer_clock_days_en">%1$d g %2$02d:%3$02d:%4$02d</string>
+    <string name="foreground_timer_start_en">Avvia timer</string>
+    <string name="foreground_timer_resume_en">Riprendi timer</string>
+    <string name="foreground_timer_reset_en">Reimposta timer</string>
+    <string name="foreground_timer_ready_en">Pronto: %1$s</string>
+    <string name="foreground_timer_paused_en">In pausa: %1$s</string>
+    <string name="foreground_timer_vibration_en">Il telefono vibra quando il tempo è scaduto</string>
+    <string name="tool_image_unavailable_en">%1$s · nessuna immagine</string>
+    <string name="foreground_timer_notification_en">Alla fine: notifica «%1$s». %2$s</string>
+    <string name="foreground_timer_denied_en">Tempo scaduto. Android non ha consentito l\'avviso.</string>
+    <string name="foreground_timer_unavailable_en">Tempo scaduto. L\'avviso non è disponibile.</string>
+    <string name="foreground_timer_uncertain_en">Tempo scaduto. Il risultato dell\'avviso non è confermato.</string>
+    <string name="foreground_timer_suppressed_en">Tempo scaduto. Il limite degli avvisi è stato raggiunto.</string>
+    <string name="foreground_timer_failed_en">Impossibile salvare lo stato del timer.</string>
+    <string name="tool_records_empty_en">Ancora nessun elemento</string>
+    <string name="tool_generated_dialog_close_en">Chiudi: %1$s</string>
+    <string name="tool_route_back_en">Torna nella mini-app</string>
+    <string name="tool_page_en">Pagina %1$d di %2$d</string>
+    <string name="tool_page_previous_en">Indietro: %1$s</string>
+    <string name="tool_page_next_en">Avanti: %1$s</string>
+    <string name="tool_reorder_handle_en">Riordina: %1$s</string>
+    <string name="tool_reorder_move_up_en">Sposta su</string>
+    <string name="tool_reorder_move_down_en">Sposta giù</string>
+    <string name="tool_game_start_en">Avvia</string>
+    <string name="tool_game_pause_en">Pausa</string>
+    <string name="tool_game_resume_en">Riprendi</string>
+    <string name="tool_game_restart_en">Ricomincia</string>
+    <string name="tool_scene_paused_en">In pausa</string>
+</resources>
