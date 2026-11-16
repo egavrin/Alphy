@@ -253,11 +253,9 @@ internal object ToolParts {
         }
     }
 
-    fun restore(needId: String, partId: String, config: JSONObject, path: String, allowNativeEdits: Boolean = false): PartCandidate {
+    fun restore(needId: String, partId: String, config: JSONObject, path: String): PartCandidate {
         val label = planText(config.opt("label"), "$path.label", 100)
         fun requireConfig(vararg fields: String) = config.requireKeys(path, setOf("label", *fields))
-        fun requireEditableConfig(vararg fields: String) = config.requireKeys(path, setOf("label", *fields),
-            if (allowNativeEdits) setOf(NativePartEditMetadata.FIELD) else emptySet())
         fun russian(): Boolean = config.opt("russian") as? Boolean
             ?: throw PartsContractFailure("$path.russian", "a boolean")
         val builder = FragmentBuilder(needId)
@@ -313,15 +311,15 @@ internal object ToolParts {
                     if (config.has("initial")) planNumber(config.opt("initial"), "$path.initial") else null, russian())
             }
             "due_items" -> {
-                requireEditableConfig("russian", "window", "items")
+                requireConfig("russian", "window", "items")
                 val items = config.readDueItems(path, allowOffsets = false)
                 dueItems(builder, label, items, integer(config.opt("window"), 0..PLAN_NUMBER_LIMIT, "$path.window"),
-                    russian(), NativePartEditMetadata.read(config, items.size, path))
+                    russian())
             }
             "idea_deck" -> {
-                requireEditableConfig("russian", "ideas")
+                requireConfig("russian", "ideas")
                 val ideas = config.readDeckIdeas(path)
-                ideaDeck(builder, label, ideas, russian(), NativePartEditMetadata.read(config, ideas.size, path))
+                ideaDeck(builder, label, ideas, russian())
             }
             "information" -> {
                 config.requireKeys(path, setOf("label", "body"), setOf("pictogram"))
@@ -1141,12 +1139,11 @@ internal object ToolParts {
             observationPaths = nativeObservationPaths(ui, LATEST to latestView, STATUS to statusView, HISTORY to list))
     }
 
-    private fun dueItems(builder: FragmentBuilder, label: String, items: List<DueItemPlan>, window: Int, russian: Boolean,
-        edit: NativePartEditMetadata = NativePartEditMetadata()): PartCandidate {
+    private fun dueItems(builder: FragmentBuilder, label: String, items: List<DueItemPlan>, window: Int, russian: Boolean): PartCandidate {
         fun localized(ru: String, en: String) = if (russian) ru else en
         fun listSchema(fields: JSONObject) =
             JSONObject().put("type", "list").put("maxItems", ToolValueSchema.LIST_MAX_ITEMS).put("fields", fields)
-        fun occurrence(row: JSONObject) = edit.actionTarget(row.getString("id") + "@" + row.getLong("occurrence"))
+        fun occurrence(row: JSONObject) = row.getString("id") + "@" + row.getLong("occurrence")
         val initial = items.mapIndexed { index, item ->
             initialDueSlot(index, item.name, checkNotNull(item.date).toString(), item.repeatDays)
         }
@@ -1158,7 +1155,7 @@ internal object ToolParts {
         val upcoming = builder.state("upcoming", "number", 0)
         val projection = PartReadProjection(setOf(display, overdue, upcoming)) { state, clock, _ ->
             val current = state.getJSONArray(rows)
-            val active = (0 until current.length()).filterNot(edit.retiredSlots::contains).map(current::getJSONObject)
+            val active = (0 until current.length()).map(current::getJSONObject)
                 .filterNot { it.getBoolean("completed") }
                 .map { it to LocalDate.parse(it.getString("date")) }.sortedBy { it.second }
             var late = 0
@@ -1180,7 +1177,7 @@ internal object ToolParts {
         }
         val complete = builder.clockedAction("complete") { state, payload, clock ->
             val current = state.getJSONArray(rows)
-            val row = (0 until current.length()).asSequence().filterNot(edit.retiredSlots::contains).map(current::getJSONObject)
+            val row = (0 until current.length()).asSequence().map(current::getJSONObject)
                 .firstOrNull { !it.getBoolean("completed") && occurrence(it) == payload }
                 ?: throw PartsContractFailure("$.event.value", "a current due occurrence")
             val repeat = row.getInt("repeatDays")
@@ -1193,7 +1190,7 @@ internal object ToolParts {
             JSONObject().put("field", field).put("text", title)
         }
         val action = JSONObject().put("action", complete).put("text", localized("Отметить", "Mark complete"))
-        val list = partNode("list", if (edit.showLabel) label else localized("Сроки", "Due items")).put("bind", display)
+        val list = partNode("list", localized("Сроки", "Due items")).put("bind", display)
             .put("columns", jsonArray(columns)).put("rowActions", JSONArray().put(action))
             .put("emptyText", localized("Нет открытых задач", "No open items"))
         val overdueView = partNode("metric", localized("Просрочено", "Overdue")).put("bind", overdue)
@@ -1205,15 +1202,14 @@ internal object ToolParts {
                 JSONObject().put("name", item.name).put("date", checkNotNull(item.date).toString()).apply {
                     if (item.repeatDays > 0) put("repeatDays", item.repeatDays)
                 }
-            })).also(edit::write)
+            }))
         return PartCandidate("due_items", "plans",
             "Sort supplied deadlines, show local-day counts, and complete or reschedule an item from the current day.",
             config, builder.finish(full, partContainer("column", summary), readProjection = projection),
             observationPaths = nativeObservationPaths(full, OVERDUE to overdueView, UPCOMING to upcomingView, ITEMS to list))
     }
 
-    private fun ideaDeck(builder: FragmentBuilder, label: String, ideas: List<DeckIdea>, russian: Boolean,
-        edit: NativePartEditMetadata = NativePartEditMetadata()): PartCandidate {
+    private fun ideaDeck(builder: FragmentBuilder, label: String, ideas: List<DeckIdea>, russian: Boolean): PartCandidate {
         fun localized(ru: String, en: String) = if (russian) ru else en
         fun effortLabel(effort: IdeaEffort) = when (effort) {
             IdeaEffort.LOW -> localized("Мало сил", "Low")
@@ -1244,7 +1240,7 @@ internal object ToolParts {
             val selectedEffort = state.getString(effort)
             return ideas.indices.filter { index ->
                 val idea = ideas[index]
-                index !in edit.retiredSlots && index !in done && idea.minutes <= minutes &&
+                index !in done && idea.minutes <= minutes &&
                     (selectedEffort == "all" || idea.effort.wire == selectedEffort)
             }
         }
@@ -1260,7 +1256,7 @@ internal object ToolParts {
             val full = state.getJSONArray(history).length() >= capacity
             val row = featured(state, choices)?.let { index ->
                 val idea = ideas[index]
-                val key = edit.actionTarget("idea${index + 1}@$day#${state.getLong(version)}")
+                val key = "idea${index + 1}@$day#${state.getLong(version)}"
                 JSONObject().put("id", key).put("name", idea.name).put("minutes", idea.minutes)
                     .put("effort", effortLabel(idea.effort)).put("canCycle", choices.size > 1).put("canComplete", !full)
             }
@@ -1299,7 +1295,7 @@ internal object ToolParts {
             JSONObject().put("text", localized("Другая", "Next")).put("action", cycle).put("enabledField", "canCycle"),
             JSONObject().put("text", localized("Сделано сегодня", "Done today")).put("action", complete).put("enabledField", "canComplete")
         )
-        val list = partNode("list", if (edit.showLabel) label else localized("Идея", "Idea")).put("bind", display).put("columns", jsonArray(columns))
+        val list = partNode("list", localized("Идея", "Idea")).put("bind", display).put("columns", jsonArray(columns))
             .put("rowActions", jsonArray(rowActions)).put("emptyText", localized("Нет подходящих идей", "No matching ideas"))
         val availableView = partNode("metric", localized("Доступно", "Available")).put("bind", availableCount)
         val completedView = partNode("metric", localized("Сделано сегодня", "Done today")).put("bind", completedCount)
@@ -1309,7 +1305,6 @@ internal object ToolParts {
         ))
         val config = JSONObject().put("label", label).put("russian", russian)
             .put("ideas", jsonArray(ideas.map { JSONObject().put("name", it.name).put("minutes", it.minutes).put("effort", it.effort.wire) }))
-            .also(edit::write)
         return PartCandidate("idea_deck", "plans",
             "Cycle supplied ideas with time and effort filters. Keep daily completions and their history.",
             config, builder.finish(ui, partContainer("column", summary), readProjection = projection),

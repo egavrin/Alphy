@@ -176,7 +176,7 @@ internal class AgentActions(private val context: Context, name: String, private 
         val field = args.getString("field")
         val eligible = tools.tools().filter { it.saved && !it.archived }.mapNotNull { record ->
             val spec = ToolSpec.availablePersisted(record.spec) ?: return@mapNotNull null
-            if (spec.isSealedStandalone || spec.schema.opt(field) !is String) return@mapNotNull null
+            if (spec.schema.opt(field) !is String) return@mapNotNull null
             record to spec
         }
         return semantic.rank(args.getString("app"), eligible, { (_, spec) -> "${spec.title}\n${spec.description}" })
@@ -185,7 +185,7 @@ internal class AgentActions(private val context: Context, name: String, private 
                     ArtifactCoordinator.get(tools, candidate.id).ordered {
                         val current = AutomationTools.exactTarget(this, tools, candidate.id, candidate.revision)
                         val spec = ToolSpec.parsePersisted(current.spec)
-                        require(!spec.isSealedStandalone && spec.schema.opt(field) is String)
+                        require(spec.schema.opt(field) is String)
                         spec.validateState(JSONObject(current.state).put(field, args.get("value")).toString())
                         AgentTarget(spec.title, "$field = ${JSONObject(current.state).get(field)}", "$field = ${args.get("value")}", artifactIdentity(current))
                     }
@@ -203,7 +203,7 @@ internal class AgentActions(private val context: Context, name: String, private 
             if (artifactIdentity(old) != target.identity) return@ordered false
             val spec = ToolSpec.parsePersisted(old.spec)
             val field = args.getString("field")
-            require(!spec.isSealedStandalone && spec.schema.opt(field) is String)
+            require(spec.schema.opt(field) is String)
             val state = spec.validateState(JSONObject(old.state).put(field, args.get("value")).toString())
             val rendered = prepareOutput(AutomationTools.isolatedRenderer(context)(old, state.toString()))
             require(rendered.effects.isEmpty() && rendered.records.length() == 0 && JSONObject(rendered.state).toString() == state.toString())

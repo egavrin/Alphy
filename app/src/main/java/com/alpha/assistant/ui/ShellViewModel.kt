@@ -993,14 +993,8 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     internal fun invalidateRefinementHandoff() {
         refinementNavigationGeneration++
     }
-    internal var nativeRefinementTarget by mutableStateOf<ToolRecord?>(null); private set
-
-    internal fun dismissNativeRefinement() {
-        nativeRefinementTarget = null
-    }
-
     fun refineTool(id: String) {
-        if(loading || loadFailed || openingRefinement || nativeRefinementTarget != null) return
+        if(loading || loadFailed || openingRefinement) return
         val controller = tools
         val displayed = controller.tools.find { it.id == id }
         val sourceConversation = snapshot.selectedId
@@ -1019,11 +1013,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                     requestError = getApplication<Application>().getString(R.string.tool_refinement_current_version)
                     return@launch
                 }
-                val spec = ToolSpec.availablePersisted(tool.spec) ?: unavailableTool()
-                if (spec.isSealedStandalone) {
-                    nativeRefinementTarget = tool
-                    return@launch
-                }
+                ToolSpec.availablePersisted(tool.spec) ?: unavailableTool()
                 val previous = snapshot.conversations.find { it.id == tool.lastConversationId }
                 if(previous?.refinementTargetId != id && previous?.refinementDraft?.let { it.text.isNotBlank() || it.attachments.isNotEmpty() } == true) {
                     requestError = "Сначала отправьте или очистите черновик изменения в этом чате."

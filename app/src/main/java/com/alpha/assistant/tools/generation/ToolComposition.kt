@@ -1,21 +1,13 @@
 package com.alpha.assistant.tools.generation
 
-import com.alpha.assistant.images.GeneratedImage
 import com.alpha.assistant.tools.ToolSpec
-import com.alpha.assistant.tools.hostGeneratedImageNode
 import com.alpha.assistant.tools.ToolUiCatalog
 import com.alpha.assistant.tools.ToolUiDiagnostic
 import com.alpha.assistant.tools.ToolValueSchema
-import org.json.JSONArray
 import org.json.JSONObject
 
-internal class StandaloneRefinementUnavailable : IllegalStateException(
-    "Generated refinement is unavailable for this mini-app. Its saved data is unchanged."
-)
-
 /** The host owns part state and UI. The sandbox receives only the fill partition. */
-internal class ToolComposition private constructor(private val layout: Layout, private val fillSchema: JSONObject,
-    private val standaloneImages: List<JSONObject>) {
+internal class ToolComposition private constructor(private val layout: Layout, private val fillSchema: JSONObject) {
     private data class FixedPart(val position: Int, val needId: String, val part: PartCandidate) {
         val instanceId = partInstanceId(needId)
         val root: JSONObject = JSONObject(part.fragment.full.toString())
@@ -83,7 +75,6 @@ internal class ToolComposition private constructor(private val layout: Layout, p
     val requiresClockSample: Boolean get() = hasReadProjections || layout.fixed.values.any { fixed ->
         fixed.part.fragment.handlers.values.any { it is PartHandler.Clocked }
     }
-    val isSealedStandalone: Boolean get() = layout.fillPositions.isEmpty()
     internal val fillPositions: List<Int> get() = layout.fillPositions
     val readPorts: Set<String> get() = layout.readPorts
     fun needsClockTicks(state: JSONObject, clock: PartClockSample): Boolean =
@@ -139,8 +130,7 @@ internal class ToolComposition private constructor(private val layout: Layout, p
         val id = event.opt("actionId") as? String
         val partAction = partActions[id]
         if (partAction == null) {
-            requireParts(!isSealedStandalone && id != null && isFillId(id), "$.event.actionId",
-                if (isSealedStandalone) "a declared part action" else "a declared part or fill action")
+            requireParts(id != null && isFillId(id), "$.event.actionId", "a declared part or fill action")
             return null
         }
         event.requireKeys("$.event", setOf("type", "actionId", "value"))
@@ -168,7 +158,6 @@ internal class ToolComposition private constructor(private val layout: Layout, p
 
     /** Use this projection for refinement. It contains only definition data owned by fill. */
     fun fillDefinition(spec: ToolSpec): JSONObject {
-        if (isSealedStandalone) throw StandaloneRefinementUnavailable()
         return JSONObject(spec.json).apply {
             remove("composition")
             remove(NativePresentation.FIELD)
@@ -184,32 +173,6 @@ internal class ToolComposition private constructor(private val layout: Layout, p
             "$.composition", "the existing part ownership and fill positions")
     }
 
-    internal fun editableParts(): List<NativeEditablePart> {
-        requireParts(isSealedStandalone, "$.composition", "a sealed standalone composition")
-        return layout.fixed.values.mapNotNull { fixed ->
-            val kind = NativeEditKind.entries.firstOrNull { it.wire == fixed.part.id } ?: return@mapNotNull null
-            NativeEditablePart(fixed.position, fixed.instanceId, kind, fixed.part.config.toString())
-        }
-    }
-
-    internal fun resealNativeEdit(previous: ToolSpec, configs: Map<Int, JSONObject>, title: String, description: String,
-        observer: ((ToolUiDiagnostic) -> Unit)?): ToolSpec {
-        val editablePositions = editableParts().map(NativeEditablePart::position).toSet()
-        requireParts(editablePositions.containsAll(configs.keys),
-            "$.composition", "configurations for editable parts")
-        val fixed = layout.fixed.values.map { current ->
-            val config = configs[current.position] ?: return@map current
-            val next = ToolParts.restore(current.needId, current.part.id, config, "$.parts.config", allowNativeEdits = true)
-            requireParts(sameToolJson(current.part.fragment.schema, next.fragment.schema) &&
-                current.part.fragment.handlers.keys == next.fragment.handlers.keys, "$.composition",
-                "the existing state schema and action IDs")
-            FixedPart(current.position, current.needId, next)
-        }
-        val updated = sealStandalone(Layout(fixed, emptyList()), title, description, previous.nativePresentation, observer)
-            .withAppLanguage(previous.appLanguage)
-        return if (previous.generatedImages.isEmpty()) updated else updated.withHostPolish(null, previous.generatedImages)
-    }
-
     internal fun requireNativePresentation(recipe: NativePresentation) {
         val part = layout.fixed[recipe.focalPosition]?.part
             ?: throw PartsContractFailure("$.nativePresentation.focalPosition", "a host-owned part position")
@@ -220,21 +183,16 @@ internal class ToolComposition private constructor(private val layout: Layout, p
     internal fun catalogUi(fullUi: JSONObject, fullState: JSONObject): JSONObject {
         requireParts(fullUi.toString().toByteArray(Charsets.UTF_8).size <= ToolUiCatalog.MAX_UI_BYTES, "$.ui", "at most ${ToolUiCatalog.MAX_UI_BYTES} bytes")
         val children = checkedChildren(fullUi)
-        if (!isSealedStandalone) {
-            val fill = layout.fillPositions.map(children::get)
-            fill.forEach(::requireFillActions)
-            ToolUiCatalog.validate(partContainer("column", fill), fillSchema, fillState(fullState))
-        }
+        val fill = layout.fillPositions.map(children::get)
+        fill.forEach(::requireFillActions)
+        ToolUiCatalog.validate(partContainer("column", fill), fillSchema, fillState(fullState))
         return partContainer("column", children.mapIndexed { position, node ->
             layout.fixed[position]?.part?.fragment?.full ?: node
         })
     }
 
     private fun checkedChildren(fullUi: JSONObject): List<JSONObject> =
-        columnChildren(fullUi, layout.size + standaloneImages.size, "$.ui").also { children ->
-            requireParts(standaloneImages.indices.all { index ->
-                sameToolJson(children[layout.size + index], standaloneImages[index])
-            }, "$.ui.children", "the approved host image bindings")
+        columnChildren(fullUi, layout.size, "$.ui").also { children ->
             layout.fixed.forEach { (position, fixed) ->
                 requireParts(sameToolJson(children[position], fixed.root), "$.ui.children[$position]", "the canonical part root")
             }
@@ -244,26 +202,10 @@ internal class ToolComposition private constructor(private val layout: Layout, p
         const val FILL_PREFIX = "fill_"
         private const val VERSION = 1
         private const val MAX_POSITIONS = 12
-        private const val STANDALONE_SOURCE = "return {state:input.state};"
         private val fillRequired = setOf("stateSchema", "initialState", "ui", "source", "capabilities")
         private val fillAuthority = setOf("capabilityResults", "collections", "surfaces", "presentation", "hostControls")
         private val fillOptional = setOf("title", "description") + fillAuthority
         internal val generatedFillFields = fillRequired + fillOptional
-
-        /** Create a standalone definition from restored host parts and revalidate the stored envelope. */
-        fun sealStandalone(assembly: PartsAssembly, observer: ((ToolUiDiagnostic) -> Unit)? = null): ToolSpec {
-            requireParts(assembly.parts.isNotEmpty() && assembly.holes.isEmpty() && assembly.blockingQuestions.isEmpty(),
-                "$.composition", "a complete assembly of host parts")
-            return sealStandalone(Layout(restoreParts(assembly), emptyList()), assembly.preview.title, assembly.preview.description,
-                assembly.preview.nativePresentation, observer)
-        }
-
-        private fun sealStandalone(layout: Layout, title: String, description: String, recipe: NativePresentation?,
-            observer: ((ToolUiDiagnostic) -> Unit)?): ToolSpec {
-            val fill = JSONObject().put("stateSchema", JSONObject()).put("initialState", JSONObject())
-                .put("ui", partContainer("column", emptyList())).put("source", STANDALONE_SOURCE).put("capabilities", JSONArray())
-            return seal(layout, title, description, fill, recipe, observer)
-        }
 
         fun complete(assembly: PartsAssembly, rawFill: String, observer: ((ToolUiDiagnostic) -> Unit)? = null): ToolSpec {
             requireParts(assembly.parts.isNotEmpty() && assembly.holes.isNotEmpty() && assembly.blockingQuestions.isEmpty(),
@@ -276,7 +218,6 @@ internal class ToolComposition private constructor(private val layout: Layout, p
 
         fun refine(previous: ToolSpec, rawFill: String, observer: ((ToolUiDiagnostic) -> Unit)? = null): ToolSpec {
             val composition = previous.composition ?: throw PartsContractFailure("$.composition", "a mixed artifact")
-            if (composition.isSealedStandalone) throw StandaloneRefinementUnavailable()
             return seal(composition.layout, previous.title, previous.description, partsObject(rawFill, "$.fill"),
                 previous.nativePresentation, observer)
         }
@@ -317,20 +258,14 @@ internal class ToolComposition private constructor(private val layout: Layout, p
             val fill = manifest.items("fillPositions", 0..MAX_POSITIONS, "$root.fillPositions").mapIndexed { index, item ->
                 position(item, "$root.fillPositions[$index]")
             }
-            val standalone = fill.isEmpty()
+            // Alpha 12 and earlier saved sealed standalone apps without fill. They stay saved and report an unavailable format.
+            requireParts(fill.isNotEmpty(), "$root.fillPositions", "at least one generated fill position")
             val readPorts = if (manifest.has("readPorts")) {
                 val names = manifest.items("readPorts", 1..MAX_POSITIONS, "$root.readPorts")
                     .map { planText(it, "$root.readPorts", 24) }
                 requireParts(names == names.distinct().sorted(), "$root.readPorts", "ordered distinct IDs")
                 names.toSet()
             } else emptySet()
-            if (standalone) {
-                requireParts(definition.opt("source") == STANDALONE_SOURCE, "$.source", "the fixed host no-op")
-                requireParts(definition.optJSONArray("capabilities")?.length() == 0, "$.capabilities", "no capabilities")
-                for (field in fillAuthority) {
-                    requireParts(!definition.has(field), "$.$field", "no fill authority in a standalone composition")
-                }
-            }
             val parts = manifest.items("parts", 1..MAX_POSITIONS, "$root.parts").mapIndexed { index, row ->
                 val path = "$root.parts[$index]"
                 val entry = row as? JSONObject ?: throw PartsContractFailure(path, "a part object")
@@ -340,16 +275,8 @@ internal class ToolComposition private constructor(private val layout: Layout, p
                 requireParts(entry.opt("instanceId") == partInstanceId(needId), "$path.instanceId", "the canonical instance ID")
                 val partId = planText(entry.opt("partId"), "$path.partId", 24)
                 val config = objectField(entry, "config", path)
-                val part = ToolParts.restore(needId, partId, config, "$path.config", allowNativeEdits = standalone)
-                if (standalone) {
-                    requireParts(sameToolJson(config, part.config) && part.fragment.projectionSource == null, "$path.config",
-                        "a canonical host part configuration")
-                }
+                val part = ToolParts.restore(needId, partId, config, "$path.config")
                 FixedPart(position(entry.opt("position"), "$path.position"), needId, part)
-            }
-            if (standalone) {
-                requireParts(parts.any { it.projection != null || it.part.fragment.handlers.values.any { handler -> handler is PartHandler.Clocked } },
-                    "$root.parts", "a host-owned part")
             }
             val positions = parts.map(FixedPart::position) + fill
             requireParts(parts.map(FixedPart::needId).toSet().size == parts.size, "$root.parts", "unique instances")
@@ -361,11 +288,7 @@ internal class ToolComposition private constructor(private val layout: Layout, p
             PartsGeneration.requireUniqueIds(ids)
             val partFields = ids.flatMap(PartFragmentIds::state).toSet()
             val fillFields = ToolValueSchema.keys(schema) - partFields
-            if (standalone) {
-                requireParts(fillFields.isEmpty(), "$.stateSchema", "only canonical part state fields")
-            } else {
-                requireParts(fillFields.all(::isFillId), "$.stateSchema", "owned state fields")
-            }
+            requireParts(fillFields.all(::isFillId), "$.stateSchema", "owned state fields")
             fragments.forEach { fragment ->
                 fragment.schema.keys().forEach { key ->
                     requireParts(sameToolJson(schema.opt(key), fragment.schema.get(key)), "$.stateSchema", "canonical part schemas")
@@ -374,9 +297,7 @@ internal class ToolComposition private constructor(private val layout: Layout, p
             }
             requireParts(surfaceIds.all(::isFillId), "$.surfaces", "fill-owned surface IDs")
             val fillSchema = JSONObject().apply { fillFields.forEach { put(it, schema.get(it)) } }
-            val images = if (standalone) GeneratedImage.list(definition.optJSONArray(GeneratedImage.FIELD))
-                .map(::hostGeneratedImageNode) else emptyList()
-            return ToolComposition(Layout(parts, fill, readPorts), fillSchema, images)
+            return ToolComposition(Layout(parts, fill, readPorts), fillSchema)
         }
 
         private fun position(value: Any?, path: String): Int {

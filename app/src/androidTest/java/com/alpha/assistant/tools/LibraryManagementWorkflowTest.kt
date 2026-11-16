@@ -582,20 +582,79 @@ class LibraryManagementWorkflowTest {
             }
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitUntil {!model.loading && !model.tools.busy}
-                robot.openDrawer(scenario);click(app.getString(R.string.mini_apps));robot.awaitDrawerClosed(scenario)
-                waitFor("Недоступный счётчик");waitFor("Формат мини-приложения недоступен")
-                click("Недоступный счётчик")
-                waitFor(app.getString(R.string.tool_closed_format_detail))
+                openUnavailableApp(scenario,"Недоступный счётчик")
                 assertNull(find(diagnostics.freshRoot(),"Изменить"))
                 diagnostics.capture("unavailable-double-font")
             }
         } finally {
             if(font.toDoubleOrNull()==null) command("settings delete system font_scale")
             else command("settings put system font_scale $font")
-            CloudTestActivity.factory=null;shell.close();keys.clear()
-            app.deleteDatabase(name);app.deleteDatabase(toolName);app.deleteDatabase("$toolName-automations.db");app.deleteSharedPreferences(name)
-            java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null);deleteEntry(name)}
+            closeShell(name,toolName,shell,keys)
         }
+    }
+
+    // Alpha 12 and earlier saved sealed standalone compositions. The fixture is one such record, as that code wrote it.
+    @Test fun savedStandaloneAppFromAnOlderVersionStaysButDoesNotOpen() {
+        val name="library-standalone-${UUID.randomUUID()}.db"
+        val shell=ShellStore(app,name)
+        val toolName="$name-tools.db"
+        val keys=SecureKeyStore(app,name,name)
+        val old=JSONObject(instrumentation.context.assets.open("legacy/sealed-standalone.json").bufferedReader().use { it.readText() })
+        val values=android.content.ContentValues().apply {
+            put("spec",old.getJSONObject("spec").toString());put("state",old.getJSONObject("state").toString());put("ui",old.getJSONObject("ui").toString())
+        }
+        lateinit var model: ShellViewModel
+        try {
+            val chat="standalone-chat"
+            val saved=counter("standalone","Workshop").copy(conversationId=chat,lastConversationId=chat,onDesktop=true)
+            ToolStore(app,toolName).use { tools ->
+                tools.saveTool(saved,true)
+                assertEquals(1,tools.writableDatabase.update("tools",values,"id=?",arrayOf(saved.id)))
+                assertEquals(1,tools.writableDatabase.update("revisions",values,"tool_id=?",arrayOf(saved.id)))
+            }
+            shell.saveConversation(Conversation(chat,"Workshop chat",1,1,messages=listOf(
+                Message("standalone-card","assistant","",1,"complete",toolId=saved.id,toolRevision=1))))
+            CloudTestActivity.factory={ ShellViewModel(it,offline,shell,keys).openSeededChat(shell).also { model=it } }
+            ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
+                waitUntil {!model.loading && !model.tools.busy}
+                // No chat is open, so the desktop tile shows the app as unavailable.
+                waitFor("Workshop");waitFor(app.getString(R.string.tool_closed_format))
+                openUnavailableApp(scenario,"Workshop")
+            }
+            ToolStore(app,toolName).use { tools ->
+                val kept=tools.tools().single { it.id==saved.id }
+                assertEquals(values.getAsString("spec"),kept.spec)
+                assertEquals(values.getAsString("state"),kept.state)
+                assertEquals(listOf(values.getAsString("spec")),tools.revisions(saved.id).map { it.spec })
+            }
+            shell.seedOpenChat(chat)
+            ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
+                waitUntil {!model.loading && !model.tools.busy}
+                // The chat card shows the app as unavailable.
+                waitFor(app.getString(R.string.tool_closed_format))
+                // Deletion in the library is the action that the unavailable text offers.
+                openUnavailableApp(scenario,"Workshop")
+                click("Действия мини-приложения");click("Удалить")
+                waitFor(app.getString(R.string.tool_delete_widgets, 0));click("Удалить")
+                waitUntil {model.tools.tools.none { it.id==saved.id }}
+            }
+            ToolStore(app,toolName).use { tools -> assertNull(tools.tool(saved.id)) }
+        } finally {
+            closeShell(name,toolName,shell,keys)
+        }
+    }
+
+    private fun openUnavailableApp(scenario: ActivityScenario<CloudTestActivity>,title: String) {
+        robot.openDrawer(scenario);click(app.getString(R.string.mini_apps));robot.awaitDrawerClosed(scenario)
+        waitFor(title);waitFor(app.getString(R.string.tool_closed_format))
+        click(title)
+        waitFor(app.getString(R.string.tool_closed_format_detail))
+    }
+
+    private fun closeShell(name: String,toolName: String,shell: ShellStore,keys: SecureKeyStore) {
+        CloudTestActivity.factory=null;shell.close();keys.clear()
+        app.deleteDatabase(name);app.deleteDatabase(toolName);app.deleteDatabase("$toolName-automations.db");app.deleteSharedPreferences(name)
+        java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null);deleteEntry(name)}
     }
 
     private fun edit(label: String,value: String) {

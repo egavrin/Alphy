@@ -20,7 +20,6 @@ import com.alpha.assistant.tools.three.ThreeSceneAssets
 import com.alpha.assistant.tools.three.ThreeSceneProblem
 import com.alpha.assistant.tools.three.checkThreeScene
 import com.alpha.assistant.tools.generation.HoleKind
-import com.alpha.assistant.tools.generation.NativeEditBase
 import com.alpha.assistant.tools.generation.NeedsPlan
 import com.alpha.assistant.tools.generation.behaviorTargets
 import com.alpha.assistant.tools.generation.nativeObservationShape
@@ -35,8 +34,6 @@ import com.alpha.assistant.tools.generation.PartRequest
 import com.alpha.assistant.tools.generation.PartsAssembly
 import com.alpha.assistant.tools.generation.PartsContractFailure
 import com.alpha.assistant.tools.generation.PartsGeneration
-import com.alpha.assistant.tools.generation.StandaloneNativeEdit
-import com.alpha.assistant.tools.generation.StandaloneRefinementUnavailable
 import com.alpha.assistant.tools.generation.ToolComposition
 import com.alpha.assistant.tools.generation.ToolParts
 import com.alpha.assistant.tools.generation.jsonArray
@@ -59,7 +56,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
-import java.util.Collections
 import java.util.UUID
 
 internal const val MAX_TOOL_PROMPT_LENGTH = 64_000
@@ -72,9 +68,6 @@ internal interface GeneratedOutputDetail { val detail: String }
 
 internal data class LessonToolPreview(val preview: ToolPreview, val sourceIds: List<String>, val illustration: ImageIntent? = null)
 
-internal fun ToolSpec.requireGeneratedRefinement() {
-    if(isSealedStandalone) throw StandaloneRefinementUnavailable()
-}
 internal class ToolForegroundAction(val tool: ToolRecord, val network: CapabilityRequest?)
 enum class ToolGenerationProgress { PLANNING, SELECTING, COMPLETING, REFINING, VALIDATING, IMAGE_PLANNING, IMAGES, POLISHING, APPROVAL }
 
@@ -379,12 +372,6 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         } finally {
             repair.record(request, response, result, applied, rejection)
         }
-    }
-
-    internal suspend fun requestNativeEdit(edit: StandaloneNativeEdit,instruction: String,key: String,session: CloudSession): String {
-        val payload=JSONObject().put("context",JSONObject(edit.providerContext())).put("request",instruction)
-        return response(key,listOf(CloudTurn("user",payload.toString())),session,CloudGenerationStage.REFINE,
-            StandaloneNativeEdit.providerGuidance)
     }
 
     suspend fun generate(key: String, prompt: String, base: ToolRecord?, images: List<String>, session: CloudSession, artifactId: String,
@@ -1045,9 +1032,7 @@ ${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by
             fullState
         } else {
             val fullUi=JSONObject(fallbackUi)
-            val standalone=spec.isSealedStandalone
             val partState=generatedOutput(GenerationProblem.RESULT) {
-                if(standalone) require(type in setOf("preview","render","open","action",SandboxContract.LIVE_INPUT_EVENT)) {"Unsupported standalone event."}
                 composition.applyPartEvent(event,fullUi,fullState,clock)
             }
             if (partState != null && composition.readPorts.isNotEmpty()) {
@@ -1055,7 +1040,7 @@ ${CapabilityCatalog.modelGuidance(allowedCapabilities)} Declare only IDs used by
                     fallbackUi, policy, clock, execute)
                 return if (liveInput) rendered.copy(frames = null, timers = null, playback = null) else rendered
             }
-            if(partState != null || standalone) {
+            if(partState != null) {
                 generatedOutput(GenerationProblem.RESULT) { SandboxContract.validateRequest(spec.source,input(fullState).toString()) }
                 currentCoroutineContext().ensureActive()
                 val raw=JSONObject().put("state",partState ?: fullState).toString()
@@ -1140,7 +1125,7 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
             val base=toolId?.let {
                 val current=current(store,it)
                 if(expected!=null)check(current==expected) {"The mini-app changed. Request the change again."}
-                ToolSpec.parsePersisted(current.spec).requireGeneratedRefinement()
+                ToolSpec.parsePersisted(current.spec)
                 flush(store)
                 checkNotNull(store.tool(it))
             }
@@ -1248,9 +1233,6 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
                 }
             }
             val state=spec.validateState(checkNotNull(d.previewState)).toString()
-            if(spec.isSealedStandalone) {
-                check(old==null && sameToolJson(JSONObject(state),JSONObject(spec.initialState))) {"The standalone draft changed."}
-            }
             val ui=spec.validateUi(JSONObject(checkNotNull(d.previewUi)),JSONObject(state)).toString()
             val next=ToolRecord(old?.id ?: d.id,(old?.revision ?: 0)+1,(old?.stateVersion ?: 0)+1,spec.json,state,ui,
                 old?.conversationId,true,createdAt=old?.createdAt ?: System.currentTimeMillis(),
@@ -1351,90 +1333,6 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
             next
         }
 
-    internal suspend fun prepareNativeEdit(expected: ToolRecord,request: NativeToolEditRequest,instruction: String,
-        key: String): NativeToolEditPreview {
-        request.begin()
-        try {
-            if(instruction.isBlank() || instruction.length>16000) throw nativeEditUnsupported()
-            val base=NativeEditBase(store.artifactIdentity,expected.id,expected.revision,expected.stateVersion,request.id)
-            val coordinator=ArtifactCoordinator.get(store,expected.id)
-            val (before,sample,edit)=coordinator.ordered {
-                val saved=nativeEditRecord(base,expected.createdAt)
-                val spec=ToolSpec.parsePersisted(saved.spec)
-                val clock=generation.samplePartClock()
-                Triple(nativeEditView(spec,saved.ui,saved.state,clock),clock,
-                    supportedNativeEdit { StandaloneNativeEdit.begin(base,spec,saved.state,clock) })
-            }
-            val plan=generation.requestNativeEdit(edit,instruction,key,request.cloud)
-            val result=supportedNativeEdit { edit.apply(plan) }
-            val next=ToolSpec.parsePersisted(result.spec)
-            val after=nativeEditView(next,next.ui.toString(),result.state,sample)
-            return AutomationRuntime.withToolRevisionChange(store,expected.id) { rules ->
-                currentCoroutineContext().ensureActive()
-                request.cloud.check()
-                nativeEditRecord(base,expected.createdAt)
-                if(generation.samplePartClock().localDate!=sample.localDate) throw nativeEditStale()
-                val impact=AutomationRuntime.toolRevisionImpact(rules,expected.id)
-                currentCoroutineContext().ensureActive()
-                request.publish(NativeToolEditRequest.Proof(base,expected.createdAt,edit,plan,result,impact))
-                val (stopped,review)=impact.partition { it.enabled }
-                NativeToolEditPreview(request.id,before,after,Collections.unmodifiableList(stopped.map { it.name }),
-                    Collections.unmodifiableList(review.map { it.name }))
-            }
-        } catch(failure: Throwable) {
-            request.cancel()
-            throw failure
-        }
-    }
-
-    internal suspend fun confirmNativeEdit(request: NativeToolEditRequest): ToolRecord = request.confirm { proof ->
-        if(proof.base.libraryId!=store.artifactIdentity) throw nativeEditStale()
-        AutomationRuntime.withToolRevisionChange(store,proof.base.artifactId) { rules ->
-            val old=nativeEditRecord(proof.base,proof.createdAt)
-            val spec=ToolSpec.parsePersisted(old.spec)
-            val clock=generation.samplePartClock()
-            try {
-                val base=NativeEditBase(store.artifactIdentity,old.id,old.revision,old.stateVersion,request.id)
-                proof.edit.validateCommit(proof.plan,proof.result,base,spec,old.state,clock)
-            } catch(_: PartsContractFailure) { throw nativeEditStale() }
-            val nextSpec=ToolSpec.parsePersisted(proof.result.spec)
-            val next=old.copy(revision=Math.incrementExact(old.revision),stateVersion=Math.incrementExact(old.stateVersion),
-                spec=nextSpec.json,state=proof.result.state,ui=nextSpec.ui.toString())
-            val context=currentCoroutineContext()
-            AutomationRuntime.commitToolRevision(store,rules,old.id,validateImpact={
-                if(it!=proof.impact) throw nativeEditImpactChanged()
-            }) { stopped ->
-                context.ensureActive()
-                if(store.tool(old.id)!=old || store.artifactWorkPending(old.id)) throw nativeEditStale()
-                request.admitCommit()
-                store.commitTool(next,old,true,revisionLabel="Изменение встроенной части",stoppedAutomations=stopped)
-            }
-            invalidate()
-            committed(next)
-            next
-        }
-    }
-
-    private fun ArtifactCoordinator.nativeEditRecord(base: NativeEditBase,createdAt: Long): ToolRecord {
-        val saved=store.tool(base.artifactId) ?: throw nativeEditStale()
-        if(!saved.saved || saved.archived || saved.revision!=base.revision || saved.stateVersion!=base.stateVersion ||
-            saved.createdAt!=createdAt || store.artifactWorkPending(saved.id)) throw nativeEditStale()
-        val live=try { current(store,saved.id,saved.revision,saved.stateVersion) }
-            catch(_: IllegalStateException) { throw nativeEditStale() }
-        if(live!=saved) throw nativeEditStale()
-        return saved
-    }
-
-    private fun nativeEditView(spec: ToolSpec,ui: String,state: String,clock: PartClockSample): NativeToolEditView {
-        val view=projectToolState(spec,spec.validateState(state),clock)
-        val canonicalUi=spec.validateUi(JSONObject(ui),view).toString()
-        return NativeToolEditView(spec.title,spec.description,canonicalUi,view.toString(),spec.appLanguage)
-    }
-
-    private inline fun <T> supportedNativeEdit(block: ()->T): T =
-        try { block() }
-        catch(_: PartsContractFailure) { throw nativeEditUnsupported() }
-        catch(_: ToolValidationFailure) { throw nativeEditUnsupported() }
     suspend fun openArtifact(expected: ToolRecord): ArtifactSnapshot =
         openArtifact(expected.id,expected.revision,expected.stateVersion)
 

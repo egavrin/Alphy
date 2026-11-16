@@ -303,13 +303,6 @@ object AutomationRuntime {
             ToolRevisionImpact(it.id,it.revision,it.definition.name,it.enabled,rules.approvalToken(it.id))
         }
 
-    /** The caller holds the revision ordering. The transaction also fences direct rule pause and edit. */
-    internal fun toolRevisionImpact(rules: AutomationStore,owner: String): List<ToolRevisionImpact> {
-        lateinit var impact: List<ToolRevisionImpact>
-        rules.transaction { impact=toolRevisionImpact(rules,rules.rules().filter { dependencies(it,owner) }) }
-        return impact
-    }
-
     internal fun commitToolRevision(tools: ToolStore,rules: AutomationStore,owner: String,
         validateImpact: ((List<ToolRevisionImpact>)->Unit)?=null,commit: (List<StoppedAutomation>)->Unit) {
         commitToolChange(tools,rules,owner,TOOL_REVISION_CHANGED) { dependent ->

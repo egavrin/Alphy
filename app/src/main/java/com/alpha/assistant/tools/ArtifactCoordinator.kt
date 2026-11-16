@@ -382,7 +382,6 @@ internal class ArtifactCoordinator private constructor() {
         recoverOpen(store)
         val old=current(store,id,revision,stateVersion)
         val spec=ToolSpec.parsePersisted(old.spec)
-        if(spec.isSealedStandalone) return openWithoutRetained(store,generation,old,spec,owner,canStart)
         if(hosts.values.any {it.nonGraphics}) throw transientBusy()
         if(session!=null) {
             ensureAvailable();flush(store);flushJob?.cancel();flushJob=null
@@ -425,7 +424,7 @@ internal class ArtifactCoordinator private constructor() {
                 if(!canStart()) throw CancellationException("The artifact host is no longer active.")
                 return generation.evaluate(spec,old.id,old.revision,old.state,event,old.ui)
             }
-            val output=prepareOutput(if(spec.isSealedStandalone) evaluateOpen() else withTransientHost {evaluateOpen()})
+            val output=prepareOutput(withTransientHost {evaluateOpen()})
             currentCoroutineContext().ensureActive()
             if(!canStart()) throw CancellationException("The artifact host is no longer active.")
             check(store.tool(old.id)==durable) {"Saved data changed during evaluation. Reopen the mini-app."}
@@ -464,15 +463,9 @@ internal class ArtifactCoordinator private constructor() {
     suspend fun evaluate(generation: ToolGenerationService,old: ToolRecord,event: JSONObject,clock: PartClockSample?=null,
         beforeDispatch: ()->Unit={}): ToolPreview {
         ensureAvailable()
-        var nativeOnly=false
         return try {
             val spec=ToolSpec.parsePersisted(old.spec)
-            nativeOnly=spec.isSealedStandalone
             val sample=clock ?: generation.partClockFor(spec)
-            if(nativeOnly) {
-                beforeDispatch()
-                return prepareOutput(generation.evaluateWithClock(spec,old.id,old.revision,old.state,event,old.ui,sample))
-            }
             val active=session
             val result=if(active==null) {
                 suspend fun run(): ToolPreview {
@@ -493,7 +486,7 @@ internal class ArtifactCoordinator private constructor() {
         } catch(failed: Throwable) {
             val transientRejection=session==null && (event.optString("type")==SandboxContract.LIVE_INPUT_EVENT ||
                 failed is CloudFailure && failed.code=="javascript_busy")
-            if(!nativeOnly && failed !is LiveDispatchStopped && !transientRejection) {
+            if(failed !is LiveDispatchStopped && !transientRejection) {
                 session?.close();session=null;failure=failed.message ?: "The artifact session stopped."
             }
             throw failed

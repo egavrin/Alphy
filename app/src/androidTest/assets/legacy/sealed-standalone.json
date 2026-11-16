@@ -1,0 +1,274 @@
+{
+  "spec": {
+    "stateSchema": {
+      "p3_due_items": {
+        "type": "list",
+        "maxItems": 100,
+        "fields": {
+          "id": "string",
+          "name": "string",
+          "date": "string",
+          "repeatDays": "number",
+          "completed": "boolean",
+          "occurrence": "number"
+        }
+      },
+      "p3_due_display": {
+        "type": "list",
+        "maxItems": 100,
+        "fields": {
+          "id": "string",
+          "name": "string",
+          "date": "string",
+          "status": "string"
+        }
+      },
+      "p3_due_overdue": "number",
+      "p3_due_upcoming": "number",
+      "p5_count_value": "number"
+    },
+    "initialState": {
+      "p3_due_items": [
+        {
+          "id": "due1",
+          "name": "Filter",
+          "date": "2026-03-05",
+          "repeatDays": 14,
+          "completed": false,
+          "occurrence": 0
+        },
+        {
+          "id": "due2",
+          "name": "Paper",
+          "date": "2026-03-06",
+          "repeatDays": 0,
+          "completed": false,
+          "occurrence": 0
+        }
+      ],
+      "p3_due_display": [],
+      "p3_due_overdue": 0,
+      "p3_due_upcoming": 0,
+      "p5_count_value": 0
+    },
+    "ui": {
+      "type": "column",
+      "children": [
+        {
+          "type": "column",
+          "children": [
+            {
+              "type": "metric",
+              "text": "Overdue",
+              "bind": "p3_due_overdue"
+            },
+            {
+              "type": "metric",
+              "text": "Next 3 days",
+              "bind": "p3_due_upcoming"
+            },
+            {
+              "type": "list",
+              "text": "Due items",
+              "bind": "p3_due_display",
+              "columns": [
+                {
+                  "field": "name",
+                  "text": "Item"
+                },
+                {
+                  "field": "date",
+                  "text": "Due date"
+                },
+                {
+                  "field": "status",
+                  "text": "Status"
+                }
+              ],
+              "rowActions": [
+                {
+                  "action": "p3_due_complete",
+                  "text": "Mark complete"
+                }
+              ],
+              "emptyText": "No open items"
+            }
+          ],
+          "partId": "due_items",
+          "partInstanceId": "p3_due"
+        },
+        {
+          "type": "column",
+          "children": [
+            {
+              "type": "metric",
+              "text": "Attempts",
+              "bind": "p5_count_value"
+            },
+            {
+              "type": "row",
+              "children": [
+                {
+                  "type": "button",
+                  "text": "Increase",
+                  "action": "p5_count_add"
+                },
+                {
+                  "type": "button",
+                  "text": "Reset",
+                  "action": "p5_count_reset"
+                }
+              ]
+            }
+          ],
+          "partId": "counter",
+          "partInstanceId": "p5_count"
+        }
+      ]
+    },
+    "source": "return {state:input.state};",
+    "capabilities": [],
+    "title": "Workshop",
+    "description": "Plans",
+    "formatVersion": 3,
+    "composition": {
+      "version": 1,
+      "parts": [
+        {
+          "position": 0,
+          "needId": "due",
+          "partId": "due_items",
+          "instanceId": "p3_due",
+          "config": {
+            "label": "Maintenance",
+            "russian": false,
+            "window": 3,
+            "items": [
+              {
+                "name": "Filter",
+                "date": "2026-03-05",
+                "repeatDays": 14
+              },
+              {
+                "name": "Paper",
+                "date": "2026-03-06"
+              }
+            ]
+          }
+        },
+        {
+          "position": 1,
+          "needId": "count",
+          "partId": "counter",
+          "instanceId": "p5_count",
+          "config": {
+            "label": "Attempts",
+            "initial": 0,
+            "step": 1,
+            "russian": false
+          }
+        }
+      ],
+      "fillPositions": []
+    }
+  },
+  "state": {
+    "p3_due_items": [
+      {
+        "id": "due1",
+        "name": "Filter",
+        "date": "2026-03-05",
+        "repeatDays": 14,
+        "completed": false,
+        "occurrence": 0
+      },
+      {
+        "id": "due2",
+        "name": "Paper",
+        "date": "2026-03-06",
+        "repeatDays": 0,
+        "completed": false,
+        "occurrence": 0
+      }
+    ],
+    "p3_due_display": [],
+    "p3_due_overdue": 0,
+    "p3_due_upcoming": 0,
+    "p5_count_value": 0
+  },
+  "ui": {
+    "type": "column",
+    "children": [
+      {
+        "type": "column",
+        "children": [
+          {
+            "type": "metric",
+            "text": "Overdue",
+            "bind": "p3_due_overdue"
+          },
+          {
+            "type": "metric",
+            "text": "Next 3 days",
+            "bind": "p3_due_upcoming"
+          },
+          {
+            "type": "list",
+            "text": "Due items",
+            "bind": "p3_due_display",
+            "columns": [
+              {
+                "field": "name",
+                "text": "Item"
+              },
+              {
+                "field": "date",
+                "text": "Due date"
+              },
+              {
+                "field": "status",
+                "text": "Status"
+              }
+            ],
+            "rowActions": [
+              {
+                "action": "p3_due_complete",
+                "text": "Mark complete"
+              }
+            ],
+            "emptyText": "No open items"
+          }
+        ],
+        "partId": "due_items",
+        "partInstanceId": "p3_due"
+      },
+      {
+        "type": "column",
+        "children": [
+          {
+            "type": "metric",
+            "text": "Attempts",
+            "bind": "p5_count_value"
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "button",
+                "text": "Increase",
+                "action": "p5_count_add"
+              },
+              {
+                "type": "button",
+                "text": "Reset",
+                "action": "p5_count_reset"
+              }
+            ]
+          }
+        ],
+        "partId": "counter",
+        "partInstanceId": "p5_count"
+      }
+    ]
+  }
+}

@@ -183,8 +183,7 @@ internal class ToolGenerationSmoke(
     }
     private suspend fun <T> branch(initialUi: String=spec.ui.toString(), seedState: String=initialState,
         freezeClock: Boolean = false, block: suspend Branch.()->T): T =
-        if(spec.isSealedStandalone) Branch({ _, _ -> error("A sealed standalone app has no executor.") },initialUi,seedState,freezeClock).block()
-        else sandbox.disposable {execute -> Branch(execute,initialUi,seedState,freezeClock).block()}
+        sandbox.disposable {execute -> Branch(execute,initialUi,seedState,freezeClock).block()}
 
     fun checkBehaviorBindings(scenario: GenerationBehavior.Scenario, rawBindings: Any?,
         route: ToolGenerationRoute, nativeSlots: Set<String>) {
@@ -585,8 +584,7 @@ internal class ToolGenerationSmoke(
             probe.open()
             return probe.block()
         }
-        return if (spec.isSealedStandalone) start(Branch({ _, _ -> error("A sealed standalone app has no executor.") }, spec.ui.toString(), seedState, false))
-        else sandbox.disposable { execute ->
+        return sandbox.disposable { execute ->
             start(Branch({ source, input -> execute("const __alphyNow=$now;$DATE_SHIM\n$source", input) }, spec.ui.toString(), seedState, false))
         }
     }

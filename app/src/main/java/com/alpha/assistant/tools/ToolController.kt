@@ -42,7 +42,6 @@ import kotlinx.coroutines.*
 import com.alpha.assistant.capabilities.*
 import com.alpha.assistant.automations.AutomationRuntime
 import com.alpha.assistant.automations.AutomationStore
-import com.alpha.assistant.tools.generation.StandaloneRefinementUnavailable
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
@@ -210,7 +209,6 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     private var localButtonJob: Job? = null
     private var shutdown: Job? = null
     private val session = AtomicReference<CloudSession?>(null)
-    private val nativeEdit = AtomicReference<NativeToolEditRequest?>(null)
     private val previews = ToolControllerDraftPreviews(scope) { id -> withContext(Dispatchers.IO) {store.draft(id)} }
     private val snapshotMutex=kotlinx.coroutines.sync.Mutex()
 
@@ -280,61 +278,6 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         check(!closing)
         engine.saveManualDefinition(tool, definition)
         if (store.primaryLibrary) AutomationRuntime.refresh(app)
-    }
-
-    internal suspend fun prepareNativeEdit(expected: ToolRecord,requestId: String,instruction: String): NativeToolEditPreview =
-        coroutineScope {
-            require(requestId.isNotBlank() && requestId.length<=128)
-            if(closing) throw nativeEditStale()
-            val request=NativeToolEditRequest(requestId)
-            if(!nativeEdit.compareAndSet(null,request))
-                throw CloudFailure("widget_busy","Завершите текущее изменение мини-приложения.")
-            try {
-                if(closing) throw nativeEditStale()
-                val preview=suspendCancellableCoroutine<NativeToolEditPreview> { result ->
-                    val worker=launch(Dispatchers.IO,start=CoroutineStart.LAZY) {
-                        result.resumeWith(runCatching {
-                            val key=keys.cloudKey(app)
-                            val proposed=engine.prepareNativeEdit(expected,request,instruction,key)
-                            ensureActive()
-                            if(keys.cloudKey(app)!=key) throw nativeEditStale()
-                            proposed
-                        })
-                    }
-                    result.invokeOnCancellation {
-                        request.cancel()
-                        nativeEdit.compareAndSet(request,null)
-                        worker.cancel()
-                    }
-                    worker.start()
-                }
-                if(nativeEdit.get()!==request || request.isClosed) throw CancellationException("The native edit was canceled.")
-                preview
-            } catch(failure: Throwable) {
-                request.cancel()
-                nativeEdit.compareAndSet(request,null)
-                throw failure
-            } finally { request.cloud.cancel() }
-        }
-
-    internal suspend fun confirmNativeEdit(requestId: String): ToolRecord {
-        val request=nativeEdit.get()?.takeIf { it.id==requestId && !closing } ?: throw nativeEditStale()
-        try {
-            return withContext(Dispatchers.IO) {
-                engine.confirmNativeEdit(request).also { if(store.primaryLibrary) AutomationRuntime.refresh(app) }
-            }
-        } catch(cancel: CancellationException) {
-            request.cancel()
-            throw cancel
-        } finally {
-            if(request.isClosed) nativeEdit.compareAndSet(request,null)
-        }
-    }
-
-    internal fun cancelNativeEdit(requestId: String?=null) {
-        val request=nativeEdit.get()?.takeIf {requestId==null || it.id==requestId} ?: return
-        request.cancel()
-        nativeEdit.compareAndSet(request,null)
     }
 
     suspend fun recoverAutomatic(operationId: String, conversationId: String): Pair<String,Int>? = withContext(Dispatchers.IO) {
@@ -1346,7 +1289,6 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     fun cancel() {
         automaticCancel?.invoke()
         session.getAndSet(null)?.cancel()
-        cancelNativeEdit()
         waitingDiscreteInput?.cancel()
         localButtonJob?.cancel()
         job?.cancel()
@@ -1420,7 +1362,6 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                 if(failure is ToolLibraryUnavailable) storageUnavailable=true
                 error = when(failure) {
                     is ToolLibraryUnavailable -> app.getString(R.string.tool_library_unavailable)
-                    is StandaloneRefinementUnavailable -> app.getString(R.string.tool_standalone_refinement_unavailable)
                     is CloudFailure -> failure.message
                     else -> failure.message?.takeIf { message -> message.any { it in 'А'..'я' || it == 'ё' || it == 'Ё' } }?.take(240) ?: "Не удалось выполнить действие инструмента. Сохранённые данные доступны."
                 }

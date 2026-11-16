@@ -77,7 +77,6 @@ import com.alpha.assistant.tools.LocalMiniAppLiveAllowed
 import com.alpha.assistant.tools.MiniAppActionDialogs
 import com.alpha.assistant.tools.MiniAppActions
 import com.alpha.assistant.tools.MiniAppLibrary
-import com.alpha.assistant.tools.NativeToolEditDialog
 import com.alpha.assistant.tools.ToolsPane
 import com.alpha.assistant.tools.miniAppDeviceUnlocked
 import kotlinx.coroutines.launch
@@ -404,7 +403,7 @@ private data class MiniAppOrigin(
                         val currentBackStack by rememberUpdatedState(backStack)
                         val liveEntries by rememberUpdatedState(backStack.takeLast(if (paneLayout.paired) 2 else 1))
                         val liveUncovered by rememberUpdatedState(deviceUnlocked && !drawerTargetsOpen && !drawerState.isOpen &&
-                            !contextSheet && model.requestError == null && model.nativeRefinementTarget == null &&
+                            !contextSheet && model.requestError == null &&
                             miniAppActions.request == null && miniAppActions.restore == null && model.chatAutomationSetup == null)
                         val desktopVisible by rememberUpdatedState(courseChatVisible && snapshot.selectedId == null &&
                             model.courseEntry == null && liveUncovered && shellState == Lifecycle.State.RESUMED)
@@ -524,11 +523,6 @@ private data class MiniAppOrigin(
             onOutlineApplied = model::updateChatCourse)
     }
     MiniAppActionDialogs(model.tools, miniAppActions)
-    model.nativeRefinementTarget?.let { target ->
-        key(model.tools, target) {
-            NativeToolEditDialog(model.tools, target, model::dismissNativeRefinement)
-        }
-    }
     model.requestError?.let { error ->
         AlertDialog(onDismissRequest = model::clearRequestError, title = { Text(stringResource(R.string.send_failed)) }, text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(error) } }, confirmButton = { TextButton(onClick = model::clearRequestError) { Text(stringResource(R.string.understood)) } })
     }

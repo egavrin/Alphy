@@ -72,7 +72,6 @@ object AutomationTools {
         }
 
     private fun nextState(spec: ToolSpec,old: ToolRecord,action: CapabilityRequest): String {
-        require(!spec.isSealedStandalone) {"Эти данные можно изменить только в мини-приложении."}
         return spec.validateState(JSONObject(old.state).put(action.args.getString("field"),action.args.get("value")).toString()).toString()
     }
 

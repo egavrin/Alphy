@@ -300,12 +300,6 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
     }
 
 @Composable private fun DraftPreviewContent.Render(drawingHeight: Dp, roundInlineViewport: Boolean = false) {
-    val projected = if(spec.isSealedStandalone) clockedToolState(spec,ui,state,LocalMiniAppLiveAllowed.current) else null
-    if(spec.isSealedStandalone && projected?.isSuccess != true) {
-        if(projected?.isFailure == true) Text(stringResource(R.string.tool_closed_format))
-        else LinearProgressIndicator(Modifier.fillMaxWidth())
-        return
-    }
     if (canvasSurfaceIds(spec.ui).isEmpty()) StaticDraftDrawing(spec, drawing, drawingHeight, roundInlineViewport = roundInlineViewport)
     val canvas: @Composable (List<String>, String, Modifier, Boolean) -> Unit = { ids, label, modifier, _ ->
         StaticDraftDrawing(spec, drawing, drawingHeight, ids, label, modifier, roundInlineViewport)
@@ -314,7 +308,7 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
     val assets = remember(context) { com.alpha.assistant.tools.three.ThreeSceneAssets(context) }
     val generated = spec.generatedImages.associateBy { "slot:" + it.slot }
     CompositionLocalProvider(LocalToolCanvas provides canvas) {
-        ToolContent(ui, projected?.getOrNull() ?: state, false, heading = spec.title, embedded = true,
+        ToolContent(ui, state, false, heading = spec.title, embedded = true,
             imageVersion = spec.generatedImages.map { it.asset.id },
             imageLoader = { handle -> generated[handle]?.let { image ->
                 withContext(kotlinx.coroutines.Dispatchers.IO) { assets.generatedBitmap(image.asset) }
