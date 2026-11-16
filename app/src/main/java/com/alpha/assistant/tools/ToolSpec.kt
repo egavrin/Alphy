@@ -5,9 +5,6 @@ import com.alpha.assistant.images.ImageIntent
 import com.alpha.assistant.sandbox.SandboxContract
 import com.alpha.assistant.tools.three.ThreeSceneAssetRef
 import com.alpha.assistant.tools.three.ThreeSceneAssets
-import com.alpha.assistant.tools.generation.NativePresentation
-import com.alpha.assistant.tools.generation.PartsContractFailure
-import com.alpha.assistant.tools.generation.ToolComposition
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -25,9 +22,7 @@ internal enum class ToolValidationCategory(val id: String, val guidance: String)
     UI_PROPERTIES("tool_ui_properties", "Remove unsupported properties. Put a component's tone and emphasis inside its style object. Use only the styles allowed for that component. visible and enabled must be booleans."),
     UI_BINDINGS("tool_ui_bindings", "Use declared dotted object paths with the documented type. Paths must exist in both schema and state. Never use array indices or prototype access."),
     UI_ACTIONS("tool_ui_actions", "Use a unique action ID for each actionable control. IDs must start with an ASCII letter and contain at most 48 letters, digits, or underscores."),
-    DRAWING("tool_drawing", "Return only the documented fields for each drawing command."),
-    COMPOSITION("tool_composition", "Keep the host-owned parts in their fixed positions. Use only fill-owned state, actions, and surfaces in generated fill."),
-    NATIVE_PRESENTATION("tool_native_presentation", "Keep the existing focal slot structure, its position, and its action.");
+    DRAWING("tool_drawing", "Return only the documented fields for each drawing command.");
 
     val feedback get() = "Validation category: $id. $guidance"
 }
@@ -43,20 +38,6 @@ internal fun <T> validateTool(category: ToolValidationCategory, details: ToolVal
         throw ToolValidationFailure(category,details)
     }
 
-private fun <T> validateHostMetadata(category: ToolValidationCategory, rule: String, block: () -> T): T = validateTool(category) {
-    try {
-        block()
-    } catch (failure: PartsContractFailure) {
-        throw ToolValidationFailure(category, ToolValidationDetails(rule,failure.path,failure.expected,"invalid host metadata"))
-    }
-}
-
-private fun <T> validateComposition(block: () -> T): T =
-    validateHostMetadata(ToolValidationCategory.COMPOSITION,"composition",block)
-
-private fun <T> validateNativePresentation(block: () -> T): T =
-    validateHostMetadata(ToolValidationCategory.NATIVE_PRESENTATION,"nativePresentation",block)
-
 internal fun validAppLanguageTag(tag: String) = tag.length in 2..3 && tag.all { it in 'a'..'z' }
 
 /** Generated data describes native controls. Generated code never runs in the host process. */
@@ -65,7 +46,6 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     val schema: JSONObject, val initialState: String, val ui: JSONObject, val capabilities: Set<String>, val capabilityResults: Boolean,
     val collections: JSONObject, val surfaces: Map<String,ToolSurface>, val presentation: String,
     internal val hostControls: ArtifactHostControls,
-    internal val composition: ToolComposition?, internal val nativePresentation: NativePresentation?,
     internal val appLanguage: String?, internal val iconId: String?,
     internal val threeScene: Boolean, internal val sceneAssets: List<ThreeSceneAssetRef>,
     internal val generatedImages: List<GeneratedImage>, internal val lessonImageIntent: ImageIntent?) {
@@ -82,8 +62,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     internal fun validateUi(root: JSONObject,state: JSONObject,stage: ToolUiValidationStage,observer: ((ToolUiDiagnostic)->Unit)?): JSONObject {
         val trace=ToolUiValidationTrace(stage,observer)
         return try {
-            val catalogRoot = composition?.let { validateComposition { it.catalogUi(root,state) } } ?: root
-            validateTool(ToolValidationCategory.UI_STRUCTURE) {ToolUiCatalog.validate(catalogRoot,schema,state,trace,capabilities)}
+            validateTool(ToolValidationCategory.UI_STRUCTURE) {ToolUiCatalog.validate(root,schema,state,trace,capabilities)}
             if (generatedImages.isNotEmpty()) validateTool(ToolValidationCategory.UI_STRUCTURE) {
                 require(generatedImages.map { it.slot }.containsAll(imageSlots(root))) { "Unknown generated image slot." }
             }
@@ -98,7 +77,6 @@ data class ToolSpec private constructor(val json: String, val title: String, val
                 throw ToolValidationFailure(ToolValidationCategory.UI_STRUCTURE, ToolValidationDetails(
                     "canvas_placement", "$.ui", "Declare inline canvases in initial app UI. Place each surface once. Immersive uses the host stage.", observed))
             }
-            nativePresentation?.let { validateNativePresentation { it.focalNode(root) } }
             root
         } catch(failure: ToolValidationFailure) {
             if (failure.details?.rule == "canvas_placement") throw failure
@@ -108,8 +86,8 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     fun action(ui: JSONObject, id: String): JSONObject? = ToolUiCatalog.action(ui,id)
 
     internal fun providerDefinition(): String {
-        if (composition == null && nativePresentation == null && appLanguage == null && iconId == null && !threeScene && generatedImages.isEmpty() && lessonImageIntent == null) return json
-        val definition = composition?.fillDefinition(this) ?: JSONObject(json).apply { remove(NativePresentation.FIELD) }
+        if (appLanguage == null && iconId == null && !threeScene && generatedImages.isEmpty() && lessonImageIntent == null) return json
+        val definition = JSONObject(json)
         definition.remove(APP_LANGUAGE_FIELD)
         definition.remove(ICON_ID_FIELD)
         definition.remove("sceneAssets")
@@ -168,7 +146,6 @@ data class ToolSpec private constructor(val json: String, val title: String, val
         private const val APP_LANGUAGE_FIELD = "appLanguage"
 
         fun available(raw: String): ToolSpec? = try {parse(raw)} catch(_: IllegalArgumentException) {null} catch(_: IllegalStateException) {null} catch(_: org.json.JSONException) {null}
-        /** Only app-owned records may contain a host composition manifest. */
         internal fun availablePersisted(raw: String): ToolSpec? = try {parsePersisted(raw)} catch(_: IllegalArgumentException) {null} catch(_: IllegalStateException) {null} catch(_: org.json.JSONException) {null}
         internal fun availablePersisted(record: ToolRecord): ToolSpec? = try {
             parsePersisted(record.spec).also { it.validateUi(JSONObject(record.ui),JSONObject(record.state)) }
@@ -182,8 +159,6 @@ data class ToolSpec private constructor(val json: String, val title: String, val
         fun storedTitle(raw: String): String = runCatching {JSONObject(raw).optString("title").take(100).ifBlank {"Unavailable mini-app"}}.getOrDefault("Unavailable mini-app")
         /** Refinements may add fields, but cannot remove, retype, or reset stored values. */
         fun stateForRevision(previous: ToolSpec, next: ToolSpec, raw: String): String {
-            requireSameComposition(previous,next)
-            requireSameNativePresentation(previous,next)
             val state = previous.validateState(raw)
             previous.schema.keys().forEach { key ->
                 require(next.schema.has(key) && ToolValueSchema.same(previous.schema.get(key),next.schema.get(key))) { "Несовместимая схема данных: $key. Сохранённые данные не изменены." }
@@ -196,8 +171,6 @@ data class ToolSpec private constructor(val json: String, val title: String, val
             return next.validateState(state.toString()).toString()
         }
         fun forRestore(current: ToolSpec,previous: ToolSpec): ToolSpec {
-            requireSameComposition(current,previous)
-            requireSameNativePresentation(current,previous)
             val definition=JSONObject(previous.json)
                 .put("stateSchema",current.schema)
                 .put("initialState",JSONObject(current.initialState))
@@ -205,21 +178,6 @@ data class ToolSpec private constructor(val json: String, val title: String, val
             else definition.remove("collections")
             return parsePersisted(definition.toString()).withIcon(current.iconId)
         }
-        private fun requireSameComposition(previous: ToolSpec,next: ToolSpec) = validateComposition {
-            val composition = previous.composition
-            if (composition == null) require(next.composition == null)
-            else composition.requireSameOwnership(next.composition)
-        }
-
-        private fun requireSameNativePresentation(previous: ToolSpec,next: ToolSpec) = validateNativePresentation {
-            val recipe = previous.nativePresentation
-            if (recipe == null) require(next.nativePresentation == null)
-            else {
-                require(recipe.sameSelection(next.nativePresentation))
-                recipe.focalNode(next.ui)
-            }
-        }
-
         /** Parse provider, import, or manual edit input. This boundary rejects host metadata. */
         fun parse(raw: String): ToolSpec = parse(raw,null)
         internal fun parse(raw: String,observer: ((ToolUiDiagnostic)->Unit)?): ToolSpec = parse(raw,observer,false)
@@ -236,7 +194,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
             validateTool(ToolValidationCategory.FIELDS) {
                 val fields = j.keys().asSequence().toSet()
                 val optional = optionalGeneratedFields +
-                    (if (persisted) setOf("composition",NativePresentation.FIELD,APP_LANGUAGE_FIELD,ICON_ID_FIELD,"sceneAssets","threeLibrary",GeneratedImage.FIELD,"lessonImageIntent") else emptySet())
+                    (if (persisted) setOf(APP_LANGUAGE_FIELD,ICON_ID_FIELD,"sceneAssets","threeLibrary",GeneratedImage.FIELD,"lessonImageIntent") else emptySet())
                 require(fields.containsAll(requiredGeneratedFields) && fields.all { it in requiredGeneratedFields || it in optional })
                 require(!j.has("capabilityResults") || j.get("capabilityResults") is Boolean) { "Неверные поля инструмента" }
             }
@@ -301,22 +259,14 @@ data class ToolSpec private constructor(val json: String, val title: String, val
             } catch(failure: ToolValidationFailure) {
                 throw ToolValidationFailure(failure.category,failure.details,uiTrace.failure(failure.category))
             }
-            val composition = if (j.has("composition")) validateComposition {
-                ToolComposition.read(j,schema,JSONObject(initialState),surfaces.keys)
-            } else null
-            val nativePresentation = if (j.has(NativePresentation.FIELD)) validateNativePresentation {
-                NativePresentation.parse(j.getJSONObject(NativePresentation.FIELD),ui).also {
-                    composition?.requireNativePresentation(it)
-                }
-            } else null
             val threeScene = j.has("runtime")
             val sceneAssets = validateTool(ToolValidationCategory.FIELDS) {
                 if (threeScene) {
                     val runtime = j.getJSONObject("runtime")
                     require(runtime.keys().asSequence().toSet() == setOf("kind", "version") &&
                         runtime.get("kind") == "threejs-worker" && runtime.get("version") == 1)
-                    require(capabilities.isEmpty() && surfaces.isEmpty() && composition == null &&
-                        nativePresentation == null && canvasSurfaceIds(ui).isEmpty() &&
+                    require(capabilities.isEmpty() && surfaces.isEmpty() &&
+                        canvasSurfaceIds(ui).isEmpty() &&
                         !j.has("collections") && !j.has("hostControls") && !j.optBoolean("capabilityResults"))
                     if (persisted) {
                         require(j.get("threeLibrary") == THREE_LIBRARY)
@@ -342,7 +292,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
                 require(encoded.toByteArray(Charsets.UTF_8).size <= MAX_DEFINITION_BYTES)
             }
             return ToolSpec(encoded, j.getString("title"), j.getString("description"), source, schema,
-                initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surfaces,presentation,hostControls,composition,nativePresentation,appLanguage,iconId,threeScene,sceneAssets,generatedImages,lessonImageIntent).also {
+                initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surfaces,presentation,hostControls,appLanguage,iconId,threeScene,sceneAssets,generatedImages,lessonImageIntent).also {
                 validateTool(ToolValidationCategory.INITIAL_STATE) { it.validateState(it.initialState) }
                 it.validateUi(it.ui,JSONObject(it.initialState),ToolUiValidationStage.DEFINITION,observer)
             }

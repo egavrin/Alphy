@@ -21,7 +21,7 @@ import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolUiCatalog
 import com.alpha.assistant.tools.liveInputEvent
 import com.alpha.assistant.tools.liveInputVersion
-import com.alpha.assistant.tools.generation.sameToolJson
+import com.alpha.assistant.tools.sameToolJson
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

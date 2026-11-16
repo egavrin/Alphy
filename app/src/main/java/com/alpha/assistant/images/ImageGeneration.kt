@@ -76,7 +76,7 @@ internal data class ImagePlan(val requests: List<ImageIntent> = emptyList(), val
             if (disposition == "unchanged") {
                 require(excerpt.isEmpty() && plan.requests.isEmpty() && plan.remove.isEmpty())
             } else {
-                val normalize = com.alpha.assistant.tools.generation.SceneCheckEvidence.Companion::normalizedExcerpt
+                fun normalize(text: String) = text.replace(Regex("""[ \t\r\n]+"""), " ").trim(' ')
                 require(excerpt.length in 1..600 && excerpt.isNotBlank() && normalize(excerpt) in normalize(originalRequest))
                 when (disposition) {
                     "generate" -> require(plan.requests.isNotEmpty())

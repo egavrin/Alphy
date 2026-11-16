@@ -4,7 +4,6 @@ import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.sandbox.GraphicsSession
 import com.alpha.assistant.sandbox.SandboxContract
 import com.alpha.assistant.sandbox.SandboxResult
-import com.alpha.assistant.tools.generation.PartClockSample
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -254,14 +253,8 @@ internal class ArtifactCoordinator private constructor() {
     }
 
     private fun validateLiveControl(record: ToolRecord,event: JSONObject) {
-        val spec=ToolSpec.parsePersisted(record.spec)
-        val ui=JSONObject(record.ui)
-        val state=JSONObject(record.state)
-        val composition=spec.composition
-        val actionId = event.getString("actionId")
-        val fill = composition != null && ToolUiCatalog.action(composition.fillUi(ui), actionId) != null
-        ToolUiCatalog.validateLiveInput(if (fill) checkNotNull(composition).fillUi(ui) else ui, actionId,
-            event.get("value"), if (fill) checkNotNull(composition).fillState(state) else state)
+        ToolSpec.parsePersisted(record.spec)
+        ToolUiCatalog.validateLiveInput(JSONObject(record.ui), event.getString("actionId"), event.get("value"), JSONObject(record.state))
     }
 
     private fun commitLiveInput(store: ToolStore,old: ToolRecord,output: ToolPreview) {
@@ -460,24 +453,23 @@ internal class ArtifactCoordinator private constructor() {
         }
     }
 
-    suspend fun evaluate(generation: ToolGenerationService,old: ToolRecord,event: JSONObject,clock: PartClockSample?=null,
+    suspend fun evaluate(generation: ToolGenerationService,old: ToolRecord,event: JSONObject,
         beforeDispatch: ()->Unit={}): ToolPreview {
         ensureAvailable()
         return try {
             val spec=ToolSpec.parsePersisted(old.spec)
-            val sample=clock ?: generation.partClockFor(spec)
             val active=session
             val result=if(active==null) {
                 suspend fun run(): ToolPreview {
                     beforeDispatch()
-                    return generation.evaluateWithClock(spec,old.id,old.revision,old.state,event,old.ui,sample)
+                    return generation.evaluate(spec,old.id,old.revision,old.state,event,old.ui)
                 }
                 if(event.optString("type")==SandboxContract.LIVE_INPUT_EVENT || hosts.values.any {it.nonGraphics})
                     withTransientHost {run()} else run()
             }
             else {
                 ensureRetained(active)
-                generation.executeEvent(spec,old.id,old.revision,old.state,event,old.ui,clock=sample) { _, input ->
+                generation.executeEvent(spec,old.id,old.revision,old.state,event,old.ui) { _, input ->
                     beforeDispatch()
                     active.dispatch(input)
                 }.also {ensureRetained(active)}

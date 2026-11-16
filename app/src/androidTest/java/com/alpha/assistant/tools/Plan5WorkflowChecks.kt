@@ -10,7 +10,6 @@ import com.alpha.assistant.R
 import com.alpha.assistant.capabilities.AudioContract
 import com.alpha.assistant.capabilities.CapabilityEffect
 import com.alpha.assistant.media.MAX_TONE_MILLIS
-import com.alpha.assistant.tools.generation.sameToolJson
 import com.alpha.assistant.ui.ShellRobot
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -103,7 +102,7 @@ internal class Plan5WorkflowChecks(
     /** Nodes that the current state shows. A closed dialog keeps its buttons in the spec, but no person can press them. */
     private fun shownNodes(): Sequence<JSONObject> {
         val tool = saved()
-        val state = projectToolState(ToolSpec.parsePersisted(tool.spec), JSONObject(tool.state), localPartClock(context))
+        val state = JSONObject(tool.state)
         fun walk(node: JSONObject): Sequence<JSONObject> = sequence {
             if (!ToolUiCatalog.visible(node, state)) return@sequence
             yield(node)
@@ -125,7 +124,7 @@ internal class Plan5WorkflowChecks(
 
     private fun currentState(): JSONObject {
         val tool = saved()
-        return projectToolState(ToolSpec.parsePersisted(tool.spec), JSONObject(tool.state), localPartClock(context))
+        return JSONObject(tool.state)
     }
 
     /** The first fixed text that a control shows now, for example the number of a board cell. */
@@ -182,7 +181,7 @@ internal class Plan5WorkflowChecks(
         if (matchingLabel != null) robot.reveal(matchingLabel, null)
         robot.waitUntil {
             val tool = saved()
-            val state = projectToolState(ToolSpec.parsePersisted(tool.spec), JSONObject(tool.state), localPartClock(context))
+            val state = JSONObject(tool.state)
             val matchingNode = uiNodes(JSONObject(tool.ui)).firstOrNull { node ->
                 val text = node.optString("text")
                 val value = node.optString("bind").takeIf(String::isNotEmpty)?.let { ToolUiCatalog.value(state, it) }

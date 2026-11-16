@@ -1,9 +1,5 @@
 package com.alpha.assistant.tools
 
-import com.alpha.assistant.tools.generation.NeedsPlan
-import com.alpha.assistant.tools.generation.PartsGeneration
-import com.alpha.assistant.tools.generation.ToolComposition
-import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -97,37 +93,6 @@ class LiveInputCatalogWorkflowTest {
         rejects("disabled row") { edit(selected) }
         state.put("rows", JSONArray())
         rejects("removed row") { edit(selected) }
-    }
-
-    @Test fun mixedFillCanResolveOnlyItsOwnLiveControls(): Unit = runBlocking {
-        val plan = NeedsPlan.parse("""
-            {"title":"Счётчик и заметка","description":"","language":"ru","inputs":[],"constants":[],"needs":[
-              {"id":"count","type":"counter","label":"Счётчик","description":"Увеличить и сбросить"},
-              {"id":"board","type":"scene","writes":[],"label":"Поле","description":"Поле с подписью"}
-            ],"questions":[]}
-        """.trimIndent())
-        val assembly = PartsGeneration.build(plan) { raw ->
-            val question = JSONObject(raw).getJSONArray("questions").getJSONObject(0)
-            val answer = JSONObject().put("id", question.getString("id")).put("choice", "A").put("confidence", 1)
-                .put("probabilities", JSONObject().put("A", 1).put("B", 0))
-            JSONObject().put("answers", JSONArray().put(answer)).toString()
-        }
-        val fill = node("""{"stateSchema":{"fill_note":"string"},"initialState":{"fill_note":""},
-            "capabilities":[],"source":"return {state:input.state};"}""")
-        fill.put("ui", column(input("fill_edit").put("bind", "fill_note").put("inputMode", "live")))
-        val spec = ToolComposition.complete(assembly, fill.toString())
-        val composition = checkNotNull(spec.composition)
-        val state = JSONObject(spec.initialState)
-        val fillUi = composition.fillUi(spec.ui)
-        val fillState = composition.fillState(state)
-        assertEquals("fill_edit", ToolUiCatalog.validateLiveInput(fillUi, "fill_edit", "текст", fillState).getString("action"))
-        ToolUiCatalog.validateAction(spec.ui, "p5_count_add", null, state)
-        rejects("fixed action") { ToolUiCatalog.validateLiveInput(spec.ui, "p5_count_add", null, state) }
-        rejects("fixed action in fill") { ToolUiCatalog.validateLiveInput(fillUi, "p5_count_add", null, fillState) }
-        rejects("unknown fill action") { ToolUiCatalog.validateLiveInput(fillUi, "fill_other", "текст", fillState) }
-        rejects("forged fixed action in fill") {
-            ToolComposition.refine(spec, fill.put("ui", column(input("p5_count_add").put("bind", "fill_note").put("inputMode", "live"))).toString())
-        }
     }
 
     private fun spec(ui: JSONObject) = ToolSpec.parse(node("""

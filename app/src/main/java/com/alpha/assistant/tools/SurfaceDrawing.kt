@@ -53,10 +53,7 @@ internal fun drawSurfaceFrame(canvas: Canvas,surface: ToolSurface,commands: JSON
     } finally {canvas.restoreToCount(saved)}
 }
 /** Compare the selected shapes and their contribution to a bounded reference rendering. */
-internal data class SurfaceGeometry(val width: Int, val height: Int, val shape: List<String>, val visible: String, val hasInk: Boolean) {
-    fun movedFrom(previous: SurfaceGeometry) = width == previous.width && height == previous.height &&
-        hasInk && previous.hasInk && visible != previous.visible && shape != previous.shape
-}
+internal data class SurfaceGeometry(val width: Int, val height: Int, val shape: List<String>, val visible: String, val hasInk: Boolean)
 
 internal fun observeSurfaceGeometry(surface: ToolSurface, commands: JSONArray, selection: List<Int>): SurfaceGeometry? {
     fun group(command: JSONObject, children: JSONArray) =

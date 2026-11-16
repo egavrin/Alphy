@@ -25,7 +25,6 @@ internal enum class CourseWorkflowError(val message: String) {
     CONTEXT_LIMIT("The course context exceeds the generation limit. No context was sent."),
     INVALID_SOURCE("Course generation requires bounded search results with valid source URLs."),
     INVALID_OUTPUT("The slide does not meet the course definition or result contract."),
-    INVALID_SCENE("The scene did not pass its behavior check."),
     UNSUPPORTED_LESSON("Alphy could not build this slide. Simplify the slide goal and retry."),
     UNSUPPORTED_OUTPUT("Course slides only accept their declared answer action. Device effects, records, and live output are unavailable."),
     INVALID_ANSWER("The answer does not match the exercise."),
@@ -148,7 +147,6 @@ internal class CourseGeneration(
             checks.throwIfInterruptedOrRejected(failure)
             when {
                 failure.code == "widget_agent_incomplete" -> courseFailure(CourseWorkflowError.UNSUPPORTED_LESSON)
-                failure.code == "widget_behavior" -> throw CourseWorkflowException(CourseWorkflowError.INVALID_SCENE, failure.message)
                 failure.code in INVALID_GENERATION_CODES -> courseFailure(CourseWorkflowError.INVALID_OUTPUT)
                 failure.code == "widget_preview_effects" -> courseFailure(CourseWorkflowError.UNSUPPORTED_OUTPUT)
                 else -> courseFailure(CourseWorkflowError.UNAVAILABLE)
@@ -193,8 +191,7 @@ internal class CourseGeneration(
         const val MAX_SEARCH_RESULTS = 20
         val SEARCH_LINK = Regex("""(?i)https?://[^\s<>"']+""")
         val INVALID_GENERATION_CODES = setOf(
-            "widget_spec", "widget_state", "widget_plan", "widget_selector", "widget_questions",
-            "widget_preview", "widget_preview_state", "widget_response_size", "widget_patch", "response_length",
+            "widget_spec", "widget_preview", "widget_preview_state", "widget_response_size", "response_length",
         )
         val SLIDE_INSTRUCTIONS = """
             Build only the reached slide. Use reachedSlideGoal as the current task.

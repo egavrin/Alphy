@@ -887,15 +887,6 @@ object ToolUiCatalog {
             rows != null && (0 until rows.length()).any { rows.getJSONObject(it).optString("action") == action }) }
     }
 
-    internal fun actionPayloadRequirement(root: JSONObject, id: String, payload: Any?): String? {
-        val target = findAction(root, id, activeOnly = false) ?: return "a declared native action"
-        val value = if (target.inRowTemplate) {
-            if (!isRowPayload(payload)) return "an object with a string row key and value"
-            (payload as JSONObject).get("value").takeUnless { it === JSONObject.NULL }
-        } else payload
-        return invalidActionPayload(target.node, id, value)
-    }
-
     internal fun isRowPayload(payload: Any?): Boolean =
         payload is JSONObject && ToolValueSchema.keys(payload) == setOf("key","value") && validStableKey(payload.get("key"))
 
@@ -914,12 +905,6 @@ object ToolUiCatalog {
         ForegroundTimerSpec.parse(validateAction(root, id, null, state, ActionDelivery.ForegroundTimer))
 
     private enum class ActionDelivery { Ordinary, LiveInput, Video, ForegroundTimer }
-
-    internal fun ordinaryButtonAvailability(root: JSONObject, id: String, state: JSONObject): Boolean? {
-        val target = findAction(root, id, activeOnly = false) ?: return null
-        if (target.inRowTemplate || target.node.optString("type") != "button" || target.node.optString("action") != id) return null
-        return resolveAction(root, id, null, state) != null
-    }
 
     private fun resolveAction(root: JSONObject, id: String, payload: Any?, state: JSONObject): Triple<JSONObject, JSONObject, Any?>? {
         fun resolve(node: JSONObject, values: JSONObject, raw: Any?): Triple<JSONObject,JSONObject,Any?>? {

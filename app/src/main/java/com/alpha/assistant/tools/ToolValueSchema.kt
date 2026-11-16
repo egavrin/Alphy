@@ -139,3 +139,13 @@ internal object ToolValueSchema {
         return keys(a) == keys(b) && a.keys().asSequence().all { same(a.get(it),b.get(it)) }
     }
 }
+
+/** Compares JSON values by content. Key order and numeric representation do not matter. */
+internal fun sameToolJson(a: Any?, b: Any?): Boolean = when {
+    a is JSONObject && b is JSONObject -> ToolValueSchema.keys(a) == ToolValueSchema.keys(b) &&
+        a.keys().asSequence().all { sameToolJson(a.opt(it), b.opt(it)) }
+    a is JSONArray && b is JSONArray -> a.length() == b.length() &&
+        (0 until a.length()).all { sameToolJson(a.opt(it), b.opt(it)) }
+    a is Number && b is Number -> a.toDouble() == b.toDouble()
+    else -> a == b
+}

@@ -55,7 +55,6 @@ import com.alpha.assistant.R
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
@@ -98,7 +97,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.window.DialogProperties
@@ -121,24 +119,18 @@ import com.alpha.assistant.ui.StatusLine
 import com.alpha.assistant.ui.StrokeIcon
 import com.alpha.assistant.capabilities.OwnedCalendarUiHost
 import com.alpha.assistant.capabilities.OwnedCalendarSnapshot
-import com.alpha.assistant.tools.generation.NativePresentation
-import com.alpha.assistant.tools.generation.NativePresentationProfile
 import org.json.JSONArray
 import org.json.JSONObject
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
-import kotlin.math.ceil
 import kotlin.math.round
 
 private val LocalEmbeddedTool = staticCompositionLocalOf { false }
 private val LocalToolBackground = staticCompositionLocalOf { Color.Unspecified }
 private val LocalRouteSystemBack = staticCompositionLocalOf { true }
 private val LocalToolMetricFont = staticCompositionLocalOf<FontFamily?> { null }
-private val LocalPresentationFocus = staticCompositionLocalOf { false }
-private val LocalPresentationPrimary = staticCompositionLocalOf<PresentationPrimary?> { null }
-private val LocalPresentationScreen = staticCompositionLocalOf<JSONObject?> { null }
 private val LocalLiveUi = staticCompositionLocalOf<NativeLiveUi?> { null }
 private val LocalLiveRow = staticCompositionLocalOf<String?> { null }
 private val LocalTimerClock = staticCompositionLocalOf<NativeTimerClock?> { null }
@@ -333,19 +325,6 @@ private class NativeLiveDraft(private val edits: NativeLiveEdits, private val sc
     }
 }
 
-private data class PresentationPrimary(val action: String, val screen: JSONObject?)
-
-private fun presentationPrimary(node: JSONObject, action: String, parentScreen: JSONObject? = null): PresentationPrimary? {
-    val type = node.getString("type")
-    val screen = if (type in ToolUiCatalog.modalTypes || type == "routeStack" || type == "pager") node else parentScreen
-    if (type == "button" && node.optString("action") == action) return PresentationPrimary(action, screen)
-    val children = node.optJSONArray("children") ?: return null
-    repeat(children.length()) { index ->
-        presentationPrimary(children.getJSONObject(index), action, screen)?.let { return it }
-    }
-    return null
-}
-
 private data class ToolRole(val ink: Color, val background: Color, val foreground: Color)
 
 private fun ColorScheme.toolRole(name: String?) = when (name) {
@@ -484,7 +463,7 @@ private val miniAppOtherLanguage = mapOf(
 
 @Composable internal fun ToolContent(ui: String, state: String, enabled: Boolean,
     heading: String? = null, imageVersion: Any? = null, imageLoader: suspend (String) -> Bitmap? = {null}, imageAvailable: suspend (String) -> Boolean = {false}, calendarHost: OwnedCalendarUiHost? = null, embedded: Boolean = false, background: Color = MaterialTheme.colorScheme.surface,
-    routeSystemBackEnabled: Boolean = true, presentation: NativePresentation? = null,
+    routeSystemBackEnabled: Boolean = true,
     liveInput: NativeLiveInput? = null,
     onLiveInputState: (unfinished: Boolean, unsaved: Boolean) -> Unit = { _, _ -> },
     videoHost: NativeVideoUiHost? = null,
@@ -497,15 +476,6 @@ private val miniAppOtherLanguage = mapOf(
     val withinLimits=remember(ui,state) {runCatching {ToolUiCatalog.validateRenderedWork(root,values)}.isSuccess}
     if(!withinLimits) {Text(stringResource(R.string.tool_render_limit)); return}
     val sceneSlot = remember(root, courseSceneLayout) { if (courseSceneLayout) courseSceneSlot(root) else null }
-    val recipe = remember(root, presentation) {
-        presentation?.takeIf { runCatching { it.focalNode(root) }.isSuccess }
-    }
-    val selectedPrimary = remember(root, recipe) {
-        recipe?.primaryActionId?.let { presentationPrimary(root, it) }
-    }
-    val primary = remember(root, values, enabled, selectedPrimary) {
-        selectedPrimary?.takeIf { enabled && runCatching { ToolUiCatalog.validateAction(root, it.action, null, values) }.isSuccess }
-    }
     // A recreation can report interrupted input without restoring or sending any draft value.
     val notice = rememberSaveable { mutableStateOf<Int?>(null) }
     val reportLiveInput by rememberUpdatedState(onLiveInputState)
@@ -553,19 +523,16 @@ private val miniAppOtherLanguage = mapOf(
     val videoUi = remember(videoHost, root, edits) { videoHost?.let { NativeVideoUi(it, root, edits::allowAction) } }
     Surface(Modifier.fillMaxWidth(), color = background) {
         CompositionLocalProvider(LocalEmbeddedTool provides embedded, LocalToolBackground provides background,
-            LocalRouteSystemBack provides (routeSystemBackEnabled && !embedded), LocalPresentationPrimary provides primary,
+            LocalRouteSystemBack provides (routeSystemBackEnabled && !embedded),
             LocalLiveUi provides NativeLiveUi(liveInput, access, edits, root, values), LocalTimerClock provides timerClock,
             LocalVideoUi provides videoUi, LocalForegroundTimer provides timerHost,
             LocalMiniAppControlsLanguage provides appLanguage) {
-            val render: @Composable () -> Unit = {
-                Column(Modifier.fillMaxWidth()) {
-                    edits.notice?.let { NativeLiveMessage(it) }
-                    NativeNode(root,values,enabled,imageVersion,imageLoader,imageAvailable,guardedCalendar,false,heading,presentation=recipe,courseSceneSlot=sceneSlot) { id,payload ->
-                        if(enabled && runCatching {ToolUiCatalog.validateAction(root,id,payload,values)}.isSuccess && edits.allowAction()) event(id,payload)
-                    }
+            Column(Modifier.fillMaxWidth()) {
+                edits.notice?.let { NativeLiveMessage(it) }
+                NativeNode(root,values,enabled,imageVersion,imageLoader,imageAvailable,guardedCalendar,false,heading,courseSceneSlot=sceneSlot) { id,payload ->
+                    if(enabled && runCatching {ToolUiCatalog.validateAction(root,id,payload,values)}.isSuccess && edits.allowAction()) event(id,payload)
                 }
             }
-            if (recipe == null) render() else NativePreset(recipe.preset, content = render)
         }
     }
 }
@@ -582,8 +549,7 @@ private fun showsToolHeading(text: String, hostHeading: String?) =
     else -> if(metric) MaterialTheme.typography.displaySmall else MaterialTheme.typography.bodyLarge
 }
 @Composable private fun metricStyle(style: JSONObject?): androidx.compose.ui.text.TextStyle {
-    val value = if (LocalPresentationFocus.current && style?.has("emphasis") != true) MaterialTheme.typography.displayMedium
-        else textStyle(style, metric = true)
+    val value = textStyle(style, metric = true)
     return value.copy(fontFamily = LocalToolMetricFont.current ?: MaterialTheme.typography.bodyLarge.fontFamily)
 }
 
@@ -621,64 +587,6 @@ private fun secondaryButtons(children: JSONArray, state: JSONObject, groupEnable
     val primary = if (hasPrimary) null else available.firstOrNull { it in unstyled }
     return unstyled.filterNot { it == primary }.toSet()
 }
-
-private val compactWorkspaceTypes = setOf("column", "section", "card", "form", "facts", "fact", "row", "flowRow",
-    "metric", "text", "badge", "input", "numberInput", "button", "toggle", "checkbox", "progress", "progressRing", "timer",
-    "spacer", "divider")
-
-private fun fitsWorkspaceColumn(node: JSONObject, state: JSONObject): Boolean {
-    if (!ToolUiCatalog.visible(node, state)) return true
-    val type = node.getString("type")
-    val layout = node.optJSONObject("layout")
-    if (type !in compactWorkspaceTypes || type == "row" && !node.optBoolean("wrap", true) ||
-        layout?.has("width") == true || layout?.has("minWidth") == true) return false
-    val children = node.optJSONArray("children") ?: return true
-    return (0 until children.length()).all { fitsWorkspaceColumn(children.getJSONObject(it), state) }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable private fun WorkspaceSlots(
-    modifier: Modifier, items: JSONArray, state: JSONObject, style: JSONObject?, gap: Dp, render: @Composable (Int, Modifier) -> Unit,
-) {
-    BoxWithConstraints(modifier) {
-        val density = LocalDensity.current
-        val visible = (0 until items.length()).filter { ToolUiCatalog.visible(items.getJSONObject(it), state) }
-        val paired = if (maxWidth >= 560.dp && density.fontScale < 1.5f) buildSet {
-            var waiting: Int? = null
-            for (index in visible) {
-                if (fitsWorkspaceColumn(items.getJSONObject(index), state)) {
-                    val previous = waiting
-                    if (previous == null) waiting = index
-                    else {
-                        add(previous)
-                        add(index)
-                        waiting = null
-                    }
-                } else waiting = null
-            }
-        } else emptySet()
-        // FlowRow reserves ceil(gap) px between items. A rounded gap can leave 1 px too little and wrap the pair.
-        val halfWidth = if (paired.isEmpty()) 0.dp else with(density) { ((constraints.maxWidth - ceil(gap.toPx()).toInt()) / 2).toDp() }
-        val slotAlignment = when (style?.optString("align")) {
-            "center" -> Alignment.TopCenter
-            "end" -> Alignment.TopEnd
-            else -> Alignment.TopStart
-        }
-        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap, alignment(style)),
-            verticalArrangement = verticalArrangement(style, gap), maxItemsInEachRow = 2) {
-            for (index in visible) key(index) {
-                val slot = if (index in paired) Modifier.width(halfWidth) else Modifier.fillMaxWidth()
-                Box(slot, contentAlignment = slotAlignment) { render(index, Modifier) }
-            }
-        }
-    }
-}
-
-private fun Modifier.focalAccent(color: Color): Modifier = drawBehind {
-    val length = minOf(size.width, 48.dp.toPx())
-    val start = if (layoutDirection == LayoutDirection.Ltr) 0f else size.width - length
-    drawLine(color, Offset(start, 1.5.dp.toPx()), Offset(start + length, 1.5.dp.toPx()), strokeWidth = 3.dp.toPx())
-}.padding(top = 12.dp)
 
 @Composable private fun nativeLayout(node: JSONObject,placement: Modifier,compact: Boolean): Modifier {
     val layout=node.optJSONObject("layout") ?: JSONObject()
@@ -804,7 +712,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
 @OptIn(ExperimentalLayoutApi::class,ExperimentalMaterial3Api::class)
 @Composable private fun NativeNode(node: JSONObject, state: JSONObject, parentEnabled: Boolean, imageVersion: Any?,
     imageLoader: suspend (String) -> Bitmap?, imageAvailable: suspend (String) -> Boolean, calendarHost: OwnedCalendarUiHost?, compact: Boolean, heading: String?, placement: Modifier = Modifier,
-    secondaryButton: Boolean = false, presentation: NativePresentation? = null, courseSceneSlot: Int? = null, event: (String,Any?) -> Unit) {
+    secondaryButton: Boolean = false, courseSceneSlot: Int? = null, event: (String,Any?) -> Unit) {
     if(!ToolUiCatalog.visible(node,state)) return
     val type=node.getString("type")
     val definition=ToolUiCatalog.component(type)
@@ -828,11 +736,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             }
         }
     }
-    val content: @Composable () -> Unit = {
-        if (type in ToolUiCatalog.modalTypes) {
-            CompositionLocalProvider(LocalPresentationScreen provides node, LocalPresentationFocus provides false, content = renderChildren)
-        } else renderChildren()
-    }
+    val content: @Composable () -> Unit = renderChildren
     if (LocalEmbeddedTool.current && type in ToolUiCatalog.modalTypes) {
         val scheme = MaterialTheme.colorScheme
         ToolRoleSurface(modifier, ToolRole(scheme.onSurface, scheme.surfaceContainerHigh, scheme.onSurface)) {
@@ -853,9 +757,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
         "appBar" -> TopAppBar(title={if (showsToolHeading(text, heading)) Text(text)},modifier=modifier,actions={content()})
         "bottomBar" -> BottomAppBar(modifier=modifier) {content()}
         "routeStack" -> NativeRouteStack(node, state, enabled, modifier, event) { route ->
-            CompositionLocalProvider(LocalPresentationScreen provides node) {
-                NativeNode(route,state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,event=event)
-            }
+            NativeNode(route,state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,event=event)
         }
         "dialog" -> AlertDialog(onDismissRequest={if(enabled)event(node.getString("dismissAction"),null)},title={Text(text)},
             text={Column(Modifier.heightIn(max=480.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -871,9 +773,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
         }
         "transition" -> NativeTransition(node,state,modifier) {content()}
         "pager" -> NativePager(node,state,enabled,modifier,event) {page ->
-            CompositionLocalProvider(LocalPresentationScreen provides node) {
-                NativeNode(checkNotNull(children).getJSONObject(page),state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,event=event)
-            }
+            NativeNode(checkNotNull(children).getJSONObject(page),state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,event=event)
         }
         "theme" -> NativePreset(node.getString("preset"), node.optInt("cornerRadius", -1).takeIf { it >= 0 }, node.optDouble("typeScale",1.0),
             node.optString("palette").ifEmpty { null }, node.optBoolean("dark")) {
@@ -889,12 +789,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             val items = checkNotNull(children)
             val secondary = secondaryButtons(items, state, enabled)
             val renderChild: @Composable (Int, Modifier) -> Unit = { index, slot ->
-                val child = items.getJSONObject(index)
-                val focal = presentation?.profile == NativePresentationProfile.FOCUS && index == presentation.focalPosition
-                if (focal) CompositionLocalProvider(LocalPresentationFocus provides true) {
-                    NativeNode(child,state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,
-                        placement=slot.focalAccent(MaterialTheme.colorScheme.primary),event=event)
-                } else NativeNode(child,state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,
+                NativeNode(items.getJSONObject(index),state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,
                     placement=slot,secondaryButton = index in secondary,event=event)
             }
             val weighted = type == "column" && (0 until items.length()).any { items.getJSONObject(it).optJSONObject("layout")?.has("weight") == true }
@@ -916,21 +811,8 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 if (weighted) BoxWithConstraints(position, propagateMinConstraints = true) { body(Modifier, constraints.hasBoundedHeight) }
                 else body(position, false)
             }
-            when (presentation?.profile) {
-                NativePresentationProfile.READING -> Box(containerModifier, contentAlignment = Alignment.TopCenter) {
-                    column(Modifier.widthIn(max = 520.dp).fillMaxWidth())
-                }
-                NativePresentationProfile.WORKSPACE -> {
-                    val usesColumnPlacement = (0 until items.length()).any { index ->
-                        val layout = items.getJSONObject(index).optJSONObject("layout")
-                        layout?.has("weight") == true || layout?.has("align") == true
-                    }
-                    if (usesColumnPlacement) column(containerModifier)
-                    else WorkspaceSlots(containerModifier, items, state, style, gap, renderChild)
-                }
-                else -> if (courseSceneSlot == null) column(containerModifier)
-                    else CourseSceneSlots(containerModifier, courseSceneSlot, items.length(), gap, renderChild)
-            }
+            if (courseSceneSlot == null) column(containerModifier)
+            else CourseSceneSlots(containerModifier, courseSceneSlot, items.length(), gap, renderChild)
         }
         "box" -> Box(modifier,contentAlignment=boxAlignment(style?.optString("align"))) {
             repeat(checkNotNull(children).length()) {index ->
@@ -1153,10 +1035,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             }
             val click={event(action,null)}
             val buttonModifier=modifier.heightIn(min=48.dp)
-            val primary = LocalPresentationPrimary.current?.takeIf { it.screen === LocalPresentationScreen.current }?.action
-            val fallback = if (primary != null) {
-                if (action == primary) "filled" else "outlined"
-            } else if (secondaryButton) "outlined" else "filled"
+            val fallback = if (secondaryButton) "outlined" else "filled"
             when(node.optString("variant", fallback)) {
                 "outlined" -> OutlinedButton(click,buttonModifier,enabled=enabled) {label()}
                 "text" -> TextButton(click,buttonModifier,enabled=enabled) {label()}

@@ -141,9 +141,9 @@ internal class AppAgent(
             val definition = JSONObject(next.toString())
             val tag = definition.remove("language")
             val language: AppLanguage? = when {
-                tag != null -> try { GenerationLanguage.parse(tag, null, request.prompt) }
+                tag != null -> try { GenerationLanguage.parse(tag) }
                     catch (_: Exception) { throw Feedback("language must be a lowercase language tag, for example \"en\" or \"ru\".") }
-                previous?.appLanguage != null -> AppLanguage(previous.appLanguage, emptySet())
+                previous?.appLanguage != null -> AppLanguage(previous.appLanguage)
                 else -> null
             }
             definition.put("formatVersion", 3)

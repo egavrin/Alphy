@@ -6,6 +6,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudSession
@@ -325,14 +326,8 @@ class CoursePlayerGenerationUiWorkflowTest {
     @Test fun invalidSlideShowsRebuildAndReplacesIt() {
         val runtime = Runtime {}
         withPlayer(runtime) { store, saved ->
-            val old = fixtureSpec("Old explanation")
-            store.commitGeneration(store.beginGeneration(saved.id, saved.revision, "explanation"),
-                CourseSlideContent(old.json, old.ui.toString(), old.initialState))
-            // An earlier version saved this slide in a format that the player no longer loads.
-            SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
-                db.execSQL("UPDATE slides SET definition=? WHERE course_id=? AND slide_id=?",
-                    arrayOf(JSONObject(old.json).put("composition", JSONObject()).toString(), saved.id, "explanation"))
-            }
+            val unknownKey = JSONObject(fixtureSpec("Old explanation").json).put("composition", JSONObject())
+            saveOldSlide(store, saved, mapOf("definition" to unknownKey.toString()))
             openPlayer()
             waitFor(R.string.course_slide_invalid)
             robot.waitFor(goal)
@@ -341,6 +336,20 @@ class CoursePlayerGenerationUiWorkflowTest {
             robot.waitFor(generatedText)
             assertEquals(1, runtime.requests.size)
             assertSavedWork(store, saved)
+        }
+    }
+
+    // Alpha 12 and earlier saved scene slides as host parts with a generated fill. The fixture is one such slide, as that code wrote it.
+    @Test fun oldMixedSceneSlideOffersRebuild() {
+        val runtime = Runtime {}
+        withPlayer(runtime) { store, saved ->
+            val mixed = JSONObject(InstrumentationRegistry.getInstrumentation().context.assets
+                .open("legacy/mixed-lesson-slide.json").bufferedReader().use { it.readText() })
+            saveOldSlide(store, saved, listOf("definition", "ui", "state").associateWith { mixed.getJSONObject(it).toString() })
+            openPlayer()
+            waitFor(R.string.course_slide_invalid)
+            waitFor(R.string.course_slide_rebuild)
+            assertTrue(runtime.requests.isEmpty())
         }
     }
 
@@ -538,6 +547,17 @@ class CoursePlayerGenerationUiWorkflowTest {
         assertEquals(original.progress, store.course(original.id)?.progress)
         assertEquals(listOf("wrong", "correct"), store.answers(original.id).map { it.operationId })
         assertTrue(store.slide(original.id, "practice") != null)
+    }
+
+    /** Saves the explanation slide, then overwrites [columns] of its row as an earlier version wrote them. */
+    private fun File.saveOldSlide(store: CourseStore, saved: CourseSnapshot, columns: Map<String, String>) {
+        val old = fixtureSpec("Old explanation")
+        store.commitGeneration(store.beginGeneration(saved.id, saved.revision, "explanation"),
+            CourseSlideContent(old.json, old.ui.toString(), old.initialState))
+        SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("UPDATE slides SET ${columns.keys.joinToString { "$it=?" }} WHERE course_id=? AND slide_id=?",
+                arrayOf(*columns.values.toTypedArray(), saved.id, "explanation"))
+        }
     }
 
     private fun withPlayer(

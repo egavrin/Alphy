@@ -6,7 +6,6 @@ import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.R
-import com.alpha.assistant.tools.generation.GenerationRepair
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import kotlinx.coroutines.runBlocking
@@ -26,15 +25,6 @@ class RowCheckboxUiWorkflowTest {
             .bufferedReader().use { JSONObject(it.readText()) }
     }
 
-    private fun recordedWriter(call: Int): JSONObject {
-        val replies = recorded.getJSONArray("candidates")
-        val repair = GenerationRepair.writer(ToolSpec.generatedFields + "behaviorBindings", null)
-        var text = replies.getJSONObject(0).getJSONObject("response").toString()
-        repair.retain(text)
-        for (index in 1..call - 3) text = repair.apply(replies.getJSONObject(index).getJSONObject("response").toString()).text
-        return JSONObject(text)
-    }
-
     @Test fun twoActualRowCheckboxesPersistTheirOwnIdsAndStates() {
         val fixture = ShellFixture("row-checkbox-ui")
         val robot = ShellRobot(fixture.name)
@@ -43,9 +33,7 @@ class RowCheckboxUiWorkflowTest {
             if (exists()) check(deleteRecursively())
             check(mkdirs())
         }
-        val writer = recordedWriter(4)
-        writer.remove("behaviorBindings")
-        val spec = ToolSpec.parse(writer.toString())
+        val spec = ToolSpec.parse(recorded.getJSONObject("definition").toString())
         val id = "row_checkbox_fixture"
         val proof = JSONArray()
         try {

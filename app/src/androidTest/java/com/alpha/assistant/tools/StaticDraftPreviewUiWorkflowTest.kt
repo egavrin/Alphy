@@ -11,7 +11,6 @@ import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
-import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.sandbox.SurfaceFrameMetrics
@@ -29,7 +28,7 @@ class StaticDraftPreviewUiWorkflowTest {
     private val robot = ShellRobot("static-draft-preview-ui")
 
     @Test fun provisionalCardUsesOneCheckpointAndClearsOnCorrectionOrCancel(): Unit = runBlocking {
-        withFixture(Provider()) { fixture, _ ->
+        withFixture(Provider) { fixture, _ ->
             val draft = ToolDraft("draft", null, 0, 0, "Drawing in chat", null, null, null, "chat")
             val previews = ToolControllerDraftPreviews(this) { draft }
             val request = previews.begin(draft.id, "request")
@@ -132,7 +131,7 @@ class StaticDraftPreviewUiWorkflowTest {
     private fun supportsClick(control: AccessibilityNodeInfo): Boolean =
         control.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }
 
-    private inline fun withFixture(provider: Provider, block: (ShellFixture, ToolStore) -> Unit) {
+    private inline fun withFixture(provider: ChatProvider, block: (ShellFixture, ToolStore) -> Unit) {
         val fixture = ShellFixture("static-drawing")
         val store = ToolStore(fixture.context, "${fixture.store.databaseName}-tools.db")
         try {
@@ -146,66 +145,24 @@ class StaticDraftPreviewUiWorkflowTest {
     }
 
     private fun snapshot(draftId: String, requestId: String, attempt: Int, title: String): ToolDraftPreview {
-        val spec = ToolSpec.parse(definition(title, mixed = false))
+        val spec = ToolSpec.parse(definition(title))
         return ToolDraftPreview(ToolDraftPreviewIdentity(draftId, requestId, attempt), spec.json,
             spec.initialState, spec.ui.toString(), surfaces(title, "first", "second"))
     }
 
-    private inner class Provider(vararg titles: String, private val mixed: Boolean = false) : ChatProvider {
-        private val responses = ArrayDeque(titles.toList())
-        override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-            if (!mixed && request.replyWithFixturePlan(emit, fixtureScene())) return
-            val response = when (request.generationStage) {
-                CloudGenerationStage.PLAN -> """{"title":"Mixed","description":"","language":"en","inputs":[],"constants":[],"questions":[],"needs":[
-                    {"id":"count","type":"counter","label":"Count","description":"Increase and reset"},
-                    {"id":"scene","type":"scene","label":"Dot","description":"Draw a dot"}],"scene":${fixtureScene()}}"""
-                CloudGenerationStage.SELECTOR -> {
-                    val questions = JSONObject(request.turns.single().text).getJSONArray("questions")
-                    val answers = JSONArray()
-                    repeat(questions.length()) { index ->
-                        val question = questions.getJSONObject(index)
-                        val answer = JSONObject().put("id", question.getString("id"))
-                        if (question.getString("type") == "noul") {
-                            answer.put("probability", 0)
-                        } else {
-                            val choices = question.getJSONObject("choices")
-                            check(choices.has("A"))
-                            val probabilities = JSONObject()
-                            choices.keys().forEach { letter -> probabilities.put(letter, if (letter == "A") 1 else 0) }
-                            answer.put("choice", "A").put("confidence", 1).put("probabilities", probabilities)
-                        }
-                        answers.put(answer)
-                    }
-                    JSONObject().put("answers", answers).toString()
-                }
-                CloudGenerationStage.COMPLETE -> JSONObject(definition(responses.removeFirst(), mixed)).also {
-                    if (mixed) it.getJSONObject("fill").withFixtureDrawingBinding("fill_first") else it.withFixtureDrawingBinding("first")
-                }.toString()
-                CloudGenerationStage.REFINE -> {
-                    check(!mixed) { "The fixture only refines a full definition" }
-                    request.patchSavedFixture(definition(responses.removeFirst(), mixed = false))
-                }
-                else -> error("Unexpected provider stage: ${request.generationStage}")
-            }
-            emit(CloudEvent.Text(request.withFixtureCheckEvidence(response)))
-        }
+    private object Provider : ChatProvider {
+        override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) =
+            error("The workflow publishes previews directly")
     }
 
-    private fun definition(title: String, mixed: Boolean): String {
-        val field = if (mixed) "fill_count" else "count"
-        val first = if (mixed) "fill_first" else "first"
-        val second = if (mixed) "fill_second" else "second"
-        val action = if (mixed) "fill_action" else "action"
-        val control = JSONObject("""{"type":"button","text":"$title action","action":"$action"}""")
-        val spec = JSONObject().put("title", title).put("description", "").put("capabilities", JSONArray())
-            .put("stateSchema", JSONObject().put(field, "number")).put("initialState", JSONObject().put(field, 0))
-            .put("surfaces", JSONArray("""[{"id":"$first","width":64,"height":64,"x":0,"y":0},
-                {"id":"$second","width":64,"height":64,"x":32,"y":0}]"""))
-            .put("source", "return {state:input.state,surfaces:${surfaces(title, first, second)}};")
-        return if (mixed) {
-            spec.put("ui", JSONObject().put("type", "column").put("children", JSONArray().put(control)))
-            JSONObject().put("holes", JSONArray().put("scene")).put("fill", spec).toString()
-        } else spec.put("formatVersion", 3).put("ui", control).toString()
+    private fun definition(title: String): String {
+        val control = JSONObject("""{"type":"button","text":"$title action","action":"action"}""")
+        return JSONObject().put("formatVersion", 3).put("title", title).put("description", "").put("capabilities", JSONArray())
+            .put("stateSchema", JSONObject().put("count", "number")).put("initialState", JSONObject().put("count", 0))
+            .put("surfaces", JSONArray("""[{"id":"first","width":64,"height":64,"x":0,"y":0},
+                {"id":"second","width":64,"height":64,"x":32,"y":0}]"""))
+            .put("source", "return {state:input.state,surfaces:${surfaces(title, "first", "second")}};")
+            .put("ui", control).toString()
     }
 
     private fun surfaces(title: String, first: String, second: String) = """{

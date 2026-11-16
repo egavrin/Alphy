@@ -535,7 +535,6 @@ class CloudWorkflowTest {
                 assertEquals(fixture.last.toolOperationId, transport.operationId.toString())
                 assertEquals(GenerationTransportFailure(CloudGenerationStage.AGENT, 1,
                     GenerationTransportPhase.RESPONSE_BODY, "stream_io", true), transport.failure)
-                assertTrue(trace.none { it is ToolGenerationTraceEvent.Repair })
                 ToolStore(app, "${fixture.name}.db-tools.db").use { store ->
                     assertEquals(fixture.last.toolId, store.tools().single().id)
                     assertEquals(1, store.tools().single().revision)

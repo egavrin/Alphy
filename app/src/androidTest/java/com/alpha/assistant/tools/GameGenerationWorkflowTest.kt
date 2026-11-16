@@ -22,23 +22,16 @@ import java.util.UUID
 @RunWith(AndroidJUnit4::class)
 class GameGenerationWorkflowTest {
     private val context get()=InstrumentationRegistry.getInstrumentation().targetContext
-    private class Provider(private val output: String): ChatProvider {
-        val requests=mutableListOf<CloudRequest>()
-        override suspend fun respond(key:String,request:CloudRequest,session:CloudSession,emit:suspend(CloudEvent)->Unit) {
-            requests+=request
-            val candidate = JSONObject(output)
-            val hasDrawing = candidate.has("surfaces")
-            if (request.replyWithFixturePlan(emit, fixtureScene("immersive", moving = true, start = true).takeIf { hasDrawing })) return
-            if (hasDrawing && request.generationStage == CloudGenerationStage.COMPLETE) candidate.withFixtureDrawingBinding("main", moving = true)
-            emit(CloudEvent.Text(candidate.toString()))
-        }
+    private object Provider: ChatProvider {
+        override suspend fun respond(key:String,request:CloudRequest,session:CloudSession,emit:suspend(CloudEvent)->Unit) =
+            error("These workflows run saved games locally")
     }
     private suspend fun fixture(raw:String,block:suspend(ToolStore,ToolEngine,ToolRecord)->Unit) {
         val name="game-guidance-${UUID.randomUUID()}.db"
         ToolStore(context,name).use {store ->
             val spec=ToolSpec.parse(raw);val tool=ToolRecord("fixture",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)
             store.saveTool(tool,true)
-            val engine=ToolEngine(store,ToolGenerationService(Provider(raw),SandboxClient(context)))
+            val engine=ToolEngine(store,ToolGenerationService(Provider,SandboxClient(context)))
             try {block(store,engine,tool)} finally {engine.closeArtifacts();context.deleteDatabase(name)}
         }
     }
@@ -112,7 +105,7 @@ class GameGenerationWorkflowTest {
     }
     @Test fun deterministicWallPaddleBrickLossAndBoardReset():Unit=runBlocking {
         val spec=ToolSpec.parse(GameGenerationExample.spec())
-        val service=ToolGenerationService(Provider(spec.json),SandboxClient(context))
+        val service=ToolGenerationService(Provider,SandboxClient(context))
         suspend fun frame(seed:JSONObject,dt:Int=50):JSONObject {
             val result=service.evaluate(spec,"fixture",1,seed.toString(),GraphicsContract.event("frame",dt),spec.ui.toString())
             assertTrue(result.effects.isEmpty());assertEquals(0,result.records.length())
@@ -189,7 +182,7 @@ class GameGenerationWorkflowTest {
     }
     @Test fun minimumAndMaximumViewportsKeepAllGameStatesWithinDrawingLimits():Unit=runBlocking {
         val spec=ToolSpec.parse(GameGenerationExample.spec())
-        val service=ToolGenerationService(Provider(spec.json),SandboxClient(context))
+        val service=ToolGenerationService(Provider,SandboxClient(context))
         for((width,height) in listOf(64 to 64,2048 to 2048,64 to 2048,2048 to 64)) {
             for(status in listOf("ready","playing","paused","won","gameOver")) {
                 val seed=JSONObject(spec.initialState).put("status",status)
@@ -207,7 +200,7 @@ class GameGenerationWorkflowTest {
     }
     @Test fun everyBrickInFiveRowsFitsCollidesAndResetsAtEveryViewportShape():Unit=runBlocking {
         val spec=ToolSpec.parse(GameGenerationExample.spec())
-        val service=ToolGenerationService(Provider(spec.json),SandboxClient(context))
+        val service=ToolGenerationService(Provider,SandboxClient(context))
         for((width,height) in listOf(360 to 640,640 to 360,64 to 64,64 to 2048,2048 to 64,2048 to 2048)) {
             val sized=service.evaluate(spec,"fixture",1,spec.initialState,viewport(width,height),spec.ui.toString())
             val board=bricks(sized.surfaces!!)

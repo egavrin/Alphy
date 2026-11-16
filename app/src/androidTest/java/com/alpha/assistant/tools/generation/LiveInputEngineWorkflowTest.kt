@@ -91,44 +91,6 @@ class LiveInputEngineWorkflowTest {
         context.deleteDatabase(name)
     }
 
-    @Test fun mixedLiveInputReceivesOnlyFillStateAndRejectsFixedPartIds(): Unit = runBlocking {
-        val plan = NeedsPlan.parse("""
-            {"title":"Mixed","description":"","language":"en","inputs":[],"constants":[],"needs":[
-              {"id":"count","type":"counter","label":"Count","description":"Increase and reset"},
-              {"id":"custom","type":"action","writes":[],"label":"Editor","description":"Independent live input"}],"questions":[]}
-        """.trimIndent())
-        val assembly = PartsGeneration.build(plan) { body ->
-            val id = JSONObject(body).getJSONArray("questions").getJSONObject(0).getString("id")
-            val answer = JSONObject().put("id", id).put("choice", "A").put("confidence", 1)
-                .put("probabilities", JSONObject().put("A", 1).put("B", 0))
-            JSONObject().put("answers", JSONArray().put(answer)).toString()
-        }
-        val fill = """
-            {"capabilities":[],"stateSchema":{"fill_text":"string"},"initialState":{"fill_text":""},
-             "ui":{"type":"column","children":[
-               {"type":"input","text":"Edit","bind":"fill_text","action":"fill_edit","inputMode":"live"}]},
-             "source":"return {state:input.state};"}
-        """.trimIndent()
-        val spec = ToolComposition.complete(assembly, fill)
-        val generation = ToolGenerationService(offline, SandboxClient(context))
-        val result = generation.executeEvent(spec, "mixed", 1, spec.initialState, liveInputEvent("fill_edit", "local"), spec.ui.toString()) { _, input ->
-            val state = input.getJSONObject("state")
-            assertEquals(setOf("fill_text"), state.keys().asSequence().toSet())
-            assertEquals("liveInput", input.getJSONObject("event").getString("type"))
-            SandboxResult("OK", JSONObject().put("state", state.put("fill_text", "local")).toString())
-        }
-        assertEquals(0, JSONObject(result.state).getInt("p5_count_value"))
-        assertEquals("local", JSONObject(result.state).getString("fill_text"))
-        var fixedInvoked = false
-        assertTrue(runCatching {
-            generation.executeEvent(spec, "mixed", 1, result.state, liveInputEvent("p5_count_add", 1), result.ui) { _, _ ->
-                fixedInvoked = true
-                SandboxResult("OK", """{"state":{"fill_text":"wrong"}}""")
-            }
-        }.isFailure)
-        assertFalse(fixedInvoked)
-    }
-
     @Test fun malformedOrUnavailableLiveInputDoesNotEnterTheExecutor(): Unit = runBlocking {
         val raw = rawDefinition()
         raw.getJSONObject("stateSchema").put("stack", JSONObject("""{"type":"array","items":"string","maxItems":4}"""))

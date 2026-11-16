@@ -9,17 +9,6 @@ import com.alpha.assistant.capabilities.OwnedCalendarContract
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.sandbox.SandboxContract
 import com.alpha.assistant.sandbox.SandboxResult
-import com.alpha.assistant.tools.generation.GeometryScope
-import com.alpha.assistant.tools.generation.framesSinceCapture
-import com.alpha.assistant.tools.generation.GenerationBehavior
-import com.alpha.assistant.tools.generation.GenerationBehavior.Binding
-import com.alpha.assistant.tools.generation.GenerationBehavior.Kind
-import com.alpha.assistant.tools.generation.GenerationBehavior.Step
-import com.alpha.assistant.tools.generation.behaviorUiObservation
-import com.alpha.assistant.tools.generation.sameToolJson
-import com.alpha.assistant.tools.generation.supportsBehaviorObservation
-import com.alpha.assistant.tools.generation.execute
-import com.alpha.assistant.tools.generation.visibleBehaviorNode
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 import org.json.JSONObject
@@ -33,19 +22,6 @@ internal class ToolSmokeFailure(val event: String, val path: String, cause: Exce
             "javascript_script_error" -> " Read the event from input.event. Declare local variables before use."
             "javascript_invalid_result" -> if (event == "action")
                 " If the action requests effects, check their capability schemas. Effect IDs must match [A-Za-z][A-Za-z0-9_]{0,47}." else ""
-            else -> ""
-        }
-}
-
-internal class BehaviorCheckFailure(val step: Int?, val reason: String,
-    val bindingDiagnostic: BehaviorBindingDiagnostic? = null, val precedingEvent: String? = null,
-    val fencedCapabilities: Set<String> = emptySet()) : IllegalStateException() {
-    val detail get() = if (step == null) reason else "step ${step + 1}: $reason"
-    val correction get() = (bindingDiagnostic?.let { "$detail. Binding diagnostic: ${it.report()}" } ?: detail) +
-        precedingEvent?.let { ". Preceding $it" }.orEmpty() +
-        when (bindingDiagnostic?.takeUnless { it.native == true }?.rule) {
-            BehaviorFailureRule.TARGET_MISSING -> ". Resolve the target path from the full composed UI root in this workflow state."
-            BehaviorFailureRule.ACTION_UNAVAILABLE -> ". Bind a visible, enabled control that accepts the exact planned value."
             else -> ""
         }
 }
@@ -70,12 +46,10 @@ internal class ToolGenerationSmoke(
     private val policy: ToolExecutionPolicy? = null,
     private val onInitialPreview: (suspend (ToolPreview) -> Unit)? = null,
     private val checkUi: (suspend (ToolPreview) -> Unit)? = null,
-    private val clockSample: com.alpha.assistant.tools.generation.PartClockSample? = null,
     private val observeReplay: ((List<String>) -> Unit)? = null,
 ) {
     private data class Control(val event: JSONObject,val path: String)
-    internal inner class Branch(private val execute: suspend (String,String)->SandboxResult,initialUi: String, seedState: String,
-        private val freezeClock: Boolean) {
+    internal inner class Branch(private val execute: suspend (String,String)->SandboxResult,initialUi: String, seedState: String) {
         var state=seedState
         var ui=initialUi
         var surfaces=JSONObject()
@@ -86,14 +60,7 @@ internal class ToolGenerationSmoke(
         var fenced=false
         var fencedEffects = emptyList<com.alpha.assistant.capabilities.CapabilityRequest>()
             private set
-        private var clock = clockSample ?: generation.partClockFor(spec)
         private val replay = observeReplay?.let { mutableListOf<String>() }
-        fun displayState(): JSONObject = projectToolState(spec, JSONObject(state), clock)
-        fun advanceClock(milliseconds: Int) {
-            val sample = checkNotNull(clock)
-            clock = sample.copy(elapsedMillis = sample.elapsedMillis + milliseconds)
-        }
-        fun advanceClockIfPresent(milliseconds: Int) { if (clock != null) advanceClock(milliseconds) }
         suspend fun event(event: JSONObject,path: String): ToolPreview {
             checkActive()
             replay?.add(event.toString())
@@ -104,8 +71,7 @@ internal class ToolGenerationSmoke(
                     if(type=="frame") require(event.getString("surfaceId") in frames)
                     if(type=="timer") require(event.getString("timerId") in timers)
                 }
-                if (!freezeClock) clock = clockSample ?: generation.partClockFor(spec)
-                val result=generation.executeEvent(spec,id,revision,state,event,ui,policy,clock) { source,input ->
+                val result=generation.executeEvent(spec,id,revision,state,event,ui,policy) { source,input ->
                     execute(source,input.toString())
                 }
                 if (spec.surfaces.isEmpty() && !result.timers.isNullOrEmpty()) {
@@ -182,349 +148,8 @@ internal class ToolGenerationSmoke(
         }
     }
     private suspend fun <T> branch(initialUi: String=spec.ui.toString(), seedState: String=initialState,
-        freezeClock: Boolean = false, block: suspend Branch.()->T): T =
-        sandbox.disposable {execute -> Branch(execute,initialUi,seedState,freezeClock).block()}
-
-    fun checkBehaviorBindings(scenario: GenerationBehavior.Scenario, rawBindings: Any?,
-        route: ToolGenerationRoute, nativeSlots: Set<String>) {
-        val proposed = rawBindings as? JSONObject ?: return
-        for ((slot, planned) in scenario.slots) {
-            if (planned.kind != Kind.ACTION || planned.rowValueType != null) continue
-            val step = scenario.steps.indexOfFirst { it is Step.Action && it.slot == slot }.takeIf { it >= 0 } ?: continue
-            val action = proposed.opt(slot) as? String ?: continue
-            checkActionContract(scenario, mapOf(slot to Binding.Id(action)), spec.ui, route, nativeSlots,
-                slot, action, step, BehaviorDiscoveryStage.WRITER_BINDING)
-        }
-    }
-
-    private fun checkActionContract(scenario: GenerationBehavior.Scenario, bindings: Map<String, Binding>,
-        root: JSONObject, route: ToolGenerationRoute, nativeSlots: Set<String>, slot: String, action: String?,
-        step: Int?, discoveryStage: BehaviorDiscoveryStage) {
-        if (slot in nativeSlots) return
-        val planned = scenario.slots.getValue(slot)
-        val binding = bindings[slot]
-        val target = action?.let { ToolUiCatalog.actionTarget(root, it) }
-        val type = target?.node?.optString("type")
-        val rule = when {
-            planned.rowValueType == null && target?.inRowTemplate == true && type == "checkbox" &&
-                target.node.optString("action") == action -> BehaviorFailureRule.ROW_SCOPE_MISMATCH
-            planned.rowValueType != null && (binding !is Binding.Id || target?.inRowTemplate != true ||
-                type != "checkbox" || target.node.optString("action") != action) -> BehaviorFailureRule.BINDING_SHAPE
-            else -> return
-        }
-        val reason = if (rule == BehaviorFailureRule.ROW_SCOPE_MISMATCH)
-            "The PLAN must declare rowValueType boolean and a keyed Boolean value for a row checkbox action"
-        else "A declared row action requires an action ID bound to a rowTemplate checkbox"
-        val kind = when (binding) {
-            is Binding.Id -> "id"
-            is Binding.Ui -> "ui"
-            is Binding.Drawing -> "drawing"
-            null -> "missing"
-        }
-        throw BehaviorCheckFailure(step, reason, BehaviorBindingDiagnostic(route, rule, step?.plus(1),
-            scenario.slots.keys.indexOf(slot) + 1, planned.kind, false, kind, type, discoveryStage = discoveryStage))
-    }
-
-    suspend fun checkBehavior(scenario: GenerationBehavior.Scenario, bindings: Map<String, Binding>, preview: ToolPreview,
-        route: ToolGenerationRoute, nativeSlots: Set<String>,
-        requireVisibleDrawing: Boolean = false, liveInputSlots: Set<String> = emptySet(),
-        allowAssertionFailure: (Int) -> Boolean = { false }) {
-        val freshUi = if (initialState == spec.initialState) preview.ui else branch(seedState = spec.initialState) {
-            event(JSONObject().put("type", "preview"), "$.ui").ui
-        }
-        branch(initialUi = freshUi, seedState = spec.initialState, freezeClock = true) {
-            var stepIndex: Int? = null
-            var precedingEvent: String? = null
-            var sent = 0
-            fun recordEvent(kind: String, slot: String) {
-                val slotNumber = scenario.slots.keys.indexOf(slot) + 1
-                precedingEvent = "$kind at step ${checkNotNull(stepIndex) + 1}, slot $slotNumber"
-            }
-            fun fail(reason: String, rule: BehaviorFailureRule, slot: String? = null,
-                nodeKind: String? = null, valueShape: BehaviorValueShape? = null,
-                comparison: BehaviorComparison? = null, observation: BehaviorObservation? = null,
-                frames: Int? = null, requiredChanges: Int? = null, observedChanges: Int? = null): Nothing {
-                val bindingKind = slot?.let {
-                    when (bindings[it]) {
-                        is Binding.Id -> "id"
-                        is Binding.Ui -> "ui"
-                        is Binding.Drawing -> "drawing"
-                        null -> "missing"
-                    }
-                }
-                throw BehaviorCheckFailure(stepIndex, reason, BehaviorBindingDiagnostic(route, rule, stepIndex?.plus(1),
-                    slot?.let { scenario.slots.keys.indexOf(it) + 1 }, scenario.slots[slot]?.kind,
-                    slot?.let { it in nativeSlots }, bindingKind, nodeKind, valueShape,
-                    (bindings[slot] as? Binding.Drawing)?.let { GeometryScope.of(it, threeScene = false) },
-                    comparison, observation, frames, requiredChanges, observedChanges), precedingEvent,
-                    if (rule == BehaviorFailureRule.EXTERNAL_RESULT_REQUIRED)
-                        fencedEffects.map { it.capability }.toSet() else emptySet())
-            }
-            fun target(slot: String) = bindings[slot] ?: fail("missing binding", BehaviorFailureRule.BINDING_MISSING, slot)
-            fun targetId(slot: String) = (target(slot) as Binding.Id).value
-            fun surface(id: String, slot: String) = effectiveSurfaces[id]
-                ?: fail("missing surface", BehaviorFailureRule.SURFACE_UNAVAILABLE, slot)
-            suspend fun send(event: JSONObject) {
-                if (fenced) fail("native or record result required", BehaviorFailureRule.EXTERNAL_RESULT_REQUIRED)
-                if (event.optString("type") != "frame" && ++sent > GenerationBehavior.MAX_EVENTS) fail("event limit reached", BehaviorFailureRule.EVENT_LIMIT)
-                val field = if (requireVisibleDrawing) "$.scene.checks" else "$.behavior"
-                val path = stepIndex?.let { "$field.scenario.steps[$it]" } ?: field
-                this.event(event, path)
-            }
-            fun read(slot: String): Any {
-                if (fenced) fail("native or record result required", BehaviorFailureRule.EXTERNAL_RESULT_REQUIRED, slot)
-                val planned = scenario.slots.getValue(slot)
-                if (planned.kind == Kind.ACTION) {
-                    val root = JSONObject(ui)
-                    val id = when (val binding = target(slot)) {
-                        is Binding.Id -> binding.value
-                        is Binding.Ui -> {
-                            var node = root
-                            for (index in binding.path) {
-                                node = node.optJSONArray("children")?.optJSONObject(index)
-                                    ?: fail("button binding path is unavailable", BehaviorFailureRule.TARGET_MISSING, slot)
-                            }
-                            node.optString("action")
-                        }
-                        is Binding.Drawing -> fail("invalid button binding", BehaviorFailureRule.BINDING_SHAPE, slot)
-                    }
-                    return ToolUiCatalog.ordinaryButtonAvailability(root, id, displayState())
-                        ?: fail("bind an existing ordinary button", BehaviorFailureRule.TARGET_MISSING, slot)
-                }
-                return when (val binding = target(slot)) {
-                    is Binding.Ui -> {
-                        val values = displayState()
-                        val node = visibleBehaviorNode(JSONObject(ui), values, binding.path) { rule, type ->
-                            fail("visible output unavailable", rule, slot, type)
-                        }
-                        val type = node.getString("type")
-                        val observed = checkNotNull(behaviorUiObservation(node, values, planned.kind, binding.native) { rule, shape ->
-                            fail("compatible visible output unavailable", rule, slot, type, shape)
-                        })
-                        val shape = BehaviorValueShape.of(observed)
-                        if (planned.valueType != null && shape != planned.valueType) {
-                            fail("slot $slot requires a visible ${planned.valueType.id} output",
-                                BehaviorFailureRule.SCALAR_SHAPE, slot, type, shape)
-                        }
-                        observed
-                    }
-                    is Binding.Drawing -> {
-                        if (requireVisibleDrawing && canvasSurfaceIds(spec.ui).isNotEmpty() &&
-                            binding.surface !in canvasSurfaceIds(JSONObject(ui), displayState())) {
-                            fail("the required canvas is hidden", BehaviorFailureRule.DRAWING_UNAVAILABLE, slot)
-                        }
-                        val commands = surfaces.optJSONObject(binding.surface)?.optJSONArray("commands")
-                            ?: fail("drawing output unavailable", BehaviorFailureRule.DRAWING_UNAVAILABLE, slot)
-                        val geometry = observeSurfaceGeometry(surface(binding.surface, slot), commands, binding.path)
-                            ?: fail("drawing selection unavailable", BehaviorFailureRule.DRAWING_UNAVAILABLE, slot)
-                        val assertion = stepIndex?.let(scenario.steps::get) as? Step.Assert
-                        if (requireVisibleDrawing && !geometry.hasInk && assertion?.test != "empty") {
-                            fail("the required drawing produces no visible pixels", BehaviorFailureRule.DRAWING_UNAVAILABLE, slot)
-                        }
-                        geometry
-                    }
-                    is Binding.Id -> fail("invalid observation binding", BehaviorFailureRule.BINDING_SHAPE, slot)
-                }
-            }
-            fun numeric(value: Any?, slot: String) = (value as? Number)?.toDouble()
-                ?: fail("numeric output unavailable", BehaviorFailureRule.SCALAR_SHAPE, slot, valueShape = BehaviorValueShape.of(value))
-            fun plansBooleanAction(root: JSONObject, slot: String, control: JSONObject): Boolean {
-                if (scenario.steps.any { it is Step.Action && it.slot == slot && it.value is Boolean }) return true
-                // A writer can bind a planned press to the wrong control. Require evidence of Boolean intent before replanning.
-                return scenario.slots.any { (id, planned) ->
-                    if (planned.kind != Kind.VALUE || planned.valueType != BehaviorValueShape.BOOLEAN) return@any false
-                    val binding = bindings[id] as? Binding.Ui ?: return@any false
-                    binding.path.fold<Int, JSONObject?>(root) { node, index ->
-                        node?.optJSONArray("children")?.optJSONObject(index)
-                    } === control
-                }
-            }
-            send(JSONObject().put("type", "open"))
-            for (surface in effectiveSurfaces.values) {
-                if (surface.sizing == "viewport") send(GraphicsContract.viewport(surface))
-                if (playback.automaticStart) send(GraphicsContract.event("start", surfaceId = surface.id))
-            }
-            scenario.execute(
-                before = { index ->
-                    stepIndex = index
-                    checkActive()
-                },
-                read = ::read,
-                perform = { step ->
-                    when (step) {
-                        is Step.Action -> {
-                            val root = JSONObject(ui)
-                            val binding = target(step.slot)
-                            val planned = scenario.slots.getValue(step.slot)
-                            if (planned.rowValueType != null) {
-                                checkActionContract(scenario, bindings, root, route, nativeSlots, step.slot,
-                                    (binding as? Binding.Id)?.value, stepIndex, BehaviorDiscoveryStage.BEHAVIOR_EXECUTION)
-                            }
-                            val action = when (binding) {
-                                is Binding.Id -> binding.value
-                                is Binding.Ui -> {
-                                    val node = visibleBehaviorNode(root, displayState(), binding.path) { rule, type ->
-                                        fail("action binding path is unavailable", rule, step.slot, type)
-                                    }
-                                    node.optString("action").takeIf(String::isNotEmpty)
-                                        ?: fail("action binding path is unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE,
-                                            step.slot, node.getString("type"))
-                                }
-                                is Binding.Drawing -> fail("invalid action binding", BehaviorFailureRule.BINDING_SHAPE, step.slot)
-                            }
-                            if (planned.rowValueType == null) {
-                                checkActionContract(scenario, bindings, root, route, nativeSlots, step.slot, action, stepIndex,
-                                    BehaviorDiscoveryStage.BEHAVIOR_EXECUTION)
-                            }
-                            if (step.row != null && fenced) fail("native or record result required", BehaviorFailureRule.EXTERNAL_RESULT_REQUIRED)
-                            val plannedValue = step.value.takeUnless { it == JSONObject.NULL }
-                            val values = displayState()
-                            val value = step.row?.let { row ->
-                                val collection = target(row.slot) as? Binding.Ui
-                                    ?: fail("row collection unavailable", BehaviorFailureRule.BINDING_SHAPE, row.slot)
-                                val node = visibleBehaviorNode(root, values, collection.path) { rule, type ->
-                                    fail("row collection unavailable", rule, row.slot, type)
-                                }
-                                if (!supportsBehaviorObservation(node.getString("type"), Kind.COLLECTION, collection.native)) {
-                                    fail("row collection unavailable", BehaviorFailureRule.OBSERVATION_KIND, row.slot)
-                                }
-                                val record = ToolUiCatalog.records(node, values).optJSONObject(row.index)
-                                    ?: fail("current row unavailable", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot)
-                                ToolUiCatalog.scenarioRowPayload(node, action, ToolUiCatalog.stableKey(record), plannedValue)
-                                    ?: fail("action does not belong to the current row collection or its payload is invalid",
-                                        BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot)
-                            } ?: plannedValue
-                            val control = ToolUiCatalog.action(root, action)
-                            val liveInput = control?.let(ToolUiCatalog::isLiveInput) == true
-                            if (step.slot in liveInputSlots && !liveInput) {
-                                fail("the planned scene control requires live input", BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot)
-                            }
-                            val rowControlKind = if (planned.rowValueType != null) {
-                                ToolUiCatalog.actionTarget(root, action)?.node?.optString("type")
-                            } else control?.optString("type")?.takeIf { supportsBehaviorObservation(it, Kind.COLLECTION) }
-                            fun unavailable(): Nothing {
-                                val requirement = control?.let { ToolUiCatalog.actionPayloadRequirement(root, action, value) }
-                                val reason = when {
-                                    rowControlKind != null ->
-                                        "row action unavailable. Use the planned stable row key on an enabled current row. Preserve the row control and its action"
-                                    requirement != null -> "the bound control requires $requirement. Match the planned payload with a supported control"
-                                    else -> "action or input unavailable"
-                                }
-                                fail(reason, BehaviorFailureRule.ACTION_UNAVAILABLE, step.slot,
-                                    rowControlKind ?: control?.optString("type"), BehaviorValueShape.of(value))
-                            }
-                            val event = try {
-                                controlEvent(root, values, action, value, liveInput)
-                            } catch (failure: CancellationException) {
-                                throw failure
-                            } catch (failure: ToolUiCatalog.InvalidBooleanActionPayload) {
-                                if (fenced) fail("native or record result required", BehaviorFailureRule.EXTERNAL_RESULT_REQUIRED)
-                                if (step.slot !in nativeSlots && planned.rowValueType == null &&
-                                    plansBooleanAction(root, step.slot, failure.control)) {
-                                    fail("a JSON Boolean value (true or false) for slot ${step.slot}",
-                                        BehaviorFailureRule.BOOLEAN_ACTION_PAYLOAD, step.slot, failure.control.getString("type"),
-                                        BehaviorValueShape.of(step.value))
-                                }
-                                unavailable()
-                            } catch (_: IllegalArgumentException) {
-                                unavailable()
-                            } catch (_: IllegalStateException) {
-                                unavailable()
-                            }
-                            send(event)
-                            recordEvent("action", step.slot)
-                        }
-                        is Step.Surface -> {
-                            val surface = surface(targetId(step.slot), step.slot)
-                            when (step.event) {
-                                "viewport" -> {
-                                    if (surface.sizing != "viewport") fail("viewport event unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
-                                    send(GraphicsContract.viewport(surface))
-                                }
-                                "pointer" -> {
-                                    if (playback.value !in setOf("playing", "ready")) fail("pointer event unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
-                                    send(GraphicsContract.event("pointer", x = checkNotNull(step.x)*surface.width,
-                                        y = checkNotNull(step.y)*surface.height, phase = checkNotNull(step.phase), surfaceId = surface.id))
-                                }
-                                "control" -> {
-                                    if (surface.id !in spec.hostControls.movement) {
-                                        fail("movement control unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
-                                    }
-                                    send(GraphicsContract.event("control", direction = checkNotNull(step.direction), surfaceId = surface.id))
-                                }
-                                else -> {
-                                    if (!spec.hostControls.playback || step.event != "restart" && ArtifactPlayback.primaryControl(playback.value) != step.event) {
-                                        fail("playback control unavailable", BehaviorFailureRule.SURFACE_UNAVAILABLE, step.slot)
-                                    }
-                                    for (id in effectiveSurfaces.keys) send(GraphicsContract.event(step.event, surfaceId = id))
-                                }
-                            }
-                            recordEvent("surface event", step.slot)
-                        }
-                        is Step.Clock -> {
-                            checkActive()
-                            advanceClock(step.milliseconds)
-                            send(JSONObject().put("type", "render"))
-                            recordEvent("clock advance", step.slot)
-                        }
-                        is Step.Advance -> {
-                            val id = targetId(step.slot)
-                            val isFrame = scenario.slots.getValue(step.slot).kind == Kind.SURFACE
-                            if (step.observe != null && (target(step.observe) as Binding.Drawing).surface != id)
-                                fail("frame and observation must use the same surface", BehaviorFailureRule.BINDING_SHAPE, step.observe)
-                            var previous = step.observe?.let { read(it) as SurfaceGeometry }
-                            var changes = 0
-                            repeat(step.count) {
-                                if (playback.value != "playing" || (if (isFrame) id !in frames else id !in timers))
-                                    fail("active subscription unavailable", BehaviorFailureRule.SUBSCRIPTION_UNAVAILABLE, step.slot)
-                                send(if (isFrame) GraphicsContract.event("frame", dt = step.frameMs ?: 16, surfaceId = id)
-                                    else JSONObject().put("type", "timer").put("timerId", id))
-                                step.observe?.let {
-                                    val current = read(it) as SurfaceGeometry
-                                    if (current.movedFrom(checkNotNull(previous))) changes++
-                                    previous = current
-                                }
-                            }
-                            recordEvent(if (isFrame) "frame advance" else "timer advance", step.slot)
-                            if (changes < step.changes) fail("assertion failed, repeated geometry change required", BehaviorFailureRule.ASSERTION_FAILED,
-                                step.observe, comparison = BehaviorComparison.MOTION, observation = BehaviorObservation.TOO_FEW_CHANGES,
-                                frames = step.count, requiredChanges = step.changes, observedChanges = changes)
-                        }
-                        else -> error("The shared checker handles observations.")
-                    }
-                },
-                completionFailed = { step, frames ->
-                    val reason = if (frames == 0) "terminal result was already present" else "terminal result was not reached"
-                    fail(reason, BehaviorFailureRule.ASSERTION_FAILED, step.observe, comparison = BehaviorComparison.EQUALS,
-                        observation = BehaviorObservation.COMPARISON_FAILED, frames = frames)
-                },
-                assert = { index, step, current, expected ->
-                        val equal = if (current is SurfaceGeometry && expected is SurfaceGeometry) {
-                            current.width == expected.width && current.height == expected.height && current.visible == expected.visible
-                        } else sameToolJson(current, expected)
-                        val passed = when (step.test) {
-                            "equals", "unchanged", "availability" -> equal
-                            "changed" -> !equal
-                            "greater" -> numeric(current, step.slot) > numeric(expected, step.slot)
-                            "less" -> numeric(current, step.slot) < numeric(expected, step.slot)
-                            "empty" -> current is SurfaceGeometry && !current.hasInk
-                            else -> when (current) {
-                                is String -> current.isNotBlank()
-                                is SurfaceGeometry -> current.hasInk
-                                is Number -> scenario.slots.getValue(step.slot).kind == Kind.COLLECTION && current.toInt() > 0
-                                else -> false
-                            }
-                        }
-                        if (!passed && !allowAssertionFailure(index)) fail("assertion failed (${step.test})", BehaviorFailureRule.ASSERTION_FAILED,
-                            step.slot, valueShape = BehaviorValueShape.of(current), comparison = BehaviorComparison.from(step.test),
-                            observation = if (current is SurfaceGeometry && expected is SurfaceGeometry) {
-                                if (equal) BehaviorObservation.UNCHANGED else BehaviorObservation.CHANGED
-                            } else BehaviorObservation.COMPARISON_FAILED, frames = scenario.framesSinceCapture(index, step))
-                },
-            )
-        }
-
-    }
+        block: suspend Branch.()->T): T =
+        sandbox.disposable {execute -> Branch(execute,initialUi,seedState).block()}
 
     private suspend fun preview(): ToolPreview = branch {
         val result = event(JSONObject().put("type", "preview"), "$.ui")
@@ -585,13 +210,13 @@ internal class ToolGenerationSmoke(
             return probe.block()
         }
         return sandbox.disposable { execute ->
-            start(Branch({ source, input -> execute("const __alphyNow=$now;$DATE_SHIM\n$source", input) }, spec.ui.toString(), seedState, false))
+            start(Branch({ source, input -> execute("const __alphyNow=$now;$DATE_SHIM\n$source", input) }, spec.ui.toString(), seedState))
         }
     }
 
     internal inner class AppProbe(private val branch: Branch, private val clock: () -> Long, private val advance: (Long) -> Unit) : AppTarget {
         override val ui: JSONObject get() = JSONObject(branch.ui)
-        override val state: JSONObject get() = branch.displayState()
+        override val state: JSONObject get() = JSONObject(branch.state)
         override val surfaces: JSONObject get() = branch.surfaces
         override val nowMillis: Long get() = clock()
         override val surfaceIds: Set<String> get() = branch.effectiveSurfaces.keys
@@ -659,7 +284,6 @@ internal class ToolGenerationSmoke(
                 val tick = minOf(PROBE_FRAME_MS, milliseconds - elapsed)
                 elapsed += tick
                 advance(tick)
-                branch.advanceClockIfPresent(tick.toInt())
                 if (branch.playback.value != "playing" || delivered >= maxEvents) continue
                 for ((index, surface) in spec.surfaces.values.withIndex()) if (surface.id in branch.frames && delivered < maxEvents) {
                     branch.event(GraphicsContract.event("frame", tick.toInt(), surfaceId = surface.id), "$.surfaces[$index]")

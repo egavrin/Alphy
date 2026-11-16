@@ -594,32 +594,37 @@ class LibraryManagementWorkflowTest {
     }
 
     // Alpha 12 and earlier saved sealed standalone compositions. The fixture is one such record, as that code wrote it.
-    @Test fun savedStandaloneAppFromAnOlderVersionStaysButDoesNotOpen() {
-        val name="library-standalone-${UUID.randomUUID()}.db"
+    @Test fun savedStandaloneAppFromAnOlderVersionStaysButDoesNotOpen() = retiredAppStaysButDoesNotOpen("legacy/sealed-standalone.json","Workshop")
+
+    // Alpha 12 and earlier saved mixed apps: host parts with a generated fill. The fixture is one such record, as that code wrote it.
+    @Test fun savedMixedAppFromAnOlderVersionStaysButDoesNotOpen() = retiredAppStaysButDoesNotOpen("legacy/mixed-app.json","Mixed workshop")
+
+    private fun retiredAppStaysButDoesNotOpen(asset: String,title: String) {
+        val name="library-retired-${UUID.randomUUID()}.db"
         val shell=ShellStore(app,name)
         val toolName="$name-tools.db"
         val keys=SecureKeyStore(app,name,name)
-        val old=JSONObject(instrumentation.context.assets.open("legacy/sealed-standalone.json").bufferedReader().use { it.readText() })
+        val old=JSONObject(instrumentation.context.assets.open(asset).bufferedReader().use { it.readText() })
         val values=android.content.ContentValues().apply {
             put("spec",old.getJSONObject("spec").toString());put("state",old.getJSONObject("state").toString());put("ui",old.getJSONObject("ui").toString())
         }
         lateinit var model: ShellViewModel
         try {
-            val chat="standalone-chat"
-            val saved=counter("standalone","Workshop").copy(conversationId=chat,lastConversationId=chat,onDesktop=true)
+            val chat="retired-chat"
+            val saved=counter("retired",title).copy(conversationId=chat,lastConversationId=chat,onDesktop=true)
             ToolStore(app,toolName).use { tools ->
                 tools.saveTool(saved,true)
                 assertEquals(1,tools.writableDatabase.update("tools",values,"id=?",arrayOf(saved.id)))
                 assertEquals(1,tools.writableDatabase.update("revisions",values,"tool_id=?",arrayOf(saved.id)))
             }
-            shell.saveConversation(Conversation(chat,"Workshop chat",1,1,messages=listOf(
-                Message("standalone-card","assistant","",1,"complete",toolId=saved.id,toolRevision=1))))
+            shell.saveConversation(Conversation(chat,"$title chat",1,1,messages=listOf(
+                Message("retired-card","assistant","",1,"complete",toolId=saved.id,toolRevision=1))))
             CloudTestActivity.factory={ ShellViewModel(it,offline,shell,keys).openSeededChat(shell).also { model=it } }
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitUntil {!model.loading && !model.tools.busy}
                 // No chat is open, so the desktop tile shows the app as unavailable.
-                waitFor("Workshop");waitFor(app.getString(R.string.tool_closed_format))
-                openUnavailableApp(scenario,"Workshop")
+                waitFor(title);waitFor(app.getString(R.string.tool_closed_format))
+                openUnavailableApp(scenario,title)
             }
             ToolStore(app,toolName).use { tools ->
                 val kept=tools.tools().single { it.id==saved.id }
@@ -633,7 +638,7 @@ class LibraryManagementWorkflowTest {
                 // The chat card shows the app as unavailable.
                 waitFor(app.getString(R.string.tool_closed_format))
                 // Deletion in the library is the action that the unavailable text offers.
-                openUnavailableApp(scenario,"Workshop")
+                openUnavailableApp(scenario,title)
                 click("Действия мини-приложения");click("Удалить")
                 waitFor(app.getString(R.string.tool_delete_widgets, 0));click("Удалить")
                 waitUntil {model.tools.tools.none { it.id==saved.id }}

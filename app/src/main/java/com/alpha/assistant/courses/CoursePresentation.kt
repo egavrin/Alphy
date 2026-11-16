@@ -33,7 +33,6 @@ internal sealed interface CoursePage {
         val course: CourseSnapshot,
         val issue: CourseSlideIssue,
         val step: CourseStep,
-        val sceneFailure: String? = null,
     ) : CoursePage {
         val generationRequest: CourseSlideGenerationRequest?
             // A current slide that does not load can be built again. The old slide stays until a new one passes.
@@ -65,7 +64,6 @@ internal fun interface CourseNextGenerationHost {
 internal sealed interface CourseNextPreparation {
     data class Ready(val request: CourseNextRequest, val page: CoursePage.Slide, val draft: CourseSlideContent?) : CourseNextPreparation
     data object Failed : CourseNextPreparation
-    data class SceneFailed(val detail: String) : CourseNextPreparation
     data object Unavailable : CourseNextPreparation
     data object Stale : CourseNextPreparation
 }
@@ -161,9 +159,6 @@ internal class CoursePresentation(
         } catch (_: CancellationException) {
             currentCoroutineContext().ensureActive()
             return CourseNextPreparation.Failed
-        } catch (failure: CourseWorkflowException) {
-            return if (failure.reason == CourseWorkflowError.INVALID_SCENE) CourseNextPreparation.SceneFailed(checkNotNull(failure.message))
-            else CourseNextPreparation.Failed
         } catch (failure: CourseStoreException) {
             return when (failure.reason) {
                 CourseRejection.STALE_REVISION, CourseRejection.COURSE_NOT_FOUND, CourseRejection.SLIDE_NOT_REACHED ->
@@ -217,14 +212,11 @@ internal class CoursePresentation(
             var issue = CourseSlideIssue.GENERATION_FAILED
             var reloaded = false
             var searchIssue: CourseSourceSearchIssue? = null
-            var sceneFailure: String? = null
             try {
                 host.generate(current)
             } catch (_: CancellationException) {
                 currentCoroutineContext().ensureActive()
                 issue = CourseSlideIssue.GENERATION_INTERRUPTED
-            } catch (failure: CourseWorkflowException) {
-                if (failure.reason == CourseWorkflowError.INVALID_SCENE) sceneFailure = failure.message
             } catch (failure: CourseStoreException) {
                 reloaded = when (failure.reason) {
                     CourseRejection.STALE_REVISION, CourseRejection.STALE_GENERATION, CourseRejection.SLIDE_NOT_REACHED,
@@ -253,8 +245,7 @@ internal class CoursePresentation(
                     val failure = if (sameReach && saved.issue == CourseSlideIssue.MISSING && !reloaded) {
                         saved.copy(issue = issue)
                     } else saved
-                    CourseSlideGenerationUpdate(failure.copy(sceneFailure = sceneFailure.takeIf { sameReach && !reloaded }),
-                        reloaded || !sameReach, searchIssue)
+                    CourseSlideGenerationUpdate(failure, reloaded || !sameReach, searchIssue)
                 }
                 is CoursePage.Slide -> CourseSlideGenerationUpdate(saved, reloaded || saved.step != pending.step ||
                     saved.course.outlineRevision != pending.course.outlineRevision)
@@ -364,7 +355,6 @@ internal fun checkSavedSlide(step: CourseStep, content: CourseSlideContent): Sav
     val scene = spec.takeIf { step.slide.kind.allowsScene && it.surfaces.isNotEmpty() }
         ?.let { if (it.lessonImageIntent == null && it.generatedImages.isEmpty()) it
             else ToolSpec.parsePersisted(courseSceneDefinition(it.json)) }
-    require(spec.composition == null || scene != null)
     val exercise = CourseExercise.read(spec, step.slide.kind)
     require(exercise?.actionId == null)
     checkedCourseUi(spec, spec.ui.toString(), spec.initialState, exercise, step.slide.kind)

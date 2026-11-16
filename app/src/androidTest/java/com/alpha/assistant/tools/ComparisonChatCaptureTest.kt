@@ -387,9 +387,6 @@ class ComparisonChatCaptureTest {
                         .put("results", JSONArray(plan.results)))
                 }
             }
-            generationEvents.filterIsInstance<ToolGenerationTraceEvent.Attempt>().lastOrNull {
-                it.operationId.toString() == assistant.toolOperationId && it.disposition == ToolGenerationDisposition.FINISH
-            }?.let { report.put("terminal_attempt", traceEvent(it)) }
             val artifact = assistant.toolId
             report.put("chat_outcome", when {
                 assistant.status != "complete" -> "request-failed"
@@ -397,7 +394,7 @@ class ComparisonChatCaptureTest {
                 else -> "complete-without-artifact"
             })
             if (assistant.status != "complete") {
-                report.put("failure_code", ToolGenerationAttemptDiagnostic.safeCode(assistant.errorCode))
+                report.put("failure_code", safeGenerationCode(assistant.errorCode))
                 if (canvasWorkflow) report.put("scene_diagnostic", assistant.error?.take(400))
             }
             if (artifact != null) {
@@ -570,7 +567,7 @@ class ComparisonChatCaptureTest {
             }
         }
         val assistant = onMain { checkNotNull(vm.snapshot.selected).messages.last() }
-        proof.put("edit_status", assistant.status).put("edit_error_code", ToolGenerationAttemptDiagnostic.safeCode(assistant.errorCode))
+        proof.put("edit_status", assistant.status).put("edit_error_code", safeGenerationCode(assistant.errorCode))
         val revised = saved()
         check(revised.revision == before.revision + 1) { "Refinement did not publish." }
         val definition = JSONObject().put("artifact_id", revised.id).put("artifact_revision", revised.revision)
@@ -729,7 +726,7 @@ class ComparisonChatCaptureTest {
             var observedNodes = emptyList<JSONObject?>()
             await(10_000) {
                 val current = saved()
-                observedState = projectToolState(spec, JSONObject(current.state), localPartClock(app))
+                observedState = JSONObject(current.state)
                 val outputs = nodes(JSONObject(current.ui)).filter {
                     it.has("bind") && it.optString("type") in setOf("text", "metric", "fact", "badge")
                 }.toList()
@@ -778,27 +775,6 @@ class ComparisonChatCaptureTest {
         .put("operation_id", event.operationId.toString()).put("attempt", event.attempt).put("at_ns", event.atNanos)
         .apply {
             when (event) {
-                is ToolGenerationTraceEvent.Stage -> {
-                    put("kind", if (event.started) "stage-start" else "stage-end").put("stage", event.stage.id)
-                    put("selector_batch", event.selectorBatch).put("provider_stage", event.providerStage?.name)
-                }
-                is ToolGenerationTraceEvent.Attempt -> {
-                    put("kind", "attempt").put("stage", event.stage.id).put("outcome", event.outcome.id)
-                    put("disposition", event.disposition.id).put("failure_code", event.failureCode)
-                    put("validation_category", event.validationCategory?.id)
-                    put("validation_rule", event.validationRule)
-                    put("behavior", event.behavior)
-                    put("behavior_binding", event.behaviorBinding?.report())
-                    put("smoke", event.smoke)
-                    put("selector_batch", event.selectorBatch).put("plan_path", event.planPath)
-                    event.planShape?.let { put("plan_rule",it.rule).put("plan_observed_type",it.observedType) }
-                }
-                is ToolGenerationTraceEvent.Repair -> {
-                    put("kind", "repair").put("provider_stage", event.providerStage.name)
-                    put("repair_number", event.repairNumber).put("mode", event.mode.wire).put("result", event.result)
-                    put("response_bytes", event.responseBytes).put("candidate_bytes", event.candidateBytes)
-                    put("changes", event.changes).put("source_edits", event.sourceEdits).put("duration_ns", event.durationNanos)
-                }
                 is ToolGenerationTraceEvent.Transport -> event.failure.let { failure ->
                     put("kind", "transport").put("provider_stage", failure.stage.name)
                     put("http_attempt", failure.httpAttempt).put("phase", failure.phase.wire)
@@ -810,8 +786,6 @@ class ComparisonChatCaptureTest {
                 }
                 is ToolGenerationTraceEvent.Finished -> {
                     put("kind", "finished").put("outcome", event.outcome.name).put("failure_code", event.failureCode)
-                    put("parts_only", event.partsOnly)
-                    put("route", event.route?.id)
                 }
             }
         }

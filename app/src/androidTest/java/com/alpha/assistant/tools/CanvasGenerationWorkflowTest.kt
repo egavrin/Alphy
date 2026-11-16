@@ -7,8 +7,6 @@ import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.sandbox.SandboxClient
-import com.alpha.assistant.tools.generation.PartsContractFailure
-import com.alpha.assistant.tools.generation.SceneRequirement
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -20,25 +18,6 @@ import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
 class CanvasGenerationWorkflowTest {
-    @Test fun sceneExcerptsIgnoreLineWrapsButKeepTheOriginalText() {
-        val request = "Show a blue\r\n\tcircle. Keep the original angle."
-        val wrapped = "  Show a blue circle.\n"
-        fun scene(evidence: String, visual: String) = fixtureScene()
-            .put("checkEvidence", JSONArray().put(JSONObject().put("step", 1).put("excerpt", evidence)
-                .put("purpose", "outcome").put("scope", "whole")))
-            .put("visualReview", JSONArray().put(visual))
-        val accepted = SceneRequirement.read(scene(wrapped, wrapped), request = request)
-        assertEquals(listOf(wrapped), accepted?.evidence?.visualReview)
-        for (invalid in listOf("show a blue circle.", "Show a blue circle!", "Show a green circle.",
-            "Show a circle.", "Show a bluecircle.", "\t\n", " ".repeat(601) + "Show")) {
-            for ((evidence, visual) in listOf(invalid to wrapped, wrapped to invalid)) {
-                assertTrue("Unexpectedly accepted excerpt ${invalid.take(40)}",
-                    runCatching { SceneRequirement.read(scene(evidence, visual), request = request) }
-                        .exceptionOrNull() is PartsContractFailure)
-            }
-        }
-    }
-
     @Test fun inlineCanvasesValidateDeclaredSurfaceOwnership() {
         val raw = definition()
         assertEquals(4, ToolSpec.parse(raw.toString()).surfaces.size)

@@ -1,0 +1,133 @@
+{
+  "definition": {
+    "capabilities": [],
+    "stateSchema": {
+      "fill_phase": "number",
+      "p5_speed_value": "number"
+    },
+    "initialState": {
+      "fill_phase": 0,
+      "p5_speed_value": 2
+    },
+    "surfaces": [
+      {
+        "id": "fill_diagram",
+        "width": 64,
+        "height": 64
+      }
+    ],
+    "ui": {
+      "type": "column",
+      "children": [
+        {
+          "type": "section",
+          "children": [
+            {
+              "type": "text",
+              "text": "Change the position with the slider."
+            }
+          ],
+          "text": "Circle movement",
+          "partId": "information",
+          "partInstanceId": "p5_intro"
+        },
+        {
+          "type": "canvas",
+          "text": "Diagram",
+          "surfaces": [
+            "fill_diagram"
+          ]
+        },
+        {
+          "type": "slider",
+          "text": "Speed",
+          "action": "p5_speed_edit",
+          "bind": "p5_speed_value",
+          "inputMode": "live",
+          "min": 1,
+          "max": 10,
+          "partId": "number_input",
+          "partInstanceId": "p5_speed"
+        }
+      ]
+    },
+    "source": "const state=input.state, type=input.event.type; if(type==='frame') state.fill_phase++; return {state,surfaces:{fill_diagram:{commands:[{type:'circle',x:input.ports.speed,y:20,radius:2,color:'accent'}]}}};",
+    "title": "Circle",
+    "description": "",
+    "formatVersion": 3,
+    "composition": {
+      "version": 1,
+      "parts": [
+        {
+          "position": 0,
+          "needId": "intro",
+          "partId": "information",
+          "instanceId": "p5_intro",
+          "config": {
+            "label": "Circle movement",
+            "body": "Change the position with the slider."
+          }
+        },
+        {
+          "position": 2,
+          "needId": "speed",
+          "partId": "number_input",
+          "instanceId": "p5_speed",
+          "config": {
+            "label": "Speed",
+            "initial": 2,
+            "min": 1,
+            "max": 10,
+            "control": "slider",
+            "inputMode": "live"
+          }
+        }
+      ],
+      "fillPositions": [
+        1
+      ],
+      "readPorts": [
+        "speed"
+      ]
+    }
+  },
+  "ui": {
+    "type": "column",
+    "children": [
+      {
+        "type": "section",
+        "children": [
+          {
+            "type": "text",
+            "text": "Change the position with the slider."
+          }
+        ],
+        "text": "Circle movement",
+        "partId": "information",
+        "partInstanceId": "p5_intro"
+      },
+      {
+        "type": "canvas",
+        "text": "Diagram",
+        "surfaces": [
+          "fill_diagram"
+        ]
+      },
+      {
+        "type": "slider",
+        "text": "Speed",
+        "action": "p5_speed_edit",
+        "bind": "p5_speed_value",
+        "inputMode": "live",
+        "min": 1,
+        "max": 10,
+        "partId": "number_input",
+        "partInstanceId": "p5_speed"
+      }
+    ]
+  },
+  "state": {
+    "fill_phase": 0,
+    "p5_speed_value": 2
+  }
+}

@@ -474,7 +474,7 @@ internal fun CourseLibraryScreen(
                     onRetryNext = {
                         when (nextPreparation) {
                             CourseNextPreparation.Stale -> refresh++
-                            CourseNextPreparation.Failed, is CourseNextPreparation.SceneFailed -> {
+                            CourseNextPreparation.Failed -> {
                                 nextPreparation = null
                                 nextRetry++
                             }
@@ -1073,9 +1073,7 @@ private fun CourseSlidePlayer(
             nextPreparation == CourseNextPreparation.Unavailable -> CourseNextNotice(R.string.course_next_unavailable)
             else -> {
                 val stale = nextPreparation == CourseNextPreparation.Stale
-                if (nextPreparation is CourseNextPreparation.SceneFailed) {
-                    Text(nextPreparation.detail, Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-                } else CourseNextNotice(if (stale) R.string.course_next_changed else R.string.course_next_failed)
+                CourseNextNotice(if (stale) R.string.course_next_changed else R.string.course_next_failed)
                 TextButton(onClick = onRetryNext, enabled = !busy) {
                     Text(stringResource(if (stale) R.string.course_reload else R.string.course_generation_retry))
                 }
@@ -1273,7 +1271,7 @@ private fun CourseGenerationPage(
             page.issue == CourseSlideIssue.GENERATION_BUSY -> R.string.course_generation_busy
             else -> R.string.course_slide_missing
         }
-        Text(page.sceneFailure?.takeUnless { waiting } ?: stringResource(message), Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+        Text(stringResource(message), Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         when {
             waiting -> {
                 LinearProgressIndicator(Modifier.fillMaxWidth())

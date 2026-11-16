@@ -1,8 +1,5 @@
 package com.alpha.assistant.tools
 
-import com.alpha.assistant.tools.generation.PartsContractFailure
-import com.alpha.assistant.tools.generation.SceneCheckEvidence
-import com.alpha.assistant.tools.generation.SceneRequirement
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 import org.json.JSONObject
@@ -121,26 +118,4 @@ class ScopedDiagnosticRegressionTest {
         assertSame(runtime, runCatching { validateTool(ToolValidationCategory.UI_STRUCTURE) { throw runtime } }.exceptionOrNull())
     }
 
-    private fun scene() = JSONObject("""{"placement":"inline","brief":"Grow the shape.",
-        "checks":{"status":"checkable","scenario":{"slots":{"slider":{"kind":"action"},"shape":{"kind":"geometry"}},
-        "steps":[{"op":"capture","slot":"shape","as":"before"},{"op":"action","slot":"slider","value":5},
-        {"op":"assert","slot":"shape","test":"changed","capture":"before"}]}},
-        "checkEvidence":[{"step":3,"excerpt":"Grow the shape.","purpose":"invalid","scope":"whole"}]}""")
-
-    @Test fun evidenceUsesArrayRowInsteadOfScenarioStep() {
-        val failure = runCatching { SceneRequirement.read(scene(), request = "Grow the shape.") }.exceptionOrNull() as PartsContractFailure
-        assertEquals("$.scene.checkEvidence[0]", failure.path)
-    }
-
-    @Test fun visualReviewUsesExplicitRootOrSceneParent() {
-        val root = JSONObject().put("visualReview", JSONArray().put("Wrong excerpt"))
-        val rootFailure = runCatching { SceneCheckEvidence.readVisual(root, "Grow the shape.", "$") }.exceptionOrNull() as PartsContractFailure
-        assertEquals("$.visualReview", rootFailure.path)
-        val nested = scene().apply {
-            getJSONArray("checkEvidence").getJSONObject(0).put("purpose", "motion")
-            put("visualReview", root.getJSONArray("visualReview"))
-        }
-        val failure = runCatching { SceneRequirement.read(nested, request = "Grow the shape.") }.exceptionOrNull() as PartsContractFailure
-        assertEquals("$.scene.visualReview", failure.path)
-    }
 }

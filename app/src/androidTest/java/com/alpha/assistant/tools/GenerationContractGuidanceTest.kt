@@ -1,10 +1,5 @@
 package com.alpha.assistant.tools
 
-import com.alpha.assistant.courses.CourseSlideKind
-import com.alpha.assistant.tools.generation.GenerationPlan
-import com.alpha.assistant.tools.generation.NeedsPlan
-import com.alpha.assistant.tools.generation.PartsContractFailure
-import com.alpha.assistant.tools.generation.SceneRequirement
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -20,17 +15,6 @@ class GenerationContractGuidanceTest {
         .put("capabilities",JSONArray()).put("stateSchema",JSONObject().put(secret,"number"))
         .put("initialState",JSONObject().put(secret,0)).put("ui",JSONObject("""{"type":"text","text":"Local"}"""))
         .put("source","return {state:input.state};")
-    private fun report(failure: ToolValidationFailure) = ToolGenerationAttemptDiagnostic(
-        attempt=1,
-        outcome=ToolGenerationOutcome.REJECTED,
-        stage=ToolGenerationStage.DEFINITION,
-        failureCode="widget_spec",
-        disposition=ToolGenerationDisposition.FINISH,
-        category=failure.category,
-        ui=failure.uiDiagnostic,
-        schemaRule=failure.details?.rule
-    ).report()
-
     private fun bindingFailure(bind: Any?,state: JSONObject=JSONObject().put(secret,0),definition: JSONObject=spec()): ToolUiDiagnostic {
         val parsed=ToolSpec.parse(definition.toString())
         val ui=JSONObject().put("type","numberInput").put("text","Local").put("action","edit")
@@ -38,8 +22,6 @@ class GenerationContractGuidanceTest {
         val failure=runCatching {parsed.validateUi(ui,state)}.exceptionOrNull() as ToolValidationFailure
         assertEquals(ToolValidationCategory.UI_BINDINGS,failure.category)
         return checkNotNull(failure.uiDiagnostic).also { diagnostic ->
-            val report=report(failure).toString()
-            assertFalse(report,report.contains("SECRET"));assertFalse(report,report.contains("content://"))
             assertEquals("$.ui.bind",diagnostic.path)
             assertFalse(diagnostic.correction,diagnostic.correction.contains("SECRET"))
         }
@@ -70,14 +52,10 @@ class GenerationContractGuidanceTest {
             val failure=runCatching {ToolSpec.parse(bad.toString())}.exceptionOrNull() as ToolValidationFailure
             assertEquals(ToolValidationCategory.STATE_SCHEMA,failure.category)
             assertEquals("schema.scalar",failure.details?.rule)
-            val report=report(failure).toString()
-            assertFalse(report.contains("SECRET"));assertTrue(report.contains("unknown"))
         }
         for(raw in listOf("SECRET_NOT_JSON", "```json\n${spec()}\n```", "{\"SECRET\":\"bad\\q\"}", "{\"SECRET\":1,\"SECRET\":2}")) {
             val failure=runCatching {ToolSpec.parse(raw)}.exceptionOrNull() as ToolValidationFailure
             assertEquals(ToolValidationCategory.JSON,failure.category)
-            val report=report(failure)
-            assertFalse(report.toString().contains("SECRET"));assertFalse(report.has("schema"));assertFalse(report.has("ui"))
             assertNull(failure.details)
         }
     }
@@ -91,19 +69,6 @@ class GenerationContractGuidanceTest {
         val fixture=spec().put("stateSchema",history).put("initialState",JSONObject("""{"history":[]}"""))
             .put("ui",JSONObject("""{"type":"list","text":"History","bind":"history","columns":[{"text":"Note","field":"note"}]}"""))
         ToolSpec.parse(fixture.toString())
-    }
-
-    @Test fun needsPlanGuidanceShowsAValidObject() {
-        val prompt = NeedsPlan.promptFor(CourseSlideKind.EXPLANATION)
-        val example = prompt.substringAfter("Use these fields:\n").substringBefore("\nWrite visible text")
-        val parsed = NeedsPlan.parse(example)
-        assertTrue(parsed.inputs.isEmpty())
-        assertTrue(parsed.needs.single().uses.isEmpty())
-        val references = prompt.substringAfter("Complete example with a reference:\n").substringBefore("\nReference rules:")
-        val referenced = NeedsPlan.parse(references)
-        assertEquals(mapOf("step" to "increment"),referenced.needs.single().uses)
-        assertEquals(2,(referenced.constants.getValue("increment").raw as Number).toInt())
-        assertTrue(prompt.contains(NeedsPlan.structureChecklist))
     }
 
     @Test fun nativeGuidanceRequiresLabelsEvenWhenAValueIsBound() {
@@ -131,15 +96,4 @@ class GenerationContractGuidanceTest {
         assertFalse(instructions.contains("Choose answer for fixed-value questions"))
     }
 
-    @Test fun lessonSceneExampleIsAValidInlineCheck() {
-        val inline = SceneRequirement.guidance.lineSequence().first { it.startsWith("{\"placement\":\"inline\"") }
-        assertEquals("inline", SceneRequirement.read(JSONObject(inline), request = "Show a shape that grows with the slider")?.placement)
-    }
-
-    @Test fun lessonPlansRejectTheWholeScreenMarker() {
-        val marker = """{"wholeScreen":true,"language":"en","requiredCapabilities":[]}"""
-        val failure = runCatching { NeedsPlan.parseResponse(marker, CourseSlideKind.EXPLANATION, emptySet(), "Explain", 0) }.exceptionOrNull()
-        assertTrue(failure is PartsContractFailure)
-        assertFalse(NeedsPlan.promptFor(CourseSlideKind.EXPLANATION).contains("wholeScreen"))
-    }
 }

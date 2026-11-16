@@ -63,11 +63,10 @@ class ComposeScenarioAcceptanceTest {
         check(!directory.exists()) {"Evidence directory already exists."}
         check(directory.mkdirs())
         val responses=JSONArray()
-        val attempts=JSONArray()
         var repaired=false
         val report=JSONObject().put("runId",runId).put("mode",mode).put("scenario",scenario).put("repetition",repetition)
             .put("revision",revision).put("sourceSha256",sourceHash).put("request",case.getString("request"))
-            .put("generation","pending").put("responses",responses).put("generationAttempts",attempts).put("phase","generation")
+            .put("generation","pending").put("responses",responses).put("generationAttempts",JSONArray()).put("phase","generation")
             .put("interactions","UNREVIEWED").put("externalResults","UNVERIFIED")
         fun save() {File(directory,"report.json").writeText(report.toString(2))}
         fun screenshot(name: String) {
@@ -130,9 +129,7 @@ class ComposeScenarioAcceptanceTest {
                 } finally {response.put("characters",characters);save()}
             }
         }
-        val engine=ToolEngine(store,ToolGenerationService(provider,SandboxClient(app),null,{diagnostic ->
-            attempts.put(diagnostic.report());save()
-        }))
+        val engine=ToolEngine(store,ToolGenerationService(provider,SandboxClient(app)))
         var activity: ActivityScenario<CloudTestActivity>?=null
         try {
             check(store.tools().isEmpty() && store.drafts().isEmpty()) {"Independent storage is not empty."}
@@ -177,12 +174,6 @@ class ComposeScenarioAcceptanceTest {
             engine.closeArtifacts();store.close();shell.close()
             uiKeys.clear();app.deleteSharedPreferences(name)
             java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null);deleteEntry(name)}
-            fun outcome(number: Int): String? = (0 until attempts.length()).asSequence()
-                .map(attempts::getJSONObject)
-                .lastOrNull { it.getInt("attempt") == number && it.getString("disposition") != "continue" }
-                ?.getString("outcome")
-            report.put("firstAttemptOutcome",outcome(1) ?: "unknown")
-                .put("repairOutcome",outcome(2) ?: "notRequested")
             save()
         }
     }

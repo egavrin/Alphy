@@ -53,20 +53,13 @@ import com.alpha.assistant.cloud.KEY_ERRORS
 import com.alpha.assistant.surfaces.PinToolDialog
 import com.alpha.assistant.surfaces.PinToolKind
 import com.alpha.assistant.surfaces.ToolWidgets
-import com.alpha.assistant.tools.generation.NativePresentation
-import com.alpha.assistant.tools.generation.PartClockSample
 import com.alpha.assistant.ui.AlphaIcon
 import com.alpha.assistant.ui.Glyph
 import com.alpha.assistant.ui.SheetBackHandler
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -196,7 +189,7 @@ internal class MiniAppActions {
                     var graphicsSnapshot by remember(graphicsHost) { mutableStateOf<ArtifactSnapshot?>(null) }
                     val content: @Composable () -> Unit = {
                         MiniAppContent(controller, tool, tool, spec.title, enabled = !controller.busy && !covered, embedded = true,
-                            presentation = spec.nativePresentation, graphicsHost = graphicsHost, graphicsSnapshot = graphicsSnapshot,
+                            graphicsHost = graphicsHost, graphicsSnapshot = graphicsSnapshot,
                             liveAllowed = !covered && !menu, allowVideo = true)
                     }
                     if (graphicsHost != null) {
@@ -313,7 +306,7 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
             imageLoader = { handle -> generated[handle]?.let { image ->
                 withContext(kotlinx.coroutines.Dispatchers.IO) { assets.generatedBitmap(image.asset) }
             } }, imageAvailable = generated::containsKey,
-            presentation = spec.nativePresentation, appLanguage = spec.appLanguage) { _, _ -> }
+            appLanguage = spec.appLanguage) { _, _ -> }
     }
 }
 
@@ -692,7 +685,7 @@ catch (_: Exception) { null }
                     if (priorUnsavedNotice) Text(stringResource(R.string.tool_live_input_unsaved))
                     TextButton(onClick = { if (mayCloseControls()) refine(tool.id) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.tool_refine)) }
                     MiniAppContent(controller,tool,displayed,spec.title,enabled=controlsReady && !controller.busy,
-                        presentation = spec.nativePresentation, graphicsHost = graphicsHost, graphicsSnapshot = artifactSnapshot,
+                        graphicsHost = graphicsHost, graphicsSnapshot = artifactSnapshot,
                         liveAllowed = controlsReady && !actions.covers(tool.id), allowVideo = true,
                         onLiveInputState = { unfinished, unsaved ->
                             liveInputUnfinished = unfinished
@@ -853,7 +846,7 @@ catch (_: Exception) { null }
                     val content: @Composable () -> Unit = {
                         MiniAppContent(controller,tool,displayed,spec.title,
                             enabled=!controller.busy && draft == null && !tool.archived && !menu && !hostCovered && !actions.covers(tool.id),
-                            routeSystemBackEnabled = details == null, presentation = spec.nativePresentation,
+                            routeSystemBackEnabled = details == null,
                             graphicsHost = graphicsHost, graphicsSnapshot = artifactSnapshot,
                             openNonGraphics = draft == null, allowVideo = true,
                             liveAllowed = draft == null && details == null && !menu && !hostCovered && !actions.covers(tool.id))
@@ -969,43 +962,8 @@ private fun hasLiveControl(node: JSONObject): Boolean {
     return lease
 }
 
-@Composable private fun clockedToolState(spec: ToolSpec, ui: String, state: String, visible: Boolean): Result<String>? {
-    val context = LocalContext.current.applicationContext
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val ticking = runCatching { spec.composition?.needsClockTicks(JSONObject(state), localPartClock(context)) == true }.getOrDefault(false)
-    val sample by produceState<PartClockSample?>(null, context, lifecycle, visible, ticking) {
-        if (!visible) return@produceState
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            callbackFlow {
-                val receiver = object : BroadcastReceiver() {
-                    override fun onReceive(context: Context, intent: Intent) { trySend(Unit) }
-                }
-                val timeChanges = IntentFilter().apply {
-                    addAction(Intent.ACTION_TIME_TICK)
-                    addAction(Intent.ACTION_DATE_CHANGED)
-                    addAction(Intent.ACTION_TIME_CHANGED)
-                    addAction(Intent.ACTION_TIMEZONE_CHANGED)
-                }
-                ContextCompat.registerReceiver(context, receiver, timeChanges, ContextCompat.RECEIVER_NOT_EXPORTED)
-                val ticker = if (ticking) launch {
-                    while (isActive) { delay(250); trySend(Unit) }
-                } else null
-                trySend(Unit)
-                awaitClose { ticker?.cancel(); context.unregisterReceiver(receiver) }
-            }.conflate().collect { value = localPartClock(context) }
-        }
-    }
-    return remember(spec, ui, state, sample) {
-        sample?.let { clock -> runCatching {
-            val view = projectToolState(spec, spec.validateState(state), clock)
-            spec.validateUi(JSONObject(ui), view)
-            view.toString()
-        } }
-    }
-}
-
 @Composable internal fun MiniAppContent(controller: ToolController, tool: ToolRecord, displayed: ToolRecord?, heading: String,
-    enabled: Boolean, embedded: Boolean = false, routeSystemBackEnabled: Boolean = true, presentation: NativePresentation? = null,
+    enabled: Boolean, embedded: Boolean = false, routeSystemBackEnabled: Boolean = true,
     graphicsHost: ArtifactUiHost? = null, graphicsSnapshot: ArtifactSnapshot? = null, openNonGraphics: Boolean = false,
     liveAllowed: Boolean = true, allowVideo: Boolean = false, onLiveInputState: (Boolean, Boolean) -> Unit = { _, _ -> }) {
     val navigationContext = LocalContext.current
@@ -1062,8 +1020,6 @@ private fun hasLiveControl(node: JSONObject): Boolean {
     val channel = (graphicsHost as? LiveArtifactUiHost) ?: localHost
     val snapshot = graphicsSnapshot ?: localLease?.getOrNull()
     val current = snapshot?.tool?.takeIf { it.stateVersion >= initial.stateVersion } ?: initial
-    val needsProjection = spec?.composition?.hasReadProjections == true
-    val projected = if (needsProjection) clockedToolState(checkNotNull(spec), current.ui, current.state, visible) else null
     val displayedVideo by rememberUpdatedState(current)
     val videoHost = if (allowVideo && deviceHost != null && tool.saved && VideoContract.PLAY in spec?.capabilities.orEmpty()) {
         remember(controller,deviceHost) {controller.nativeVideoHost(deviceHost) {displayedVideo}}
@@ -1094,8 +1050,7 @@ private fun hasLiveControl(node: JSONObject): Boolean {
         if (localButtons) JSONObject(current.ui).takeUnless(::hasLiveControl) else null
     }
     Box(Modifier.fillMaxWidth().onGloballyPositioned { inWindow = !it.boundsInWindow().isEmpty }) {
-        if (projected?.isFailure == true) Text(stringResource(R.string.tool_closed_format))
-        else ToolContent(current.ui,projected?.getOrNull() ?: current.state,enabled && !controller.settlingPhoto && (!needsProjection || projected != null),
+        ToolContent(current.ui,current.state,enabled && !controller.settlingPhoto,
             heading=heading,calendarHost=calendarHost,embedded=embedded,
             background=if(embedded) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
             imageVersion=(tool.id to current.revision),
@@ -1110,7 +1065,7 @@ private fun hasLiveControl(node: JSONObject): Boolean {
                 if (handle.startsWith("slot:")) spec?.generatedImages?.any { "slot:" + it.slot == handle } == true
                 else controller.nativeImageAvailable(tool.id, handle)
             },
-            routeSystemBackEnabled = routeSystemBackEnabled, presentation = presentation, liveInput = liveInput, videoHost = videoHost, timerHost = timerHost,
+            routeSystemBackEnabled = routeSystemBackEnabled, liveInput = liveInput, videoHost = videoHost, timerHost = timerHost,
             onLiveInputState = onLiveInputState, appLanguage = spec?.appLanguage) {id,value ->
             if (value == null && visibleUi?.let { ToolUiCatalog.action(it, id)?.optString("type") } == "button") {
                 controller.queueLocalButton(current, id, buttonHost) { buttonHost.get() && currentVisibility && navigationForeground() }

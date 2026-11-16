@@ -1,7 +1,5 @@
 package com.alpha.assistant.tools
 
-import com.alpha.assistant.tools.generation.PartsContractFailure
-import com.alpha.assistant.tools.generation.requireParts
 import com.google.android.gms.tasks.Task
 import com.google.mlkit.nl.languageid.LanguageIdentification
 import com.google.mlkit.nl.languageid.LanguageIdentificationOptions
@@ -13,23 +11,13 @@ import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-internal data class AppLanguage(val tag: String, val literals: Set<String>)
+internal data class AppLanguage(val tag: String)
 
 /** Model-selected language and output checks for one generation operation. */
 internal object GenerationLanguage {
-    fun parse(tag: Any?, rawLiterals: Any?, request: String): AppLanguage {
-        requireParts(tag is String && validAppLanguageTag(tag), "$.language", "a lowercase two- or three-letter language tag")
-        val literals = if (rawLiterals == null) emptySet() else {
-            val array = rawLiterals as? JSONArray ?: throw PartsContractFailure("$.literals", "an array of exact request excerpts")
-            requireParts(array.length() <= 32, "$.literals", "at most 32 exact request excerpts")
-            (0 until array.length()).map { index ->
-                val literal = array.opt(index) as? String
-                requireParts(literal != null && literal.isNotBlank() && literal in request,
-                    "$.literals[$index]", "an exact request excerpt")
-                checkNotNull(literal)
-            }.toSet()
-        }
-        return AppLanguage(tag as String, literals)
+    fun parse(tag: Any?): AppLanguage {
+        require(tag is String && validAppLanguageTag(tag)) { "$.language requires a lowercase two- or three-letter language tag." }
+        return AppLanguage(tag)
     }
 
     private val words = Regex("""\p{L}[\p{L}\p{M}]*""")
@@ -51,10 +39,9 @@ internal object GenerationLanguage {
     class Check(private val language: AppLanguage) {
         private val checked = mutableSetOf<List<String>>()
 
-        suspend fun mismatches(ui: JSONObject, title: String = "", description: String = "",
-            skipNativeParts: Boolean = false): Boolean {
-            val controls = labels(ui, skipNativeParts).filterNot(language.literals::contains)
-            return mismatches(controls) || mismatches((listOf(title, description) + controls).filterNot(language.literals::contains))
+        suspend fun mismatches(ui: JSONObject, title: String = "", description: String = ""): Boolean {
+            val controls = labels(ui)
+            return mismatches(controls) || mismatches(listOf(title, description) + controls)
         }
 
         private suspend fun mismatches(copy: List<String>): Boolean {
@@ -65,11 +52,10 @@ internal object GenerationLanguage {
         }
     }
 
-    private fun labels(ui: JSONObject, skipNativeParts: Boolean = false): List<String> = buildList {
+    private fun labels(ui: JSONObject): List<String> = buildList {
         fun visit(value: Any?) {
             when (value) {
                 is JSONObject -> {
-                    if (skipNativeParts && value.has("partInstanceId")) return
                     for (key in listOf("text", "emptyText")) {
                         value.optString(key).takeIf(String::isNotBlank)?.let(::add)
                     }

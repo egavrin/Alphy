@@ -1,0 +1,122 @@
+{
+  "spec": {
+    "stateSchema": {
+      "fill_pos": "number",
+      "p5_count_value": "number"
+    },
+    "initialState": {
+      "fill_pos": 0,
+      "p5_count_value": 0
+    },
+    "ui": {
+      "type": "column",
+      "children": [
+        {
+          "type": "column",
+          "children": [
+            {
+              "type": "metric",
+              "text": "Count",
+              "bind": "p5_count_value"
+            },
+            {
+              "type": "row",
+              "children": [
+                {
+                  "type": "button",
+                  "text": "Increase",
+                  "action": "p5_count_add"
+                },
+                {
+                  "type": "button",
+                  "text": "Reset",
+                  "action": "p5_count_reset"
+                }
+              ]
+            }
+          ],
+          "partId": "counter",
+          "partInstanceId": "p5_count"
+        },
+        {
+          "type": "button",
+          "text": "Move",
+          "action": "fill_action"
+        }
+      ]
+    },
+    "surfaces": [
+      {
+        "id": "fill_board",
+        "width": 64,
+        "height": 64
+      }
+    ],
+    "capabilities": [],
+    "source": "if (input.event.type === \"frame\" || input.event.type === \"action\") input.state.fill_pos += 1;\nreturn {state:input.state,surfaces:{fill_board:{commands:[{type:\"circle\",x:8+input.state.fill_pos,y:16,radius:2,color:\"accent\"}]}}};",
+    "title": "Mixed workshop",
+    "description": "",
+    "formatVersion": 3,
+    "composition": {
+      "version": 1,
+      "parts": [
+        {
+          "position": 0,
+          "needId": "count",
+          "partId": "counter",
+          "instanceId": "p5_count",
+          "config": {
+            "label": "Count",
+            "initial": 0,
+            "step": 1,
+            "russian": false
+          }
+        }
+      ],
+      "fillPositions": [
+        1
+      ]
+    }
+  },
+  "state": {
+    "fill_pos": 0,
+    "p5_count_value": 0
+  },
+  "ui": {
+    "type": "column",
+    "children": [
+      {
+        "type": "column",
+        "children": [
+          {
+            "type": "metric",
+            "text": "Count",
+            "bind": "p5_count_value"
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "button",
+                "text": "Increase",
+                "action": "p5_count_add"
+              },
+              {
+                "type": "button",
+                "text": "Reset",
+                "action": "p5_count_reset"
+              }
+            ]
+          }
+        ],
+        "partId": "counter",
+        "partInstanceId": "p5_count"
+      },
+      {
+        "type": "button",
+        "text": "Move",
+        "action": "fill_action"
+      }
+    ]
+  }
+}

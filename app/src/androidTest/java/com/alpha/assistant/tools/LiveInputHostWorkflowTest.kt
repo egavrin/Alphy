@@ -72,7 +72,7 @@ class LiveInputHostWorkflowTest {
                                             controller.tools.find { it.id == id }?.let { tool ->
                                                 val spec = ToolSpec.parsePersisted(tool.spec)
                                                 MiniAppContent(controller, tool, tool, spec.title, enabled = !controller.busy,
-                                                    embedded = true, presentation = spec.nativePresentation)
+                                                    embedded = true)
                                             }
                                         }
                                     }

@@ -7,7 +7,7 @@ import com.alpha.assistant.media.DeviceMediaPlayback
 import com.alpha.assistant.media.MediaPlaybackResult
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolUiCatalog
-import com.alpha.assistant.tools.generation.sameToolJson
+import com.alpha.assistant.tools.sameToolJson
 import java.lang.ref.WeakReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope

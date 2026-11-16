@@ -59,7 +59,7 @@ internal object AppSnapshot {
                             Column {
                                 ToolContent(preview.ui, preview.state, enabled = true, imageVersion = pictures.keys,
                                     imageLoader = { handle -> pictures[handle]?.let { withContext(Dispatchers.IO) { assets.generatedBitmap(it.asset) } } },
-                                    imageAvailable = pictures::containsKey, presentation = preview.spec.nativePresentation,
+                                    imageAvailable = pictures::containsKey,
                                     appLanguage = preview.spec.appLanguage) { _, _ -> }
                             }
                         }
