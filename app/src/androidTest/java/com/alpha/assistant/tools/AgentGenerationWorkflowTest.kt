@@ -72,6 +72,24 @@ class AgentGenerationWorkflowTest {
         assertTrue(provider.feedback(2), provider.feedback(2).contains("92"))
     }
 
+    // Failure case: a passing first version still cost a second model call only to send finish.
+    @Test fun aWriteWithPassingChecksFinishesInOneCall(): Unit = runBlocking {
+        val provider = AgentScriptProvider(JSONObject(writeAppReply(tipApp())).put("checks", splitCheck)
+            .put("summary", "The bill split is ready.").toString())
+        assertEquals("Bill split", generate(provider).spec.title)
+        assertEquals(1, provider.calls.size)
+    }
+
+    @Test fun aWriteWithFailingChecksKeepsTheVersionAndNamesTheCheck(): Unit = runBlocking {
+        val wrong = JSONArray().put(JSONObject().put("name", "split").put("steps",
+            JSONArray("""[{"set":"bill","value":80},{"expect":"value","target":"total","equals":93}]""")))
+        val provider = AgentScriptProvider(JSONObject(writeAppReply(tipApp())).put("checks", wrong).toString(), finish(splitCheck))
+        generate(provider)
+        assertEquals(2, provider.calls.size)
+        val feedback = provider.feedback(1)
+        assertTrue(feedback, feedback.contains("write_app: OK") && feedback.contains("finish: FAILED. check \"split\""))
+    }
+
     @Test fun appSourceCanFormatMoneyForTheAppLanguage(): Unit = runBlocking {
         // The guide tells the model to format money with Intl.NumberFormat, so the sandbox must support it.
         val app = JSONObject("""

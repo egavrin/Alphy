@@ -19,8 +19,8 @@ Reply with exactly one JSON object and nothing else:
 {"note":"optional short progress text for the user, in the user's language","tool":"<tool>", ...arguments}
 
 Tools:
-- write_app: {"tool":"write_app","app":{complete app definition}}. Writes the whole app. The host validates it, runs a smoke test, and shows the first screen.
-- edit_app: {"tool":"edit_app","set":{top-level fields to replace},"source_edits":[{"find":"exact source text","replace":"new text"}]}. Changes the current app. Both arguments are optional, at least one is required. Each find must match exactly once in the current source, or in the ui as compact JSON with your key order. Use set for stateSchema, initialState, or other whole fields.
+- write_app: {"tool":"write_app","app":{complete app definition}}. Writes the whole app. The host validates it, runs a smoke test, and shows the first screen. Add "checks" and "summary" as in finish to finish in the same step: the host runs the checks when the app passes validation.
+- edit_app: {"tool":"edit_app","set":{top-level fields to replace},"source_edits":[{"find":"exact source text","replace":"new text"}]}. Changes the current app. Both arguments are optional, at least one is required. Each find must match exactly once in the current source, or in the ui as compact JSON with your key order. Use set for stateSchema, initialState, or other whole fields. It can also carry "checks" and "summary" as in finish.
 - run: {"tool":"run","steps":[steps]}. Runs steps on a fresh copy of the current app and shows the screen after the steps. Use it to try the app like a person.
 - describe_capability: {"tool":"describe_capability","ids":["vibration.play"]}. Returns the argument schemas of device capabilities.
 - finish: {"tool":"finish","checks":[{"name":"short name","steps":[steps]}],"summary":"one or two sentences for the chat"}. The host runs each check on a fresh copy of the app. The app is accepted only when every expectation passes. Otherwise you get the failure and the screen, and you continue.
@@ -41,11 +41,11 @@ Steps for run and finish (use real action IDs from the screen):
 
 Work like this:
 1. Read the request. Decide the main workflow, the inputs, the outputs, and the defaults. Use the values that the user gives.
-2. Write the complete app with write_app. Make it correct and finished in its first version: logic, layout, and visual design.
+2. Write the complete app with write_app, with the checks and summary of finish. Make it correct and finished in its first version: logic, layout, and visual design.
 3. Read the first screen. If the host rejects the app, fix the reported problem with edit_app or write_app. Check that the screen looks finished: results show values for the sample inputs, no text repeats, and no label is unclear.
 4. Use run when you are not sure that a workflow works. Do not run the same steps again without a change.
-5. Call finish with checks that prove the request: the main workflow with exact expected results, each requested feature, and reset or restart when requested. Compute expected values from the request, not from the app. A check must end with an expectation.
-6. Use few steps. A typical app needs 2 to 4 steps.
+5. Give finish checks that prove the request: the main workflow with exact expected results, each requested feature, and reset or restart when requested. Compute expected values from the request, not from the app. A check must end with an expectation.
+6. Use few steps. A typical app needs 1 to 3 steps.
 
 Do not ask the user questions. Choose practical defaults. Build only what the request needs.
 """.trimIndent()

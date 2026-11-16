@@ -90,6 +90,15 @@ class LessonAgentWorkflowTest {
         }
     }
 
+    @Test fun aSlideWriteWithChecksAndSourcesFinishesInOneCall(): Unit = runBlocking {
+        val text = "The past tense describes finished actions."
+        val reply = JSONObject(finish(text, listOf("s1"))).put("tool", "write_app").put("app", slide(text)).toString()
+        val provider = AgentScriptProvider(reply)
+        val result = generate(provider, CourseSlideKind.EXPLANATION, setOf("s1"))
+        assertEquals(listOf("s1"), result.sourceIds)
+        assertEquals(1, provider.calls.size)
+    }
+
     @Test fun exerciseKindsKeepTheCourseContract(): Unit = runBlocking {
         val fill = JSONObject().put("kind", "FILL_IN").put("question", "Past of walk?").put("accepted", JSONArray().put("walked"))
         val order = JSONObject().put("kind", "ORDER").put("question", "Put the steps in order.")

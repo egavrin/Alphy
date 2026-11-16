@@ -257,6 +257,32 @@ internal class AppAgent(
                 if (hints.isEmpty()) "" else "\nDesign hints: ${hints.joinToString(" ")}"
         }
 
+        suspend fun finishing(reply: JSONObject, candidate: Candidate): Any {
+            if (!edited && !request.testFix) throw Feedback("Change the app before finish. The request asks for a change.")
+            if (edited) for (steps in reproductions) {
+                val outcome = drive(candidate, request) { AppSteps.run(this, steps, everyStep = false) }
+                if (outcome.failure != null) return "finish: FAILED. The reproduced problem still fails: ${shown(outcome.failure, outcome, privateApp)}" +
+                    (outcome.final?.takeUnless { privateApp }?.let { "\nScreen:\n${it.text}" } ?: "")
+            }
+            val finished = finish(reply, candidate, request, privateApp)
+            val shot = request.screenshot.takeIf { lesson == null }
+            return if (finished !is Finished || shot == null || reviewed || privateApp || candidate.spec.threeScene) finished
+            else {
+                // One review for each generation keeps the added time to one model step.
+                reviewed = true
+                // A capture failure skips the review. It must not block an app that passed its checks.
+                try { Review(shot(candidate.preview)) } catch (failure: CancellationException) { throw failure } catch (_: Exception) { finished }
+            }
+        }
+
+        // A write or an edit can carry the finish arguments, so a passing version ends the loop in the same step.
+        suspend fun acceptedThenFinish(tool: String, candidate: Candidate, reply: JSONObject): Any {
+            val text = accepted(tool, candidate)
+            if (!reply.has("checks")) return text
+            val result = try { finishing(reply, candidate) } catch (failure: Feedback) { "finish: REJECTED. ${failure.message}" }
+            return if (result is String) "$text\n$result" else result
+        }
+
         suspend fun handle(reply: JSONObject): Any {
             reply.optString("note").trim().takeIf { it.isNotEmpty() }?.let { note -> request.onNote?.invoke(note.take(160)) }
             return when (val tool = reply.optString("tool")) {
@@ -269,7 +295,7 @@ internal class AppAgent(
                     lastWriteIndex = history.lastIndex
                     draftMatchesLastWrite = true
                     current = null
-                    accepted(tool, validate(app))
+                    acceptedThenFinish(tool, validate(app), reply)
                 }
                 "edit_app" -> {
                     request.progress?.invoke(ToolGenerationProgress.COMPLETING)
@@ -280,7 +306,7 @@ internal class AppAgent(
                     draft = next
                     draftMatchesLastWrite = false
                     current = null
-                    accepted(tool, validate(next))
+                    acceptedThenFinish(tool, validate(next), reply)
                 }
                 "run" -> {
                     request.progress?.invoke(ToolGenerationProgress.VALIDATING)
@@ -304,22 +330,7 @@ internal class AppAgent(
                 }
                 "finish" -> {
                     request.progress?.invoke(ToolGenerationProgress.VALIDATING)
-                    val candidate = current ?: throw Feedback(noValidApp(draft))
-                    if (!edited && !request.testFix) throw Feedback("Change the app before finish. The request asks for a change.")
-                    if (edited) for (steps in reproductions) {
-                        val outcome = drive(candidate, request) { AppSteps.run(this, steps, everyStep = false) }
-                        if (outcome.failure != null) return "finish: FAILED. The reproduced problem still fails: ${shown(outcome.failure, outcome, privateApp)}" +
-                            (outcome.final?.takeUnless { privateApp }?.let { "\nScreen:\n${it.text}" } ?: "")
-                    }
-                    val finished = finish(reply, candidate, request, privateApp)
-                    val shot = request.screenshot.takeIf { lesson == null }
-                    if (finished !is Finished || shot == null || reviewed || privateApp || candidate.spec.threeScene) finished
-                    else {
-                        // One review for each generation keeps the added time to one model step.
-                        reviewed = true
-                        // A capture failure skips the review. It must not block an app that passed its checks.
-                        try { Review(shot(candidate.preview)) } catch (failure: CancellationException) { throw failure } catch (_: Exception) { finished }
-                    }
+                    finishing(reply, current ?: throw Feedback(noValidApp(draft)))
                 }
                 "generate_image" -> {
                     val maker = request.imageMaker ?: throw Feedback("Pictures are off for this request. Build the app without image nodes.")
@@ -507,7 +518,7 @@ internal class AppAgent(
     /** Tells the model the host's lesson arguments of finish. The course code adds the slide rules. */
     private fun lessonGuide(lesson: AppLessonTarget, illustrations: Boolean): String = buildString {
         append(lesson.guide)
-        append("\n\nWhen you call finish for this slide, add \"sources\": ")
+        append("\n\nWhen you call finish for this slide, or add checks to write_app or edit_app, add \"sources\": ")
         if (lesson.allowedSourceIds.isEmpty()) append("leave it out, because this course has no sources.")
         else append("the IDs of the trusted search results that the slide uses, in the order that the slide uses them. ")
             .append("Available IDs: ").append(lesson.allowedSourceIds.joinToString()).append('.')
