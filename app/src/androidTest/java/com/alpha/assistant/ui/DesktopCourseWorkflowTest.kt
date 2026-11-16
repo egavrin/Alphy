@@ -217,7 +217,9 @@ class DesktopCourseWorkflowTest {
         }
 
         val order = layoutIds()
-        openDatabase(coursesName).use { it.version = 2 }
+        // A newer, unknown schema version makes the course read fail.
+        val version = openDatabase(coursesName).use { it.version }
+        openDatabase(coursesName).use { it.version = version + 1 }
         try {
             fixture.launch().use {
                 reveal(robot.text(R.string.desktop_courses_load_failed))
@@ -225,7 +227,7 @@ class DesktopCourseWorkflowTest {
                 assertEquals(order, layoutIds())
             }
         } finally {
-            openDatabase(coursesName).use { it.version = 1 }
+            openDatabase(coursesName).use { it.version = version }
         }
 
         fixture.launch().use {

@@ -111,7 +111,8 @@ class GenerationContractGuidanceTest {
         assertTrue(guidance.contains("A bind supplies a value. It does not supply the text label."))
         assertTrue(guidance.contains("The only non-container exceptions are spacer, divider, skeleton, spinner, navigation, calendar, medicine."))
         assertTrue(guidance.contains("Every supplied text value must contain 1 to 300 characters"))
-        val invalid = spec().put("ui", JSONObject("""{"type":"text","text":"","bind":"$secret"}"""))
+        // A bound text or badge may show only its value, so a bound metric is the labeled case.
+        val invalid = spec().put("ui", JSONObject("""{"type":"metric","text":"","bind":"$secret"}"""))
         val failure = runCatching { ToolSpec.parse(invalid.toString()) }.exceptionOrNull() as ToolValidationFailure
         val diagnostic = checkNotNull(failure.uiDiagnostic)
         assertEquals("component_text", diagnostic.rule)

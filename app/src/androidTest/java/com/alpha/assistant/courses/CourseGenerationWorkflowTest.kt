@@ -18,6 +18,9 @@ import com.alpha.assistant.tools.LessonToolPreview
 import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolPreview
 import com.alpha.assistant.tools.ToolSpec
+import com.alpha.assistant.tools.agentAppAccepted
+import com.alpha.assistant.tools.agentFixtureFinish
+import com.alpha.assistant.tools.agentWrite
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -166,7 +169,7 @@ class CourseGenerationWorkflowTest {
                     player.generate(course.id, course.revision, "practice", key, CloudSession())
                 }
                 assertEquals(0, opens)
-                assertEquals(policyStages, provider.stages)
+                assertTrue(provider.stages.isNotEmpty() && provider.stages.all { it == CloudGenerationStage.AGENT })
                 assertNull(store.slide(course.id, "practice"))
                 assertEquals(CourseGenerationFailure.INVALID_OUTPUT, store.course(course.id)?.generationFailure)
             }
@@ -179,16 +182,16 @@ class CourseGenerationWorkflowTest {
                 if (input.event.type === 'render') return {state:input.state,effects:[]};
                 return {state:input.state};
             """.trimIndent()).toString())
-            val diagnostics = mutableListOf<JSONObject>()
-            val service = ToolGenerationService(provider, SandboxClient(context), null) { diagnostics += it.report() }
+            val service = ToolGenerationService(provider, SandboxClient(context))
             CourseStore(context, name).use { store ->
                 val course = store.create(setup, outline())
                 val player = policyFixtureController(store, service)
                 workflowError(CourseWorkflowError.UNSUPPORTED_OUTPUT) {
                     player.generate(course.id, course.revision, "practice", key, CloudSession())
                 }
-                assertEquals(policyStages, provider.stages)
-                assertEquals("render", diagnostics.last().getJSONObject("smoke").getString("event"))
+                assertTrue(provider.stages.isNotEmpty() && provider.stages.all { it == CloudGenerationStage.AGENT })
+                // The agent loop returns the smoke rejection to the model as feedback.
+                assertTrue(provider.feedback.toString(), provider.feedback.any { "Smoke event: render." in it })
                 assertNull(store.slide(course.id, "practice"))
                 assertEquals(CourseGenerationFailure.INVALID_OUTPUT, store.course(course.id)?.generationFailure)
             }
@@ -232,7 +235,8 @@ class CourseGenerationWorkflowTest {
                 val complete = player.submitAnswer(course.id, active.revision, "fill", "answer", CourseAnswer.FillIn("preterite"))
                 assertTrue(complete.progress.isComplete)
                 assertTrue(store.answers(course.id).single().correct)
-                assertEquals(policyStages, provider.stages)
+                // One step writes the lesson app, and the next step finishes.
+                assertEquals(listOf(CloudGenerationStage.AGENT, CloudGenerationStage.AGENT), provider.stages)
             }
         }
     }
@@ -688,18 +692,14 @@ class CourseGenerationWorkflowTest {
 
     private class PolicyProvider(private val definition: String) : ChatProvider {
         val stages = mutableListOf<CloudGenerationStage?>()
+        val feedback = mutableListOf<String>()
 
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
             stages += request.generationStage
-            emit(CloudEvent.Text(when (request.generationStage) {
-                CloudGenerationStage.PLAN -> """
-                    {"title":"Course fixture","description":"","language":"en","inputs":[],"constants":[],"needs":[
-                      {"id":"course","type":"other","label":"Course exercise","description":"Show the course exercise"}
-                    ],"questions":[]}
-                """.trimIndent()
-                CloudGenerationStage.COMPLETE -> definition
-                else -> error("Unexpected provider call.")
-            }))
+            if (request.turns.size > 1) feedback += request.turns.last().text
+            check(request.generationStage == CloudGenerationStage.AGENT) { "Unexpected provider call." }
+            // The app agent writes the definition until the host accepts it, then finishes.
+            emit(CloudEvent.Text(if (request.agentAppAccepted) agentFixtureFinish else agentWrite(definition)))
         }
     }
 
@@ -772,7 +772,6 @@ class CourseGenerationWorkflowTest {
     ))))
 
     private val key = "PRIVATE-KEY"
-    private val policyStages = listOf(CloudGenerationStage.PLAN, CloudGenerationStage.COMPLETE)
     private val lessonStages = listOf(CloudGenerationStage.PLAN)
     private val setup = CourseSetup("Past tense", "Beginner", "Use past tense", "PRIVATE-CONVERSATION")
 }

@@ -575,7 +575,7 @@ private object PresentationFixtures {
         val plan = NeedsPlan.parse("""
             {"title":"Счётчик поездок","description":"Локальный счётчик","language":"ru","inputs":[],"constants":[],"needs":[
               {"id":"count","type":"counter","label":"Поездок","description":"Увеличение и сброс"},
-              {"id":"notes","type":"action","label":"Справка","description":"Текст о поездках"}
+              {"id":"notes","type":"action","writes":[],"label":"Справка","description":"Текст о поездках"}
             ],"questions":[]}
         """.trimIndent())
         val assembly = PartsGeneration.build(plan) { raw ->

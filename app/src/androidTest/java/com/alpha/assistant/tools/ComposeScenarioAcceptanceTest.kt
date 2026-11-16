@@ -63,14 +63,11 @@ class ComposeScenarioAcceptanceTest {
         check(!directory.exists()) {"Evidence directory already exists."}
         check(directory.mkdirs())
         val responses=JSONArray()
-        val routingStages=JSONArray()
         val attempts=JSONArray()
         var repaired=false
-        var planRequests=0
-        var selectorRequests=0
         val report=JSONObject().put("runId",runId).put("mode",mode).put("scenario",scenario).put("repetition",repetition)
             .put("revision",revision).put("sourceSha256",sourceHash).put("request",case.getString("request"))
-            .put("generation","pending").put("responses",responses).put("routingStages",routingStages).put("generationAttempts",attempts).put("phase","generation")
+            .put("generation","pending").put("responses",responses).put("generationAttempts",attempts).put("phase","generation")
             .put("interactions","UNREVIEWED").put("externalResults","UNVERIFIED")
         fun save() {File(directory,"report.json").writeText(report.toString(2))}
         fun screenshot(name: String) {
@@ -111,26 +108,17 @@ class ComposeScenarioAcceptanceTest {
         val provider=object: ChatProvider {
             override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
                 check(request.jsonObject && !request.search && request.turns.all {it.images.isEmpty()})
-                val stage=checkNotNull(request.generationStage)
-                if (stage != CloudGenerationStage.SELECTOR && request.turns.size > 1) repaired=true
-                if (stage == CloudGenerationStage.PLAN || stage == CloudGenerationStage.SELECTOR) {
-                    if (stage == CloudGenerationStage.PLAN) check(++planRequests <= 4) {"PLAN repair limit exceeded."}
-                    else check(++selectorRequests <= 2) {"Selector request limit exceeded."}
-                    routingStages.put(stage.name)
-                    save()
-                    if (liveProvider != null) liveProvider.respond(key,request,session,emit)
-                    else check(request.replyWithFixturePlan(emit))
-                    return
-                }
-                check(stage == CloudGenerationStage.COMPLETE)
-                check(responses.length()<4) {"COMPLETE repair limit exceeded."}
-                if(responses.length()>0) responses.getJSONObject(responses.length()-1).put("outcome","correctionRequested")
+                // Mini-apps come from the app agent. Each step is one request.
+                check(request.generationStage == CloudGenerationStage.AGENT) {"Unexpected generation stage."}
+                check(responses.length()<12) {"Agent step limit exceeded."}
+                // A later step without an accepted version follows a host rejection.
+                if (request.turns.size > 1 && !request.agentAppAccepted) repaired=true
                 val response=JSONObject().put("attempt",responses.length()+1).put("outcome","started").put("characters",0)
                 responses.put(response);save()
                 var characters=0
                 val delegate=liveProvider ?: object: ChatProvider {
                     override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
-                        emit(CloudEvent.Text(ArkanoidFixture.spec()))
+                        emit(CloudEvent.Text(request.agentReply(ArkanoidFixture.spec())))
                     }
                 }
                 try {

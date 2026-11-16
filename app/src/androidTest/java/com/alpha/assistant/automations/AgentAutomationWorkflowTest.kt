@@ -262,7 +262,9 @@ class AgentAutomationWorkflowTest {
                 val approved = checkNotNull(store.rule(draft.id))
                 val run = checkNotNull(store.begin(approved, AutomationEvent("manual", "legacy-run"), 1, false))
                 store.finish(run, "succeeded", "Existing history")
+                // Version 2 had no agent runs and no retired rules.
                 store.writableDatabase.execSQL("DROP TABLE agent_runs")
+                store.writableDatabase.execSQL("ALTER TABLE rules DROP COLUMN retired_reason")
                 store.writableDatabase.version = 2
                 approved
             }

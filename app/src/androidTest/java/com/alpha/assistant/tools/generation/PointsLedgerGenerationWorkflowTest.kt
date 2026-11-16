@@ -65,7 +65,7 @@ class PointsLedgerGenerationWorkflowTest {
 
     @Test fun persistedMixedLedgerRunsThroughHostActionsAndKeepsItsOwnership(): Unit = runBlocking {
         val plan = JSONObject(raw)
-        plan.getJSONArray("needs").put(JSONObject().put("id", "help").put("type", "action")
+        plan.getJSONArray("needs").put(JSONObject().put("id", "help").put("type", "action").put("writes", JSONArray())
             .put("label", "Справка").put("description", "Дополнительная справка"))
         val assembly = build(plan.toString())
         assertEquals(listOf("help"), assembly.holes.single().needIds)

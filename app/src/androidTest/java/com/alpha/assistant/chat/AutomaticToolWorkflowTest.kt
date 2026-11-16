@@ -57,9 +57,10 @@ class AutomaticToolWorkflowTest {
         JSONObject().put("kind",kind).put("text",text).put("brief",if(kind in listOf("create","refine")) brief else "")
             .put("search",search).toString()
     private fun card(toolId: String) = Message("card-$toolId","assistant","",1,"complete",toolId = toolId,toolRevision = 1)
-    private fun seedTool(store: ToolStore, id: String, title: String, chat: String = "chat") {
+    /** A null [chat] is an app without an origin chat, so the load-time upgrade adds no card for it. */
+    private fun seedTool(store: ToolStore, id: String, title: String, chat: String? = "chat", last: String? = chat) {
         val parsed = ToolSpec.parse(spec(title))
-        store.saveTool(ToolRecord(id,1,1,parsed.json,parsed.initialState,parsed.ui.toString(),chat,true),true)
+        store.saveTool(ToolRecord(id,1,1,parsed.json,parsed.initialState,parsed.ui.toString(),chat,true,lastConversationId = last),true)
     }
     private fun seedChat(store: ShellStore, vararg refs: String) {
         store.saveConversation(Conversation("chat","Chat",1,1,messages = refs.map(::card)))
@@ -1332,7 +1333,7 @@ class AutomaticToolWorkflowTest {
             seedTool(tools,"b-host-id","Counter")
             seedTool(tools,"c-host-id","Water tracker")
             seedTool(tools,"outside-host-id","Secret outside title","outside")
-            seedTool(tools,"no-card-host-id","Secret unreferenced title")
+            seedTool(tools,"no-card-host-id","Secret unreferenced title",null)
             seedChat(shell,"a-host-id","b-host-id","c-host-id")
         }.use { f ->
             f.send("Change the Water tracker"); f.idle()
@@ -1343,7 +1344,8 @@ class AutomaticToolWorkflowTest {
             assertEquals(2,f.toolStore.tool("c-host-id")!!.revision)
             assertFalse(requests.first().systemInstructions.contains("host-id"))
             assertFalse(requests.first().systemInstructions.contains("Secret"))
-            assertTrue(requests.first().systemInstructions.contains("Water tracker"))
+            // App titles stay out of the chat instructions. The choice card carries them.
+            assertFalse(requests.first().systemInstructions.contains("Water tracker"))
 
             f.send("Change it"); f.idle()
             assertEquals(listOf("Counter","Counter","Counter Plus"),f.last.refinementChoices.map { it.title })
@@ -1379,7 +1381,7 @@ class AutomaticToolWorkflowTest {
             assertEquals("full-view-id",f.last.toolId)
             assertEquals("Keep this draft",f.model.snapshot.draft.text)
             assertEquals("Change its button",requests.first().turns.last().text)
-            assertTrue(requests.first().systemInstructions.contains("Counter"))
+            assertFalse(requests.first().systemInstructions.contains("Counter"))
             assertFalse(requests.first().systemInstructions.contains("full-view-id"))
 
             main { f.model.refineTool("full-view-id") }
@@ -1575,7 +1577,7 @@ class AutomaticToolWorkflowTest {
             }
             Fixture(provider) { shell, tools ->
                 seedTool(tools,"counter-id","Counter")
-                seedTool(tools,"other-id","Other app")
+                seedTool(tools,"other-id","Other app",null,"chat")
                 seedChat(shell,"counter-id")
             }.use { f ->
                 try {

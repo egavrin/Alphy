@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.ColorUtils
 import androidx.test.core.app.ActivityScenario
+import com.alpha.assistant.GalleryCanvasSample
 import com.alpha.assistant.GallerySamples
 import com.alpha.assistant.GalleryToneLabels
 import com.alpha.assistant.MiniAppGalleryActivity
@@ -121,7 +122,7 @@ class MiniAppVisualWorkflowTest {
     }
 
     @Test fun galleryFixturesCoverTheCurrentCatalog() {
-        val covered = GallerySamples.values.flatMap { sample ->
+        val covered = (GallerySamples.values + GalleryCanvasSample).flatMap { sample ->
             sample.spec()
             sample.sections.flatMap { section -> sample.componentTypes(section.id) }
         }.toSet()
@@ -558,7 +559,8 @@ class MiniAppVisualWorkflowTest {
         }
     }
 
-    @Test fun nativePickersKeepActionsReachableAtSystemFont200() {
+    // The short landscape window (below 400 dp) needs the compact display. A 1080 px display gives 411 dp.
+    @Test fun nativePickersKeepActionsReachableAtSystemFont200() = withDateRangeDisplay(compact = true) {
         val app = robot.instrumentation.targetContext
         val original = robot.shell("settings get system font_scale")
         val destination = File(app.getExternalFilesDir(null), "plan3-native-pickers-200").apply { mkdirs() }

@@ -83,7 +83,7 @@ class PartsGenerationWorkflowTest {
             assertEquals(listOf("ready", "count_value", "notes"), assembly.parts.map { it.needId })
             assertTrue(rejected { assembly.requireComplete() }.path.startsWith("$.holes"))
         }
-        val unsupported = raw.replace("\"type\":\"counter\"", "\"type\":\"scene\"")
+        val unsupported = raw.replace("\"type\":\"counter\"", "\"type\":\"scene\",\"writes\":[]")
         val assembly = PartsGeneration.build(NeedsPlan.parse(unsupported), ask = chooseFirst)
         assertEquals(listOf("count", "count_value"), assembly.holes.map { it.needIds.single() })
         assertTrue(assembly.holes.all { it.kind == HoleKind.SCENE })

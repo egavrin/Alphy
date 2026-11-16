@@ -277,6 +277,7 @@ class MiniAppPresentationWorkflowTest {
     @Test fun savedObservatorySceneChoicesAdaptAndKeepCameraThroughPlayback() = savedObservatory(5)
 
     private fun savedObservatory(revision: Int) {
+        org.junit.Assume.assumeTrue(com.alpha.assistant.tools.three.ThreeSceneWebView.available())
         val sceneChoices = revision == 5
         val evidence = if (sceneChoices) "observatory-v5" else "observatory"
         val robot = ShellRobot(evidence)
@@ -1640,7 +1641,8 @@ class MiniAppPresentationWorkflowTest {
         waitUntil {!model.tools.busy && store.tool("lake")!!.revision == 2}
         shown("Revised lake day"); shown("Изменить")
         assertNull(find("Опишите изменения"))
-        assertNull(store.draft("candidate"))
+        // The draft belongs to a chat, so it stays as that chat's receipt for revision 2, not as an editable draft.
+        assertEquals(2, store.draft("candidate")?.acceptedRevision)
         screenshot("accepted-refinement")
     }
     @Test fun cancelThenErrorThenRetryPreservesAppAndPendingDraft() {
@@ -1648,11 +1650,12 @@ class MiniAppPresentationWorkflowTest {
         val provider=object: ChatProvider {
             override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
                 check(request.jsonObject)
-                if (request.replyWithFixturePlan(emit)) return
+                // The agent finishes after the host accepts the written app. That step does not count as an attempt.
+                if (request.replyWithAgentFinish(emit)) return
                 when(calls.incrementAndGet()) {
                     1 -> awaitCancellation()
                     2 -> throw CloudFailure("fixture_failure","Offline refinement fixture")
-                    else -> emit(CloudEvent.Text(ItineraryFixture.spec("Recovered lake day")))
+                    else -> emit(CloudEvent.Text(agentWrite(ItineraryFixture.spec("Recovered lake day"))))
                 }
             }
         }

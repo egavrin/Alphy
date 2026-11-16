@@ -61,8 +61,9 @@ class DeviceCapabilityUiWorkflowTest {
             "stateSchema":{"count":"number"},"initialState":{"count":0},
             "surfaces":[{"id":"board","width":300,"height":300}],
             "ui":{"type":"column","children":[{"type":"button","text":"Start tilt","action":"go"},{"type":"text","text":"Samples","bind":"count"}]},
-            "source":"const s=input.state,e=input.event;if(e.type==='action')return {state:s,effects:[{id:'tilt',capability:'sensor.accelerometer.stream',args:{enabled:true}}]};if(e.type==='sensor' && Math.abs(e.x)>1)s.count++;return {state:s,surfaces:{board:{commands:[{type:'text',x:30,y:30,text:String(s.count),size:20,color:'default'}]}}};"}
+            "source":"const s=input.state,e=input.event;if(e.type==='action')return {state:s,effects:[{id:'tilt',capability:'sensor.accelerometer.stream',args:{enabled:true}}]};if(e.type==='sensor' && Number.isFinite(e.x) && Number.isFinite(e.y))s.count++;return {state:s,surfaces:{board:{commands:[{type:'text',x:30,y:30,text:String(s.count),size:20,color:'default'}]}}};"}
         """.trimIndent()
+        // Each finite sample counts, so the check does not depend on how the device is held.
         withApp(spec) { tools, record ->
             robot.click("Start tilt")
             robot.waitFor(robot.text(R.string.tool_stop_tilt))

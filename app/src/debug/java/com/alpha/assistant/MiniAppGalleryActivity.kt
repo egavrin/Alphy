@@ -96,7 +96,9 @@ internal fun gallerySpec(ui: String, state: String, schema: String, title: Strin
     val definition = JSONObject().put("formatVersion", 3).put("title", title).put("description", "Галерея мини-приложений")
         .put("capabilities", JSONArray(capabilities)).put("stateSchema", JSONObject(schema)).put("initialState", JSONObject(state))
         .put("ui", JSONObject(ui)).put("source", "return {state:input.state};")
+    // Playback and movement controls are opt-in, so the canvas page declares the ones its check expects.
     if (canvas) definition.put("surfaces", JSONArray("""[{"id":"main","width":100,"height":100}]"""))
+        .put("hostControls", JSONObject("""{"playback":true,"movement":["main"]}"""))
     return try { ToolSpec.parse(definition.toString()) }
     catch (failure: ToolValidationFailure) {
         throw IllegalArgumentException("Invalid gallery fixture $title at ${failure.uiDiagnostic}", failure)
@@ -121,7 +123,7 @@ internal fun gallerySpec(ui: String, state: String, schema: String, title: Strin
 }
 
 @Composable private fun GalleryCanvas(maxHeight: Dp) {
-    val spec = remember { gallerySpec("""{"type":"text","text":"Графика"}""", """{"score":0}""", """{"score":"number"}""", "Проверка холста", canvas = true) }
+    val spec = remember { GalleryCanvasSample.spec() }
     val tool = remember(spec) { ToolRecord("gallery", 1, 1, spec.json, spec.initialState, spec.ui.toString(), null, false) }
     val host = remember(tool) {
         val frame = GraphicsContract.frame("""{"commands":[
@@ -140,5 +142,6 @@ internal fun gallerySpec(ui: String, state: String, schema: String, title: Strin
             override suspend fun close() {}
         }
     }
-    NativeToolSurface(tool, spec, true, maxHeight, host)
+    // The canvas node draws inside the app UI, so the surface needs that UI as its content.
+    NativeToolSurface(tool, spec, true, maxHeight, host, content = { ToolContent(tool.ui, tool.state, true) { _, _ -> } })
 }

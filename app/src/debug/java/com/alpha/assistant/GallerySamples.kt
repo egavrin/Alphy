@@ -9,11 +9,11 @@ import org.json.JSONObject
 internal data class GallerySection(val id: String, val content: String)
 
 internal data class GallerySample(val id: String, val title: String, val sections: List<GallerySection>,
-    val capabilities: List<String> = emptyList()) {
+    val capabilities: List<String> = emptyList(), val canvas: Boolean = false) {
     fun spec(section: String? = null): ToolSpec {
         val selected = if (section == null) sections else listOf(sections.single { it.id == section })
         val state = JSONObject(GalleryState)
-        return gallerySpec(column(selected.joinToString(",") { it.content }), state.toString(), GallerySchema, title, capabilities)
+        return gallerySpec(column(selected.joinToString(",") { it.content }), state.toString(), GallerySchema, title, capabilities, canvas)
     }
 
     fun componentTypes(section: String? = null): Set<String> = buildSet {
@@ -201,3 +201,7 @@ internal val GallerySamples = listOf(
         """),
     )),
 ).associateBy(GallerySample::id)
+
+/** The canvas page draws a fixed frame through the native host, so it is not in [GallerySamples]. */
+internal val GalleryCanvasSample = GallerySample("canvas", "Проверка холста",
+    listOf(section("canvas", """{"type":"canvas","text":"Проверка холста","surfaces":["main"]}""")), canvas = true)

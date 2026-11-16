@@ -64,7 +64,8 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         store.tool(id)?.let { it.saved && it.revision.toString() == revision } == true
 
     internal suspend fun searchLibrary(query: String, archived: Boolean): List<ToolRecord> = withContext(Dispatchers.IO) {
-        val hits = librarySearch.search(query, 0.70f, 100, ::libraryRecords, ::appCurrent) { id -> store.tool(id)?.archived == archived }
+        // Unrelated text scores up to about 0.80 with the bundled model, so a lower cutoff matches every app.
+        val hits = librarySearch.search(query, 0.80f, 100, ::libraryRecords, ::appCurrent) { id -> store.tool(id)?.archived == archived }
         hits.mapNotNull { hit ->
             store.tool(hit.id)?.takeIf { it.saved && it.archived == archived && it.revision.toString() == hit.revision }
         }

@@ -129,6 +129,7 @@ import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.round
 
 private val LocalEmbeddedTool = staticCompositionLocalOf { false }
@@ -656,7 +657,8 @@ private fun fitsWorkspaceColumn(node: JSONObject, state: JSONObject): Boolean {
                 } else waiting = null
             }
         } else emptySet()
-        val halfWidth = if (paired.isEmpty()) 0.dp else with(density) { ((constraints.maxWidth - gap.roundToPx()) / 2).toDp() }
+        // FlowRow reserves ceil(gap) px between items. A rounded gap can leave 1 px too little and wrap the pair.
+        val halfWidth = if (paired.isEmpty()) 0.dp else with(density) { ((constraints.maxWidth - ceil(gap.toPx()).toInt()) / 2).toDp() }
         val slotAlignment = when (style?.optString("align")) {
             "center" -> Alignment.TopCenter
             "end" -> Alignment.TopEnd

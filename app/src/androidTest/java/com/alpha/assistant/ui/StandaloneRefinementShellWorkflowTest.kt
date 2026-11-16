@@ -92,7 +92,8 @@ class StandaloneRefinementShellWorkflowTest {
                     robot.waitUntil { !model.surfacePending }
                     val initialSurface = model.surfaceSequence
                     fun assertUnchanged() {
-                        assertEquals(storedChat, model.snapshot)
+                        // The stored shell does not reopen a chat. The model opened the seeded chat at launch.
+                        assertEquals(storedChat.copy(selectedId = selected.id), model.snapshot)
                         assertEquals(storedChat, fixture.store.load())
                         assertEquals(initialSurface, model.surfaceSequence)
                         assertFalse(model.surfacePending)

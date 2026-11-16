@@ -2,12 +2,14 @@ package com.alpha.assistant.agent
 
 import android.content.Intent
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.provider.AlarmClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.alpha.assistant.R
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -21,6 +23,11 @@ class PhoneCameraWorkflowTest {
     private val continueCamera = "Продолжить к камере"
 
     @Test fun approvedSelfieStaysInChatOutsideProviderContext() {
+        // An emulator can declare the front-camera feature without a front lens, so the check reads the lenses.
+        val cameras = robot.instrumentation.targetContext.getSystemService(CameraManager::class.java)
+        assumeTrue("This device has no front camera", cameras.cameraIdList.any {
+            cameras.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+        })
         val fixture = ShellFixture("phone-selfie")
         val chat = "photo-chat"
         try {

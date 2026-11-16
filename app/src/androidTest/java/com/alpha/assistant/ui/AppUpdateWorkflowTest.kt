@@ -37,13 +37,14 @@ class AppUpdateWorkflowTest {
     private val apk = File(app.filesDir, "update-test/Alphy-$fixtureTag.apk")
 
     @Test fun selectsNewestReleaseAndRejectsCorruptDownload() {
-        val tag = "v0.1.0-alpha.10"
+        // Offered tags use a far-future version, so a version bump of the app does not make them old.
+        val tag = "v99.0.0-alpha.10"
         val assetRequests = AtomicInteger()
         val checkRequests = AtomicInteger()
         val releases = JSONArray()
-            .put(release("v0.1.0-alpha.20").put("draft", true))
-            .put(release("v0.1.0-alpha.19", digest = "missing"))
-            .put(release("v0.1.0-alpha.18", assetHost = "example.com"))
+            .put(release("v99.0.0-alpha.20").put("draft", true))
+            .put(release("v99.0.0-alpha.19", digest = "missing"))
+            .put(release("v99.0.0-alpha.18", assetHost = "example.com"))
             .put(release("v0.1.0-alpha.3"))
             .put(release("v0.1.0-alpha.9"))
         val nextPage = JSONArray().put(release(tag))

@@ -46,7 +46,7 @@ class CapabilityWorkflowTest {
             if (!entry.getBoolean("callable")) return@repeat
             assertFalse(entry.getJSONObject("argumentSchema").getBoolean("additionalProperties"))
             assertEquals(entry.getString("id")=="network.request",entry.getJSONObject("access").getBoolean("toolGrant"))
-            assertEquals(entry.getString("id") in setOf("share.text", PHOTO_CAPTURE), entry.getJSONObject("access").getBoolean("confirmation"))
+            assertEquals(entry.getString("id") in setOf("share.text", PHOTO_CAPTURE, MiniAppImage.ID), entry.getJSONObject("access").getBoolean("confirmation"))
             assertTrue(entry.has("result"))
         }
         val guidance = CapabilityCatalog.modelGuidance(CapabilityCatalog.ids)

@@ -37,7 +37,8 @@ class NativePresentationHostWorkflowTest {
             robot.waitUntil { robot.composed(scenario, "desktop") }
             scenario.onActivity { checkNotNull(fixture.model).openSurface(saved.id) }
             assertWorkspace("Saved workspace")
-            robot.waitFor("Saved workspace description")
+            // A saved app shows only itself, without its description.
+            assertNull(robot.find("Saved workspace description"))
             clickEnabledAction("Saved workspace primary")
             robot.waitUntil { count(store, saved.id) == 1 }
             robot.diagnostics.capture("saved-full-workspace")

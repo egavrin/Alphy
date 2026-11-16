@@ -105,8 +105,7 @@ class DesktopGridWorkflowTest {
             reveal("Shared total: 2")
             assertEquals(2, count(id))
             robot.back()
-            reveal(robot.text(R.string.tool_library_content))
-            robot.back()
+            // Back returns to the chat that opened the full view.
             reveal(robot.text(R.string.tool_open))
             reveal("Shared total: 2")
             robot.back()

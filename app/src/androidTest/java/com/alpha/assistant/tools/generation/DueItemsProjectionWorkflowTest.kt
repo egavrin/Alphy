@@ -50,7 +50,7 @@ class DueItemsProjectionWorkflowTest {
 
     private suspend fun mixed(): ToolSpec {
         val plan = JSONObject(raw)
-        plan.getJSONArray("needs").put(JSONObject().put("id", "help").put("type", "action")
+        plan.getJSONArray("needs").put(JSONObject().put("id", "help").put("type", "action").put("writes", JSONArray())
             .put("label", "Справка").put("description", "Дополнительная справка"))
         val assembly = build(plan.toString())
         assertTrue(assembly.requiresReadProjection)

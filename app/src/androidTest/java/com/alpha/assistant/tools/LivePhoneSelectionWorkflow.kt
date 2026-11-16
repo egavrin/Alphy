@@ -19,6 +19,7 @@ import com.alpha.assistant.ui.openSeededChat
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -29,7 +30,10 @@ class LivePhoneSelectionWorkflow {
     @Test fun traceWholeRequests() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
-        val runId = checkNotNull(args.getString("liveRunId"))
+        val runId = args.getString("liveRunId")
+        // Only a live run passes a run ID. The ordinary suite skips this provider-backed trace.
+        assumeTrue(runId != null)
+        requireNotNull(runId)
         val fixture = ShellFixture("phone-selection-live")
         val dir = File(checkNotNull(fixture.context.getExternalFilesDir(null)), "phone-selection/$runId")
         check(dir.mkdirs())

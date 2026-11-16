@@ -56,7 +56,10 @@ class ToolStorageRecoveryWorkflowTest {
                     assertEquals(0, fixture.provider.calls)
                     robot.diagnostics.capture("published-library-desktop")
                 }
-                assertEquals("Stored message", fixture.store.load().conversations.single().messages.single().text)
+                // The first open adds one durable card for the saved app to its chat.
+                val messages = fixture.store.load().conversations.single().messages
+                assertEquals("Stored message", messages.first().text)
+                assertEquals(listOf("saved"), messages.mapNotNull { it.toolId })
             }
         } finally { fixture.remove() }
     }

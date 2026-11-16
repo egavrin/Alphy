@@ -164,7 +164,7 @@ class StandaloneClockedCompositionTest {
         assertNull(ToolSpec.availablePersisted(raw.toString()))
 
         val withHole = JSONObject(plan).apply {
-            getJSONArray("needs").put(JSONObject().put("id", "extra").put("type", "action")
+            getJSONArray("needs").put(JSONObject().put("id", "extra").put("type", "action").put("writes", JSONArray())
                 .put("label", "Extra").put("description", "Custom section"))
         }
         val mixed = assembly(withHole.toString())

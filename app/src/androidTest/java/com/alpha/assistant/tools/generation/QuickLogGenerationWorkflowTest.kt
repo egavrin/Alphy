@@ -236,7 +236,7 @@ class QuickLogGenerationWorkflowTest {
         val raw = plan().apply {
             getJSONArray("needs")
                 .put(JSONObject().put("id", "cups").put("type", "counter").put("label", "Чашки").put("description", "Счёт чашек"))
-                .put(JSONObject().put("id", "custom").put("type", "action").put("label", "Ещё").put("description", "Отдельная функция"))
+                .put(JSONObject().put("id", "custom").put("type", "action").put("writes", JSONArray()).put("label", "Ещё").put("description", "Отдельная функция"))
         }
         val assembled = build(raw)
         assertEquals(listOf("cups"), assembled.parts.map { it.needId })

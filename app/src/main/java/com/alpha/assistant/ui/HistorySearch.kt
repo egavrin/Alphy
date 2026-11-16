@@ -36,7 +36,8 @@ internal class HistorySearch(context: Context, private val store: ShellStore) {
     }
 
     suspend fun search(query: String): List<HistoryResult> = withContext(Dispatchers.IO) {
-        index.search(query, 0.70f, 50, ::records, ::current).mapNotNull { hit ->
+        // Unrelated text scores up to about 0.80 with the bundled model, so a lower cutoff matches every chat.
+        index.search(query, 0.80f, 50, ::records, ::current).mapNotNull { hit ->
             val key = JSONArray(hit.id)
             val record = resolve(key)?.takeIf { it.revision == hit.revision } ?: return@mapNotNull null
             val excerpt = record.text.substring(hit.offset, hit.end).replace(Regex("\\s+"), " ").trim()

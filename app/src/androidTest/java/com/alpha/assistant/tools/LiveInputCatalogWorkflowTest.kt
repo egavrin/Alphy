@@ -103,7 +103,7 @@ class LiveInputCatalogWorkflowTest {
         val plan = NeedsPlan.parse("""
             {"title":"Счётчик и заметка","description":"","language":"ru","inputs":[],"constants":[],"needs":[
               {"id":"count","type":"counter","label":"Счётчик","description":"Увеличить и сбросить"},
-              {"id":"board","type":"scene","label":"Поле","description":"Поле с подписью"}
+              {"id":"board","type":"scene","writes":[],"label":"Поле","description":"Поле с подписью"}
             ],"questions":[]}
         """.trimIndent())
         val assembly = PartsGeneration.build(plan) { raw ->

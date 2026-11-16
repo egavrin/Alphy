@@ -90,7 +90,7 @@ internal fun galleryCaptureChecks(context: Context): Map<String, GalleryCaptureC
         "records/chart" to GalleryCaptureCheck(listOf("Расходы по дням"),
             graphics = listOf("Расходы по дням. Дневные расходы: Пн 2; Вт 4; Ср 3; "),
             next = GalleryCaptureStep("legend", GalleryCaptureCheck(listOf("Дневные расходы")), reveal = "Дневные расходы")),
-        "records/progress" to GalleryCaptureCheck(listOf("Недельный лимит: 2", "Оплачено: 2"), graphics = listOf("Недельный лимит", "Оплачено")),
+        "records/progress" to GalleryCaptureCheck(listOf("Недельный лимит: 40%", "Оплачено: 40%"), graphics = listOf("Недельный лимит", "Оплачено")),
         "records/list" to GalleryCaptureCheck(listOf("Заметки", "Заметка из поездки")),
         "records/grouped" to GalleryCaptureCheck(listOf("По месяцам", "Июнь", rows)),
         "records/lazy-list" to GalleryCaptureCheck(listOf("Журнал", rows)),
