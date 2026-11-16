@@ -527,14 +527,10 @@ internal class ToolGenerationSmoke(
 
     }
 
-    private suspend fun preview(freezeClock: Boolean = false): ToolPreview = branch(freezeClock = freezeClock) {
+    private suspend fun preview(): ToolPreview = branch {
         val result = event(JSONObject().put("type", "preview"), "$.ui")
         event(JSONObject().put("type", "render"), "$.ui")
         result
-    }
-
-    suspend fun checkNativePlan(scenario: GenerationBehavior.Scenario, bindings: Map<String, Binding>) {
-        checkBehavior(scenario, bindings, preview(freezeClock = true), ToolGenerationRoute.NATIVE, bindings.keys)
     }
 
     suspend fun run(): ToolPreview {
