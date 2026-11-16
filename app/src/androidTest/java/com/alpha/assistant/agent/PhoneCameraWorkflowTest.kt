@@ -1,10 +1,15 @@
 package com.alpha.assistant.agent
 
+import android.app.Activity
+import android.app.Instrumentation
 import android.content.Intent
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.provider.AlarmClock
+import androidx.lifecycle.Lifecycle
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.R
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
@@ -12,6 +17,7 @@ import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class PhoneCameraWorkflowTest {
@@ -72,7 +78,6 @@ class PhoneCameraWorkflowTest {
         val fixture = ShellFixture("phone-clock-camera")
         try {
             val request = timerThenPhoto(fixture)
-            val clock = checkNotNull(Intent(AlarmClock.ACTION_SET_TIMER).resolveActivity(fixture.context.packageManager)).packageName
             fixture.install()
             fixture.launch().use { scenario ->
                 send(request)
@@ -81,10 +86,7 @@ class PhoneCameraWorkflowTest {
                     val plan = checkNotNull(fixture.model?.agent?.plan)
                     assertEquals(listOf("clock.setTimer", "camera.capture"), plan.steps.map { it.command.function })
                 }
-                robot.click(robot.text(R.string.agent_execute))
-                robot.waitUntil { robot.diagnostics.freshRoot()?.packageName?.toString() == clock }
-                robot.cameraEvidence("clock-handoff")
-                robot.back()
+                runTimerStep(scenario)
                 robot.reveal(continueCamera, forward = null)
                 assertNull(robot.find(shutter))
                 robot.cameraEvidence("clock-continue")
@@ -117,14 +119,11 @@ class PhoneCameraWorkflowTest {
         val fixture = ShellFixture("phone-clock-cancel")
         try {
             val request = timerThenPhoto(fixture)
-            val clock = checkNotNull(Intent(AlarmClock.ACTION_SET_TIMER).resolveActivity(fixture.context.packageManager)).packageName
             fixture.install()
             fixture.launch().use { scenario ->
                 send(request)
                 robot.reveal(robot.text(R.string.agent_execute))
-                robot.click(robot.text(R.string.agent_execute))
-                robot.waitUntil { robot.diagnostics.freshRoot()?.packageName?.toString() == clock }
-                robot.back()
+                runTimerStep(scenario)
                 robot.reveal(continueCamera, forward = null)
                 val waiting = checkNotNull(fixture.model?.agent?.plan)
                 robot.click(robot.text(R.string.cancel))
@@ -143,6 +142,41 @@ class PhoneCameraWorkflowTest {
     private fun send(text: String) {
         robot.edit(robot.text(R.string.composer_label), text)
         robot.click(robot.text(R.string.composer_send))
+    }
+
+    /**
+     * Approve the plan and complete its timer step. By default, the test blocks the timer request, so no real Clock
+     * timer exists, and a pause and a resume stand in for the return from Clock. Pass `-e realClock true` on a test
+     * emulator to use the real Clock app. Never use it on a personal phone.
+     */
+    private fun runTimerStep(scenario: ActivityScenario<*>) {
+        if (InstrumentationRegistry.getArguments().getString("realClock") == "true") {
+            val clock = checkNotNull(Intent(AlarmClock.ACTION_SET_TIMER)
+                .resolveActivity(robot.instrumentation.targetContext.packageManager)).packageName
+            robot.click(robot.text(R.string.agent_execute))
+            robot.waitUntil { robot.diagnostics.freshRoot()?.packageName?.toString() == clock }
+            robot.cameraEvidence("clock-handoff")
+            robot.back()
+            return
+        }
+        val timer = AtomicReference<Intent>()
+        val monitor = object : Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? {
+                if (intent.action != AlarmClock.ACTION_SET_TIMER) return null
+                timer.set(intent)
+                return Instrumentation.ActivityResult(Activity.RESULT_OK, null)
+            }
+        }
+        robot.instrumentation.addMonitor(monitor)
+        try {
+            robot.click(robot.text(R.string.agent_execute))
+            robot.waitUntil { monitor.hits == 1 }
+        } finally {
+            robot.instrumentation.removeMonitor(monitor)
+        }
+        assertEquals(300, timer.get().getIntExtra(AlarmClock.EXTRA_LENGTH, 0))
+        scenario.moveToState(Lifecycle.State.STARTED)
+        scenario.moveToState(Lifecycle.State.RESUMED)
     }
 
     private fun timerThenPhoto(fixture: ShellFixture): String {
