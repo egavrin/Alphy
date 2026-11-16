@@ -4,10 +4,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.alpha.assistant.cloud.ChatProvider
-import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudGenerationStage
-import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.data.Source
 import com.alpha.assistant.sandbox.SandboxClient
@@ -16,10 +13,7 @@ import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolPreview
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.AgentScriptProvider
-import com.alpha.assistant.tools.agentAppAccepted
-import com.alpha.assistant.tools.agentFixtureFinish
 import com.alpha.assistant.tools.agentStall
-import com.alpha.assistant.tools.agentWrite
 import com.alpha.assistant.tools.writeAppReply
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -74,13 +68,6 @@ class CourseGenerationWorkflowTest {
                 workflowError(CourseWorkflowError.INVALID_ANSWER) {
                     player.submitAnswer(id, resumed.revision, practice, "bad", CourseAnswer.Choice("injected"))
                 }
-                assertTrue(runtime.events.isEmpty())
-                runtime.action = { spec, state, _ ->
-                    // Even a different key in mutable state cannot change the host grade.
-                    state.put("courseExerciseV1", choice(correct = "b").toString())
-                    state.put("selected", "b")
-                    ToolPreview(spec, state.toString(), spec.ui.toString())
-                }
                 val wrong = player.submitAnswer(id, resumed.revision, practice, "wrong", CourseAnswer.Choice("b"))
                 assertEquals(practice, wrong.progress.currentSlideId)
                 rejected(CourseRejection.DUPLICATE_ANSWER) {
@@ -89,10 +76,8 @@ class CourseGenerationWorkflowTest {
                 rejected(CourseRejection.STALE_REVISION) {
                     player.submitAnswer(id, resumed.revision, practice, "stale", CourseAnswer.Choice("a"))
                 }
-                assertEquals(1, runtime.events.size)
                 val right = player.submitAnswer(id, wrong.revision, practice, "right", CourseAnswer.Choice("a"))
                 assertEquals(listOf(false, true), store.answers(id).map { it.correct })
-                assertEquals(listOf("b", "a"), runtime.events.map { it.getString("value") })
                 assertEquals(reviewSlide, right.progress.currentSlideId)
                 runtime.response = { preview(definition()) }
                 val review = player.generate(id, right.revision, reviewSlide, key, CloudSession())
@@ -122,73 +107,6 @@ class CourseGenerationWorkflowTest {
                 assertEquals(review, player.generate(id, review.revision, reviewSlide, key, CloudSession()))
                 assertEquals(2, runtime.prompts.size)
                 assertTrue(player.advance(id, review.revision, reviewSlide).progress.isComplete)
-            }
-        }
-    }
-
-    @Test fun checksTheCurrentActionBeforeStartingTheSandbox(): Unit = runBlocking {
-        withDatabase { context, name ->
-            CourseStore(context, name).use { store ->
-                val runtime = FixtureRuntime()
-                val player = CourseController(store, runtime.generation)
-                val course = store.create(setup, outline())
-                runtime.response = { preview(definition(choice())) }
-                val active = player.generate(course.id, course.revision, "practice", key, CloudSession())
-                val stored = checkNotNull(store.slide(course.id, "practice"))
-                // Another writer can save valid JSON with a disabled control. It must not reach the sandbox.
-                val disabled = JSONObject(stored.content.uiJson).put("enabled", false)
-                val updated = store.commitAnswer(course.id, CourseAnswerSubmission(
-                    "disable", active.revision, "practice", CourseAnswer.Choice("b"), false,
-                    stored.content.stateJson, disabled.toString(),
-                ))
-                workflowError(CourseWorkflowError.INVALID_ACTION) {
-                    player.submitAnswer(course.id, updated.revision, "practice", "disabled", CourseAnswer.Choice("a"))
-                }
-                assertTrue(runtime.events.isEmpty())
-                assertEquals(listOf("disable"), store.answers(course.id).map { it.operationId })
-            }
-        }
-    }
-
-    @Test fun rejectsEachForbiddenRawAnswerOutputAndAcceptsALaterCleanAnswer(): Unit = runBlocking {
-        withDatabase { context, name ->
-            val fill = JSONObject().put("kind", "FILL_IN").put("question", "Name the form.")
-                .put("accepted", JSONArray(listOf("preterite"))).put("actionId", "answer")
-            val definition = JSONObject(definition().json)
-            definition.getJSONObject("stateSchema").put("courseExerciseV1", "string")
-            definition.getJSONObject("initialState").put("courseExerciseV1", fill.toString())
-            definition.put("ui", JSONObject("""{"type":"input","text":"Answer","action":"answer","bind":"selected"}"""))
-            definition.put("source", """
-                const result = {state:input.state};
-                const forbidden = {effects:[],records:[],surfaces:{},frames:[],timers:[],playback:'ready'};
-                if (input.event.type === 'action' && Object.prototype.hasOwnProperty.call(forbidden,input.event.value)) {
-                    result[input.event.value] = forbidden[input.event.value];
-                }
-                return result;
-            """.trimIndent())
-            val provider = PolicyProvider(definition.toString())
-            val service = ToolGenerationService(provider, SandboxClient(context))
-            CourseStore(context, name).use { store ->
-                val course = store.create(setup, CourseOutline(listOf(CourseLessonPlan("lesson", "Past", listOf(
-                    CourseSlidePlan("fill", CourseSlideKind.FILL_IN, "Name the form"),
-                )))))
-                val player = policyFixtureController(store, service)
-                val active = player.generate(course.id, course.revision, "fill", key, CloudSession())
-                val stored = store.slide(course.id, "fill")
-                assertNotNull(stored)
-                for (forbidden in listOf("effects", "records", "surfaces", "frames", "timers", "playback")) {
-                    workflowError(CourseWorkflowError.UNSUPPORTED_OUTPUT) {
-                        player.submitAnswer(course.id, active.revision, "fill", "answer", CourseAnswer.FillIn(forbidden))
-                    }
-                    assertEquals(active, store.course(course.id))
-                    assertEquals(stored, store.slide(course.id, "fill"))
-                    assertTrue(store.answers(course.id).isEmpty())
-                }
-                val complete = player.submitAnswer(course.id, active.revision, "fill", "answer", CourseAnswer.FillIn("preterite"))
-                assertTrue(complete.progress.isComplete)
-                assertTrue(store.answers(course.id).single().correct)
-                // One step writes the lesson app, and the next step finishes.
-                assertEquals(listOf(CloudGenerationStage.AGENT, CloudGenerationStage.AGENT), provider.stages)
             }
         }
     }
@@ -555,7 +473,6 @@ class CourseGenerationWorkflowTest {
                 active = player.submitAnswer(course.id, active.revision, "order", "ordered", CourseAnswer.Order(listOf("b", "a")))
                 assertTrue(active.progress.isComplete)
                 assertEquals(listOf(false, true, false, true), store.answers(course.id).map { it.correct })
-                assertTrue(runtime.events.isEmpty())
             }
         }
     }
@@ -694,40 +611,10 @@ class CourseGenerationWorkflowTest {
         }
     }
 
-    // The trusted lesson route cannot produce these hostile definitions. Inject the shared custom route.
-    private fun policyFixtureController(store: CourseStore, tools: ToolGenerationService) = CourseController(
-        store, CourseGeneration(
-            generateTool = { key, input, session, id, policy, _ ->
-                val preview = tools.generate(key, input.prompt, null, emptyList(), session, id)
-                policy.validateDefinition(preview.spec.json)
-                policy.validateResult(JSONObject().put("state", JSONObject(preview.state)).put("ui", JSONObject(preview.ui)).toString())
-                LessonToolPreview(preview, emptyList())
-            },
-            evaluateTool = { spec, id, revision, state, event, ui, policy ->
-                tools.evaluate(spec, id, revision, state, event, ui, policy = policy)
-            },
-        ),
-    )
-
-    private class PolicyProvider(private val definition: String) : ChatProvider {
-        val stages = mutableListOf<CloudGenerationStage?>()
-
-        override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-            stages += request.generationStage
-            check(request.generationStage == CloudGenerationStage.AGENT) { "Unexpected provider call." }
-            // The app agent writes the definition until the host accepts it, then finishes.
-            emit(CloudEvent.Text(if (request.agentAppAccepted) agentFixtureFinish else agentWrite(definition)))
-        }
-    }
-
     private class FixtureRuntime {
         val prompts = mutableListOf<String>()
-        val events = mutableListOf<JSONObject>()
         var sourceIds: List<String> = emptyList()
         var response: suspend (CloudSession) -> ToolPreview = { error("Unexpected provider call.") }
-        var action: suspend (ToolSpec, JSONObject, JSONObject) -> ToolPreview = { spec, state, _ ->
-            ToolPreview(spec, state.toString(), spec.ui.toString())
-        }
         val generation = CourseGeneration(
             generateTool = { _, input, session, _, policy, _ ->
                 prompts += input.prompt
@@ -736,11 +623,6 @@ class CourseGenerationWorkflowTest {
                     policy.validateResult(preview.rawResult())
                 }
                 LessonToolPreview(preview, sourceIds)
-            },
-            evaluateTool = { spec, _, _, state, event, _, policy ->
-                policy.validateDefinition(spec.json)
-                events += event
-                action(spec, JSONObject(state), event).also { policy.validateResult(it.rawResult()) }
             },
         )
 
@@ -753,9 +635,7 @@ class CourseGenerationWorkflowTest {
         val state = JSONObject().put("selected", "a")
         exercise?.let { schema.put("courseExerciseV1", "string"); state.put("courseExerciseV1", it.toString()) }
         forgedSourceIds?.let { schema.put("courseSourceIdsV1", "string"); state.put("courseSourceIdsV1", it.toString()) }
-        val ui = if (exercise?.has("actionId") == true) {
-            JSONObject("""{"type":"singleChoice","text":"Choose a form","action":"answer","bind":"selected","options":[{"text":"Preterite form","value":"a"},{"text":"Imperfect form","value":"b"}]}""")
-        } else JSONObject("""{"type":"text","text":"Course content"}""")
+        val ui = JSONObject("""{"type":"text","text":"Course content"}""")
         return ToolSpec.parse(JSONObject().put("formatVersion", 3).put("title", "Course fixture").put("description", "")
             .put("capabilities", JSONArray()).put("stateSchema", schema).put("initialState", state)
             .put("ui", ui).put("source", "return {state:input.state};").toString())
@@ -764,7 +644,7 @@ class CourseGenerationWorkflowTest {
     private fun preview(spec: ToolSpec) = ToolPreview(spec, spec.initialState, spec.ui.toString())
 
     private fun choice(correct: String = "a") = JSONObject().put("kind", "CHOICE").put("question", "Choose a form.")
-        .put("options", options()).put("correct", correct).put("actionId", "answer")
+        .put("options", options()).put("correct", correct)
 
     private fun options() = JSONArray().put(JSONObject().put("id", "a").put("label", "Preterite form"))
         .put(JSONObject().put("id", "b").put("label", "Imperfect form"))

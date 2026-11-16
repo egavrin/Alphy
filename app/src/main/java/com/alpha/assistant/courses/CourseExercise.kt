@@ -2,13 +2,11 @@ package com.alpha.assistant.courses
 
 import com.alpha.assistant.sandbox.SandboxContract
 import com.alpha.assistant.tools.ToolSpec
-import com.alpha.assistant.tools.ToolUiCatalog
 import org.json.JSONArray
 import org.json.JSONObject
 
 internal const val COURSE_EXERCISE_FEEDBACK_LIMIT = 160
 internal val COURSE_EXERCISE_FEEDBACK_FIELDS = setOf("wrongHint", "correctFeedback")
-private val OPTIONAL_EXERCISE_FIELDS = COURSE_EXERCISE_FEEDBACK_FIELDS + "actionId"
 
 internal data class CourseExerciseOption(val id: String, val label: String)
 
@@ -23,7 +21,6 @@ internal data class CourseExercisePrompt(
 /** The player receives the prompt. Only the controller reads the key from the immutable definition. */
 internal class CourseExercise private constructor(
     val prompt: CourseExercisePrompt,
-    val actionId: String?,
     private val key: List<String>,
 ) {
     private val options = prompt.options.associateBy { it.id }
@@ -57,48 +54,6 @@ internal class CourseExercise private constructor(
         }
     }
 
-    fun action(ui: JSONObject, state: JSONObject, answer: CourseAnswer): JSONObject? {
-        val id = actionId ?: return null
-        val value = when (answer) {
-            is CourseAnswer.Choice -> answer.optionId
-            is CourseAnswer.FillIn -> answer.text
-            is CourseAnswer.Order -> JSONArray(answer.optionIds)
-        }
-        validateCourseOutput(CourseWorkflowError.INVALID_ACTION) {
-            val node = ToolUiCatalog.validateAction(ui, id, value, state)
-            val type = when (prompt.kind) {
-                CourseSlideKind.CHOICE -> "singleChoice"
-                CourseSlideKind.FILL_IN -> "input"
-                CourseSlideKind.ORDER -> "multiChoice"
-                else -> error("The slide does not accept an answer.")
-            }
-            require(node.getString("type") == type && node.getString("action") == id)
-            if (type == "input") {
-                require(node.optString("keyboard", "text") != "password")
-                require(key.all { it.length <= node.optInt("maxLength", 2048) })
-            } else {
-                val offered = node.getJSONArray("options")
-                require(offered.length() == options.size)
-                repeat(offered.length()) { index ->
-                    val item = offered.getJSONObject(index)
-                    require(options[item.get("value")]?.label == item.getString("text"))
-                }
-            }
-        }
-        return JSONObject().put("type", "action").put("actionId", id).put("value", value)
-    }
-
-    fun validateInitialAction(ui: JSONObject, state: JSONObject) {
-        if (actionId == null) return
-        val sample = when (prompt.kind) {
-            CourseSlideKind.CHOICE -> CourseAnswer.Choice(key.single())
-            CourseSlideKind.FILL_IN -> CourseAnswer.FillIn(key.first())
-            CourseSlideKind.ORDER -> CourseAnswer.Order(key)
-            else -> error("The slide does not accept an answer.")
-        }
-        action(ui, state, sample)
-    }
-
     companion object {
         fun read(spec: ToolSpec, kind: CourseSlideKind): CourseExercise? = validateCourseOutput {
             val raw = JSONObject(spec.initialState).opt(EXERCISE_FIELD)
@@ -116,12 +71,9 @@ internal class CourseExercise private constructor(
             }
             val required = kindFields + setOf("kind", "question")
             val fields = data.keys().asSequence().toSet()
-            require(fields.containsAll(required) && (fields - required).all { it in OPTIONAL_EXERCISE_FIELDS })
+            require(fields.containsAll(required) && (fields - required).all { it in COURSE_EXERCISE_FEEDBACK_FIELDS })
             require(data.get("kind") == kind.name)
             val question = data.text("question", 512)
-            val actionId = if (data.has("actionId")) data.text("actionId", 48).also {
-                require(it.matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")))
-            } else null
             val options = if (kind == CourseSlideKind.FILL_IN) emptyList() else {
                 val offered = data.getJSONArray("options")
                 require(offered.length() in 2..30)
@@ -147,7 +99,7 @@ internal class CourseExercise private constructor(
             }
             val wrongHint = if (data.has("wrongHint")) data.text("wrongHint", COURSE_EXERCISE_FEEDBACK_LIMIT) else null
             val correctFeedback = if (data.has("correctFeedback")) data.text("correctFeedback", COURSE_EXERCISE_FEEDBACK_LIMIT) else null
-            CourseExercise(CourseExercisePrompt(kind, question, options, wrongHint, correctFeedback), actionId, key)
+            CourseExercise(CourseExercisePrompt(kind, question, options, wrongHint, correctFeedback), key)
         }
 
         private fun JSONObject.text(name: String, maxLength: Int): String =

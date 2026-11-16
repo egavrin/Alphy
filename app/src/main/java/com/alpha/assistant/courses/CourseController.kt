@@ -89,17 +89,6 @@ internal class CourseController(
         val exercise = checkNotNull(CourseExercise.read(spec, step.slide.kind))
         val correct = exercise.grade(submitted)
         val (ui, state) = checkedCourseUi(spec, slide.content.uiJson, slide.content.stateJson, exercise)
-        val event = exercise.action(ui, state, submitted)
-        val result = event?.let {
-            // A stale action must not enter the sandbox after another writer changes the course.
-            reached(courseId, expectedRevision, slideId)
-            generation.evaluate(spec, artifactId(courseId, slideId), state.toString(), event, ui.toString())
-        }
-        val next = result?.let {
-            checkedCourseUi(spec, it.ui, it.state, exercise).also { (nextUi, nextState) ->
-                if (!correct) exercise.validateInitialAction(nextUi, nextState)
-            }
-        }
         currentCoroutineContext().ensureActive()
         store.commitAnswer(courseId, CourseAnswerSubmission(
             operationId = operationId,
@@ -107,8 +96,8 @@ internal class CourseController(
             slideId = slideId,
             answer = submitted,
             correct = correct,
-            resultingStateJson = next?.second?.toString() ?: slide.content.stateJson,
-            resultingUiJson = next?.first?.toString(),
+            resultingStateJson = slide.content.stateJson,
+            resultingUiJson = null,
         ))
     }
 

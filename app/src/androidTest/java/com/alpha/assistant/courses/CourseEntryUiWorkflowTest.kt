@@ -180,7 +180,6 @@ class CourseEntryUiWorkflowTest {
                 val saved = if (complete) store.advance(reached.id, reached.revision, "reached") else reached
                 val controller = CourseController(store, CourseGeneration(
                     generateTool = { _, _, _, _, _, _ -> error("Unexpected provider call.") },
-                    evaluateTool = { _, _, _, _, _, _, _ -> error("Unexpected generated event.") },
                 ))
                 fixture.launch().use { scenario ->
                     val screen = EntryScreen(scenario)

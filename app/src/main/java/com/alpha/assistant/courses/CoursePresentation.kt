@@ -360,7 +360,6 @@ internal fun checkSavedSlide(step: CourseStep, content: CourseSlideContent): Sav
         ?.let { if (it.lessonImageIntent == null && it.generatedImages.isEmpty()) it
             else ToolSpec.parsePersisted(courseSceneDefinition(it.json)) }
     val exercise = CourseExercise.read(spec, step.slide.kind)
-    require(exercise?.actionId == null)
     checkedCourseUi(spec, spec.ui.toString(), spec.initialState, exercise, step.slide.kind)
     val (ui, state) = checkedCourseUi(spec, content.uiJson, content.stateJson, exercise, step.slide.kind)
     SavedCourseSlide(spec, scene, exercise, ui, state)

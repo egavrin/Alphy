@@ -133,7 +133,6 @@ class CourseOutlineRefinementUiWorkflowTest {
                 }
                 val controller = CourseController(store, CourseGeneration(
                     generateTool = { _, _, _, _, _, _ -> error("Unexpected slide generation.") },
-                    evaluateTool = { _, _, _, _, _, _, _ -> error("Unexpected generated event.") },
                 ))
                 fixture.launch().use { scenario ->
                     scenario.onActivity { activity ->

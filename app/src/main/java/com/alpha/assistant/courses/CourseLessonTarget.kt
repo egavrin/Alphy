@@ -1,7 +1,9 @@
 package com.alpha.assistant.courses
 
+import com.alpha.assistant.sandbox.SandboxContract
 import com.alpha.assistant.tools.ToolExecutionPolicy
 import com.alpha.assistant.tools.agent.AppLessonTarget
+import org.json.JSONObject
 
 /** The course rules for one slide, in the form that the app agent loop runs on each version. */
 internal fun courseLessonTarget(
@@ -10,6 +12,11 @@ internal fun courseLessonTarget(
     guide = lessonGuide(kind),
     policy = policy,
     checkSlide = { spec, preview ->
+        // The exercise format has no actionId, so name that field before the generic format reason.
+        val raw = JSONObject(spec.initialState).opt(EXERCISE_FIELD) as? String
+        if (raw != null && runCatching { SandboxContract.objectFrom(raw).has("actionId") }.getOrDefault(false)) {
+            throw IllegalArgumentException("The host shows the answer controls. Remove actionId from $EXERCISE_FIELD and remove the answer control.")
+        }
         val exercise = try {
             CourseExercise.read(spec, kind)
         } catch (_: CourseWorkflowException) {
@@ -17,8 +24,6 @@ internal fun courseLessonTarget(
                 "initialState.$EXERCISE_FIELD does not match the $kind exercise format in the course slide rules."
                 else "Only CHOICE, FILL_IN, and ORDER slides have $EXERCISE_FIELD. Remove it.")
         }
-        if (exercise?.actionId != null) throw IllegalArgumentException(
-            "The host shows the answer controls. Remove actionId from $EXERCISE_FIELD and remove the answer control.")
         try {
             checkedCourseUi(spec, preview.ui, preview.state, exercise, kind)
         } catch (failure: CourseWorkflowException) {

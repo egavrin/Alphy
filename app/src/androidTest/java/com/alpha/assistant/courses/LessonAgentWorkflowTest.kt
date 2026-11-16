@@ -23,6 +23,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -110,7 +111,6 @@ class LessonAgentWorkflowTest {
             val provider = AgentScriptProvider(writeAppReply(slide(text, exercise)), finish(text))
             val result = generate(provider, kind)
             val read = checkNotNull(CourseExercise.read(result.preview.spec, kind)) { kind.name }
-            assertNull(kind.name, read.actionId)
             assertEquals(kind.name, kind, read.prompt.kind)
         }
     }
@@ -126,7 +126,8 @@ class LessonAgentWorkflowTest {
         val provider = AgentScriptProvider(writeAppReply(withControl), writeAppReply(slide(text, choice)), finish(text))
         val result = generate(provider, CourseSlideKind.CHOICE)
         assertTrue(provider.feedback(1), provider.feedback(1).startsWith("write_app: REJECTED"))
-        assertNull(CourseExercise.read(result.preview.spec, CourseSlideKind.CHOICE)?.actionId)
+        assertTrue(provider.feedback(1), provider.feedback(1).contains("Remove actionId"))
+        assertNotNull(CourseExercise.read(result.preview.spec, CourseSlideKind.CHOICE))
     }
 
     @Test fun capabilityIsRejectedByTheCoursePolicy(): Unit = runBlocking {

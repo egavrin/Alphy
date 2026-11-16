@@ -4,7 +4,6 @@ import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.cloud.validSourceUrl
 import com.alpha.assistant.data.Source
-import com.alpha.assistant.sandbox.SandboxContract
 import com.alpha.assistant.tools.ArtifactProtocol
 import com.alpha.assistant.tools.GenerationLanguage
 import com.alpha.assistant.tools.ToolUiCatalog
@@ -12,7 +11,6 @@ import com.alpha.assistant.tools.canvasSurfaceIds
 import com.alpha.assistant.tools.LessonToolPreview
 import com.alpha.assistant.tools.ToolExecutionPolicy
 import com.alpha.assistant.tools.ToolGenerationService
-import com.alpha.assistant.tools.ToolPreview
 import com.alpha.assistant.tools.ToolSpec
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
@@ -26,9 +24,8 @@ internal enum class CourseWorkflowError(val message: String) {
     INVALID_SOURCE("Course generation requires bounded search results with valid source URLs."),
     INVALID_OUTPUT("The slide does not meet the course definition or result contract."),
     UNSUPPORTED_LESSON("Alphy could not build this slide. Simplify the slide goal and retry."),
-    UNSUPPORTED_OUTPUT("Course slides only accept their declared answer action. Device effects, records, and live output are unavailable."),
+    UNSUPPORTED_OUTPUT("Course slides accept no actions, except live inputs on a scene slide. Device effects, records, and live output are unavailable."),
     INVALID_ANSWER("The answer does not match the exercise."),
-    INVALID_ACTION("The exercise action is not available on this slide."),
     UNAVAILABLE("The course operation could not finish. Saved work is unchanged."),
 }
 
@@ -56,16 +53,12 @@ internal inline fun <T> validateCourseOutput(
 
 internal class CourseGeneration(
     private val generateTool: suspend (String, Input, CloudSession, String, ToolExecutionPolicy, CourseSlideKind) -> LessonToolPreview,
-    private val evaluateTool: suspend (ToolSpec, String, Int, String, JSONObject, String, ToolExecutionPolicy) -> ToolPreview,
     private val tools: ToolGenerationService? = null,
 ) {
     constructor(tools: ToolGenerationService) : this(
         generateTool = { key, input, session, id, policy, kind ->
             val hint = GenerationLanguage.identifyText(input.slideGoal)
             tools.generateLesson(key, input.prompt, session, id, courseLessonTarget(kind, input.sources.keys, policy, hint))
-        },
-        evaluateTool = { spec, id, revision, state, event, ui, policy ->
-            tools.evaluate(spec, id, revision, state, event, ui, policy = policy)
         },
         tools = tools,
     )
@@ -156,10 +149,7 @@ internal class CourseGeneration(
         }
         val spec = preview.spec
         val exercise = CourseExercise.read(spec, kind)
-        val initialState = JSONObject(spec.initialState)
-        exercise?.validateInitialAction(spec.ui, initialState)
         val (ui, state) = checkedCourseUi(spec, preview.ui, preview.state, exercise, kind)
-        exercise?.validateInitialAction(ui, state)
         if ((input.sources.isNotEmpty() && sourceIds.isEmpty()) || sourceIds.distinct().size != sourceIds.size) {
             courseFailure(CourseWorkflowError.INVALID_OUTPUT)
         }
@@ -169,23 +159,6 @@ internal class CourseGeneration(
 
     fun sceneHost(store: CourseStore, page: CoursePage.Slide): CourseSceneHost =
         CourseSceneHost(checkNotNull(tools), store, page, CourseExecutionChecks(page.step.slide.kind).policy)
-
-    suspend fun evaluate(spec: ToolSpec, artifactId: String, state: String, event: JSONObject, ui: String): ToolPreview {
-        val checks = CourseExecutionChecks()
-        return try {
-            // Each reached slide has one immutable ToolSpec definition.
-            evaluateTool(spec, artifactId, 1, state, event, ui, checks.policy)
-        } catch (cancel: CancellationException) {
-            throw cancel
-        } catch (failure: CourseWorkflowException) {
-            throw failure
-        } catch (failure: CloudFailure) {
-            checks.throwIfInterruptedOrRejected(failure)
-            courseFailure(CourseWorkflowError.UNAVAILABLE)
-        } catch (_: Exception) {
-            courseFailure(CourseWorkflowError.INVALID_OUTPUT)
-        }
-    }
 
     private companion object {
         const val MAX_SEARCH_RESULTS = 20
@@ -219,28 +192,22 @@ internal fun courseSceneDefinition(definition: String): String {
     return if (intent == null && images == null) definition else json.toString()
 }
 
-private fun checkCourseDefinition(definition: JSONObject, kind: CourseSlideKind?): String? {
+private fun checkCourseDefinition(definition: JSONObject, kind: CourseSlideKind?) {
     val scene = (definition.optJSONArray("surfaces")?.length() ?: 0) != 0
     if (definition.getJSONArray("capabilities").length() != 0 || definition.optBoolean("capabilityResults") ||
         (definition.optJSONObject("collections")?.length() ?: 0) != 0 ||
         scene && kind?.allowsScene != true ||
         definition.optJSONObject("presentation")?.getString("mode") == "immersive"
     ) courseFailure(CourseWorkflowError.UNSUPPORTED_OUTPUT)
-    val answerAction = definition.getJSONObject("initialState").opt(EXERCISE_FIELD)?.let {
-        require(it is String)
-        val exercise = SandboxContract.objectFrom(it)
-        if (exercise.has("actionId")) exercise.get("actionId") as? String ?: error("Expected an action ID.") else null
-    }
     val ui = definition.getJSONObject("ui")
-    if (scene && (answerAction != null || canvasSurfaceIds(ui).isEmpty() || definition.has("hostControls"))) {
+    if (scene && (definition.getJSONObject("initialState").has(EXERCISE_FIELD) || canvasSurfaceIds(ui).isEmpty() ||
+            definition.has("hostControls"))) {
         courseFailure(CourseWorkflowError.UNSUPPORTED_OUTPUT)
     }
-    requireLocalUi(ui, answerAction, scene)
-    return answerAction
+    requireLocalUi(ui, scene)
 }
 
 internal class CourseExecutionChecks(private val kind: CourseSlideKind? = null) {
-    private var answerAction: String? = null
     private var scene = false
 
     // The shared service reports a generic failure. Keep this call's course reason locally.
@@ -257,7 +224,7 @@ internal class CourseExecutionChecks(private val kind: CourseSlideKind? = null) 
             rejection = null
             check {
                 val definition = JSONObject(raw)
-                answerAction = checkCourseDefinition(definition, kind)
+                checkCourseDefinition(definition, kind)
                 scene = (definition.optJSONArray("surfaces")?.length() ?: 0) != 0
             }
         },
@@ -268,7 +235,7 @@ internal class CourseExecutionChecks(private val kind: CourseSlideKind? = null) 
                 result.optJSONObject("surfaces")?.let { ArtifactProtocol.bitmapHandles(it).isNotEmpty() } == true) {
                 courseFailure(CourseWorkflowError.UNSUPPORTED_OUTPUT)
             }
-            result.optJSONObject("ui")?.let { requireLocalUi(it, answerAction, scene) }
+            result.optJSONObject("ui")?.let { requireLocalUi(it, scene) }
         } },
     )
 
@@ -288,18 +255,18 @@ internal fun checkedCourseUi(
     val state = spec.validateState(stateJson)
     validateCourseUi(uiJson)
     val ui = spec.validateUi(JSONObject(uiJson), state)
-    requireLocalUi(ui, exercise?.actionId, kind?.allowsScene == true && spec.surfaces.isNotEmpty())
+    requireLocalUi(ui, kind?.allowsScene == true && spec.surfaces.isNotEmpty())
     ui to state
 }
 
 private val DEVICE_CONTROLS = setOf("calendar", "medicine", "navigation", "image", "video")
 private val EXTRA_ACTION_FIELDS = setOf("interactions", "dismissAction", "rowActions", "swipeAction", "reorder")
 
-private fun requireLocalUi(node: JSONObject, answerAction: String?, scene: Boolean = false) {
+private fun requireLocalUi(node: JSONObject, scene: Boolean = false) {
     if (node.getString("type") in DEVICE_CONTROLS || EXTRA_ACTION_FIELDS.any(node::has)) {
         courseFailure(CourseWorkflowError.UNSUPPORTED_OUTPUT)
     }
-    if (node.has("action") && node.get("action") != answerAction &&
+    if (node.has("action") &&
         (!scene || node.getString("type") !in setOf("slider", "numberInput", "toggle", "checkbox", "button", "select", "segmented"))) {
         courseFailure(CourseWorkflowError.UNSUPPORTED_OUTPUT)
     }
@@ -315,9 +282,9 @@ private fun requireLocalUi(node: JSONObject, answerAction: String?, scene: Boole
         }
     }
     node.optJSONArray("children")?.let { children ->
-        repeat(children.length()) { requireLocalUi(children.getJSONObject(it), answerAction, scene) }
+        repeat(children.length()) { requireLocalUi(children.getJSONObject(it), scene) }
     }
-    node.optJSONObject("rowTemplate")?.let { requireLocalUi(it, answerAction, false) }
+    node.optJSONObject("rowTemplate")?.let { requireLocalUi(it, false) }
 }
 
 internal fun stringList(array: JSONArray, size: IntRange, maxLength: Int): List<String> {

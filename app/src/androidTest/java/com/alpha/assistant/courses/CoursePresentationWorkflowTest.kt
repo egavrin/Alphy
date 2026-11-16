@@ -192,10 +192,6 @@ class CoursePresentationWorkflowTest {
                 calls.incrementAndGet()
                 error("Unexpected provider call.")
             },
-            evaluateTool = { _, _, _, _, _, _, _ ->
-                calls.incrementAndGet()
-                error("Unexpected generated event.")
-            },
         )
         return CoursePresentation(store, CourseController(store, generation))
     }

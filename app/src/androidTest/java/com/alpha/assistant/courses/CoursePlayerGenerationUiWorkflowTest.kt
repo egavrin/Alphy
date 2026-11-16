@@ -699,7 +699,6 @@ class CoursePlayerGenerationUiWorkflowTest {
                 policy.validateResult(JSONObject().put("ui", spec.ui).put("state", JSONObject(spec.initialState)).toString())
                 LessonToolPreview(ToolPreview(spec, spec.initialState, spec.ui.toString()), input.sources.keys.toList())
             },
-            evaluateTool = { _, _, _, _, _, _, _ -> error("Unexpected generated event.") },
         )
     }
 
