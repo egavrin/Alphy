@@ -526,4 +526,6 @@ class AgentGuideExampleTest {
     @Test fun converterExampleIsValid() = check(AppAgentGuide.exampleConverter, AppAgentGuide.exampleConverterCheck)
 
     @Test fun trackerExampleIsValid() = check(AppAgentGuide.exampleTracker, AppAgentGuide.exampleTrackerCheck)
+
+    @Test fun gameExampleIsValid() = check(AppAgentGuide.exampleGame, AppAgentGuide.exampleGameCheck)
 }

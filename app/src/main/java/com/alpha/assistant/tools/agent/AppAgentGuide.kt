@@ -71,7 +71,7 @@ Design rules. The app must look finished and good on a phone:
 - Show results immediately after an input changes. Do not require an extra Calculate button unless the user asks for one.
 - Calculators and converters: start every number input and slider at a sample value, from the request or else a typical value. Compute the results for these values in initialState, so the first screen shows a real result, not empty fields and dashes.
 - Drawings: the screen text gives each surface size and the extent of the drawing. Give a touch area a background that differs from the page, so the user sees where to touch. Outside games, show numbers and words as text or metric nodes, not as drawn text. Show a progress bar or a ring with a progress or progressRing node, not with a drawing. Center the main drawing and fill most of the surface. Use 2 to 4 colors that suit the topic. The drawing tones default, muted, accent, success, warning, and error are ink colors. The tone default is the text color, not the background, so a circle in default is a dark disk. A shape in muted is a light tint for tracks, empty cells, and grid lines.
-- Games: a game is something the user plays for a score, a win, or a loss. Make it self-contained: use "presentation":{"mode":"immersive"} and one surface with "sizing":"viewport" and no canvas node, so the game fills the screen. On the surface, draw the score, the lives, the start screen, the game over screen with a play again area, and the on-screen buttons that the request names. Use the viewport width and height for drawing and touch. Read tap, drag, and swipe from pointer events. When the request names tilting, declare sensor.accelerometer.stream: the host sends tilt while the game plays. Add no native buttons and no hint texts for moves, such as Left, Right, Jump, or Restart. Keep ui for settings only, such as the level. Block moves after the game ends. In checks, use pointer, drag, or tilt on the surface and read the drawn score with {"expect":"text","contains":"Score 1"}.
+- Games: a game is something the user plays for a score, a win, or a loss. Make it self-contained: use "presentation":{"mode":"immersive"} and one surface with "sizing":"viewport" and no canvas node, so the game fills the screen. On the surface, draw the score, the lives, the start screen, the game over screen with a play again area, and the on-screen buttons that the request names. When the request names buttons, such as direction buttons or a new game button, draw them on the surface and read taps on them. Card, tile, and board games also draw the board and map each tap to a cell. Use the viewport width and height for drawing and touch. Read tap, drag, and swipe from pointer events. When the request names tilting, declare sensor.accelerometer.stream: the host sends tilt while the game plays. Add no native buttons and no hint texts for moves, such as Left, Right, Jump, or Restart. Keep ui for settings only, such as the level. Block moves after the game ends. In checks, use pointer, drag, or tilt on the surface and read the drawn score with {"expect":"text","contains":"Score 1"}.
 - Timers: for a countdown that must alert the user (vibration, sound, notification), use a timer node with foreground (the host owns Start, Reset, and alerts). For a countdown that only shows time, store the end time with Date.now() and bind a timer node.
 """.trimIndent()
 
@@ -107,12 +107,27 @@ Design rules. The app must look finished and good on a phone:
 
     const val exampleTrackerCheck = """[{"set":"done","row":0,"value":true},{"set":"draft","value":"Stretch"},{"tap":"add"},{"set":"done","row":3,"value":true},{"expect":"text","contains":"2 of 4"},{"expect":"value","target":"progress","equals":50},{"tap":"reset"},{"expect":"text","contains":"0 of 4"}]"""
 
+    val exampleGame = """
+{"title":"Bubble tap","description":"Tap the bubbles before the time runs out","language":"en",
+"presentation":{"mode":"immersive"},"surfaces":[{"id":"game","width":360,"height":640,"sizing":"viewport"}],
+"stateSchema":{"phase":"string","score":"number","best":"number","left":"number","i":"number","w":"number","h":"number","round":"string"},
+"initialState":{"phase":"start","score":0,"best":0,"left":0,"i":0,"w":360,"h":640,"round":"20"},
+"ui":{"type":"theme","preset":"expressive","palette":"blue","cornerRadius":20,"children":[{"type":"column","style":{"gap":"medium","padding":"medium"},"children":[
+ {"type":"segmented","text":"Round","bind":"round","action":"round","options":[{"text":"20 s","value":"20"},{"text":"40 s","value":"40"}]}]}]},
+"source":"const s=input.state,e=input.event,P=[[0.5,0.4],[0.3,0.65],[0.7,0.25],[0.6,0.7]];\nif(e.type==='action')s.round=e.value;\nif(e.type==='viewport'){s.w=e.width;s.h=e.height;}\nconst r=Math.min(s.w,s.h)*0.09;\nif(e.type==='frame'&&s.phase==='play'){s.left=Math.max(0,s.left-e.dt);if(!s.left){s.phase='over';s.best=Math.max(s.best,s.score);}}\nif(e.type==='pointer'&&e.phase==='down'){\n if(s.phase!=='play'){s.phase='play';s.score=0;s.i=0;s.left=Number(s.round)*1000;}\n else{const p=P[s.i%4];if(Math.hypot(e.x-p[0]*s.w,e.y-p[1]*s.h)<r){s.score++;s.i++;}}\n}\nconst p=P[s.i%4],c=[{type:'rect',x:0,y:0,width:s.w,height:s.h,color:'#10233F'},{type:'text',x:16,y:40,size:24,text:'Score '+s.score+'   Best '+s.best,color:'#FFFFFF'}];\nif(s.phase==='play')c.push({type:'text',x:s.w-70,y:40,size:24,text:Math.ceil(s.left/1000)+' s',color:'#FFC94D'},{type:'circle',x:p[0]*s.w,y:p[1]*s.h,radius:r,color:'#FFC94D'});\nelse c.push({type:'text',x:24,y:s.h/2,size:32,text:s.phase==='over'?'Game over':'Bubble tap',color:'#FFFFFF'},{type:'text',x:24,y:s.h/2+44,size:22,text:s.phase==='over'?'Tap to play again':'Tap to start',color:'#FFC94D'});\nreturn {state:s,frames:['game'],surfaces:{game:{commands:c}}};"}
+""".trimIndent()
+
+    const val exampleGameCheck = """[{"pointer":"game","x":0.5,"y":0.85},{"expect":"text","contains":"Score 0"},{"pointer":"game","x":0.5,"y":0.4},{"expect":"text","contains":"Score 1"},{"pointer":"game","x":0.3,"y":0.65},{"expect":"text","contains":"Score 2"}]"""
+
     val examples = """
 Example app (converter with a hero card). Its finish check: $exampleConverterCheck
 $exampleConverter
 
 Example app (tracker with a ring and emoji rows). Its finish check: $exampleTrackerCheck
 $exampleTracker
+
+Example game (immersive, drawn score and screens, tap input, settings in ui). Its finish check: $exampleGameCheck
+$exampleGame
 """.trimIndent()
 
     val format = """
