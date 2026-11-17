@@ -343,7 +343,8 @@ internal class ArtifactCoordinator private constructor() {
         val frameOwner=registration.key==hosts.keys.last()
         val source=registration.value
         val type=raw.getString("type")
-        require(type != "sensor") { "Sensor events require an active native session." }
+        // An immersive frame owner reads the accelerometer itself. Other hosts cannot add samples.
+        require(type != "sensor" || frameOwner) { "Sensor events require the frame owner." }
         if(frameOwner && type!="viewport") reconcileViewport(store)
         when(type) {
             "viewport" -> {

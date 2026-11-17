@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flow
 import androidx.compose.ui.platform.LocalContext
+import com.alpha.assistant.capabilities.TiltContract
+import com.alpha.assistant.device.AccelerometerStream
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -116,6 +118,10 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
             val input=SurfaceInputState()
             var coverActive=false
             var openedDrawingHost: DrawingHost?=null
+            // An immersive game reads tilt while it plays with the menu closed and the window focused. Inline apps start it with a button.
+            val tiltWanted=immersive && TiltContract.ID in spec.capabilities
+            var tilt: AccelerometerStream?=null
+            var tiltUnavailable=false
             try {
                 val opened=active.open()
                 if(spec.surfaces.isNotEmpty()) {
@@ -181,6 +187,13 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
                         }
                         clock.reset();timers.clear()
                     }
+                    val tilting=tiltWanted && !tiltUnavailable && !coverActive && !controlsExpanded && view.hasWindowFocus() &&
+                        snapshot?.playback=="playing" && snapshot?.fenced==false && snapshot?.frameOwner==true
+                    if(tilting && tilt==null) {
+                        val stream=AccelerometerStream(context)
+                        if(stream.start()) tilt=stream else {stream.close();tiltUnavailable=true}
+                    } else if(!tilting && tilt!=null) {tilt?.close();tilt=null}
+                    tilt?.samples?.tryReceive()?.getOrNull()?.let {deliver(it)}
                     if(snapshot?.playback=="playing" && !coverActive && snapshot?.fenced==false && snapshot?.frameOwner==true) {
                         val dt=clock.tick(tick)
                         val subscribed=checkNotNull(snapshot).frames.toList()
@@ -206,6 +219,7 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
             } catch(cancel: CancellationException) {throw cancel}
               catch(_: Exception) {error=R.string.tool_session_stopped}
             finally {
+                tilt?.close()
                 if(drawingHost==openedDrawingHost) drawingHost=null
                 withContext(NonCancellable) {
                     for(cancel in input.cancel())runCatching {deliver(cancel)}

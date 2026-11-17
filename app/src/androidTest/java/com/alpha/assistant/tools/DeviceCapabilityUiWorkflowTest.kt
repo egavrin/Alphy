@@ -11,6 +11,7 @@ import com.alpha.assistant.ui.seedOpenChat
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -77,6 +78,42 @@ class DeviceCapabilityUiWorkflowTest {
             assertEquals(stopped, count())
             assertNull(robot.find(robot.text(R.string.tool_stop_tilt)))
         }
+    }
+
+    // Failure case: a tilt game needed a Start tilt button in its own UI, so it was not self-contained.
+    private val immersiveTilt = """
+            {"formatVersion":3,"title":"Tilt game","description":"","capabilities":["sensor.accelerometer.stream"],
+            "presentation":{"mode":"immersive"},"stateSchema":{"count":"number","frames":"number"},"initialState":{"count":0,"frames":0},
+            "surfaces":[{"id":"board","width":300,"height":300}],"ui":{"type":"text","text":"Samples","bind":"count"},
+            "source":"const s=input.state,e=input.event;if(e.type==='sensor'&&Number.isFinite(e.x)&&Number.isFinite(e.y))s.count++;if(e.type==='frame')s.frames++;return {state:s,frames:['board'],surfaces:{board:{commands:[{type:'text',x:30,y:30,text:String(s.count),size:20,color:'default'}]}}};"}
+        """.trimIndent()
+
+    @Test fun immersiveTiltStreamsWhilePlaying() = withApp(immersiveTilt) { tools, record ->
+        robot.waitUntil { JSONObject(checkNotNull(tools.tool(record.id)).state).getInt("count") > 0 }
+        assertTrue("no native action started tilt", tools.effects(record.id).isEmpty())
+    }
+
+    @Test fun immersiveTiltStopsOnMenuAndFocusLoss() = withApp(immersiveTilt) { tools, record ->
+        fun state() = JSONObject(checkNotNull(tools.tool(record.id)).state)
+        // Saved state trails the session by one flush, and the notification shade takes focus after its animation.
+        fun assertHeld(reason: String) {
+            SystemClock.sleep(1000)
+            val before = state()
+            SystemClock.sleep(900)
+            val after = state()
+            assertEquals("no sample after $reason", before.getInt("count"), after.getInt("count"))
+            assertTrue("frames continue after $reason: $before $after", after.getInt("frames") > before.getInt("frames"))
+        }
+        fun resumes() { val held = state().getInt("count"); robot.waitUntil { state().getInt("count") > held } }
+        resumes()
+        robot.click(robot.text(R.string.tool_game_controls_open))
+        assertHeld("the menu opens")
+        robot.click(robot.text(R.string.tool_game_controls_close))
+        resumes()
+        val shell = robot.instrumentation.uiAutomation
+        shell.executeShellCommand("cmd statusbar expand-notifications").close()
+        try { assertHeld("focus loss") } finally { shell.executeShellCommand("cmd statusbar collapse").close() }
+        resumes()
     }
 
     private val photoSpec = """
