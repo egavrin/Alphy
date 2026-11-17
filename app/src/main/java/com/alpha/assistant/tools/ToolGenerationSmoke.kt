@@ -29,7 +29,7 @@ internal class ToolSmokeFailure(val event: String, val path: String, cause: Exce
 }
 
 internal const val MAX_PROBE_EVENTS = 600
-private const val PROBE_FRAME_MS = 50L
+internal const val PROBE_FRAME_MS = 50L
 
 /** Replaces Date in a disposable probe isolate. It reads __alphyNow from the current evaluation. */
 private const val DATE_SHIM = "(function(){const g=globalThis;const D=g.__alphyDate||(g.__alphyDate=g.Date);" +

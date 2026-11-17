@@ -96,12 +96,17 @@ class GenerationContractGuidanceTest {
         assertFalse(instructions.contains("Choose answer for fixed-value questions"))
     }
 
+    /**
+     * AppAgentGuide.system("", "").length at bdd7e3d was 56298 characters; the prompt may grow by at most 10%.
+     * The runtime facts and layout defaults add 2200 more: on 2026-11-17 they cut the first-write reasoning by about 24%.
+     */
+    private val maxGuideLength = 56298 * 11 / 10 + 2200
+
     @Test fun theGuideAsksForOneMainElementAndEmoji() {
         // Failure case: generated apps opened with a form and a small value; the mocks lead with one large element.
         val guide = com.alpha.assistant.tools.agent.AppAgentGuide.system("", "")
         for (part in listOf("one main element", "\"type\":\"emoji\"", "\"variant\":\"hero\"")) assertTrue(part, guide.contains(part))
-        // AppAgentGuide.system("", "").length at bdd7e3d was 56298 characters; the prompt may grow by at most 10%.
-        assertTrue("${guide.length}", guide.length <= 56298 * 11 / 10)
+        assertTrue("${guide.length}", guide.length <= maxGuideLength)
     }
 
     /** Review finding: the catalog guidance named no new variant, so the agent could not find circle checks, field icons, or a vertical divider. */
@@ -127,7 +132,7 @@ class GenerationContractGuidanceTest {
         assertFalse("ellipse", guide.contains("ellipse"))
         val example = com.alpha.assistant.tools.agent.AppAgentGuide.exampleGame
         assertTrue("the example game draws flat", example.contains("type:'radial'"))
-        assertTrue("${guide.length}", guide.length <= 56298 * 11 / 10)
+        assertTrue("${guide.length}", guide.length <= maxGuideLength)
     }
 
 }
