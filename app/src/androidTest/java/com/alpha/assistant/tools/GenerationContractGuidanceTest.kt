@@ -123,6 +123,8 @@ class GenerationContractGuidanceTest {
         val guide = com.alpha.assistant.tools.agent.AppAgentGuide.system("", "")
         for (part in listOf("lit from the upper left", "#55000000", "glow", "start screen shows the playfield", "pixel or retro style"))
             assertTrue(part, guide.contains(part))
+        // Review finding: no drawing command is an ellipse, and a model wrote {type:'ellipse'} as a ground shadow.
+        assertFalse("ellipse", guide.contains("ellipse"))
         val example = com.alpha.assistant.tools.agent.AppAgentGuide.exampleGame
         assertTrue("the example game draws flat", example.contains("type:'radial'"))
         assertTrue("${guide.length}", guide.length <= 56298 * 11 / 10)
