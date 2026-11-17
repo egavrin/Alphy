@@ -62,6 +62,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
@@ -130,7 +131,8 @@ import kotlin.math.round
 private val LocalEmbeddedTool = staticCompositionLocalOf { false }
 private val LocalToolBackground = staticCompositionLocalOf { Color.Unspecified }
 private val LocalRouteSystemBack = staticCompositionLocalOf { true }
-private val LocalToolMetricFont = staticCompositionLocalOf<FontFamily?> { null }
+/** The technical preset aligns digits in columns with tabular figures. */
+private val LocalToolTabularDigits = staticCompositionLocalOf { false }
 private val LocalLiveUi = staticCompositionLocalOf<NativeLiveUi?> { null }
 private val LocalLiveRow = staticCompositionLocalOf<String?> { null }
 private val LocalTimerClock = staticCompositionLocalOf<NativeTimerClock?> { null }
@@ -546,11 +548,14 @@ private fun showsToolHeading(text: String, hostHeading: String?) =
     "headline" -> MaterialTheme.typography.headlineMedium
     "label" -> MaterialTheme.typography.labelLarge
     "number" -> MaterialTheme.typography.displaySmall.copy(fontFamily = MaterialTheme.typography.bodyLarge.fontFamily)
-    else -> if(metric) MaterialTheme.typography.displaySmall else MaterialTheme.typography.bodyLarge
+    "display" -> MaterialTheme.typography.displayMedium.copy(fontFamily = MaterialTheme.typography.bodyLarge.fontFamily)
+    // A plain metric is a secondary value, so the number and display emphases stand out above it.
+    else -> if(metric) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.bodyLarge
 }
 @Composable private fun metricStyle(style: JSONObject?): androidx.compose.ui.text.TextStyle {
     val value = textStyle(style, metric = true)
-    return value.copy(fontFamily = LocalToolMetricFont.current ?: MaterialTheme.typography.bodyLarge.fontFamily)
+    return value.copy(fontFamily = MaterialTheme.typography.bodyLarge.fontFamily,
+        fontFeatureSettings = if (LocalToolTabularDigits.current) "tnum" else null)
 }
 
 @Composable private fun ToolStatusText(text: String, tone: String, style: androidx.compose.ui.text.TextStyle, modifier: Modifier = Modifier) {
@@ -565,6 +570,35 @@ private fun showsToolHeading(text: String, hostHeading: String?) =
 }
 
 /** Draws a catalog icon: a shell glyph or a domain icon. */
+/** The leading icon of a field-like button, such as a select or a date input. */
+@Composable private fun RowScope.NativeButtonIcon(node: JSONObject) {
+    val icon = node.optString("icon")
+    if (icon.isNotEmpty()) { ToolGlyph(icon, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)) }
+}
+
+/** Value pills above slider thumbs. The track insets its ends by about 10 dp. */
+@Composable private fun SliderValueLabels(values: List<Double>, low: Double, high: Double) {
+    Layout(content = {
+        values.forEach { value ->
+            Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.primaryContainer) {
+                Text(BigDecimal.valueOf(value).stripTrailingZeros().toPlainString(), Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }, modifier = Modifier.fillMaxWidth()) { measurables, constraints ->
+        val pills = measurables.map { it.measure(constraints.copy(minWidth = 0, minHeight = 0)) }
+        val inset = 10.dp.roundToPx()
+        val width = constraints.maxWidth
+        layout(width, pills.maxOf { it.height }) {
+            pills.forEachIndexed { index, pill ->
+                val fraction = ((values[index] - low) / (high - low)).coerceIn(0.0, 1.0)
+                val center = inset + ((width - 2 * inset) * fraction).toInt()
+                pill.place((center - pill.width / 2).coerceIn(0, maxOf(0, width - pill.width)), 0)
+            }
+        }
+    }
+}
+
 @Composable private fun ToolGlyph(name: String, modifier: Modifier = Modifier, color: Color = LocalContentColor.current) =
     StrokeIcon(Glyph.entries.firstOrNull { it.name == name }?.path ?: checkNotNull(ToolIcons.paths[name]), modifier, color)
 
@@ -825,9 +859,12 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             val items = checkNotNull(children)
             val secondary = secondaryButtons(items, state, enabled)
             if(type == "row" && !node.optBoolean("wrap",true)) {
-                Row(modifier,horizontalArrangement=horizontalArrangement(style,gap),verticalAlignment=verticalAlignment(style?.optString("crossAlign"))) {
+                val dividers = (0 until items.length()).any { items.getJSONObject(it).optString("type") == "divider" }
+                // A divider between row items is vertical. The row takes the height of its tallest item for it.
+                Row(if (dividers) modifier.height(IntrinsicSize.Min) else modifier,horizontalArrangement=horizontalArrangement(style,gap),verticalAlignment=verticalAlignment(style?.optString("crossAlign"))) {
                     CompositionLocalProvider(LocalFixedRow provides true) { repeat(items.length()) {index ->
                         val child=items.getJSONObject(index); val layout=child.optJSONObject("layout")
+                        if (child.optString("type") == "divider") { VerticalDivider(); return@repeat }
                         var slot: Modifier=Modifier
                         if(layout?.has("weight") == true) slot=slot.weight(layout.getDouble("weight").toFloat())
                         // Text without a weight shares the free width, so one long text cannot squeeze the next to one letter per line.
@@ -1077,6 +1114,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             var range by remember(original.toString(),binding) {mutableStateOf(original.getDouble(0)..original.getDouble(1))}
             Column(modifier) {
                 Text("$text: ${BigDecimal.valueOf(range.start).stripTrailingZeros().toPlainString()} – ${BigDecimal.valueOf(range.endInclusive).stripTrailingZeros().toPlainString()}")
+                SliderValueLabels(listOf(range.start, range.endInclusive), low, high)
                 RangeSlider(value=((range.start-low)/(high-low)).toFloat().coerceIn(0f,1f)..((range.endInclusive-low)/(high-low)).toFloat().coerceIn(0f,1f),
                     onValueChange={range=nativeSliderValue(node,it.start)..nativeSliderValue(node,it.endInclusive)},enabled=enabled,modifier=Modifier.semantics {contentDescription=text})
                 if (range.start!=original.getDouble(0) || range.endInclusive!=original.getDouble(1))
@@ -1110,7 +1148,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                     val date=LocalDate.parse(current.toString())
                     DatePickerDialog(context,{_,year,month,day -> event(action,LocalDate.of(year,month+1,day).toString())},date.year,date.monthValue-1,date.dayOfMonth).show()
                 }
-            },enabled=enabled,modifier=modifier.heightIn(min=48.dp)) {Text("$text: $label")}
+            },enabled=enabled,modifier=modifier.heightIn(min=48.dp)) {NativeButtonIcon(node); Text("$text: $label")}
         }
         "slider" -> {
             val (low,high)=ToolUiCatalog.bounds(node)
@@ -1120,6 +1158,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             val value = (editor?.shown(original) as? Number)?.toDouble() ?: draft
             Column(modifier) {
                 Text("$text: ${BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()}")
+                SliderValueLabels(listOf(value), low, high)
                 Slider(value=((value-low)/(high-low)).toFloat().coerceIn(0f,1f),onValueChange={ fraction ->
                     val next = nativeSliderValue(node,fraction)
                     if (editor == null) draft = next else editor.change(next)
@@ -1148,6 +1187,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                     Box {
                         OutlinedButton(onClick={expanded=true},enabled=enabled,modifier=Modifier.heightIn(min=48.dp)) {
                             val option=(0 until options.length()).map {options.getJSONObject(it)}.first {scalarEqual(it.get("value"),selected)}
+                            NativeButtonIcon(node)
                             Text(option.getString("text"))
                         }
                         DropdownMenu(expanded && enabled,onDismissRequest={expanded=false}) {
@@ -1169,9 +1209,9 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             Column(modifier,verticalArrangement=Arrangement.spacedBy(6.dp)) {
                 Text(ToolUiCatalog.display(node,state))
                 if(node.optBoolean("indeterminate")) {
-                    if(type == "progress") LinearProgressIndicator(modifier=Modifier.fillMaxWidth().semantics {contentDescription=text})
+                    if(type == "progress") LinearProgressIndicator(modifier=Modifier.fillMaxWidth().height(10.dp).semantics {contentDescription=text})
                     else CircularProgressIndicator(modifier=Modifier.size(56.dp).semantics {contentDescription=text})
-                } else if(type == "progress") LinearProgressIndicator(progress={progress},modifier=Modifier.fillMaxWidth().semantics {contentDescription=text})
+                } else if(type == "progress") LinearProgressIndicator(progress={progress},modifier=Modifier.fillMaxWidth().height(10.dp).semantics {contentDescription=text})
                 else CircularProgressIndicator(progress={progress},modifier=Modifier.size(56.dp).semantics {contentDescription=text})
             }
         }
@@ -1443,7 +1483,8 @@ private class NativeLiveEditor(private val ui: NativeLiveUi, val draft: NativeLi
         OutlinedTextField(draft,{if(it.length <= if(numeric) 40 else node.optInt("maxLength",2048)) {
                 if (editor == null) ordinaryDraft = it else editor.change(it)
             }},
-            enabled=editor?.canEdit ?: enabled,label={Text(label)},modifier=fieldModifier,singleLine=numeric || node.optInt("maxLines",if(search) 1 else 8) == 1,maxLines=if(numeric) 1 else node.optInt("maxLines",if(search) 1 else 8),
+            enabled=editor?.canEdit ?: enabled,label={Text(label)},modifier=fieldModifier,
+            leadingIcon=node.optString("icon").takeIf { it.isNotEmpty() }?.let { icon -> { ToolGlyph(icon, Modifier.size(20.dp)) } },singleLine=numeric || node.optInt("maxLines",if(search) 1 else 8) == 1,maxLines=if(numeric) 1 else node.optInt("maxLines",if(search) 1 else 8),
             visualTransformation=if(node.optString("keyboard") == "password") PasswordVisualTransformation() else VisualTransformation.None,
             isError=draft.isNotEmpty() && !valid,keyboardOptions=KeyboardOptions(keyboardType=keyboard,imeAction=ime),
             keyboardActions=keyboardActions)
@@ -1466,7 +1507,8 @@ private class NativeLiveEditor(private val ui: NativeLiveUi, val draft: NativeLi
                 }
             }
             BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val inline = maxWidth >= 280.dp && LocalDensity.current.fontScale < 1.5f
+                // A half-width cell still fits the field and both buttons on one line.
+                val inline = maxWidth >= 168.dp && LocalDensity.current.fontScale < 1.5f
                 // Leave room for the two 48 dp buttons and the gaps before measuring the field.
                 val fieldSize = if (inline) Modifier.width(maxWidth - 110.dp) else Modifier.fillMaxWidth()
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1577,7 +1619,7 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
         val key = ToolUiCatalog.stableKey(record)
         // Each template row is a card on the page, as in phone list apps.
         Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainerLow) {
-            Box(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+            Box(Modifier.heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp), contentAlignment = Alignment.CenterStart) {
                 CompositionLocalProvider(LocalLiveRow provides key) {
                     renderTemplate(template,record) {id,value -> event(id,JSONObject().put("key",key).put("value",value ?: JSONObject.NULL))}
                 }
@@ -1746,10 +1788,9 @@ internal fun rootThemeColors(ui: String, shellDark: Boolean): ColorScheme? =
             bodyLarge=scaled(typography.bodyLarge),bodyMedium=scaled(typography.bodyMedium),bodySmall=scaled(typography.bodySmall),
             labelLarge=scaled(typography.labelLarge),labelMedium=scaled(typography.labelMedium),labelSmall=scaled(typography.labelSmall),
         )) {
-        val metricFont = if (preset == "technical") FontFamily.Monospace else null
         // The app draws its own background, so its palette shows, not the gray shell card around it.
         Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(radius), color = colors.background, contentColor = colors.onBackground) {
-            CompositionLocalProvider(LocalToolMetricFont provides metricFont, content = content)
+            CompositionLocalProvider(LocalToolTabularDigits provides (preset == "technical"), content = content)
         }
     }
 }

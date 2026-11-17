@@ -126,7 +126,7 @@ class NativeNumberStepWorkflowTest {
     }
 
     @Test fun widthChangeKeepsTheFocusedNumberDraft() {
-        val width = mutableStateOf(260.dp)
+        val width = mutableStateOf(150.dp)
         val service = robot.automation.serviceInfo
         val originalFlags = service.flags
         try {
@@ -143,7 +143,7 @@ class NativeNumberStepWorkflowTest {
                 assertTrue(robot.field(field).performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, selection))
                 fun keyboardVisible() = robot.automation.windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
                 robot.waitUntil { keyboardVisible() && robot.field(field).isFocused }
-                for (target in listOf(300.dp, 260.dp)) {
+                for (target in listOf(300.dp, 150.dp)) {
                     robot.instrumentation.runOnMainSync { width.value = target }
                     robot.waitUntil {
                         val fieldBounds = Rect().also(robot.field(field)::getBoundsInScreen)

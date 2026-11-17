@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import org.json.JSONArray
+import org.json.JSONObject
 import com.alpha.assistant.ui.AlphaTheme
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
@@ -44,3 +46,16 @@ internal fun ShellRobot.renderApps(folder: String, uis: List<String>, state: Str
         }
     } finally { fixture.remove() }
 }
+
+/** The validation failure of a native UI with its diagnostic, or null when the UI is valid. */
+internal fun validateNativeUi(ui: JSONObject, fields: JSONObject = JSONObject(), state: JSONObject = JSONObject()): String? {
+    var diagnostic: ToolUiDiagnostic? = null
+    val trace = ToolUiValidationTrace(ToolUiValidationStage.DEFINITION) { diagnostic = it }
+    return runCatching { ToolUiCatalog.validate(ui, fields, state, trace) }.exceptionOrNull()?.let { "$it $diagnostic" }
+}
+
+/** A themed app root with one padded column of [children]. */
+internal fun themedColumn(vararg children: JSONObject, preset: String = "soft", palette: String = "blue") =
+    JSONObject().put("type", "theme").put("preset", preset).put("palette", palette)
+        .put("children", JSONArray().put(JSONObject().put("type", "column").put("style", JSONObject("""{"gap":"medium","padding":"medium"}"""))
+            .put("children", JSONArray(children.toList()))))

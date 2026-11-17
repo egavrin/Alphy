@@ -16,15 +16,6 @@ import org.junit.Test
 class NativeIconWorkflowTest {
     private val robot = ShellRobot("native-icon")
 
-    private fun validate(ui: JSONObject, fields: JSONObject = JSONObject(), state: JSONObject = JSONObject()): String? {
-        var diagnostic: ToolUiDiagnostic? = null
-        val trace = ToolUiValidationTrace(ToolUiValidationStage.DEFINITION) { diagnostic = it }
-        return runCatching { ToolUiCatalog.validate(ui, fields, state, trace) }.exceptionOrNull()?.let { "$it $diagnostic" }
-    }
-
-    private fun theme(vararg children: JSONObject) = JSONObject().put("type", "theme").put("preset", "soft").put("palette", "blue")
-        .put("children", JSONArray().put(JSONObject().put("type", "column").put("style", JSONObject("""{"gap":"medium","padding":"medium"}"""))
-            .put("children", JSONArray(children.toList()))))
 
     private fun render(ui: JSONObject, last: String, state: String = "{}", check: (Bitmap) -> Unit) =
         robot.renderApps("icons", listOf(ui.toString()), state, last, check)
@@ -53,8 +44,8 @@ class NativeIconWorkflowTest {
                 JSONObject().put("type", "icon").put("name", name).put("text", "icon $name")
             }))
         }
-        val ui = theme(*rows.toTypedArray(), JSONObject().put("type", "text").put("text", "End of icons"))
-        assertEquals(null, validate(ui))
+        val ui = themedColumn(*rows.toTypedArray(), JSONObject().put("type", "text").put("text", "End of icons"))
+        assertEquals(null, validateNativeUi(ui))
         render(ui, "End of icons") { }
     }
 
@@ -64,9 +55,9 @@ class NativeIconWorkflowTest {
             {"type":"badge","text":"On track","icon":"Check"}]}""")
         val item = JSONObject("""{"type":"listItem","text":"Vitamin D","icon":"Pill","children":[{"type":"text","text":"After breakfast"}]}""")
         val empty = JSONObject("""{"type":"emptyState","text":"No plants yet","icon":"Sprout","children":[{"type":"text","text":"Add the first plant."}]}""")
-        val ui = theme(card, item, empty)
-        assertEquals(null, validate(ui, JSONObject("""{"glasses":"number"}"""), JSONObject("""{"glasses":3}""")))
-        assertTrue(validate(theme(JSONObject("""{"type":"card","text":"Water","icon":"NoSuchIcon","children":[]}"""))) != null)
+        val ui = themedColumn(card, item, empty)
+        assertEquals(null, validateNativeUi(ui, JSONObject("""{"glasses":"number"}"""), JSONObject("""{"glasses":3}""")))
+        assertTrue(validateNativeUi(themedColumn(JSONObject("""{"type":"card","text":"Water","icon":"NoSuchIcon","children":[]}"""))) != null)
         render(ui, "Add the first plant.", """{"glasses":3}""") { shot ->
             for (label in listOf("Water today", "Vitamin D")) assertTrue("$label has a colored icon at its left", shot.colorLeftOf(label) > 0.2f)
             assertTrue("the empty state has a colored icon above its title", shot.colorAbove("No plants yet") > 0.2f)

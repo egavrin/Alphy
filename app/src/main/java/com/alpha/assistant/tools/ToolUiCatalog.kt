@@ -85,7 +85,8 @@ object ToolUiCatalog {
         for(type in listOf("input","numberInput","timeInput","dateInput","toggle","checkbox","slider","select","tabs","chip","singleChoice","multiChoice","segmented","navigationBar","navigationRail","menu","rangeSlider","dateRangeInput","search")) {
             val binding=when(type) {"input","search","dateInput" -> setOf("string"); "rangeSlider","dateRangeInput","multiChoice" -> setOf("array"); in booleanInputTypes -> setOf("boolean"); "numberInput","timeInput","slider" -> setOf("number"); else -> scalar}
             val props=when(type) {"chip" -> setOf("variant","dismissAction","icon"); "input","search" -> setOf("maxLength","keyboard","imeAction","maxLines"); "numberInput","slider","rangeSlider" -> setOf("min","max","step"); "singleChoice" -> setOf("options","variant"); in choiceTypes -> setOf("options"); else -> emptySet()}
-            val inputProps = if (type in liveInputTypes) props + "inputMode" else props
+            val iconProps = if (type in setOf("input","numberInput","select","dateInput","timeInput")) props + "icon" else props
+            val inputProps = if (type in liveInputTypes) iconProps + "inputMode" else iconProps
             add(entry(type,setOf("bind","action")+inputProps,if(type == "toggle") Projection.LOCAL_ACTION else Projection.SUMMARY,binding,action=true))
         }
         for(type in listOf("list","table","groupedList","lazyList","lazyGrid")) {
@@ -250,7 +251,7 @@ object ToolUiCatalog {
                             val style=node.getJSONObject("style"); require(ToolValueSchema.keys(style).all {it in definition.styles})
                             style.keys().forEach { key -> require(style.get(key) is String && style.getString(key) in when(key) {
                                 "tone" -> tones
-                                "emphasis" -> setOf("body","title","headline","label","number")
+                                "emphasis" -> setOf("body","title","headline","label","number","display")
                                 "align","crossAlign" -> setOf("start","center","end")
                                 "arrangement" -> setOf("start","center","end","between","around","evenly")
                                 "padding","gap" -> setOf("none","small","medium","large")
