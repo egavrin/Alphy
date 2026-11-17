@@ -1,0 +1,31 @@
+{
+  "description": "Held-out live prompts for the app agent. Use them only to measure a finished change, never to tune prompts or components. Run with run_cases.py --corpus tools/agent_corpus/holdout.json.",
+  "cases": [
+    {"id": "holdout-tip-ru", "expected_outcome": "app", "tags": ["ru", "calculator", "numberInput", "metric"],
+     "request": "Калькулятор чаевых: сумма счёта, процент чаевых и на сколько человек делим."},
+    {"id": "holdout-sleep-en", "expected_outcome": "app", "tags": ["en", "list", "timeInput", "metric"],
+     "request": "A sleep log: when I went to bed and when I woke up, hours slept each night, and the weekly average."},
+    {"id": "holdout-calories-fr", "expected_outcome": "app", "tags": ["fr", "list", "progress", "metric"],
+     "request": "Un compteur de calories pour la journée avec un objectif de 2000 kcal et la liste des repas."},
+    {"id": "holdout-study-ja", "expected_outcome": "app", "tags": ["ja", "list", "chart", "metric"],
+     "request": "勉強時間トラッカー：科目ごとに時間を記録して、今週の合計を見たい。"},
+    {"id": "holdout-power-de", "expected_outcome": "app", "tags": ["de", "calculator", "numberInput"],
+     "request": "Ein Stromkosten-Rechner: alter und neuer Zählerstand, Preis pro kWh und die Kosten."},
+    {"id": "holdout-reading-es", "expected_outcome": "app", "tags": ["es", "list", "segmented", "progress"],
+     "request": "Una lista de lectura: libros por leer, leyendo y terminados, con las páginas leídas de cada uno."},
+    {"id": "holdout-words-ko", "expected_outcome": "app", "tags": ["ko", "list", "quiz", "input"],
+     "request": "단어장 앱: 영어 단어와 뜻을 추가하고 퀴즈로 외울 수 있게 해 줘."},
+    {"id": "holdout-eggs-it", "expected_outcome": "app", "tags": ["it", "timer", "singleChoice"],
+     "request": "Un timer per le uova: alla coque, morbide e sode, con un avviso alla fine."},
+    {"id": "holdout-bricks-en", "expected_outcome": "app", "tags": ["en", "game", "canvas", "drag"],
+     "request": "A brick breaker game where I move the paddle with my finger."},
+    {"id": "holdout-tilt-ru", "expected_outcome": "app", "tags": ["ru", "game", "canvas", "tilt"],
+     "request": "Игра: шарик в лабиринте, который катится, когда я наклоняю телефон."},
+    {"id": "holdout-dodge-es", "expected_outcome": "app", "tags": ["es", "game", "canvas", "drag"],
+     "request": "Un juego de esquivar: una nave que muevo arrastrando y asteroides que caen. Con puntos y vidas."},
+    {"id": "holdout-jump3d-de", "expected_outcome": "app", "tags": ["de", "game", "3d", "tap"],
+     "request": "Ein 3D-Spiel: ein Würfel springt über Hindernisse, wenn ich auf den Bildschirm tippe."},
+    {"id": "holdout-moles-zh", "expected_outcome": "app", "tags": ["zh", "game", "canvas", "tap"],
+     "request": "做一个打地鼠游戏，点击冒出来的地鼠得分，30秒倒计时。"}
+  ]
+}
