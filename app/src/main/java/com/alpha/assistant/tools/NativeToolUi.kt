@@ -363,6 +363,10 @@ internal fun ColorScheme.toolInk(name: String, background: Color): Color {
     else -> MaterialTheme.colorScheme.toolInk(name, LocalToolBackground.current)
 }
 
+/** A progress track on a hero card uses the surface color, because the usual tracks are close to the hero container. */
+@Composable private fun progressTrack(usual: Color) =
+    MaterialTheme.colorScheme.let { if (LocalToolBackground.current == it.secondaryContainer) it.surface else usual }
+
 @Composable private fun ToolRoleSurface(modifier: Modifier, role: ToolRole, content: @Composable () -> Unit) {
     Surface(modifier, shape = MaterialTheme.shapes.medium, color = role.background, contentColor = role.foreground) {
         CompositionLocalProvider(LocalToolBackground provides role.background, content = content)
@@ -385,7 +389,7 @@ private const val COMPACT_METRIC_LENGTH = 24
  * Shrinks a label until it fits without a line break inside a word. StepBased accepts a break inside a word.
  * With [oneLineFirst], the label first shrinks to fit one line. It breaks between words only when one line cannot fit at [min].
  */
-private data class WholeWordAutoSize(val min: TextUnit, val max: TextUnit, val oneLineFirst: Boolean = false) : TextAutoSize {
+internal data class WholeWordAutoSize(val min: TextUnit, val max: TextUnit, val oneLineFirst: Boolean = false) : TextAutoSize {
     override fun TextAutoSizeLayoutScope.getFontSize(constraints: Constraints, text: AnnotatedString): TextUnit {
         val sizes = generateSequence(if (max.isSpecified) max.value else 14f) { it - 1f }.takeWhile { it >= min.value }.map { it.sp }
         fun fits(size: TextUnit, oneLine: Boolean): Boolean {
@@ -553,6 +557,13 @@ private fun space(value: String?, default: Int = 0) = when(value) {"none" -> 0; 
 private fun alignment(style: JSONObject?) = when(style?.optString("align")) {"center" -> Alignment.CenterHorizontally; "end" -> Alignment.End; else -> Alignment.Start}
 private fun showsToolHeading(text: String, hostHeading: String?) =
     text.isNotBlank() && !text.trim().equals(hostHeading?.trim(), ignoreCase = true)
+private val recordTypes = setOf("list","table","groupedList","lazyList","lazyGrid")
+/** The end of the texts after a leading large emoji in a hero card, or 0 when the card does not start with one. */
+private fun heroEmojiSide(children: JSONArray): Int {
+    val first = children.optJSONObject(0) ?: return 0
+    if (first.getString("type") != "emoji" || first.optString("size") != "large") return 0
+    return (1 until children.length()).firstOrNull { children.getJSONObject(it).getString("type") !in setOf("text","metric","badge") } ?: children.length()
+}
 
 @Composable private fun textStyle(style: JSONObject?, metric: Boolean = false) = when(style?.optString("emphasis")) {
     "title" -> MaterialTheme.typography.titleLarge
@@ -588,7 +599,7 @@ private fun showsToolHeading(text: String, hostHeading: String?) =
     val stroke = 14.dp
     Layout(content = {
         CircularProgressIndicator(progress = { progress }, strokeWidth = stroke, strokeCap = StrokeCap.Round,
-            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            trackColor = progressTrack(MaterialTheme.colorScheme.surfaceContainerHighest),
             modifier = Modifier.semantics { contentDescription = description; stateDescription = amount })
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) { content() }
     }) { measurables, constraints ->
@@ -797,7 +808,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
 @OptIn(ExperimentalLayoutApi::class,ExperimentalMaterial3Api::class)
 @Composable private fun NativeNode(node: JSONObject, state: JSONObject, parentEnabled: Boolean, imageVersion: Any?,
     imageLoader: suspend (String) -> Bitmap?, imageAvailable: suspend (String) -> Boolean, calendarHost: OwnedCalendarUiHost?, compact: Boolean, heading: String?, placement: Modifier = Modifier,
-    secondaryButton: Boolean = false, courseSceneSlot: Int? = null, event: (String,Any?) -> Unit) {
+    secondaryButton: Boolean = false, namedByTitle: Boolean = false, courseSceneSlot: Int? = null, event: (String,Any?) -> Unit) {
     if(!ToolUiCatalog.visible(node,state)) return
     val type=node.getString("type")
     val definition=ToolUiCatalog.component(type)
@@ -808,20 +819,20 @@ private fun courseSceneSlot(root: JSONObject): Int? {
     val binding=node.optString("bind")
     // A card draws a background, so its padding is inside it. For other nodes, padding is outside.
     val outerPadding=if(type == "card") 0.dp else space(style?.optString("padding"))
-    val modifier=nativeInteractions(node,enabled,event,nativeLayout(node,placement,compact || type in setOf("spacer","icon")).padding(outerPadding))
+    val modifier=nativeInteractions(node,enabled,event,nativeLayout(node,placement,compact || type in setOf("spacer","icon","emoji")).padding(outerPadding))
     val gap=space(style?.optString("gap"),12)
     val action=node.optString("action")
     val children=node.optJSONArray("children")
-    val renderChildren: @Composable () -> Unit = {
-        if (children != null) {
-            val secondary = if (type == "section" || type == "card") secondaryButtons(children, state, enabled) else emptySet()
-            repeat(children.length()) { index ->
-                NativeNode(children.getJSONObject(index),state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,
-                    secondaryButton = index in secondary,event=event)
-            }
-        }
+    val group = type == "section" || type == "card"
+    val secondary = if (children != null && group) secondaryButtons(children, state, enabled) else emptySet()
+    // The only list under a shown title takes its name from that title, so the page does not name it twice.
+    val namedChild = if (children != null && group && showsToolHeading(text, heading))
+        (0 until children.length()).filter { children.getJSONObject(it).getString("type") in recordTypes }.singleOrNull() else null
+    val renderChildren: @Composable (IntRange) -> Unit = { range ->
+        for (index in range) NativeNode(checkNotNull(children).getJSONObject(index),state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,
+            secondaryButton = index in secondary, namedByTitle = index == namedChild, event=event)
     }
-    val content: @Composable () -> Unit = renderChildren
+    val content: @Composable () -> Unit = { if (children != null) renderChildren(0 until children.length()) }
     if (LocalEmbeddedTool.current && type in ToolUiCatalog.modalTypes) {
         val scheme = MaterialTheme.colorScheme
         ToolRoleSurface(modifier, ToolRole(scheme.onSurface, scheme.surfaceContainerHigh, scheme.onSurface)) {
@@ -1039,9 +1050,12 @@ private fun courseSceneSlot(root: JSONObject): Int? {
         }
         "card" -> {
           val hero = node.optString("variant") == "hero"
+          val centered = style?.optString("align") == "center"
           val scheme = MaterialTheme.colorScheme
-          // A hero card holds the main result in the palette's container color.
-          ToolRoleSurface(modifier, if (hero) ToolRole(scheme.primary, scheme.primaryContainer, scheme.onPrimaryContainer) else scheme.toolRole(tone)) {
+          // A hero card holds the main result in the palette's secondary container. The primary container is neon in some palettes.
+          ToolRoleSurface(modifier, if (hero) ToolRole(scheme.secondary, scheme.secondaryContainer, scheme.onSecondaryContainer) else scheme.toolRole(tone)) {
+           // Text in a centered card is centered too, so it lines up with a centered emoji or icon.
+           CompositionLocalProvider(LocalCenteredContent provides (centered || LocalCenteredContent.current)) {
             Column(Modifier.padding(space(style?.optString("padding"), if (hero) 20 else 16)), verticalArrangement = Arrangement.spacedBy(gap), horizontalAlignment = alignment(style)) {
                 val icon = node.optString("icon")
                 val title = showsToolHeading(text, heading)
@@ -1049,8 +1063,22 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                     if (icon.isNotEmpty()) IconBadge(icon, if (tone in setOf("", "default", "muted")) MaterialTheme.colorScheme.primary else LocalContentColor.current)
                     if (title) Text(text, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)
                 }
-                content()
+                val beside = if (hero && !centered && children != null) heroEmojiSide(children) else 0
+                if (beside > 1) BoxWithConstraints {
+                    // A large emoji stands at the end of the texts that follow it. Below 300 dp it stays above them.
+                    val wide = maxWidth >= 300.dp
+                    Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+                        if (!wide) content() else {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(gap)) { renderChildren(1 until beside) }
+                                renderChildren(0..0)
+                            }
+                            renderChildren(beside until checkNotNull(children).length())
+                        }
+                    }
+                } else content()
             }
+           }
           }
         }
         "listItem" -> Column(modifier) {
@@ -1250,8 +1278,9 @@ private fun courseSceneSlot(root: JSONObject): Int? {
         }
         "select","tabs" -> {
             val options=node.getJSONArray("options"); val selected=ToolUiCatalog.value(state,binding)
-            Column(modifier,verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                Text(text,style=MaterialTheme.typography.labelLarge)
+            // A tab row shows its options instead of its name. The name stays for screen readers.
+            Column(if(type == "tabs") modifier.semantics {contentDescription=text} else modifier,verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                if(type != "tabs") Text(text,style=MaterialTheme.typography.labelLarge)
                 if(type == "tabs") ScrollableTabRow(
                     selectedTabIndex=(0 until options.length()).first {scalarEqual(selected,options.getJSONObject(it).get("value"))},
                     modifier=Modifier.fillMaxWidth(),edgePadding=0.dp) {
@@ -1277,7 +1306,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 }
             }
         }
-        "list","table","groupedList","lazyList","lazyGrid" -> NativeRecords(node,state,enabled,modifier,heading,event=event) {template,row,dispatch ->
+        "list","table","groupedList","lazyList","lazyGrid" -> NativeRecords(node,state,enabled,modifier,heading,namedByTitle,event=event) {template,row,dispatch ->
             NativeNode(template,row,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,event=dispatch)
         }
         "progress","progressRing" -> {
@@ -1297,16 +1326,19 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 Row(Modifier.fillMaxWidth().semantics {contentDescription=text; stateDescription=amount},horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     repeat(high.toInt()) {index ->
                         Box(Modifier.weight(1f, fill = false).widthIn(max = 20.dp).aspectRatio(1f).clip(CircleShape)
-                            .background(if(index < filled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest))
+                            .background(if(index < filled) MaterialTheme.colorScheme.primary else progressTrack(MaterialTheme.colorScheme.surfaceContainerHighest)))
                     }
                 }
             } else Column(modifier,verticalArrangement=Arrangement.spacedBy(6.dp)) {
                 Text(ToolUiCatalog.display(node,state))
                 if(node.optBoolean("indeterminate")) {
-                    if(type == "progress") LinearProgressIndicator(modifier=Modifier.fillMaxWidth().height(10.dp).semantics {contentDescription=text})
+                    if(type == "progress") LinearProgressIndicator(modifier=Modifier.fillMaxWidth().height(10.dp).semantics {contentDescription=text},
+                        trackColor=progressTrack(ProgressIndicatorDefaults.linearTrackColor))
                     else CircularProgressIndicator(modifier=Modifier.size(56.dp).semantics {contentDescription=text})
-                } else if(type == "progress") LinearProgressIndicator(progress={progress},modifier=Modifier.fillMaxWidth().height(10.dp).semantics {contentDescription=text})
-                else CircularProgressIndicator(progress={progress},modifier=Modifier.size(56.dp).semantics {contentDescription=text})
+                } else if(type == "progress") LinearProgressIndicator(progress={progress},modifier=Modifier.fillMaxWidth().height(10.dp).semantics {contentDescription=text},
+                    trackColor=progressTrack(ProgressIndicatorDefaults.linearTrackColor))
+                else CircularProgressIndicator(progress={progress},modifier=Modifier.size(56.dp).semantics {contentDescription=text},
+                    trackColor=progressTrack(ProgressIndicatorDefaults.circularDeterminateTrackColor))
             }
         }
         "timer" -> if (node.has("foreground")) {
@@ -1633,7 +1665,8 @@ private class NativeLiveEditor(private val ui: NativeLiveUi, val draft: NativeLi
 }
 private data class NativeRecordEntry(val key: String,val group: String? = null,val record: JSONObject? = null,val divider: Boolean = false)
 @OptIn(ExperimentalFoundationApi::class)
-@Composable private fun NativeRecords(node: JSONObject, state: JSONObject, enabled: Boolean, modifier: Modifier, heading: String?, event: (String,Any?) -> Unit, renderTemplate: @Composable (JSONObject,JSONObject,(String,Any?) -> Unit) -> Unit) {
+@Composable private fun NativeRecords(node: JSONObject, state: JSONObject, enabled: Boolean, modifier: Modifier, heading: String?, namedByTitle: Boolean,
+    event: (String,Any?) -> Unit, renderTemplate: @Composable (JSONObject,JSONObject,(String,Any?) -> Unit) -> Unit) {
     val rows=ToolUiCatalog.records(node,state); val type=node.getString("type")
     val columns=if(type == "lazyGrid") null else node.optJSONArray("columns"); val action=node.optString("action")
     val selected=if(node.has("selectedKeyBind")) ToolUiCatalog.value(state,node.getString("selectedKeyBind")) as String else ""
@@ -1669,8 +1702,10 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
             }
         }
     }
-    Column(modifier,verticalArrangement=Arrangement.spacedBy(8.dp)) {
-        if(showsToolHeading(node.getString("text"), heading)) Text(node.getString("text"),style=MaterialTheme.typography.titleMedium,modifier=Modifier.semantics {heading()})
+    val name=node.getString("text")
+    // A list named by the title above it keeps its name for screen readers only.
+    Column(if(namedByTitle) modifier.semantics {contentDescription=name} else modifier,verticalArrangement=Arrangement.spacedBy(8.dp)) {
+        if(!namedByTitle && showsToolHeading(name, heading)) Text(name,style=MaterialTheme.typography.titleMedium,modifier=Modifier.semantics {heading()})
         if(rows.length() == 0) Text(node.optString("emptyText",miniAppString(R.string.tool_records_empty)),
             Modifier.padding(vertical = 12.dp), color = toolInk("muted"))
         if(type == "table") BoxWithConstraints {

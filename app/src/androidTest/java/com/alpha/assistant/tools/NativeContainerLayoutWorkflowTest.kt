@@ -9,7 +9,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getAllSemanticsNodes
 import androidx.compose.ui.semantics.getOrNull
@@ -199,26 +198,9 @@ class NativeContainerLayoutWorkflowTest {
                     }
                 }
                 robot.waitFor(labels.last())
-                labels.map { label ->
-                    val results = mutableListOf<TextLayoutResult>()
-                    scenario.onActivity { activity ->
-                        checkNotNull(semanticsNodes(activity).firstOrNull { node ->
-                            node.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text == label }
-                        }) { "No text $label" }.config[SemanticsActions.GetTextLayoutResult].action?.invoke(results)
-                    }
-                    results.single()
-                }
+                labels.map { label -> textLayout(scenario, label) }
             }
         } finally { fixture.remove() }
-    }
-
-    /** True when each line break of [layout] falls between words. */
-    private fun wholeWords(layout: TextLayoutResult): Boolean {
-        val text = layout.layoutInput.text.text
-        return (0 until layout.lineCount - 1).all { line ->
-            val end = layout.getLineEnd(line)
-            text[end - 1].isWhitespace() || text[end - 1] == '-' || text[end].isWhitespace()
-        }
     }
 
     /** Failure case: a 3 by 3 board of card cells with columns 3 showed only 2 cells in each row on a phone. */

@@ -3,7 +3,6 @@ package com.alpha.assistant.tools
 import com.alpha.assistant.R
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
-import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -87,14 +86,7 @@ class Plan5SavedArtifactWorkflowTest {
                 }
             }
         } finally {
-            fixture.model?.let { model ->
-                runBlocking { model.tools.closeAndJoin() }
-                model.courseStore.close()
-                model.memoryStore.close()
-            }
-            fixture.remove()
-            fixture.context.deleteDatabase("${fixture.name}.db-courses.db")
-            fixture.context.deleteDatabase("${fixture.name}.db-memory.db")
+            fixture.removeWithModel()
         }
     }
 }

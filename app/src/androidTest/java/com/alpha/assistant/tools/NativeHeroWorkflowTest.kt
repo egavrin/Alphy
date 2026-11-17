@@ -1,6 +1,7 @@
 package com.alpha.assistant.tools
 
 import android.graphics.Rect
+import androidx.compose.ui.graphics.toArgb
 import com.alpha.assistant.tools.agent.AppScreen
 import com.alpha.assistant.ui.ShellRobot
 import org.json.JSONArray
@@ -134,6 +135,75 @@ class NativeHeroWorkflowTest {
             fun inside(label: String) = robot.bounds(label).let { shot.getPixel(it.left - dp(8), it.centerY()) }
             assertTrue("the hero card is tinted", colorSaturation(inside("Hero body")) > colorSaturation(inside("Plain body")) + 0.1f)
         }
+    }
+
+    /** Failure case: hero cards used the palette's primary container, which is neon in the teal and green palettes. */
+    @Test fun aHeroCardUsesTheQuietContainer() {
+        val hero = JSONObject("""{"type":"card","text":"Hero card","variant":"hero","children":[{"type":"text","text":"Hero body"}]}""")
+        val ui = themedColumn(hero, JSONObject("""{"type":"text","text":"End of cards"}"""), palette = "teal").put("dark", false)
+        assertEquals(null, validateNativeUi(ui))
+        val scheme = checkNotNull(ToolPalettes.scheme("teal", false))
+        robot.renderApps("hero", listOf(ui.toString()), "{}", "End of cards") { shot ->
+            val body = robot.bounds("Hero body")
+            assertSameColor("the hero background", shot.getPixel(body.left - dp(8), body.centerY()), scheme.secondaryContainer.toArgb())
+        }
+    }
+
+    /** Review finding: the default progress track is the secondary container, so it disappeared on a hero card. */
+    @Test fun progressTracksShowOnAHeroCard() {
+        val hero = JSONObject("""{"type":"card","variant":"hero","children":[{"type":"text","text":"Hero body"},
+            {"type":"progress","text":"Monthly budget","bind":"used","min":0,"max":100},
+            {"type":"progress","text":"Glasses","variant":"dots","bind":"glasses","min":0,"max":5}]}""")
+        val ui = themedColumn(hero, JSONObject("""{"type":"text","text":"End of cards"}""")).put("dark", false)
+        val state = """{"used":40,"glasses":2}"""
+        assertEquals(null, validateNativeUi(ui, JSONObject("""{"used":"number","glasses":"number"}"""), JSONObject(state)))
+        robot.renderApps("hero", listOf(ui.toString()), state, "End of cards") { shot ->
+            val bar = robot.bounds("Monthly budget")
+            val card = shot.getPixel(bar.left - dp(8), bar.centerY())
+            assertTrue("the empty part of the bar shows", shot.ink(bar.left + bar.width() * 3 / 4, bar.centerY(), card))
+            val dots = robot.bounds("Glasses")
+            assertTrue("an empty dot shows", shot.ink(dots.left + dp(4 * 28 + 10), dots.centerY(), card))
+        }
+    }
+
+    private val bolt = JSONObject("""{"type":"emoji","text":"Bolt","value":"⚡","size":"large"}""")
+    private val cost = JSONObject("""{"type":"metric","text":"Cost","bind":"cost","style":{"emphasis":"display"}}""")
+    private val costState = """{"cost":"42 €","used":40}"""
+    private val costFields = JSONObject("""{"cost":"string","used":"number"}""")
+    private val endOfHero = JSONObject("""{"type":"text","text":"End of hero"}""")
+    private fun heroOf(vararg children: JSONObject, align: String? = null) = JSONObject().put("type", "card").put("variant", "hero")
+        .put("children", JSONArray(children.toList())).apply { if (align != null) put("style", JSONObject().put("align", align)) }
+
+    /** Renders [ui] with the cost state and gives the emoji and the cost value boxes to [check]. */
+    private fun heroBounds(ui: JSONObject, fontScale: Float = 1f, check: (emoji: Rect, value: Rect) -> Unit) {
+        assertEquals(null, validateNativeUi(ui, costFields, JSONObject(costState)))
+        robot.renderApps("hero", listOf(ui.toString()), costState, "End of hero", fontScale = fontScale) {
+            check(robot.bounds("Bolt"), robot.bounds("42 €"))
+        }
+    }
+
+    /** Failure case: a hero card centered its large emoji above left-aligned numbers, so the card looked like a template. */
+    @Test fun aHeroEmojiStandsBesideTheResult() {
+        val bar = JSONObject("""{"type":"progress","text":"Monthly budget","bind":"used","min":0,"max":100}""")
+        for (scale in listOf(1f, 2f)) heroBounds(themedColumn(heroOf(bolt, cost, bar), endOfHero), scale) { emoji, value ->
+            assertTrue("at $scale the emoji $emoji is right of the value $value", emoji.left >= value.right)
+            assertTrue("at $scale the emoji and the value share a line", emoji.top < value.bottom && emoji.bottom > value.top)
+            assertTrue("at $scale the bar keeps the card width", robot.bounds("Monthly budget").right >= emoji.centerX())
+        }
+    }
+
+    @Test fun aNarrowHeroKeepsItsEmojiAtTheStart() {
+        val grid = JSONObject().put("type", "grid").put("columns", 2).put("children", JSONArray().put(heroOf(bolt, cost)).put(JSONObject("""{"type":"text","text":"Other cell"}""")))
+        heroBounds(themedColumn(grid, endOfHero)) { emoji, value ->
+            assertTrue("the emoji $emoji is above the value $value", emoji.bottom <= value.top)
+            assertTrue("the emoji tile $emoji keeps its size", emoji.width() <= dp(120))
+            assertTrue("the emoji starts where the value starts", abs(emoji.left - value.left) <= dp(4))
+        }
+    }
+
+    @Test fun aCenteredHeroCentersItsText() = heroBounds(themedColumn(heroOf(bolt, cost, align = "center"), endOfHero)) { emoji, value ->
+        assertTrue("the emoji $emoji is above the value $value", emoji.bottom <= value.top)
+        assertTrue("the value $value is centered under the emoji $emoji", abs(emoji.centerX() - value.centerX()) <= dp(8))
     }
 
     @Test fun emojiDrawsInPagesAndRows() {

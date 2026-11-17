@@ -77,7 +77,8 @@ internal fun galleryCaptureChecks(context: Context): Map<String, GalleryCaptureC
         "forms/date-range" to GalleryCaptureCheck(targets = listOf(dateRange),
             next = GalleryCaptureStep("open", GalleryCaptureCheck(listOf("Дни доставки"), listOf(cancel, apply("Дни доставки"))),
                 click = dateRange, dismiss = cancel)),
-        "choices/tabs" to GalleryCaptureCheck(listOf("Дневник привычек"), listOf("Месяц")),
+        // A tab row shows its options. Its name "Дневник привычек" is for screen readers only.
+        "choices/tabs" to GalleryCaptureCheck(listOf("Неделя"), listOf("Месяц")),
         "choices/chips" to GalleryCaptureCheck(targets = listOf("Добавить привычку"), disabled = listOf("Отмечено")),
         "choices/select" to dropdown("Фильтр"),
         "choices/single" to GalleryCaptureCheck(listOf("Вид отчёта"), listOf("Месяц")),

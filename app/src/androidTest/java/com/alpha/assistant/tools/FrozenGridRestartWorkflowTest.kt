@@ -8,7 +8,6 @@ import com.alpha.assistant.data.Message
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.seedOpenChat
-import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -74,14 +73,7 @@ class FrozenGridRestartWorkflowTest {
             }
         } finally {
             File(directory, "workflow.json").writeText(proof.toString(2))
-            fixture.model?.let { model ->
-                runBlocking { model.tools.closeAndJoin() }
-                model.courseStore.close()
-                model.memoryStore.close()
-            }
-            fixture.remove()
-            fixture.context.deleteDatabase("${fixture.name}.db-courses.db")
-            fixture.context.deleteDatabase("${fixture.name}.db-memory.db")
+            fixture.removeWithModel()
         }
     }
 }

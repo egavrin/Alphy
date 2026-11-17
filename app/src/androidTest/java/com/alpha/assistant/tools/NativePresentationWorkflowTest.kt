@@ -185,20 +185,6 @@ class NativePresentationWorkflowTest {
         } finally { image.recycle() }
     }
 
-    private fun textLayout(scenario: ActivityScenario<CloudTestActivity>, label: String): TextLayoutResult {
-        lateinit var result: TextLayoutResult
-        scenario.onActivity { activity ->
-            val owner = activity.window.decorView.allViews.filterIsInstance<ViewRootForTest>().single().semanticsOwner
-            val node = owner.getAllSemanticsNodes(mergingEnabled = false).first {
-                it.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text == label } == true
-            }
-            val layout = mutableListOf<TextLayoutResult>()
-            assertTrue(checkNotNull(node.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action).invoke(layout))
-            result = layout.single()
-        }
-        return result
-    }
-
     private fun textPosition(scenario: ActivityScenario<CloudTestActivity>, label: String): Rect {
         val result = Rect()
         scenario.onActivity { activity ->

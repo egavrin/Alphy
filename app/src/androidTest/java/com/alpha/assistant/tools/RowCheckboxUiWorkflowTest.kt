@@ -8,7 +8,6 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.R
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
-import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -107,14 +106,7 @@ class RowCheckboxUiWorkflowTest {
                 }
             }
         } finally {
-            fixture.model?.let { model ->
-                runBlocking { model.tools.closeAndJoin() }
-                model.courseStore.close()
-                model.memoryStore.close()
-            }
-            fixture.remove()
-            fixture.context.deleteDatabase("${fixture.name}.db-courses.db")
-            fixture.context.deleteDatabase("${fixture.name}.db-memory.db")
+            fixture.removeWithModel()
         }
     }
 

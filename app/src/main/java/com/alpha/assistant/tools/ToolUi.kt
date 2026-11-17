@@ -40,6 +40,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -750,9 +751,9 @@ catch (_: Exception) { null }
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = detailGutter - 8.dp),verticalAlignment=Alignment.CenterVertically) {
             IconButton(onClick = ::back,
                 modifier = Modifier.size(48.dp).semantics { contentDescription = backLabel }) { AlphaIcon(Glyph.Back) }
-            // Two lines keep most titles whole next to the edit action.
+            // Two lines keep most titles whole next to the edit action. A long word shrinks to 16 sp before it breaks.
             Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge,
-                maxLines = 2, overflow = TextOverflow.Ellipsis)
+                maxLines = 2, overflow = TextOverflow.Ellipsis, autoSize = WholeWordAutoSize(16.sp, MaterialTheme.typography.titleLarge.fontSize))
             if (tool != null && spec != null && tool.saved && !tool.archived && draft == null) {
                 TextButton(onClick = { refine(tool.id) }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp)) {
