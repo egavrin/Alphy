@@ -19,7 +19,7 @@ class SandboxClient internal constructor(context: Context,private val runtime: A
                 val valid=runCatching {SandboxContract.validateRequest(source,input)}.isSuccess
                 if(!valid) SandboxResult("INVALID_REQUEST") else {
                     val type=JSONObject(input).getJSONObject("event").getString("type")
-                    val deadline=if(type in setOf("frame","pointer","timer","control")) com.alpha.assistant.tools.GraphicsContract.EVALUATION_MS else SandboxContract.EVALUATION_MS
+                    val deadline=if(type in setOf("frame","pointer","timer")) com.alpha.assistant.tools.GraphicsContract.EVALUATION_MS else SandboxContract.EVALUATION_MS
                     val result=isolate.evaluate(evaluationScript(source, input),deadline)
                     currentCoroutineContext().ensureActive()
                     if (result.hasValidOutput()) result else SandboxResult("INVALID_RESULT")

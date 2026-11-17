@@ -32,7 +32,6 @@ Steps for run and finish (use real action IDs from the screen):
 - {"pointer":"surfaceId","x":0.25,"y":0.5} taps a drawing surface at a fraction of its width and height.
 - {"drag":"surfaceId","from":[0.5,0.8],"to":[0.9,0.8]} drags on a drawing surface: down, 5 moves, and up. Fractions clamp to 0..1.
 - {"tilt":[2,0]} sends one accelerometer sample x, y in m/s² to an app that declares sensor.accelerometer.stream.
-- {"move":"surfaceId","direction":"left"} sends a host movement control.
 - {"playback":"start"} sends start, pause, resume, or restart to drawing surfaces.
 - {"wait":1000} advances the clock in milliseconds. Date.now() and native timers use this clock. Subscribed frames and timers run.
 - {"expect":"text","contains":"23.00"} passes when visible text contains the value (case-insensitive).

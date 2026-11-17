@@ -217,8 +217,8 @@ class LiveInputHostWorkflowTest {
             robot.waitGone(finish)
             robot.back()
             robot.waitGone(note)
-            robot.click(robot.text(R.string.tool_game_left))
-            robot.waitUntil { JSONObject(checkNotNull(store.tool(record.id)).state).getString("movementNote") == value }
+            robot.click(robot.text(R.string.tool_game_pause))
+            robot.waitUntil { JSONObject(checkNotNull(store.tool(record.id)).state).getString("pauseNote") == value }
             assertTrue(store.effects(record.id).isEmpty())
             robot.diagnostics.capture("immersive-after-final-ack")
         }
@@ -245,10 +245,10 @@ class LiveInputHostWorkflowTest {
         if (graphics) json.put("surfaces", JSONArray("""[{"id":"board","width":64,"height":64}]"""))
         if (immersive) {
             json.put("presentation", JSONObject().put("mode", "immersive"))
-            json.put("hostControls", JSONObject("""{"movement":["board"]}"""))
-            json.getJSONObject("stateSchema").put("movementNote", "string")
-            json.getJSONObject("initialState").put("movementNote", "")
-            json.put("source", "if(input.event.type==='control')input.state.movementNote=input.state.note;${json.getString("source")}")
+            json.put("hostControls", JSONObject("""{"playback":true}"""))
+            json.getJSONObject("stateSchema").put("pauseNote", "string")
+            json.getJSONObject("initialState").put("pauseNote", "")
+            json.put("source", "if(input.event.type==='pause')input.state.pauseNote=input.state.note;${json.getString("source")}")
         }
         val spec = ToolSpec.parse(json.toString())
         return ToolRecord(id, 1, 1, spec.json, spec.initialState, spec.ui.toString(), conversationId, true).also { store.saveTool(it, true) }

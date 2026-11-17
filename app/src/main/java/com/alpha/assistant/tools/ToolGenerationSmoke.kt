@@ -132,11 +132,6 @@ internal class ToolGenerationSmoke(
                     event(GraphicsContract.event("pointer",x=x,y=y,phase=phase,pointer=pointer,surfaceId=surface.id),path)
                 }
                 if (index == 0 && TiltContract.ID in spec.capabilities) event(GraphicsContract.tilt(2.0, -1.0, 1, 1), "$.capabilities")
-                if (surface.id in spec.hostControls.movement) {
-                    for (direction in listOf("left", "right")) {
-                        event(GraphicsContract.event("control", direction = direction, surfaceId = surface.id), path)
-                    }
-                }
             }
             if (spec.hostControls.playback) {
                 for (type in listOf("pause", "resume", "restart")) {
@@ -275,12 +270,6 @@ internal class ToolGenerationSmoke(
         override suspend fun tilt(x: Double, y: Double) {
             if (TiltContract.ID !in spec.capabilities) throw AppStepError("Declare ${TiltContract.ID} in capabilities to receive tilt.")
             branch.event(GraphicsContract.tilt(x, y, ++tiltSequence, clock()), "$.capabilities")
-            settle()
-        }
-
-        override suspend fun control(surfaceId: String, direction: String) {
-            branch.event(GraphicsContract.event("control", direction = direction, surfaceId = surfaceId),
-                "$.surfaces[${spec.surfaces.keys.toList().indexOf(surfaceId)}]")
             settle()
         }
 

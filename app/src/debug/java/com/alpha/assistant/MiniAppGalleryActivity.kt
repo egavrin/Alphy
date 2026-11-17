@@ -96,9 +96,9 @@ internal fun gallerySpec(ui: String, state: String, schema: String, title: Strin
     val definition = JSONObject().put("formatVersion", 3).put("title", title).put("description", "Галерея мини-приложений")
         .put("capabilities", JSONArray(capabilities)).put("stateSchema", JSONObject(schema)).put("initialState", JSONObject(state))
         .put("ui", JSONObject(ui)).put("source", "return {state:input.state};")
-    // Playback and movement controls are opt-in, so the canvas page declares the ones its check expects.
+    // Playback controls are opt-in, so the canvas page declares the ones its check expects.
     if (canvas) definition.put("surfaces", JSONArray("""[{"id":"main","width":100,"height":100}]"""))
-        .put("hostControls", JSONObject("""{"playback":true,"movement":["main"]}"""))
+        .put("hostControls", JSONObject("""{"playback":true}"""))
     return try { ToolSpec.parse(definition.toString()) }
     catch (failure: ToolValidationFailure) {
         throw IllegalArgumentException("Invalid gallery fixture $title at ${failure.uiDiagnostic}", failure)

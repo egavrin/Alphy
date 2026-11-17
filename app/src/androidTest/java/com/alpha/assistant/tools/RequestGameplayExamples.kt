@@ -65,11 +65,11 @@ internal object RequestGameplayExamples {
         .put("description", "Поймай три звезды корзиной и не допусти двух промахов.")
         .put("capabilities", JSONArray())
         .put("presentation", JSONObject("""{"mode":"immersive"}"""))
-        .put("hostControls", JSONObject("""{"playback":true,"movement":["field"]}"""))
+        .put("hostControls", JSONObject("""{"playback":true}"""))
         .put("surfaces", JSONArray("""[{"id":"field","width":280,"height":228}]"""))
         .put("stateSchema", JSONObject("""{"status":"string","lane":"number","target":"number","elapsed":"number","score":"number","misses":"number"}"""))
         .put("initialState", JSONObject("""{"status":"ready","lane":1,"target":0,"elapsed":0,"score":0,"misses":0}"""))
-        .put("ui", JSONObject("""{"type":"text","text":"Коснитесь дорожки или используйте кнопки «Влево» и «Вправо». Поймайте три звезды. После двух промахов игра закончится."}"""))
+        .put("ui", JSONObject("""{"type":"text","text":"Коснитесь дорожки. Поймайте три звезды. После двух промахов игра закончится."}"""))
         .put("source", """
             const s = input.state, e = input.event;
             const lanes = [52, 140, 228], fallMs = 700;
@@ -80,7 +80,6 @@ internal object RequestGameplayExamples {
               if (e.type === 'pointer' && (e.phase === 'down' || e.phase === 'move')) {
                 s.lane = e.x < 96 ? 0 : e.x < 184 ? 1 : 2;
               }
-              if (e.type === 'control') s.lane = Math.max(0, Math.min(2, s.lane + (e.direction === 'left' ? -1 : 1)));
             }
             if (e.type === 'frame' && s.status === 'playing') {
               s.elapsed += e.dt;
@@ -140,7 +139,6 @@ internal object RequestGameplayExamples {
             if (e.type === 'pointer' && (e.phase === 'down' || e.phase === 'move') && (e.x !== x || e.y !== y)) {
               s.angle = wrap(Math.atan2(e.y - y, e.x - x));
             }
-            if (e.type === 'control') s.angle = wrap(s.angle + (e.direction === 'left' ? -1 : 1) * Math.PI / 6);
             const angle = s.angle;
             const commands = [
               {type:'arc',x:x-radius,y:y-radius,width:radius*2,height:radius*2,start:0,sweep:360,stroke:1.5,color:'muted'},

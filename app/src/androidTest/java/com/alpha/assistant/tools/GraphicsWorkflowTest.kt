@@ -97,7 +97,6 @@ internal object ArkanoidFixture {
         return function(event){
             if(event.type==='restart')reset();
             if(event.type==='pointer' && event.phase!=='up' && event.phase!=='cancel')paddle=Math.max(0,Math.min(256,event.x-32));
-            if(event.type==='control')paddle=Math.max(0,Math.min(256,paddle+(event.direction==='left'?-28:28)));
             if(event.type==='frame')frames++;
             if(event.type==='frame' && lives>0){
                 const dt=event.dt/1000; x+=vx*dt;y+=vy*dt;
@@ -116,7 +115,7 @@ internal object ArkanoidFixture {
     """.trimIndent()
     fun spec()=JSONObject().put("formatVersion",3).put("title","Arkanoid").put("description","Move the paddle. Break the bricks.")
         .put("capabilities",JSONArray()).put("stateSchema",JSONObject("{\"score\":\"number\",\"lives\":\"number\"}"))
-        .put("hostControls", JSONObject("""{"playback":true,"movement":["main"]}"""))
+        .put("hostControls", JSONObject("""{"playback":true}"""))
         .put("initialState",JSONObject("{\"score\":0,\"lives\":3}"))
         .put("ui",JSONObject("{\"type\":\"text\",\"text\":\"Saved score\",\"bind\":\"score\"}"))
         .put("source","if(!globalThis.game)globalThis.game=(function(state){$source})(input.state); const frame=globalThis.game(input.event); const saved=globalThis.game({type:'checkpoint'}).checkpoint; if(input.event.type!=='preview' && input.event.type!=='render'){input.state.score=saved.score;input.state.lives=saved.lives;} return {state:input.state,surfaces:{main:{commands:frame.commands}},frames:['main']};")

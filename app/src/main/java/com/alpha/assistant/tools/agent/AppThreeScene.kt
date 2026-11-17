@@ -20,9 +20,6 @@ internal class ThreeSceneTarget(private val session: ThreeSceneSession) : AppTar
 
     override suspend fun control(id: String, payload: Any?) = session.action(id, payload)
 
-    override suspend fun control(surfaceId: String, direction: String) =
-        throw AppStepError("A 3D scene has no movement controls. Use pointer on \"$SCENE\" or the native controls.")
-
     override suspend fun playback(type: String) = session.event(JSONObject().put("type", type))
 
     override suspend fun pointer(surfaceId: String, path: List<Pair<Double, Double>>) {

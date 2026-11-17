@@ -54,7 +54,7 @@ class SavedGameRuntimeDiagnosticTest {
                     if(pacingMs>0)delay(pacingMs)
                     val event=when {
                         index%100==0 -> GraphicsContract.event("restart")
-                        index%10==0 -> GraphicsContract.event("control",direction=if(index%20==0)"left" else "right")
+                        index%10==0 -> GraphicsContract.event("pointer",x=if(index%20==0)60.0 else 300.0,y=580.0,phase="move")
                         else -> GraphicsContract.event("frame",16)
                     }
                     eventIndex=index;eventType=event.getString("type")

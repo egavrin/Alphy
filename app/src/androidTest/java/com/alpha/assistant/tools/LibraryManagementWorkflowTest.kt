@@ -602,6 +602,9 @@ class LibraryManagementWorkflowTest {
     // Alpha 12 also saved apps built only from host parts with a nativePresentation recipe and no composition. The fixture has that record shape.
     @Test fun savedPresentationAppFromAnOlderVersionStaysButDoesNotOpen() = retiredAppStaysButDoesNotOpen("legacy/native-presentation-app.json","Focus counter")
 
+    // Alpha 12 saved games with host Left and Right controls (hostControls.movement). Games now draw their own controls.
+    @Test fun savedAppWithHostMovementStaysButDoesNotOpen() = retiredAppStaysButDoesNotOpen("legacy/host-movement-app.json","Lane runner")
+
     private fun retiredAppStaysButDoesNotOpen(asset: String,title: String) {
         val name="library-retired-${UUID.randomUUID()}.db"
         val shell=ShellStore(app,name)

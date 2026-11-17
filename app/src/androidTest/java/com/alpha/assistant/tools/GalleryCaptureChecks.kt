@@ -114,7 +114,7 @@ internal fun galleryCaptureChecks(context: Context): Map<String, GalleryCaptureC
             next = GalleryCaptureStep("detail", GalleryCaptureCheck(listOf("Музей у набережной"), listOf(routeBack)),
                 click = "Открыть остановку", dismiss = routeBack)),
         "canvas" to GalleryCaptureCheck(listOf(context.getString(R.string.tool_game_ready)),
-            listOf(context.getString(R.string.tool_game_start), context.getString(R.string.tool_game_left), context.getString(R.string.tool_game_right)),
+            listOf(context.getString(R.string.tool_game_start)),
             graphics = listOf("Проверка холста. Графика. ")),
     )
 }

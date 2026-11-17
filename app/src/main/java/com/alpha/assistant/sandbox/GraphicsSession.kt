@@ -103,7 +103,7 @@ class GraphicsSession(context: Context) {
         JSONObject().put("artifactId",id).put("revision",revision).put("state",JSONObject(state)).put("event",event)
 
     private suspend fun send(active: AndroidJsRuntime.Isolate,payload: String,type: String,seq: Long,rememberState: Boolean): SandboxResult {
-        val deadline=if(type in setOf("frame","pointer","timer","control",SandboxContract.LIVE_INPUT_EVENT)) GraphicsContract.EVALUATION_MS else SandboxContract.EVALUATION_MS
+        val deadline=if(type in setOf("frame","pointer","timer",SandboxContract.LIVE_INPUT_EVENT)) GraphicsContract.EVALUATION_MS else SandboxContract.EVALUATION_MS
         val result=active.evaluate("__alphaArtifactDispatch(${JSONObject.quote(payload)})",deadline)
         currentCoroutineContext().ensureActive()
         synchronized(lock) {if(closed || isolate !== active || sequence!=seq)return SandboxResult("CLOSED")}

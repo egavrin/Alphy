@@ -10,7 +10,7 @@ import org.json.JSONObject
 
 internal enum class ToolValidationCategory(val id: String, val guidance: String) {
     JSON("tool_json", "Return one JSON object without Markdown. Keep the object within ${ToolSpec.MAX_DEFINITION_BYTES} bytes and nesting depth 24."),
-    FIELDS("tool_fields", "Use exactly these fields: formatVersion, title, description, capabilities, stateSchema, initialState, ui, source. Optional surfaces declares identified native drawing surfaces. Optional presentation selects app or immersive mode. Optional hostControls declares playback and movement for declared surfaces. Optional capabilityResults and collections enable local typed results and private durable records. Remove other extra fields and include missing fields."),
+    FIELDS("tool_fields", "Use exactly these fields: formatVersion, title, description, capabilities, stateSchema, initialState, ui, source. Optional surfaces declares identified native drawing surfaces. Optional presentation selects app or immersive mode. Optional hostControls declares playback for declared surfaces. Optional capabilityResults and collections enable local typed results and private durable records. Remove other extra fields and include missing fields."),
     VERSION("tool_version", "Set formatVersion to the integer 3. Incompatible saved artifacts remain unavailable with their data intact."),
     METADATA("tool_metadata", "Use a title string with 1 to 100 characters and a description string with at most 500 characters."),
     CAPABILITIES("tool_capabilities", "Use an array of unique capability IDs from the supplied catalog. For local counters, use an empty array."),
@@ -230,7 +230,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
                 require(surfaces.values.none { it.sizing == "viewport" } || surfaces.size == 1 && surfaces.values.single().x == null)
             }
             val hostControls = validateTool(ToolValidationCategory.FIELDS,
-                ToolValidationDetails("host_controls", "$.hostControls", "Boolean playback and unique declared movement surface IDs", "invalid controls")) {
+                ToolValidationDetails("host_controls", "$.hostControls", "Boolean playback", "invalid controls")) {
                 if (j.has("hostControls")) ArtifactHostControls.parse(j.getJSONObject("hostControls"), surfaces.keys)
                 else ArtifactHostControls()
             }

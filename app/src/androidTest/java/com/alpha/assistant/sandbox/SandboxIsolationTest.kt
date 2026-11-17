@@ -108,7 +108,7 @@ class SandboxIsolationTest {
         assertEquals(500L,SandboxContract.EVALUATION_MS)
         val source="const until=Date.now()+40;while(Date.now()<until){};return {state:input.state};"
         val events=listOf(GraphicsContract.event("frame",16),GraphicsContract.event("pointer",x=1.0,y=1.0,phase="down"),
-            GraphicsContract.event("control",direction="left"),JSONObject().put("type","timer").put("timerId","clock"))
+            GraphicsContract.event("pointer",x=2.0,y=2.0,phase="move"),JSONObject().put("type","timer").put("timerId","clock"))
         val graphics=GraphicsSession(context)
         try {
             assertEquals("OK",graphics.open(source,"{\"count\":1}").status)

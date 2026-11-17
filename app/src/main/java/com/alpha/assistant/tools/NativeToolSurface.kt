@@ -324,10 +324,6 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
             Text(stringResource(R.string.retry))
         }
     }
-    val movementSurfaces = spec.surfaces.values.filter { it.id in spec.hostControls.movement }
-    val movementControls: @Composable (Modifier,ToolSurface) -> Unit = {modifier,surface ->
-        for(direction in listOf("left","right"))Button(onClick={enqueue(GraphicsContract.event("control",direction=direction,surfaceId=surface.id))},enabled=enabled && !covered && error==null,modifier=modifier.heightIn(min=48.dp),contentPadding=PaddingValues(horizontal=8.dp)) {Text(stringResource(if(direction == "left") R.string.tool_game_left else R.string.tool_game_right))}
-    }
     val showControls = stringResource(R.string.tool_game_controls_open)
     val gameControls = stringResource(R.string.tool_game_controls)
     if(immersive) Box(Modifier.fillMaxSize()) {
@@ -343,12 +339,7 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
                 topControls()
                 val failure = error
                 if (failure != null) recovery(failure)
-                else {
-                    if (movementSurfaces.isNotEmpty()) FlowRow(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(4.dp)) {
-                        for(surface in movementSurfaces)movementControls(Modifier.widthIn(min=48.dp),surface)
-                    }
-                    if (spec.hostControls.playback) playbackControls()
-                }
+                else if (spec.hostControls.playback) playbackControls()
             }
         }
     } else {
@@ -357,7 +348,6 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
             val failure = error
             if (failure != null) recovery(failure)
             else {
-                for(surface in movementSurfaces)Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {movementControls(Modifier.weight(1f),surface)}
                 if (spec.hostControls.playback) {
                     val (icon, label) = when(snapshot?.playback) {
                         "ready" -> Glyph.Check to R.string.tool_game_ready

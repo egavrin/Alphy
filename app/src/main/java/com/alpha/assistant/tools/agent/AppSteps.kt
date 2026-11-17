@@ -25,7 +25,6 @@ internal interface AppTarget {
     val requested: List<String>
     /** Sends a control event. [payload] is already in the control's wire shape. */
     suspend fun control(id: String, payload: Any?)
-    suspend fun control(surfaceId: String, direction: String)
     suspend fun playback(type: String)
     /** Pointer down at the first point, a move at each middle point, and up at the last point. Points are fractions. */
     suspend fun pointer(surfaceId: String, path: List<Pair<Double, Double>>)
@@ -45,7 +44,6 @@ internal sealed interface AppStep {
     data class Pointer(val surface: String, val x: Double, val y: Double) : AppStep
     data class Drag(val surface: String, val from: Pair<Double, Double>, val to: Pair<Double, Double>) : AppStep
     data class Tilt(val x: Double, val y: Double) : AppStep
-    data class Move(val surface: String, val direction: String) : AppStep
     data class Playback(val event: String) : AppStep
     data class Wait(val milliseconds: Long) : AppStep
     /** A raw control event from a host smoke replay. The model cannot write this step. */
@@ -98,9 +96,6 @@ internal object AppSteps {
             step.has("pointer") -> AppStep.Pointer(string("pointer"), number("x").also { require01(it, "x") }, number("y").also { require01(it, "y") })
             step.has("drag") -> AppStep.Drag(string("drag"), pair("from", 0.0..1.0, true), pair("to", 0.0..1.0, true))
             step.has("tilt") -> pair("tilt", -20.0..20.0, false).let { (x, y) -> AppStep.Tilt(x, y) }
-            step.has("move") -> AppStep.Move(string("move"), string("direction").also {
-                if (it !in setOf("left", "right")) throw AppStepError("direction must be left or right.")
-            })
             step.has("playback") -> AppStep.Playback(string("playback").also {
                 if (it !in setOf("start", "pause", "resume", "restart")) throw AppStepError("playback must be start, pause, resume, or restart.")
             })
@@ -117,7 +112,7 @@ internal object AppSteps {
                 "effect" -> AppStep.Expect(kind, string("capability"), null, null)
                 else -> throw AppStepError("expect must be text, absent, value, enabled, disabled, or effect.")
             }
-            else -> throw AppStepError("Use one of tap, set, pointer, drag, tilt, move, playback, wait, or expect.")
+            else -> throw AppStepError("Use one of tap, set, pointer, drag, tilt, playback, wait, or expect.")
         }
     }
 
@@ -188,10 +183,6 @@ internal object AppSteps {
             } + listOf(to)); null
         }
         is AppStep.Tilt -> { probe.tilt(step.x, step.y); null }
-        is AppStep.Move -> {
-            if (step.surface !in probe.surfaceIds) throw AppStepError("No drawing surface ${step.surface}.")
-            probe.control(step.surface, step.direction); null
-        }
         is AppStep.Playback -> { probe.playback(step.event); null }
         is AppStep.Wait -> { probe.wait(step.milliseconds); null }
         is AppStep.Event -> { probe.control(step.id, step.payload); null }
@@ -313,7 +304,6 @@ internal object AppSteps {
         is AppStep.Pointer -> "pointer on ${step.surface} at ${step.x}, ${step.y}"
         is AppStep.Drag -> "drag on ${step.surface} from ${step.from.first}, ${step.from.second} to ${step.to.first}, ${step.to.second}"
         is AppStep.Tilt -> "tilt ${step.x}, ${step.y}"
-        is AppStep.Move -> "move ${step.direction} on ${step.surface}"
         is AppStep.Playback -> "playback ${step.event}"
         is AppStep.Wait -> "wait ${step.milliseconds} ms"
         is AppStep.Event -> "control ${step.id} with ${JSONObject.wrap(step.payload)}"

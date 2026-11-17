@@ -43,11 +43,10 @@ object GraphicsContract {
         }
         return ToolSurface(o.getString("id"),o.getInt("width"),o.getInt("height"),if(positioned)o.getInt("x") else null,if(positioned)o.getInt("y") else null,o.optString("sizing","fixed"))
     }
-    fun event(type: String,dt: Int = 0,x: Double = 0.0,y: Double = 0.0,phase: String = "move",direction: String = "left",pointer: Int = 0,surfaceId: String = "main"): JSONObject =
+    fun event(type: String,dt: Int = 0,x: Double = 0.0,y: Double = 0.0,phase: String = "move",pointer: Int = 0,surfaceId: String = "main"): JSONObject =
         JSONObject().put("type",type).apply {when(type) {
             "frame" -> {put("dt",dt);put("surfaceId",surfaceId)}
             "pointer" -> {put("surfaceId",surfaceId);put("x",x);put("y",y);put("phase",phase);put("pointer",pointer)}
-            "control" -> {put("surfaceId",surfaceId);put("direction",direction)}
             "start","pause","resume","restart","stop" -> put("surfaceId",surfaceId)
         }}.also(::validateEvent)
     /** One accelerometer sample in display-aligned m/s². */
@@ -72,7 +71,6 @@ object GraphicsContract {
             "viewport" -> {require(o.get("width") is Int && o.getInt("width") in 64..2048 && o.get("height") is Int && o.getInt("height") in 64..2048);setOf("type","surfaceId","width","height")}
             "frame" -> {require(o.get("dt") is Int);number(o,"dt",0.0,50.0);setOf("type","surfaceId","dt")}
             "pointer" -> {number(o,"x",0.0,2048.0);number(o,"y",0.0,2048.0);require(o.get("pointer") is Int && o.getInt("pointer") in 0..1);require(o.get("phase") in setOf("down","move","up","cancel"));setOf("type","surfaceId","x","y","phase","pointer")}
-            "control" -> {require(o.get("direction") in setOf("left","right"));setOf("type","surfaceId","direction")}
             "sensor" -> {
                 require(o.get("sensor") == "accelerometer")
                 for (key in listOf("sequence", "timestampMillis")) {

@@ -146,7 +146,7 @@ class SharedArtifactWorkflowTest {
         fixture {store,engine,initial ->
             val source="""
                 const s=input.state,e=input.event;
-                if(e.type==='control')s.count++;
+                if(e.type==='pointer')s.count++;
                 const result={state:s,frames:['left']};
                 if(s.count===1)result.playback='paused';
                 if(s.count===3)result.playback='playing';
@@ -156,11 +156,11 @@ class SharedArtifactWorkflowTest {
             assertEquals("playing",engine.openArtifact(tool).playback)
             assertEquals("paused",engine.artifactEvent(tool.id,1,GraphicsContract.event("pause",surfaceId="left")).playback)
             assertEquals("playing",engine.artifactEvent(tool.id,1,GraphicsContract.event("restart",surfaceId="left")).playback)
-            assertEquals("paused",engine.artifactEvent(tool.id,1,GraphicsContract.event("control",surfaceId="left")).playback)
+            assertEquals("paused",engine.artifactEvent(tool.id,1,GraphicsContract.event("pointer",x=1.0,y=1.0,phase="down",surfaceId="left")).playback)
             assertEquals("paused",engine.artifactEvent(tool.id,1,GraphicsContract.event("resume",surfaceId="left")).playback)
-            assertEquals("paused",engine.artifactEvent(tool.id,1,GraphicsContract.event("control",surfaceId="left")).playback)
+            assertEquals("paused",engine.artifactEvent(tool.id,1,GraphicsContract.event("pointer",x=1.0,y=1.0,phase="down",surfaceId="left")).playback)
             assertEquals("paused",engine.artifactEvent(tool.id,1,GraphicsContract.event("restart",surfaceId="left")).playback)
-            assertEquals("playing",engine.artifactEvent(tool.id,1,GraphicsContract.event("control",surfaceId="left")).playback)
+            assertEquals("playing",engine.artifactEvent(tool.id,1,GraphicsContract.event("pointer",x=1.0,y=1.0,phase="down",surfaceId="left")).playback)
         }
         fixture {store,engine,initial ->
             val source="""

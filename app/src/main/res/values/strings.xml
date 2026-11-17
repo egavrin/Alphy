@@ -394,8 +394,6 @@
     <string name="tool_game_pause">Пауза</string>
     <string name="tool_game_resume">Продолжить</string>
     <string name="tool_game_restart">Сначала</string>
-    <string name="tool_game_left">Влево</string>
-    <string name="tool_game_right">Вправо</string>
     <string name="tool_game_ready">Игра готова</string>
     <string name="tool_game_playing">Игра идёт</string>
     <string name="tool_game_paused">Игра на паузе</string>

@@ -63,8 +63,6 @@ class RequestGameplayWorkflowTest {
         suspend fun advance(ms: Int) { repeat(ms / 50) { frame(50) } }
         suspend fun pointer(x: Double, y: Double, phase: String = "down") =
             send(GraphicsContract.event("pointer", x = x, y = y, phase = phase, surfaceId = surfaceId))
-        suspend fun move(direction: String) =
-            send(GraphicsContract.event("control", direction = direction, surfaceId = surfaceId))
         suspend fun speed(value: Double) = send(JSONObject().put("type", "action").put("actionId", "speed").put("value", value))
 
         fun boundValue(node: JSONObject) = ToolUiCatalog.value(JSONObject(result.state), node.getString("bind"))
@@ -129,19 +127,19 @@ class RequestGameplayWorkflowTest {
         assertEquals(228.0, commands("roundRect").single().getDouble("x") + 22.0, 0.0)
         advance(700)
         assertTrue("Catch awards exactly one point", "Очки: 1 · Промахи: 1" in labels())
-        move("left")
+        pointer(140.0, 200.0)
         assertEquals(140.0, commands("roundRect").single().getDouble("x") + 22.0, 0.0)
         advance(700)
         assertTrue("Second catch increases the score", "Очки: 2 · Промахи: 1" in labels())
-        move("left")
+        pointer(52.0, 200.0)
         advance(700)
         assertTrue("Third catch wins", "Вы победили!" in labels())
         assertTrue("Final score remains visible", "Очки: 3 · Промахи: 1" in labels())
         assertEquals("ended", result.playback)
         assertEquals(emptySet<String>(), result.frames)
         val won = drawing()
-        move("right")
-        assertEquals("Movement does not change a finished board", won, drawing())
+        pointer(228.0, 200.0)
+        assertEquals("Touch does not change a finished board", won, drawing())
 
         lifecycle("restart")
         assertEquals("ready", result.playback)
@@ -177,8 +175,6 @@ class RequestGameplayWorkflowTest {
         assertMoon("Higher speed advances the moon farther", 0.4)
         pointer(140.0, 190.0)
         assertMoon("Pointer selects the lower point on the orbit", Math.PI / 2)
-        move("right")
-        assertMoon("Native movement also positions the moon", 2 * Math.PI / 3)
         lifecycle("pause")
         assertEquals("paused", result.playback)
         assertEquals(emptySet<String>(), result.frames)

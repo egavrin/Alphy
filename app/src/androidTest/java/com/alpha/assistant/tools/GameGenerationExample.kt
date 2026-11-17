@@ -6,14 +6,14 @@ import org.json.JSONObject
 /** Executable offline workflow fixture for continuous motion. */
 internal object GameGenerationExample {
     fun spec():String=JSONObject().put("formatVersion",3).put("title","Neon Arkanoid")
-        .put("description","Break 30 bricks across five rows. Drag anywhere to move the paddle, or use the native Left and Right controls. Three lives, one board, no device access.")
+        .put("description","Break 30 bricks across five rows. Drag anywhere to move the paddle, or use the Left and Right buttons. Three lives, one board, no device access.")
         .put("capabilities",JSONArray()).put("presentation",JSONObject("""{"mode":"immersive"}"""))
-        .put("hostControls", JSONObject("""{"playback":true,"movement":["main"]}"""))
+        .put("hostControls", JSONObject("""{"playback":true}"""))
         .put("surfaces",JSONArray("""[{"id":"main","width":360,"height":640,"sizing":"viewport"}]"""))
         .put("stateSchema",JSONObject("""{"width":"number","height":"number","paddle":"number","x":"number","y":"number","vx":"number","vy":"number","score":"number","lives":"number","status":"string","message":"string","bricks":{"type":"array","maxItems":30,"items":"boolean"}}"""))
         .put("initialState",JSONObject().put("width",360).put("height",640).put("paddle",0.5).put("x",0.5).put("y",0.84)
             .put("vx",0.34).put("vy",-0.72).put("score",0).put("lives",3).put("status","ready")
-            .put("message","Ready. Drag anywhere to move. Native Left and Right controls also move the paddle. Break all 30 bricks.")
+            .put("message","Ready. Drag anywhere to move. The Left and Right buttons also move the paddle. Break all 30 bricks.")
             .put("bricks",JSONArray().apply {repeat(30) {put(true)}}))
         .put("ui",JSONObject("""{"type":"column","children":[{"type":"text","text":"Game status","bind":"message"},{"type":"text","text":"Score","bind":"score"},{"type":"text","text":"Lives","bind":"lives"},{"type":"text","text":"Drag anywhere to move the paddle. Left and Right provide accessible movement. Pause, Resume, and Restart use the same saved game."},{"type":"row","children":[{"type":"button","text":"Left","action":"left"},{"type":"button","text":"Right","action":"right"}]},{"type":"row","children":[{"type":"button","text":"Start","action":"start"},{"type":"button","text":"Pause","action":"pause"},{"type":"button","text":"Resume","action":"resume"},{"type":"button","text":"Restart","action":"restart"}]}]}"""))
         .put("source","""
@@ -30,7 +30,6 @@ internal object GameGenerationExample {
             if((a==='start'&&s.status==='ready')||(a==='resume'&&s.status==='paused'))s.status='playing';
             if((a==='pause'||a==='stop')&&s.status==='playing')s.status='paused';
             if(a==='left'||a==='right')s.paddle=clamp(s.paddle+(a==='left'?-0.08:0.08));
-            if(e.type==='control')s.paddle=clamp(s.paddle+(e.direction==='left'?-0.08:0.08));
             if(e.type==='pointer'&&(e.phase==='down'||e.phase==='move'))s.paddle=clamp(e.x/W);
             if(e.type==='frame'&&s.status==='playing'){
               for(let ms=e.dt;ms>0&&s.status==='playing';ms-=5){
@@ -66,7 +65,7 @@ internal object GameGenerationExample {
               }
             }
             if(e.type!=='preview'&&e.type!=='render'){
-              const messages={ready:'Ready. Drag anywhere to move. Native Left and Right controls also move the paddle. Break all 30 bricks.',
+              const messages={ready:'Ready. Drag anywhere to move. The Left and Right buttons also move the paddle. Break all 30 bricks.',
                 playing:'Playing. Drag anywhere or use Left and Right.',paused:'Paused. Use Resume to continue.',
                 won:'Board cleared. You won! Use Restart to play again.',gameOver:'Game over. Use Restart for a new board.'};
               s.message=messages[s.status]+' Score '+s.score+'. Lives '+s.lives+'.';
@@ -95,7 +94,7 @@ internal object GameGenerationExample {
               commands.push({type:'roundRect',x:cx,y:cy,width:cw,height:u*0.24,radius:u*0.025,color:'#ED122139'},
                 {type:'text',x:cx+u*0.035,y:cy+u*0.078,size:u*0.051,text:titles[s.status],color:'#E6F3FF'},
                 {type:'text',x:cx+u*0.035,y:cy+u*0.14,size:u*0.031,text:details[s.status],color:'#B4C8E2'},
-                {type:'text',x:cx+u*0.035,y:cy+u*0.195,size:u*0.026,text:'Native Left / Right also move the paddle.',color:'#90ABC9'});
+                {type:'text',x:cx+u*0.035,y:cy+u*0.195,size:u*0.026,text:'Left / Right buttons also move the paddle.',color:'#90ABC9'});
             }
             return {state:s,playback:s.status==='won'||s.status==='gameOver'?'ended':s.status,
               surfaces:{main:{commands}},frames:s.status==='playing'?['main']:[]};

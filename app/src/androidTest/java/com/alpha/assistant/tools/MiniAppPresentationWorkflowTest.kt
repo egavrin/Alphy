@@ -1051,8 +1051,7 @@ class MiniAppPresentationWorkflowTest {
             val raw=assets.open("runtime-replay/$file").bufferedReader().use {it.readText()}
             val definition=JSONObject(raw)
             val ids=definition.getJSONArray("surfaces")
-            val movement=JSONArray().put(ids.getJSONObject(0).getString("id"))
-            definition.put("hostControls",JSONObject().put("playback",true).put("movement",movement))
+            definition.put("hostControls",JSONObject().put("playback",true))
             fixture(specJson=definition.toString()) {_,store,scenario ->
                 diagnostics.state={"replay=$file state="+store.tool("lake")?.state}
                 fun state()=JSONObject(store.tool("lake")!!.state)
@@ -1076,8 +1075,6 @@ class MiniAppPresentationWorkflowTest {
                 assertEquals("$file orientation=$orientation full-window canvas",window,bounds)
                 click("Сначала");shown("Пауза")
                 click("Пауза");shown("Продолжить")
-                click("Влево");waitUntil {state().getDouble("paddle")<0.49}
-                click("Вправо");waitUntil {kotlin.math.abs(state().getDouble("paddle")-0.5)<0.03}
                 click("Управление мини-приложением")
                 shown(definition.getJSONObject("ui").getJSONArray("children").getJSONObject(0).getString("text")+": "+state().getString("message"))
                 waitUntil("App controls sheet did not settle") {offersExpand()}
@@ -1227,11 +1224,9 @@ class MiniAppPresentationWorkflowTest {
         shown("Игра идёт")
         click("Пауза")
         shown("Игра на паузе")
-        click("Вправо");paddle(156)
-        val before=store.tool("lake")!!;assertTrue(before.stateVersion>=1)
+        val before=store.tool("lake")!!
         ToolSpec.parsePersisted(before.spec).validateState(before.state)
         assertNull("Protocol 3 saves validated state without a checkpoint button",find("Save score"))
-        click("Влево");paddle(128)
         click("Продолжить");shown("Игра идёт")
         val node=checkNotNull(surface());node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
         automation.waitForIdle(100,3000)
@@ -1334,7 +1329,7 @@ class MiniAppPresentationWorkflowTest {
             .put("initialState",JSONObject("""{"last":"none","phase":"none","x":0,"downs":0,"cancels":0,"ticks":0,"firstDt":0,"resumed":false}"""))
             .put("ui",JSONObject("""{"type":"text","text":"Last surface","bind":"last"}"""))
             .put("surfaces",JSONArray("""[{"id":"back","width":320,"height":240,"x":0,"y":0},{"id":"front","width":160,"height":120,"x":80,"y":60}]"""))
-            .put("hostControls", JSONObject("""{"playback":true,"movement":["front"]}"""))
+            .put("hostControls", JSONObject("""{"playback":true}"""))
             .put("source","""
                 const s=input.state,e=input.event;
                 if(e.type==='pointer') {
@@ -1342,7 +1337,6 @@ class MiniAppPresentationWorkflowTest {
                     if(e.phase==='down')s.downs++;
                     if(e.phase==='cancel')s.cancels++;
                 }
-                if(e.type==='control')s.last=e.surfaceId;
                 if(e.type==='resume')s.resumed=true;
                 if(e.type==='frame') {s.ticks++;if(s.resumed){s.firstDt=e.dt;s.resumed=false;}}
                 return {state:s,frames:['back'],surfaces:{
@@ -1383,7 +1377,6 @@ class MiniAppPresentationWorkflowTest {
             waitUntil {state().getInt("cancels")==1}
             touch(android.view.MotionEvent.ACTION_UP,10f,10f)
             shown("Игра на паузе");screenshot("positioned-surfaces-paused")
-            click("Влево");waitUntil { state().getString("last") == "front" }
             click("Продолжить");shown("Игра идёт")
             waitUntil {state().getInt("firstDt")==0 && !state().getBoolean("resumed")}
             waitUntil {com.alpha.assistant.sandbox.SurfaceFrameMetrics.snapshot()?.frameCommits?.let {it>0}==true}
