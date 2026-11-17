@@ -42,11 +42,17 @@ internal fun surfaceLabels(commands: JSONArray,availableImages: Set<String> = em
     visit(commands)
 }
 
-/** The box that a text command covers, in surface coordinates. [paint] takes the text size. */
-internal fun surfaceTextBox(c: JSONObject,paint: Paint): RectF {
+/** Where a text command draws: the left end of its baseline and its box, in surface coordinates. */
+internal class SurfaceTextPlace(val x: Float,val baseline: Float,val box: RectF)
+
+/** Align moves the anchor x to the start, center, or end of the text. Baseline moves the anchor y. [paint] takes the text size. */
+internal fun surfaceTextPlace(c: JSONObject,paint: Paint): SurfaceTextPlace {
     paint.textSize=c.getDouble("size").toFloat()
-    val x=c.getDouble("x").toFloat();val y=c.getDouble("y").toFloat()
-    return RectF(x,y+paint.ascent(),x+paint.measureText(c.getString("text")),y+paint.descent())
+    val width=paint.measureText(c.getString("text"))
+    val x=c.getDouble("x").toFloat().let {when(c.optString("align")) {"center" -> it-width/2;"end" -> it-width;else -> it}}
+    val y=c.getDouble("y").toFloat()
+    val baseline=when(c.optString("baseline")) {"middle" -> y-(paint.ascent()+paint.descent())/2;"top" -> y-paint.ascent();else -> y}
+    return SurfaceTextPlace(x,baseline,RectF(x,baseline+paint.ascent(),x+width,baseline+paint.descent()))
 }
 
 /** The boxes of the text commands outside transformed groups, in surface coordinates. */
@@ -56,7 +62,7 @@ internal fun surfaceTextBoxes(commands: JSONArray): List<RectF> = buildList {
         repeat(array.length()) {index ->
             val command=array.getJSONObject(index)
             when(command.getString("type")) {
-                "text" -> add(surfaceTextBox(command,paint))
+                "text" -> add(surfaceTextPlace(command,paint).box)
                 "group" -> if(!command.has("transform")) visit(command.getJSONArray("children"))
             }
         }
@@ -206,7 +212,7 @@ private fun drawSurface(canvas: Canvas,commands: JSONArray,roleColors: Map<Strin
                 if(c.has("stroke")) {paint.style=Paint.Style.STROKE;paint.strokeWidth=f("stroke")}
                 canvas.drawPath(path,paint)
             }
-            "text" -> {paint.textSize=f("size");canvas.drawText(c.getString("text"),f("x"),f("y"),paint)}
+            "text" -> {val place=surfaceTextPlace(c,paint);canvas.drawText(c.getString("text"),place.x,place.baseline,paint)}
         }
     }
 }

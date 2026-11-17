@@ -211,7 +211,10 @@ object GraphicsContract {
                         if(c.has("stroke"))number(c,"stroke",0.1,128.0)
                         setOf("type","segments")+(if(c.has("stroke"))setOf("stroke") else emptySet())
                     }
-                    "text" -> {point(number(c,"x"),number(c,"y"),m);number(c,"size",1.0,128.0);require(c.get("text") is String);budget.chars+=c.getString("text").length;require(budget.chars<=2048);setOf("type","x","y","size","text")}
+                    "text" -> {point(number(c,"x"),number(c,"y"),m);number(c,"size",1.0,128.0);require(c.get("text") is String);budget.chars+=c.getString("text").length;require(budget.chars<=2048)
+                        if(c.has("align"))require((c.get("align") as? String) in setOf("start","center","end"))
+                        if(c.has("baseline"))require((c.get("baseline") as? String) in setOf("alphabetic","middle","top"))
+                        setOf("type","x","y","size","text")+setOf("align","baseline").filter(c::has)}
                     else -> error("Unsupported drawing command")
                 }
                 fields(c,fields+paint(c,m),commandPath)
