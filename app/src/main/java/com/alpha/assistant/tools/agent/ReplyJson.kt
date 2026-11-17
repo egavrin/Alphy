@@ -4,7 +4,7 @@ package com.alpha.assistant.tools.agent
 internal object ReplyJson {
     data class Opener(val index: Int, val bracket: Char, val excerpt: String)
 
-    private class Scan(val open: List<Int>, val inString: Boolean, val mismatch: Boolean)
+    private class Scan(val open: List<Int>, val inString: Boolean, val mismatch: Char?)
 
     private fun scan(text: String): Scan {
         val open = ArrayList<Int>()
@@ -17,26 +17,28 @@ internal object ReplyJson {
                 c == '"' -> inString = true
                 c == '{' || c == '[' -> open.add(i)
                 c == '}' || c == ']' -> {
-                    if (open.isEmpty() || text[open.last()] != if (c == '}') '{' else '[') return Scan(open, false, true)
+                    if (open.isEmpty() || text[open.last()] != if (c == '}') '{' else '[') return Scan(open, false, c)
                     open.removeAt(open.lastIndex)
                 }
             }
         }
-        return Scan(open, inString, false)
+        return Scan(open, inString, null)
     }
 
     /** The closers that complete [text], or null when a string is open, a closer mismatches, or nothing is missing. */
     fun closers(text: String): String? {
         val scan = scan(text)
-        if (scan.inString || scan.mismatch || scan.open.isEmpty()) return null
+        if (scan.inString || scan.mismatch != null || scan.open.isEmpty()) return null
         return scan.open.reversed().joinToString("") { if (text[it] == '{') "}" else "]" }
     }
 
-    /** The innermost opener still open at the first mismatched closer, or at the end of the text. Null when the text ends inside a string. */
+    /**
+     * The array that a `}` closes by mistake. This is the one fault whose parser position is far from the cause.
+     * Null for every other fault, so the parser position applies.
+     */
     fun unclosedOpener(text: String): Opener? {
         val scan = scan(text)
-        if (scan.inString) return null
-        val index = scan.open.lastOrNull() ?: return null
+        val index = scan.open.lastOrNull()?.takeIf { scan.mismatch == '}' } ?: return null
         return Opener(index, text[index], text.substring(maxOf(0, index - 39), index + 1))
     }
 }

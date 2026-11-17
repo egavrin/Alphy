@@ -322,6 +322,7 @@ class AgentGenerationWorkflowTest {
         assertEquals("}", ReplyJson.closers("""{"text":"[1] {name}""""))
         assertNull(ReplyJson.closers("""{"text":"open"""))
         assertNull(ReplyJson.closers("""{"a":[1}"""))
+        assertEquals("}", ReplyJson.closers("""{"a":"say \"]\" now""""))
     }
 
     @Test fun anAutoClosedReplyStillGetsValidation(): Unit = runBlocking {
@@ -338,6 +339,15 @@ class AgentGenerationWorkflowTest {
         val feedback = provider.feedback(2)
         assertFalse(feedback, feedback.contains("no closing"))
         assertTrue(feedback, feedback.contains("Unterminated string"))
+    }
+
+    // Failure case: an extra closer far from the fault was reported as a missing closer of an outer object.
+    @Test fun anExtraCloserGetsThePositionFeedback(): Unit = runBlocking {
+        val provider = AgentScriptProvider(writeAppReply(tipApp()), """{"tool":"run","steps":[{"set":"bill","value":80}]]}""", finish(splitCheck))
+        generate(provider)
+        val feedback = provider.feedback(2)
+        assertTrue(feedback, feedback.contains("at character"))
+        assertFalse(feedback, feedback.contains("no closing"))
     }
 
     @Test fun finishNeedsAnExpectationAfterTheLastOperation(): Unit = runBlocking {
