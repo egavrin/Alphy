@@ -285,12 +285,12 @@ internal class AppAgent(
 
         suspend fun handle(reply: JSONObject): Any {
             reply.optString("note").trim().takeIf { it.isNotEmpty() }?.let { note -> request.onNote?.invoke(note.take(160)) }
-            return when (val tool = reply.optString("tool")) {
+            return when (val tool = toolOf(reply)) {
                 "write_app" -> {
                     request.progress?.invoke(ToolGenerationProgress.COMPLETING)
                     if (request.testFix && !reproduced) throw Feedback(REPRODUCE_FIRST)
                     if (privateApp) throw Feedback(PRIVATE_EDIT)
-                    val app = objectArgument(reply, "app")
+                    val app = objectArgument(reply, "app").also { liftFinish(reply, it) }
                     draft = app
                     lastWriteIndex = history.lastIndex
                     draftMatchesLastWrite = true
@@ -584,6 +584,20 @@ internal class AppAgent(
             else -> return null
         })
         return reply
+    }
+
+    /** The tool of [reply]. Checks in an edit set belong to the reply, and an edit that only carries checks is a finish. */
+    private fun toolOf(reply: JSONObject): String {
+        val tool = reply.optString("tool")
+        if (tool != "edit_app") return tool
+        reply.optJSONObject("set")?.let { liftFinish(reply, it) }
+        val changes = (reply.optJSONObject("set")?.length() ?: 0) + (reply.optJSONArray("source_edits")?.length() ?: 0)
+        return if (changes == 0 && reply.has("checks")) "finish" else tool
+    }
+
+    // The model often nests the finish arguments in app or set. A rejection there costs a whole new app, so the host moves them up.
+    private fun liftFinish(reply: JSONObject, holder: JSONObject) {
+        for (key in listOf("checks", "summary")) holder.remove(key)?.let { if (!reply.has(key)) reply.put(key, it) }
     }
 
     private fun objectArgument(reply: JSONObject, name: String): JSONObject = when (val value = reply.opt(name)) {

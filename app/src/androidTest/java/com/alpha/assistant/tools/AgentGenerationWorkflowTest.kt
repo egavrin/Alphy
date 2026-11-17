@@ -72,12 +72,34 @@ class AgentGenerationWorkflowTest {
         assertTrue(provider.feedback(2), provider.feedback(2).contains("92"))
     }
 
+    private fun withFinish(reply: JSONObject) = reply.put("checks", splitCheck).put("summary", "The bill split is ready.")
+
+    /** Generates with [replies] and asserts that the app with [title] is accepted after the last reply. */
+    private suspend fun assertFinishes(title: String, vararg replies: String) {
+        val provider = AgentScriptProvider(*replies)
+        assertEquals(title, generate(provider).spec.title)
+        assertEquals(replies.size, provider.calls.size)
+    }
+
     // Failure case: a passing first version still cost a second model call only to send finish.
     @Test fun aWriteWithPassingChecksFinishesInOneCall(): Unit = runBlocking {
-        val provider = AgentScriptProvider(JSONObject(writeAppReply(tipApp())).put("checks", splitCheck)
-            .put("summary", "The bill split is ready.").toString())
-        assertEquals("Bill split", generate(provider).spec.title)
-        assertEquals(1, provider.calls.size)
+        assertFinishes("Bill split", withFinish(JSONObject(writeAppReply(tipApp()))).toString())
+    }
+
+    // Failure case: the model put checks and summary inside app, and the whole app came back as rejected.
+    @Test fun checksInsideTheAppStillFinishInOneCall(): Unit = runBlocking {
+        assertFinishes("Bill split", writeAppReply(withFinish(tipApp())))
+    }
+
+    // Failure case: checks in an edit set were rejected as a field that set cannot change.
+    @Test fun checksInsideAnEditSetRunAfterTheEdit(): Unit = runBlocking {
+        val edit = JSONObject().put("tool", "edit_app").put("set", withFinish(JSONObject().put("title", "Tip split")))
+        assertFinishes("Tip split", writeAppReply(tipApp()), edit.toString())
+    }
+
+    // Failure case: an edit with only new checks was rejected because it changed nothing.
+    @Test fun anEditWithOnlyChecksRunsThem(): Unit = runBlocking {
+        assertFinishes("Bill split", writeAppReply(tipApp()), withFinish(JSONObject().put("tool", "edit_app")).toString())
     }
 
     @Test fun aWriteWithFailingChecksKeepsTheVersionAndNamesTheCheck(): Unit = runBlocking {
