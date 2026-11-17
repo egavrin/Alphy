@@ -2,6 +2,9 @@ package com.alpha.assistant.ui
 
 import android.content.res.Resources
 import android.util.Log
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.core.app.ActivityScenario
 import com.alpha.assistant.R
 import com.alpha.assistant.data.Attachment
@@ -260,13 +263,21 @@ class DesktopWorkflowTest {
         }
     }
 
-    // The node is min(620 dp, root width) wide, and its left and right margins in the root are equal.
+    // The shell pads by the system bars and the display cutout (b94b351). The node is min(620 dp, safe width) wide,
+    // and its left and right margins inside that padding are equal.
     private fun assertCentered(scenario: ActivityScenario<*>, tag: String) {
         val (bounds, rootWidth) = robot.composedBounds(scenario, tag)
-        val width = minOf(620 * robot.instrumentation.targetContext.resources.displayMetrics.density, rootWidth.toFloat())
-        val right = rootWidth - bounds.right
-        Log.i("DesktopWorkflowTest", "tag=$tag bounds=$bounds rootWidth=$rootWidth expectedWidth=$width left=${bounds.left} right=$right")
+        var insets = Insets.NONE
+        scenario.onActivity { activity ->
+            insets = checkNotNull(ViewCompat.getRootWindowInsets(activity.window.decorView))
+                .getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+        }
+        val safeWidth = rootWidth - insets.left - insets.right
+        val width = minOf(620 * robot.instrumentation.targetContext.resources.displayMetrics.density, safeWidth.toFloat())
+        val left = bounds.left - insets.left
+        val right = rootWidth - insets.right - bounds.right
+        Log.i("DesktopWorkflowTest", "tag=$tag bounds=$bounds rootWidth=$rootWidth insets=$insets expectedWidth=$width left=$left right=$right")
         assertEquals("Width of $tag", width, bounds.width().toFloat(), 1f)
-        assertEquals("Margins of $tag", bounds.left.toFloat(), right.toFloat(), 1f)
+        assertEquals("Margins of $tag", left.toFloat(), right.toFloat(), 1f)
     }
 }

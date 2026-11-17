@@ -40,6 +40,7 @@ import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -49,6 +50,7 @@ class ThreeSceneWorkflowTest {
     private val context get() = instrumentation.targetContext
 
     @Test fun texturedWorkerChecksActualSurfaceDrawAndLaterBindingChanges() = runBlocking {
+        assumeTrue("This device has no qualified WebView for 3D scenes", ThreeSceneWebView.available())
         val png = java.io.ByteArrayOutputStream().use { bytes ->
             val bitmap = Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888)
             try {
@@ -270,6 +272,7 @@ class ThreeSceneWorkflowTest {
     }
 
     @Test fun webViewSerializesLargeReadsWithinTheTransferBudget() = runBlocking {
+        assumeTrue("This device has no qualified WebView for 3D scenes", ThreeSceneWebView.available())
         val bytes = 33 * 1024 * 1024
         val opens = AtomicInteger()
         val inFlight = AtomicInteger()

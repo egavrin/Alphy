@@ -18,12 +18,15 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
+import com.alpha.assistant.ui.VisibleSemanticRuntime
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
 class AgentWorkflowTest {
+    @get:Rule val semantic = VisibleSemanticRuntime()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private val initialTime = 1893485700000L
 

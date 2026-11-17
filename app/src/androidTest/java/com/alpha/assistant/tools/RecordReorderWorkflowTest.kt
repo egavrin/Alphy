@@ -41,11 +41,9 @@ class RecordReorderWorkflowTest {
                 awaitOrder(tools, fixture, listOf("a", "b", "c"))
                 assertEquals(initial.stateVersion + 2, checkNotNull(tools.tool("order")).stateVersion)
 
+                // Back returns to the chat that opened the app (f8373d3). Its card opens the saved app again.
                 robot.back()
-                robot.waitFor(robot.text(R.string.tool_library_content))
-                val title = ToolSpec.parsePersisted(initial.spec).title
-                robot.reveal(title)
-                robot.click(title)
+                robot.click(robot.text(R.string.tool_open))
                 robot.waitFor(alpha)
                 assertTrue("The saved order appears again", robot.bounds(alpha).centerY() < robot.bounds(beta).centerY())
                 assertEquals(listOf("a", "b", "c"), order(checkNotNull(tools.tool("order"))))

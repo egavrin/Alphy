@@ -7,11 +7,14 @@ import android.app.appsearch.SetSchemaRequest
 import android.app.appsearch.SetSchemaResponse
 import android.content.Context
 import android.util.Log
+import androidx.test.platform.app.InstrumentationRegistry
+import com.alpha.assistant.semantic.SemanticRuntime
 import com.alpha.assistant.semantic.semanticRevision
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 import java.util.function.Consumer
+import org.junit.rules.ExternalResource
 
 /**
  * Removes the semantic indexes that a fixture opened. Each index is one AppSearch database that the platform keeps after the test.
@@ -43,3 +46,13 @@ internal fun removeSemanticIndexes(context: Context, vararg indexes: String) {
 /** Removes the three indexes of a [ShellViewModel] on shell database [database]: HistorySearch, ToolController, and MemoryStore (their names are built in main code). */
 internal fun removeShellIndexes(context: Context, database: String) =
     removeSemanticIndexes(context, "history:$database", "apps:$database-tools.db", "memory:$database-memory.db")
+
+/**
+ * Counts one visible activity for each test, as [AlphyActivity] does in onStart and onStop.
+ * The runtime refuses work after the last activity stops, so without this rule a test without UI fails after any test with UI.
+ */
+class VisibleSemanticRuntime : ExternalResource() {
+    private val instrumentation = InstrumentationRegistry.getInstrumentation()
+    override fun before() = instrumentation.runOnMainSync { SemanticRuntime.activityStarted() }
+    override fun after() = instrumentation.runOnMainSync { SemanticRuntime.activityStopped() }
+}

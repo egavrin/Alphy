@@ -76,8 +76,9 @@ class ToolWorkflowTest {
             val numericBoundaries = listOf("null","2147483648","0","101").map {
                 objectSchema.replace("\"maxItems\":10,","\"maxItems\":$it,")
             }
+            // A reply that lacks only its closers is repaired (f6e0b06), so a truncated schema is not in this list.
             val candidates = numericBoundaries + invalidSchemas.map { JSONObject(objectSchema).put("stateSchema",JSONObject(it)).toString() } +
-                listOf("", "   ", "not JSON", objectSchema.dropLast(1), objectSchema + " trailing", "```json\n$objectSchema\n```", "[]")
+                listOf("", "   ", "not JSON", objectSchema + " trailing", "```json\n$objectSchema\n```", "[]")
             candidates.forEach { invalid ->
                 answer = invalid; rawInvalid = true; requests.clear()
                 val rejected = engine.createDraft("Invalid refinement",second.id)

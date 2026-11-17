@@ -10,6 +10,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
+import com.alpha.assistant.ui.VisibleSemanticRuntime
+import org.junit.Rule
 import org.junit.Test
 import java.io.File
 import java.util.UUID
@@ -20,6 +22,7 @@ import java.util.concurrent.TimeUnit.SECONDS
 import java.util.concurrent.TimeoutException
 
 class MemoryFoundationWorkflowTest {
+    @get:Rule val semantic = VisibleSemanticRuntime()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
     @Test

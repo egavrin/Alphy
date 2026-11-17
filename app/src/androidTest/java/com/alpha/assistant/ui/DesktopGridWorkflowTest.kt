@@ -225,6 +225,8 @@ class DesktopGridWorkflowTest {
             robot.waitUntil { count("steps") == 1 }
             click(R.string.tool_options)
             click(R.string.tool_chat)
+            // The app bar also has an «Изменить» button, so wait until the app has left the screen.
+            robot.waitGone(robot.text(R.string.tool_options))
 
             click(R.string.desktop_edit)
             val earlier = robot.text(R.string.desktop_move_earlier, "Steps counter")
@@ -268,6 +270,7 @@ class DesktopGridWorkflowTest {
             reveal("Glasses: 2")
             click(R.string.tool_options)
             click(R.string.tool_chat)
+            robot.waitGone(robot.text(R.string.tool_options))
             click(R.string.desktop_edit)
             click(R.string.desktop_remove_tile, "Steps counter")
             robot.waitGone(robot.text(R.string.desktop_done))
