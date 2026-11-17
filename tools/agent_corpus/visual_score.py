@@ -40,8 +40,8 @@ GAME_CONTROL_WORDS = [
     "влево", "вправо", "вверх", "вниз", "заново", "новая игра", "начать",
     "左", "右", "上", "下", "重新", "再来", "开始", "왼쪽", "오른쪽", "다시", "시작",
 ]
-# Gradient fill, object color, or a soft shadow: a black with alpha other than FF.
-DEPTH_SOURCE = re.compile(r"gradient\s*:|color\s*:\s*\{\s*type|#(?!ff)[0-9a-f]{2}000000", re.I)
+# Gradient fill, object color, or a soft shadow: a black with alpha below 80 (a game-over overlay is darker).
+DEPTH_SOURCE = re.compile(r"gradient\s*:|color\s*:\s*\{\s*type|#[0-7][0-9a-f]000000", re.I)
 HIGHER = ["hero", "picture", "immersive", "viewport", "depth", "tilt"]
 LOWER = ["fields", "rowFields", "nativeGameButtons"]
 
@@ -237,8 +237,10 @@ def self_test():
     lit = {"initialState": {}, "surfaces": [{"id": "board", "width": 300, "height": 300}], "ui": {"type": "column"},
            "source": "c.push({type:'circle',x:1,y:1,radius:2,gradient:{type:'radial',x:1,y:1,radius:2,stops:[]}})"}
     assert score_app(lit, ["game"])["depth"] == 1
-    lit["source"] = "c.push({type:'rect',color:'#FF000000'});c.push({type:'rect',color:'#80000000'})"
+    lit["source"] = "c.push({type:'rect',color:'#FF000000'});c.push({type:'rect',color:'#55000000'})"
     assert score_app(lit, ["game"])["depth"] == 1
+    lit["source"] = "c.push({type:'rect',color:'#B3000000'});c.push({type:'rect',color:'#C7000000'})"
+    assert score_app(lit, ["game"])["depth"] == 0
     lit["source"] = "c.push({type:'circle',x:1,y:1,radius:2,color:'#FF0000'});c.push({type:'rect',color:'#FF000000'})"
     assert score_app(lit, ["game"])["depth"] == 0
     lit["surfaces"] = []
