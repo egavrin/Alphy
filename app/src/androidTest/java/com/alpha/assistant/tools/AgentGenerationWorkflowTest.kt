@@ -11,11 +11,13 @@ import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.agent.AppAgentGuide
 import com.alpha.assistant.tools.agent.GenerationSettings
+import com.alpha.assistant.tools.agent.ReplyJson
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -300,6 +302,33 @@ class AgentGenerationWorkflowTest {
         val feedback = provider.feedback(2)
         assertTrue(feedback, feedback.contains("character"))
         assertFalse(feedback, feedback.contains("\"steps\""))
+    }
+
+    // Failure case: 4 of 9 invalid replies lacked only the last brace; each cost a full repair step.
+    @Test fun aReplyMissingItsLastBraceIsRead(): Unit = runBlocking {
+        assertFinishes("Bill split", withFinish(JSONObject(writeAppReply(tipApp()))).toString().dropLast(1))
+    }
+
+    // Failure case: the parser named character 5851 for an array opened at 1890; the model resent the same reply 3 times.
+    @Test fun anUnclosedArrayIsNamedAtItsStart(): Unit = runBlocking {
+        val provider = AgentScriptProvider(writeAppReply(tipApp()), """{"tool":"run","steps":[{"set":"bill","value":80}}""", finish(splitCheck))
+        generate(provider)
+        val feedback = provider.feedback(2)
+        assertTrue(feedback, feedback.contains("\"steps\":["))
+        assertTrue(feedback, feedback.contains("no closing ]"))
+    }
+
+    @Test fun bracketsInStringsAndOpenStringsAreNotClosed() {
+        assertEquals("}", ReplyJson.closers("""{"text":"[1] {name}""""))
+        assertNull(ReplyJson.closers("""{"text":"open"""))
+        assertNull(ReplyJson.closers("""{"a":[1}"""))
+    }
+
+    @Test fun anAutoClosedReplyStillGetsValidation(): Unit = runBlocking {
+        val broken = JSONObject(writeAppReply(tipApp())).apply { getJSONObject("app").remove("ui") }.toString().dropLast(1)
+        val provider = AgentScriptProvider(broken, writeAppReply(tipApp()), finish(splitCheck))
+        generate(provider)
+        assertTrue(provider.feedback(1), provider.feedback(1).contains("Validation category"))
     }
 
     @Test fun finishNeedsAnExpectationAfterTheLastOperation(): Unit = runBlocking {

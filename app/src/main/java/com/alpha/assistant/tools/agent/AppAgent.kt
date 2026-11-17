@@ -547,13 +547,25 @@ internal class AppAgent(
         }
     }
 
-    private fun parseReply(raw: String): JSONObject = try {
-        JSONObject(raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim())
-    } catch (failure: JSONException) {
-        // Only a position message is safe to quote. "Value X of type ..." repeats the reply itself.
-        val reason = failure.message.orEmpty().takeIf { " at character " in it }?.substringBefore(" of ")?.take(120)
-            ?: "the reply is not one JSON object"
-        nativeCallReply(raw) ?: throw Feedback("Reply with one JSON object that names a tool. The JSON is invalid: $reason.")
+    private fun parseReply(raw: String): JSONObject {
+        val text = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        try {
+            return JSONObject(text)
+        } catch (failure: JSONException) {
+            // A reply that lacks only its closing brackets is complete in intent. Validation still runs on it.
+            ReplyJson.closers(text)?.let { closers -> runCatching { JSONObject(text + closers) }.getOrNull()?.let { return it } }
+            nativeCallReply(raw)?.let { return it }
+            val prefix = "Reply with one JSON object that names a tool. The JSON is invalid: "
+            // The parser position is far from the real fault when an array stays open. The opener excerpt is quotable, the reply is not.
+            ReplyJson.unclosedOpener(text)?.let {
+                val (kind, closer) = if (it.bracket == '[') "array" to "]" else "object" to "}"
+                throw Feedback("${prefix}the $kind that starts at «${it.excerpt}» (character ${it.index}) has no closing $closer.")
+            }
+            // Only a position message is safe to quote. "Value X of type ..." repeats the reply itself.
+            val reason = failure.message.orEmpty().takeIf { " at character " in it }?.substringBefore(" of ")?.take(120)
+                ?: "the reply is not one JSON object"
+            throw Feedback("$prefix$reason.")
+        }
     }
 
     /**
