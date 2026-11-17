@@ -443,11 +443,14 @@ class AgentGuideExampleTest {
         val provider = Provider(write, finish)
         val preview = ToolGenerationService(provider, SandboxClient(context))
             .generate("fixture", "Example", null, emptyList(), CloudSession(), "agent-example")
-        assertTrue(provider.calls[1].turns.last().text, provider.calls[1].turns.last().text.contains("write_app: OK"))
+        val written = provider.calls[1].turns.last().text
+        assertTrue(written, written.contains("write_app: OK"))
+        // The examples follow their own guide, so the host gives them no design hint.
+        assertFalse(written, written.contains("Design hints:"))
         assertEquals("en", preview.spec.appLanguage)
     }
 
-    @Test fun calculatorExampleIsValid() = check(AppAgentGuide.exampleCalculator, AppAgentGuide.exampleCalculatorCheck)
+    @Test fun converterExampleIsValid() = check(AppAgentGuide.exampleConverter, AppAgentGuide.exampleConverterCheck)
 
-    @Test fun listExampleIsValid() = check(AppAgentGuide.exampleList, AppAgentGuide.exampleListCheck)
+    @Test fun trackerExampleIsValid() = check(AppAgentGuide.exampleTracker, AppAgentGuide.exampleTrackerCheck)
 }

@@ -54,12 +54,13 @@ Do not ask the user questions. Choose practical defaults. Build only what the re
 Design rules. The app must look finished and good on a phone:
 - Wrap the root in {"type":"theme","preset":p,"palette":c,"children":[...]} with one column child. Choose the preset by mood: clean (utilities, converters), soft (health, home, habits), expressive (games, fun), editorial (reading, lists of text), technical (money, numbers, data), playful (kids, quizzes). Use cornerRadius 16 to 24.
 - Choose the palette by topic: blue (water, weather, travel), teal (health, money), green (plants, habits, nature), amber (cooking, energy), orange (fitness, food), red (alarms, sport), pink (beauty, care), purple (learning, music, kids), indigo (sleep, focus, study), brown (coffee, books, home), graphite (neutral tools). Add "dark":true only for a night, space, or arcade app.
-- Icons: give the main card, each listItem, each key metric, and each emptyState an icon that names its topic, for example {"type":"metric","text":"Water","icon":"Drop",...}. A button may have an icon when its meaning is clear, such as Plus for Add.
-- Put the main result first or directly after its inputs, in a card with a metric that has style emphasis "number". Show at most 2 secondary results as metrics in a grid with columns 2. Do not show the same value twice, for example as a percent beside its progress bar.
+- Start with one main element at the top: a hero card ({"type":"card","variant":"hero"}) with an emoji and the main value in style emphasis "display", a large progressRing or a progress with variant level or dots that holds the value, a picture, or a drawing. The main task comes next. Put settings, add forms, and edit forms after it or in a dialog. Put at most 2 typed fields above the main element.
+- Illustrate utilities, trackers, and lists with emoji, as in the examples: {"type":"emoji","text":"description","value":"🥛","size":"large"} in the main element, and a small bound emoji first in list rows. Give other cards, each listItem, each key metric, and each emptyState an icon that names its topic, for example {"type":"metric","text":"Water","icon":"Drop",...}. A button may have an icon when its meaning is clear, such as Plus for Add.
+- Show at most 2 secondary results as metrics in a grid with columns 2. Do not show the same value twice, for example as a percent beside its progress bar.
 - Group inputs in a section or form with a short heading. Use one section for each topic. Do not put every control in one flat column.
 - Choose the control that fits the value: segmented for 2 to 4 short exclusive options, singleChoice (a radio list) for 5 or more, chip for on/off filters, slider with inputMode live for a bounded range, numberInput with step for exact amounts and counts, input with inputMode live for text before an Add button, timeInput for times, dateInput for dates, checkbox in list rows. Use few typed fields: each one shows an Apply button after an edit.
 - Give each group one filled primary button. Use outlined or text variants for secondary actions. Put Reset or Clear last.
-- Lists and logs: start them empty in initialState, without sample rows. A total that adds up logged entries starts at 0. Use a list with rowTemplate for rows with controls, columns for read-only tables. Give a table 2 to 4 short columns so it fits a phone. Show saved rows as text, not as input fields. In a row template, put the item name first and its values in short texts or badges, for example "250 ml" or "08:30", not "Amount: 250 ml". Give these bound texts and badges an empty text label ("text":""), so the row shows only the values. A phone row is about 320 dp wide: a row with "wrap":false holds the weighted name and at most two controls, such as a switch and a delete icon. Put a time field or a third control on a second line. To change a row, load it into the form or open a dialog. Show an emptyState with a short message when a list is empty.
+- Lists and logs: items that the request names, such as three doses or the cards to learn, are initial content. Lists that the user fills start empty in initialState, without sample rows. A total that adds up logged entries starts at 0. Use a list with rowTemplate for rows with controls, columns for read-only tables. Give a table 2 to 4 short columns so it fits a phone. Show saved rows as text, not as input fields. In a row template, put the emoji or the item name first and its values in short texts or badges, for example "250 ml" or "08:30", not "Amount: 250 ml". Give these bound texts and badges an empty text label ("text":""), so the row shows only the values. A phone row is about 320 dp wide: a row with "wrap":false holds the weighted name and at most two controls, such as a switch and a delete icon. Put a time field or a third control on a second line. To change a row, load it into the form or open a dialog. Show an emptyState with a short message when a list is empty.
 - Status: use a banner or badge with tone success, warning, or error only for a real status. Use text with style tone muted for hints.
 - Write status, error, and empty texts in the user's words. Do not name endpoints, JSON paths, value types, state fields, or capabilities. When a value has no source, say only that it is not available yet.
 - A text or badge with bind shows "Label: value", or only the value when its label is empty. A metric shows the label above the value. Do not repeat the label words in the value: use "Done" with "3 of 5", not "Done" with "3 done". Read the screen text after each write.
@@ -73,49 +74,44 @@ Design rules. The app must look finished and good on a phone:
 - Timers: for a countdown that must alert the user (vibration, sound, notification), use a timer node with foreground (the host owns Start, Reset, and alerts). For a countdown that only shows time, store the end time with Date.now() and bind a timer node.
 """.trimIndent()
 
-    val exampleCalculator = """
-{"title":"Hike time","description":"Estimate the time for a hike","language":"en",
-"stateSchema":{"distance":"number","pace":"number","rest":"number","totalText":"string","movingText":"string","restText":"string"},
-"initialState":{"distance":10,"pace":12,"rest":5,"totalText":"2 h 10 min","movingText":"2 h 0 min","restText":"10 min"},
-"ui":{"type":"theme","preset":"soft","palette":"green","cornerRadius":20,"children":[{"type":"column","style":{"gap":"medium","padding":"medium"},"children":[
- {"type":"card","children":[{"type":"metric","text":"Total time","icon":"Clock","bind":"totalText","style":{"emphasis":"number","tone":"accent"}},
-  {"type":"grid","columns":2,"children":[{"type":"metric","text":"Walking","icon":"Steps","bind":"movingText"},{"type":"metric","text":"Rest","icon":"Coffee","bind":"restText"}]}]},
- {"type":"section","text":"Route","children":[
-  {"type":"numberInput","text":"Distance (km)","bind":"distance","action":"distance","min":0,"max":200,"step":0.5},
-  {"type":"slider","text":"Pace (min per km)","bind":"pace","action":"pace","min":8,"max":30,"step":1,"inputMode":"live"}]},
- {"type":"section","text":"Breaks","children":[
-  {"type":"segmented","text":"Rest each hour","bind":"rest","action":"rest","options":[{"text":"None","value":0},{"text":"5 min","value":5},{"text":"10 min","value":10}]}]},
- {"type":"button","text":"Reset","action":"reset","variant":"text"}]}]},
-"source":"const s=input.state,e=input.event;\nif(e.type==='action'||e.type==='liveInput'){\n if(e.actionId==='reset'){s.distance=10;s.pace=12;s.rest=5;}\n else s[e.actionId]=e.value;\n const moving=Math.round(s.distance*s.pace),rest=Math.floor(moving/60)*s.rest;\n const time=m=>Math.floor(m/60)+' h '+(m%60)+' min';\n s.movingText=time(moving);s.restText=rest+' min';s.totalText=time(moving+rest);\n}\nreturn {state:s};"}
+    val exampleConverter = """
+{"title":"Cups to grams","description":"Convert baking cups to grams","language":"en",
+"stateSchema":{"cups":"number","ingredient":"string","picture":"string","gramsText":"string"},
+"initialState":{"cups":2,"ingredient":"flour","picture":"🌾","gramsText":"250 g"},
+"ui":{"type":"theme","preset":"clean","palette":"amber","cornerRadius":20,"children":[{"type":"column","style":{"gap":"medium","padding":"medium"},"children":[
+ {"type":"card","variant":"hero","children":[{"type":"emoji","text":"Ingredient","bind":"picture","size":"large"},{"type":"metric","text":"Grams","bind":"gramsText","style":{"emphasis":"display"}}]},
+ {"type":"numberInput","text":"Cups","bind":"cups","action":"cups","min":0,"max":20,"step":0.25},
+ {"type":"segmented","text":"Ingredient","bind":"ingredient","action":"ingredient","options":[{"text":"Flour","value":"flour"},{"text":"Sugar","value":"sugar"},{"text":"Butter","value":"butter"}]}]}]},
+"source":"const s=input.state,e=input.event;\nif(e.type==='action'){\n s[e.actionId]=e.value;\n s.picture={flour:'🌾',sugar:'🍬',butter:'🧈'}[s.ingredient];\n s.gramsText=Math.round(s.cups*{flour:125,sugar:200,butter:227}[s.ingredient])+' g';\n}\nreturn {state:s};"}
 """.trimIndent()
 
-    const val exampleCalculatorCheck = """[{"set":"distance","value":12},{"set":"pace","value":12},{"set":"rest","value":10},{"expect":"text","contains":"2 h 44 min"},{"expect":"value","target":"restText","equals":"20 min"}]"""
+    const val exampleConverterCheck = """[{"set":"cups","value":3},{"set":"ingredient","value":"sugar"},{"expect":"text","contains":"600 g"},{"set":"ingredient","value":"butter"},{"expect":"value","target":"gramsText","equals":"681 g"}]"""
 
-    val exampleList = """
-{"title":"Packing list","description":"Things to pack for a trip","language":"en",
-"stateSchema":{"draft":"string","items":{"type":"list","maxItems":100,"fields":{"id":"string","name":"string","packed":"boolean"}},"packedText":"string","progress":"number","nextId":"number","hasItems":"boolean","empty":"boolean"},
-"initialState":{"draft":"","items":[],"packedText":"0 of 0","progress":0,"nextId":1,"hasItems":false,"empty":true},
-"ui":{"type":"theme","preset":"soft","palette":"blue","cornerRadius":20,"children":[{"type":"column","style":{"gap":"medium","padding":"medium"},"children":[
- {"type":"card","children":[{"type":"metric","text":"Packed","icon":"Luggage","bind":"packedText","style":{"emphasis":"number"}},{"type":"progress","text":"Packing progress","bind":"progress"}]},
+    val exampleTracker = """
+{"title":"Daily habits","description":"Check off water, a walk, and reading every day","language":"en",
+"stateSchema":{"habits":{"type":"list","maxItems":20,"fields":{"id":"string","picture":"string","name":"string","done":"boolean"}},"progress":"number","doneText":"string","draft":"string","nextId":"number"},
+"initialState":{"habits":[{"id":"h1","picture":"💧","name":"Drink water","done":false},{"id":"h2","picture":"🚶","name":"Walk 30 min","done":false},{"id":"h3","picture":"📖","name":"Read 20 pages","done":false}],"progress":0,"doneText":"0 of 3","draft":"","nextId":4},
+"ui":{"type":"theme","preset":"soft","palette":"green","cornerRadius":24,"children":[{"type":"column","style":{"gap":"medium","padding":"medium"},"children":[
+ {"type":"progressRing","text":"Done today","size":"large","bind":"progress","min":0,"max":100,"children":[{"type":"text","text":"","bind":"doneText","style":{"emphasis":"display"}}]},
+ {"type":"list","text":"Habits","bind":"habits","rowTemplate":{"type":"row","wrap":false,"style":{"gap":"medium","crossAlign":"center"},"children":[
+  {"type":"emoji","text":"Habit","bind":"picture","size":"small"},
+  {"type":"text","text":"","bind":"name","layout":{"weight":1}},
+  {"type":"checkbox","text":"Done","bind":"done","action":"done"}]}},
  {"type":"row","wrap":false,"style":{"gap":"small","crossAlign":"center"},"children":[
-  {"type":"input","text":"New item","bind":"draft","action":"draft","inputMode":"live","maxLength":80,"layout":{"weight":1}},
+  {"type":"input","text":"New habit","bind":"draft","action":"draft","inputMode":"live","maxLength":60,"layout":{"weight":1}},
   {"type":"button","text":"Add","action":"add","variant":"filled","icon":"Plus"}]},
- {"type":"emptyState","text":"Nothing to pack yet","icon":"Luggage","visibleBind":"empty","children":[{"type":"text","text":"Add the first item above.","style":{"tone":"muted"}}]},
- {"type":"list","text":"Items","bind":"items","visibleBind":"hasItems","rowTemplate":{"type":"row","wrap":false,"style":{"crossAlign":"center"},"children":[
-  {"type":"checkbox","text":"Packed","bind":"packed","action":"pack"},
-  {"type":"text","text":"Item","bind":"name","layout":{"weight":1}},
-  {"type":"icon","name":"Close","text":"Remove","action":"remove"}]}}]}]},
-"source":"const s=input.state,e=input.event,v=e.value;\nif(e.type==='action'||e.type==='liveInput'){\n if(e.actionId==='draft')s.draft=v;\n if(e.actionId==='add'&&s.draft.trim()&&s.items.length<100){s.items.push({id:'i'+s.nextId,name:s.draft.trim(),packed:false});s.nextId++;s.draft='';}\n if(e.actionId==='pack'){const it=s.items.find(x=>x.id===v.key);if(it)it.packed=v.value;}\n if(e.actionId==='remove')s.items=s.items.filter(x=>x.id!==v.key);\n const done=s.items.filter(x=>x.packed).length,n=s.items.length;\n s.packedText=done+' of '+n;s.progress=n?Math.round(done*100/n):0;s.hasItems=n>0;s.empty=!s.hasItems;\n}\nreturn {state:s};"}
+ {"type":"button","text":"New day","action":"reset","variant":"text","icon":"Refresh"}]}]},
+"source":"const s=input.state,e=input.event,v=e.value;\nif(e.type==='action'||e.type==='liveInput'){\n if(e.actionId==='draft')s.draft=v;\n if(e.actionId==='add'&&s.draft.trim()&&s.habits.length<20){s.habits.push({id:'h'+s.nextId,picture:'⭐',name:s.draft.trim(),done:false});s.nextId++;s.draft='';}\n if(e.actionId==='done'){const h=s.habits.find(x=>x.id===v.key);if(h)h.done=v.value;}\n if(e.actionId==='reset')s.habits.forEach(h=>h.done=false);\n const done=s.habits.filter(h=>h.done).length,n=s.habits.length;\n s.doneText=done+' of '+n;s.progress=n?Math.round(done*100/n):0;\n}\nreturn {state:s};"}
 """.trimIndent()
 
-    const val exampleListCheck = """[{"set":"draft","value":"Tent"},{"tap":"add"},{"set":"draft","value":"Map"},{"tap":"add"},{"set":"pack","row":0,"value":true},{"expect":"text","contains":"1 of 2"},{"expect":"value","target":"progress","equals":50},{"tap":"remove","row":0},{"tap":"remove","row":0},{"expect":"text","contains":"Nothing to pack yet"}]"""
+    const val exampleTrackerCheck = """[{"set":"done","row":0,"value":true},{"set":"draft","value":"Stretch"},{"tap":"add"},{"set":"done","row":3,"value":true},{"expect":"text","contains":"2 of 4"},{"expect":"value","target":"progress","equals":50},{"tap":"reset"},{"expect":"text","contains":"0 of 4"}]"""
 
     val examples = """
-Example app (calculator). Its finish check: $exampleCalculatorCheck
-$exampleCalculator
+Example app (converter with a hero card). Its finish check: $exampleConverterCheck
+$exampleConverter
 
-Example app (list with row controls). Its finish check: $exampleListCheck
-$exampleList
+Example app (tracker with a ring and emoji rows). Its finish check: $exampleTrackerCheck
+$exampleTracker
 """.trimIndent()
 
     val format = """
@@ -154,7 +150,7 @@ This is a test-and-fix request for the user's saved app:
     val pictures = """
 Pictures are available for this request:
 - generate_image: {"tool":"generate_image","images":[{"slot":"hero","prompt":"visual description only","alt":"short description in the app language","aspect":"3:2"}]}. Makes pictures for this app, at most 4 in one request. Each picture takes about 20 seconds and costs the user money.
-- Make pictures only when they help the request: a recipe or lesson illustration, flash cards, a picture book, a catalog of items, a game backdrop. Do not make pictures for calculators, trackers, timers, or forms unless the user asks for them.
+- Make pictures when the request asks for a picture or has a visual topic: a recipe, a dish or a menu, a plant, an animal, a place, a catalog of items, flash cards, a lesson, a picture book, or a game backdrop. Show the main picture at the top as the main element. Do not make pictures for calculators, trackers, timers, or forms unless the user asks for them: use an emoji there.
 - Make the pictures first. Then show each one with {"type":"image","assetSlot":"hero","text":"short description"}. Add "fit":"crop" for a wide banner. A row template cannot hold an image node.
 - ${ImageIntent.GUIDANCE}
 """.trimIndent()

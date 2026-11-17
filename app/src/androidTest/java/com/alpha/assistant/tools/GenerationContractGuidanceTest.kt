@@ -96,4 +96,12 @@ class GenerationContractGuidanceTest {
         assertFalse(instructions.contains("Choose answer for fixed-value questions"))
     }
 
+    @Test fun theGuideAsksForOneMainElementAndEmoji() {
+        // Failure case: generated apps opened with a form and a small value; the mocks lead with one large element.
+        val guide = com.alpha.assistant.tools.agent.AppAgentGuide.system("", "")
+        for (part in listOf("one main element", "\"type\":\"emoji\"", "\"variant\":\"hero\"")) assertTrue(part, guide.contains(part))
+        // AppAgentGuide.system("", "").length at bdd7e3d was 56298 characters; the prompt may grow by at most 10%.
+        assertTrue("${guide.length}", guide.length <= 56298 * 11 / 10)
+    }
+
 }

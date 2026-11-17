@@ -728,8 +728,9 @@ internal class AppAgent(
         val nodes = descendants(ui)
         return buildList {
             if (nodes.none { it.optString("type") == "theme" && it.has("palette") }) add("Set a palette on the theme that suits the topic.")
-            if (nodes.any { it.optString("type") in setOf("card", "listItem", "emptyState") && !it.has("icon") })
-                add("Give each card, listItem, and emptyState an icon that names its topic.")
+            // An emoji illustration names the topic of its card too.
+            if (nodes.any { it.optString("type") in setOf("card", "listItem", "emptyState") && !it.has("icon") && descendants(it).none { d -> d.optString("type") == "emoji" } })
+                add("Give each card, listItem, and emptyState an icon or an emoji that names its topic.")
             if (nodes.any { node -> node.optString("type") == "card" && descendants(node).count { it.optString("type") == "metric" } > 3 })
                 add("Show one main metric in a card and at most 2 more. Remove repeated or minor values.")
         }
