@@ -45,6 +45,8 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -2150,9 +2152,13 @@ private fun NativeSceneChoices(
             val end = rememberDatePickerState(initialSelectedDateMillis = initialEnd, yearRange = 1..9999, initialDisplayMode = DisplayMode.Input)
             val startDate = start.selectedDateMillis
             val endDate = end.selectedDateMillis
+            val invalid = startDate != null && endDate != null && startDate > endDate
+            val fields = remember { BringIntoViewRequester() }
+            // In landscape the error line appears above the fields and pushes them down, under the keyboard. Show them again.
+            LaunchedEffect(invalid) { if (invalid) { withFrameNanos {}; fields.bringIntoView() } }
             DateRangeInputDialog(text, dismiss, cancel, { apply(startDate, endDate) }) {
                 val rangeError: @Composable () -> Unit = {
-                    if (startDate != null && endDate != null && startDate > endDate) Text(
+                    if (invalid) Text(
                         stringResource(R.string.tool_date_range_invalid), Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -2171,7 +2177,7 @@ private fun NativeSceneChoices(
                     rangeError()
                 } else {
                     rangeError()
-                    Row(Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth().bringIntoViewRequester(fields)) {
                         Column(Modifier.weight(1f)) { startInput() }
                         Column(Modifier.weight(1f)) { endInput() }
                     }
