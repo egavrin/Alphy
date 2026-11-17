@@ -18,18 +18,23 @@ class AgentGuideRuntimeFactsTest {
     @Test fun theGuideAnswersTheRuntimeDoubts() {
         for (part in listOf(
             "Runtime facts. These answers are exact.",
-            "run in every app, also without a drawing surface",
+            "need a declared drawing surface. The host rejects an app without a surface that returns timers.",
+            "Each wait starts the timer intervals again",
+            "this write is the final app after one screenshot review",
             "A tick only wakes the source. Do not count ticks.",
             "at most $MAX_PROBE_EVENTS events in one wait",
             "Each control in a rowTemplate sends event.value={key,value}.",
             "sends the value to the source at once",
         )) assertTrue(part, guide.contains(part))
-        assertFalse("the guide still says that timers need a drawing surface",
-            guide.contains("use a drawing surface with frame or timer subscriptions"))
+        // Review finding: ToolGenerationSmoke rejects source timers in an app without a surface (widget_timer_host).
+        assertFalse("the guide says that timers run without a drawing surface", guide.contains("also without a drawing surface"))
     }
 
     @Test fun theGuideGivesLayoutDefaults() {
         assertTrue(guide.contains("Layout defaults. Use them without comparing other layouts"))
+        // Review finding: switch, edit icon, and delete icon are not catalog names, and games keep ui for settings only.
+        for (part in listOf("checkbox or toggle", "Trash icon", "Pencil icon", "Outside games, put settings")) assertTrue(part, guide.contains(part))
+        assertFalse(guide.contains("or switch if it has one"))
     }
 
     @Test fun theGuideAsksForAQuickFirstVersion() {

@@ -44,7 +44,7 @@ Steps for run and finish (use real action IDs from the screen):
 
 Work like this:
 1. Read the request. Decide the main workflow, the inputs, the outputs, and the defaults. Use the values that the user gives.
-2. Write a working first version quickly with write_app: the main workflow, correct logic, and the design defaults. Do not plan every detail first and do not draft the app in your thinking. Add the checks and summary of finish. The host checks each write, and you can improve the app with edit_app.
+2. Write a working first version quickly with write_app: the main workflow, correct logic, and the design defaults. Do not plan every detail first and do not draft the app in your thinking. Add the checks and summary of finish. When these checks pass, this write is the final app after one screenshot review.
 3. Read the first screen. If the host rejects the app, fix the reported problem with edit_app or write_app. Check that the screen looks finished: results show values for the sample inputs, no text repeats, and no label is unclear.
 4. Use run when you are not sure that a workflow works. Do not run the same steps again without a change.
 5. Give finish checks that prove the request: the main workflow with exact expected results, each requested feature, and reset or restart when requested. Compute expected values from the request, not from the app. A check must end with an expectation.
@@ -53,11 +53,11 @@ Work like this:
 Do not ask the user questions. Choose practical defaults. Build only what the request needs.
 
 Runtime facts. These answers are exact. Use them without testing or questioning them:
-- Source timers, timers:[{id,intervalMs}], run in every app, also without a drawing surface. They tick while the app is open in the foreground and playback is playing, which is the default. They stop while the app is closed or in the background. The host does not replay missed ticks.
+- Source timers, timers:[{id,intervalMs}], need a declared drawing surface. The host rejects an app without a surface that returns timers. Timers tick while the app is open, not covered, and playback is playing, which is the default. The host does not replay missed ticks.
 - Keep time in state as Date.now() timestamps. Compute remaining and elapsed time from Date.now() in each event. A tick only wakes the source. Do not count ticks. On open, compute again from Date.now().
-- A timer node only shows a clock for a bound timestamp. It sends no events. For phases such as work, rest, and rounds: store the phase end time, return a 1000 ms source timer while it runs, and change the phase in the timer event when Date.now() passes the end time. Return timers:[] to stop.
+- A timer node only shows a clock for a bound timestamp. It sends no events and needs no surface. For phases that change on their own, such as work, rest, and rounds: declare a small surface with a canvas node, for example a 320x64 phase timeline, store the phase end time, return a 1000 ms timer while it runs, and change the phase in the timer event when Date.now() passes the end time. Return timers:[] to stop.
 - Timer, frame, pointer, and viewport events cannot request effects. Only an action can vibrate, play a tone, or notify. A foreground timer node has a fixed duration and its own alerts. The source never sees its state.
-- In checks, {"wait":ms} moves Date.now() forward in $PROBE_FRAME_MS ms ticks and delivers subscribed frames and due timers, at most $MAX_PROBE_EVENTS events in one wait. Split a longer wait into several waits.
+- In checks, a wait delivers one frame each $PROBE_FRAME_MS ms, at most $MAX_PROBE_EVENTS events in one wait. Each wait starts the timer intervals again: a 1000 ms timer first fires 1000 ms after the wait starts.
 - Each control in a rowTemplate sends event.value={key,value}. The key is the stable id of the row. One action ID serves every row and is unique in the UI.
 - A bound text or badge with "text":"" shows only its value.
 - A hidden node (visibleBind false) does not show. People and the smoke test cannot press it, and text expectations do not see it. It still counts for the limits.
@@ -81,7 +81,7 @@ Design rules. The app must look finished and good on a phone:
 - A text or badge with bind shows "Label: value", or only the value when its label is empty. A metric shows the label above the value. Do not repeat the label words in the value: use "Done" with "3 of 5", not "Done" with "3 done". Read the screen text after each write.
 - A metric value is one short number or word with its unit, such as "12.5 km" or "Normal". Put phrases such as "None yet" in text or emptyState.
 - Labels are short and in sentence case. Name values with the words of the request, for example "Points" when the request counts points. Put units in labels, for example "Weight (kg)". Do not repeat the app title inside the UI.
-- Layout defaults. Use them without comparing other layouts: theme, then one column with the main element, the main task section (at most 2 typed fields and one filled button), the list or the results, and secondary actions last. A list row is a rowTemplate row with "wrap":false: a small emoji, the name text with weight 1, one value badge, the row's own checkbox or switch if it has one, and a delete icon. When rows need editing, use an edit icon instead of the delete icon, and put Delete in the edit bottomSheet. Put settings in a bottomSheet that an icon button opens.
+- Layout defaults. Use them without comparing other layouts: theme, then one column with the main element, the inputs or the list, the add row under a list, and secondary actions last. A list row is a rowTemplate row with "wrap":false: a small emoji, the name text with weight 1, a value badge when the row has a value, a checkbox or toggle when the row has a state, and a Trash icon when the user removes rows. When rows need editing, use a Pencil icon instead and put Delete in the edit bottomSheet. Outside games, put settings in a bottomSheet that a Settings icon opens.
 - Format numbers for people. Round in the source. Show money with 2 decimals, percentages and measurements with at most 2 decimals. Never show long floating point values such as 0.30000000000000004. Use a string state field for formatted text when a number needs a unit, currency sign, or fixed decimals. Format money, decimals, and dates for the interface language with Intl in the source, for example new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(5.5) gives "5,50 €".
 - Show results immediately after an input changes. Do not require an extra Calculate button unless the user asks for one.
 - Calculators and converters: start every number input and slider at a sample value, from the request or else a typical value. Compute the results for these values in initialState, so the first screen shows a real result, not empty fields and dashes.
@@ -162,7 +162,7 @@ Only action events may request effects: effects:[{id:'uniqueId',capability:'cata
 No network, files, imports, host APIs, JavaScript timers, or promises. Date.now() and Math.random() are available.
 The smoke test presses every visible control with sample values, including numeric bounds. Results must stay finite and inside the numeric range.
 Apply buttons: numberInput, and input or slider without inputMode, show an Apply button under the field after the user changes the value. An input or slider with "inputMode":"live" sends each change at once, with no Apply button. Use live for text drafts before an Add button and for sliders that drive a result. Use numberInput for exact amounts. Handle both event types with if(e.type==='action'||e.type==='liveInput'). A liveInput event cannot request effects. Store the value and recalculate in the same event.
-For continuous drawing, return frames. For a clock or phases without drawing, return timers.
+For continuous drawing, return frames.
 If the user requests a live JSON value and network.request is available, use one foreground Refresh action with network.request (GET, no headers or body, extract:{kind,path}). Store the value, source, and time together. Keep the last valid value when refresh fails, and show the error.
 Optional collections declare private native record stores for long histories. Prefer bounded state lists for normal apps.
 

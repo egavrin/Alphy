@@ -28,10 +28,10 @@
 
 | Fact | Code |
 |---|---|
-| Source timers run in every app, also without a surface, while the app is resumed, not covered, and playback is playing (default). Missed ticks are not replayed. | `NativeToolSurface.kt` event loop (timers map, `clock.reset();timers.clear()`), `ArtifactPlayback.value="playing"` |
+| Source timers need a declared surface: the host rejects an app without a surface that returns timers. They tick while the app is resumed, not covered, and playback is playing (default). Missed ticks are not replayed. (Corrected after the final review: the first version said that timers run without a surface.) | `ToolGenerationSmoke` `widget_timer_host`; only the `NativeToolSurface.kt` loop delivers timers, and `ToolUi` mounts it only with surfaces or immersive; `clock.reset();timers.clear()`, `ArtifactPlayback.value="playing"` |
 | The timer node sends no events and does not change state. A foreground timer has a fixed durationMs and host-owned alerts. | `ToolUiCatalog.kt` timer rule and validation |
 | Only action events request effects. | `ArtifactProtocol.modelGuidance`, `AppAgentGuide.format` |
-| A check wait ticks 50 ms, delivers subscribed frames and due timers, at most 600 events per wait. | `ToolGenerationSmoke.kt` `wait`, `MAX_PROBE_EVENTS=600` |
+| A check wait ticks 50 ms, delivers subscribed frames and due timers, at most 600 events per wait. Each wait starts the timer intervals again. | `ToolGenerationSmoke.kt` `wait` (`due` is reset in each call), `MAX_PROBE_EVENTS=600` |
 | A rowTemplate control sends `{key,value}`. Template action IDs are globally unique. | `ToolUiCatalog.kt` rowTemplate rule, `ToolGenerationSmoke.controls` |
 | A bound text or badge may have an empty label. | `ToolUiCatalog.kt` general rules |
 | Hidden nodes do not show, the smoke test skips them, text expectations do not see them, they count for limits. | `AppScreen.shownNode`, `ToolGenerationSmoke.controls`, catalog "Hidden nodes still validate" |
@@ -55,7 +55,7 @@
 - [ ] **Step 1:** Write variant transforms on the dumped system prompt: V1 runtime facts (and the corrected continuous-updates line), V2 layout defaults, V3 quick first version, V4 all three.
 - [ ] **Step 2:** Collect 20 cases x 2 samples per variant with `collect.py`.
 - [ ] **Step 3:** Score: reasoning tokens (median, paired geometric mean against base), share of replies that are a parseable `write_app` with ui and source.
-- Expected: keep a variant only if its paired geometric mean is at most 0.8 and the parseable share does not drop.
+- Expected: keep a variant only if its paired geometric mean is at most 0.8 and the parseable share does not drop. Also count first writes that return timers without a surface: the host rejects them.
 
 ### Task 2: Implement the kept variants
 
