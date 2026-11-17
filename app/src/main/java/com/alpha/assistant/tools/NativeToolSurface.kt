@@ -22,6 +22,9 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -70,6 +73,19 @@ internal val LocalToolCanvas = compositionLocalOf<(@Composable (List<String>, St
 private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
 
 @OptIn(ExperimentalLayoutApi::class)
+/** The screen boxes of the text that [snapshot] draws on a stage at [stage]. Text in transformed groups is left out. */
+private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurface>,stage: Rect): List<Rect> {
+    val placements=surfacePlacements(surfaces)
+    if(snapshot==null || placements.isEmpty()) return emptyList()
+    val sx=stage.width/placements.maxOf {it.x+it.surface.width}
+    val sy=stage.height/placements.maxOf {it.y+it.surface.height}
+    return placements.flatMap {p ->
+        surfaceTextBoxes(snapshot.surfaces.optJSONObject(p.surface.id)?.optJSONArray("commands") ?: JSONArray()).map {r ->
+            Rect(stage.left+(p.x+r.left)*sx,stage.top+(p.y+r.top)*sy,stage.left+(p.x+r.right)*sx,stage.top+(p.y+r.bottom)*sy)
+        }
+    }
+}
+
 @Composable internal fun NativeToolSurface(tool: ToolRecord,spec: ToolSpec,enabled: Boolean,maxCanvasHeight: Dp,host: ArtifactUiHost,immersive: Boolean=false,covered: Boolean=false,onCoverReady: (Boolean)->Unit = {},topControls: @Composable () -> Unit = {},stageAvailableHeight: Dp? = null,
     content: @Composable () -> Unit = {},onSnapshot: (ArtifactSnapshot) -> Unit = {}) {
     val context=LocalContext.current
@@ -78,6 +94,11 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
     var attempt by remember(tool.id,tool.revision) {mutableIntStateOf(0)}
     var error by remember(tool.id,tool.revision) {mutableStateOf<Int?>(null)}
     var controlsExpanded by remember(tool.id,tool.revision) {mutableStateOf(false)}
+    // The full-screen menu button moves to another top position when the game draws text under it. It stays there after.
+    var menuAlignment by remember(tool.id) {mutableStateOf<Alignment>(Alignment.TopEnd)}
+    var screenBounds by remember {mutableStateOf<Rect?>(null)}
+    var stageBounds by remember {mutableStateOf<Rect?>(null)}
+    var menuBounds by remember {mutableStateOf<Rect?>(null)}
     var snapshot by remember(tool.id,tool.revision) {mutableStateOf<ArtifactSnapshot?>(null)}
     var drawingHost by remember(tool.id,tool.revision,attempt) {mutableStateOf<DrawingHost?>(null)}
     var requestedImages by remember(tool.id,tool.revision,attempt) {mutableStateOf<Set<String>>(emptySet())}
@@ -284,7 +305,7 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
                     if (viewportSurface != null && it.width > 0 && it.height > 0) {
                         requestedViewport = surfaceViewport(viewportSurface,it.width,it.height,density)
                     }
-                }.then(if (immersive) Modifier else Modifier.clip(MaterialTheme.shapes.medium))
+                }.then(if (immersive) Modifier.onGloballyPositioned {stageBounds=it.boundsInRoot()} else Modifier.clip(MaterialTheme.shapes.medium))
                     .background(canvasBackground)
                     .semantics {contentDescription="$description. $labels"}
                     .pointerInput(ids,measuredSize,interactive,enabled,snapshot?.playback in setOf("ready","playing"),error==null,attempt,acceptedViewport,requestedViewport,covered) {
@@ -340,9 +361,25 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
     }
     val showControls = stringResource(R.string.tool_game_controls_open)
     val gameControls = stringResource(R.string.tool_game_controls)
-    if(immersive) Box(Modifier.fillMaxSize()) {
+    if(immersive) {
+        val surfaces by rememberUpdatedState(effectiveSurfaces.filter {it.id in spec.surfaces.keys})
+        LaunchedEffect(tool.id) {
+            while(true) {
+                delay(500)
+                val screen=screenBounds ?: continue
+                val menu=menuBounds ?: continue
+                val stage=stageBounds ?: continue
+                val texts=drawnTextBounds(snapshot,surfaces,stage)
+                if(menuAlignment==Alignment.TopCenter || texts.none {it.overlaps(menu)}) continue
+                val mirrored=Rect(screen.left+screen.right-menu.right,menu.top,screen.left+screen.right-menu.left,menu.bottom)
+                menuAlignment=if(texts.any {it.overlaps(mirrored)}) Alignment.TopCenter
+                    else if(menuAlignment==Alignment.TopEnd) Alignment.TopStart else Alignment.TopEnd
+            }
+        }
+    }
+    if(immersive) Box(Modifier.fillMaxSize().onGloballyPositioned {screenBounds=it.boundsInRoot()}) {
         stage(spec.surfaces.keys.toList(), spec.title, Modifier, true)
-        if(!controlsExpanded && error==null)IconButton(onClick={controlsExpanded=true},modifier=Modifier.align(Alignment.TopEnd).windowInsetsPadding(WindowInsets.displayCutout.union(WindowInsets.systemGestures.only(WindowInsetsSides.Horizontal))).size(48.dp).semantics {contentDescription=showControls}) {
+        if(!controlsExpanded && error==null)IconButton(onClick={controlsExpanded=true},modifier=Modifier.align(menuAlignment).windowInsetsPadding(WindowInsets.displayCutout.union(WindowInsets.systemGestures.only(WindowInsetsSides.Horizontal))).size(48.dp).onGloballyPositioned {menuBounds=it.boundsInRoot()}.semantics {contentDescription=showControls}) {
             Surface(shape = MaterialTheme.shapes.small, color = scheme.surfaceContainerHigh, contentColor = scheme.onSurface) {
                 AlphaIcon(Glyph.Menu, Modifier.padding(6.dp), color = LocalContentColor.current)
             }

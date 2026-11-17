@@ -240,6 +240,29 @@ class MiniAppPresentationWorkflowTest {
             (if (fill == null) "[]" else "[{type:'rect',x:0,y:0,width:300,height:200,color:'$fill'}]") + "}}};")
         .toString()
 
+    private fun cornerTextSpec(y: Int) = JSONObject(ArkanoidFixture.spec()).put("title", "Corner score")
+        .put("presentation", JSONObject("""{"mode":"immersive"}"""))
+        .put("surfaces", JSONArray("""[{"id":"main","width":360,"height":800}]"""))
+        .put("stateSchema", JSONObject("""{"n":"number"}""")).put("initialState", JSONObject("""{"n":0}"""))
+        .put("ui", JSONObject("""{"type":"column","children":[{"type":"text","text":"Corner controls"}]}"""))
+        .put("source", "return {state:input.state,surfaces:{main:{commands:[{type:'rect',x:0,y:0,width:360,height:800,color:'#123456'}," +
+            "{type:'text',x:250,y:$y,size:28,text:'Score 120',color:'#FFFFFF'}]}}};").toString()
+
+    /** Failure case: the full-screen game menu covered the score that a game drew in the top corner. */
+    @Test fun theGameMenuMovesAwayFromDrawnText() {
+        val robot = ShellRobot("corner-menu")
+        val width = instrumentation.targetContext.resources.displayMetrics.widthPixels
+        for ((y, start) in listOf(40 to true, 760 to false)) fixture(specJson = cornerTextSpec(y)) { _, _, _ ->
+            click(robot.text(R.string.tool_open))
+            val menu = robot.text(R.string.tool_game_controls_open)
+            shown(menu)
+            // The host checks the drawn text twice a second.
+            SystemClock.sleep(1500)
+            val x = robot.bounds(menu).centerX()
+            assertEquals("with the score at y $y the menu is at x $x of $width", start, x < width / 2)
+        }
+    }
+
     /** Failure case: an inline canvas drew the shell surface color, a gray box inside a tinted card. */
     @Test fun anInlineCanvasTakesItsCardColor() {
         val robot = ShellRobot("canvas-card")

@@ -42,6 +42,28 @@ internal fun surfaceLabels(commands: JSONArray,availableImages: Set<String> = em
     visit(commands)
 }
 
+/** The box that a text command covers, in surface coordinates. [paint] takes the text size. */
+internal fun surfaceTextBox(c: JSONObject,paint: Paint): RectF {
+    paint.textSize=c.getDouble("size").toFloat()
+    val x=c.getDouble("x").toFloat();val y=c.getDouble("y").toFloat()
+    return RectF(x,y+paint.ascent(),x+paint.measureText(c.getString("text")),y+paint.descent())
+}
+
+/** The boxes of the text commands outside transformed groups, in surface coordinates. */
+internal fun surfaceTextBoxes(commands: JSONArray): List<RectF> = buildList {
+    val paint=Paint(Paint.ANTI_ALIAS_FLAG)
+    fun visit(array: JSONArray) {
+        repeat(array.length()) {index ->
+            val command=array.getJSONObject(index)
+            when(command.getString("type")) {
+                "text" -> add(surfaceTextBox(command,paint))
+                "group" -> if(!command.has("transform")) visit(command.getJSONArray("children"))
+            }
+        }
+    }
+    visit(commands)
+}
+
 /** Each surface and group restores the native canvas. Each leaf owns its paint. */
 internal fun drawSurfaceFrame(canvas: Canvas,surface: ToolSurface,commands: JSONArray,width: Float,height: Float,roleColors: Map<String,Int>,
     images: Map<String,Bitmap> = emptyMap()) {
