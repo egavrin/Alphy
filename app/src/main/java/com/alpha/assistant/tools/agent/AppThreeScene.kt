@@ -25,9 +25,15 @@ internal class ThreeSceneTarget(private val session: ThreeSceneSession) : AppTar
 
     override suspend fun playback(type: String) = session.event(JSONObject().put("type", type))
 
-    override suspend fun pointer(surfaceId: String, x: Double, y: Double) {
-        for (type in listOf("pointerdown", "pointerup")) session.event(session.pointer(type, 1, x, y))
+    override suspend fun pointer(surfaceId: String, path: List<Pair<Double, Double>>) {
+        for ((index, point) in path.withIndex()) {
+            val type = when (index) { 0 -> "pointerdown"; path.lastIndex -> "pointerup"; else -> "pointermove" }
+            session.event(session.pointer(type, 1, point.first, point.second))
+        }
     }
+
+    override suspend fun tilt(x: Double, y: Double) =
+        throw AppStepError("A 3D scene has no tilt input. Use pointer or drag on \"$SCENE\" or the native controls.")
 
     override suspend fun wait(milliseconds: Long): Int {
         var frames = 0

@@ -419,6 +419,79 @@ class AgentGenerationWorkflowTest {
         generate(provider, "One minute countdown")
         assertEquals(2, provider.calls.size)
     }
+
+    private val anyScreen = JSONArray().put(JSONObject().put("name", "open").put("steps", JSONArray("""[{"expect":"absent","contains":"no such text"}]""")))
+
+    /** Writes [app] with a check of [steps]. The check passes when the app finishes in one model call. */
+    private suspend fun passesInOneCall(app: JSONObject, steps: String, prompt: String) {
+        val checks = JSONArray().put(JSONObject().put("name", "drawn").put("steps", JSONArray(steps)))
+        val provider = AgentScriptProvider(JSONObject(writeAppReply(app)).put("checks", checks).put("summary", "Ready.").toString(), finish(anyScreen))
+        generate(provider, prompt)
+        assertEquals(if (provider.calls.size > 1) provider.feedback(1) else "", 1, provider.calls.size)
+    }
+
+    private fun drawingApp(source: String, ui: String = """{"type":"column","children":[{"type":"canvas","text":"Board","surfaces":["main"]}]}""",
+        surface: String = """{"id":"main","width":300,"height":200}""", schema: String = """{"n":"number"}""", state: String = """{"n":0}""") = JSONObject("""
+            {"title":"Drawn","description":"Draws its own text","capabilities":[],"stateSchema":$schema,"initialState":$state,
+            "surfaces":[$surface],"ui":$ui}
+        """.trimIndent()).put("source", source)
+
+    /** Failure case: games drew their score, but checks read only native nodes, so the agent added native score texts. */
+    @Test fun drawnTextIsVisibleToChecks(): Unit = runBlocking {
+        val app = drawingApp("const s=input.state,e=input.event;if(e.type==='pointer'&&e.phase==='down')s.n++;" +
+            "return {state:s,surfaces:{main:{commands:[{type:'text',x:20,y:40,size:24,text:'Score '+(s.n+2),color:'default'}]}}};")
+        passesInOneCall(app, """[{"pointer":"main","x":0.5,"y":0.5},{"expect":"text","contains":"Score 3"}]""", "Tap to score")
+    }
+
+    @Test fun immersiveSurfacesAppearInTheScreen(): Unit = runBlocking {
+        val app = drawingApp("const s=input.state;return {state:s,surfaces:{main:{commands:[{type:'text',x:40,y:300,size:28,text:'Tap to start',color:'default'}]}}};",
+            ui = """{"type":"column","children":[{"type":"text","text":"Settings"}]}""",
+            surface = """{"id":"main","width":360,"height":640,"sizing":"viewport"}""").put("presentation", JSONObject().put("mode", "immersive"))
+        val provider = AgentScriptProvider(writeAppReply(app), finish(anyScreen))
+        generate(provider, "A game")
+        assertTrue(provider.feedback(1), provider.feedback(1).contains("main 360x640") && provider.feedback(1).contains("Tap to start"))
+    }
+
+    /** Review focus: a drag that leaves the surface clamps to its edge. */
+    @Test fun aDragStepSendsDownMovesAndUp(): Unit = runBlocking {
+        val app = drawingApp("const s=input.state,e=input.event;" +
+            "if(e.type==='pointer'&&e.phase!=='cancel'){s[e.phase]++;s.x=e.x;}" +
+            "return {state:s,surfaces:{main:{commands:[{type:'text',x:10,y:30,size:16,text:'down '+s.down+' move '+s.move+' up '+s.up+' x '+Math.round(s.x),color:'default'}]}}};",
+            schema = """{"down":"number","move":"number","up":"number","x":"number"}""", state = """{"down":0,"move":0,"up":0,"x":0}""")
+        passesInOneCall(app, """[{"drag":"main","from":[0.5,0.5],"to":[1.2,0.5]},{"expect":"text","contains":"down 1 move 5 up 1 x 300"}]""", "Drag on the board")
+    }
+
+    @Test fun aTiltStepSendsOneSample(): Unit = runBlocking {
+        val app = drawingApp("const s=input.state,e=input.event;" +
+            "if(e.type==='action')return {state:s,effects:[{id:'tilt',capability:'sensor.accelerometer.stream',args:{enabled:true}}]};" +
+            "if(e.type==='sensor')s.n=e.x;" +
+            "return {state:s,surfaces:{main:{commands:[{type:'text',x:10,y:30,size:16,text:'tilt '+s.n.toFixed(1),color:'default'}]}}};",
+            ui = """{"type":"column","children":[{"type":"canvas","text":"Board","surfaces":["main"]},{"type":"button","text":"Start tilt","action":"go"}]}""")
+            .put("capabilities", JSONArray().put("sensor.accelerometer.stream"))
+        passesInOneCall(app, """[{"tilt":[2,0]},{"expect":"text","contains":"tilt 2.0"}]""", "Tilt the phone to roll a ball")
+    }
+
+    /** Review focus: drawn text from a busy frame must not flood the agent screen. */
+    @Test fun drawnTextStaysShort(): Unit = runBlocking {
+        val app = drawingApp("const s=input.state,c=[];for(let i=0;i<300;i++)c.push({type:'text',x:10,y:10+i,size:8,text:'w'+i,color:'default'});" +
+            "return {state:s,surfaces:{main:{commands:c}}};")
+        val provider = AgentScriptProvider(writeAppReply(app), finish(anyScreen))
+        generate(provider, "Many words")
+        val line = provider.feedback(1).lines().first { "main 300x200" in it }
+        assertTrue(line, line.contains("w0. w1.") && line.length <= 520)
+    }
+
+    @Test fun theSmokeTestSendsATiltSample(): Unit = runBlocking {
+        val good = drawingApp("const s=input.state,e=input.event;" +
+            "if(e.type==='action')return {state:s,effects:[{id:'tilt',capability:'sensor.accelerometer.stream',args:{enabled:true}}]};" +
+            "return {state:s,surfaces:{main:{commands:[]}}};",
+            ui = """{"type":"column","children":[{"type":"canvas","text":"Board","surfaces":["main"]},{"type":"button","text":"Start tilt","action":"go"}]}""")
+            .put("capabilities", JSONArray().put("sensor.accelerometer.stream"))
+        val bad = JSONObject(good.toString()).put("source", "if(input.event.type==='sensor')throw new Error('tilt broke');" + good.getString("source"))
+        val provider = AgentScriptProvider(writeAppReply(bad), writeAppReply(good), finish(anyScreen))
+        generate(provider, "Tilt the phone to roll a ball")
+        assertTrue(provider.feedback(1), provider.feedback(1).contains("REJECTED") && provider.feedback(1).contains("Smoke event: sensor"))
+    }
 }
 
 /** The examples in the agent prompt must be valid apps whose documented checks pass. */

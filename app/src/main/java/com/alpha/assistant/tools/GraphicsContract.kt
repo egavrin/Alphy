@@ -50,6 +50,10 @@ object GraphicsContract {
             "control" -> {put("surfaceId",surfaceId);put("direction",direction)}
             "start","pause","resume","restart","stop" -> put("surfaceId",surfaceId)
         }}.also(::validateEvent)
+    /** One accelerometer sample in display-aligned m/s². */
+    fun tilt(x: Double, y: Double, sequence: Long, timestampMillis: Long): JSONObject = JSONObject().put("type", "sensor")
+        .put("sensor", "accelerometer").put("sequence", sequence).put("timestampMillis", timestampMillis)
+        .put("x", x).put("y", y).put("z", 9.8).also(::validateEvent)
     fun viewport(surface: ToolSurface): JSONObject = JSONObject().put("type","viewport").put("surfaceId",surface.id)
         .put("width",surface.width).put("height",surface.height).also(::validateEvent)
     fun validateSurfaceEvent(event: JSONObject,surfaces: Map<String,ToolSurface>) {

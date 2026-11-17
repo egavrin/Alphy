@@ -30,6 +30,8 @@ Steps for run and finish (use real action IDs from the screen):
 - {"set":"actionId","value":v} sends a value from an input, numberInput, slider, toggle, checkbox, select, segmented, or other choice control. Use the control's value type.
 - Add "row":0 (index from 0) or "key":"stableKey" to tap or set a control inside a list row.
 - {"pointer":"surfaceId","x":0.25,"y":0.5} taps a drawing surface at a fraction of its width and height.
+- {"drag":"surfaceId","from":[0.5,0.8],"to":[0.9,0.8]} drags on a drawing surface: down, 5 moves, and up. Fractions clamp to 0..1.
+- {"tilt":[2,0]} sends one accelerometer sample x, y in m/s² to an app that declares sensor.accelerometer.stream.
 - {"move":"surfaceId","direction":"left"} sends a host movement control.
 - {"playback":"start"} sends start, pause, resume, or restart to drawing surfaces.
 - {"wait":1000} advances the clock in milliseconds. Date.now() and native timers use this clock. Subscribed frames and timers run.

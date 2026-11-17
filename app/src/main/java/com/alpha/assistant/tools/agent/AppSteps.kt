@@ -27,7 +27,10 @@ internal interface AppTarget {
     suspend fun control(id: String, payload: Any?)
     suspend fun control(surfaceId: String, direction: String)
     suspend fun playback(type: String)
-    suspend fun pointer(surfaceId: String, x: Double, y: Double)
+    /** Pointer down at the first point, a move at each middle point, and up at the last point. Points are fractions. */
+    suspend fun pointer(surfaceId: String, path: List<Pair<Double, Double>>)
+    /** Sends one accelerometer sample in m/s². */
+    suspend fun tilt(x: Double, y: Double)
     /** Advances the clock and delivers frames and timers. Returns the delivered event count. */
     suspend fun wait(milliseconds: Long): Int
 }
@@ -40,6 +43,8 @@ internal sealed interface AppStep {
     data class Tap(val id: String, val key: String?, val row: Int?) : AppStep
     data class Set(val id: String, val value: Any?, val key: String?, val row: Int?) : AppStep
     data class Pointer(val surface: String, val x: Double, val y: Double) : AppStep
+    data class Drag(val surface: String, val from: Pair<Double, Double>, val to: Pair<Double, Double>) : AppStep
+    data class Tilt(val x: Double, val y: Double) : AppStep
     data class Move(val surface: String, val direction: String) : AppStep
     data class Playback(val event: String) : AppStep
     data class Wait(val milliseconds: Long) : AppStep
@@ -74,6 +79,14 @@ internal object AppSteps {
     private fun parse(step: JSONObject): AppStep {
         fun string(name: String) = step.opt(name) as? String ?: throw AppStepError("$name must be a string.")
         fun number(name: String) = (step.opt(name) as? Number)?.toDouble() ?: throw AppStepError("$name must be a number.")
+        /** A pair of numbers. Fractions clamp to 0..1, so a drag past the edge ends at the edge. */
+        fun pair(name: String, range: ClosedFloatingPointRange<Double>, clamp: Boolean): Pair<Double, Double> {
+            val raw = step.opt(name) as? JSONArray
+            val values = (0 until (raw?.length() ?: 0)).mapNotNull { (raw?.opt(it) as? Number)?.toDouble()?.takeIf(Double::isFinite) }
+            if (raw?.length() != 2 || values.size != 2 || !clamp && values.any { it !in range })
+                throw AppStepError("$name must be [x, y] with numbers from ${range.start} to ${range.endInclusive}.")
+            return values[0].coerceIn(range) to values[1].coerceIn(range)
+        }
         val key = step.opt("key")?.let { it as? String ?: throw AppStepError("key must be a string.") }
         val row = step.opt("row")?.let { (it as? Number)?.toInt()?.takeIf { index -> index >= 0 } ?: throw AppStepError("row must be a row index from 0.") }
         return when {
@@ -83,6 +96,8 @@ internal object AppSteps {
                 AppStep.Set(string("set"), step.get("value").takeUnless { it == JSONObject.NULL }, key, row)
             }
             step.has("pointer") -> AppStep.Pointer(string("pointer"), number("x").also { require01(it, "x") }, number("y").also { require01(it, "y") })
+            step.has("drag") -> AppStep.Drag(string("drag"), pair("from", 0.0..1.0, true), pair("to", 0.0..1.0, true))
+            step.has("tilt") -> pair("tilt", -20.0..20.0, false).let { (x, y) -> AppStep.Tilt(x, y) }
             step.has("move") -> AppStep.Move(string("move"), string("direction").also {
                 if (it !in setOf("left", "right")) throw AppStepError("direction must be left or right.")
             })
@@ -102,7 +117,7 @@ internal object AppSteps {
                 "effect" -> AppStep.Expect(kind, string("capability"), null, null)
                 else -> throw AppStepError("expect must be text, absent, value, enabled, disabled, or effect.")
             }
-            else -> throw AppStepError("Use one of tap, set, pointer, move, playback, wait, or expect.")
+            else -> throw AppStepError("Use one of tap, set, pointer, drag, tilt, move, playback, wait, or expect.")
         }
     }
 
@@ -164,10 +179,15 @@ internal object AppSteps {
             null
         }
         is AppStep.Set -> { probe.control(step.id, payload(probe, step.id, step.value, step.key, step.row)); null }
-        is AppStep.Pointer -> {
-            if (step.surface !in probe.surfaceIds) throw AppStepError("No drawing surface ${step.surface}. Surfaces: ${probe.surfaceIds.joinToString().ifEmpty { "none" }}.")
-            probe.pointer(step.surface, step.x, step.y); null
+        is AppStep.Pointer -> { probe.pointer(surface(probe, step.surface), listOf(step.x to step.y, step.x to step.y)); null }
+        is AppStep.Drag -> {
+            val (from, to) = step.from to step.to
+            // Five moves lead from the start to the end, as a short finger drag.
+            probe.pointer(surface(probe, step.surface), listOf(from) + (1..5).map { i ->
+                from.first + (to.first - from.first) * i / 5 to from.second + (to.second - from.second) * i / 5
+            } + listOf(to)); null
         }
+        is AppStep.Tilt -> { probe.tilt(step.x, step.y); null }
         is AppStep.Move -> {
             if (step.surface !in probe.surfaceIds) throw AppStepError("No drawing surface ${step.surface}.")
             probe.control(step.surface, step.direction); null
@@ -177,6 +197,9 @@ internal object AppSteps {
         is AppStep.Event -> { probe.control(step.id, step.payload); null }
         is AppStep.Expect -> expect(probe, step)
     }
+
+    private fun surface(probe: AppTarget, id: String): String =
+        id.takeIf { it in probe.surfaceIds } ?: throw AppStepError("No drawing surface $id. Surfaces: ${probe.surfaceIds.joinToString().ifEmpty { "none" }}.")
 
     private fun expect(probe: AppTarget, step: AppStep.Expect): String? {
         val screen = AppScreen.render(probe.ui, probe.state, probe.surfaces, probe.nowMillis, probe.surfaceSizes)
@@ -288,6 +311,8 @@ internal object AppSteps {
         is AppStep.Tap -> "tap ${step.id}" + rowText(step.key, step.row)
         is AppStep.Set -> "set ${step.id} to ${JSONObject.wrap(step.value)}" + rowText(step.key, step.row)
         is AppStep.Pointer -> "pointer on ${step.surface} at ${step.x}, ${step.y}"
+        is AppStep.Drag -> "drag on ${step.surface} from ${step.from.first}, ${step.from.second} to ${step.to.first}, ${step.to.second}"
+        is AppStep.Tilt -> "tilt ${step.x}, ${step.y}"
         is AppStep.Move -> "move ${step.direction} on ${step.surface}"
         is AppStep.Playback -> "playback ${step.event}"
         is AppStep.Wait -> "wait ${step.milliseconds} ms"

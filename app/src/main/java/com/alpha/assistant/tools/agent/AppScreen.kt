@@ -3,6 +3,8 @@ package com.alpha.assistant.tools.agent
 import com.alpha.assistant.tools.GraphicsContract
 import com.alpha.assistant.tools.ToolSurface
 import com.alpha.assistant.tools.ToolUiCatalog
+import com.alpha.assistant.tools.canvasSurfaceIds
+import com.alpha.assistant.tools.surfaceLabels
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
@@ -38,6 +40,8 @@ internal class AppScreen private constructor(val lines: List<String>, val visibl
     companion object {
         private const val MAX_ROWS = 6
         private const val MAX_LINES = 160
+        /** Drawn text of one surface on the screen. A game redraws often, so only the last frame counts. */
+        private const val MAX_DRAWN_TEXT = 400
         private val collections = setOf("list", "table", "groupedList", "lazyList", "lazyGrid")
         private val flattened = setOf("column", "scroll", "theme", "box", "motion", "transform", "transition")
         private val silent = setOf("divider", "spacer", "skeleton")
@@ -68,6 +72,16 @@ internal class AppScreen private constructor(val lines: List<String>, val visibl
             fun line(depth: Int, text: String) {
                 if (lines.size < MAX_LINES) lines += "  ".repeat(depth) + text
                 else if (lines.size == MAX_LINES) lines += "... more nodes are not shown"
+            }
+            fun surfaceText(surface: String): String {
+                val frame = surfaces.optJSONObject(surface)
+                val commands = frame?.optJSONArray("commands")
+                val count = commands?.length() ?: 0
+                val words = commands?.let { surfaceLabels(it) { label -> label } }?.trim()?.take(MAX_DRAWN_TEXT).orEmpty()
+                if (words.isNotEmpty()) visible += words
+                return "$surface${sizes[surface]?.let { " ${it.width}x${it.height}" }.orEmpty()}: " +
+                    "$count drawing command${if (count == 1) "" else "s"}${frame?.let(::extent).orEmpty()}" +
+                    if (words.isEmpty()) "" else ", text \"${words.replace("\n", " ")}\""
             }
             fun timerText(node: JSONObject, values: JSONObject): String {
                 if (node.has("foreground")) {
@@ -155,13 +169,7 @@ internal class AppScreen private constructor(val lines: List<String>, val visibl
                     }
                     type == "canvas" -> {
                         val ids = node.optJSONArray("surfaces")?.let { list -> (0 until list.length()).map { list.getString(it) } }.orEmpty()
-                        val drawn = ids.joinToString { surface ->
-                            val frame = surfaces.optJSONObject(surface)
-                            val count = frame?.optJSONArray("commands")?.length() ?: 0
-                            "$surface${sizes[surface]?.let { " ${it.width}x${it.height}" }.orEmpty()}: " +
-                                "$count drawing command${if (count == 1) "" else "s"}${frame?.let(::extent).orEmpty()}"
-                        }
-                        line(depth, "canvas ${quote(label)} ($drawn)")
+                        line(depth, "canvas ${quote(label)} (${ids.joinToString(transform = ::surfaceText)})")
                     }
                     type in ToolUiCatalog.choiceTypes -> {
                         val value = bound(node, values)
@@ -206,6 +214,9 @@ internal class AppScreen private constructor(val lines: List<String>, val visibl
                 }
                 node.optString("dismissAction").takeIf { it.isNotEmpty() }?.let { line(depth + 1, "dismiss [$it]") }
             }
+            // A surface without a canvas node fills the app window, as in an immersive game.
+            val placed = canvasSurfaceIds(ui).toSet()
+            for (surface in (sizes.keys + surfaces.keys().asSequence()).distinct() - placed) line(0, "surface ${surfaceText(surface)}")
             visit(ui, state, 0, true)
             return AppScreen(lines, visible.filter { it.isNotBlank() })
         }

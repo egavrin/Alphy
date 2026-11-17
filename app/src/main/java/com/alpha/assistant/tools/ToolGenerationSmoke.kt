@@ -1,6 +1,8 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.tools.agent.AppStepError
 import com.alpha.assistant.tools.agent.AppTarget
+import com.alpha.assistant.capabilities.TiltContract
 import com.alpha.assistant.cloud.CloudFailure
 
 import com.alpha.assistant.capabilities.MedicineContract
@@ -129,6 +131,7 @@ internal class ToolGenerationSmoke(
                     val y=if(phase=="move") surface.height.toDouble() else surface.height/2.0
                     event(GraphicsContract.event("pointer",x=x,y=y,phase=phase,pointer=pointer,surfaceId=surface.id),path)
                 }
+                if (index == 0 && TiltContract.ID in spec.capabilities) event(GraphicsContract.tilt(2.0, -1.0, 1, 1), "$.capabilities")
                 if (surface.id in spec.hostControls.movement) {
                     for (direction in listOf("left", "right")) {
                         event(GraphicsContract.event("control", direction = direction, surfaceId = surface.id), path)
@@ -257,14 +260,21 @@ internal class ToolGenerationSmoke(
             settle()
         }
 
-        override suspend fun pointer(surfaceId: String, x: Double, y: Double) {
+        override suspend fun pointer(surfaceId: String, path: List<Pair<Double, Double>>) {
             val surface = checkNotNull(branch.effectiveSurfaces[surfaceId])
-            val px = x * surface.width
-            val py = y * surface.height
-            for (phase in listOf("down", "up")) {
-                branch.event(GraphicsContract.event("pointer", x = px, y = py, phase = phase, surfaceId = surfaceId),
-                    "$.surfaces[${spec.surfaces.keys.toList().indexOf(surfaceId)}]")
+            for ((index, point) in path.withIndex()) {
+                val phase = when (index) { 0 -> "down"; path.lastIndex -> "up"; else -> "move" }
+                branch.event(GraphicsContract.event("pointer", x = point.first * surface.width, y = point.second * surface.height,
+                    phase = phase, surfaceId = surfaceId), "$.surfaces[${spec.surfaces.keys.toList().indexOf(surfaceId)}]")
             }
+            settle()
+        }
+
+        private var tiltSequence = 0L
+
+        override suspend fun tilt(x: Double, y: Double) {
+            if (TiltContract.ID !in spec.capabilities) throw AppStepError("Declare ${TiltContract.ID} in capabilities to receive tilt.")
+            branch.event(GraphicsContract.tilt(x, y, ++tiltSequence, clock()), "$.capabilities")
             settle()
         }
 
