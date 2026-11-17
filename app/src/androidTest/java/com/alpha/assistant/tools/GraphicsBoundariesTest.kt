@@ -37,6 +37,16 @@ class GraphicsBoundariesTest {
         }
         assertTrue(failure.message,failure.message!!.contains("\"purple\""))
         assertTrue(failure.message,failure.message!!.contains("$.surfaces[0].commands[0].color"))
+        // Review finding: the category sentence spoke of fields before the color details.
+        assertFalse(failure.message,failure.message!!.contains("documented fields"))
+    }
+    /** Review finding: a gradient string got "No value for color" instead of a message about the gradient key. */
+    @Test fun aGradientThatIsNotAnObjectNamesTheGradientKey() {
+        val failure=assertThrows(Exception::class.java) {
+            frame("""[{"type":"rect","x":0,"y":0,"width":10,"height":10,"gradient":"red"}]""")
+        }
+        assertTrue(failure.message,failure.message!!.contains("gradient"))
+        assertFalse(failure.message,failure.message!!.contains("No value for color"))
     }
     @Test fun aGradientUnderColorWithABadStopIsRejected() {
         val failure=assertThrows(IllegalArgumentException::class.java) {
@@ -44,6 +54,8 @@ class GraphicsBoundariesTest {
         }
         assertTrue(failure.message,failure.message!!.contains("\"purple\""))
         assertTrue(failure.message,failure.message!!.contains(".color.stops[1].color"))
+        // Review finding: a stop takes only a color string, so its message must not offer a gradient object.
+        assertFalse(failure.message,failure.message!!.contains("gradient object"))
     }
     private val rect="""{"type":"rect","x":0,"y":0,"width":10,"height":10,"color":"#FF0000"}"""
     /** Failure cases: unknown presentation/sizing fields, positioned or multiple viewport surfaces,

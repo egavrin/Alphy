@@ -566,6 +566,16 @@ class AgentGenerationWorkflowTest {
         assertTrue(line, line.contains("w0. w1.") && line.length <= 520)
     }
 
+    /** Review finding: the agent must see the unsupported drawing color and the command that holds it. */
+    @Test fun aBadDrawingColorNamesItsValueAndPath(): Unit = runBlocking {
+        val good = drawingApp("const s=input.state;return {state:s,surfaces:{main:{commands:[{type:'rect',x:0,y:0,width:300,height:200,color:'#10233F'}]}}};")
+        val bad = JSONObject(good.toString()).put("source", good.getString("source").replace("'#10233F'", "'purple'"))
+        val provider = AgentScriptProvider(writeAppReply(bad), writeAppReply(good), finish(anyScreen))
+        generate(provider, "Draw a purple box")
+        val feedback = provider.feedback(1)
+        assertTrue(feedback, feedback.contains("Observed: \"purple\"") && feedback.contains("$.surfaces[0].commands[0].color"))
+    }
+
     @Test fun theSmokeTestSendsATiltSample(): Unit = runBlocking {
         val good = drawingApp("const s=input.state,e=input.event;" +
             "if(e.type==='action')return {state:s,effects:[{id:'tilt',capability:'sensor.accelerometer.stream',args:{enabled:true}}]};" +

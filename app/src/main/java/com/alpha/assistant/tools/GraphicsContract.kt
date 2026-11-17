@@ -88,10 +88,11 @@ object GraphicsContract {
     }
     private val hexColor=Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?")
     private val bitmapHandle=Regex("[0-9a-f]{64}")
-    private fun color(value: Any,path: String) {
+    /** [orGradient] is true for a command color, which can also be a gradient object, and false for a gradient stop. */
+    private fun color(value: Any,path: String,orGradient: Boolean) {
         if(value is String && (value in ToolUiCatalog.tones || value.matches(hexColor))) return
-        throw ToolValidationFailure(ToolValidationCategory.DRAWING,ToolValidationDetails(
-            "drawing.color",path,"default, muted, accent, success, warning, error, #RRGGBB, #AARRGGBB, or a gradient object","\"${value.toString().take(40)}\""))
+        val expected=ToolUiCatalog.tones.joinToString(", ")+", #RRGGBB, "+if(orGradient) "#AARRGGBB, or a gradient object" else "or #AARRGGBB"
+        throw ToolValidationFailure(ToolValidationCategory.DRAWING,ToolValidationDetails("drawing.color",path,expected,"\"${value.toString().take(40)}\""))
     }
     /** The gradient of a drawing command: the `gradient` object, or a JSON object under `color`. Null for a solid color. */
     internal fun gradientOf(command: JSONObject): JSONObject? = command.optJSONObject("gradient") ?: command.optJSONObject("color")
@@ -121,8 +122,9 @@ object GraphicsContract {
         }
         fun paint(c: JSONObject,m: DoubleArray,path: String): Set<String> {
             require(c.has("color") xor c.has("gradient")) {"Use exactly one color or gradient."}
-            val g=gradientOf(c)
-            if(g==null) {color(c.get("color"),"$path.color");return setOf("color")}
+            // Read the gradient key explicitly, so a gradient that is not an object names that key.
+            val g=if(c.has("gradient")) c.getJSONObject("gradient") else c.optJSONObject("color")
+            if(g==null) {color(c.get("color"),"$path.color",true);return setOf("color")}
             val gradientPath=if(c.has("gradient")) "$path.gradient" else "$path.color"
             val x=number(g,"x");val y=number(g,"y");point(x,y,m)
             val fields=when(g.getString("type")) {
@@ -136,7 +138,7 @@ object GraphicsContract {
             var previous=-1.0
             repeat(stops.length()) {
                 val stop=stops.getJSONObject(it);require(keys(stop)==setOf("offset","color"))
-                val offset=number(stop,"offset",0.0,1.0);require(offset>previous);previous=offset;color(stop.get("color"),"$gradientPath.stops[$it].color")
+                val offset=number(stop,"offset",0.0,1.0);require(offset>previous);previous=offset;color(stop.get("color"),"$gradientPath.stops[$it].color",false)
             }
             require(stops.getJSONObject(0).getDouble("offset")==0.0 && previous==1.0)
             return setOf(if(c.has("gradient")) "gradient" else "color")
