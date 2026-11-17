@@ -131,7 +131,7 @@ import kotlin.math.abs
 import kotlin.math.round
 
 private val LocalEmbeddedTool = staticCompositionLocalOf { false }
-private val LocalToolBackground = staticCompositionLocalOf { Color.Unspecified }
+internal val LocalToolBackground = staticCompositionLocalOf { Color.Unspecified }
 private val LocalRouteSystemBack = staticCompositionLocalOf { true }
 /** The technical preset aligns digits in columns with tabular figures. */
 private val LocalToolTabularDigits = staticCompositionLocalOf { false }
@@ -1875,7 +1875,7 @@ internal fun rootThemeColors(ui: String, shellDark: Boolean): ColorScheme? =
         )) {
         // The app draws its own background, so its palette shows, not the gray shell card around it.
         Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(radius), color = colors.background, contentColor = colors.onBackground) {
-            CompositionLocalProvider(LocalToolTabularDigits provides (preset == "technical"), content = content)
+            CompositionLocalProvider(LocalToolTabularDigits provides (preset == "technical"), LocalToolBackground provides colors.background, content = content)
         }
     }
 }

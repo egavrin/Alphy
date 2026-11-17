@@ -51,6 +51,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** Black-box failure cases: stale or inactive chat cards, lost app context/draft, scrolling composer,
@@ -225,6 +226,54 @@ class MiniAppPresentationWorkflowTest {
             java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null); deleteEntry(name)}
         }
     }
+    /** A saved canvas app in a theme. The board fills its surface with [fill], or draws nothing when [fill] is null. */
+    private fun canvasSpec(fill: String?, inCard: Boolean) = JSONObject().put("formatVersion", 3).put("title", "Board").put("description", "A board")
+        .put("capabilities", JSONArray()).put("stateSchema", JSONObject("""{"n":"number"}""")).put("initialState", JSONObject("""{"n":0}"""))
+        .put("surfaces", JSONArray("""[{"id":"board","width":300,"height":200}]"""))
+        .put("ui", JSONObject().put("type", "theme").put("preset", "playful").put("palette", "orange").put("children", JSONArray().put(
+            JSONObject().put("type", "column").put("style", JSONObject("""{"padding":"medium","gap":"medium"}""")).put("children", JSONArray().apply {
+                val canvas = JSONObject("""{"type":"canvas","text":"Drawing board","surfaces":["board"]}""")
+                put(if (inCard) JSONObject().put("type", "card").put("text", "Board card").put("children", JSONArray().put(canvas)) else canvas)
+                put(JSONObject("""{"type":"text","text":"Under the board"}"""))
+            }))))
+        .put("source", "return {state:input.state,surfaces:{board:{commands:" +
+            (if (fill == null) "[]" else "[{type:'rect',x:0,y:0,width:300,height:200,color:'$fill'}]") + "}}};")
+        .toString()
+
+    /** Failure case: an inline canvas drew the shell surface color, a gray box inside a tinted card. */
+    @Test fun anInlineCanvasTakesItsCardColor() {
+        val robot = ShellRobot("canvas-card")
+        fixture(specJson = canvasSpec(fill = null, inCard = true)) { _, _, _ ->
+            click(robot.text(R.string.tool_open))
+            shown("Under the board")
+            val board = robot.bounds(robot.texts().first { it.startsWith("Drawing board") })
+            val shot = checkNotNull(automation.takeScreenshot())
+            try {
+                val canvas = shot.getPixel(board.centerX(), board.centerY())
+                val card = shot.getPixel(board.left - (8 * shot.density / 160), board.centerY())
+                for (shift in listOf(16, 8, 0)) assertTrue("the canvas ${Integer.toHexString(canvas)} matches its card ${Integer.toHexString(card)}",
+                    abs((canvas shr shift and 0xFF) - (card shr shift and 0xFF)) <= 3)
+            } finally { shot.recycle() }
+        }
+    }
+
+    /** Failure case: an inline canvas kept a fixed 16 dp corner in a playful theme with 32 dp corners. */
+    @Test fun anInlineCanvasUsesTheThemeRadius() {
+        val robot = ShellRobot("canvas-radius")
+        fixture(specJson = canvasSpec(fill = "#1E88E5", inCard = false)) { _, _, _ ->
+            click(robot.text(R.string.tool_open))
+            shown("Under the board")
+            val board = robot.bounds(robot.texts().first { it.startsWith("Drawing board") })
+            val shot = checkNotNull(automation.takeScreenshot())
+            try {
+                val inset = 8 * shot.density / 160
+                val corner = shot.getPixel(board.left + inset, board.top + inset)
+                val middle = shot.getPixel(board.centerX(), board.centerY())
+                assertTrue("the corner ${Integer.toHexString(corner)} is outside the 32 dp clip", abs((corner shr 16 and 0xFF) - (middle shr 16 and 0xFF)) > 40)
+            } finally { shot.recycle() }
+        }
+    }
+
     /** Failure case: a live slider in an open 3D app showed "Open the mini-app to edit" and a disabled Apply, so the scene value never changed. */
     @Test fun savedSceneLiveSliderSendsItsValue() {
         org.junit.Assume.assumeTrue(com.alpha.assistant.tools.three.ThreeSceneWebView.available())

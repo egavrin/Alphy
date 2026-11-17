@@ -16,6 +16,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.platform.LocalDensity
@@ -66,7 +68,7 @@ internal val LocalToolCanvas = compositionLocalOf<(@Composable (List<String>, St
 private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
 
 @OptIn(ExperimentalLayoutApi::class)
-@Composable internal fun NativeToolSurface(tool: ToolRecord,spec: ToolSpec,enabled: Boolean,maxCanvasHeight: Dp,host: ArtifactUiHost,immersive: Boolean=false,covered: Boolean=false,roundInlineViewport: Boolean=false,onCoverReady: (Boolean)->Unit = {},topControls: @Composable () -> Unit = {},stageAvailableHeight: Dp? = null,
+@Composable internal fun NativeToolSurface(tool: ToolRecord,spec: ToolSpec,enabled: Boolean,maxCanvasHeight: Dp,host: ArtifactUiHost,immersive: Boolean=false,covered: Boolean=false,onCoverReady: (Boolean)->Unit = {},topControls: @Composable () -> Unit = {},stageAvailableHeight: Dp? = null,
     content: @Composable () -> Unit = {},onSnapshot: (ArtifactSnapshot) -> Unit = {}) {
     val context=LocalContext.current
     val view=LocalView.current
@@ -234,11 +236,14 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
         }
     }
     val scheme = MaterialTheme.colorScheme
-    val canvasBackground = scheme.surface
-    val roleColors = remember(scheme) {
-        ToolUiCatalog.tones.associateWith { scheme.toolInk(it, canvasBackground).toArgb() }
-    }
+    val appColors = remember(spec.ui, scheme) { rootThemeColors(spec.ui.toString(), scheme.background.luminance() < 0.5f) }
     val stage: @Composable (List<String>, String, Modifier, Boolean) -> Unit = { ids, description, modifier, interactive ->
+        // A full-screen surface takes the app theme background. An inline canvas takes the color of the card or page around it.
+        val colors = if (immersive) appColors ?: scheme else MaterialTheme.colorScheme
+        val canvasBackground = if (immersive) colors.background else LocalToolBackground.current.takeOrElse { colors.surface }
+        val roleColors = remember(colors, canvasBackground) {
+            ToolUiCatalog.tones.associateWith { colors.toolInk(it, canvasBackground).toArgb() }
+        }
         val selected = effectiveSurfaces.filter { it.id in ids }
         val placements = remember(selected) { surfacePlacements(selected) }
         if(placements.isNotEmpty()) {
@@ -265,7 +270,7 @@ private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
                     if (viewportSurface != null && it.width > 0 && it.height > 0) {
                         requestedViewport = surfaceViewport(viewportSurface,it.width,it.height,density)
                     }
-                }.then(if (roundInlineViewport) Modifier.clip(RoundedCornerShape(InlineToolViewportCornerRadius)) else Modifier)
+                }.then(if (immersive) Modifier else Modifier.clip(MaterialTheme.shapes.medium))
                     .background(canvasBackground)
                     .semantics {contentDescription="$description. $labels"}
                     .pointerInput(ids,measuredSize,interactive,enabled,snapshot?.playback in setOf("ready","playing"),error==null,attempt,acceptedViewport,requestedViewport,covered) {

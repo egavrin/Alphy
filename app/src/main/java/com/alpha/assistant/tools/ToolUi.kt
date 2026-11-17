@@ -227,7 +227,7 @@ internal val InlineToolViewportCornerRadius = 16.dp
 
 @Composable internal fun CoveredToolSurface(
     tool: ToolRecord, spec: ToolSpec, enabled: Boolean, maxCanvasHeight: Dp, host: ArtifactUiHost,
-    actions: MiniAppActions, immersive: Boolean = false, covered: Boolean = false, roundInlineViewport: Boolean = false,
+    actions: MiniAppActions, immersive: Boolean = false, covered: Boolean = false,
     onCoverReady: (Boolean) -> Unit = {}, topControls: @Composable () -> Unit = {},
     stageAvailableHeight: Dp? = null, content: @Composable () -> Unit = {},
     onSnapshot: (ArtifactSnapshot) -> Unit = {},
@@ -257,7 +257,6 @@ internal val InlineToolViewportCornerRadius = 16.dp
     key(host) {
         NativeToolSurface(tool, spec, enabled, maxCanvasHeight, host, immersive,
             covered = covered || actions.covers(tool.id),
-            roundInlineViewport = roundInlineViewport,
             onCoverReady = { ready ->
                 actions.surfacePaused(handle, latestSnapshot.takeIf { ready })
                 onCoverReady(ready)
@@ -855,7 +854,7 @@ catch (_: Exception) { null }
                         draft == null && !controller.busy && !tool.archived && !menu &&
                             !hostCovered && details == null && !actions.covers(tool.id))
                     else if (draft == null && graphicsHost != null) CoveredToolSurface(tool, spec, !tool.archived,
-                        canvasHeight, graphicsHost, actions, covered = details != null || menu || hostCovered, roundInlineViewport = true,
+                        canvasHeight, graphicsHost, actions, covered = details != null || menu || hostCovered,
                         stageAvailableHeight = stageAvailableHeight, content = content) { artifactSnapshot = it }
                     else content()
                 }
