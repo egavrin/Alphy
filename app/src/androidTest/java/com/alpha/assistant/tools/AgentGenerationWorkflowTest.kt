@@ -182,12 +182,43 @@ class AgentGenerationWorkflowTest {
     }
 
     @Test fun anUnsupportedPropertyIsNamedWithTheAllowedOnes(): Unit = runBlocking {
-        val broken = tipApp().apply { getJSONObject("ui").getJSONArray("children").getJSONObject(2).put("tone", "accent") }
+        val broken = tipApp().apply { getJSONObject("ui").getJSONArray("children").getJSONObject(2).put("value", 5) }
         val provider = AgentScriptProvider(writeAppReply(broken), writeAppReply(tipApp()), finish(splitCheck))
         generate(provider)
         val feedback = provider.feedback(1)
-        assertTrue(feedback, feedback.contains("This metric has unsupported properties: tone."))
+        assertTrue(feedback, feedback.contains("This metric has unsupported properties: value."))
         assertTrue(feedback, feedback.contains("Allowed:") && feedback.contains("style"))
+    }
+
+    /**
+     * Writes the bill split with [banner] added in one step and returns the accepted banner node.
+     * Failure case: in the baseline at the start commit, about one case in ten put tone beside style, mostly on banner and badge.
+     */
+    private suspend fun acceptedBanner(banner: String): JSONObject {
+        val app = tipApp().apply { getJSONObject("ui").getJSONArray("children").put(JSONObject(banner)) }
+        val provider = AgentScriptProvider(writeAppReply(app), finish(splitCheck))
+        val preview = generate(provider)
+        assertTrue(provider.feedback(1), provider.feedback(1).contains("write_app: OK"))
+        val children = preview.spec.ui.getJSONArray("children")
+        return children.getJSONObject(children.length() - 1).also { assertEquals("banner", it.getString("type")) }
+    }
+
+    @Test fun aToneBesideStyleMovesIntoStyle(): Unit = runBlocking {
+        val banner = acceptedBanner("""{"type":"banner","text":"Tip","tone":"warning","children":[{"type":"text","text":"Tip is 15%"}]}""")
+        assertEquals("warning", banner.getJSONObject("style").getString("tone"))
+        assertFalse(banner.has("tone"))
+    }
+
+    @Test fun aToneAlreadyInStyleWins(): Unit = runBlocking {
+        val banner = acceptedBanner("""{"type":"banner","text":"Tip","tone":"warning","style":{"tone":"error"},"children":[{"type":"text","text":"Tip is 15%"}]}""")
+        assertEquals("error", banner.getJSONObject("style").getString("tone"))
+    }
+
+    @Test fun aToneOnATypeWhoseStyleHasNoToneIsStillRejected(): Unit = runBlocking {
+        val broken = tipApp().apply { getJSONObject("ui").getJSONArray("children").getJSONObject(0).put("tone", "accent") }
+        val provider = AgentScriptProvider(writeAppReply(broken), writeAppReply(tipApp()), finish(splitCheck))
+        generate(provider)
+        assertTrue(provider.feedback(1), provider.feedback(1).contains("This numberInput has unsupported properties: tone."))
     }
 
     @Test fun aFindAndReplaceCanChangeTheUi(): Unit = runBlocking {

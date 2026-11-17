@@ -160,6 +160,7 @@ internal class AppAgent(
             }
             if (!definition.has("description")) definition.put("description", "")
             if (!definition.has("capabilities")) definition.put("capabilities", JSONArray())
+            moveToneIntoStyle(definition.opt("ui"))
             val parsed = try {
                 ToolSpec.parse(service.normalizeAgentDefinition(definition.toString()))
                     .withAppLanguage(language?.tag).withIcon(previous?.iconId)
@@ -810,5 +811,25 @@ internal class AppAgent(
         val scalarTypes = setOf("number", "string", "boolean")
         val placeholderValues = setOf("None", "null", "undefined", "NaN", "[object Object]")
         val longDecimal = Regex("\\d+\\.\\d{7,}")
+
+        /**
+         * Moves a tone that the model put beside style into style, when the node's type accepts a style tone.
+         * A tone already in style wins. A style that is not an object stays for validation to reject.
+         */
+        private fun moveToneIntoStyle(node: Any?) {
+            when (node) {
+                is JSONArray -> for (i in 0 until node.length()) moveToneIntoStyle(node.opt(i))
+                is JSONObject -> {
+                    val style = node.opt("style")
+                    if (node.has("tone") && (style == null || style is JSONObject) &&
+                        "tone" in ToolUiCatalog.components[node.optString("type")]?.styles.orEmpty()) {
+                        val tone = node.remove("tone")
+                        val target = style as? JSONObject ?: JSONObject().also { node.put("style", it) }
+                        if (!target.has("tone")) target.put("tone", tone)
+                    }
+                    for (key in node.keys().asSequence().toList()) moveToneIntoStyle(node.opt(key))
+                }
+            }
+        }
     }
 }
