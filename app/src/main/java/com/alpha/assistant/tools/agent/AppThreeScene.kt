@@ -12,10 +12,10 @@ internal class ThreeSceneTarget(private val session: ThreeSceneSession) : AppTar
     private var clock = System.currentTimeMillis() / 1000 * 1000
     override val ui: JSONObject get() = JSONObject(session.snapshot.ui)
     override val state: JSONObject get() = JSONObject(session.snapshot.state)
-    override val surfaces: JSONObject get() = JSONObject()
+    override val surfaces: JSONObject get() = session.snapshot.hudSurfaces(SCENE)
     override val nowMillis: Long get() = clock
     override val surfaceIds: Set<String> = setOf(SCENE)
-    override val surfaceSizes: Map<String, ToolSurface> = emptyMap()
+    override val surfaceSizes: Map<String, ToolSurface> get() = session.snapshot.hudSizes(SCENE)
     override val requested: List<String> = emptyList()
 
     override suspend fun control(id: String, payload: Any?) = session.action(id, payload)

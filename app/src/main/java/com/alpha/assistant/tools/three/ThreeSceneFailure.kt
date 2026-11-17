@@ -18,6 +18,7 @@ internal enum class ThreeSceneProblem(val guidance: String) {
     CAPTURE_FAILED("Alphy could not capture the 3D viewport."),
     BLANK_FRAME("Render visible content in the scene viewport."),
     INVALID_SNAPSHOT("Return valid state and optional native UI from snapshot."),
+    INVALID_HUD("Return hud as {width,height,commands} with width and height from 64 to 2048 and the 2D drawing commands of a canvas surface."),
     STARTUP_MUTATION("Keep every supplied state value unchanged through createScene and open."),
     INVALID_AUDIO("Request an authorized audio clip only after a foreground action or drop."),
     INVALID_BINDING("Bind the planned check to a supported scene control or observable output."),

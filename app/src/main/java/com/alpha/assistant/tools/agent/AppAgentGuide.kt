@@ -160,14 +160,14 @@ Pictures are available for this request:
 
     val threeScene = """
 3D scenes are available on this device. Use one when the request needs real 3D: a model viewer, a planet or a solar system, a molecule, a 3D shape to rotate, or a 3D game. Use a canvas for flat drawings and 2D games.
-- Add "runtime":{"kind":"threejs-worker","version":1}. Use "capabilities":[] and no surfaces, hostControls, collections, capabilityResults, or canvas node. Alphy shows the scene in a viewport above the native ui.
+- Add "runtime":{"kind":"threejs-worker","version":1}. Use "capabilities":[] and no surfaces, hostControls, collections, capabilityResults, or canvas node. Alphy shows the scene in a viewport above the native ui. A 3D game adds "presentation":{"mode":"immersive"}, so the scene fills the screen.
 - source is an ES module, not a function body: export async function createScene(context){...}. context has THREE, addons (GLTFLoader, OrbitControls, EffectComposer, RenderPass, ShaderPass, OutputPass), canvas, input, state, viewport {width,height}, readAsset(id), and bindTexture(slot, mesh).
 - In createScene: const renderer=new context.THREE.WebGLRenderer({canvas:context.canvas,antialias:true}); renderer.setSize(context.viewport.width,context.viewport.height,false); add an AmbientLight and a DirectionalLight; build the scene; render the first frame before you return. The host rejects a first frame that shows only the background.
-- Return {event(e){}, frame(f){}, snapshot(){return {state};}, dispose(){renderer.dispose();}}. event gets open, viewport (width,height), pointerdown, pointermove, pointerup, pointercancel (x and y from 0 to 1), action and liveInput (actionId,value), pause, resume, start, and restart. frame gets {timeMs,dtMs}: animate with dtMs and render. Render again after each change.
+- Return {event(e){}, frame(f){}, snapshot(){return {state};}, dispose(){renderer.dispose();}}. A 3D game also returns hud from snapshot: {width:context.viewport.width,height:context.viewport.height,commands:[...]} with the 2D drawing commands of a canvas. Draw the score, the start screen, and the game over screen there, over the scene. event gets open, viewport (width,height), pointerdown, pointermove, pointerup, pointercancel (x and y from 0 to 1), action and liveInput (actionId,value), pause, resume, start, and restart. frame gets {timeMs,dtMs}: animate with dtMs and render. Render again after each change.
 - Keep app values in state, with the same stateSchema rules. Native controls in ui send action events to event(e). Change state there, and snapshot() returns it. Do not change state values in createScene or open.
 - For rotate and zoom use new context.addons.OrbitControls(camera, context.input), and call controls.update() in frame.
 - Do not use the DOM, fetch, import, or URLs.
-- Steps for run and finish: native controls work as usual. {"pointer":"scene","x":0.5,"y":0.5} taps the viewport. {"wait":1000} advances frames. Expectations read the native ui and state.
+- Steps for run and finish: native controls work as usual. {"pointer":"scene","x":0.5,"y":0.5} taps the viewport. {"wait":1000} advances frames. Expectations read the native ui, the hud text, and state.
 """.trimIndent()
 
     fun system(capabilities: String, extra: String, pictures: Boolean = false, threeD: Boolean = false): String = buildString {

@@ -281,7 +281,7 @@ private data class MiniAppOrigin(
     var immersiveExited by rememberSaveable(selectedTool?.id, selectedTool?.revision, destination == ShellDestination.MiniApps) { mutableStateOf(false) }
     val previewingMiniApp = focusedMiniApp && model.tools.selectedDraftId != null
     val immersive = focusedMiniApp && !previewingMiniApp && !editingMiniApp && selectedTool?.archived == false &&
-        selectedSpec?.presentation == "immersive" && !immersiveExited
+        selectedSpec?.presentation == "immersive" && !selectedSpec.threeScene && !immersiveExited
     val libraryVisible = destination == ShellDestination.MiniApps && !model.tools.storageUnavailable
     val systemInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
     var miniAppBackground by remember { mutableStateOf<Color?>(null) }

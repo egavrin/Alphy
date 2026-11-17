@@ -7,6 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -44,6 +45,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -67,7 +70,11 @@ import com.alpha.assistant.tools.ToolPlaybackControls
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStageLayout
+import com.alpha.assistant.tools.ToolSurface
 import com.alpha.assistant.tools.ToolUiCatalog
+import com.alpha.assistant.tools.drawSurfaceFrame
+import com.alpha.assistant.tools.surfaceLabels
+import com.alpha.assistant.tools.toolInk
 import com.alpha.assistant.tools.miniAppString
 import com.alpha.assistant.ui.AlphaIcon
 import com.alpha.assistant.ui.Glyph
@@ -105,7 +112,8 @@ internal fun ThreeScenePane(
     var error by remember(tool.id, tool.revision) { mutableStateOf<String?>(null) }
     var paused by rememberSaveable(tool.id, tool.revision) { mutableStateOf(false) }
     var retry by remember(tool.id, tool.revision) { mutableStateOf(0) }
-    var fullscreen by remember(visible, session) { mutableStateOf(false) }
+    // An immersive scene, such as a 3D game, opens across the whole window.
+    var fullscreen by remember(visible, session) { mutableStateOf(spec.presentation == "immersive") }
     val events = remember(tool.id, tool.revision, visible, retry) { Channel<JSONObject>(32) }
     val moves = remember(events) { linkedMapOf<Int, JSONObject>() }
     val pointers = remember(events) { linkedMapOf<Int, JSONObject>() }
@@ -252,6 +260,7 @@ internal fun ThreeScenePane(
                 }, modifier = Modifier.fillMaxSize(), update = { container ->
                     if (container.outlineProvider !== inlineOutline) container.outlineProvider = inlineOutline
                 })
+                snapshot.hud?.let { ThreeSceneHud(it, spec.title) }
                 if (!fullscreen) SceneOverlay(paused, expanded = false, spec.appLanguage, onFullscreen = { fullscreen = true })
             }
         }, controls = {
@@ -283,6 +292,7 @@ internal fun ThreeScenePane(
                                     viewportPending = true
                                     expanded.apply { attachSceneView(view) }
                                 }, modifier = Modifier.fillMaxSize())
+                                snapshot.hud?.let { ThreeSceneHud(it, spec.title) }
                                 SceneOverlay(paused, expanded = true, spec.appLanguage, onFullscreen = { fullscreen = false })
                             }
                             Column(Modifier.fillMaxWidth()
@@ -306,6 +316,27 @@ internal fun ThreeScenePane(
             TextButton(onClick = { retry++ }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.retry)) }
         }
         sceneControls(spec.title)
+    }
+}
+
+/** Draws the scene hud over the viewport and adds its text to the viewport description. Touches pass to the scene. */
+@Composable
+internal fun ThreeSceneHud(hud: String, label: String) {
+    val drawing = remember(hud) { JSONObject(hud) }
+    val surface = remember(drawing) { ToolSurface("hud", drawing.getInt("width"), drawing.getInt("height")) }
+    val text = remember(drawing) { surfaceLabels(drawing.getJSONArray("commands")) { it }.trim() }
+    val scheme = MaterialTheme.colorScheme
+    val roleColors = remember(scheme) { ToolUiCatalog.tones.associateWith { scheme.toolInk(it, scheme.surface).toArgb() } }
+    Canvas(Modifier.fillMaxSize().semantics { contentDescription = if (text.isEmpty()) label else "$label. $text" }) {
+        val scale = minOf(size.width / surface.width, size.height / surface.height)
+        val canvas = drawContext.canvas.nativeCanvas
+        val saved = canvas.save()
+        try {
+            canvas.translate((size.width - surface.width * scale) / 2, (size.height - surface.height * scale) / 2)
+            drawSurfaceFrame(canvas, surface, drawing.getJSONArray("commands"), surface.width * scale, surface.height * scale, roleColors)
+        } finally {
+            canvas.restoreToCount(saved)
+        }
     }
 }
 

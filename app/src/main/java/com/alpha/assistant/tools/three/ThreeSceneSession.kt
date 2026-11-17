@@ -5,6 +5,8 @@ import android.content.Context
 import android.view.MotionEvent
 import com.alpha.assistant.media.DeviceMediaPlayback
 import com.alpha.assistant.media.MediaPlaybackResult
+import com.alpha.assistant.tools.GraphicsContract
+import com.alpha.assistant.tools.ToolSurface
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolUiCatalog
 import com.alpha.assistant.tools.sameToolJson
@@ -27,7 +29,41 @@ internal object ThreeSceneForeground {
     fun activity(): Activity = activeActivity() ?: throw ThreeSceneFailure(ThreeSceneProblem.FOREGROUND)
 }
 
-internal data class ThreeSceneSnapshot(val state: String, val ui: String)
+/** The scene output. The optional hud is a 2D drawing {width,height,commands} over the viewport, in the canvas command format. */
+internal data class ThreeSceneSnapshot(val state: String, val ui: String, val hud: String? = null) {
+    /** The hud as one drawing surface with the [id] of the viewport, for the agent screen. */
+    fun hudSurfaces(id: String): JSONObject =
+        hud?.let { JSONObject().put(id, JSONObject().put("commands", JSONObject(it).getJSONArray("commands"))) } ?: JSONObject()
+
+    fun hudSizes(id: String): Map<String, ToolSurface> =
+        hud?.let { JSONObject(it) }?.let { mapOf(id to ToolSurface(id, it.getInt("width"), it.getInt("height"))) }.orEmpty()
+
+    companion object {
+        fun validated(spec: ToolSpec, result: JSONObject, fallbackUi: String): ThreeSceneSnapshot {
+            val hud = if (result.has("hud")) hud(result.opt("hud")) else null
+            return try {
+                require(result.keys().asSequence().all { it in setOf("state", "ui", "audio", "hud") })
+                val state = spec.validateState(result.getJSONObject("state").toString())
+                val ui = if (result.has("ui")) result.getJSONObject("ui") else JSONObject(fallbackUi)
+                spec.validateUi(ui, state)
+                ThreeSceneSnapshot(state.toString(), ui.toString(), hud)
+            } catch (_: Exception) {
+                throw ThreeSceneFailure(ThreeSceneProblem.INVALID_SNAPSHOT)
+            }
+        }
+
+        private fun hud(value: Any?): String = try {
+            val hud = value as JSONObject
+            require(hud.keys().asSequence().toSet() == setOf("width", "height", "commands"))
+            val (width, height) = listOf("width", "height").map { (hud.get(it) as Number).toDouble() }
+            require(width in 64.0..2048.0 && height in 64.0..2048.0)
+            val frame = GraphicsContract.frame(JSONObject().put("commands", hud.getJSONArray("commands")).toString(), "frame")
+            JSONObject().put("width", width.toInt()).put("height", height.toInt()).put("commands", frame.getJSONArray("commands")).toString()
+        } catch (_: Exception) {
+            throw ThreeSceneFailure(ThreeSceneProblem.INVALID_HUD)
+        }
+    }
+}
 
 internal class ThreeSceneSession(
     context: Context,
@@ -142,15 +178,7 @@ internal class ThreeSceneSession(
         }
     }
 
-    private fun validatedSnapshot(result: JSONObject, fallbackUi: String): ThreeSceneSnapshot = try {
-        require(result.keys().asSequence().all { it in setOf("state", "ui", "audio") })
-        val state = spec.validateState(result.getJSONObject("state").toString())
-        val ui = if (result.has("ui")) result.getJSONObject("ui") else JSONObject(fallbackUi)
-        spec.validateUi(ui, state)
-        ThreeSceneSnapshot(state.toString(), ui.toString())
-    } catch (_: Exception) {
-        throw ThreeSceneFailure(ThreeSceneProblem.INVALID_SNAPSHOT)
-    }
+    private fun validatedSnapshot(result: JSONObject, fallbackUi: String) = ThreeSceneSnapshot.validated(spec, result, fallbackUi)
 
     private fun startupSnapshot(result: JSONObject, expected: JSONObject, fallbackUi: String,
         operation: ThreeSceneOperation): ThreeSceneSnapshot {
