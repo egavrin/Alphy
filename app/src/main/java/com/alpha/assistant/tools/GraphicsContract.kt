@@ -88,9 +88,13 @@ object GraphicsContract {
     }
     private val hexColor=Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?")
     private val bitmapHandle=Regex("[0-9a-f]{64}")
-    private fun color(value: Any) {
-        require(value is String && (value in ToolUiCatalog.tones || value.matches(hexColor))) {"Unsupported drawing color."}
+    private fun color(value: Any,path: String) {
+        if(value is String && (value in ToolUiCatalog.tones || value.matches(hexColor))) return
+        throw ToolValidationFailure(ToolValidationCategory.DRAWING,ToolValidationDetails(
+            "drawing.color",path,"default, muted, accent, success, warning, error, #RRGGBB, #AARRGGBB, or a gradient object","\"${value.toString().take(40)}\""))
     }
+    /** The gradient of a drawing command: the `gradient` object, or a JSON object under `color`. Null for a solid color. */
+    internal fun gradientOf(command: JSONObject): JSONObject? = command.optJSONObject("gradient") ?: command.optJSONObject("color")
     private val identity=doubleArrayOf(1.0,0.0,0.0,1.0,0.0,0.0)
     private fun transform(parent: DoubleArray,raw: JSONArray): DoubleArray {
         require(raw.length()==6)
@@ -115,10 +119,11 @@ object GraphicsContract {
         fun bounds(x: Double,y: Double,w: Double,h: Double,m: DoubleArray) {
             point(x,y,m);point(x+w,y,m,false);point(x,y+h,m,false);point(x+w,y+h,m,false)
         }
-        fun paint(c: JSONObject,m: DoubleArray): Set<String> {
+        fun paint(c: JSONObject,m: DoubleArray,path: String): Set<String> {
             require(c.has("color") xor c.has("gradient")) {"Use exactly one color or gradient."}
-            if(c.has("color")) {color(c.get("color"));return setOf("color")}
-            val g=c.getJSONObject("gradient")
+            val g=gradientOf(c)
+            if(g==null) {color(c.get("color"),"$path.color");return setOf("color")}
+            val gradientPath=if(c.has("gradient")) "$path.gradient" else "$path.color"
             val x=number(g,"x");val y=number(g,"y");point(x,y,m)
             val fields=when(g.getString("type")) {
                 "linear" -> {val x2=number(g,"x2");val y2=number(g,"y2");require(x.toFloat()!=x2.toFloat() || y.toFloat()!=y2.toFloat());point(x2,y2,m);setOf("x2","y2")}
@@ -131,10 +136,10 @@ object GraphicsContract {
             var previous=-1.0
             repeat(stops.length()) {
                 val stop=stops.getJSONObject(it);require(keys(stop)==setOf("offset","color"))
-                val offset=number(stop,"offset",0.0,1.0);require(offset>previous);previous=offset;color(stop.get("color"))
+                val offset=number(stop,"offset",0.0,1.0);require(offset>previous);previous=offset;color(stop.get("color"),"$gradientPath.stops[$it].color")
             }
             require(stops.getJSONObject(0).getDouble("offset")==0.0 && previous==1.0)
-            return setOf("gradient")
+            return setOf(if(c.has("gradient")) "gradient" else "color")
         }
         fun fields(command: JSONObject, expected: Set<String>, path: String) {
             val actual = keys(command)
@@ -217,7 +222,7 @@ object GraphicsContract {
                         setOf("type","x","y","size","text")+setOf("align","baseline").filter(c::has)}
                     else -> error("Unsupported drawing command")
                 }
-                fields(c,fields+paint(c,m),commandPath)
+                fields(c,fields+paint(c,m,commandPath),commandPath)
             }
         }
         visit(o.getJSONArray("commands"),1,identity,"$surfacePath.commands")

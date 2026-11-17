@@ -14,6 +14,37 @@ import org.junit.runner.RunWith
 class GraphicsBoundariesTest {
     private fun frame(commands: String)=GraphicsContract.frame("{\"commands\":$commands}","frame")
     private fun rejects(block: () -> Unit)=assertTrue(runCatching(block).isFailure)
+    private fun pixels(commands: JSONArray): IntArray {
+        val bitmap=Bitmap.createBitmap(16,16,Bitmap.Config.ARGB_8888)
+        drawSurfaceFrame(Canvas(bitmap),ToolSurface("main",16,16),commands,16f,16f,emptyMap())
+        return IntArray(256).also {bitmap.getPixels(it,0,16,0,0,16,16)}
+    }
+    @Test fun aGradientUnderColorDrawsLikeAGradient() {
+        val g="""{"type":"linear","x":0,"y":0,"x2":16,"y2":0,"stops":[{"offset":0,"color":"#FF0000"},{"offset":1,"color":"#0000FF"}]}"""
+        val documented=frame("""[{"type":"rect","x":0,"y":0,"width":16,"height":16,"gradient":$g}]""").getJSONArray("commands")
+        val alias=frame("""[{"type":"rect","x":0,"y":0,"width":16,"height":16,"color":$g}]""").getJSONArray("commands")
+        assertTrue(pixels(documented).distinct().size>2)
+        assertArrayEquals(pixels(documented),pixels(alias))
+    }
+    @Test fun anAliasedGradientCountsAgainstTheStopBudget() {
+        val g="""{"type":"linear","x":0,"y":0,"x2":16,"y2":0,"stops":[{"offset":0,"color":"#FF0000"},{"offset":1,"color":"#0000FF"}]}"""
+        val commands=List(65) {"""{"type":"rect","x":0,"y":0,"width":1,"height":1,"color":$g}"""}.joinToString(",","[","]")
+        rejects {frame(commands)}
+    }
+    @Test fun anUnsupportedColorNamesItsValueAndPath() {
+        val failure=assertThrows(IllegalArgumentException::class.java) {
+            frame("""[{"type":"rect","x":0,"y":0,"width":10,"height":10,"color":"purple"}]""")
+        }
+        assertTrue(failure.message,failure.message!!.contains("\"purple\""))
+        assertTrue(failure.message,failure.message!!.contains("$.surfaces[0].commands[0].color"))
+    }
+    @Test fun aGradientUnderColorWithABadStopIsRejected() {
+        val failure=assertThrows(IllegalArgumentException::class.java) {
+            frame("""[{"type":"rect","x":0,"y":0,"width":10,"height":10,"color":{"type":"radial","x":5,"y":5,"radius":5,"stops":[{"offset":0,"color":"#FFFFFF"},{"offset":1,"color":"purple"}]}}]""")
+        }
+        assertTrue(failure.message,failure.message!!.contains("\"purple\""))
+        assertTrue(failure.message,failure.message!!.contains(".color.stops[1].color"))
+    }
     private val rect="""{"type":"rect","x":0,"y":0,"width":10,"height":10,"color":"#FF0000"}"""
     /** Failure cases: unknown presentation/sizing fields, positioned or multiple viewport surfaces,
      * invalid viewport bounds, stale pointer bounds, and resize without pointer cancellation.

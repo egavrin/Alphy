@@ -180,7 +180,7 @@ private fun drawSurface(canvas: Canvas,commands: JSONArray,roleColors: Map<Strin
         }
         val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style=Paint.Style.FILL
-            if(c.has("color"))color=drawingColor(c.getString("color"),roleColors) else shader=gradient(c.getJSONObject("gradient"),roleColors)
+            GraphicsContract.gradientOf(c)?.let {shader=gradient(it,roleColors)} ?: run {color=drawingColor(c.getString("color"),roleColors)}
             // Muted text keeps its readable ink. A muted shape is a light tint, so an empty track or a grid line stays in the background.
             if(c.optString("color")=="muted" && c.getString("type")!="text") alpha=MUTED_SHAPE_ALPHA
         }
