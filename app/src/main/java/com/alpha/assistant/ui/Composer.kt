@@ -73,12 +73,13 @@ internal class CourseComposerState(
     var contextOpen by remember(destination) { mutableStateOf(false) }
     var anchor by remember { mutableStateOf<ContextMenuAnchor?>(null) }
     Composer(model, { contextOpen = true }, destination = destination, placeholder = placeholder,
-        label = placeholder, onContextAnchorChanged = { anchor = it })
+        label = placeholder, onContextAnchorChanged = { anchor = it }, settings = model::openAiSettings)
     if (contextOpen) ReviewedContextDialog(model, anchor, destination = destination) { contextOpen = false }
 }
 
 /** The message composer of the shell, the mini-app split, and the assistant half sheet.
- * [compact] puts the field and the round actions in one row and hides the other lines, while the keyboard takes most of a landscape window. */
+ * [compact] puts the field and the round actions in one row and hides the other lines, while the keyboard takes most of a landscape window.
+ * [settings] opens «Сервис ИИ». */
 @Composable internal fun Composer(
     model: ShellViewModel,
     context: () -> Unit,
@@ -91,6 +92,7 @@ internal class CourseComposerState(
     assistantInvocation: String? = null,
     requiresQuestion: Boolean = false,
     displayedCapture: AssistCapture? = null,
+    settings: () -> Unit,
 ) {
     val draft = model.composerDraft(destination)
     val searchFocus = androidx.compose.runtime.remember { androidx.compose.ui.focus.FocusRequester() }
@@ -118,8 +120,10 @@ internal class CourseComposerState(
     Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
         if (!compact) {
             if (ownsVoice && model.voice.active && !model.voice.oneShot) {
-                ProvideTextStyle(MaterialTheme.typography.bodySmall) { StatusLine(Glyph.Mic, MaterialTheme.colorScheme.onSurfaceVariant, model.voice.status) }
-                if (model.voice.partial.isNotBlank()) Text(model.voice.partial, style = MaterialTheme.typography.bodySmall)
+                ProvideTextStyle(MaterialTheme.typography.bodySmall) {
+                    StatusLine(Glyph.Mic, MaterialTheme.colorScheme.onSurfaceVariant, model.voice.status)
+                    SpeechStatus(model.voice)
+                }
                 TextButton(onClick = { model.voice.stop() }) { Text(stringResource(R.string.voice_stop)) }
             }
             Column(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
@@ -132,7 +136,7 @@ internal class CourseComposerState(
                 }
             }
             if (ownsVoice && model.voice.permissionRequired) MicrophonePermissionGuidance(model.voice, startVoice)
-            else if (ownsVoice && !model.voice.active && model.voice.hasAttempted) ProvideTextStyle(MaterialTheme.typography.bodySmall) { StatusLine(Glyph.Mic, MaterialTheme.colorScheme.onSurfaceVariant, model.voice.status) }
+            else if (ownsVoice && !model.voice.active && model.voice.hasAttempted) ProvideTextStyle(MaterialTheme.typography.bodySmall) { VoiceStatus(model.voice, settings) }
             if (model.attachmentBusy) ProvideTextStyle(MaterialTheme.typography.labelSmall) { StatusLine(Glyph.File, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.composer_image_check)) }
         }
         val colors = MaterialTheme.colorScheme

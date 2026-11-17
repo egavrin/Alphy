@@ -2,6 +2,8 @@
 
 Alphy is an Android assistant with chat, courses, generated mini-apps, and device automations. One user can have concurrent cloud, UI, and background work on one device. The audit uses the local working tree at HEAD `289ab4a`, including local edits and untracked app source.
 
+Note (2026-11-16): this audit is a record of that revision. Its voice rows name a local T-one recognizer and a `LocalVoiceWorkflowTest`. The unified AI provider change removed both. Voice input now uses the provider of the AI key or the phone recognizer (see [voice integration](voice-integration.md)).
+
 Risk rates the consequence of a broken transition. **High** means a possible privacy breach, unauthorized effect, loss of saved data, or missed scheduled action. **Medium** means a blocked workflow, lost progress, or incorrect recovery. **Low** means a local presentation or input error with a direct recovery path.
 
 ## Initial findings

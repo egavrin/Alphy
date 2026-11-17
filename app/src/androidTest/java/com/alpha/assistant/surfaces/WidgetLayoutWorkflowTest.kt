@@ -1,5 +1,6 @@
 package com.alpha.assistant.surfaces
 
+import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.ui.openSeededChat
 import com.alpha.assistant.ui.seedOpenChat
 import android.content.ContextWrapper
@@ -34,6 +35,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 class WidgetLayoutWorkflowTest {
     @Test fun savedLayoutRestrictsWidgetActionsAndStalePreviewCannotReplaceIt() {
@@ -72,8 +77,8 @@ class WidgetLayoutWorkflowTest {
                     Message("artifact", "assistant", "", 1, "complete", toolId = record.id, toolRevision = 1),
                 )))
                 fixture.store.seedOpenChat("chat")
-                fixture.keys.save("alpha-test-only").getOrThrow()
-                CloudTestActivity.factory = { app -> ShellViewModel(app, provider, fixture.store, fixture.keys).openSeededChat(fixture.store).also { fixture.model = it } }
+                fixture.keys.save("alpha-test-only", AiProvider.OPENAI).getOrThrow()
+                CloudTestActivity.factory = { app -> ShellViewModel(app, provider, fixture.store, fixture.keys, legacy = isolatedLegacyKeys(app), models = isolatedModels(app), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(fixture.store).also { fixture.model = it } }
 
                 fun draft(label: String) {
                     val edit = robot.text(R.string.widget_layout_edit)

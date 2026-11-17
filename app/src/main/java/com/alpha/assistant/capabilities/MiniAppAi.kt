@@ -16,6 +16,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 internal object MiniAppAi {
@@ -23,11 +24,13 @@ internal object MiniAppAi {
     const val MAX_PROMPT = 1_500
     const val MAX_ANSWER = 1_500
 
-    fun cancelled() = CapabilityResult("cancelled", "Запрос мини-приложения к DeepSeek остановлен.")
+    fun cancelled() = CapabilityResult("cancelled", "Запрос мини-приложения к сервису ИИ остановлен.")
 
     suspend fun ask(context: Context, provider: ChatProvider, keys: SecureKeyStore,
         prompt: String, active: () -> Boolean): CapabilityResult = coroutineScope {
         val session = CloudSession()
+        // The provider name for the texts below. Without a readable account, the generic name stands.
+        val service = withContext(Dispatchers.IO) { keys.account().getOrNull()?.provider?.displayName } ?: "Сервис ИИ"
         try {
             suspendCancellableCoroutine { result ->
                 val worker = launch(Dispatchers.IO) {
@@ -45,8 +48,8 @@ internal object MiniAppAi {
                         val text = answer?.takeIf { it.isNotBlank() && it.length <= MAX_ANSWER && '\u0000' !in it }
                         val data = text?.let { JSONObject().put("text", it) }
                         if (data == null || data.toString().toByteArray().size > CapabilityResultEvent.MAX_DATA_BYTES) {
-                            CapabilityResult("failed", "DeepSeek не вернул ответ допустимого размера.")
-                        } else CapabilityResult("succeeded", "Ответ DeepSeek получен.", data)
+                            CapabilityResult("failed", "$service не вернул ответ допустимого размера.")
+                        } else CapabilityResult("succeeded", "Ответ $service получен.", data)
                     })
                 }
                 result.invokeOnCancellation { session.cancel(); worker.cancel() }
@@ -55,9 +58,9 @@ internal object MiniAppAi {
             throw cancel
         } catch (failure: CloudFailure) {
             if (failure.code in KEY_ERRORS) CapabilityResult("denied", failure.message)
-            else CapabilityResult("failed", "Запрос мини-приложения к DeepSeek не выполнен.")
+            else CapabilityResult("failed", "Запрос мини-приложения к $service не выполнен.")
         } catch (_: Exception) {
-            CapabilityResult("failed", "Запрос мини-приложения к DeepSeek не выполнен.")
+            CapabilityResult("failed", "Запрос мини-приложения к $service не выполнен.")
         } finally {
             session.cancel()
         }

@@ -5,6 +5,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.capabilities.CapabilityResult
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.ui.removeSemanticIndexes
 import kotlinx.coroutines.*
 import org.json.*
 import org.junit.Assert.*
@@ -35,7 +36,7 @@ class SharedArtifactWorkflowTest {
         val spec=definition();val initial=ToolRecord("shared",1,1,spec.json,spec.initialState,spec.ui.toString(),null,true)
         store.saveTool(initial,true)
         val engine=ToolEngine(store,ToolGenerationService(offline,SandboxClient(context)))
-        try {block(store,engine,initial)} finally {runCatching {engine.closeArtifact(initial.id,initial.revision)};store.close();context.deleteDatabase(name)}
+        try {block(store,engine,initial)} finally {runCatching {engine.closeArtifact(initial.id,initial.revision)};store.close();context.deleteDatabase(name);removeSemanticIndexes(context,"apps:$name")}
     }
 
     @Test fun retainedHostHandoffWaitsForReleaseAndKeepsTheQueuedAction(): Unit=runBlocking {

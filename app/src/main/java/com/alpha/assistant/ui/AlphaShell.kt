@@ -162,7 +162,7 @@ private data class MiniAppOrigin(
                 miniAppOrigin = null
                 refinementToolId = null
                 destination = target
-                settingsSection = SettingsSection.DeepSeek
+                settingsSection = SettingsSection.Ai
                 settingsFromMenu = false
                 automationRuleId = model.surfaceAutomationRuleId
             }
@@ -386,14 +386,15 @@ private data class MiniAppOrigin(
                                 }, horizontalAlignment = Alignment.CenterHorizontally) {
                                     if (paired && model.saveFailed && !compactComposer) SaveFailure()
                                     ChatPane(model, conversation, ::openMiniApp,
-                                        settings = { openSettings(SettingsSection.DeepSeek) }, modifier = Modifier.weight(1f).testTag("chat-content"),
+                                        settings = { openSettings(SettingsSection.Ai) }, modifier = Modifier.weight(1f).testTag("chat-content"),
                                         actions = miniAppActions, openAutomation = ::openAutomation,
                                         pairedToolId = model.tools.selectedId.takeIf { paired },
                                         pairedDraftId = model.tools.selectedDraftId.takeIf { paired },
                                         showLivePreviews = paired || currentChatVisible,
                                         resumeCourse = if (destination == null) model::resumeChatCourse else null)
                                     if (paired) Composer(model, { contextSheet = true }, Modifier.widthIn(max = 620.dp).testTag("composer"),
-                                        compact = compactComposer, onContextAnchorChanged = { contextAnchor = it })
+                                        compact = compactComposer, onContextAnchorChanged = { contextAnchor = it },
+                                        settings = { openSettings(SettingsSection.Ai) })
                                 }
                             }
                         }
@@ -467,7 +468,7 @@ private data class MiniAppOrigin(
                                                 alignDetailStart = currentPairedLibrary && currentLayout.wide,
                                                 standalone = !currentLayout.paired,
                                                 exitImmersive = { immersiveExited = true },
-                                                settings = { openSettings(SettingsSection.DeepSeek) },
+                                                settings = { openSettings(SettingsSection.Ai) },
                                                 close = ::closeMiniApp, goToChat = { navigate(null) },
                                                 appBackground = { miniAppBackground = it })
                                         }
@@ -507,7 +508,7 @@ private data class MiniAppOrigin(
                     if (chatVisible) Composer(model, { contextSheet = true },
                         Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp).fillMaxWidth().testTag("composer"),
                         compact = compact, onContextAnchorChanged = { contextAnchor = it },
-                        destination = model.courseSetup?.composer)
+                        destination = model.courseSetup?.composer, settings = { openSettings(SettingsSection.Ai) })
                 }
             }
         }

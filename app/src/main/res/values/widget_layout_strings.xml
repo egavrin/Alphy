@@ -4,5 +4,5 @@
     <string name="widget_layout_instruction">Что показать в виджете</string>
     <string name="widget_layout_generate">Подготовить виджет</string>
     <string name="widget_layout_saved">Вид виджета сохранён.</string>
-    <string name="widget_layout_failed">Не удалось подготовить или сохранить виджет. Проверьте ключ DeepSeek и повторите запрос.</string>
+    <string name="widget_layout_failed">Не удалось подготовить или сохранить виджет. Проверьте ключ сервиса ИИ и повторите запрос.</string>
 </resources>

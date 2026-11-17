@@ -1,5 +1,6 @@
 package com.alpha.assistant.ui
 
+import com.alpha.assistant.cloud.AiProvider
 import android.app.Activity
 import android.app.Instrumentation
 import android.content.Intent
@@ -121,14 +122,14 @@ class ChatPresentationWorkflowTest {
         val complete = CompletableDeferred<Unit>()
         val fragment = "**Ожидаемая часть** [пример](https://example.com/)"
         val answer = "Окончательный ответ."
-        check(fixture.keys.save("alpha-test-only").isSuccess)
+        check(fixture.keys.save("alpha-test-only", AiProvider.OPENAI).isSuccess)
         CloudTestActivity.factory = { app -> ShellViewModel(app, object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 emit(CloudEvent.AnswerFragment(fragment))
                 complete.await()
                 emit(CloudEvent.RoundComplete("""{"kind":"answer","text":${JSONObject.quote("**$answer**")},"brief":"","search":"none"}""", false))
             }
-        }, fixture.store, fixture.keys).openSeededChat(fixture.store) }
+        }, fixture.store, fixture.keys, legacy = isolatedLegacyKeys(app), models = isolatedModels(app), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(fixture.store) }
         try {
             fixture.launch().use { scenario ->
                 robot.edit(robot.text(R.string.composer_label), "Проверка ответа")
@@ -261,7 +262,7 @@ class ChatPresentationWorkflowTest {
                 val settings = robot.text(R.string.open_settings)
                 robot.reveal(settings)
                 robot.click(settings)
-                robot.waitFor(robot.text(R.string.settings_deepseek))
+                robot.waitFor(robot.text(R.string.settings_ai))
             }
         } finally {
             fixture.remove()

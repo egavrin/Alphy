@@ -188,7 +188,7 @@ class AppUpdateWorkflowTest {
         robot.instrumentation.runOnMainSync {
             app.installUpdateFixture(client)
             app.installAssistantFixture {
-                ShellViewModel(it, fixture.provider, fixture.store, fixture.keys)
+                ShellViewModel(it, fixture.provider, fixture.store, fixture.keys, legacy = isolatedLegacyKeys(it), models = isolatedModels(it), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE)
             }
         }
         try {

@@ -19,7 +19,8 @@ class ImageGenerationWorkflowTest {
     @Test fun consentLimitsDuplicateSubmissionAndRevocation() = runBlocking<Unit> {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val prefix = "image-workflow-${UUID.randomUUID()}"
-        val settings = ImageSettings(context, prefix)
+        val keys = com.alpha.assistant.data.SecureKeyStore(context, prefix, prefix)
+        val settings = ImageSettings(context, keys, prefix)
         val count = AtomicInteger()
         val usedModel = java.util.concurrent.atomic.AtomicReference<ImageModel>()
         val entered = CompletableDeferred<Unit>()
@@ -38,7 +39,7 @@ class ImageGenerationWorkflowTest {
             ProviderImage(bytes.toByteArray(), if (intent.prompt == "Invalid") "image/jpeg" else "image/png")
         }))
         try {
-            settings.saveKey("fixture-only").getOrThrow()
+            keys.save("fixture-only", com.alpha.assistant.cloud.AiProvider.OPENROUTER).getOrThrow()
             assertNull(settings.selection())
             assertEquals(0, count.get())
             settings.setEnabled(true).getOrThrow()
@@ -77,7 +78,29 @@ class ImageGenerationWorkflowTest {
                 assertEquals(calls, count.get())
             }
         } finally {
-            settings.clearKey()
+            keys.clear()
+        }
+    }
+
+    /** Spec 11: the image settings read the plain provider preference. Only key() decrypts, so a damaged ciphertext fails there alone. */
+    @Test fun selectionReadsTheProviderWithoutDecrypting() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val prefix = "image-provider-${UUID.randomUUID()}"
+        val keys = com.alpha.assistant.data.SecureKeyStore(context, prefix, prefix)
+        val settings = ImageSettings(context, keys, prefix)
+        try {
+            keys.save("fixture-only", com.alpha.assistant.cloud.AiProvider.OPENROUTER).getOrThrow()
+            settings.setEnabled(true).getOrThrow()
+            val before = checkNotNull(settings.selection())
+            assertTrue(context.getSharedPreferences(prefix, android.content.Context.MODE_PRIVATE).edit().putString("ciphertext", "AAAA").commit())
+            assertTrue(keys.account().isFailure)
+            assertEquals(before, settings.selection())
+            assertEquals(ImageModel.QWEN, settings.model)
+            assertTrue(settings.available)
+            assertTrue(runCatching { settings.key(before) }.isFailure)
+        } finally {
+            keys.clear()
+            context.deleteSharedPreferences(prefix)
         }
     }
 }

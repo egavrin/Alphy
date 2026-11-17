@@ -1,5 +1,6 @@
 package com.alpha.assistant.courses
 
+import com.alpha.assistant.cloud.AiProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.alpha.assistant.CloudTestActivity
@@ -32,6 +33,10 @@ import java.net.URL
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 @RunWith(AndroidJUnit4::class)
 class ShellCourseHostWorkflowTest {
@@ -438,8 +443,8 @@ class ShellCourseHostWorkflowTest {
         try {
             shell.seedChat(conversationId, "PRIVATE-CHAT-TITLE", "PRIVATE-CHAT-MESSAGE", selected = true)
             MemoryStore(shell.context, memoryDb).use { it.saveExplicitFact("PRIVATE-MEMORY Compare fractions") }
-            check(shell.keys.save(credential).isSuccess)
-            CloudTestActivity.factory = { app -> ShellViewModel(app, provider, shell.store, shell.keys).openSeededChat(shell.store).also { shell.model = it } }
+            check(shell.keys.save(credential, AiProvider.OPENAI).isSuccess)
+            CloudTestActivity.factory = { app -> ShellViewModel(app, provider, shell.store, shell.keys, legacy = isolatedLegacyKeys(app), models = isolatedModels(app), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(shell.store).also { shell.model = it } }
             CourseStore(shell.context, courseDb).use { store ->
                 store.create(CourseSetup("PRIVATE-OTHER-COURSE", "Beginner", "Unrelated goal"), outline)
                 val courseOutline = if (singleSlide) CourseOutline(outline.lessons.map { it.copy(slides = it.slides.take(1)) }) else outline

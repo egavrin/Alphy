@@ -14,7 +14,8 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from compare import digest, encode, hex_id, require
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from run import ADB, RUNNER, adb_command, child_environment, identity, read_live_key, transfer_key
+from run import (ADB, RUNNER, adb_command, child_environment, dotenv_value, identity, read_live_account,
+                 selected_model, transfer_key)
 
 ROUTE = "alphy-android-chat"
 PROVIDER = {"name": "DeepSeek", "model": "deepseek-flash",
@@ -62,15 +63,22 @@ def envelope(product, slot, case, plan_hash, run_id, review_seconds):
     }
 
 
-def instrument_command(adb, payload):
+def instrument_command(adb, payload, model=None):
     encoded = base64.urlsafe_b64encode(encode(payload)).decode("ascii").rstrip("=")
     return adb_command(adb, "shell", "am", "instrument", "-w", "-r", "-e", "class", TEST,
-                       "-e", "comparisonEnvelope", encoded, RUNNER)
+                       "-e", "comparisonEnvelope", encoded, *(["-e", "aiModel", model] if model else []), RUNNER)
 
 
 def match_report(report, payload):
     require(all(report.get(field) == payload[field] for field in IDENTITY_FIELDS),
             "The device report does not match the frozen slot.")
+
+
+def match_account(report):
+    """A report that names a provider or model must name the frozen pair. An early device failure names neither."""
+    if "provider" in report or "model" in report:
+        require(report.get("provider") == "deepseek" and report.get("model") == PROVIDER["model"],
+                "The device used a provider or model outside the frozen plan.")
 
 
 def adb_output(adb, *args):
@@ -125,7 +133,7 @@ def capture(args):
     if args.verify_tip:
         require(case["id"] == "bench:tip", "The tip interaction check requires the tip benchmark.")
         payload["verify_tip"] = True
-    command = instrument_command(args.adb, payload)
+    command = instrument_command(args.adb, payload, selected_model())
     remote = f"/sdcard/Android/data/{PACKAGE}/files/comparison-capture/{run_id}"
     directory = args.output
     directory.mkdir(mode=0o700)
@@ -153,7 +161,9 @@ def capture(args):
     save()
     try:
         try:
-            key = read_live_key()
+            if dotenv_value("ALPHY_AI_PROVIDER") != "deepseek":
+                raise RuntimeError("Comparison captures need ALPHY_AI_PROVIDER=deepseek.")
+            account = read_live_account()
         except RuntimeError as failure:
             manifest["failure"] = str(failure)
             raise
@@ -166,9 +176,9 @@ def capture(args):
             report = read_report()
             phase = report.get("phase") if report else None
             if phase == "credentialReady" and not transferred:
-                transfer_key(args.adb, run_id, key)
+                transfer_key(args.adb, run_id, account)
                 transferred = True
-                key = None
+                account = None
             if phase == "review" and recorder is None:
                 recorder = spawn(adb_command(args.adb, "shell", "screenrecord", "--time-limit",
                                              str(args.review_seconds - 2), remote + "/motion.mp4"))
@@ -177,11 +187,13 @@ def capture(args):
         require(process.poll() is not None, "Device capture timed out.")
         report = read_report()
         require(report is not None, "No valid device report was available.")
+        manifest.update(provider=report.get("provider"), model=report.get("model"))
+        match_account(report)
         manifest["status"] = "device-" + report["phase"]
     except (ValueError, RuntimeError, OSError, subprocess.TimeoutExpired):
         manifest["status"] = "capture-failed"
     finally:
-        key = None
+        account = None
         if process is not None and process.poll() is None:
             process.kill()
             process.wait(timeout=10)

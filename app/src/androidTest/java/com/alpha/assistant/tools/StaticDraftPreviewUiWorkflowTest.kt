@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.cloud.AiProvider
 import android.graphics.Color
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.ComponentActivity
@@ -19,6 +20,10 @@ import com.alpha.assistant.ui.AlphaTheme
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -161,8 +166,8 @@ class StaticDraftPreviewUiWorkflowTest {
         val fixture = ShellFixture("static-drawing")
         val store = ToolStore(fixture.context, "${fixture.store.databaseName}-tools.db")
         try {
-            fixture.keys.save("fixture-key").getOrThrow()
-            CloudTestActivity.factory = { app -> ShellViewModel(app, provider, fixture.store, fixture.keys).also { fixture.model = it } }
+            fixture.keys.save("fixture-key", AiProvider.OPENAI).getOrThrow()
+            CloudTestActivity.factory = { app -> ShellViewModel(app, provider, fixture.store, fixture.keys, legacy = isolatedLegacyKeys(app), models = isolatedModels(app), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).also { fixture.model = it } }
             block(fixture, store)
         } finally {
             store.close()

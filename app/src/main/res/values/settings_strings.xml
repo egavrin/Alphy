@@ -9,8 +9,25 @@
     <string name="settings_theme_dark">Тёмная</string>
     <string name="settings_group_data">Данные и разрешения</string>
     <string name="settings_group_maintenance">Обслуживание</string>
-    <string name="settings_deepseek_disclosure">Какие данные получает DeepSeek</string>
-    <string name="settings_voice_disclosure">Модели и лицензии</string>
+    <string name="ai_disclosure">Что получает %1$s</string>
+    <string name="ai_available">Что доступно</string>
+    <string name="ai_feature_chat">Ответы и мини-приложения</string>
+    <string name="ai_feature_vision">Понимание изображений</string>
+    <string name="ai_feature_vision_detail">фото и снимки экрана</string>
+    <string name="ai_feature_search">Поиск в интернете</string>
+    <string name="ai_feature_images">Создание изображений</string>
+    <string name="ai_feature_images_paid">платно, с подтверждением</string>
+    <string name="ai_feature_images_unavailable">Недоступно с %1$s. Нужен ключ OpenAI или OpenRouter.</string>
+    <string name="ai_feature_voice">Озвучка ответов</string>
+    <string name="ai_feature_voice_phone">на телефоне, раздел «Голос»</string>
+    <string name="ai_feature_voice_any">телефон или облако, раздел «Голос»</string>
+    <string name="capability_voice_input">Голосовой ввод</string>
+    <string name="capability_voice_input_cloud">распознаёт %1$s</string>
+    <string name="capability_voice_input_phone">на телефоне</string>
+    <string name="ai_models">Модели</string>
+    <string name="ai_models_chat">Чат и мини-приложения</string>
+    <string name="ai_models_images">Изображения</string>
+    <string name="ai_models_voice">Облачная озвучка</string>
     <string name="settings_access_android">Разрешения Android</string>
     <string name="settings_access_automation">Уведомления и автоматизации</string>
     <string name="settings_access_scope">Как Alphy использует разрешения</string>
@@ -19,5 +36,5 @@
     <string name="semantic_searching">Ищем на устройстве…</string>
     <string name="semantic_search_unavailable">Поиск недоступен. Очистите запрос, чтобы открыть список.</string>
     <string name="settings_screenshot_review">Проверять вид приложений по снимку экрана</string>
-    <string name="settings_screenshot_review_hint">Медленнее: DeepSeek получает снимок первого экрана и может поправить оформление. Приложения с личными данными так не проверяются.</string>
+    <string name="settings_screenshot_review_hint">Медленнее: сервис ИИ получает снимок первого экрана и может поправить оформление. Приложения с личными данными так не проверяются.</string>
 </resources>

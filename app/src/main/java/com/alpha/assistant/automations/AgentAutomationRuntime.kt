@@ -17,7 +17,8 @@ import com.alpha.assistant.R
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudSession
-import com.alpha.assistant.cloud.DeepSeekProvider
+import com.alpha.assistant.cloud.AiModels
+import com.alpha.assistant.cloud.CloudChatProvider
 import com.alpha.assistant.cloud.cloudKey
 import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.data.ShellStore
@@ -44,8 +45,8 @@ internal object AgentAutomationRuntime {
         val agent = rule.definition.agent ?: return null
         val consent = SecureKeyStore(context).consentIdentity()
         return when {
-            consent == null -> "Сохраните ключ DeepSeek и подтвердите доступ."
-            requireApprovedConsent && store.state(consentKey(rule.id)) != consent -> "Ключ DeepSeek изменился. Проверьте и включите сценарий заново."
+            consent == null -> "Сохраните ключ сервиса ИИ и подтвердите доступ."
+            requireApprovedConsent && store.state(consentKey(rule.id)) != consent -> "Ключ сервиса ИИ изменился. Проверьте и включите сценарий заново."
             !notificationAllowed(context) -> "Разрешите уведомления Alphy в настройках Android."
             !ShellStore(context).use { it.hasConversation(agent.conversationId) } -> "Чат для доставки удалён."
             else -> null
@@ -109,7 +110,7 @@ internal object AgentAutomationRuntime {
             return "Сценарий остановлен или изменён."
         if (rule.definition.zone() != occurrence.zone || (now < occurrence.target && rule.nextAt != occurrence.target))
             return "Время запуска изменилось."
-        if (store.state(consentKey(rule.id)) != occurrence.credential) return "Доступ DeepSeek изменился."
+        if (store.state(consentKey(rule.id)) != occurrence.credential) return "Доступ к сервису ИИ изменился."
         return AutomationRuntime.triggerFailure(context, rule) ?: accessFailure(context, store, rule, true)
     }
 
@@ -192,7 +193,7 @@ internal object AgentAutomationRuntime {
     /** A stopped job can reattach only before the persisted outbound claim. */
     suspend fun prepare(
         context: Context, store: AutomationStore, id: String, session: CloudSession,
-        provider: ChatProvider = DeepSeekProvider(), clock: () -> Long = System::currentTimeMillis,
+        provider: ChatProvider = CloudChatProvider(SecureKeyStore(context), AiModels(context)), clock: () -> Long = System::currentTimeMillis,
     ): Boolean {
         val occurrence = store.agentRun(id) ?: return true
         val now = clock()

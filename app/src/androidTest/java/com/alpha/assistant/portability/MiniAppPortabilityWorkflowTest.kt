@@ -12,7 +12,9 @@ import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
-import com.alpha.assistant.cloud.DeepSeekProvider
+import com.alpha.assistant.cloud.AiModels
+import com.alpha.assistant.cloud.CloudChatProvider
+import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.ToolEngine
 import com.alpha.assistant.tools.ToolGenerationService
@@ -60,11 +62,11 @@ class MiniAppPortabilityWorkflowTest {
             ToolStore(app, databases[0]).use { original ->
                 original.saveTool(saved, revision = true)
                 original.setNetworkGrant(saved.id, true)
-                val source = ToolEngine(original, ToolGenerationService(DeepSeekProvider(), SandboxClient(app)))
+                val source = ToolEngine(original, ToolGenerationService(CloudChatProvider(SecureKeyStore(app), AiModels(app)), SandboxClient(app)))
                 for ((index, includeState) in listOf(false, true).withIndex()) {
                     val archive = ByteArrayOutputStream().also { source.exportPortable(saved, includeState, it) }.toByteArray()
                     ToolStore(app, databases[index + 1]).use { destination ->
-                        val engine = ToolEngine(destination, ToolGenerationService(DeepSeekProvider(), SandboxClient(app)))
+                        val engine = ToolEngine(destination, ToolGenerationService(CloudChatProvider(SecureKeyStore(app), AiModels(app)), SandboxClient(app)))
                         assertTrue(runCatching { engine.importPortable(malformed.inputStream()) }.isFailure)
                         assertTrue(destination.tools().isEmpty())
                         val imported = engine.importPortable(archive.inputStream())

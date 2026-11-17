@@ -173,7 +173,7 @@ Return the result itself. The host handles delivery. You have no access to priva
     }
     session.check()
     val text = answer?.takeIf { it.isNotBlank() && it.length <= ChatToolReply.MAX_TEXT }
-        ?: throw CloudFailure("incomplete", "DeepSeek не вернул результат задачи.")
+        ?: throw CloudFailure("incomplete", "Сервис ИИ не вернул результат задачи.")
     return JSONObject().put("text", text).put("sources", encodeSources(sources.values.toList()))
 }
 

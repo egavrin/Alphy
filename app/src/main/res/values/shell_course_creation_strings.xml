@@ -12,7 +12,7 @@
     <string name="shell_course_start">Начать курс</string>
     <string name="shell_course_change_setup">Изменить настройки</string>
     <string name="shell_course_input_required">Укажите тему, уровень и цель курса.</string>
-    <string name="shell_course_plan_failed">Не удалось составить план. Проверьте настройки DeepSeek и попробуйте ещё раз.</string>
+    <string name="shell_course_plan_failed">Не удалось составить план. Проверьте настройки сервиса ИИ и попробуйте ещё раз.</string>
     <string name="shell_course_save_failed">Не удалось сохранить курс. План можно проверить и попробовать ещё раз.</string>
     <string name="shell_course_setup_in_chat">Подготовлю план курса. Его можно уточнить в чате.</string>
     <string name="shell_course_open_learning">Откройте «Обучение», чтобы настроить курс.</string>

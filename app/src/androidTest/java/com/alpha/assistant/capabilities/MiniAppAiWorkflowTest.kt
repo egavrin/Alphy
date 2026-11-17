@@ -1,5 +1,6 @@
 package com.alpha.assistant.capabilities
 
+import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.ui.openSeededChat
 import com.alpha.assistant.ui.seedOpenChat
 import android.app.AlertDialog
@@ -25,6 +26,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 class MiniAppAiWorkflowTest {
     @Test fun visibleActionsUseExistingConsentWithoutNetworkGrantAndCancelWhenHidden() {
@@ -59,7 +64,7 @@ class MiniAppAiWorkflowTest {
                 )))
                 fixture.store.seedOpenChat("chat")
                 CloudTestActivity.factory = { app ->
-                    ShellViewModel(app, provider, fixture.store, fixture.keys).openSeededChat(fixture.store).also { fixture.model = it }
+                    ShellViewModel(app, provider, fixture.store, fixture.keys, legacy = isolatedLegacyKeys(app), models = isolatedModels(app), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(fixture.store).also { fixture.model = it }
                 }
                 fun edit(prompt: String) {
                     robot.reveal("Prompt", forward = null)
@@ -82,7 +87,7 @@ class MiniAppAiWorkflowTest {
                     result("denied")
                     assertTrue(prompts.isEmpty())
 
-                    fixture.keys.save("alpha-test-only").getOrThrow()
+                    fixture.keys.save("alpha-test-only", AiProvider.OPENAI).getOrThrow()
                     ask()
                     result("Answer for first")
                     edit("second")

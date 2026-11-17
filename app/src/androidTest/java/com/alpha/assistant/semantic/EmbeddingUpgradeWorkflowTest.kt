@@ -1,5 +1,6 @@
 package com.alpha.assistant.semantic
 
+import com.alpha.assistant.cloud.AiProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.automations.AutomationStore
@@ -52,7 +53,7 @@ class EmbeddingUpgradeWorkflowTest {
                     "actions":[{"id":"notice","capability":"notification.post","args":{"title":"Fixture","text":"Local only"}}]}
                 """.trimIndent()))
             }
-            keys.save(syntheticCredential).getOrThrow()
+            keys.save(syntheticCredential, AiProvider.OPENAI).getOrThrow()
         } else {
             ShellStore(context).use {
                 val chat = it.load().conversations.single { row -> row.id == "upgrade-chat" }

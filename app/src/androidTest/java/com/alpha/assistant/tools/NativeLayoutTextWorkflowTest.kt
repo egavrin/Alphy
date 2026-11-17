@@ -1,6 +1,7 @@
 package com.alpha.assistant.tools
 
 import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.removeShellIndexes
 import com.alpha.assistant.ui.seedOpenChat
 import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +24,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.UUID
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 /** Failure cases: invalid dimensions/constraints, misplaced weight/alignment, unsafe links, invalid span ranges,
  * duplicate IDs, stale scroll/selection keys, hidden/disabled template controls, unbounded work, and widget disclosure.
@@ -94,10 +99,10 @@ class NativeLayoutTextWorkflowTest {
         val keys=SecureKeyStore(app,name,name); val selected=spec()
         tools.saveTool(ToolRecord("layout",1,1,selected.json,selected.initialState,selected.ui.toString(),"chat",true),true)
         shell.saveConversation(Conversation("chat","Native layout",1,1,messages=listOf(Message("artifact","assistant","Native layout is ready.",1,"complete",toolId="layout",toolRevision=1))))
-        shell.seedOpenChat("chat"); keys.save("offline-fixture-only").getOrThrow()
+        shell.seedOpenChat("chat"); keys.save("offline-fixture-only", AiProvider.OPENAI).getOrThrow()
         lateinit var model: ShellViewModel
         val provider=object: ChatProvider {override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {error("Offline workflow must not call a provider")}}
-        CloudTestActivity.factory={ShellViewModel(it,provider,shell,keys).openSeededChat(shell).also {created -> model=created}}
+        CloudTestActivity.factory={ShellViewModel(it,provider,shell,keys, legacy = isolatedLegacyKeys(it), models = isolatedModels(it), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(shell).also {created -> model=created}}
         val diagnostics=UiFailureDiagnostics("layout-presentation").apply {state={"state="+tools.tool("layout")?.state}}
         fun find(label: String,node: AccessibilityNodeInfo?=diagnostics.freshRoot()): AccessibilityNodeInfo? {
             if(node==null)return null
@@ -158,7 +163,7 @@ class NativeLayoutTextWorkflowTest {
             assertTrue(tools.effects("layout").isEmpty())
             println("NATIVE_LAYOUT_TEXT selection=PASS scrollTarget=PASS reopen=PASS wide=PASS disabled=PASS fontScale1.5=PASS effects=0")
         } finally {
-            CloudTestActivity.factory=null;tools.close();shell.close();keys.clear();app.deleteDatabase("$name.db");app.deleteDatabase("$name.db-tools.db");app.deleteSharedPreferences(name)
+            CloudTestActivity.factory=null;tools.close();shell.close();keys.clear();app.deleteDatabase("$name.db");app.deleteDatabase("$name.db-tools.db"); removeShellIndexes(app, "$name.db");app.deleteSharedPreferences(name)
             java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null);deleteEntry(name)}
         }
     }

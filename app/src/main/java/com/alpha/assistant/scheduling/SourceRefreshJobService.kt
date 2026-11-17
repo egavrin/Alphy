@@ -9,7 +9,8 @@ import android.content.Context
 import android.os.PersistableBundle
 import android.os.SystemClock
 import com.alpha.assistant.cloud.CloudSession
-import com.alpha.assistant.cloud.DeepSeekProvider
+import com.alpha.assistant.cloud.AiModels
+import com.alpha.assistant.cloud.CloudChatProvider
 import com.alpha.assistant.cloud.cloudKey
 import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.data.Source
@@ -136,7 +137,7 @@ class SourceRefreshJobService : JobService() {
                         if (!search.authorized(run)) return@coroutineScope
                         task.ensureActive()
                         session.check()
-                        results = DeepSeekProvider().search(key, run.query, session)
+                        results = CloudChatProvider(keys, AiModels(this@SourceRefreshJobService)).search(key, run.query, session)
                         session.check()
                         if (SystemClock.elapsedRealtime() >= deadlineAt) results = null
                         finished = true

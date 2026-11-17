@@ -67,7 +67,7 @@ Camera capture stores a private thumbnail, not a full-resolution photo.
 
 The result vocabulary is `succeeded`, `denied`, `revoked`, `unavailable`, `failed`, `cancelled`, `awaitingUser`, `unknownOutcome`, and `launched`.
 Permission and hardware failure do not reset tool data.
-Native calendar results and selected content remain in the local effect history. Alphy does not automatically send them to DeepSeek.
+Native calendar results and selected content remain in the local effect history. Alphy does not automatically send them to the AI service. A mini-app sends text there only through the explicit `ai.ask` action, which uses the active provider of the account (see [cloud integration](cloud-integration.md)).
 Refinement still requires the existing explicit confirmation before it sends current tool source and state.
 
 Provider references cover [Calendar Provider](https://developer.android.com/identity/providers/calendar-provider), [document selection](https://developer.android.com/training/data-storage/shared/documents-files), and [notification permission](https://developer.android.com/develop/ui/compose/notifications/notification-permission).

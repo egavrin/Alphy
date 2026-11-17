@@ -1,6 +1,7 @@
 package com.alpha.assistant.cloud
 
 import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.removeShellIndexes
 import com.alpha.assistant.ui.seedOpenChat
 import android.app.Application
 import android.app.Instrumentation
@@ -8,6 +9,7 @@ import android.content.ContentValues
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Bundle
 import android.os.PatternMatcher
 import android.os.SystemClock
@@ -34,7 +36,6 @@ import org.junit.Test
 import java.io.Closeable
 import java.io.File
 import java.io.OutputStream
-import java.net.ServerSocket
 import java.security.KeyStore
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
@@ -42,6 +43,10 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 /** Device workflows use the real HTTP provider, SQLite and Keystore, with isolated test data. */
 class CloudWorkflowTest {
@@ -78,40 +83,22 @@ class CloudWorkflowTest {
         val grounded get() = path == "/chat/completions" && json.getJSONArray("messages").getJSONObject(0).getString("content").contains("Ground the typed decision")
     }
     private class Server(val handler: (Request, OutputStream) -> Unit) : Closeable {
-        private val server = ServerSocket(0, 8, java.net.InetAddress.getByName("127.0.0.1"))
-        val url = "http://127.0.0.1:${server.localPort}"
         val requests = CopyOnWriteArrayList<Request>()
-        val failures = CopyOnWriteArrayList<Throwable>()
-        private val sockets = CopyOnWriteArrayList<java.net.Socket>()
-        init { Thread {
-            while (!server.isClosed) {
-                val socket = try { server.accept() } catch (_: Exception) { break }
-                sockets += socket
-                Thread {
-                    try { socket.use {
-                        socket.soTimeout = 15000
-                        val input = socket.getInputStream().buffered()
-                        fun line(): String { val result = StringBuilder(); while (true) { val b = input.read(); if (b < 0 || b == 10) return result.toString().trimEnd('\r'); result.append(b.toChar()) } }
-                        val path = line().split(" ")[1]
-                        var length = 0
-                        var authorized = false
-                        while (true) { val header = line(); if (header.isEmpty()) break
-                            if (header.startsWith("Content-Length:", true)) length = header.substringAfter(':').trim().toInt()
-                            if (header.equals("Authorization: Bearer alpha-test-only", true)) authorized = true
-                        }
-                        check(authorized) { "Missing isolated test authorization" }
-                        check(length in 1..(40 * 1024 * 1024))
-                        val bytes = ByteArray(length); var offset = 0
-                        while (offset < length) { val count = input.read(bytes, offset, length - offset); check(count > 0); offset += count }
-                        val request = Request(path, JSONObject(String(bytes, Charsets.UTF_8)))
-                        requests += request
-                        handler(request, socket.getOutputStream())
-                    } } catch (failure: Throwable) { if (!server.isClosed && failure !is java.net.SocketException) failures += failure }
-                }.apply { isDaemon = true }.start()
+        private val loopback = LoopbackServer { raw, output ->
+            check(raw.headers["authorization"].equals("Bearer alpha-test-only", true) || raw.headers["x-api-key"] == "alpha-test-only") {
+                "Missing isolated test authorization"
             }
-        }.apply { isDaemon = true }.start() }
-        override fun close() { server.close(); sockets.forEach { runCatching { it.close() } } }
+            check(raw.body.isNotEmpty())
+            val request = Request(raw.path, JSONObject(raw.body))
+            requests += request
+            handler(request, output)
+        }
+        val url get() = loopback.url
+        val failures get() = loopback.failures
+        override fun close() = loopback.close()
     }
+    /** Every provider in this class talks to the loopback server with the DeepSeek profile. */
+    private val deepSeek = { AiAccount(AiProvider.DEEPSEEK, "alpha-test-only") }
     private inner class Fixture(provider: ChatProvider, seed: (ShellStore) -> Unit = {}) : Closeable {
         val name = "cloud-test-${UUID.randomUUID()}"
         val store = ShellStore(app, "$name.db")
@@ -120,8 +107,8 @@ class CloudWorkflowTest {
         var scenario: ActivityScenario<CloudTestActivity>? = null
         init {
             seed(store)
-            check(keys.save("alpha-test-only").isSuccess)
-            CloudTestActivity.factory = { application -> ShellViewModel(application, provider, store, keys).openSeededChat(store).also { model = it } }
+            check(keys.save("alpha-test-only", AiProvider.DEEPSEEK).isSuccess)
+            CloudTestActivity.factory = { application -> ShellViewModel(application, provider, store, keys, legacy = isolatedLegacyKeys(application), models = isolatedModels(application), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(store).also { model = it } }
             scenario = ActivityScenario.launch(CloudTestActivity::class.java)
             waitUntil { !model.loading }
         }
@@ -141,11 +128,13 @@ class CloudWorkflowTest {
         override fun close() {
             main { model.cancelRequest() }
             scenario?.close(); CloudTestActivity.factory = null
-            // Wait for the serialized writer before deleting only this fixture's data.
+            kotlinx.coroutines.runBlocking { model.tools.closeAndJoin() }
+            // The chat writer offers no join. Wait for it before deleting only this fixture's data.
             SystemClock.sleep(150)
             store.close(); app.deleteDatabase("$name.db"); app.deleteDatabase("$name.db-tools.db"); app.deleteDatabase("$name.db-memory.db"); keys.clear()
             app.deleteSharedPreferences(name)
             KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(name) }
+            removeShellIndexes(app, "$name.db")
         }
     }
 
@@ -235,7 +224,7 @@ class CloudWorkflowTest {
                 else -> output.answer("{\"count\":1}")
             }
         }.use { server ->
-            val provider = DeepSeekProvider(server.url, onHttpCall = { httpCalls.incrementAndGet() }) {}
+            val provider = CloudChatProvider(deepSeek, Endpoints { server.url }, onHttpCall = { httpCalls.incrementAndGet() }) {}
             suspend fun request(json: Boolean, search: Boolean = false, stage: CloudGenerationStage? = null, expanded: Boolean = false): String {
                 val text = StringBuilder()
                 provider.respond("alpha-test-only",CloudRequest(listOf(CloudTurn("user","Return JSON {\"count\":1}")),search,
@@ -271,6 +260,24 @@ class CloudWorkflowTest {
         }
     }
 
+    /** A content filter after streamed text fails the request with "refusal". The failed message keeps no part of the text. */
+    @Test fun refusalAfterPartialTextKeepsNoAnswerText() {
+        Server { request, output ->
+            if (request.classifying) output.classification(decision("Hello"))
+            else { output.headers(); output.event(textChunk("Partial answer")); output.event(end("content_filter")); output.write("data: [DONE]\n\n".toByteArray()); output.flush() }
+        }.use { server ->
+            Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
+                fixture.submit("Say hello."); fixture.idle()
+                assertEquals("error", fixture.last.status)
+                assertEquals("refusal", fixture.last.errorCode)
+                assertEquals("", fixture.last.text)
+                assertNull(fixture.persisted().selected!!.messages.last().text.takeIf { it.isNotEmpty() })
+                assertNull(fixture.model.activeAnswer(fixture.last.id))
+                assertTrue(server.failures.toString(), server.failures.isEmpty())
+            }
+        }
+    }
+
     @Test fun bareToolNounCannotDispatchAPhonePlan() = kotlinx.coroutines.runBlocking {
         for (prompt in listOf("a timer", "An alarm?")) {
             var calls = 0
@@ -287,7 +294,7 @@ class CloudWorkflowTest {
                 }
             }.use { server ->
                 val events = mutableListOf<CloudEvent>()
-                DeepSeekProvider(server.url).respond("alpha-test-only",
+                CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",
                     cleanChatRequest(prompt).copy(search = false, allowDevicePlan = true),
                     CloudSession()) { events += it }
                 val result = events.filterIsInstance<CloudEvent.RoundComplete>().single()
@@ -316,7 +323,7 @@ class CloudWorkflowTest {
             output.classification(decision(text, kind = "clarify"))
         }.use { server ->
             val events = mutableListOf<CloudEvent>()
-            DeepSeekProvider(server.url).respond("alpha-test-only",
+            CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",
                 CloudRequest(listOf(CloudTurn("user", "a thing")), false, ChatToolReply.instructions(), chatDecision = true),
                 CloudSession()) { events += it }
             val result = ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text)
@@ -340,7 +347,7 @@ class CloudWorkflowTest {
             }.use { server ->
                 val events = mutableListOf<CloudEvent>()
                 val failure = runCatching {
-                    DeepSeekProvider(server.url).respond("alpha-test-only",
+                    CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",
                         CloudRequest(listOf(CloudTurn("user", "a thing")), false, ChatToolReply.instructions(), chatDecision = true),
                         CloudSession()) { events += it }
                 }.exceptionOrNull()
@@ -366,7 +373,7 @@ class CloudWorkflowTest {
         }.use { server ->
             // Failure case: the one-word request "stopwatch" got no statement, and the reply and the app followed the Russian device.
             for (text in listOf("text my partner when my timer finishes", "stopwatch")) {
-                DeepSeekProvider(server.url).respond("alpha-test-only",
+                CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",
                     CloudRequest(listOf(CloudTurn("user", text)), false,
                         ChatToolReply.instructions(), chatDecision = true), CloudSession()) {}
                 assertTrue("$text: $system", "The latest request is in English (en)." in system)
@@ -388,7 +395,7 @@ class CloudWorkflowTest {
         }.use { server ->
             try {
                 val received = mutableListOf<String>()
-                DeepSeekProvider(server.url, responseReadTimeoutMillis = 1500, recordEmptyCompletion = {}).respond("alpha-test-only",
+                CloudChatProvider(deepSeek, Endpoints { server.url }, responseReadTimeoutMillis = 1500, recordEmptyCompletion = {}).respond("alpha-test-only",
                     CloudRequest(listOf(CloudTurn("user", "Return a plan.")), false,
                         jsonObject = true, generationStage = CloudGenerationStage.AGENT), session) {
                     if (it is CloudEvent.Text) received += it.value
@@ -423,7 +430,7 @@ class CloudWorkflowTest {
                 } else output.answer("{}")
             }.use { server ->
                 val text = mutableListOf<String>()
-                DeepSeekProvider(server.url).respond("alpha-test-only",
+                CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",
                     CloudRequest(listOf(CloudTurn("user", id)), false, jsonObject = true, generationStage = CloudGenerationStage.AGENT), session
                 ) { if (it is CloudEvent.Text) text += it.value }
                 assertEquals(id, listOf("{}"), text)
@@ -452,7 +459,7 @@ class CloudWorkflowTest {
                 output.interruptedGeneration(if (mode in setOf("partial", "buffered")) "partial" else null)
             }.use { server ->
                 val received = mutableListOf<String>()
-                val provider = DeepSeekProvider(server.url)
+                val provider = CloudChatProvider(deepSeek, Endpoints { server.url })
                 val call = if (mode == "buffered") request.copy(
                     capabilityDiscovery = { error("The interrupted request cannot discover capabilities.") }
                 ) else request
@@ -499,7 +506,7 @@ class CloudWorkflowTest {
                 else -> error("Unexpected generation call.")
             }
         }.use { server ->
-            Fixture(DeepSeekProvider(server.url)).use { fixture ->
+            Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
                 val trace = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
                 main { fixture.model.tools.generationTraceObserver = { trace += it } }
                 fixture.submit(prompt)
@@ -551,7 +558,7 @@ class CloudWorkflowTest {
                 else -> error("Unexpected generation call.")
             }
         }.use { server ->
-            Fixture(DeepSeekProvider(server.url)).use { fixture ->
+            Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
                 val trace = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
                 main { fixture.model.tools.generationTraceObserver = { trace += it } }
                 fixture.submit(prompt)
@@ -597,7 +604,7 @@ class CloudWorkflowTest {
         }.use { server ->
             for (text in cases) {
                 val events = mutableListOf<CloudEvent>()
-                DeepSeekProvider(server.url).respond("alpha-test-only",
+                CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",
                     cleanChatRequest(text).copy(search = false), CloudSession()) { events += it }
                 val result = ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text)
                 assertEquals("create", result.kind)
@@ -610,7 +617,15 @@ class CloudWorkflowTest {
 
     @Test fun recordedRecipeAnswerStopsAtTheArtifactGate() = recordedPromptReplay("recipe-scaler-answer")
 
+    /** The recorded replies are provider-neutral. Each wire re-encodes the same replay (spec 16.5). */
     private fun recordedPromptReplay(name: String) {
+        for (provider in listOf(AiProvider.DEEPSEEK, AiProvider.OPENAI, AiProvider.ANTHROPIC))
+            recordedPromptReplay(provider, name)
+    }
+
+    private fun recordedPromptReplay(provider: AiProvider, name: String) {
+        val openAi = provider == AiProvider.OPENAI
+        val anthropic = provider == AiProvider.ANTHROPIC
         fun asset(name: String) = instrumentation.context.assets.open("generation-reliability/$name")
             .bufferedReader().use { JSONObject(it.readText()) }
         fun replies(data: JSONObject) = data.getJSONArray("replies").let { rows ->
@@ -623,7 +638,8 @@ class CloudWorkflowTest {
         val calls = AtomicInteger()
         val trace = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
         val stages = CopyOnWriteArrayList<String>()
-        val directory = File(app.getExternalFilesDir(null), "$name-e2e/recorded")
+        val directory = File(app.getExternalFilesDir(null),
+            "$name-e2e/recorded${if (provider == AiProvider.DEEPSEEK) "" else "-" + provider.id}")
         check(!directory.exists() || directory.deleteRecursively())
         check(directory.mkdirs())
         val proof = JSONObject().put("case", recorded.getString("case")).put("request", prompt)
@@ -641,15 +657,21 @@ class CloudWorkflowTest {
                 val index = calls.getAndIncrement()
                 val reply = checkNotNull(sequence.getOrNull(index)) { "Unexpected HTTP call ${index + 1}." }
                 val stage = reply.getString("stage")
-                val messages = request.json.getJSONArray("messages")
-                val last = messages.getJSONObject(messages.length() - 1).getString("content")
+                val last = request.contents().last()
                 when (stage) {
                     "CHAT_DECISION" -> {
-                        request.requireStrictDecision(image = true)
+                        when (provider) {
+                            AiProvider.OPENAI -> request.requireResponsesDecision()
+                            AiProvider.ANTHROPIC -> request.requireAnthropicDecision()
+                            else -> request.requireStrictDecision(image = true)
+                        }
                         assertEquals(prompt, last)
                     }
                     "ANSWER" -> {
-                        assertTrue(request.answering)
+                        assertTrue(if (anthropic) request.path == "/v1/messages" && !request.json.has("tools") &&
+                            !request.json.getJSONObject("output_config").has("format")
+                            else if (openAi) request.path == "/v1/responses" && !request.json.has("tools") && !request.json.has("text")
+                            else request.answering)
                         val input = JSONObject(last)
                         assertEquals(prompt, input.getString("originalRequest"))
                         assertEquals("answer", input.getJSONObject("decision").getString("kind"))
@@ -658,11 +680,16 @@ class CloudWorkflowTest {
                 }
                 stages += stage
                 if (stage == "CHAT_DECISION") {
-                    output.calls(call(0, id = reply.optString("call_id", "decision-0"),
-                        name = "submit_chat_decision", arguments = reply.getString("reply")))
-                } else output.answer(reply.getString("reply"))
+                    val id = reply.optString("call_id", "decision-0")
+                    if (openAi) output.responsesCall(id, "submit_chat_decision", reply.getString("reply"))
+                    else if (anthropic) output.anthropicText(structuredCalls("submit_chat_decision" to JSONObject(reply.getString("reply"))))
+                    else output.calls(call(0, id = id, name = "submit_chat_decision", arguments = reply.getString("reply")))
+                } else if (openAi) output.responsesText(reply.getString("reply"))
+                else if (anthropic) output.anthropicText(reply.getString("reply")) else output.answer(reply.getString("reply"))
             }.use { server ->
-                Fixture(DeepSeekProvider(server.url)).use { fixture ->
+                Fixture(CloudChatProvider({ AiAccount(provider, "alpha-test-only") }, Endpoints { server.url })).use { fixture ->
+                    // The stored account matches the provider account that the replay passes.
+                    check(fixture.keys.save("alpha-test-only", provider).isSuccess)
                     val robot = ShellRobot(fixture.name)
                     val database = "${fixture.name}.db-tools.db"
                     main {
@@ -767,7 +794,7 @@ class CloudWorkflowTest {
                 else -> error("Unexpected request for $kind.")
             }
         }.use { server ->
-            val fixture = Fixture(DeepSeekProvider(server.url))
+            val fixture = Fixture(CloudChatProvider(deepSeek, Endpoints { server.url }))
             val clock = instrumentation.addMonitor(IntentFilter(android.provider.AlarmClock.ACTION_SET_TIMER), null, true)
             try {
                 fixture.use {
@@ -842,7 +869,7 @@ class CloudWorkflowTest {
             }
         }.use { server ->
             val failure = runCatching {
-                DeepSeekProvider(server.url).respond("alpha-test-only",
+                CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",
                     cleanChatRequest("Find the current prices of Bitcoin, Ethereum, and Solana.").copy(search = true),
                     CloudSession()) {}
             }.exceptionOrNull()
@@ -904,7 +931,7 @@ class CloudWorkflowTest {
             output.event(end())
             output.write("data: [DONE]\n\n".toByteArray())
         }.use { server ->
-            val provider = DeepSeekProvider(server.url) { diagnostics += it }
+            val provider = CloudChatProvider(deepSeek, Endpoints { server.url }) { diagnostics += it }
             val request = CloudRequest(listOf(CloudTurn("user","PRIVATE_PROMPT")),false,
                 ChatToolReply.instructions(),chatDecision = true)
             val expected = linkedMapOf(
@@ -969,6 +996,55 @@ class CloudWorkflowTest {
         return properties
     }
 
+    /** The OpenAI Responses form of the decision request: a flat strict tool and reasoning at low effort. */
+    private fun Request.requireResponsesDecision() {
+        assertEquals("/v1/responses", path)
+        assertEquals("gpt-6.1-terra", json.getString("model"))
+        assertFalse(json.getBoolean("store"))
+        assertEquals("low", json.getJSONObject("reasoning").getString("effort"))
+        assertEquals(8192, json.getInt("max_output_tokens"))
+        assertFalse(json.has("text"))
+        val tool = json.getJSONArray("tools").getJSONObject(0)
+        assertEquals("submit_chat_decision", tool.getString("name"))
+        assertTrue(tool.getBoolean("strict"))
+    }
+
+    /** The Anthropic form of the decision request (spec 8.7): no forced tool, and the decision tool as structured output. */
+    private fun Request.requireAnthropicDecision() {
+        assertEquals("/v1/messages", path)
+        assertEquals("claude-sonnet-5-5", json.getString("model"))
+        assertEquals(8192, json.getInt("max_tokens"))
+        assertFalse(json.has("tools"))
+        assertFalse(json.has("tool_choice"))
+        val config = json.getJSONObject("output_config")
+        assertEquals("low", config.getString("effort"))
+        val branch = config.getJSONObject("format").getJSONObject("schema").getJSONObject("properties").getJSONObject("calls")
+            .getJSONObject("items").getJSONArray("anyOf").getJSONObject(0)
+        assertEquals("submit_chat_decision", branch.getJSONObject("properties").getJSONObject("name").getJSONArray("enum").getString(0))
+    }
+
+    /**
+     * The text of each message, system text first. A Responses request has the system text in `instructions`, and a
+     * Messages request has it in `system`.
+     */
+    private fun Request.contents(): List<String> {
+        if (path == "/v1/messages") {
+            val messages = json.getJSONArray("messages")
+            return listOf(json.getString("system")) + List(messages.length()) { index ->
+                val blocks = messages.getJSONObject(index).getJSONArray("content")
+                (0 until blocks.length()).joinToString("") { blocks.getJSONObject(it).optString("text") }
+            }
+        }
+        if (path != "/v1/responses") {
+            val messages = json.getJSONArray("messages")
+            return List(messages.length()) { messages.getJSONObject(it).getString("content") }
+        }
+        val input = json.getJSONArray("input")
+        return listOf(json.getString("instructions")) + List(input.length(), input::getJSONObject)
+            .filter { it.optString("type") == "message" }
+            .map { item -> item.getJSONArray("content").let { parts -> (0 until parts.length()).joinToString("") { parts.getJSONObject(it).optString("text") } } }
+    }
+
     private fun JSONObject.kinds(): Set<String> {
         val kinds = getJSONObject("kind").getJSONArray("enum")
         return (0 until kinds.length()).map(kinds::getString).toSet()
@@ -1009,7 +1085,7 @@ class CloudWorkflowTest {
             assertTrue("short follow-up" in messages.getJSONObject(0).getString("content"))
             if (request.answering) output.answer(reply) else output.classification(decision("К чему относится этот вопрос?", kind = "clarify"))
         }.use { server ->
-            Fixture(DeepSeekProvider(server.url)) { shell ->
+            Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })) { shell ->
                 val pairs = (1..21).flatMap { index ->
                     listOf(Message("user-$index", "user", "Old question $index", index.toLong(), "sent", provenance = MessageProvenance.CLEAN),
                         Message("answer-$index", "assistant", "Old answer $index", index.toLong(), "complete", replyTo = "user-$index", provenance = MessageProvenance.CLEAN))
@@ -1072,7 +1148,7 @@ class CloudWorkflowTest {
                 }
             }
         }.use { server ->
-            val chatProvider = DeepSeekProvider(server.url)
+            val chatProvider = CloudChatProvider(deepSeek, Endpoints { server.url })
             val provider = object : ChatProvider {
                 override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                     if (request.chatDecision) {
@@ -1128,7 +1204,7 @@ class CloudWorkflowTest {
                 assertFalse(body.contains("MATCHED_FACT_"))
                 output.classification(decision("Clean decision"))
             }
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             val facts = (1..7).map { fixture.model.memoryStore.saveExplicitFact("В моём саду я выращиваю растения сорта MATCHED_FACT_$it.") }
             val unrelated = fixture.model.memoryStore.saveExplicitFact("Мой код банковского сейфа UNRELATED_FACT.")
             fixture.submit(prompt, search = true)
@@ -1162,7 +1238,7 @@ class CloudWorkflowTest {
                 cleanReceived.countDown()
                 check(resume.await(10, TimeUnit.SECONDS))
                 output.classification(decision("Clean decision"))
-            }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+            }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
                 val memory = fixture.model.memoryStore
                 val fact = memory.saveExplicitFact("В моём саду я выращиваю растения сорта STALE_MEMORY_MARKER.")
                 val prompt = "Какие растения я выращиваю в моём саду?"
@@ -1203,7 +1279,7 @@ class CloudWorkflowTest {
                         runCatching { output.classification(decision("Clean decision")) }
                     }
                 }
-            }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+            }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
                 fixture.model.memoryStore.saveExplicitFact("В моём саду я выращиваю растения сорта MEMORY_FOR_ANSWER.")
                 val prompt = "Какие растения я выращиваю в моём саду?"
                 try {
@@ -1242,7 +1318,7 @@ class CloudWorkflowTest {
                     output.classification(decision("Clean decision"))
                 }
             }.use { server ->
-                Fixture(DeepSeekProvider(server.url)).use { fixture ->
+                Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
                     val memory = fixture.model.memoryStore
                     if (unavailable) memory.beginClose()
                     else memory.saveExplicitFact("В моём саду я выращиваю растения. ".repeat(8) + "А".repeat(100_000))
@@ -1279,7 +1355,7 @@ class CloudWorkflowTest {
                 }
             }
         }.use { server ->
-            val provider = DeepSeekProvider(server.url)
+            val provider = CloudChatProvider(deepSeek, Endpoints { server.url })
             val request = CloudRequest(listOf(history, turn), true, instructions, chatDecision = true)
             val events = mutableListOf<CloudEvent>()
             provider.respond("alpha-test-only", request, CloudSession()) { events += it }
@@ -1300,7 +1376,7 @@ class CloudWorkflowTest {
             output.headers(type = "application/json")
             output.write("""{"results":[{"title":"A source","url":"https://example.org/lesson","summary":"An excerpt"}]}""".toByteArray())
         }.use { server ->
-            val provider: CloudSearchProvider = DeepSeekProvider(server.url)
+            val provider: CloudSearchProvider = CloudChatProvider(deepSeek, Endpoints { server.url })
             val invalid = runCatching { provider.search("alpha-test-only", "$query📚", CloudSession()) }.exceptionOrNull()
             assertEquals("search_query", (invalid as? CloudFailure)?.code)
             val sources = provider.search("alpha-test-only", query, CloudSession())
@@ -1325,7 +1401,7 @@ class CloudWorkflowTest {
                 decisionContext = ChatDecisionContext(current, emptyList(), ChatToolReply.instructions(), MessageProvenance.UNKNOWN),
             )
             val events = mutableListOf<CloudEvent>()
-            DeepSeekProvider(server.url).respond("alpha-test-only", request, CloudSession()) { events += it }
+            CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only", request, CloudSession()) { events += it }
             val completed = events.single() as CloudEvent.RoundComplete
             assertEquals("clarify", ChatToolReply.decode(completed.text).kind)
             assertEquals(MessageProvenance.CLEAN, completed.provenance)
@@ -1438,7 +1514,7 @@ class CloudWorkflowTest {
                     else -> error("Unexpected generation request $number")
                 }
             }
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             try {
                 fixture.submit("Build a counter with an Add button.")
                 assertTrue(server.failures.toString(), partial.await(15, TimeUnit.SECONDS))
@@ -1546,7 +1622,7 @@ class CloudWorkflowTest {
                 else -> output.calls(call(0, name = name, arguments = arguments))
             }
         }.use { server ->
-            val provider = DeepSeekProvider(server.url)
+            val provider = CloudChatProvider(deepSeek, Endpoints { server.url })
             suspend fun request(role: String = "user", allowed: Boolean = true): CloudEvent.RoundComplete {
                 val events = mutableListOf<CloudEvent>()
                 val hasContext = mode != "declined"
@@ -1623,7 +1699,7 @@ class CloudWorkflowTest {
                 output.calls(call(0, id = "draft-1", name = "draft_automation", arguments = draft))
             }
         }.use { server ->
-            Fixture(DeepSeekProvider(server.url)).use { fixture ->
+            Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
                 fixture.submit("присылай мне каждое утро в семь утра подборку самых важных новостей за прошлый день")
                 fixture.idle()
                 main {
@@ -1662,6 +1738,8 @@ class CloudWorkflowTest {
                     assertTrue(messages.getJSONObject(0).getString("content").contains("2026-11-05T21:00:00Z"))
                     output.calls(call(0, arguments = args))
                 } else {
+                    // Thinking is off, so the search round has no reasoning to send back.
+                    assertFalse(messages.getJSONObject(messages.length() - 2).has("reasoning_content"))
                     val result = messages.getJSONObject(messages.length() - 1)
                     assertEquals("search-0", result.getString("tool_call_id"))
                     val hits = JSONObject(result.getString("content")).getJSONArray("results")
@@ -1671,12 +1749,44 @@ class CloudWorkflowTest {
                 }
             }
         }.use { server ->
-            val result = com.alpha.assistant.automations.prepareAgentResult(DeepSeekProvider(server.url), "alpha-test-only",
+            val result = com.alpha.assistant.automations.prepareAgentResult(CloudChatProvider(deepSeek, Endpoints { server.url }), "alpha-test-only",
                 com.alpha.assistant.automations.AgentAutomation("Summarize yesterday's news.", "PRIVATE_CHAT_ID"), target, zone, CloudSession())
             assertEquals("Источники не заменяют независимую проверку.\n\nVerified tally: 17 world events [1]", result.getString("text"))
             assertEquals(allowed, result.getJSONArray("sources").getJSONObject(0).getString("url"))
             assertEquals(3, server.requests.size)
             assertTrue(server.failures.toString(), server.failures.isEmpty())
+        }
+    }
+
+    // Spec 4.3 and 4.5: a thinking search round sends its reasoning back with the tool results, even when it is empty.
+    @Test fun thinkingSearchRoundSendsReasoningBack() = kotlinx.coroutines.runBlocking {
+        for (reasoning in listOf("AGENT_REASONING", "")) Server { request, output ->
+            val messages = request.json.optJSONArray("messages")
+            when {
+                request.path == "/v1/tools/search" -> {
+                    output.headers(type = "application/json")
+                    output.write(JSONObject().put("results", JSONArray().put(JSONObject().put("title", "Fact")
+                        .put("url", "https://example.com/fact"))).toString().toByteArray())
+                }
+                messages!!.length() == 2 -> {
+                    output.headers()
+                    if (reasoning.isNotEmpty()) output.event(JSONObject("""{"choices":[{"delta":{"reasoning_content":"$reasoning"}}]}"""))
+                    output.event(toolDelta(call(0)))
+                    output.event(end("tool_calls")); output.write("data: [DONE]\n\n".toByteArray())
+                }
+                else -> {
+                    assertEquals(reasoning, messages.getJSONObject(messages.length() - 2).getString("reasoning_content"))
+                    output.answer("{\"a\":1}")
+                }
+            }
+        }.use { server ->
+            val failure = runCatching {
+                CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only", CloudRequest(listOf(CloudTurn("user", "Build an app.")),
+                    search = true, jsonObject = true, generationStage = CloudGenerationStage.AGENT), CloudSession()) {}
+            }.exceptionOrNull()
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+            assertNull(failure)
+            assertEquals(3, server.requests.size)
         }
     }
 
@@ -1742,7 +1852,7 @@ class CloudWorkflowTest {
                 val instructions = ChatToolReply.instructions()
                 val request = CloudRequest(listOf(turn),true,instructions,chatDecision = true,
                     decisionContext = ChatDecisionContext(turn, emptyList(), instructions, MessageProvenance.CLEAN))
-                val failure = runCatching { DeepSeekProvider(server.url).respond("alpha-test-only",request,CloudSession()) { events += it } }.exceptionOrNull()
+                val failure = runCatching { CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",request,CloudSession()) { events += it } }.exceptionOrNull()
                 // Report the handler location before a client EOF hides the original assertion.
                 val handlerFailures = server.failures.map { handlerFailure ->
                     val frame = handlerFailure.stackTrace.firstOrNull { it.className.startsWith(CloudWorkflowTest::class.java.name) }
@@ -1815,7 +1925,7 @@ class CloudWorkflowTest {
                 useLocation = current
                 val requestStart = server.requests.size
                 val events = mutableListOf<CloudEvent>()
-                DeepSeekProvider(server.url).respond("alpha-test-only", cleanChatRequest(
+                CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only", cleanChatRequest(
                     if(current) "weather here" else "weather in London", selectedText = "SECRET_NOTE",
                     weatherLocation = { resolved++; com.alpha.assistant.weather.WeatherPlace("London, England, United Kingdom", System.currentTimeMillis()) }
                 ), CloudSession()) { events += it }
@@ -1858,7 +1968,7 @@ class CloudWorkflowTest {
                 searches = 0
                 val events = mutableListOf<CloudEvent>()
                 val result = runCatching {
-                    DeepSeekProvider(server.url).respond("alpha-test-only", cleanChatRequest("Какая погода в Москве?"), CloudSession()) { events += it }
+                    CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only", cleanChatRequest("Какая погода в Москве?"), CloudSession()) { events += it }
                 }
                 val completed = events.filterIsInstance<CloudEvent.RoundComplete>()
                 if (reject == true) {
@@ -1892,7 +2002,7 @@ class CloudWorkflowTest {
                 resolution = mode
                 currentText = "weather here"
                 val events = mutableListOf<CloudEvent>()
-                DeepSeekProvider(server.url).respond("alpha-test-only", cleanChatRequest(currentText, weatherLocation = {
+                CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only", cleanChatRequest(currentText, weatherLocation = {
                         resolutions++
                         if(resolution == "denied") throw CloudFailure("weather_location", "Доступ к геопозиции запрещён. Укажите город.")
                         com.alpha.assistant.weather.WeatherPlace("London", System.currentTimeMillis() - 600000)
@@ -1925,7 +2035,7 @@ class CloudWorkflowTest {
             )
             for((text, selected) in cases) {
                 val events = mutableListOf<CloudEvent>()
-                DeepSeekProvider(server.url).respond("alpha-test-only", CloudRequest(listOf(CloudTurn("user", text)), true,
+                CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only", CloudRequest(listOf(CloudTurn("user", text)), true,
                     ChatToolReply.instructions(), chatDecision = true, selectedText = selected,
                     weatherLocation = { error("Text operations must not request location") }), CloudSession()) { events += it }
                 assertEquals("none", ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text).search)
@@ -1970,7 +2080,7 @@ class CloudWorkflowTest {
                 "The location is verified [1]" to null,
                 "The source reports 30 minutes [1]. These statements are not independently verified." to null).forEach { (text,code) ->
                 result = text; val events = mutableListOf<CloudEvent>()
-                val failure = runCatching { DeepSeekProvider(server.url).respond("alpha-test-only",cleanChatRequest("Find a sourced statement"),CloudSession()) { events += it } }.exceptionOrNull()
+                val failure = runCatching { CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",cleanChatRequest("Find a sourced statement"),CloudSession()) { events += it } }.exceptionOrNull()
                 if(code == null) {
                     assertNull(failure)
                     val final = ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text)
@@ -2038,7 +2148,7 @@ class CloudWorkflowTest {
         }.use { server ->
             val request = cleanChatRequest("Summarize this and give me its link", selectedText = "Manual note")
                 .copy(screenContext = screen, screenImages = listOf(image))
-            val provider = DeepSeekProvider(server.url)
+            val provider = CloudChatProvider(deepSeek, Endpoints { server.url })
             val events = mutableListOf<CloudEvent>()
             provider.respond("alpha-test-only", request, CloudSession()) { events += it }
             assertTrue(ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text).text.contains(url))
@@ -2084,7 +2194,7 @@ class CloudWorkflowTest {
         }.use { server ->
             for(value in listOf("answer","injected","search")) {
                 mode = value; val start = server.requests.size; val events = mutableListOf<CloudEvent>()
-                val failure = runCatching { DeepSeekProvider(server.url).respond("alpha-test-only",cleanChatRequest("Summarize the selected note", selectedText = selected),CloudSession()) { events += it } }.exceptionOrNull()
+                val failure = runCatching { CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",cleanChatRequest("Summarize the selected note", selectedText = selected),CloudSession()) { events += it } }.exceptionOrNull()
                 if(value == "injected") { assertEquals("tool_invalid",(failure as? CloudFailure)?.code); assertTrue(events.filterIsInstance<CloudEvent.RoundComplete>().isEmpty()) }
                 else { assertNull(failure); assertTrue(ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text).text.contains("Selected dose 7")) }
                 assertEquals(if(value == "search") 1 else 0,server.requests.drop(start).count { it.path == "/v1/tools/search" })
@@ -2105,7 +2215,7 @@ class CloudWorkflowTest {
                 decision().replace("\"kind\":", "\"kind\":\"answer\",\"kind\":") to "widget_request",
                 decision().dropLast(1) to "widget_request").forEach { (value,code) ->
                 answer = value; val events = mutableListOf<CloudEvent>()
-                val failure = runCatching { DeepSeekProvider(server.url).respond("alpha-test-only",CloudRequest(listOf(CloudTurn("user","Explain")),false,ChatToolReply.instructions(),chatDecision = true),CloudSession()) { events += it } }.exceptionOrNull()
+                val failure = runCatching { CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",CloudRequest(listOf(CloudTurn("user","Explain")),false,ChatToolReply.instructions(),chatDecision = true),CloudSession()) { events += it } }.exceptionOrNull()
                 assertEquals(code,(failure as? CloudFailure)?.code)
                 assertTrue(events.isEmpty())
             }
@@ -2136,7 +2246,7 @@ class CloudWorkflowTest {
             val authorizations = mutableListOf<ChatToolReply.Decision>()
             val rejections = mutableListOf<DecisionRejection>()
             session.decisionRejectionObserver = { rejections.add(it) }
-            DeepSeekProvider(server.url).respond("alpha-test-only",
+            CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",
                 cleanChatRequest(prompt).copy(search = false, validateOperation = { authorizations.add(it) }),
                 session) { events += it }
             val result = ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text)
@@ -2182,7 +2292,7 @@ class CloudWorkflowTest {
             }.use { server ->
                 val events = mutableListOf<CloudEvent>()
                 val request = cleanChatRequest(prompt).copy(validateOperation = { error("An invalid decision cannot authorize an operation.") })
-                val failure = runCatching { DeepSeekProvider(server.url).respond("alpha-test-only", request, session) { events += it } }.exceptionOrNull()
+                val failure = runCatching { CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only", request, session) { events += it } }.exceptionOrNull()
                 assertEquals(mode, if (mode == "invalid-enum") "widget_request" else "tool_invalid", (failure as? CloudFailure)?.code)
                 assertEquals(mode, listOf(true, false), rejections.map { it.correcting })
                 assertTrue(mode, rejections.all { it.stage == "DECISION" })
@@ -2217,7 +2327,7 @@ class CloudWorkflowTest {
             }.use { server ->
                 val events = mutableListOf<CloudEvent>()
                 val request = cleanChatRequest(prompt).copy(validateOperation = { error("An invalid decision cannot authorize an operation.") })
-                val failure = runCatching { DeepSeekProvider(server.url).respond("alpha-test-only", request, session) { events += it } }.exceptionOrNull()
+                val failure = runCatching { CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only", request, session) { events += it } }.exceptionOrNull()
                 assertEquals(mode, code, (failure as? CloudFailure)?.code)
                 assertEquals(mode, 1, server.requests.size)
                 assertTrue(mode, events.isEmpty())
@@ -2274,7 +2384,7 @@ class CloudWorkflowTest {
         }.use { server ->
             val events = mutableListOf<CloudEvent>()
             val result = runCatching {
-                DeepSeekProvider(server.url).respond("alpha-test-only",
+                CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",
                     cleanChatRequest(prompt).copy(selectedText = selected), CloudSession()) { events += it }
             }
             assertTrue(server.failures.toString(), server.failures.isEmpty())
@@ -2313,7 +2423,7 @@ class CloudWorkflowTest {
         }.use { server ->
             val events = mutableListOf<CloudEvent>()
             val result = runCatching {
-                DeepSeekProvider(server.url).respond("alpha-test-only", cleanChatRequest(prompt), CloudSession()) { events += it }
+                CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only", cleanChatRequest(prompt), CloudSession()) { events += it }
             }
             assertTrue(server.failures.toString(), server.failures.isEmpty())
             result.getOrThrow()
@@ -2351,7 +2461,7 @@ class CloudWorkflowTest {
         }.use { server ->
             val events = mutableListOf<CloudEvent>()
             val result = runCatching {
-                DeepSeekProvider(server.url).respond("alpha-test-only", cleanChatRequest("Make an app with the latest gold price"), CloudSession()) { events += it }
+                CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only", cleanChatRequest("Make an app with the latest gold price"), CloudSession()) { events += it }
             }
             assertTrue(server.failures.toString(), server.failures.isEmpty())
             result.getOrThrow()
@@ -2432,7 +2542,7 @@ class CloudWorkflowTest {
                     })
                 }
             }
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             fun savedTool() = ToolStore(app, "${fixture.name}.db-tools.db").use { it.tools().single() }
             fun run(case: String, expectedGrounding: Int, expectedGeneration: Int) {
                 mode.set(case)
@@ -2534,7 +2644,7 @@ class CloudWorkflowTest {
                 else -> error("Unexpected provider call after native generation.")
             }
             if (number <= 1) output.classification(reply) else output.answer(reply)
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             fixture.submit(prompt)
             fixture.idle()
             val saved = fixture.last
@@ -2558,7 +2668,7 @@ class CloudWorkflowTest {
                 2 -> { request.requireDraftTool(); output.calls(call(0, name = "draft_automation", arguments = draft)) }
                 else -> error("Unexpected automation request.")
             }
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             fixture.submit("Remind me to drink water every morning at 7.")
             fixture.idle()
             main {
@@ -2586,7 +2696,7 @@ class CloudWorkflowTest {
                 1, 2 -> { request.requireDraftTool(); output.answer(explanation) }
                 else -> error("Unexpected automation request.")
             }
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             fixture.submit("Summarize my calendar every morning at 7.")
             fixture.idle()
             assertEquals("complete", fixture.last.status)
@@ -2616,7 +2726,7 @@ class CloudWorkflowTest {
                     2 -> { request.requireDraftTool(); output.calls(call(0, name = "draft_automation", arguments = forgedDraft)) }
                     else -> error("Draft must not get another correction.")
                 }
-            }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+            }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
                 fixture.submit("Send me the news every day at 7.")
                 fixture.idle()
                 assertEquals(expected, fixture.last.errorCode)
@@ -2662,7 +2772,7 @@ class CloudWorkflowTest {
                 chatDecision = true, selectedText = "PRIVATE_SELECTION", validateOperation = { authorizations += it },
                 decisionContext = ChatDecisionContext(original, emptyList(), instructions, MessageProvenance.MEMORY_DERIVED),
                 automationDraftChatId = "fixture")
-            DeepSeekProvider(server.url).respond("alpha-test-only", request, session) { events += it }
+            CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only", request, session) { events += it }
             assertEquals(listOf(ChatToolReply.decode(ordinary)), authorizations)
             assertEquals(MessageProvenance.CLEAN, events.filterIsInstance<CloudEvent.RoundComplete>().single().provenance)
             assertEquals(3, server.requests.size)
@@ -2677,7 +2787,7 @@ class CloudWorkflowTest {
         Server { _, output -> output.classification("""{"kind":"create"}""") }.use { server ->
             val request = cleanChatRequest("Build a local counter.").copy(automationDraftChatId = "fixture",
                 validateOperation = { error("A canceled decision cannot authorize an operation.") })
-            val failure = runCatching { DeepSeekProvider(server.url).respond("alpha-test-only", request, session) { events += it } }
+            val failure = runCatching { CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only", request, session) { events += it } }
                 .exceptionOrNull()
             assertEquals("cancelled", (failure as? CloudFailure)?.code)
             assertTrue(events.isEmpty())
@@ -2690,7 +2800,7 @@ class CloudWorkflowTest {
             request.requireStrictDecision(image = true)
             output.classification(JSONObject(decision("Ready.",kind = "refine",search = "required",brief = "Change a planner"))
                 .put("targetId","unknown-planner").toString())
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             fixture.submit("Update my planner",true)
             fixture.idle()
             assertEquals("widget_request",fixture.last.errorCode)
@@ -2711,7 +2821,7 @@ class CloudWorkflowTest {
         }.use { server ->
             examples.forEach { value ->
                 answer = value; val events = mutableListOf<CloudEvent>()
-                DeepSeekProvider(server.url).respond("alpha-test-only",CloudRequest(listOf(CloudTurn("user","Explain this example")),true,ChatToolReply.instructions(),chatDecision = true),CloudSession()) { events += it }
+                CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",CloudRequest(listOf(CloudTurn("user","Explain this example")),true,ChatToolReply.instructions(),chatDecision = true),CloudSession()) { events += it }
                 assertTrue(events.filterIsInstance<CloudEvent.Text>().isEmpty())
                 val final = ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text)
                 assertEquals(value,final.text)
@@ -2755,7 +2865,7 @@ class CloudWorkflowTest {
                 }
                 else -> output.classification(decision("The initial decision text",search = if(current == "Find a duration") "required" else "none"))
             }
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             fun waitForFragment(text: String) {
                 assertTrue(waitFor("Ответ не завершён").isVisibleToUser)
                 val fragment = waitFor(text.trimEnd())
@@ -2845,7 +2955,7 @@ class CloudWorkflowTest {
                 }
                 else -> output.classification(decision(search = "required"))
             }
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             fixture.submit("Find two sourced facts",true); fixture.idle()
             assertEquals("${fixture.last.errorCode}: ${fixture.last.error}; ${server.failures}","complete",fixture.last.status)
             assertEquals(2,server.requests.count { it.path == "/v1/tools/search" }); assertEquals(5,server.requests.size)
@@ -2875,7 +2985,7 @@ class CloudWorkflowTest {
                 arrayOf(call(0,arguments = JSONObject().put("query","😀".repeat(129)).toString())),arrayOf(call(0),call(1),call(2)))
             for(value in batches) {
                 batch = value
-                val failure = runCatching { DeepSeekProvider(server.url).respond("alpha-test-only",cleanChatRequest("Find facts"),CloudSession()) {} }.exceptionOrNull()
+                val failure = runCatching { CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",cleanChatRequest("Find facts"),CloudSession()) {} }.exceptionOrNull()
                 assertTrue(failure is CloudFailure)
             }
             assertEquals(0,server.requests.count { it.path == "/v1/tools/search" }); assertTrue(server.failures.isEmpty())
@@ -2897,7 +3007,7 @@ class CloudWorkflowTest {
                 request.searching -> output.calls(call(0))
                 else -> output.classification(decision(search = "required"))
             }
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             listOf("empty" to "search_empty","invalid" to "search_no_usable_results","malformed" to "search_response","quota" to "quota").forEach { (value,code) ->
                 mode = value; fixture.submit("Find a verified fact",true); fixture.idle()
                 assertEquals(code,fixture.last.errorCode); assertEquals("error",fixture.last.status)
@@ -2916,7 +3026,7 @@ class CloudWorkflowTest {
                 request.answering -> output.answer(if(mode == "direct") "A local answer" else "Source fact [1]")
                 else -> output.classification(decision("A local answer",search = if(mode == "direct") "none" else "optional"))
             }
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             fixture.submit("Question about local counters",true); fixture.idle()
             assertEquals("complete",fixture.last.status); assertEquals(2,server.requests.size); assertTrue(fixture.last.sources.isEmpty())
             mode = "mixed"; fixture.submit("Find a fact if useful",true); fixture.idle()
@@ -2932,7 +3042,7 @@ class CloudWorkflowTest {
                 request.searching -> output.calls(call(0),call(1))
                 else -> output.classification(decision(search = "required"))
             }
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             fixture.submit("Find two sourced facts",true); fixture.idle()
             assertEquals("error",fixture.last.status); assertEquals("https://example.com/first",fixture.last.sources.single().url)
             assertEquals("",fixture.last.text); assertEquals(4,server.requests.size)
@@ -2962,7 +3072,7 @@ class CloudWorkflowTest {
                 request.answering -> output.answer("New answer")
                 else -> output.classification(decision("New answer"))
             }
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             try {
                 fixture.submit("Create an itinerary",true); assertTrue(entered.await(10,TimeUnit.SECONDS)); assertEquals("",fixture.last.text)
                 val oldId = fixture.model.snapshot.selectedId
@@ -2990,7 +3100,7 @@ class CloudWorkflowTest {
                 request.answering -> output.answer("New answer")
                 else -> output.classification(decision("New answer"))
             }
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             try {
                 fixture.submit("Two facts",true); assertTrue(entered.await(10,TimeUnit.SECONDS))
                 val oldId = fixture.model.snapshot.selectedId
@@ -3015,7 +3125,7 @@ class CloudWorkflowTest {
                 request.answering -> output.answer("Ответ по источнику [1]")
                 else -> output.classification(decision(search = "required"))
             }
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             setText("Сообщение ассистенту","Найди Alpha test"); click("Отправить сообщение"); fixture.idle()
             assertEquals("${fixture.last.errorCode}: ${fixture.last.error}; ${server.failures}","complete",fixture.last.status)
             assertTrue(fixture.last.text.endsWith("Ответ по источнику [1]")); assertEquals("found",fixture.last.searchStatus)
@@ -3047,7 +3157,7 @@ class CloudWorkflowTest {
                 output.classification(if (current.isEmpty()) decision("Что нужно описать?", kind = "clarify")
                     else decision("Изображение принято"))
             }
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             val uri = app.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, "alpha-test.png"); put(MediaStore.Images.Media.MIME_TYPE, "image/png")
             })!!
@@ -3098,6 +3208,46 @@ class CloudWorkflowTest {
         } }
     }
 
+    @Test fun largePictureArrivesShrunkAndSmallPictureKeepsBytes() {
+        Server { request, output ->
+            if (request.answering) output.answer("Изображение принято")
+            else output.classification(decision("Изображение принято"))
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
+            fun store(name: String, width: Int, height: Int): Pair<Uri, ByteArray> {
+                val uri = app.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, name); put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                })!!
+                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                val bytes = java.io.ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray(); bitmap.recycle()
+                app.contentResolver.openOutputStream(uri)!!.use { it.write(bytes) }
+                return uri to bytes
+            }
+            fun sent(): ByteArray {
+                val messages = server.requests.last().json.getJSONArray("messages")
+                val data = messages.getJSONObject(messages.length() - 1).getJSONArray("content").getJSONObject(1).getJSONObject("image_url").getString("url")
+                assertTrue(data.startsWith("data:image/png;base64,"))
+                return android.util.Base64.decode(data.substringAfter(','), android.util.Base64.DEFAULT)
+            }
+            val (largeUri, _) = store("alpha-large.png", 3000, 1000)
+            val (smallUri, smallBytes) = store("alpha-small.png", 40, 30)
+            try {
+                for (uri in listOf(largeUri, smallUri)) {
+                    val name = if (uri == largeUri) "alpha-large.png" else "alpha-small.png"
+                    main { fixture.model.addAttachment(Attachment(uri.toString(), name, "image/png")) }
+                    waitUntil { !fixture.model.attachmentBusy }
+                    fixture.submit(""); fixture.idle(); assertEquals("complete", fixture.last.status)
+                    val bytes = sent()
+                    if (uri == largeUri) {
+                        val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+                        assertEquals(2048 to 683, options.outWidth to options.outHeight)
+                    } else assertArrayEquals(smallBytes, bytes)
+                }
+            } finally { runCatching { app.contentResolver.delete(largeUri, null, null) }; runCatching { app.contentResolver.delete(smallUri, null, null) } }
+            assertTrue(server.failures.isEmpty())
+        } }
+    }
+
     @Test fun cancelCannotChangeNewConversationAndRetryUsesSameUser() {
         val slowStarted = CountDownLatch(1); val releaseSlow = CountDownLatch(1)
         Server { request, output ->
@@ -3107,7 +3257,7 @@ class CloudWorkflowTest {
                 "reject" -> { output.headers(401, "application/json"); output.write("{}".toByteArray()) }
                 else -> if (request.answering) output.answer("Новый ответ") else output.classification(decision("Новый ответ"))
             }
-        }.use { server -> Fixture(DeepSeekProvider(server.url)).use { fixture ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url })).use { fixture ->
             fixture.submit("slow"); assertTrue(slowStarted.await(10, TimeUnit.SECONDS))
             waitUntil { fixture.last.status == "streaming" }; assertEquals("",fixture.last.text)
             val oldId = fixture.model.snapshot.selectedId
@@ -3171,7 +3321,7 @@ class CloudWorkflowTest {
                     output.event(end("tool_calls")); output.write("data: [DONE]\n\n".toByteArray())
                 }
             }
-        }.use { server -> Fixture(DeepSeekProvider(server.url), seed = { store ->
+        }.use { server -> Fixture(CloudChatProvider(deepSeek, Endpoints { server.url }), seed = { store ->
             store.saveConversation(Conversation("restart", "Interrupted", 1, 1, messages = listOf(Message("u", "user", "test", 1, "sent"), Message("a", "assistant", "partial", 1, "streaming", replyTo = "u"))))
             store.seedOpenChat("restart")
         }).use { fixture ->
@@ -3183,7 +3333,7 @@ class CloudWorkflowTest {
             fixture.submit("Unreadable credential"); fixture.idle()
             assertEquals("key_read", fixture.last.errorCode); assertEquals(0, server.requests.size)
             assertEquals("broken", app.getSharedPreferences(fixture.name, android.content.Context.MODE_PRIVATE).getString("ciphertext", null))
-            fixture.keys.clear(); fixture.keys.save("alpha-test-only")
+            fixture.keys.clear(); fixture.keys.save("alpha-test-only", AiProvider.DEEPSEEK)
             fixture.submit("Empty search", true); fixture.idle()
             assertEquals("complete", fixture.last.status); assertEquals("empty", fixture.last.searchStatus); assertTrue(fixture.last.sources.isEmpty())
             fixture.submit("Create a live dashboard with a local counter.", true); fixture.idle()
@@ -3194,7 +3344,7 @@ class CloudWorkflowTest {
             assertTrue(com.alpha.assistant.tools.ToolSpec.parsePersisted(shell.spec).capabilities.isEmpty())
             response = "quota"; fixture.submit("Quota search", true); fixture.idle()
             assertEquals("quota", fixture.last.errorCode); assertEquals("error", fixture.last.searchStatus)
-            assertTrue(fixture.last.error.startsWith("Поиск:")); assertTrue(server.failures.isEmpty())
+            assertTrue(fixture.last.error.startsWith("Поиск, DeepSeek: ")); assertTrue(server.failures.isEmpty())
         } }
     }
 

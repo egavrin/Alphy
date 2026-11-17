@@ -18,6 +18,10 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 @RunWith(AndroidJUnit4::class)
 class ShellCourseDesktopModelWorkflowTest {
@@ -41,6 +45,7 @@ class ShellCourseDesktopModelWorkflowTest {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T = ShellViewModel(
                             shell.context.applicationContext as Application, shell.provider, shell.store, shell.keys,
+                            legacy = isolatedLegacyKeys(shell.context.applicationContext as Application), models = isolatedModels(shell.context.applicationContext as Application), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE,
                         ) as T
                     })[ShellViewModel::class.java]
                 }

@@ -3,7 +3,9 @@ package com.alpha.assistant.tools
 import android.graphics.Bitmap
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.CloudSession
+import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.images.ImageAspect
 import com.alpha.assistant.images.ImageGeneration
 import com.alpha.assistant.images.ImageProvider
@@ -47,7 +49,9 @@ class AgentImageWorkflowTest {
     private val prompts = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun withImages(enabled: Boolean, body: suspend (ImageGeneration, AtomicInteger) -> Unit) = runBlocking {
-        val settings = ImageSettings(context, "agent-image-${UUID.randomUUID()}")
+        val name = "agent-image-${UUID.randomUUID()}"
+        val keys = SecureKeyStore(context, name, name)
+        val settings = ImageSettings(context, keys, name)
         val count = AtomicInteger()
         val images = ImageGeneration(context, settings, mapOf("openrouter" to ImageProvider { _, _, intent ->
             count.incrementAndGet()
@@ -59,11 +63,11 @@ class AgentImageWorkflowTest {
             ProviderImage(bytes.toByteArray(), "image/png")
         }))
         try {
-            settings.saveKey("fixture-only").getOrThrow()
+            keys.save("fixture-only", AiProvider.OPENROUTER).getOrThrow()
             settings.setEnabled(enabled).getOrThrow()
             body(images, count)
         } finally {
-            settings.clearKey()
+            keys.clear()
         }
     }
 

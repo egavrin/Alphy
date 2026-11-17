@@ -1,5 +1,9 @@
 package com.alpha.assistant.ui
 
+import com.alpha.assistant.cloud.AiAccount
+import com.alpha.assistant.cloud.AiModels
+import com.alpha.assistant.cloud.AiProvider
+import com.alpha.assistant.cloud.KeyCheck
 import android.Manifest
 import android.accessibilityservice.AccessibilityService
 import android.app.Activity
@@ -28,6 +32,7 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getAllSemanticsNodes
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.navigationevent.NavigationEvent
@@ -45,6 +50,7 @@ import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.data.Conversation
+import com.alpha.assistant.data.LegacyKeys
 import com.alpha.assistant.data.Message
 import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.data.ShellStore
@@ -120,19 +126,57 @@ internal fun ShellViewModel.openSeededChat(store: ShellStore): ShellViewModel = 
     synchronized(seededChats) { seededChats[store] }?.let(::restoreTaskChat)
 }
 
+/** Old key stores that the app never uses. No test writes them, so a test model outside [ShellFixture] never reaches a real old key (decision 10). */
+internal fun isolatedLegacyKeys(context: Context): LegacyKeys =
+    LegacyKeys(context, "test-legacy-deepseek", "alpha.test.shell.legacy.deepseek", "test-legacy-images", "alpha.test.shell.legacy.images")
+
+/** Model choices that the app never uses, so a test model outside [ShellFixture] never changes the real «Модели» choices. */
+internal fun isolatedModels(context: Context): AiModels = AiModels(context, "test-ai-models")
+
+/** A fake DeepSeek key ("sk-" and 32 hex digits). It is built at run time, so no source line holds a key-shaped literal that secret scanning blocks. */
+internal fun fakeDeepSeekKey(half: String = "0123456789abcdef"): String = "sk-$half$half"
+
+/** An image settings file that the app never uses, for a test model outside [ShellFixture]. */
+internal const val ISOLATED_IMAGES = "test-images"
+
+/** A voice settings file that the app never uses, for a test model or session outside [ShellFixture]. */
+internal const val ISOLATED_VOICE = "test-voice"
+
 /** An isolated shell database, key, and provider for one test. */
 internal class ShellFixture(prefix: String) {
     val context: Context = InstrumentationRegistry.getInstrumentation().targetContext
     val name: String = "$prefix-${UUID.randomUUID()}"
     val store: ShellStore = ShellStore(context, "$name.db")
     val keys: SecureKeyStore = SecureKeyStore(context, name, name)
+    // The old stores get their own names and aliases, so no test touches the production stores or the account store.
+    private val legacyDeepSeek = "$name-legacy-deepseek"
+    private val legacyImages = "$name-legacy-images"
+    val legacy: LegacyKeys = LegacyKeys(context, legacyDeepSeek, legacyDeepSeek, legacyImages, legacyImages)
     val provider: FixtureProvider = FixtureProvider()
+    val models: AiModels = AiModels(context, "$name-models")
+    /** The image settings file of the model. The model never uses the app file. */
+    val imageStore: String = "$name-images"
+    /** The voice settings file of the model and of a test session. Neither uses the app file. */
+    val voiceStore: String = "$name-voice"
     @Volatile var model: ShellViewModel? = null
+    /** The key check of «Согласиться и сохранить». A device test never calls a real provider. */
+    @Volatile var keyCheck: suspend (AiAccount) -> KeyCheck = { KeyCheck.ACCEPTED }
 
-    fun install(saveKey: Boolean = true, voice: VoiceFactory? = null, onboarding: Boolean = false) {
-        if (saveKey) check(keys.save("alpha-test-only").isSuccess)
-        CloudTestActivity.factory = { app -> ShellViewModel(app, provider, store, keys, voiceFactory = voice, offerOnboarding = onboarding).openSeededChat(store).also { model = it } }
+    /** A loopback test passes a [chat] provider that reads [models]. */
+    fun install(saveKey: Boolean = true, voice: VoiceFactory? = null, onboarding: Boolean = false, chat: ChatProvider = provider) {
+        if (saveKey) check(keys.save("alpha-test-only", AiProvider.OPENAI).isSuccess)
+        CloudTestActivity.factory = { app ->
+            ShellViewModel(app, chat, store, keys, voiceFactory = voice, offerOnboarding = onboarding, keyCheck = { keyCheck(it) }, legacy = legacy, models = models, imageStore = imageStore, voiceStore = voiceStore)
+                .openSeededChat(store).also { model = it }
+        }
     }
+    fun seedLegacyDeepSeek(key: String = "sk-" + "0123456789abcdef".repeat(2)) =
+        check(SecureKeyStore(context, legacyDeepSeek, legacyDeepSeek).save(key, AiProvider.DEEPSEEK).isSuccess)
+    fun seedLegacyOpenRouter(key: String = "sk-or-v1-legacy") =
+        check(SecureKeyStore(context, legacyImages, legacyImages).save(key, AiProvider.OPENROUTER).isSuccess)
+    /** An old DeepSeek store that reports a key but does not decrypt: the ciphertext has no IV. */
+    fun seedUnreadableLegacyDeepSeek() =
+        check(context.getSharedPreferences(legacyDeepSeek, Context.MODE_PRIVATE).edit().putString("ciphertext", "AAAA").commit())
     fun seedChat(id: String, title: String, message: String, selected: Boolean = false, updatedAt: Long = 1L) {
         store.saveConversation(Conversation(id, title, updatedAt, updatedAt, messages = listOf(Message("$id-u", "user", message, updatedAt, "sent"))))
         if (selected) store.seedOpenChat(id)
@@ -141,8 +185,19 @@ internal class ShellFixture(prefix: String) {
     fun remove() {
         CloudTestActivity.factory = null
         SystemClock.sleep(150)
-        store.close(); context.deleteDatabase("$name.db"); context.deleteDatabase("$name.db-tools.db"); context.deleteDatabase("$name.db-tools.db-automations.db"); keys.clear(); context.deleteSharedPreferences(name)
-        java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(name) }
+        // Every step runs, even when an earlier one throws. The first failure is reported after all steps.
+        val steps = listOf<() -> Unit>(
+            { store.close() },
+            { context.deleteDatabase("$name.db"); context.deleteDatabase("$name.db-tools.db"); context.deleteDatabase("$name.db-tools.db-automations.db") },
+            { keys.clear() },
+            { context.deleteSharedPreferences(name); context.deleteSharedPreferences("$name-models"); context.deleteSharedPreferences(imageStore); context.deleteSharedPreferences(voiceStore) },
+            { java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(name) } },
+            // The clear methods also delete the Keystore aliases.
+            { legacy.clear(AiProvider.DEEPSEEK); legacy.clear(AiProvider.OPENROUTER) },
+            { context.deleteSharedPreferences(legacyDeepSeek); context.deleteSharedPreferences(legacyImages) },
+            { removeShellIndexes(context, "$name.db") },
+        )
+        steps.mapNotNull { step -> runCatching(step).exceptionOrNull() }.firstOrNull()?.let { throw it }
     }
 }
 
@@ -189,6 +244,19 @@ internal class ShellRobot(fixture: String) {
         }
         diagnostics.capture("wait-timeout")
         fail("UI condition did not complete within ${timeoutMs / 1000} seconds")
+    }
+    /** Waits for a field that shows [label] as its value, such as the choice of a read-only menu field. A text or a link with the same words does not count. */
+    fun selected(label: String): AccessibilityNodeInfo {
+        fun search(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+            if (node == null) return null
+            if (node.className?.toString() == "android.widget.EditText" && node.text?.toString() == label) return node
+            repeat(node.childCount) { search(childOrNull(node, it))?.let { match -> return match } }
+            return null
+        }
+        diagnostics.target(label)
+        var result: AccessibilityNodeInfo? = null
+        waitUntil { result = search(diagnostics.freshRoot()); result != null }
+        return result!!
     }
     // Compose UI 1.12.1 marks only an enabled field as editable, so a field that is disabled for a short time needs a wait.
     // The climb stops at the first ancestor that holds a field and takes the first field in it.
@@ -300,6 +368,8 @@ internal class ShellRobot(fixture: String) {
         assertTrue("48dp touch target $bounds: $label", bounds.width() >= minSize && bounds.height() >= minSize)
         return bounds
     }
+    /** Waits until [assertTarget] passes without a scroll by the test, for a target that the app scrolls into view. */
+    fun awaitTarget(label: String) = waitUntil { runCatching { assertTarget(label) }.isSuccess }
     fun bounds(label: String): Rect = Rect().also { waitFor(label).getBoundsInScreen(it) }
 
     fun assertScreenshotShows(label: String) {
@@ -369,6 +439,21 @@ internal class ShellRobot(fixture: String) {
                     text.text.substring(it.start, it.end) == label
             }
         } == true }
+    /** Each composed text inside the node with [tag]: the text, its line count, and whether it overflows its bounds. */
+    fun composedTextFit(scenario: ActivityScenario<*>, tag: String): List<Triple<String, Int, Boolean>> {
+        val result = mutableListOf<Triple<String, Int, Boolean>>()
+        scenario.onActivity { activity ->
+            fun visit(node: SemanticsNode) {
+                node.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.let { read ->
+                    val layouts = mutableListOf<TextLayoutResult>()
+                    if (read(layouts)) layouts.forEach { result += Triple(it.layoutInput.text.text, it.lineCount, it.hasVisualOverflow) }
+                }
+                node.children.forEach(::visit)
+            }
+            nodes(activity).filter { it.config.getOrNull(SemanticsProperties.TestTag) == tag }.forEach(::visit)
+        }
+        return result
+    }
     /** The window bounds of the composed node with [tag] and the width of its Compose root, in pixels. */
     fun composedBounds(scenario: ActivityScenario<*>, tag: String): Pair<Rect, Int> =
         checkNotNull(composedBoundsOrNull(scenario, tag)) { "Expected one composed node with tag $tag" }

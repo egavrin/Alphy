@@ -17,6 +17,7 @@ import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.ui.removeSemanticIndexes
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -207,7 +208,7 @@ class SurfaceBitmapWorkflowTest {
                 withContext(Dispatchers.Main) {current.close()}
                 withTimeout(5000) {while(db.isOpen) yield()}
             }
-            scope.cancel();files.forEach(File::delete);app.deleteDatabase(name);app.deleteDatabase("$name-automations.db")
+            scope.cancel();files.forEach(File::delete);app.deleteDatabase(name);app.deleteDatabase("$name-automations.db");removeSemanticIndexes(app,"apps:$name")
         }
     }
 }

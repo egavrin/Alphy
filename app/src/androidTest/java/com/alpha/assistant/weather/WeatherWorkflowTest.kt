@@ -7,12 +7,17 @@ import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.cloud.*
 import com.alpha.assistant.data.*
 import com.alpha.assistant.ui.ShellViewModel
+import com.alpha.assistant.ui.removeShellIndexes
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.UUID
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 /** Failure cases: city names trigger location, temporal words become cities, a late result
  * submits after cancellation, a draft edit or conversation switch, or a place survives retry. */
@@ -23,7 +28,7 @@ class WeatherWorkflowTest {
         val name = "weather-${UUID.randomUUID()}"
         val store = ShellStore(app, "$name.db")
         val keys = SecureKeyStore(app, name, name)
-        check(keys.save("alpha-test-only").isSuccess)
+        check(keys.save("alpha-test-only", AiProvider.OPENAI).isSuccess)
         lateinit var model: ShellViewModel
         var pending = CompletableDeferred<WeatherPlace>()
         var entered = 0
@@ -42,7 +47,7 @@ class WeatherWorkflowTest {
                     val result = pending
                     return withContext(NonCancellable) { result.await() }
                 }
-            }).also { model = it }
+            }, legacy = isolatedLegacyKeys(application), models = isolatedModels(application), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).also { model = it }
         }
         fun main(action: () -> Unit) = instrumentation.runOnMainSync(action)
         fun waitUntil(condition: () -> Boolean) {
@@ -117,7 +122,7 @@ class WeatherWorkflowTest {
         } finally {
             pending.complete(WeatherPlace("London", System.currentTimeMillis()))
             CloudTestActivity.factory = null
-            store.close(); app.deleteDatabase("$name.db"); app.deleteDatabase("$name.db-tools.db"); keys.clear()
+            store.close(); app.deleteDatabase("$name.db"); app.deleteDatabase("$name.db-tools.db"); removeShellIndexes(app, "$name.db"); keys.clear()
         }
     }
 }

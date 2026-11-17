@@ -61,7 +61,7 @@ class SavedCourseShellWorkflowTest {
             robot.openDrawer(scenario)
             robot.click(robot.text(R.string.settings))
             robot.awaitDrawerClosed(scenario)
-            robot.click(robot.text(R.string.settings_deepseek))
+            robot.click(robot.text(R.string.settings_ai))
             robot.reveal(robot.text(R.string.key_label), forward = null)
             assertTrue(robot.composed(scenario, "settings-detail"))
             robot.back()

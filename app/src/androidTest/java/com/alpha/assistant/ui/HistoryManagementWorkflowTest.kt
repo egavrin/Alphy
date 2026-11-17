@@ -42,7 +42,7 @@ class HistoryManagementWorkflowTest {
         val newDraft = Draft("independent new draft")
         try {
             store.saveConversation(first); store.saveConversation(second); store.saveNewDraft(newDraft); store.seedOpenChat(first.id)
-            keys.save("history-test-only").getOrThrow()
+            keys.save("history-test-only", AiProvider.OPENAI).getOrThrow()
             val spec = ToolSpec.parse("""{"formatVersion":3,"title":"History fixture",
                 "description":"","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":0},
                 "ui":{"type":"text","text":"Fixture"},"source":"return {state:input.state};"}""")
@@ -51,7 +51,7 @@ class HistoryManagementWorkflowTest {
             val rule = rules.save(null, JSONObject("""{"name":"History fixture","trigger":{"type":"manual"},"conditions":{},"actions":[{"id":"notice","capability":"notification.post","args":{"title":"Fixture","text":"Fixture"}}]}"""))
             CloudTestActivity.factory = { app -> ShellViewModel(app, object : ChatProvider {
                 override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) { error("History actions must not call a provider") }
-            }, store, keys).openSeededChat(store) }
+            }, store, keys, legacy = isolatedLegacyKeys(app), models = isolatedModels(app), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(store) }
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitFor("Сообщение ассистенту")
                 openSearch(scenario)
@@ -90,7 +90,7 @@ class HistoryManagementWorkflowTest {
         } finally {
             CloudTestActivity.factory = null
             store.close(); tools.close(); rules.close(); keys.clear(); source.delete()
-            context.deleteDatabase("$fixture.db"); context.deleteDatabase("$fixture.db-tools.db"); context.deleteDatabase("$fixture-automations.db")
+            context.deleteDatabase("$fixture.db"); context.deleteDatabase("$fixture.db-tools.db"); removeShellIndexes(context, "$fixture.db"); context.deleteDatabase("$fixture-automations.db")
             context.deleteSharedPreferences(fixture)
             java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(fixture) }
         }
@@ -105,13 +105,13 @@ class HistoryManagementWorkflowTest {
         val release = CompletableDeferred<Unit>()
         val delivered = CompletableDeferred<Unit>()
         try {
-            keys.save("history-test-only").getOrThrow()
+            keys.save("history-test-only", AiProvider.OPENAI).getOrThrow()
             CloudTestActivity.factory = { app -> ShellViewModel(app, object : ChatProvider {
                 override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                     entered.complete(Unit)
                     withContext(NonCancellable) { release.await(); emit(CloudEvent.Text("Late deleted response")); delivered.complete(Unit) }
                 }
-            }, store, keys).openSeededChat(store) }
+            }, store, keys, legacy = isolatedLegacyKeys(app), models = isolatedModels(app), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(store) }
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 edit("Сообщение ассистенту", "Running fixture")
                 click("Отправить сообщение")
@@ -137,7 +137,7 @@ class HistoryManagementWorkflowTest {
         } finally {
             release.complete(Unit)
             CloudTestActivity.factory = null
-            store.close(); keys.clear(); context.deleteDatabase("$fixture.db"); context.deleteDatabase("$fixture.db-tools.db"); context.deleteSharedPreferences(fixture)
+            store.close(); keys.clear(); context.deleteDatabase("$fixture.db"); context.deleteDatabase("$fixture.db-tools.db"); removeShellIndexes(context, "$fixture.db"); context.deleteSharedPreferences(fixture)
             java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(fixture) }
         }
     }

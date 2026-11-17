@@ -1,5 +1,7 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.cloud.AiAccount
+import com.alpha.assistant.cloud.AiProvider
 import android.app.Application
 import android.content.ContentValues
 import android.graphics.Bitmap
@@ -10,10 +12,12 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.cloud.CloudTurn
-import com.alpha.assistant.cloud.DeepSeekProvider
+import com.alpha.assistant.cloud.CloudChatProvider
+import com.alpha.assistant.cloud.Endpoints
 import com.alpha.assistant.cloud.ImageInput
 import com.alpha.assistant.data.Attachment
 import com.alpha.assistant.data.SecureKeyStore
+import com.alpha.assistant.ui.removeSemanticIndexes
 import kotlinx.coroutines.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -37,13 +41,15 @@ class ToolCancellationTest {
         while(SystemClock.uptimeMillis()<deadline) { if(condition()) return; SystemClock.sleep(25) }
         fail("Cancellation workflow timed out")
     }
+    private fun loopbackProvider(server: ServerSocket) = CloudChatProvider(
+        { AiAccount(AiProvider.DEEPSEEK, "tool-cancel-test-only") }, Endpoints { "http://127.0.0.1:${server.localPort}" })
 
     @Test fun blockedImageCancellationSendsNothingAndNextRequestStillWorks() {
         val app = instrumentation.targetContext.applicationContext as Application
         val name = "tool-cancel-${UUID.randomUUID()}"
         val store = ToolStore(app,"$name.db")
         val keys = SecureKeyStore(app,name,name)
-        keys.save("tool-cancel-test-only").getOrThrow()
+        keys.save("tool-cancel-test-only", AiProvider.DEEPSEEK).getOrThrow()
         val scope = CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
         val enteredRead = CountDownLatch(1)
         val releaseRead = CountDownLatch(1)
@@ -84,7 +90,7 @@ class ToolCancellationTest {
         var created = false
         try {
             main {
-                controller = ToolController(app,scope,DeepSeekProvider("http://127.0.0.1:${server.localPort}"),keys,store) { attachment ->
+                controller = ToolController(app,scope,loopbackProvider(server),keys,store) { attachment ->
                     if(imageReads.incrementAndGet() == 1) {
                         enteredRead.countDown()
                         check(releaseRead.await(10,TimeUnit.SECONDS))
@@ -113,7 +119,7 @@ class ToolCancellationTest {
             main { if(created) controller.close(); scope.cancel() }
             server.close(); serverThread.join(1000)
             runCatching { app.contentResolver.delete(uri,null,null) }
-            store.close(); app.deleteDatabase("$name.db"); keys.clear(); app.deleteSharedPreferences(name)
+            store.close(); app.deleteDatabase("$name.db"); removeSemanticIndexes(app, "apps:$name.db"); keys.clear(); app.deleteSharedPreferences(name)
             KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(name) }
         }
     }
@@ -124,7 +130,7 @@ class ToolCancellationTest {
             val reader = thread(isDaemon = true) {
                 runCatching { server.accept().use { received.incrementAndGet() } }
             }
-            val provider = DeepSeekProvider("http://127.0.0.1:${server.localPort}")
+            val provider = loopbackProvider(server)
             val request = CloudRequest(listOf(CloudTurn("user","fixture")),false)
             val canceledSession = CloudSession().apply { cancel() }
             assertTrue(runCatching { provider.respond("tool-cancel-test-only",request,canceledSession) {} }.isFailure)

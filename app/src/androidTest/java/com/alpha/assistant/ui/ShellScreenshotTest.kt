@@ -7,11 +7,20 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.os.SystemClock
 import android.util.Log
+import androidx.activity.compose.setContent
 import androidx.annotation.StringRes
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
+import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
+import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
@@ -151,6 +160,176 @@ class ShellScreenshotTest {
         }
     }
 
+    // The «Сервис ИИ» panel at a 360 dp phone width, in both themes, at the default font scale and at 1.3.
+    @Test fun captureAiPanelAtPhoneWidth() {
+        val night = checkNotNull(Regex("""Night mode: (\S+)""").find(robot.shell("cmd uimode night"))).groupValues[1]
+        val nightBits = Resources.getSystem().configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        val scale = robot.shell("settings get system font_scale")
+        val root = checkNotNull(fixture.context.getExternalFilesDir("alphy-ai-panel-screens")).apply { check(deleteRecursively()) }
+        fixture.install(saveKey = false)
+        try {
+            for ((mode, bits) in listOf("no" to Configuration.UI_MODE_NIGHT_NO, "yes" to Configuration.UI_MODE_NIGHT_YES)) {
+                setNight(mode, bits)
+                for (size in listOf("1.0", "1.3")) {
+                    setScale(size)
+                    check(fixture.keys.clear().isSuccess)
+                    fixture.launch().use { scenario ->
+                        val directory = File(root, "$mode-$size").apply { mkdirs() }
+                        phoneWidth(scenario)
+                        scenario.onActivity { checkNotNull(fixture.model).openSurface(null, settings = true) }
+                        robot.waitFor(robot.text(R.string.key_missing))
+                        robot.reveal(robot.text(R.string.key_help))
+                        capturePanel(scenario, directory, "missing")
+                        enterKey("sk-ant-api03-alpha-test-only")
+                        robot.selected("Anthropic")
+                        assertProviderFits(scenario, "$mode-$size")
+                        capturePanel(scenario, directory, "anthropic")
+                        robot.reveal(robot.text(R.string.ai_available))
+                        capturePanel(scenario, directory, "anthropic-functions")
+                        enterKey("sk-or-v1-alpha-test-only")
+                        robot.selected("OpenRouter")
+                        assertProviderFits(scenario, "$mode-$size")
+                        robot.reveal(robot.text(R.string.consent_and_save))
+                        robot.click(robot.text(R.string.consent_and_save))
+                        robot.waitFor(robot.text(R.string.key_ready))
+                        capturePanel(scenario, directory, "ready-openrouter")
+                        robot.reveal(robot.text(R.string.ai_available))
+                        capturePanel(scenario, directory, "ready-openrouter-functions")
+                    }
+                }
+            }
+        } finally {
+            try { setNight(night, nightBits) } finally { setScale(scale) }
+        }
+    }
+
+    // The found-key cards and the onboarding steps at a 360 dp phone width, in both themes (spec 14.5 and 14.6).
+    @Test fun captureOldKeysAtPhoneWidth() {
+        val night = checkNotNull(Regex("""Night mode: (\S+)""").find(robot.shell("cmd uimode night"))).groupValues[1]
+        val nightBits = Resources.getSystem().configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        val root = checkNotNull(fixture.context.getExternalFilesDir("alphy-old-key-screens")).apply { check(deleteRecursively()) }
+        val themes = listOf("no" to Configuration.UI_MODE_NIGHT_NO, "yes" to Configuration.UI_MODE_NIGHT_YES)
+        fun settings(directory: File, name: String, status: Int) = fixture.launch().use { scenario ->
+            phoneWidth(scenario)
+            scenario.onActivity { checkNotNull(fixture.model).openSurface(null, settings = true) }
+            robot.waitFor(robot.text(status))
+            robot.waitFor(robot.text(R.string.legacy_deepseek))
+            capturePanel(scenario, directory, name)
+        }
+        fixture.install(saveKey = false, onboarding = true)
+        try {
+            // The onboarding passes come first, because the settings passes need the onboarded setting.
+            for ((mode, bits) in themes) {
+                setNight(mode, bits)
+                check(fixture.keys.clear().isSuccess)
+                fixture.seedLegacyDeepSeek()
+                fixture.launch().use { scenario ->
+                    val directory = File(root, mode).apply { mkdirs() }
+                    phoneWidth(scenario)
+                    robot.reveal(robot.text(R.string.onboarding_next))
+                    robot.click(robot.text(R.string.onboarding_next))
+                    robot.waitFor(robot.text(R.string.legacy_deepseek))
+                    capturePanel(scenario, directory, "onboarding-old-key", PHONE_WIDTH)
+                    // «Использовать» masks the old key, selects DeepSeek, opens the consent, and scrolls to the save button.
+                    robot.click(robot.text(R.string.legacy_deepseek_use))
+                    robot.waitFor(robot.text(R.string.consent_text, "DeepSeek"))
+                    robot.awaitTarget(robot.text(R.string.consent_and_save))
+                    capturePanel(scenario, directory, "onboarding-old-key-used", PHONE_WIDTH)
+                    enterKey("sk-ant-api03-alpha-test-only")
+                    robot.selected("Anthropic")
+                    robot.reveal(robot.text(R.string.consent_and_save))
+                    robot.click(robot.text(R.string.consent_and_save))
+                    robot.waitFor(robot.text(R.string.key_ready))
+                    robot.reveal(robot.text(R.string.onboarding_next))
+                    robot.click(robot.text(R.string.onboarding_next))
+                    robot.waitFor(robot.text(R.string.onboarding_ready_voice))
+                    capturePanel(scenario, directory, "onboarding-ready-anthropic", PHONE_WIDTH)
+                }
+            }
+            fixture.store.saveSetting("onboarded", "1")
+            for ((mode, bits) in themes) {
+                setNight(mode, bits)
+                val directory = File(root, mode)
+                check(fixture.keys.clear().isSuccess)
+                fixture.seedLegacyDeepSeek()
+                fixture.seedLegacyOpenRouter()
+                settings(directory, "settings-old-keys", R.string.key_missing)
+                check(fixture.legacy.clear(AiProvider.OPENROUTER).isSuccess)
+                check(fixture.keys.save("sk-proj-alpha-test-only", AiProvider.OPENAI).isSuccess)
+                settings(directory, "settings-account-old-key", R.string.key_ready)
+            }
+        } finally {
+            setNight(night, nightBits)
+        }
+    }
+
+    // «Модели» open at a 360 dp phone width, in both themes: an OpenRouter account with three groups and a DeepSeek account (spec 14.8).
+    @Test fun captureModelsAtPhoneWidth() {
+        val night = checkNotNull(Regex("""Night mode: (\S+)""").find(robot.shell("cmd uimode night"))).groupValues[1]
+        val nightBits = Resources.getSystem().configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        val root = checkNotNull(fixture.context.getExternalFilesDir("alphy-models-screens")).apply { check(deleteRecursively()) }
+        val accounts = listOf(AiProvider.OPENROUTER to "sk-or-v1-alpha-test-only", AiProvider.DEEPSEEK to fakeDeepSeekKey())
+        fixture.install(saveKey = false)
+        try {
+            for ((mode, bits) in listOf("no" to Configuration.UI_MODE_NIGHT_NO, "yes" to Configuration.UI_MODE_NIGHT_YES)) {
+                setNight(mode, bits)
+                val directory = File(root, mode).apply { mkdirs() }
+                for ((provider, key) in accounts) {
+                    check(fixture.keys.save(key, provider).isSuccess)
+                    fixture.launch().use { scenario ->
+                        phoneWidth(scenario)
+                        scenario.onActivity { checkNotNull(fixture.model).openSurface(null, settings = true) }
+                        robot.waitFor(robot.text(R.string.key_ready))
+                        robot.reveal(robot.text(R.string.ai_models))
+                        robot.click(robot.text(R.string.ai_models))
+                        // The group headings start under the «Модели» title text.
+                        robot.reveal(robot.text(R.string.ai_models_chat))
+                        assertEquals(robot.bounds(robot.text(R.string.ai_models)).left, robot.bounds(robot.text(R.string.ai_models_chat)).left)
+                        // The last row comes into view at the end of the scroll area, so the capture shows every group.
+                        robot.reveal((provider.profile.chatModels + provider.profile.speechModels.map { it.title }).last())
+                        capturePanel(scenario, directory, "models-${provider.id}")
+                    }
+                }
+            }
+        } finally {
+            setNight(night, nightBits)
+        }
+    }
+
+    private fun enterKey(value: String) {
+        robot.reveal(robot.text(R.string.key_label), forward = false)
+        robot.enter(robot.text(R.string.key_label), value)
+    }
+
+    // The provider labels must not wrap or overflow at 360 dp (spec 18).
+    private fun assertProviderFits(scenario: ActivityScenario<*>, size: String) {
+        // The floating field label reports a visual overflow while it is scaled down, so only the provider value counts.
+        val names = com.alpha.assistant.cloud.AiProvider.entries.map { it.displayName }
+        val texts = robot.composedTextFit(scenario, "ai-provider").filter { it.first in names }
+        texts.forEach { (text, lines, overflow) -> Log.i("AlphyAiPanel", "$size provider text '$text': $lines lines, overflow $overflow") }
+        assertTrue("Provider texts at $size: $texts", texts.isNotEmpty() && texts.all { (_, lines, overflow) -> lines == 1 && !overflow })
+    }
+
+    private fun phoneWidth(scenario: ActivityScenario<CloudTestActivity>) {
+        scenario.onActivity { activity ->
+            val model = checkNotNull(fixture.model)
+            activity.setContent { Box(Modifier.width(360.dp).fillMaxHeight().testTag(PHONE_WIDTH)) { AlphaTheme { AlphaShell(model) } } }
+        }
+        robot.awaitFrames(10)
+    }
+
+    private fun capturePanel(scenario: ActivityScenario<*>, directory: File, name: String, tag: String = "settings-pane") {
+        val image = settled { checkNotNull(robot.automation.takeScreenshot()) }
+        try {
+            val (pane, _) = robot.composedBounds(scenario, tag)
+            val density = fixture.context.resources.displayMetrics.density
+            assertEquals("The panel is 360 dp wide", 360f, pane.width() / density, 1f)
+            val bottom = minOf(pane.bottom, image.height)
+            val panel = Bitmap.createBitmap(image, pane.left, pane.top, pane.width(), bottom - pane.top)
+            try { save(directory, name, panel) } finally { panel.recycle() }
+        } finally { image.recycle() }
+    }
+
     @Test fun destinationColorsFollowTheShellInBothModes() {
         val night = checkNotNull(Regex("""Night mode: (\S+)""").find(robot.shell("cmd uimode night"))).groupValues[1]
         val nightBits = Resources.getSystem().configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
@@ -258,7 +437,7 @@ class ShellScreenshotTest {
         robot.reveal(robot.text(R.string.settings_name_label), forward = null)
         captureSettingsPage(scenario, directory, "settings")
         for ((section, target, name) in listOf(
-            Triple(R.string.settings_deepseek, R.string.key_ready, "deepseek"),
+            Triple(R.string.settings_ai, R.string.key_ready, "ai"),
             Triple(R.string.settings_voice, R.string.voice_start, "voice"),
             Triple(R.string.settings_appearance, R.string.settings_theme, "appearance"),
             Triple(R.string.access, R.string.access_intro, "access"),
@@ -344,6 +523,10 @@ class ShellScreenshotTest {
             assertTrue("The screen did not settle within 3 seconds", SystemClock.uptimeMillis() < deadline)
             last = next
         }
+    }
+
+    private companion object {
+        const val PHONE_WIDTH = "phone-width"
     }
 
     private fun setNight(mode: String, bits: Int) {

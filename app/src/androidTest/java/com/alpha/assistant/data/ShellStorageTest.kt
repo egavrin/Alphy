@@ -1,6 +1,8 @@
 package com.alpha.assistant.data
 
 import android.database.DatabaseUtils
+import com.alpha.assistant.cloud.AiAccount
+import com.alpha.assistant.cloud.AiProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.*
@@ -48,14 +50,53 @@ class ShellStorageTest {
         val store = SecureKeyStore(context, name, "alpha.test.deepseek")
         try {
             assertNull(store.read().getOrThrow())
-            store.save("  test-only-key  ").getOrThrow()
+            store.save("  test-only-key  ", AiProvider.OPENAI).getOrThrow()
             assertEquals("test-only-key", store.read().getOrThrow())
             assertFalse(preferences.all.values.any { it.toString().contains("test-only-key") })
-            assertTrue(store.save(" ").isFailure)
+            assertTrue(store.save(" ", AiProvider.OPENAI).isFailure)
             assertEquals("test-only-key", store.read().getOrThrow())
             preferences.edit().putString("ciphertext", "invalid").commit()
             assertTrue(store.read().isFailure)
             assertEquals("invalid", preferences.getString("ciphertext", null))
         } finally { preferences.edit().clear().commit() }
+    }
+
+    private fun withStore(block: (SecureKeyStore, android.content.SharedPreferences) -> Unit) {
+        val name = "ai-account-test"
+        val preferences = context.getSharedPreferences(name, 0)
+        preferences.edit().clear().commit()
+        try { block(SecureKeyStore(context, name, "alpha.test.ai"), preferences) } finally { preferences.edit().clear().commit() }
+    }
+
+    @Test fun saveWritesProviderWithKeyAndConsent() = withStore { keys, preferences ->
+        assertNull(keys.account().getOrThrow())
+        assertTrue(keys.save("sk-or-v1-abc", AiProvider.OPENROUTER).isSuccess)
+        assertEquals(AiAccount(AiProvider.OPENROUTER, "sk-or-v1-abc"), keys.account().getOrThrow())
+        assertEquals("openrouter", preferences.getString("provider", null))
+        assertTrue(keys.consented())
+    }
+
+    @Test fun saveStoresTrimmedKey() = withStore { keys, _ ->
+        keys.save("  sk-proj-abc\n", AiProvider.OPENAI)
+        assertEquals("sk-proj-abc", keys.account().getOrThrow()!!.key)
+    }
+
+    @Test fun providerChangeChangesConsentIdentity() = withStore { keys, _ ->
+        keys.save("sk-proj-abc", AiProvider.OPENAI); val first = keys.consentIdentity()
+        keys.save("sk-ant-api03-abc", AiProvider.ANTHROPIC)
+        assertNotEquals(first, keys.consentIdentity())
+    }
+
+    @Test fun storedKeyWithoutProviderIsFailure() = withStore { keys, preferences ->
+        keys.save("sk-proj-abc", AiProvider.OPENAI)
+        preferences.edit().remove("provider").commit()
+        assertTrue(keys.account().isFailure)
+    }
+
+    @Test fun clearRemovesProvider() = withStore { keys, preferences ->
+        keys.save("sk-proj-abc", AiProvider.OPENAI)
+        assertTrue(keys.clear().isSuccess)
+        assertFalse(preferences.contains("provider"))
+        assertNull(keys.account().getOrThrow())
     }
 }

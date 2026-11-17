@@ -669,7 +669,7 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
         if (result.effects.any { it.capability == com.alpha.assistant.capabilities.MiniAppAi.ID } &&
             (!acceptAi || !input.saved || !spec.capabilityResults)) {
             invalidate()
-            throw CloudFailure("ai_foreground_required", "Для запроса к DeepSeek откройте сохранённое мини-приложение с поддержкой результатов.")
+            throw CloudFailure("ai_foreground_required", "Для запроса к сервису ИИ откройте сохранённое мини-приложение с поддержкой результатов.")
         }
         if (result.effects.any { it.capability == com.alpha.assistant.capabilities.MiniAppImage.ID } &&
             (!acceptAi || !input.saved || !spec.capabilityResults || spec.threeScene || value != null ||

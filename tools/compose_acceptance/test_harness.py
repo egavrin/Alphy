@@ -4,6 +4,7 @@ import contextlib
 import io
 import hashlib
 import json
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -133,38 +134,103 @@ class HarnessBoundaries(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         harness.main()
 
-    def test_key_preserves_environment_and_reads_only_dotenv_data(self):
+    KEY_NAMES = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "DEEPSEEK_API_KEY")
+
+    def test_account_reads_the_provider_then_only_its_key(self):
         sentinel = "synthetic-credential-environment"
         with patch.object(Path, "read_text", side_effect=AssertionError("Unexpected dotenv read")):
-            self.assertEqual(sentinel, harness.read_live_key({"DEEPSEEK_API_KEY": sentinel}))
-        with patch.object(Path, "read_text", return_value='UNRELATED=value\nexport DEEPSEEK_API_KEY="literal-$(no-execution)"\n'):
-            self.assertEqual("literal-$(no-execution)", harness.read_live_key({}))
+            self.assertEqual(("openrouter", sentinel), harness.read_live_account(
+                {"ALPHY_AI_PROVIDER": "openrouter", "OPENROUTER_API_KEY": sentinel, "DEEPSEEK_API_KEY": "other"}))
+        dotenv = ('UNRELATED=value\nALPHY_AI_PROVIDER=anthropic\nDEEPSEEK_API_KEY=other\n'
+                  'export ANTHROPIC_API_KEY="literal-$(no-execution)"\n')
+        with patch.object(Path, "read_text", return_value=dotenv):
+            self.assertEqual(("anthropic", "literal-$(no-execution)"), harness.read_live_account({}))
+        # The key of another provider is never a fallback.
         with patch.object(Path, "read_text", side_effect=FileNotFoundError):
-            with self.assertRaisesRegex(RuntimeError, "DEEPSEEK_API_KEY"):
-                harness.read_live_key({})
+            with self.assertRaisesRegex(RuntimeError, "OPENAI_API_KEY") as failure:
+                harness.read_live_account({"ALPHY_AI_PROVIDER": "openai", "DEEPSEEK_API_KEY": sentinel})
+        self.assertNotIn(sentinel, str(failure.exception))
 
-    def test_socket_transfer_never_places_key_in_commands_and_removes_forward(self):
-        sentinel = "synthetic-credential-transfer"
+    def test_account_refuses_an_absent_or_unknown_provider_before_any_key(self):
+        for value in (None, "", "gemini", "OpenAI", "deepseek "):
+            seen = []
+
+            class Recording(dict):
+                def get(self, name, default=None):
+                    seen.append(name)
+                    return super().get(name, default)
+
+            environment = Recording({name: "synthetic-credential-key" for name in self.KEY_NAMES})
+            if value is not None:
+                environment["ALPHY_AI_PROVIDER"] = value
+            with self.subTest(value=value), patch.object(Path, "read_text", side_effect=FileNotFoundError):
+                with self.assertRaisesRegex(RuntimeError, "openai, anthropic, openrouter, or deepseek") as failure:
+                    harness.read_live_account(environment)
+                self.assertEqual(["ALPHY_AI_PROVIDER"], seen)
+                self.assertNotIn("gemini", str(failure.exception))
+
+    def test_model_is_optional_and_checked_only_by_form(self):
+        with patch.object(Path, "read_text", side_effect=FileNotFoundError):
+            self.assertIsNone(harness.selected_model({}))
+            self.assertEqual("openai/gpt-6.1-terra", harness.selected_model({"ALPHY_AI_MODEL": "openai/gpt-6.1-terra"}))
+            self.assertEqual("x:1_a.b-c", harness.selected_model({"ALPHY_AI_MODEL": "x:1_a.b-c"}))
+            for value in ("two words", "m" * 101, "$(model)", "model;x", "модель"):
+                with self.subTest(value=value), self.assertRaisesRegex(RuntimeError, "ALPHY_AI_MODEL") as failure:
+                    harness.selected_model({"ALPHY_AI_MODEL": value})
+                self.assertNotIn(value, str(failure.exception))
+        with patch.object(Path, "read_text", return_value="ALPHY_AI_MODEL=claude-opus-5-5\n"):
+            self.assertEqual("claude-opus-5-5", harness.selected_model({}))
+
+    def test_child_environment_holds_no_key(self):
+        with patch.dict(harness.os.environ, {**{name: "test-value" for name in self.KEY_NAMES},
+                                             "ALPHY_AI_PROVIDER": "openai", "PATH": "/usr/bin"}, clear=True):
+            self.assertEqual({"ALPHY_AI_PROVIDER": "openai", "PATH": "/usr/bin"}, harness.child_environment())
+
+    @staticmethod
+    def connection(payloads):
         connection = Mock()
         connection.__enter__ = Mock(return_value=connection)
         connection.__exit__ = Mock(return_value=False)
         connection.recv.return_value = b"\x01"
-        payloads = []
         connection.sendall.side_effect = lambda data: payloads.append(bytes(data))
-        with patch.object(harness.subprocess, "run", return_value=Mock(stdout="12345\n", returncode=0)) as execute:
-            with patch.object(harness.socket, "create_connection", return_value=connection):
-                harness.transfer_key("adb", "synthetic-run", sentinel)
+        return connection
+
+    def test_socket_transfer_sends_the_provider_and_key_and_never_places_the_key_in_commands(self):
+        sentinel = "synthetic-credential-transfer"
+        payloads = []
+        with patch.dict(harness.os.environ, {name: "test-value" for name in self.KEY_NAMES}), \
+                patch.object(harness.subprocess, "run", return_value=Mock(stdout="12345\n", returncode=0)) as execute, \
+                patch.object(harness.socket, "create_connection", return_value=self.connection(payloads)):
+            harness.transfer_key("adb", "synthetic-run", ("anthropic", sentinel))
         self.assertEqual(["adb", "-s", "emulator-5556", "forward", "--remove", "tcp:12345"], execute.call_args_list[-1].args[0])
         self.assertNotIn(sentinel, repr([call.args for call in execute.call_args_list]))
-        self.assertTrue(all("DEEPSEEK_API_KEY" not in call.kwargs["env"] for call in execute.call_args_list))
-        self.assertEqual(b"\x00\x00\x00\x1d" + sentinel.encode(), payloads[0])
+        self.assertTrue(all(name not in call.kwargs["env"] for call in execute.call_args_list for name in self.KEY_NAMES))
+        envelope = b"anthropic\n" + sentinel.encode()
+        self.assertEqual(harness.struct.pack("!I", len(envelope)) + envelope, payloads[0])
+
+    def test_envelope_refuses_an_unknown_provider_and_an_unsafe_key_before_any_command(self):
+        for provider, key in (("gemini", "synthetic-key"), ("", "synthetic-key"), ("openai", ""), ("openai", "two words"),
+                              ("openai", "line\nbreak"), ("openai", "tab\tkey"), ("openai", "ключ"),
+                              ("openai", "k" * (8192 - len("openai\n") + 1))):
+            with self.subTest(provider=provider, key=key[:20]), patch.object(harness.subprocess, "run") as execute:
+                with self.assertRaises(RuntimeError) as failure:
+                    harness.transfer_key("adb", "synthetic-run", (provider, key))
+                execute.assert_not_called()
+                if key:
+                    self.assertNotIn(key, str(failure.exception))
+        payloads = []
+        longest = "k" * (8192 - len("openai\n"))
+        with patch.object(harness.subprocess, "run", return_value=Mock(stdout="12345\n", returncode=0)), \
+                patch.object(harness.socket, "create_connection", return_value=self.connection(payloads)):
+            harness.transfer_key("adb", "synthetic-run", ("openai", longest))
+        self.assertEqual(4 + 8192, len(payloads[0]))
 
     def test_transfer_failure_is_sanitized_and_cleans_forward(self):
         sentinel = "synthetic-credential-failure"
         with patch.object(harness.subprocess, "run", return_value=Mock(stdout="12345\n", returncode=0)) as execute:
             with patch.object(harness.socket, "create_connection", side_effect=OSError(sentinel)):
                 with self.assertRaises(RuntimeError) as failure:
-                    harness.transfer_key("adb", "synthetic-run", sentinel)
+                    harness.transfer_key("adb", "synthetic-run", ("deepseek", sentinel))
         self.assertNotIn(sentinel, str(failure.exception))
         self.assertEqual("tcp:12345", execute.call_args_list[-1].args[0][-1])
 
@@ -183,6 +249,189 @@ class HarnessBoundaries(unittest.TestCase):
         self.assertNotIn("uninstall", command)
         self.assertIn("composeLive", command)
         self.assertIn("false", command)
+        self.assertNotIn("aiModel", command)
+        command = harness.instrument_command("adb", 1, 2, "a" * 40, "b" * 64, True, 1, model="claude-opus-5-5")
+        self.assertEqual("claude-opus-5-5", command[command.index("aiModel") + 1])
+
+    def fake_device(self, temporary, environment, device_report, call):
+        """[call] against a fake emulator that holds the built APKs, asks once for the credential, and then gives
+        [device_report]. Returns the result of [call], the transferred accounts, and each command with its options."""
+        transfers, calls = [], []
+        def reply(command, **options):
+            calls.append((command, options))
+            stdout = {"app_search": self.appsearch_dump(0), "ro.kernel.qemu": "1\n"}.get(command[-1], "fixture\n")
+            if command[-1].endswith("/report.json"):
+                stdout = json.dumps({"phase": "credentialReady"})
+            elif "pm" in command:
+                stdout = f"package:/data/app/{command[-1]}/base.apk\n"
+            elif "sha256sum" in command:
+                stdout = "f" * 64 + "  " + command[-1]
+            elif "pull" in command:
+                (Path(command[-1]) / "report.json").write_text(json.dumps(device_report))
+            return Mock(stdout=stdout, stderr="", returncode=0)
+        def start(command, stdout, **options):
+            calls.append((command, options))
+            stdout.write("OK (1 test)\n")
+            return Mock(**{"poll.side_effect": [None] + [0] * 5, "returncode": 0})
+        tested = {"revision": "a" * 40, "sourceSha256": "b" * 64, "apks": {path: "f" * 64 for path in harness.APKS}}
+        with patch.dict(harness.os.environ, environment, clear=True), \
+                patch.object(harness.Path, "home", return_value=Path(temporary)), \
+                patch.object(harness, "identity", return_value=tested), \
+                patch.object(harness, "transfer_key", side_effect=lambda *values, **options: transfers.append(values[2])), \
+                patch.object(harness.subprocess, "run", side_effect=reply), \
+                patch.object(harness.subprocess, "Popen", side_effect=start), \
+                patch.object(harness.time, "sleep"), contextlib.redirect_stdout(io.StringIO()):
+            return call(), transfers, calls
+
+    def fake_run(self, temporary, environment, device_report, live=False):
+        args = harness.argparse.Namespace(scenario=3, repetition=1, live=live, credential_check=not live, seconds=1,
+                                          adb="adb", serial="emulator-5564", output=Path(temporary) / "out")
+        def call():
+            try:
+                harness.run(args)
+                return "passed"
+            except SystemExit:
+                return "failed"
+        outcome, transfers, calls = self.fake_device(temporary, environment, device_report, call)
+        manifest = json.loads(next(args.output.glob("*/*/manifest.json")).read_text())
+        return outcome, transfers, calls, manifest
+
+    def test_credential_check_sends_the_selected_provider_and_records_what_the_device_used(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            outcome, transfers, calls, manifest = self.fake_run(
+                temporary, {"ALPHY_AI_PROVIDER": "anthropic", "ALPHY_AI_MODEL": "claude-opus-5-5"},
+                {"phase": "complete", "provider": "anthropic", "model": "claude-opus-5-5"})
+        self.assertEqual("passed", outcome)
+        self.assertEqual("anthropic", transfers[0][0])
+        self.assertTrue(transfers[0][1].startswith("synthetic-credential-"))
+        command = manifest["command"]
+        self.assertEqual("claude-opus-5-5", command[command.index("aiModel") + 1])
+        self.assertEqual(("anthropic", "claude-opus-5-5"), (manifest["provider"], manifest["model"]))
+        self.assertNotIn(transfers[0][1], json.dumps([command for command, _ in calls]))
+
+    def test_credential_check_defaults_to_deepseek_without_a_model(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            outcome, transfers, _, manifest = self.fake_run(
+                temporary, {}, {"phase": "complete", "provider": "deepseek", "model": "deepseek-flash"})
+        self.assertEqual("passed", outcome)
+        self.assertEqual("deepseek", transfers[0][0])
+        self.assertNotIn("aiModel", manifest["command"])
+        self.assertEqual(("deepseek", "deepseek-flash"), (manifest["provider"], manifest["model"]))
+
+    def test_run_fails_when_the_device_reports_another_provider(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            outcome, _, _, manifest = self.fake_run(
+                temporary, {"ALPHY_AI_PROVIDER": "openai"}, {"phase": "complete", "provider": "deepseek", "model": "deepseek-flash"})
+        self.assertEqual("failed", outcome)
+        self.assertEqual("deepseek", manifest["provider"])
+
+    def test_live_run_sends_the_account_and_gives_no_child_the_key(self):
+        sentinel = "synthetic-credential-live"
+        with tempfile.TemporaryDirectory() as temporary:
+            outcome, transfers, calls, manifest = self.fake_run(
+                temporary, {"ALPHY_AI_PROVIDER": "anthropic", "ANTHROPIC_API_KEY": sentinel, "OPENAI_API_KEY": "other"},
+                {"phase": "complete", "provider": "anthropic", "model": "claude-sonnet-5-5"}, live=True)
+        self.assertEqual("passed", outcome)
+        self.assertEqual([("anthropic", sentinel)], transfers)
+        self.assertNotIn(sentinel, json.dumps([command for command, _ in calls]))
+        self.assertTrue(calls and all(name not in options["env"] for _, options in calls for name in self.KEY_NAMES))
+        self.assertEqual("real", manifest["mode"])
+
+    def test_live_run_without_a_known_provider_stops_before_any_command(self):
+        for environment in ({}, {"ALPHY_AI_PROVIDER": "gemini", "DEEPSEEK_API_KEY": "synthetic-credential-key"}):
+            with self.subTest(environment=environment), tempfile.TemporaryDirectory() as temporary:
+                args = harness.argparse.Namespace(scenario=3, repetition=1, live=True, credential_check=False, seconds=1,
+                                                  adb="adb", serial="emulator-5564", output=Path(temporary) / "out")
+                with patch.dict(harness.os.environ, environment, clear=True), \
+                        patch.object(harness.Path, "home", return_value=Path(temporary)), \
+                        patch.object(harness.subprocess, "run") as execute, \
+                        self.assertRaisesRegex(RuntimeError, "ALPHY_AI_PROVIDER"):
+                    harness.run(args)
+                execute.assert_not_called()
+
+    LIVE_VOICE = "com.alpha.assistant.voice.LiveVoiceInputTest#transcribeRussianFixture"
+
+    def fake_live_check(self, temporary, device_report, environment, test=LIVE_VOICE):
+        args = harness.argparse.Namespace(serial="emulator-5564", label="live", test=test, adb="adb", output=Path(temporary) / "out")
+        code, transfers, calls = self.fake_device(temporary, environment, device_report, lambda: harness.live_check(args))
+        return code, transfers, calls, next((args.output / "live").iterdir())
+
+    def test_live_check_transfers_the_account_and_records_what_the_device_used(self):
+        sentinel = "synthetic-credential-live-check"
+        report = {"phase": "complete", "provider": "openai", "model": "gpt-transcribe", "text": "Поставь таймер на пять минут"}
+        with tempfile.TemporaryDirectory() as temporary:
+            code, transfers, calls, directory = self.fake_live_check(
+                temporary, report, {"ALPHY_AI_PROVIDER": "openai", "OPENAI_API_KEY": sentinel, "ALPHY_AI_MODEL": "gpt-6.1-sol"})
+            manifest = json.loads((directory / "manifest.json").read_text())
+            evidence = b"".join(path.read_bytes() for path in directory.iterdir())
+        self.assertEqual(0, code)
+        self.assertEqual([("openai", sentinel)], transfers)
+        command = manifest["command"]
+        self.assertEqual(self.LIVE_VOICE, command[command.index("class") + 1])
+        self.assertEqual(directory.name, command[command.index("liveRunId") + 1])
+        self.assertEqual("gpt-6.1-sol", command[command.index("aiModel") + 1])
+        self.assertEqual(("passed", "openai", "gpt-transcribe"), (manifest["status"], manifest["provider"], manifest["model"]))
+        self.assertNotIn(sentinel.encode(), evidence)
+        self.assertNotIn(sentinel, json.dumps([command for command, _ in calls]))
+        self.assertTrue(all(name not in options["env"] for _, options in calls for name in self.KEY_NAMES))
+
+    def test_live_check_fails_a_skipped_test_and_another_provider(self):
+        for report in ({"phase": "skipped", "provider": "anthropic", "model": None},
+                       {"phase": "complete", "provider": "deepseek", "model": None}):
+            with self.subTest(report=report), tempfile.TemporaryDirectory() as temporary:
+                code, _, _, directory = self.fake_live_check(
+                    temporary, report, {"ALPHY_AI_PROVIDER": "anthropic", "ANTHROPIC_API_KEY": "synthetic-credential-key"})
+                self.assertEqual(1, code)
+                self.assertEqual("failed", json.loads((directory / "manifest.json").read_text())["status"])
+
+    def test_live_check_accepts_only_live_tests_of_the_app(self):
+        allowed = (self.LIVE_VOICE, "com.alpha.assistant.courses.LiveCourseWorkflowTest#generateAndPlay",
+                   "com.alpha.assistant.LiveCheck#run_1")
+        refused = ("com.alpha.assistant.tools.OneUseCredentialTest#receive", "org.example.LiveTest#run",
+                   "com.alpha.assistantx.LiveTest#run", "com.alpha.assistant.voice.liveVoiceInputTest#run",
+                   "com.alpha.assistant.Live.Other#run", "com.alpha.assistant.courses.LiveCourseWorkflowTest",
+                   "com.alpha.assistant.voice.LiveVoiceInputTest", "com.alpha.assistant.voice.LiveVoiceInputTest#",
+                   self.LIVE_VOICE + " -e aiModel x", self.LIVE_VOICE + "$x", self.LIVE_VOICE + ",com.alpha.assistant.LiveOther")
+        for test in allowed:
+            self.assertTrue(harness.live_test(test), test)
+        for test in refused:
+            with self.subTest(test=test), tempfile.TemporaryDirectory() as temporary, \
+                    patch.object(harness.subprocess, "run") as execute, patch.object(harness.subprocess, "Popen") as start:
+                self.assertFalse(harness.live_test(test))
+                args = harness.argparse.Namespace(serial="emulator-5564", label="live", test=test, adb="adb", output=Path(temporary))
+                with self.assertRaisesRegex(SystemExit, "Live"):
+                    harness.live_check(args)
+                execute.assert_not_called()
+                start.assert_not_called()
+                self.assertEqual([], list(Path(temporary).iterdir()))
+
+    def test_run_uses_the_selected_serial_for_every_adb_command(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            args = harness.argparse.Namespace(scenario=3, repetition=1, live=False, credential_check=True, seconds=1,
+                                              adb="adb", serial="emulator-5564", output=Path(temporary))
+            identity = {"revision": "a" * 40, "sourceSha256": "b" * 64}
+            process = Mock(**{"poll.return_value": 0})
+            def reply(command, **options):
+                return Mock(stdout=self.appsearch_dump(0) if command[-1] == "app_search" else "", stderr="", returncode=int(command[-1] != "app_search"))
+            with patch.dict(harness.os.environ, {}, clear=True), patch.object(harness.Path, "home", return_value=Path(temporary)), \
+                    patch.object(harness, "identity", return_value=identity), \
+                    patch.object(harness.subprocess, "run", side_effect=reply) as execute, \
+                    patch.object(harness.subprocess, "Popen", return_value=process) as start, \
+                    contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+                harness.run(args)
+            commands = [call.args[0] for call in execute.call_args_list] + [call.args[0] for call in start.call_args_list]
+            adb = [command for command in commands if command[0] == "adb"]
+            self.assertTrue(adb)
+            self.assertTrue(all(command[1:3] == ["-s", "emulator-5564"] for command in adb), adb)
+            manifest = json.loads(next(Path(temporary).glob("*/*/manifest.json")).read_text())
+            self.assertEqual("emulator-5564", manifest["serial"])
+            self.assertEqual(0, manifest["semanticChunkTypes"])
+            self.assertIn("emulator-5564", manifest["command"])
+
+    def test_run_requires_a_serial(self):
+        with patch.object(sys, "argv", ["run.py", "run", "--scenario", "3", "--repetition", "1"]), \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            harness.main()
 
     def test_manifest_rejects_missing_and_duplicate_checks(self):
         case = harness.scenarios()[0]
@@ -306,10 +555,83 @@ class HarnessBoundaries(unittest.TestCase):
     @staticmethod
     def emulator_reply(command):
         return {"get-state": "device", "ro.kernel.qemu": "1", "ro.build.version.sdk": "29",
-                "ro.build.fingerprint": "fixture/sdk/29", "webviewupdate": "WebView 133 fixture"}.get(command[-1], "")
+                "ro.build.fingerprint": "fixture/sdk/29", "webviewupdate": "WebView 133 fixture",
+                "app_search": HarnessBoundaries.appsearch_dump(0)}.get(command[-1], "")
+
+    @staticmethod
+    def appsearch_dump(chunks, other=1):
+        """The schema part of dumpsys app_search: types print with 2 spaces, their properties with 4."""
+        def schema_type(names):
+            properties = "".join(f'    properties {{\n      cardinality: OPTIONAL\n      property_name: "{name}"\n    }}\n' for name in names)
+            return f'  types {{\n    description: ""\n{properties}    schema_type: "HASH"\n    version: 1\n  }}\n'
+        chunk = ["source", "revision", "signature", "start", "end", "vector"]
+        return "crc: 1\nschema {\n" + schema_type(chunk) * chunks + schema_type(chunk[:-1]) * other + schema_type(chunk + ["extra"]) * other + "}\n"
+
+    def test_semantic_chunk_count_reads_only_chunk_shaped_types(self):
+        self.assertEqual(3, harness.semantic_chunk_count(self.appsearch_dump(3, other=2)))
+        self.assertEqual(0, harness.semantic_chunk_count(self.appsearch_dump(0)))
+        self.assertIsNone(harness.semantic_chunk_count(""))
+
+    def test_semantic_store_error_stops_only_above_the_limit(self):
+        limit = harness.SEMANTIC_CHUNK_LIMIT
+        self.assertIsNone(harness.semantic_store_error(0))
+        self.assertIsNone(harness.semantic_store_error(limit))
+        self.assertIn(str(limit + 1), harness.semantic_store_error(limit + 1))
+        self.assertIsNone(harness.semantic_store_error(None))
+
+    def test_suite_stops_with_an_environment_error_only_when_the_count_is_above_the_limit(self):
+        limit = harness.SEMANTIC_CHUNK_LIMIT
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            for label, dump in (("below", self.appsearch_dump(3)), ("at-limit", self.appsearch_dump(limit))):
+                code, observed, _ = self.fake_suite(output, label, dump=dump)
+                self.assertEqual((0, "passed"), (code, observed))
+                record = json.loads((output / label / "run.json").read_text())
+                self.assertEqual(int(label == "at-limit") * limit or 3, record["semanticChunkTypes"])
+                self.assertIsNone(record["semanticChunkNote"])
+            code, observed, calls = self.fake_suite(output, "over-limit", dump=self.appsearch_dump(limit + 1))
+            record = json.loads((output / "over-limit/run.json").read_text())
+            self.assertEqual((1, "environment-error"), (code, observed))
+            self.assertEqual((0, limit + 1), (record["tests"], record["semanticChunkTypes"]))
+            self.assertIn("AppSearch", record["deviceError"])
+            self.assertFalse(any(c[0] == "./gradlew" or "install" in c for c, _ in calls))
+
+    def test_suite_continues_and_records_an_unknown_count_when_the_dump_gives_none(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            for label, options in (("empty", {"dump": ""}), ("unparseable", {"dump": "Service not found"}),
+                                   ("failed-command", {"failed_command": "app_search"})):
+                code, observed, calls = self.fake_suite(output, label, **options)
+                record = json.loads((output / label / "run.json").read_text())
+                self.assertEqual((0, "passed"), (code, observed))
+                self.assertIsNone(record["semanticChunkTypes"])
+                self.assertIn("no readable", record["semanticChunkNote"])
+                self.assertTrue(any(c[0] == "./gradlew" for c, _ in calls))
+
+    def test_run_continues_with_an_unknown_count_and_stops_above_the_limit(self):
+        for dump, stops in ((None, False), (self.appsearch_dump(harness.SEMANTIC_CHUNK_LIMIT + 1), True)):
+            with tempfile.TemporaryDirectory() as temporary:
+                args = harness.argparse.Namespace(scenario=3, repetition=1, live=False, credential_check=True, seconds=1,
+                                                  adb="adb", serial="emulator-5564", output=Path(temporary))
+                def reply(command, **options):
+                    if command[-1] == "app_search":
+                        return Mock(stdout=dump or "", stderr="", returncode=int(dump is None))
+                    return Mock(stdout="", stderr="", returncode=1)
+                with patch.dict(harness.os.environ, {}, clear=True), patch.object(harness.Path, "home", return_value=Path(temporary)), \
+                        patch.object(harness, "identity", return_value={"revision": "a" * 40, "sourceSha256": "b" * 64}), \
+                        patch.object(harness.subprocess, "run", side_effect=reply), \
+                        patch.object(harness.subprocess, "Popen", return_value=Mock(**{"poll.return_value": 0})), \
+                        contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+                    harness.run(args)
+                manifests = list(Path(temporary).glob("*/*/manifest.json"))
+                self.assertEqual(not stops, bool(manifests))
+                if manifests:
+                    manifest = json.loads(manifests[0].read_text())
+                    self.assertIsNone(manifest["semanticChunkTypes"])
+                    self.assertIn("no readable", manifest["semanticChunkNote"])
 
     def fake_suite(self, output, label, instrumentation=SUITE_PASSED, installed="f" * 64, test_install=0, baseline=None,
-                   *, serial="emulator-5560", emulator=True, installed_test="f" * 64, failed_command=None):
+                   *, serial="emulator-5560", emulator=True, installed_test="f" * 64, failed_command=None, dump=None):
         """Run suite() against a fake device whose built and installed APK hashes are "f" * 64 unless changed."""
         calls = []
         run = harness.subprocess.run
@@ -320,6 +642,8 @@ class HarnessBoundaries(unittest.TestCase):
             if "instrument" in command:
                 options["stdout"].write(instrumentation)
             reply = self.emulator_reply(command)
+            if command[-1] == "app_search" and dump is not None:
+                reply = dump
             if command[-1] == "ro.kernel.qemu" and not emulator:
                 reply = "0"
             elif "pm" in command:
@@ -375,10 +699,10 @@ class HarnessBoundaries(unittest.TestCase):
     def test_suite_gives_the_key_to_no_command_and_the_build_paths_only_to_gradle(self):
         environment = {key: value for key, value in harness.os.environ.items() if key not in ("JAVA_HOME", "ANDROID_HOME")}
         with tempfile.TemporaryDirectory() as temporary, \
-                patch.dict(harness.os.environ, {**environment, "DEEPSEEK_API_KEY": "test-value"}, clear=True):
+                patch.dict(harness.os.environ, {**environment, **{name: "test-value" for name in self.KEY_NAMES}}, clear=True):
             _, observed, calls = self.fake_suite(Path(temporary), "environment")
         self.assertEqual("passed", observed)
-        self.assertEqual([], [command for command, options in calls if "DEEPSEEK_API_KEY" in options["env"]])
+        self.assertEqual([], [command for command, options in calls if set(self.KEY_NAMES) & options["env"].keys()])
         self.assertNotIn("test-value", json.dumps([command for command, _ in calls]))
         build_paths = [(command[0], options["env"].get("JAVA_HOME"), options["env"].get("ANDROID_HOME"))
                        for command, options in calls if {"JAVA_HOME", "ANDROID_HOME"} & options["env"].keys()]

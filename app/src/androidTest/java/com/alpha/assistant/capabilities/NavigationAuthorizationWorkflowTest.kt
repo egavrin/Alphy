@@ -11,12 +11,17 @@ import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.data.ShellStore
 import com.alpha.assistant.tools.*
 import com.alpha.assistant.ui.ShellViewModel
+import com.alpha.assistant.ui.removeShellIndexes
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
 import java.util.UUID
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 /** Repair failure cases, before production: unrelated/input controls cannot authorize navigation; semantic
  * Mark A cannot substitute B or coordinates; route cannot substitute destination/mode/ref; valid clicks need
@@ -65,7 +70,7 @@ class NavigationAuthorizationWorkflowTest {
         store.saveTool(tool,true)
         lateinit var model: ShellViewModel
         val offline=object: ChatProvider {override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend(CloudEvent)->Unit)=error("Offline UI fixture")}
-        CloudTestActivity.factory={ShellViewModel(it,offline,shell,keys).also {created -> model=created}}
+        CloudTestActivity.factory={ShellViewModel(it,offline,shell,keys, legacy = isolatedLegacyKeys(it), models = isolatedModels(it), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).also {created -> model=created}}
         try {
             ActivityScenario.launch(CloudTestActivity::class.java).use {
                 waitUntil {!model.loading && !model.tools.busy}
@@ -75,7 +80,7 @@ class NavigationAuthorizationWorkflowTest {
                 val dir=File(context.getExternalFilesDir(null),"navigation-evidence").apply {mkdirs()}
                 automation.takeScreenshot()?.let {image -> File(dir,"${node.getString("type")}-${output?.getString("stopId") ?: "valid"}.png").outputStream().use {out -> image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out)};image.recycle()}
             }
-        } finally {CloudTestActivity.factory=null;SystemClock.sleep(100);store.close();shell.close();context.deleteDatabase("$name.db");context.deleteDatabase("$name.db-tools.db");context.deleteSharedPreferences(name)}
+        } finally {CloudTestActivity.factory=null;SystemClock.sleep(100);store.close();shell.close();context.deleteDatabase("$name.db");context.deleteDatabase("$name.db-tools.db"); removeShellIndexes(context, "$name.db");context.deleteSharedPreferences(name)}
     }
     @Test fun genericDetailsCannotMarkB() = fixture(JSONObject("{\"type\":\"button\",\"text\":\"Show details\",\"action\":\"run\"}"),stop("B")) { model,store,tool ->
         click("Show details");waitUntil {!model.tools.busy && store.effects(tool.id).isNotEmpty()}

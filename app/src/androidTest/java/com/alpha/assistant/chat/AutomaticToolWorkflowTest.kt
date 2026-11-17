@@ -1,6 +1,7 @@
 package com.alpha.assistant.chat
 
 import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.removeShellIndexes
 import com.alpha.assistant.ui.seedOpenChat
 import android.app.Application
 import android.os.SystemClock
@@ -32,6 +33,10 @@ import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 /** Complete chat workflows with isolated databases and a deterministic provider, without external requests.
  * Failure cases: ordinary replies, partial/invalid/duplicate/oversized decisions, unknown or ambiguous targets,
@@ -88,8 +93,8 @@ class AutomaticToolWorkflowTest {
         var scenario: ActivityScenario<CloudTestActivity>; private set
         init {
             seed(store,toolStore)
-            keys.save("isolated-auto-test").getOrThrow()
-            CloudTestActivity.factory = { ShellViewModel(it,provider,store,keys).openSeededChat(store).also { created -> model = created } }
+            keys.save("isolated-auto-test", AiProvider.OPENAI).getOrThrow()
+            CloudTestActivity.factory = { ShellViewModel(it,provider,store,keys, legacy = isolatedLegacyKeys(it), models = isolatedModels(it), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(store).also { created -> model = created } }
             scenario = ActivityScenario.launch(CloudTestActivity::class.java)
             waitUntil { !model.loading && !model.tools.busy }
         }
@@ -101,14 +106,14 @@ class AutomaticToolWorkflowTest {
             val selected = previous.snapshot.selectedId
             scenario.close(); store.close()
             store = ShellStore(app,"$name.db").also { it.seedOpenChat(selected) }
-            CloudTestActivity.factory = { ShellViewModel(it,provider,store,keys).openSeededChat(store).also { created -> model = created } }
+            CloudTestActivity.factory = { ShellViewModel(it,provider,store,keys, legacy = isolatedLegacyKeys(it), models = isolatedModels(it), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(store).also { created -> model = created } }
             scenario = ActivityScenario.launch(CloudTestActivity::class.java)
             waitUntil { model !== previous && !model.loading && !model.tools.busy }
         }
         override fun close() {
             main { model.cancelRequest() }; scenario.close(); CloudTestActivity.factory = null
             SystemClock.sleep(150); toolStore.close(); store.close()
-            app.deleteDatabase("$name.db"); app.deleteDatabase("$name.db-tools.db")
+            app.deleteDatabase("$name.db"); app.deleteDatabase("$name.db-tools.db"); removeShellIndexes(app, "$name.db")
             keys.clear(); app.deleteSharedPreferences(name)
             java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(name) }
         }

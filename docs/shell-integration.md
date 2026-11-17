@@ -1,6 +1,6 @@
 # Native shell integration
 
-Package 2 implements the native Russian shell. Package 3A adds cloud chat, image input, and web search. See [cloud integration](cloud-integration.md) for current provider behavior. Later packages add local speech, generated tools, widgets, and automation. See [voice integration](voice-integration.md), [tool integration](tool-integration.md), and [automations](automations.md).
+Package 2 implements the native Russian shell. Package 3A adds cloud chat, image input, and web search. See [cloud integration](cloud-integration.md) for current provider behavior. Later packages add voice input and output, generated tools, widgets, and automation. See [voice integration](voice-integration.md), [tool integration](tool-integration.md), and [automations](automations.md).
 
 ## Persistent state
 
@@ -14,9 +14,9 @@ The `settings` table stores `selected`, `newDraft`, and `userName`. Stale `theme
 
 ## Credentials
 
-`data/SecureKeyStore.kt` stores the DeepSeek key in private preferences named `alpha_credentials`. The values contain AES-GCM ciphertext and its IV. Android Keystore alias `alpha.deepseek.v1` holds the AES key. `save()`, `read()`, and `clear()` return `Result`. `read()` distinguishes absent credentials from decryption failures. A failed read does not create a replacement key, delete ciphertext, or log the credential. A blank save fails before encryption.
+`data/SecureKeyStore.kt` stores the AI account in private preferences named `alpha_ai_credentials`. The account is one key from OpenAI, Anthropic, OpenRouter, or DeepSeek, and the provider ID next to it. The values contain AES-GCM ciphertext and its IV. Android Keystore alias `alpha.ai.v1` holds the AES key. `save()`, `read()`, `account()`, and `clear()` return `Result`. `read()` distinguishes absent credentials from decryption failures. A stored key without a known provider is a failure, so a request never guesses its destination. A failed read does not create a replacement key, delete ciphertext, or log the credential. A blank save fails before encryption. The old DeepSeek store (`alpha_credentials`, alias `alpha.deepseek.v1`) and the old OpenRouter image store are never read for requests. `data/LegacyKeys.kt` reports them so that «Сервис ИИ» can offer «Использовать» or «Удалить».
 
-Settings accepts a replacement key without displaying the stored key. A successful save clears the entry field. The entry field is not saved through activity recreation. Existing `allowBackup="false"` excludes the application data from Android backup. A saved key writes the consent record in the same commit. A stored key without that record shows «Согласиться». «Удалить ключ» removes the key and the consent. `cloudKey()` is the only key read for requests. Key storage does not validate the provider credential.
+Settings accepts a replacement key without displaying the stored key. A successful save clears the entry field. The entry field is not saved through activity recreation. Existing `allowBackup="false"` excludes the application data from Android backup. A saved key writes the consent record in the same commit. «Удалить ключ» removes the key and the consent. `cloudKey()` is the only key read for requests. Key storage does not validate the provider credential. The key check before the save does. See [cloud integration](cloud-integration.md).
 
 ## UI boundaries
 

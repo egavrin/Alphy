@@ -163,7 +163,7 @@ class ReviewedContextUiWorkflowTest {
         var sends = 0
         CloudTestActivity.factory = { app -> ShellViewModel(app, object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) { sends++ }
-        }, store, keys).openSeededChat(store) }
+        }, store, keys, legacy = isolatedLegacyKeys(app), models = isolatedModels(app), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(store) }
         try {
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 val menu = Rect().also { waitFor("Меню").getBoundsInScreen(it) }
@@ -204,7 +204,7 @@ class ReviewedContextUiWorkflowTest {
         } finally {
             CloudTestActivity.factory = null
             store.close(); image.delete()
-            context.deleteDatabase("$fixture.db"); context.deleteDatabase("$fixture.db-tools.db")
+            context.deleteDatabase("$fixture.db"); context.deleteDatabase("$fixture.db-tools.db"); removeShellIndexes(context, "$fixture.db")
         }
     }
 

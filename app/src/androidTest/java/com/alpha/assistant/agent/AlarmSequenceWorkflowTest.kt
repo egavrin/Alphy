@@ -15,6 +15,7 @@ import com.alpha.assistant.memory.MemoryStore
 import com.alpha.assistant.tools.ToolStore
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
+import com.alpha.assistant.ui.removeSemanticIndexes
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -226,7 +227,10 @@ class AlarmSequenceWorkflowTest {
                 }
             }
         } finally {
-            if (cleanup) listOf("$name-memory.db", "$name-tools.db", "$name-agent.db").forEach(context::deleteDatabase)
+            if (cleanup) {
+                listOf("$name-memory.db", "$name-tools.db", "$name-agent.db").forEach(context::deleteDatabase)
+                removeSemanticIndexes(context, "memory:$name-memory.db")
+            }
         }
     }
 

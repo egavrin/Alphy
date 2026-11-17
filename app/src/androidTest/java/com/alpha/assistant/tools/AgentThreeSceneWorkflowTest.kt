@@ -5,7 +5,9 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.MainActivity
+import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.CloudSession
+import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.images.ImageGeneration
 import com.alpha.assistant.images.ImageProvider
 import com.alpha.assistant.images.ImageSettings
@@ -87,7 +89,9 @@ class AgentThreeSceneWorkflowTest {
     }
 
     @Test fun aTextureIsMadeBoundAndKept(): Unit = runBlocking {
-        val settings = ImageSettings(context, "agent-three-${UUID.randomUUID()}")
+        val name = "agent-three-${UUID.randomUUID()}"
+        val keys = SecureKeyStore(context, name, name)
+        val settings = ImageSettings(context, keys, name)
         val images = ImageGeneration(context, settings, mapOf("openrouter" to ImageProvider { _, _, _ ->
             val bitmap = Bitmap.createBitmap(32, 16, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLUE) }
             val bytes = ByteArrayOutputStream()
@@ -97,9 +101,8 @@ class AgentThreeSceneWorkflowTest {
         val texture = JSONObject("""{"tool":"generate_image","images":[
             {"slot":"skin","prompt":"Blue paint texture","alt":"Blue paint","aspect":"2:1"}]}""").toString()
         val provider = AgentScriptProvider(texture, writeAppReply(cube(texture = "await context.bindTexture('skin', mesh);", color = "0xffffff")), finish)
-        val name = "agent-three-${UUID.randomUUID()}"
         try {
-            settings.saveKey("fixture-only").getOrThrow()
+            keys.save("fixture-only", AiProvider.OPENROUTER).getOrThrow()
             settings.setEnabled(true).getOrThrow()
             ToolStore(context, name).use { store ->
                 val engine = ToolEngine(store, ToolGenerationService(provider, SandboxClient(context), images))
@@ -114,7 +117,7 @@ class AgentThreeSceneWorkflowTest {
                 assertTrue(saved.sceneAssets.any { it.id == saved.generatedImages.single().asset.id })
             }
         } finally {
-            settings.clearKey()
+            keys.clear()
             context.deleteDatabase(name)
         }
     }

@@ -1,7 +1,12 @@
 package com.alpha.assistant.cloud
 
 import android.content.ContentResolver
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.net.Uri
 import android.util.Base64
 import com.alpha.assistant.automations.AutomationDraftTool
@@ -10,6 +15,7 @@ import com.alpha.assistant.data.ScreenContext
 import com.alpha.assistant.data.screenPrefix
 import com.alpha.assistant.data.Attachment
 import com.alpha.assistant.data.MessageProvenance
+import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.data.Source
 import com.alpha.assistant.memory.MemoryProvenance
 import com.alpha.assistant.memory.MemoryPurpose
@@ -20,11 +26,11 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
-import java.net.SocketTimeoutException
 import java.net.URI
-import java.net.URL
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -186,26 +192,97 @@ object ImageInput {
         decoded.recycle()
         return bytes
     }
-    fun dataUrl(resolver: ContentResolver, attachment: Attachment) = "data:${attachment.mime};base64," + Base64.encodeToString(read(resolver, attachment), Base64.NO_WRAP)
+    const val MAX_SEND_EDGE = 2048
+    fun dataUrl(resolver: ContentResolver, attachment: Attachment): String {
+        val (bytes, mime) = forSending(read(resolver, attachment), attachment.mime)
+        return "data:$mime;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+    }
+
+    /** A picture within the limit keeps its bytes. A larger PNG stays PNG, and any other format becomes JPEG at quality 90. */
+    internal fun forSending(bytes: ByteArray, mime: String): Pair<ByteArray, String> {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val width = bounds.outWidth; val height = bounds.outHeight
+        if (width <= 0 || height <= 0) throw CloudFailure("image_format", "Не удалось прочитать изображение. Выберите другой файл.")
+        val longEdge = maxOf(width, height)
+        if (longEdge <= MAX_SEND_EDGE) return bytes to mime
+        // Decode at a power-of-two fraction that keeps the long edge at 2048 or more, so a large photo never loads at full size.
+        var sample = 1
+        while (longEdge / (sample * 2) >= MAX_SEND_EDGE) sample *= 2
+        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+            ?: throw CloudFailure("image_format", "Не удалось прочитать изображение. Выберите другой файл.")
+        var scaled: Bitmap? = null; var oriented: Bitmap? = null; var flattened: Bitmap? = null
+        try {
+            val factor = MAX_SEND_EDGE.toDouble() / longEdge
+            scaled = Bitmap.createScaledBitmap(decoded, maxOf(1, Math.round(width * factor).toInt()), maxOf(1, Math.round(height * factor).toInt()), true)
+            val matrix = orientation(bytes, mime)
+            oriented = if (matrix.isIdentity) scaled else Bitmap.createBitmap(scaled, 0, 0, scaled.width, scaled.height, matrix, true)
+            val png = mime == "image/png"
+            var output = oriented
+            if (!png && output.hasAlpha()) {
+                flattened = Bitmap.createBitmap(output.width, output.height, Bitmap.Config.ARGB_8888)
+                Canvas(flattened).apply { drawColor(Color.WHITE); drawBitmap(output, 0f, 0f, null) }
+                output = flattened
+            }
+            val out = ByteArrayOutputStream()
+            if (!output.compress(if (png) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG, if (png) 100 else 90, out)) {
+                throw CloudFailure("image_format", "Не удалось прочитать изображение. Выберите другой файл.")
+            }
+            return out.toByteArray() to if (png) "image/png" else "image/jpeg"
+        } finally {
+            decoded.recycle(); scaled?.recycle(); oriented?.recycle(); flattened?.recycle()
+        }
+    }
+
+    /** A re-encoded JPEG loses its EXIF tag, so the pixels are turned upright before encoding. */
+    private fun orientation(bytes: ByteArray, mime: String): Matrix {
+        val matrix = Matrix()
+        if (mime != "image/jpeg" && mime != "image/webp") return matrix
+        val tag = try {
+            ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        } catch (_: IOException) { ExifInterface.ORIENTATION_NORMAL }
+        when (tag) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> { matrix.postRotate(90f); matrix.postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.postRotate(270f); matrix.postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+        }
+        return matrix
+    }
 }
 
-/** Production uses HTTPS. The loopback base URL is an explicit device-test seam. */
-class DeepSeekProvider internal constructor(
-    private val baseUrl: String,
-    private val onHttpCall: (() -> Unit)? = null,
-    private val responseReadTimeoutMillis: Int = 60_000,
-    private val recordEmptyCompletion: (String) -> Unit,
+/**
+ * Alphy cloud logic for the stored AI account. Each call reads the account and sends its requests through the
+ * wire of its provider. Production uses HTTPS. The loopback base URL is an explicit device-test seam.
+ */
+class CloudChatProvider internal constructor(
+    private val accounts: () -> AiAccount?,
+    private val endpoints: Endpoints,
+    private val chatModel: (AiProvider) -> String = { it.profile.chatModels.first() },
+    onHttpCall: (() -> Unit)? = null,
+    responseReadTimeoutMillis: Int = 60_000,
+    private val recordEmptyCompletion: (String) -> Unit = { android.util.Log.w("AlphyCloudCompletion", it) },
 ) : ChatProvider, CloudSearchProvider {
-    @JvmOverloads constructor(baseUrl: String = "https://api.deepseek.com") : this(baseUrl, recordEmptyCompletion = {
-        android.util.Log.w("AlphyCloudCompletion", it)
-    })
+    constructor(keys: SecureKeyStore, models: AiModels) : this(keys, models, Endpoints.PRODUCTION)
+    /** The production wiring with a loopback [endpoints], so a device test runs the same path. */
+    internal constructor(keys: SecureKeyStore, models: AiModels, endpoints: Endpoints) : this({ keys.account().getOrNull() }, endpoints, models::chat)
 
-    init {
-        val uri = URI(baseUrl)
-        require(uri.userInfo == null && uri.query == null && uri.fragment == null)
-        require(baseUrl == "https://api.deepseek.com" || (uri.scheme == "http" && uri.host in listOf("127.0.0.1", "localhost")))
+    private val http = CloudHttp(onHttpCall, responseReadTimeoutMillis)
+
+    /** The stored account must still hold the key of this request. A change in the middle of a request is stale. */
+    private fun account(key: String): AiAccount = accounts()?.takeIf { it.key == key }
+        ?: throw CloudFailure("stale_account", "Ключ ИИ изменился во время запроса. Повторите запрос.")
+
+    private fun wire(key: String): ChatWire = when (val provider = account(key).provider) {
+        AiProvider.OPENAI -> OpenAiResponsesWire(endpoints.checked(provider), chatModel(provider), http, recordEmptyCompletion)
+        AiProvider.OPENROUTER, AiProvider.DEEPSEEK ->
+            OpenAiCompatibleWire(provider, endpoints.checked(provider), chatModel(provider), http, recordEmptyCompletion)
+        AiProvider.ANTHROPIC -> AnthropicWire(endpoints.checked(provider), chatModel(provider), http, recordEmptyCompletion)
     }
-    private data class ToolCall(val id: String, val name: String, val arguments: String)
+
     private data class WebQuery(val query: String, val from: Instant? = null, val until: Instant? = null) {
         fun includes(source: Source): Boolean {
             if (from == null || until == null) return true
@@ -213,12 +290,7 @@ class DeepSeekProvider internal constructor(
             return published >= from && published < until
         }
     }
-    private data class Completion(val text: String, val calls: List<ToolCall>)
-    private enum class CompletionStage(val strictDecision: Boolean = false) {
-        GENERAL, GENERATION, DECISION(true),
-        AUTOMATION_DRAFT, SEARCH_PLAN, ANSWER, GROUNDED_DECISION
-    }
-    private data class AdmittedChatBody(val bytes: ByteArray, val usesMemory: Boolean)
+    private data class AdmittedChatBody(val body: JSONObject, val usesMemory: Boolean)
     private fun message(turn: CloudTurn): JSONObject {
         val content: Any = if(turn.images.isEmpty()) turn.text else JSONArray().apply {
             put(JSONObject().put("type","text").put("text",turn.text.ifBlank { "Опиши изображение" }))
@@ -227,7 +299,8 @@ class DeepSeekProvider internal constructor(
         return JSONObject().put("role",turn.role).put("content",content)
     }
     override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-        if(request.chatDecision) { respondDecision(key,request,session,emit); return }
+        val wire = wire(key)
+        if(request.chatDecision) { respondDecision(wire,key,request,session,emit); return }
         require(request.screenContext == null && request.screenImages.isEmpty()) {
             "Automatic screen context requires the chat answer path."
         }
@@ -238,9 +311,8 @@ class DeepSeekProvider internal constructor(
         val callIds = mutableSetOf<String>()
         repeat(3) { round ->
             val think = request.generationStage == CloudGenerationStage.AGENT
-            val body = JSONObject().put("model", "deepseek-flash").put("messages", messages).put("stream", true)
+            val body = JSONObject().put("messages", messages).put("stream", true)
                 .put("thinking", JSONObject().put("type", if (think) "enabled" else "disabled"))
-            if (think) body.put("reasoning_effort", "low")
             if (request.expandedWriterOutput) body.put("max_tokens", 131_072)
             else if (!think) body.put("max_tokens", 4096)
             if (request.jsonObject) body.put("response_format", JSONObject().put("type", "json_object"))
@@ -254,25 +326,26 @@ class DeepSeekProvider internal constructor(
                 body.put("tools", JSONArray().put(discoveryTool(strict = false))).put("tool_choice", "auto")
             }
             var httpAttempt = 0
-            suspend fun complete(allowTools: Boolean): Completion {
-                val bytes = body.utf8()
+            suspend fun complete(allowTools: Boolean, retainReasoning: Boolean): Completion {
                 val stage = request.generationStage
+                val limits = StreamLimits(maxText = when {
+                    request.agentPlan -> ChatToolReply.MAX_REPLY
+                    request.scheduledAgent -> ChatToolReply.MAX_TEXT
+                    else -> 2 * 1024 * 1024
+                }, allowTools = allowTools, reportLength = stage != null,
+                    stage = if (stage == null) CompletionStage.GENERAL else CompletionStage.GENERATION,
+                    maxWireChars = if (think || request.expandedWriterOutput) 64 * 1024 * 1024 else 2 * 1024 * 1024,
+                    retainReasoning = retainReasoning)
                 while (true) {
                     var outputStarted = false
                     try {
                         httpAttempt++
-                        return stream(key, bytes, session, {
+                        return wire.complete(key, body, limits, session) {
                             if (it.isNotEmpty()) outputStarted = true
                             if (discovery == null && !request.scheduledAgent && !request.agentPlan) {
                                 emit(CloudEvent.Text(it))
                             }
-                        }, maxText = when {
-                            request.agentPlan -> ChatToolReply.MAX_REPLY
-                            request.scheduledAgent -> ChatToolReply.MAX_TEXT
-                            else -> 2 * 1024 * 1024
-                        }, allowTools = allowTools, reportLength = stage != null,
-                            stage = if (stage == null) CompletionStage.GENERAL else CompletionStage.GENERATION,
-                            maxWireChars = if (think || request.expandedWriterOutput) 64 * 1024 * 1024 else 2 * 1024 * 1024)
+                        }
                     } catch (failure: CloudFailure) {
                         val phase = when (failure.code) {
                             "pre_headers_io", "pre_headers_timeout" -> GenerationTransportPhase.BEFORE_HEADERS
@@ -289,17 +362,18 @@ class DeepSeekProvider internal constructor(
                     }
                 }
             }
-            var completion = complete(if (discovery == null) !request.agentPlan else offerDiscovery)
+            // Spec 4.5: every round that offers tools keeps its reasoning for the next round, with or without thinking.
+            var completion = complete(if (discovery == null) !request.agentPlan else offerDiscovery, request.search || offerDiscovery)
             if (discovery != null && completion.calls.isNotEmpty()) {
                 val call = validateDiscovery(completion)
                 val result = discover(session, discovery)
                 messages.put(JSONObject().put("role", "assistant").put("content", JSONObject.NULL)
                     .put("tool_calls", JSONArray().put(JSONObject().put("id", call.id).put("type", "function")
-                        .put("function", JSONObject().put("name", call.name).put("arguments", call.arguments)))))
+                        .put("function", JSONObject().put("name", call.name).put("arguments", call.arguments)))).replaying(completion))
                 messages.put(JSONObject().put("role", "tool").put("tool_call_id", call.id).put("content", result.toString()))
                 body.put("tool_choice", "none")
                 session.checkActive(currentCoroutineContext())
-                completion = complete(false)
+                completion = complete(false, false)
             }
             if (discovery != null && !request.agentPlan) emit(CloudEvent.Text(completion.text))
             if (completion.calls.isEmpty() && request.scheduledAgent) {
@@ -320,7 +394,7 @@ class DeepSeekProvider internal constructor(
             messages.put(JSONObject().put("role", "assistant").put("content", completion.text.ifEmpty { null }).put("tool_calls", JSONArray().apply {
                 completion.calls.forEach { call -> put(JSONObject().put("id", call.id).put("type", "function")
                     .put("function", JSONObject().put("name", call.name).put("arguments", call.arguments))) }
-            }))
+            }).replaying(completion))
             completion.calls.forEachIndexed { index, call ->
                 emit(CloudEvent.Search("searching"))
                 val results = search(key, queries[index].query, session).filter(queries[index]::includes)
@@ -334,7 +408,13 @@ class DeepSeekProvider internal constructor(
         }
         throw CloudFailure("tool_limit", "Превышен лимит шагов поиска")
     }
-    private fun searchTool(dated: Boolean = false): JSONArray {
+    /** Attaches the reasoning of a tool round. A round without reasoning keeps the request unchanged. */
+    private fun JSONObject.replaying(completion: Completion) = apply {
+        completion.replay?.takeIf { it.length() > 0 }?.let { put("reasoning_replay", it) }
+    }
+
+    /** The canonical web_search tool. AnthropicWorkflowTest checks its structured-calls schema against the Anthropic limits. */
+    internal fun searchTool(dated: Boolean = false): JSONArray {
         val properties = JSONObject().put("query", JSONObject().put("type", "string"))
         if (dated) {
             properties.put("publishedFrom", JSONObject().put("type", "string").put("description", "Inclusive RFC 3339 instant."))
@@ -347,7 +427,7 @@ class DeepSeekProvider internal constructor(
     }
 
     private fun completionBody(messages: JSONArray, json: Boolean = false) = JSONObject()
-        .put("model","deepseek-flash").put("messages",messages).put("stream",true)
+        .put("messages",messages).put("stream",true)
         .put("thinking",JSONObject().put("type","disabled")).put("max_tokens",8192)
         .apply { if(json) put("response_format",JSONObject().put("type","json_object")) }
 
@@ -454,7 +534,7 @@ class DeepSeekProvider internal constructor(
             .takeIf(::fits)
     }
 
-    private suspend fun respondDecision(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+    private suspend fun respondDecision(wire: ChatWire, key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
         require(!request.jsonObject)
         val contextLimit = 100_000
         fun contextLength(turns: List<CloudTurn>, instructions: String) =
@@ -516,7 +596,7 @@ class DeepSeekProvider internal constructor(
             .put("function", JSONObject().put("name", SUBMIT_CHAT_DECISION)) else "required"
         val selection = memory?.let { readChatMemory { it.selectForRequest(current.text, MemoryPurpose.CHAT_ANSWER) } }
         suspend fun admitAnswerBody(input: JSONArray, contextLength: Int): AdmittedChatBody {
-            if (memory == null || selection == null) return AdmittedChatBody(completionBody(input).utf8(), false)
+            if (memory == null || selection == null) return AdmittedChatBody(completionBody(input), false)
             val coroutine = currentCoroutineContext()
             return readChatMemory {
                 memory.withRequestFacts(selection, MemoryPurpose.CHAT_ANSWER, MemoryProvenance.valueOf(inputProvenance.name)) { facts ->
@@ -533,7 +613,7 @@ class DeepSeekProvider internal constructor(
                                 for (index in 1 until input.length()) put(input.getJSONObject(index))
                             }
                     } else input
-                    val body = AdmittedChatBody(completionBody(messages).utf8(), usesMemory)
+                    val body = AdmittedChatBody(completionBody(messages), usesMemory)
                     session.checkActive(coroutine)
                     body
                 }
@@ -631,7 +711,7 @@ The user reviews and approves the plan before any device action.
         // The decision sometimes followed the device language, so the host states the identified request language.
         val requestLanguage = GenerationLanguage.identifyText(current.text)
             ?.let { "The latest request is in ${GenerationLanguage.name(it)}." }.orEmpty()
-        fun classificationBody(notice: String = ""): ByteArray {
+        fun classificationBody(notice: String = ""): JSONObject {
             val system = listOf(instructions, ChatToolReply.courseInstructions.takeIf { allowCourse }.orEmpty(),
                 weatherInstructions, repairInstructions, memoryInstructions, devicePlanInstructions,
                 if (inventory != null) "Call $DISCOVER_CAPABILITIES only for a direct question about what Alphy can do on this phone. Requests to perform an action use their normal tool." else "",
@@ -642,7 +722,7 @@ The user reviews and approves the plan before any device action.
             val turns = listOf(current.copy(images = emptyList()))
             validateContext(turns, system)
             val messages = JSONArray().put(message(CloudTurn("system", system))).put(message(turns.single()))
-            return completionBody(messages).put("tools", decisionTools).put("tool_choice", decisionChoice).utf8()
+            return completionBody(messages).put("tools", decisionTools).put("tool_choice", decisionChoice)
         }
         suspend fun clarifyPreparation() {
             session.checkActive(currentCoroutineContext())
@@ -734,23 +814,26 @@ The user reviews and approves the plan before any device action.
             }
             return ChatToolReply.decode(if (kind == "create" || kind == "refine") kotlinx.serialization.json.JsonObject(json - "image") else json)
         }
-        suspend fun readDecision(body: ByteArray, stage: CompletionStage,
-            retryBody: (String) -> ByteArray = { notice ->
-                JSONObject(body.toString(Charsets.UTF_8)).apply {
+        suspend fun readDecision(body: JSONObject, stage: CompletionStage,
+            retryBody: (String) -> JSONObject = { notice ->
+                JSONObject(body.toString()).apply {
                     val system = getJSONArray("messages").getJSONObject(0)
                     system.put("content", system.getString("content") + notice)
-                }.utf8()
+                }
             },
             decode: (Completion) -> ChatToolReply.Decision): ChatToolReply.Decision {
-            suspend fun read(bytes: ByteArray): ChatToolReply.Decision = decode(try {
-                stream(key, bytes, session, {}, ChatToolReply.MAX_REPLY, stage = stage)
-            } catch (failure: IOException) {
-                // A decision stream reports every failure after headers as a CloudFailure. A plain
-                // IOException means that the connection failed before any output, so one new request is safe.
-                if (failure is CloudFailure) throw failure
-                currentCoroutineContext().ensureActive()
-                stream(key, bytes, session, {}, ChatToolReply.MAX_REPLY, stage = stage)
-            })
+            suspend fun read(body: JSONObject): ChatToolReply.Decision {
+                val limits = StreamLimits(ChatToolReply.MAX_REPLY, stage = stage)
+                return decode(try {
+                    wire.complete(key, body, limits, session) {}
+                } catch (failure: IOException) {
+                    // A decision stream reports every failure after headers as a CloudFailure. A plain
+                    // IOException means that the connection failed before any output, so one new request is safe.
+                    if (failure is CloudFailure) throw failure
+                    currentCoroutineContext().ensureActive()
+                    wire.complete(key, body, limits, session) {}
+                })
+            }
             fun report(failure: CloudFailure, attempt: Int, correcting: Boolean) {
                 val shape = failure.shape ?: return
                 runCatching { session.decisionRejectionObserver?.invoke(DecisionRejection(stage.name, attempt, shape, correcting)) }
@@ -878,7 +961,7 @@ The user reviews and approves the plan before any device action.
                 turns.forEach { put(message(it.copy(images = emptyList()))) }
             }
             val body = completionBody(draftMessages).put("tools", JSONArray().put(AutomationDraftTool.schema())).put("tool_choice", "auto")
-            val draft = readDecision(body.utf8(), CompletionStage.AUTOMATION_DRAFT) { completion ->
+            val draft = readDecision(body, CompletionStage.AUTOMATION_DRAFT) { completion ->
                 if (completion.calls.isEmpty() && completion.text.isNotBlank() && completion.text.length <= ChatToolReply.MAX_TEXT)
                     return@readDecision ChatToolReply.Decision("answer", completion.text, "", "none")
                 val call = completion.calls.singleOrNull()
@@ -895,7 +978,7 @@ The user reviews and approves the plan before any device action.
             } else {
                 val encoded = ChatToolReply.encode(draft)
                 if (encoded.length > ChatToolReply.MAX_REPLY)
-                    throw CloudFailure("response_size", "The assistant response exceeds the allowed size.")
+                    throw responseTooLarge()
                 emit(CloudEvent.RoundComplete(encoded, false, MessageProvenance.CLEAN))
             }
             return
@@ -934,7 +1017,7 @@ The user reviews and approves the plan before any device action.
                 .put(message(current.copy(images = emptyList())))
             val searchBody = completionBody(searchMessages).put("tools",searchTool())
                 .put("tool_choice",JSONObject().put("type","function").put("function",JSONObject().put("name","web_search")))
-            val planned = stream(key,searchBody,session,{},ChatToolReply.MAX_REPLY,stage = CompletionStage.SEARCH_PLAN)
+            val planned = wire.complete(key,searchBody,StreamLimits(ChatToolReply.MAX_REPLY,stage = CompletionStage.SEARCH_PLAN),session) {}
             val queries = validateCalls(planned.calls)
             planned.calls.forEachIndexed { index,_ ->
                 session.checkActive(currentCoroutineContext())
@@ -991,8 +1074,8 @@ The user reviews and approves the plan before any device action.
             val answerBody = admitAnswerBody(answerMessages,
                 historySize + answerInstructions.length + answerContext.length)
             provenance = if(answerBody.usesMemory) MessageProvenance.MEMORY_DERIVED else inputProvenance
-            val answer = stream(key,answerBody.bytes,session,{ if (!weather) emit(CloudEvent.AnswerFragment(it, provenance)) },
-                maxText = ChatToolReply.MAX_TEXT,allowTools = false,stage = CompletionStage.ANSWER)
+            val answerLimits = StreamLimits(ChatToolReply.MAX_TEXT, allowTools = false, stage = CompletionStage.ANSWER)
+            val answer = wire.complete(key,answerBody.body,answerLimits,session) { if (!weather) emit(CloudEvent.AnswerFragment(it, provenance)) }
             try {
                 accept(decision.copy(text = answer.text), answerScreen)
             } catch (failure: CloudFailure) {
@@ -1003,8 +1086,7 @@ The user reviews and approves the plan before any device action.
                     "Use a short answer with valid source numbers or exact supplied URLs. Omit unsupported citations. " +
                     "If the excerpts do not give the requested current conditions, say so and cite the most relevant source."
                 answerMessages.getJSONObject(0).put("content", "$answerInstructions\n$correction")
-                val revised = stream(key, completionBody(answerMessages).utf8(), session, {},
-                    maxText = ChatToolReply.MAX_TEXT, allowTools = false, stage = CompletionStage.ANSWER)
+                val revised = wire.complete(key, completionBody(answerMessages), answerLimits, session) {}
                 accept(decision.copy(text = revised.text), answerScreen)
             }
         } else {
@@ -1030,13 +1112,13 @@ The user reviews and approves the plan before any device action.
                 remaining -= JSONObject.quote(excerpt).length - 2
             }
             val groundedContext = payload.toString()
-            fun groundedBody(notice: String = ""): ByteArray {
+            fun groundedBody(notice: String = ""): JSONObject {
                 val system = groundedInstructions + notice
                 if (groundedContext.length > ChatToolReply.MAX_REPLY || system.length + groundedContext.length > contextLimit)
                     throw CloudFailure("decision_context", "The request and source context exceed the grounding limit. Shorten the request.")
                 val grounded = JSONArray().put(message(CloudTurn("system", system)))
                     .put(message(CloudTurn("user", groundedContext, current.images)))
-                return completionBody(grounded, json = true).utf8()
+                return completionBody(grounded, json = true)
             }
             readDecision(groundedBody(), CompletionStage.GROUNDED_DECISION, retryBody = ::groundedBody) { completed ->
                 if(completed.calls.isNotEmpty()) throw CloudFailure("tool_invalid","The grounded decision cannot execute more searches.")
@@ -1049,7 +1131,7 @@ The user reviews and approves the plan before any device action.
         session.checkActive(currentCoroutineContext())
         val encoded = ChatToolReply.encode(final)
         if(encoded.length > ChatToolReply.MAX_REPLY)
-            throw CloudFailure("response_size","The assistant response exceeds the allowed size.")
+            throw responseTooLarge()
         emit(CloudEvent.RoundComplete(encoded,false,provenance))
     }
 
@@ -1066,186 +1148,13 @@ The user reviews and approves the plan before any device action.
 
     override suspend fun search(key: String, query: String, session: CloudSession): List<Source> {
         requireWebSearchQuery(query)
-        val body = JSONObject().put("query", query).put("count", 5).put("need_content", true)
-        val connection = open("/v1/tools/search", key, body.utf8(), session)
-        try {
-            checkStatus(connection, true)
-            val text = connection.inputStream.use { input ->
-                val bytes = readBounded(input, 1024 * 1024 + 1)
-                if (bytes.size > 1024 * 1024) throw CloudFailure("search_response", "Ответ поиска слишком большой")
-                String(bytes, Charsets.UTF_8)
-            }
-            session.checkActive(currentCoroutineContext())
-            val array = try { JSONObject(text).getJSONArray("results") } catch (_: Exception) { throw CloudFailure("search_response", "Сервис поиска вернул неверный ответ") }
-            val results = (0 until array.length()).mapNotNull { index ->
-                val item = array.optJSONObject(index) ?: return@mapNotNull null
-                val url = item.opt("url") as? String ?: return@mapNotNull null
-                val title = item.opt("title") as? String ?: return@mapNotNull null
-                if (!validSourceUrl(url) || title.isBlank()) return@mapNotNull null
-                val excerpt = listOf("content","summary","snippet").mapNotNull { field ->
-                    (item.opt(field) as? String)?.takeIf { it.isNotBlank() }
-                }.distinct().joinToString("\n").take(6000)
-                val siteName = (item.opt("site_name") as? String)?.trim()?.takeIf { it.isNotEmpty() && it.none(Char::isISOControl) }?.take(120)
-                val siteIcon = (item.opt("site_icon") as? String)?.takeIf { it.startsWith("https://") && validSourceUrl(it) }
-                val publishedAt = (item.opt("date") as? String)?.let { value ->
-                    runCatching { Instant.parse(value).toString() }.getOrNull()
-                }
-                Source(title.take(300), url, excerpt, siteName, siteIcon, publishedAt)
-            }.take(5)
-            if(array.length() > 0 && results.isEmpty()) {
-                throw CloudFailure("search_no_usable_results", "Search returned no usable sources. Retry the search or ask without web sources.")
-            }
-            return results
-        } finally { session.detach(connection) }
-    }
-    private suspend fun stream(key: String, body: JSONObject, session: CloudSession, onText: suspend (String) -> Unit,
-        maxText: Int = 2 * 1024 * 1024, allowTools: Boolean = true, reportLength: Boolean = false,
-        stage: CompletionStage, maxWireChars: Int = 2 * 1024 * 1024): Completion =
-        stream(key, body.utf8(), session, onText, maxText, allowTools, reportLength, stage, maxWireChars)
-
-    private suspend fun stream(key: String, body: ByteArray, session: CloudSession, onText: suspend (String) -> Unit,
-        maxText: Int = 2 * 1024 * 1024, allowTools: Boolean = true, reportLength: Boolean = false,
-        stage: CompletionStage, maxWireChars: Int = 2 * 1024 * 1024): Completion {
-        fun toolFragment(json: JSONObject, key: String): String {
-            if (!stage.strictDecision) return json.optString(key)
-            if (json.isNull(key)) return ""
-            return json.opt(key) as? String
-                ?: throw CloudFailure("stream_invalid", "Сервис вернул неверный поток ответа")
+        val search = when (val provider = account(key).provider) {
+            AiProvider.OPENROUTER -> OpenRouterSearch(endpoints, chatModel(provider), http)
+            AiProvider.OPENAI -> OpenAiSearch(endpoints, chatModel(provider), http)
+            AiProvider.DEEPSEEK -> DeepSeekSearch(endpoints, http)
+            AiProvider.ANTHROPIC -> AnthropicSearch(endpoints, chatModel(provider), http)
         }
-        val path = if (stage.strictDecision) "/beta/chat/completions" else "/chat/completions"
-        var opened: HttpURLConnection? = null
-        var headersReceived = false
-        try {
-            val connection = open(path, key, body, session).also { opened = it }
-            checkStatus(connection, false)
-            headersReceived = true
-            val text = StringBuilder()
-            val ids = mutableMapOf<Int, StringBuilder>(); val names = mutableMapOf<Int, StringBuilder>(); val arguments = mutableMapOf<Int, StringBuilder>()
-            var finish: String? = null
-            var done = false
-            var received = 0
-            var contentSeen = false
-            var reasoning = false
-            var alternateText = false
-            var bomData = false
-            connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
-                while (true) {
-                    session.checkActive(currentCoroutineContext())
-                    val line = reader.readLine() ?: break
-                    received += line.length
-                    if (received > maxWireChars) throw CloudFailure("response_size", "Ответ слишком большой")
-                    if (!line.startsWith("data:")) {
-                        bomData = bomData || line.startsWith("\uFEFFdata:")
-                        continue
-                    }
-                    val data = line.substring(5).trim()
-                    if (data == "[DONE]") { done = true; break }
-                    if (data.isEmpty()) continue
-                    val json = try { JSONObject(data) } catch (_: Exception) { throw CloudFailure("stream_invalid", "Сервис вернул неверный поток ответа") }
-                    if (json.has("error")) throw CloudFailure("provider", "DeepSeek прервал ответ. Повторите попытку.")
-                    val choices = json.optJSONArray("choices") ?: continue
-                    if (choices.length() == 0) continue
-                    val choice = choices.getJSONObject(0)
-                    alternateText = alternateText || choice.optJSONObject("message").hasText("content") ||
-                        (1 until choices.length()).any { index ->
-                            val other = choices.optJSONObject(index)
-                            other?.optJSONObject("delta").hasText("content") || other?.optJSONObject("message").hasText("content")
-                        }
-                    if (!choice.isNull("finish_reason")) finish = choice.getString("finish_reason")
-                    if(!allowTools && finish == "tool_calls") throw CloudFailure("tool_invalid","The answer cannot call tools.")
-                    val delta = choice.optJSONObject("delta") ?: continue
-                    reasoning = reasoning || delta.hasText("reasoning_content")
-                    val toolCalls = delta.optJSONArray("tool_calls")
-                    if(!allowTools && !delta.isNull("tool_calls") && toolCalls?.length() != 0)
-                        throw CloudFailure("tool_invalid","The answer cannot call tools.")
-                    if (!delta.isNull("content")) {
-                        val chunk = delta.get("content") as? String ?: throw CloudFailure("stream_invalid","Сервис вернул неверный поток ответа")
-                        if(text.length + chunk.length > maxText) throw CloudFailure("response_size","The assistant response exceeds the allowed size.")
-                        contentSeen = true
-                        text.append(chunk)
-                        onText(chunk)
-                    }
-                    toolCalls?.let { calls -> repeat(calls.length()) { i ->
-                        val call = calls.getJSONObject(i); val index = call.getInt("index")
-                        if(call.has("type") && call.getString("type") != "function") throw CloudFailure("tool_invalid","The assistant returned an unsupported tool type.")
-                        if (index !in 0..1) throw CloudFailure("tool_limit", "Модель превысила лимит функций")
-                        ids.getOrPut(index) { StringBuilder() }.append(toolFragment(call, "id"))
-                        call.optJSONObject("function")?.let { function ->
-                            names.getOrPut(index) { StringBuilder() }.append(toolFragment(function, "name"))
-                            arguments.getOrPut(index) { StringBuilder() }.append(toolFragment(function, "arguments"))
-                        }
-                    } }
-                }
-            }
-            session.checkActive(currentCoroutineContext())
-            if (reportLength && done && finish == "length") throw CloudFailure("response_length", "Достигнут лимит ответа. Уточните запрос.")
-            if (!done || finish !in listOf("stop", "tool_calls")) {
-                val message = if (!reportLength && finish == "length") "Достигнут лимит ответа. Уточните запрос."
-                    else "Соединение прервано. Ответ неполный. Повторите попытку."
-                throw CloudFailure("incomplete", message)
-            }
-            val calls = ids.keys.sorted().map { ToolCall(ids[it].toString(), names[it]?.toString().orEmpty(), arguments[it]?.toString().orEmpty()) }
-            if (finish == "tool_calls" && calls.isEmpty() || finish == "stop" && calls.isNotEmpty()) throw CloudFailure("stream_invalid", "Неполный вызов функции")
-            if (calls.isEmpty() && text.isBlank()) {
-                val content = when {
-                    !contentSeen -> "absent"
-                    text.isEmpty() -> "empty"
-                    else -> "blank"
-                }
-                recordEmptyCompletion("empty_response stage=${stage.name} content=$content reasoning=$reasoning alternateText=$alternateText bomData=$bomData")
-                throw CloudFailure("empty_response", "DeepSeek вернул пустой ответ. Повторите попытку.")
-            }
-            return Completion(text.toString(), calls)
-        } catch (_: org.json.JSONException) {
-            throw CloudFailure("stream_invalid", "Сервис вернул неверный поток ответа")
-        } catch (failure: IOException) {
-            session.checkActive(currentCoroutineContext())
-            if (failure is CloudFailure) throw failure
-            if (!headersReceived) {
-                if (stage != CompletionStage.GENERATION) throw failure
-                if (failure is SocketTimeoutException)
-                    throw CloudFailure("pre_headers_timeout", "DeepSeek did not return response headers in time. Retry the request.")
-                throw CloudFailure("pre_headers_io", "The DeepSeek connection failed before response headers. Retry the request.")
-            }
-            if (failure is SocketTimeoutException)
-                throw CloudFailure("stream_timeout", "DeepSeek did not finish the response in time. Retry the request.")
-            throw CloudFailure("stream_io", "The DeepSeek response stream was interrupted. Retry the request.")
-        } finally { opened?.let(session::detach) }
-    }
-    private fun JSONObject?.hasText(field: String): Boolean = (this?.opt(field) as? String)?.isNotBlank() == true
-
-    private fun JSONObject.utf8(): ByteArray = toString().toByteArray(Charsets.UTF_8)
-
-    private suspend fun open(path: String, key: String, bytes: ByteArray, session: CloudSession): HttpURLConnection {
-        session.checkActive(currentCoroutineContext())
-        val connection = URL(baseUrl + path).openConnection() as HttpURLConnection
-        session.attach(connection)
-        try {
-            connection.requestMethod = "POST"; connection.connectTimeout = 20000; connection.readTimeout = responseReadTimeoutMillis
-            connection.instanceFollowRedirects = false; connection.doOutput = true
-            connection.setRequestProperty("Authorization", "Bearer $key")
-            connection.setRequestProperty("Content-Type", "application/json")
-            connection.setRequestProperty("Accept", "text/event-stream, application/json")
-            connection.setFixedLengthStreamingMode(bytes.size)
-            session.checkActive(currentCoroutineContext())
-            session.beforeHttp?.invoke()
-            session.checkActive(currentCoroutineContext())
-            onHttpCall?.invoke()
-            connection.outputStream.use { it.write(bytes) }
-            return connection
-        } catch (failure: Exception) { session.detach(connection); throw failure }
-    }
-    private fun checkStatus(connection: HttpURLConnection, search: Boolean) {
-        val status = connection.responseCode
-        if (status in 200..299) return
-        val prefix = if (search) "Поиск: " else ""
-        throw when (status) {
-            401, 403 -> CloudFailure("auth", prefix + "ключ отклонён. Замените API-ключ в настройках.")
-            402 -> CloudFailure("quota", prefix + "недостаточно средств DeepSeek. Проверьте баланс аккаунта.")
-            429 -> CloudFailure("rate_limit", prefix + "лимит запросов. Повторите позже.")
-            in 500..599 -> CloudFailure("unavailable", prefix + "DeepSeek временно недоступен. Повторите позже.")
-            else -> CloudFailure("http_$status", prefix + "DeepSeek отклонил запрос (HTTP $status). Проверьте запрос и повторите.")
-        }
+        return search.search(key, query, session)
     }
 }
 private const val SUBMIT_CHAT_DECISION = "submit_chat_decision"
@@ -1260,7 +1169,7 @@ fun validSourceUrl(value: String): Boolean = runCatching {
     value.length <= 8192 && uri.scheme in listOf("https", "http") && !uri.host.isNullOrBlank() && uri.userInfo == null
 }.getOrDefault(false)
 
-private fun readBounded(input: java.io.InputStream, limit: Int): ByteArray {
+internal fun readBounded(input: java.io.InputStream, limit: Int): ByteArray {
     val output = java.io.ByteArrayOutputStream()
     val buffer = ByteArray(8192)
     while (output.size() < limit) {

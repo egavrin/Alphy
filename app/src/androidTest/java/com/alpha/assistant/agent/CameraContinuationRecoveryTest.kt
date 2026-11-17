@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.memory.MemoryStore
 import com.alpha.assistant.tools.ToolStore
+import com.alpha.assistant.ui.removeSemanticIndexes
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
@@ -51,6 +52,7 @@ class CameraContinuationRecoveryTest {
         } finally {
             if (phase == "recover") {
                 listOf("$name-memory.db", "$name-tools.db", "$name-agent.db").forEach(context::deleteDatabase)
+                removeSemanticIndexes(context, "memory:$name-memory.db")
             }
         }
         Unit

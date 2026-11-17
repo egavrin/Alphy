@@ -41,6 +41,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.alpha.assistant.R
+import com.alpha.assistant.cloud.Capability
 
 private const val ONBOARDING_STEPS = 3
 
@@ -56,7 +57,7 @@ private const val ONBOARDING_STEPS = 3
     }
 }
 
-/** The first-run flow: what Alphy does, the DeepSeek key, and a first request. */
+/** The first-run flow: what Alphy does, the AI key, and a first request. */
 @Composable internal fun OnboardingPane(model: ShellViewModel) {
     var step by rememberSaveable { mutableIntStateOf(1) }
     BackHandler(step > 1) { step-- }
@@ -73,6 +74,8 @@ private const val ONBOARDING_STEPS = 3
                     WelcomeCard()
                     Feature(Glyph.Search, R.string.onboarding_feature_answers)
                     Feature(Glyph.Grid, R.string.onboarding_feature_apps)
+                    Feature(Glyph.Photo, R.string.onboarding_feature_vision)
+                    Feature(Glyph.Mic, R.string.onboarding_feature_voice)
                     Feature(Glyph.Repeat, R.string.onboarding_feature_more)
                     NameSettings(model)
                     Button(onClick = { step = 2 }, Modifier.fillMaxWidth()) { Text(stringResource(R.string.onboarding_next)) }
@@ -80,7 +83,7 @@ private const val ONBOARDING_STEPS = 3
                 2 -> {
                     StepTitle(R.string.onboarding_key_title)
                     Text(stringResource(R.string.onboarding_key_text), style = MaterialTheme.typography.bodyLarge.merge(RussianHyphenation))
-                    DeepSeekKeyPanel(model, scroll)
+                    AiKeyPanel(model, scroll)
                     val ready = model.keyStatus == KeyStatus.Ready
                     Button(onClick = { step = 3 }, Modifier.fillMaxWidth(), enabled = ready) { Text(stringResource(R.string.onboarding_next)) }
                     if (!ready) TextButton(onClick = { model.finishOnboarding() }, Modifier.fillMaxWidth()) {
@@ -90,6 +93,11 @@ private const val ONBOARDING_STEPS = 3
                 else -> {
                     StepTitle(R.string.onboarding_ready_title)
                     Text(stringResource(R.string.onboarding_ready_text), style = MaterialTheme.typography.bodyLarge)
+                    // The saved account decides the image line, so the step names only a function that is absent (spec 14.5).
+                    model.accountProvider?.takeIf { Capability.IMAGES !in it.profile.capabilities }?.let {
+                        Text(stringResource(R.string.onboarding_ready_no_images, it.displayName), style = MaterialTheme.typography.bodyLarge.merge(RussianHyphenation))
+                    }
+                    Text(stringResource(R.string.onboarding_ready_voice), style = MaterialTheme.typography.bodyLarge.merge(RussianHyphenation))
                     ExampleRequests { model.finishOnboarding(it) }
                     Button(onClick = { model.finishOnboarding() }, Modifier.fillMaxWidth()) { Text(stringResource(R.string.onboarding_start)) }
                 }

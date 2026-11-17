@@ -1,6 +1,7 @@
 package com.alpha.assistant.tools
 
 import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.removeShellIndexes
 import com.alpha.assistant.ui.seedOpenChat
 import android.graphics.Bitmap
 import android.os.SystemClock
@@ -18,6 +19,10 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
 import java.security.MessageDigest
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 /** Harness failures: missing opt-in, wrong matrix identity, credential leaks, shared artifact state,
  * extra provider retries, lost evidence, automatic effects, and synthetic evidence reported as real.
@@ -75,14 +80,18 @@ class ComposeScenarioAcceptanceTest {
             finally {bitmap.recycle()}
         }
         save()
-        fun transferredKey(): String {
+        // The provider and the model that this run used go to the report. The key never does.
+        fun transferredAccount(): Pair<AiAccount,String> {
             check(args.getString("composeCredentialTransport")=="adb") {"Host credential transport is required."}
-            return OneUseCredential.receive(runId) {report.put("phase","credentialReady");save()}
-                .also {report.put("phase","generation").put("credentialTransport","oneUseAdbPeer");save()}
+            val account=OneUseCredential.receive(runId) {report.put("phase","credentialReady");save()}
+            val model=account.liveChatModel()
+            report.put("phase","generation").put("credentialTransport","oneUseAdbPeer")
+                .put("provider",account.provider.id).put("model",model);save()
+            return account to model
         }
         if(credentialProbe) {
             try {
-                val key=transferredKey()
+                val key=transferredAccount().first.key
                 check(key.startsWith("synthetic-credential-")) {"Credential probe requires a synthetic value."}
                 check(directory.walkTopDown().filter {it.isFile}.none {it.readBytes().toString(Charsets.UTF_8).contains(key)})
                 android.net.LocalServerSocket("compose-credential-$runId").close()
@@ -103,7 +112,9 @@ class ComposeScenarioAcceptanceTest {
                 error("The review activity cannot call a provider.")
             }
         }
-        val liveProvider=if (live) DeepSeekProvider() else null
+        var liveAccount: AiAccount?=null
+        var liveModel=""
+        val liveProvider=if (live) CloudChatProvider({liveAccount},Endpoints.PRODUCTION,chatModel={liveModel}) else null
         val provider=object: ChatProvider {
             override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
                 check(request.jsonObject && !request.search && request.turns.all {it.images.isEmpty()})
@@ -133,7 +144,7 @@ class ComposeScenarioAcceptanceTest {
         var activity: ActivityScenario<CloudTestActivity>?=null
         try {
             check(store.tools().isEmpty() && store.drafts().isEmpty()) {"Independent storage is not empty."}
-            val key=if(live) transferredKey() else "offline-fixture"
+            val key=if(live) transferredAccount().let {(account,model) -> liveAccount=account;liveModel=model;account.key} else "offline-fixture"
             val draft=engine.createDraft(case.getString("request"),null)
             engine.generate(draft.id,key,emptyList(),CloudSession())
             val tool=engine.accept(draft.id)
@@ -146,9 +157,9 @@ class ComposeScenarioAcceptanceTest {
             shell.saveConversation(Conversation("review","Scenario review",1,1,messages=listOf(
                 Message("artifact","assistant","Acceptance review",1,"complete",toolId=tool.id,toolRevision=tool.revision))))
             shell.seedOpenChat("review")
-            uiKeys.save("review-ui-fixture-only").getOrThrow()
+            uiKeys.save("review-ui-fixture-only", AiProvider.OPENAI).getOrThrow()
             lateinit var model: ShellViewModel
-            CloudTestActivity.factory={ShellViewModel(it,offline,shell,uiKeys).openSeededChat(shell).also {created -> model=created}}
+            CloudTestActivity.factory={ShellViewModel(it,offline,shell,uiKeys, legacy = isolatedLegacyKeys(it), models = isolatedModels(it), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(shell).also {created -> model=created}}
             activity=ActivityScenario.launch(CloudTestActivity::class.java)
             val deadline=SystemClock.uptimeMillis()+15000
             while((model.loading || model.tools.busy) && SystemClock.uptimeMillis()<deadline)SystemClock.sleep(40)
@@ -172,7 +183,7 @@ class ComposeScenarioAcceptanceTest {
         } finally {
             activity?.close();CloudTestActivity.factory=null
             engine.closeArtifacts();store.close();shell.close()
-            uiKeys.clear();app.deleteSharedPreferences(name)
+            uiKeys.clear();app.deleteSharedPreferences(name);removeShellIndexes(app,"$name.db")
             java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null);deleteEntry(name)}
             save()
         }

@@ -1,6 +1,7 @@
 package com.alpha.assistant.tools
 
 import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.removeShellIndexes
 import com.alpha.assistant.ui.seedOpenChat
 import android.os.Bundle
 import android.widget.TextView
@@ -26,6 +27,10 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.UUID
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 /** Failure cases: wrong search, stale accessibility trees, lost state/history, stale writes, pending effects, active rules, stale widget actions, recovery auto-enables rules. */
 class LibraryManagementWorkflowTest {
@@ -421,7 +426,7 @@ class LibraryManagementWorkflowTest {
                 tools.commitTool(counter("second","Покупки"),null,true)
                 AutomationStore(app,rulesName).use { rules -> val dependency=rules.save(null,rule(first));rules.approve(dependency.id,dependency.revision) }
             }
-            CloudTestActivity.factory={ application -> ShellViewModel(application,offline,shell,keys).openSeededChat(shell).also {
+            CloudTestActivity.factory={ application -> ShellViewModel(application,offline,shell,keys, legacy = isolatedLegacyKeys(application), models = isolatedModels(application), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(shell).also {
                 model=it
                 diagnostics.state={"loading=${model.loading} busy=${model.tools.busy} selected=${model.tools.selectedId} tools=${model.tools.tools.map {item -> item.id to item.archived}}"}
             } }
@@ -463,7 +468,7 @@ class LibraryManagementWorkflowTest {
             }
         } finally {
             CloudTestActivity.factory=null;shell.close();keys.clear()
-            app.deleteDatabase(name);app.deleteDatabase(toolName);app.deleteDatabase(rulesName);app.deleteSharedPreferences(name)
+            app.deleteDatabase(name);app.deleteDatabase(toolName);removeShellIndexes(app,name);app.deleteDatabase(rulesName);app.deleteSharedPreferences(name)
             java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null);deleteEntry(name)}
         }
     }
@@ -492,7 +497,7 @@ class LibraryManagementWorkflowTest {
                     Message("card","assistant","Готово.",1,"complete",toolId=current.id,toolRevision=1))))
                 shell.seedOpenChat("chat")
             }
-            CloudTestActivity.factory={ ShellViewModel(it,offline,shell,keys).openSeededChat(shell).also { model=it } }
+            CloudTestActivity.factory={ ShellViewModel(it,offline,shell,keys, legacy = isolatedLegacyKeys(it), models = isolatedModels(it), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(shell).also { model=it } }
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitUntil {!model.loading && !model.tools.busy}
                 waitFor("Счёт: 7")
@@ -548,7 +553,7 @@ class LibraryManagementWorkflowTest {
             }
         } finally {
             CloudTestActivity.factory=null;shell.close();keys.clear();ToolWidgets.remove(app,widget)
-            app.deleteDatabase(name);app.deleteDatabase(toolName);app.deleteDatabase(rulesName);app.deleteDatabase("$toolName-medicine.db")
+            app.deleteDatabase(name);app.deleteDatabase(toolName);removeShellIndexes(app,name);app.deleteDatabase(rulesName);app.deleteDatabase("$toolName-medicine.db")
             app.deleteSharedPreferences(name)
             java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null);deleteEntry(name)}
         }
@@ -565,7 +570,7 @@ class LibraryManagementWorkflowTest {
         val font=command("settings get system font_scale")
         lateinit var model: ShellViewModel
         try {
-            CloudTestActivity.factory={ ShellViewModel(it,offline,shell,keys).openSeededChat(shell).also { model=it } }
+            CloudTestActivity.factory={ ShellViewModel(it,offline,shell,keys, legacy = isolatedLegacyKeys(it), models = isolatedModels(it), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(shell).also { model=it } }
             command("settings put system font_scale 2.0")
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitUntil {!model.loading && !model.tools.busy}
@@ -625,7 +630,7 @@ class LibraryManagementWorkflowTest {
             }
             shell.saveConversation(Conversation(chat,"$title chat",1,1,messages=listOf(
                 Message("retired-card","assistant","",1,"complete",toolId=saved.id,toolRevision=1))))
-            CloudTestActivity.factory={ ShellViewModel(it,offline,shell,keys).openSeededChat(shell).also { model=it } }
+            CloudTestActivity.factory={ ShellViewModel(it,offline,shell,keys, legacy = isolatedLegacyKeys(it), models = isolatedModels(it), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(shell).also { model=it } }
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitUntil {!model.loading && !model.tools.busy}
                 // No chat is open, so the desktop tile shows the app as unavailable.
@@ -664,7 +669,7 @@ class LibraryManagementWorkflowTest {
 
     private fun closeShell(name: String,toolName: String,shell: ShellStore,keys: SecureKeyStore) {
         CloudTestActivity.factory=null;shell.close();keys.clear()
-        app.deleteDatabase(name);app.deleteDatabase(toolName);app.deleteDatabase("$toolName-automations.db");app.deleteSharedPreferences(name)
+        app.deleteDatabase(name);app.deleteDatabase(toolName);removeShellIndexes(app,name);app.deleteDatabase("$toolName-automations.db");app.deleteSharedPreferences(name)
         java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null);deleteEntry(name)}
     }
 

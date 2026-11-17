@@ -8,6 +8,7 @@ import android.app.appsearch.StorageInfo
 import android.os.SystemClock
 import android.util.Log
 import com.alpha.assistant.agent.AgentCommand
+import com.alpha.assistant.ui.removeSemanticIndexes
 import org.junit.Assume.assumeTrue
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -58,6 +59,9 @@ class SemanticWorkflowTest {
 
     @Test fun privateVectorIndexReopensAndConvergesAfterEditAndDelete() = runBlocking {
         val name = "workflow:${UUID.randomUUID()}"
+        try { privateVectorIndexWorkflow(name) } finally { removeSemanticIndexes(context, name) }
+    }
+    private suspend fun privateVectorIndexWorkflow(name: String) {
         var index = SemanticIndex(context, name)
         val facts = linkedMapOf(
             "pet" to SemanticRecord("pet", "1", "I own a black Labrador dog named Pepper."),
@@ -360,7 +364,7 @@ class SemanticWorkflowTest {
                 }
                 assertTrue("interactive misses=${misses.map { it.index }}", misses.size * 100 <= cases.size * 5)
             }
-        } finally { context.deleteDatabase(name) }
+        } finally { context.deleteDatabase(name); removeSemanticIndexes(context, "history:$name") }
     }
 
     @Test fun savedHistoryScale() {
@@ -398,7 +402,7 @@ class SemanticWorkflowTest {
                     }
                 }
             }
-        } finally { context.deleteDatabase(name) }
+        } finally { context.deleteDatabase(name); removeSemanticIndexes(context, "history:$name") }
     }
 
 }

@@ -49,7 +49,7 @@ The current route leaves these measurements open:
 | --- | --- |
 | Send, first UI, and completed UI | Record a monotonic timestamp at the accepted composer action. Associate the operation ID with the first presented preview or final-content frame. Emit completed UI after validation and the usable host frame for that same operation. The provisional label and artifact card do not identify those frames. |
 | Route stages, parts-only result, and correction | Connect the existing `ToolGenerationService` attempt observer through `ToolController`. Add timed stage boundaries and the parts-only result at the generation service. Keep the original operation ID and explicit attempt number on every event. |
-| Provider calls | The capture counts calls at the DeepSeek HTTP boundary. Bind each completion or search request to its chat operation and generation attempt. One `respond` invocation can contain multiple HTTP requests. |
+| Provider calls | The capture counts calls at the DeepSeek HTTP boundary. It needs `ALPHY_AI_PROVIDER=deepseek`. `capture.json` records the provider and the model that the device reports, and another pair fails the capture. Bind each completion or search request to its chat operation and generation attempt. One `respond` invocation can contain multiple HTTP requests. |
 | Comparison evidence | Record frame traces, check the frozen interactions and recovery, and collect blind ratings. Add the reference adapter, approved supplemental inputs, and the full real matrix. |
 
 The offline protocol check does not contact a device or provider:

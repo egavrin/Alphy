@@ -1,5 +1,6 @@
 package com.alpha.assistant.surfaces
 
+import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.ui.openSeededChat
 import com.alpha.assistant.ui.seedOpenChat
 import android.app.KeyguardManager
@@ -29,8 +30,9 @@ import com.alpha.assistant.data.ScreenContext
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
+import com.alpha.assistant.voice.FakeSpeechInput
 import com.alpha.assistant.voice.VoiceSession
-import com.offlineassistant.app.voice.AudioTranscription
+import com.alpha.assistant.voice.VoiceSettings
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CompletableDeferred
@@ -38,6 +40,10 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 @RunWith(AndroidJUnit4::class)
 class AssistantSheetWorkflowTest {
@@ -194,7 +200,7 @@ class AssistantSheetWorkflowTest {
     }
 
     @Test fun microphoneSendUsesTheSameScreenshot() {
-        val transcript = CompletableDeferred<AudioTranscription>()
+        val transcript = CompletableDeferred<String?>()
         withFixture(transcript) { fixture, provider ->
             launch(capture("Voice question screen")).use { scenario ->
                 robot.waitFor(robot.text(R.string.assistant_image_attached))
@@ -202,7 +208,7 @@ class AssistantSheetWorkflowTest {
                 robot.allowMicrophone(scenario)
                 assertTrue(provider.requests.isEmpty())
                 robot.click(robot.text(R.string.voice_send))
-                transcript.complete(AudioTranscription("When does the train leave?", null, 0))
+                transcript.complete("When does the train leave?")
                 robot.waitUntil { provider.requests.size == 1 }
                 val turn = provider.requests.single().turns.last()
                 assertEquals("When does the train leave?", turn.text)
@@ -217,7 +223,7 @@ class AssistantSheetWorkflowTest {
     }
 
     @Test fun contextThatChangesDuringRecordingRequiresExplicitSend() {
-        val transcript = CompletableDeferred<AudioTranscription>()
+        val transcript = CompletableDeferred<String?>()
         withFixture(transcript) { _, provider ->
             val id = capture("Initial screen text", withImage = false)
             launch(id).use { scenario ->
@@ -228,7 +234,7 @@ class AssistantSheetWorkflowTest {
                     AssistantCapture.updateScreen(id, ScreenContext(visibleText = "Initial screen text", pageText = "Late page text"))
                 }
                 robot.click(robot.text(R.string.voice_send))
-                transcript.complete(AudioTranscription("Summarize this page", null, 0))
+                transcript.complete("Summarize this page")
                 robot.waitFor("Summarize this page")
                 assertTrue(provider.requests.isEmpty())
                 robot.waitFor(robot.text(R.string.assistant_page_text))
@@ -411,20 +417,20 @@ class AssistantSheetWorkflowTest {
     }
 
     private fun withFixture(
-        transcript: CompletableDeferred<AudioTranscription>? = null,
+        transcript: CompletableDeferred<String?>? = null,
         failFirst: Boolean = false,
         block: (ShellFixture, RecordingProvider) -> Unit,
     ) {
         val fixture = ShellFixture("assistant-sheet")
         val provider = RecordingProvider("Assistant fixture reply", failFirst)
-        check(fixture.keys.save("alpha-test-only").isSuccess)
+        check(fixture.keys.save("alpha-test-only", AiProvider.OPENAI).isSuccess)
         robot.instrumentation.runOnMainSync {
             app.installAssistantFixture {
                 ShellViewModel(it, provider, fixture.store, fixture.keys, voiceFactory = transcript?.let { result ->
                     { application, scope, onTranscript ->
-                        VoiceSession(application, scope, onTranscript, prepareModels = {}, captureAudio = { result.await() })
+                        VoiceSession(application, scope, onTranscript, VoiceSettings(application, fixture.voiceStore)) { FakeSpeechInput { result.await() } }
                     }
-                }).openSeededChat(fixture.store)
+                }, legacy = isolatedLegacyKeys(it), models = isolatedModels(it), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(fixture.store)
             }
         }
         try {

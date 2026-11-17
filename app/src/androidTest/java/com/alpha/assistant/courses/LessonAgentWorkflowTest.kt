@@ -3,6 +3,7 @@ package com.alpha.assistant.courses
 import android.graphics.Bitmap
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudFailure
@@ -12,6 +13,7 @@ import com.alpha.assistant.images.ImageGeneration
 import com.alpha.assistant.images.ImageProvider
 import com.alpha.assistant.images.ImageSettings
 import com.alpha.assistant.images.ProviderImage
+import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.AgentScriptProvider
 import com.alpha.assistant.tools.LessonToolPreview
@@ -21,6 +23,7 @@ import com.alpha.assistant.tools.writeAppReply
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -194,11 +197,18 @@ class LessonAgentWorkflowTest {
         assertEquals("A calendar", illustration?.alt)
     }
 
-    /** Pictures on needs a saved key. Each call uses its own settings file, so no real key takes part. */
+    /** The fixture key stores of [pictures]. Each test clears its stores. */
+    private val keyStores = mutableListOf<SecureKeyStore>()
+
+    @After fun clearKeys() = keyStores.forEach { it.clear() }
+
+    /** Pictures on needs a saved key. Each call uses its own key store, so no real key takes part. */
     private fun pictures(enabled: Boolean): ImageGeneration {
-        val settings = ImageSettings(context, "lesson-agent-${UUID.randomUUID()}")
+        val name = "lesson-agent-${UUID.randomUUID()}"
+        val keys = SecureKeyStore(context, name, name).also { keyStores += it }
+        val settings = ImageSettings(context, keys, name)
         if (enabled) {
-            settings.saveKey("fixture-only").getOrThrow()
+            keys.save("fixture-only", AiProvider.OPENROUTER).getOrThrow()
             settings.setEnabled(true).getOrThrow()
         }
         return ImageGeneration(context, settings, mapOf("openrouter" to ImageProvider { _, _, _ ->

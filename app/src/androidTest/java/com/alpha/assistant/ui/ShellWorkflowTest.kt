@@ -38,15 +38,15 @@ class ShellWorkflowTest {
     @Before fun isolatedFixture() {
         store = ShellStore(context, "$fixtureName.db")
         keys = SecureKeyStore(context, fixtureName, fixtureName)
-        check(keys.save("alpha-test-only").isSuccess)
+        check(keys.save("alpha-test-only", AiProvider.OPENAI).isSuccess)
         CloudTestActivity.factory = { app -> ShellViewModel(app, object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) { emit(CloudEvent.RoundComplete("""{"kind":"answer","text":"Navigation fixture response","brief":"","search":"none"}""",false)) }
-        }, store, keys).openSeededChat(store) }
+        }, store, keys, legacy = isolatedLegacyKeys(app), models = isolatedModels(app), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(store) }
     }
     @After fun removeFixture() {
         CloudTestActivity.factory = null
         SystemClock.sleep(150)
-        store.close(); context.deleteDatabase("$fixtureName.db"); context.deleteDatabase("$fixtureName.db-tools.db"); keys.clear(); context.deleteSharedPreferences(fixtureName)
+        store.close(); context.deleteDatabase("$fixtureName.db"); context.deleteDatabase("$fixtureName.db-tools.db"); removeShellIndexes(context, "$fixtureName.db"); keys.clear(); context.deleteSharedPreferences(fixtureName)
         java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(fixtureName) }
     }
     // Failure cases: duplicate or bottom navigation, clipped touch targets, obsolete composer controls,
@@ -73,8 +73,9 @@ class ShellWorkflowTest {
             }
             assertEquals("One navigation action: $label", 1, count(diagnostics.freshRoot()))
         }
-        for (label in listOf("Веб-поиск DeepSeek", "Облако", "Облачная обработка",
-            "DeepSeek processes this chat and current attachments. Widget changes also send that tool’s code and data. History stays on this device.")) {
+        val providerLabels = com.alpha.assistant.cloud.AiProvider.entries.flatMap { listOf("Веб-поиск ${it.displayName}",
+            "${it.displayName} processes this chat and current attachments. Widget changes also send that tool’s code and data. History stays on this device.") }
+        for (label in providerLabels + listOf("Облако", "Облачная обработка")) {
             assertNull("Removed composer content: $label", find(diagnostics.freshRoot(), label))
         }
         fun checkbox(node: AccessibilityNodeInfo?): Boolean {

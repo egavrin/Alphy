@@ -308,6 +308,7 @@ private fun CompactAssistant(
                     model, context = { menu = AssistantMenu.Context }, modifier = Modifier.widthIn(max = 620.dp),
                     compact = compact, placeholder = R.string.assistant_ask,
                     assistantInvocation = capture?.id, requiresQuestion = screenshot != null, displayedCapture = shown,
+                    settings = providerSettings,
                 )
             }
         }
@@ -353,7 +354,7 @@ private fun CompactAssistant(
         ModalBottomSheet(onDismissRequest = { menu = null }) {
             Column(Modifier.safeDrawingPadding().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 when (menu) {
-                    AssistantMenu.Voice -> VoiceControls(model)
+                    AssistantMenu.Voice -> VoiceControls(model, providerSettings)
                     AssistantMenu.Permissions -> {
                         Text(stringResource(R.string.access), style = MaterialTheme.typography.headlineSmall)
                         com.alpha.assistant.capabilities.AndroidAccessOverview()

@@ -25,11 +25,17 @@ Build and explicitly replace-install the APKs before a run:
 /opt/homebrew/share/android-commandlinetools/platform-tools/adb -s emulator-5556 install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 ```
 
-Real mode reads nonempty `DEEPSEEK_API_KEY` from the host environment and preserves that value.
-If it is absent or empty, the runner reads only that variable from `~/.env` as dotenv data.
+Real mode reads `ALPHY_AI_PROVIDER` (`openai`, `anthropic`, `openrouter`, or `deepseek`) first. An absent or other value stops the run before any key is read.
+Then the runner reads only the key variable of that provider: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, or `DEEPSEEK_API_KEY`.
+Each variable comes from the host environment, or, if it is absent or empty there, from `~/.env` as dotenv data.
+The optional `ALPHY_AI_MODEL` selects a curated chat model. Without it, the device uses the first curated model of the provider.
+The device refuses a model that is not in the curated list of the provider, before any provider call.
 The runner never executes the dotenv file or puts a key in arguments, logs, generated files, or evidence.
-Child processes receive an environment without `DEEPSEEK_API_KEY`.
-If both sources lack the key, the run reports its name and examined sources without a provider call.
+Child processes receive an environment without any of the four key variables.
+If both sources lack the key, the run reports the variable name and examined sources without a provider call.
+The host sends `<provider id>` and the key, separated by one line feed, through the one-use channel below.
+The manifest records the provider and the model that the device reports. A run fails if the device reports another provider.
+`run.py live-check --serial SERIAL --label LABEL --test com.alpha.assistant.<package>.Live<Name>#<method>` runs one live device test with the same account flow.
 
 The instrumentation opens one abstract local socket after its identity and empty-storage checks.
 The host reaches it through an explicitly device-qualified ADB forward on host loopback.

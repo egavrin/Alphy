@@ -31,5 +31,5 @@
     <string name="assistant_history">История</string>
     <string name="assistant_history_search">Поиск в истории</string>
     <string name="assistant_continuous_voice">Непрерывный голосовой сеанс</string>
-    <string name="assistant_provider_settings">Настройки DeepSeek</string>
+    <string name="assistant_provider_settings">Настройки сервиса ИИ</string>
 </resources>

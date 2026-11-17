@@ -228,9 +228,10 @@ opens outline review. The user starts and saves the course from that review.
             decision.image?.let { put("image", it.json().put("required", decision.imageRequired).toString()) }
         }.toString()
 
-    private const val SOURCE_LIMITATION = "Источники не заменяют независимую проверку."
-    private fun sourceLimitation(sources: List<Source>) =
-        if (sources.isEmpty()) "Источники не найдены. Независимая проверка не выполнена." else SOURCE_LIMITATION
+    /** The source notes that [grounded] puts before a searched reply. The voice does not read them (spec 12.3). */
+    internal const val SOURCE_LIMITATION = "Источники не заменяют независимую проверку."
+    internal const val NO_SOURCES = "Источники не найдены. Независимая проверка не выполнена."
+    private fun sourceLimitation(sources: List<Source>) = if (sources.isEmpty()) NO_SOURCES else SOURCE_LIMITATION
 
     /** Attribution is exact. Retrieved sources do not independently verify facts. */
     fun grounded(decision: Decision, sources: List<Source>, providedUrl: String? = null): Decision {

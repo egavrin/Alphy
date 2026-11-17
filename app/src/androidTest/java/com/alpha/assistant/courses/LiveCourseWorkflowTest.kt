@@ -14,8 +14,10 @@ import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
-import com.alpha.assistant.cloud.DeepSeekProvider
+import com.alpha.assistant.cloud.CloudChatProvider
+import com.alpha.assistant.cloud.Endpoints
 import com.alpha.assistant.tools.OneUseCredential
+import com.alpha.assistant.tools.liveChatModel
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
@@ -27,6 +29,10 @@ import org.junit.runner.RunWith
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicInteger
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 @RunWith(AndroidJUnit4::class)
 class LiveCourseWorkflowTest {
@@ -94,9 +100,11 @@ class LiveCourseWorkflowTest {
         var checkpoint = "credential"
         var activity: ActivityScenario<CloudTestActivity>? = null
         try {
-            val credential = OneUseCredential.receive(runId) { save("credentialReady") }
+            val account = OneUseCredential.receive(runId) { save("credentialReady") }
+            val model = account.liveChatModel()
+            report.put("provider", account.provider.id).put("model", model)
             save("running")
-            val live = DeepSeekProvider("https://api.deepseek.com", onHttpCall = { calls.incrementAndGet() }) {}
+            val live = CloudChatProvider({ account }, Endpoints.PRODUCTION, chatModel = { model }, onHttpCall = { calls.incrementAndGet() }) {}
             val provider = object : ChatProvider {
                 override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                     check(key == "course-fixture")
@@ -109,7 +117,7 @@ class LiveCourseWorkflowTest {
                     val fragments = StringBuilder()
                     var completed: String? = null
                     try {
-                        live.respond(credential, request, session) { response ->
+                        live.respond(account.key, request, session) { response ->
                             when (response) {
                                 is CloudEvent.Text -> fragments.append(response.value)
                                 is CloudEvent.RoundComplete -> completed = response.courseTopic?.let {
@@ -131,9 +139,9 @@ class LiveCourseWorkflowTest {
                 }
             }
             fixture.seedChat("course", "Course acceptance", "Ready", selected = true)
-            check(fixture.keys.save("course-fixture").isSuccess)
+            check(fixture.keys.save("course-fixture", account.provider).isSuccess)
             CloudTestActivity.factory = { app ->
-                ShellViewModel(app, provider, fixture.store, fixture.keys).also { fixture.model = it }
+                ShellViewModel(app, provider, fixture.store, fixture.keys, legacy = isolatedLegacyKeys(app), models = isolatedModels(app), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).also { fixture.model = it }
             }
             fixture.launch().also { activity = it }.let {
                 val model = checkNotNull(fixture.model)

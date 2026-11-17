@@ -7,12 +7,17 @@ import com.alpha.assistant.cloud.*
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.agent.AppAgentGuide
 import com.alpha.assistant.ui.ShellRobot
+import com.alpha.assistant.ui.removeShellIndexes
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.UUID
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 @RunWith(AndroidJUnit4::class)
 class ToolWorkflowTest {
@@ -242,7 +247,7 @@ class ToolWorkflowTest {
         val name = "tool-ui-${UUID.randomUUID()}"
         val store = com.alpha.assistant.data.ShellStore(app,"$name.db")
         val keys = com.alpha.assistant.data.SecureKeyStore(app,name,name)
-        keys.save("tool-test-only").getOrThrow()
+        keys.save("tool-test-only", AiProvider.OPENAI).getOrThrow()
         var calls = 0
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
@@ -251,7 +256,7 @@ class ToolWorkflowTest {
             }
         }
         lateinit var model: com.alpha.assistant.ui.ShellViewModel
-        com.alpha.assistant.CloudTestActivity.factory = { application -> com.alpha.assistant.ui.ShellViewModel(application,provider,store,keys).also { model = it } }
+        com.alpha.assistant.CloudTestActivity.factory = { application -> com.alpha.assistant.ui.ShellViewModel(application,provider,store,keys, legacy = isolatedLegacyKeys(application), models = isolatedModels(application), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).also { model = it } }
         val scenario = androidx.test.core.app.ActivityScenario.launch(com.alpha.assistant.CloudTestActivity::class.java)
         // A fresh root holds no cached node of an entry that a transition covers or removes.
         val diagnostics = com.alpha.assistant.diagnostics.UiFailureDiagnostics("tool-ui")
@@ -345,7 +350,7 @@ class ToolWorkflowTest {
         } finally {
             scenario.close(); com.alpha.assistant.CloudTestActivity.factory = null
             android.os.SystemClock.sleep(150)
-            store.close(); app.deleteDatabase("$name.db"); app.deleteDatabase("$name.db-tools.db")
+            store.close(); app.deleteDatabase("$name.db"); app.deleteDatabase("$name.db-tools.db"); removeShellIndexes(app, "$name.db")
             keys.clear(); app.deleteSharedPreferences(name)
             java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(name) }
         }

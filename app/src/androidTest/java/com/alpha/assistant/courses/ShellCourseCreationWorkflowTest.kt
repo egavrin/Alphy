@@ -1,5 +1,6 @@
 package com.alpha.assistant.courses
 
+import com.alpha.assistant.cloud.AiProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.alpha.assistant.CloudTestActivity
@@ -23,6 +24,10 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.CopyOnWriteArrayList
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 @RunWith(AndroidJUnit4::class)
 class ShellCourseCreationWorkflowTest {
@@ -189,8 +194,8 @@ class ShellCourseCreationWorkflowTest {
         try {
             shell.seedChat(chatId, "Origin chat", "PRIVATE-EARLIER-TEXT", selected = true)
             shell.seedChat("other", "Other chat", "PRIVATE-OTHER-TEXT")
-            check(shell.keys.save("PRIVATE-FIXTURE-KEY").isSuccess)
-            CloudTestActivity.factory = { app -> ShellViewModel(app, provider, shell.store, shell.keys).openSeededChat(shell.store).also { shell.model = it } }
+            check(shell.keys.save("PRIVATE-FIXTURE-KEY", AiProvider.OPENAI).isSuccess)
+            CloudTestActivity.factory = { app -> ShellViewModel(app, provider, shell.store, shell.keys, legacy = isolatedLegacyKeys(app), models = isolatedModels(app), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(shell.store).also { shell.model = it } }
             CourseStore(shell.context, courseDb).use { store ->
                 shell.launch().use { scenario ->
                     waitFor(R.string.composer_label)

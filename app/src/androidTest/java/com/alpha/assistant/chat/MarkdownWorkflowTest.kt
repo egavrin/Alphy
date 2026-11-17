@@ -1,6 +1,7 @@
 package com.alpha.assistant.chat
 
 import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.removeShellIndexes
 import com.alpha.assistant.ui.seedOpenChat
 import android.app.Application
 import android.os.SystemClock
@@ -20,6 +21,10 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.UUID
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 /** Renders real chat messages. HTTP links are clickable; unsafe schemes and embedded images cannot launch or fetch. */
 @RunWith(AndroidJUnit4::class)
@@ -37,7 +42,7 @@ class MarkdownWorkflowTest {
         val provider = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) = error("No request expected")
         }
-        CloudTestActivity.factory = { ShellViewModel(it,provider,store,keys).openSeededChat(store).also { created -> model = created } }
+        CloudTestActivity.factory = { ShellViewModel(it,provider,store,keys, legacy = isolatedLegacyKeys(it), models = isolatedModels(it), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(store).also { created -> model = created } }
         val scenario = ActivityScenario.launch(CloudTestActivity::class.java)
         fun collect(node: android.view.accessibility.AccessibilityNodeInfo?): String {
             if(node == null) return ""
@@ -59,7 +64,7 @@ class MarkdownWorkflowTest {
             assertFalse(validSourceUrl("javascript:alert(1)")); assertFalse(validSourceUrl("intent://device"))
         } finally {
             scenario.close(); CloudTestActivity.factory = null; SystemClock.sleep(150)
-            store.close(); app.deleteDatabase("$name.db"); app.deleteDatabase("$name.db-tools.db")
+            store.close(); app.deleteDatabase("$name.db"); app.deleteDatabase("$name.db-tools.db"); removeShellIndexes(app, "$name.db")
             keys.clear(); app.deleteSharedPreferences(name)
             java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(name) }
         }

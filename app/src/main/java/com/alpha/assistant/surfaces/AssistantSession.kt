@@ -18,7 +18,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
+import com.alpha.assistant.cloud.AiModels
+import com.alpha.assistant.cloud.CloudChatProvider
+import com.alpha.assistant.data.LegacyKeys
 import com.alpha.assistant.data.ScreenContext
+import com.alpha.assistant.data.SecureKeyStore
+import com.alpha.assistant.images.ImageSettings
 import com.alpha.assistant.ui.ShellViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,7 +43,13 @@ object AssistantChat : ViewModelStoreOwner {
         (application as? ModelSource)?.assistantModel(application)
             ?: ViewModelProvider(this, object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
-                override fun <T : ViewModel> create(modelClass: Class<T>): T = ShellViewModel(application, offerOnboarding = true) as T
+                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                    // One store for «Модели» and the requests (spec 7.5).
+                    val models = AiModels(application)
+                    return ShellViewModel(application, CloudChatProvider(SecureKeyStore(application), models), offerOnboarding = true,
+                        legacy = LegacyKeys(application), models = models, imageStore = ImageSettings.STORE,
+                        voiceStore = com.alpha.assistant.voice.VoiceSettings.STORE) as T
+                }
             })[ShellViewModel::class.java]
 }
 

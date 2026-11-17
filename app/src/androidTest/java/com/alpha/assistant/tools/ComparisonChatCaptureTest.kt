@@ -9,8 +9,9 @@ import android.util.Base64
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
-import com.alpha.assistant.images.ImageModel
+import com.alpha.assistant.images.ImageProvider
 import com.alpha.assistant.images.ImageSettings
+import com.alpha.assistant.images.imageProviders
 import com.alpha.assistant.tools.agent.GenerationSettings
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
@@ -19,7 +20,8 @@ import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
-import com.alpha.assistant.cloud.DeepSeekProvider
+import com.alpha.assistant.cloud.CloudChatProvider
+import com.alpha.assistant.cloud.Endpoints
 import com.alpha.assistant.data.Conversation
 import com.alpha.assistant.data.Message
 import com.alpha.assistant.data.SecureKeyStore
@@ -27,6 +29,7 @@ import com.alpha.assistant.data.ShellStore
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellViewModel
+import com.alpha.assistant.ui.removeShellIndexes
 import com.alpha.assistant.ui.seedOpenChat
 import com.alpha.assistant.weather.WeatherLocator
 import kotlinx.coroutines.runBlocking
@@ -40,6 +43,10 @@ import java.security.MessageDigest
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.FutureTask
 import java.util.concurrent.atomic.AtomicInteger
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 private val terminalChatStatuses = setOf("complete", "error", "cancelled", "interrupted")
 
@@ -149,7 +156,6 @@ class ComparisonChatCaptureTest {
         // Opt-in pictures and screenshot review for a showcase run. The cleanup restores both settings.
         val pictures = input.optBoolean("images")
         val screenshotReview = input.optBoolean("screenshot_review")
-        val imageSettings = ImageSettings(app)
         require(!savedEdit || verifyWorkflow && caseId in setOf("extra:reference-points-ledger", "extra:russian-grid-game"))
         val verifyTip = input.optBoolean("verify_tip") || verifyWorkflow && caseId == "bench:tip"
         require(runId.matches(Regex("[a-f0-9]{32}")) && slotId.matches(Regex("[A-Za-z0-9:_-]{1,168}:candidate:[1-3]")))
@@ -197,6 +203,7 @@ class ComparisonChatCaptureTest {
             "$database-courses.db", "$database-memory.db")
         val store = ShellStore(app, database)
         val keys = SecureKeyStore(app, name, name)
+        val imageSettings = ImageSettings(app, keys, ISOLATED_IMAGES)
         val marker = "comparison-fixture-marker"
         var activity: ActivityScenario<CloudTestActivity>? = null
         var model: ShellViewModel? = null
@@ -210,14 +217,9 @@ class ComparisonChatCaptureTest {
             check(initial.conversations.isEmpty() && initial.selected == null && initial.newDraft.text.isEmpty())
             report.put("fresh_store", database)
             failureAt = "credential"
-            val credential = OneUseCredential.receive(runId) { save("credentialReady") }
-            if (pictures) {
-                failureAt = "image-credential"
-                check(!imageSettings.hasKey) { "The emulator already has an image key." }
-                imageSettings.saveKey(OneUseCredential.receive("$runId-openrouter") { save("imageCredentialReady") }).getOrThrow()
-                imageSettings.select(ImageModel.QWEN)
-                imageSettings.setEnabled(true).getOrThrow()
-            }
+            val account = OneUseCredential.receive(runId) { save("credentialReady") }
+            val chatModel = account.liveChatModel()
+            report.put("provider", account.provider.id).put("model", chatModel)
             GenerationSettings(app).screenshotReview = screenshotReview
             report.put("pictures", pictures).put("screenshot_review", screenshotReview)
             val provider = object : ChatProvider {
@@ -237,7 +239,7 @@ class ComparisonChatCaptureTest {
                                 }
                             }
                     }
-                    val live = DeepSeekProvider("https://api.deepseek.com", onHttpCall = {
+                    val live = CloudChatProvider({ account }, Endpoints.PRODUCTION, chatModel = { chatModel }, onHttpCall = {
                         providerHttpCalls.incrementAndGet()
                         httpDispatches += JSONObject().put("stage", stage)
                             .put("at_ns", SystemClock.elapsedRealtimeNanos())
@@ -247,10 +249,19 @@ class ComparisonChatCaptureTest {
                         acceptedOperations += JSONObject().put("kind", decision.kind).put("search", decision.search)
                             .put("at_ns", SystemClock.elapsedRealtimeNanos())
                     }) else request
-                    live.respond(credential, tracedRequest, session, emit)
+                    live.respond(account.key, tracedRequest, session, emit)
                 }
             }
-            keys.save(marker).getOrThrow()
+            keys.save(marker, account.provider).getOrThrow()
+            if (pictures) {
+                // Pictures use the key of the account, so its provider must generate images (spec 11).
+                failureAt = "images"
+                imageSettings.setEnabled(true).getOrThrow()
+            }
+            // The shell holds only the marker. The live image request gets the key of the account, as the chat request does.
+            val pictureProviders = imageProviders(Endpoints.PRODUCTION).mapValues { (_, live) ->
+                ImageProvider { key, model, intent -> check(key == marker); live.generate(account.key, model, intent) }
+            }
             failureAt = "launch"
             val toolDatabase = "$database-tools.db"
             val savedId = if (savedEdit) {
@@ -271,7 +282,7 @@ class ComparisonChatCaptureTest {
                 override suspend fun locate(): Nothing = error("No device location in a comparison fixture.")
             }
             CloudTestActivity.factory = { application ->
-                ShellViewModel(application, provider, store, keys, weatherLocator = noLocation).also { model = it }
+                ShellViewModel(application, provider, store, keys, weatherLocator = noLocation, legacy = isolatedLegacyKeys(application), models = isolatedModels(application), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE, imageProviders = pictureProviders).also { model = it }
             }
             val scenario = ActivityScenario.launch(CloudTestActivity::class.java)
             activity = scenario
@@ -529,13 +540,14 @@ class ComparisonChatCaptureTest {
                     vm.memoryStore.close()
                 }
                 GenerationSettings(app).screenshotReview = false
-                if (pictures) imageSettings.clearKey().getOrThrow()
+                if (pictures) imageSettings.setEnabled(false).getOrThrow()
                 if (ownsStore) {
                     store.close()
                     keys.clear().getOrThrow()
                     app.deleteSharedPreferences(name)
                     KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(name) }
                     databases.forEach(app::deleteDatabase)
+                    removeShellIndexes(app, database)
                 }
             } catch (failure: Exception) {
                 if (terminal != "unresolved") terminal = "failed"

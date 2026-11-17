@@ -6,12 +6,21 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
 import com.alpha.assistant.R
+import com.alpha.assistant.cloud.AiProvider
+import com.alpha.assistant.cloud.Capability
+import com.alpha.assistant.cloud.CloudFailure
+import com.alpha.assistant.cloud.CloudHttp
+import com.alpha.assistant.cloud.CloudSession
+import com.alpha.assistant.cloud.Endpoints
+import com.alpha.assistant.cloud.bearerHeaders
+import com.alpha.assistant.cloud.checked
+import com.alpha.assistant.cloud.reply
+import com.alpha.assistant.cloud.utf8
 import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.tools.three.ThreeSceneAssetCleanup
 import com.alpha.assistant.tools.three.ThreeSceneAssetRef
 import com.alpha.assistant.tools.three.ThreeSceneAssets
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -19,20 +28,12 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
-import okhttp3.Call
-import okhttp3.Callback
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
 
-enum class ImageAspect(val wire: String) {
-    SQUARE("1:1"), LANDSCAPE("3:2"), EQUIRECTANGULAR("2:1");
+enum class ImageAspect(val wire: String, val ratio: Double) {
+    SQUARE("1:1", 1.0), LANDSCAPE("3:2", 1.5), EQUIRECTANGULAR("2:1", 2.0);
     companion object { fun read(wire: String) = entries.single { it.wire == wire } }
 }
 
@@ -100,39 +101,48 @@ internal data class ImagePlan(val requests: List<ImageIntent> = emptyList(), val
     }
 }
 
-internal enum class ImageModel(val wire: String, val title: String, val providerId: String, val route: String) {
-    QWEN("qwen/qwen-image-2.1-turbo", "Qwen Image 2.1 Turbo", "openrouter", "alibaba"),
-    SEEDREAM("bytedance-seed/seedream-4.5", "Seedream 4.5", "openrouter", "seed");
+internal enum class ImageModel(val wire: String, val title: String, val provider: AiProvider, val route: String?) {
+    QWEN("qwen/qwen-image-2.1-turbo", "Qwen Image 2.1 Turbo", AiProvider.OPENROUTER, "alibaba"),
+    SEEDREAM("bytedance-seed/seedream-4.5", "Seedream 4.5", AiProvider.OPENROUTER, "seed"),
+    GPT_IMAGE_FLARE("gpt-image-2.6-flare", "GPT Image 2.6 Flare", AiProvider.OPENAI, null),
+    GPT_IMAGE_SUNBURST("gpt-image-2.6-sunburst", "GPT Image 2.6 Sunburst", AiProvider.OPENAI, null);
 }
 
-internal class ImageSettings(context: Context, name: String = "alpha_images") {
+/** The image settings of the stored AI account. Only a provider with the images capability can generate (spec 11.1, 11.5). */
+internal class ImageSettings(context: Context, private val keys: SecureKeyStore = SecureKeyStore(context), name: String = STORE) {
+    companion object {
+        /** The preference file of the app. */
+        const val STORE = "alpha_images"
+    }
     private val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
-    private val keys = SecureKeyStore(context, "${name}_credentials", "alpha.${name}.openrouter.v1")
     data class Selection(val model: ImageModel, val consent: String, val access: Long)
-    val model: ImageModel get() = ImageModel.entries.firstOrNull { it.name == prefs.getString("model", null) } ?: ImageModel.QWEN
+    private val provider: AiProvider?
+        get() = keys.provider()?.takeIf { Capability.IMAGES in it.profile.capabilities }
+    val available: Boolean get() = provider != null
+    /** The models of [provider], with no key read. The list is empty when [provider] cannot generate images. */
+    fun models(provider: AiProvider?): List<ImageModel> = ImageModel.entries.filter { it.provider == provider }
+    private val stored: ImageModel? get() = prefs.getString("model", null)?.let { name -> ImageModel.entries.firstOrNull { it.name == name } }
+    /** The stored model when it belongs to the account provider. Otherwise the first model of that provider. */
+    val model: ImageModel? get() = model(provider)
+    /** The stored model when it belongs to [provider], otherwise the first model of [provider]. No key is read. */
+    fun model(provider: AiProvider?): ImageModel? = models(provider).let { list -> stored?.takeIf { it in list } ?: list.firstOrNull() }
     val enabled get() = prefs.getBoolean("enabled", false)
-    val hasKey get() = keys.consented()
     private val access get() = prefs.getLong("access", 0)
-    fun selection(): Selection? = if (enabled) keys.consentIdentity()?.let { Selection(model, it, access) } else null
+    fun selection(): Selection? = if (enabled) model?.let { chosen -> keys.consentIdentity()?.let { Selection(chosen, it, access) } } else null
     fun isCurrent(selection: Selection) = enabled && access == selection.access && keys.consentIdentity() == selection.consent
     fun key(selection: Selection): String {
         check(isCurrent(selection))
-        return checkNotNull(keys.read().getOrThrow()).also { require(it.none { c -> c.isWhitespace() || c.isISOControl() }) }
-    }
-    fun saveKey(value: String): Result<Unit> = runCatching {
-        val key = value.trim()
-        require(key.length in 1..8192 && key.none { it.isWhitespace() || it.isISOControl() })
-        keys.save(key).getOrThrow()
-    }
-    fun clearKey() = runCatching {
-        setEnabled(false).getOrThrow()
-        keys.clear().getOrThrow()
+        val account = checkNotNull(keys.account().getOrThrow())
+        check(account.provider == selection.model.provider)
+        return account.key.also { require(it.none { c -> c.isWhitespace() || c.isISOControl() }) }
     }
     fun setEnabled(value: Boolean): Result<Unit> = runCatching {
-        check(!value || hasKey)
+        check(!value || available)
         check(prefs.edit().putBoolean("enabled", value).putLong("access", access + 1).commit())
     }
     fun select(value: ImageModel) { prefs.edit().putString("model", value.name).apply() }
+    /** Keeps the model choice made for [provider]. A stored model names its provider, and a choice for a different one resets (spec 6.7). */
+    fun keepFor(provider: AiProvider) { if (stored?.provider != provider) prefs.edit().remove("model").apply() }
     fun observeAccess(change: () -> Unit): java.io.Closeable {
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, field ->
             if (field == null || field == "access") change()
@@ -161,7 +171,7 @@ internal data class GeneratedImage(
         fun read(value: JSONObject): GeneratedImage {
             val asset = ThreeSceneAssetRef(value.getString("id"), value.getString("name"),
                 value.getString("mime"), value.getLong("size"))
-            require(asset.id.matches(Regex("[0-9a-f]{64}")) && asset.size in 1..10_485_760 &&
+            require(asset.id.matches(Regex("[0-9a-f]{64}")) && asset.size in 1..MAX_IMAGE_BYTES &&
                 asset.mime in imageTypes && asset.name.length in 1..120)
             val slot = value.getString("slot")
             val alt = value.getString("alt")
@@ -170,7 +180,7 @@ internal data class GeneratedImage(
             val width = value.getInt("width")
             val height = value.getInt("height")
             val model = value.getString("model")
-            require(width in 1..4096 && height in 1..4096 && model.length in 1..160)
+            require(width in 1..MAX_IMAGE_EDGE && height in 1..MAX_IMAGE_EDGE && model.length in 1..160)
             return GeneratedImage(slot, alt, aspect, asset, width, height, model,
                 value.optDouble("cost").takeIf(Double::isFinite), value.optString("provider").takeIf(String::isNotEmpty),
                 value.optString("receipt").takeIf(String::isNotEmpty))
@@ -185,6 +195,9 @@ internal data class GeneratedImage(
     }
 }
 
+private const val RATIO_TOLERANCE = .08
+private const val MAX_IMAGE_BYTES = 10_485_760
+private const val MAX_IMAGE_EDGE = 4096
 private val imageTypes = setOf("image/png", "image/jpeg", "image/webp")
 internal data class ProviderImage(val bytes: ByteArray, val mime: String? = null, val cost: Double? = null, val receipt: String? = null)
 internal fun interface ImageProvider {
@@ -194,7 +207,7 @@ internal fun interface ImageProvider {
 internal class ImageGeneration(
     private val context: Context,
     val settings: ImageSettings = ImageSettings(context),
-    private val providers: Map<String, ImageProvider> = mapOf("openrouter" to OpenRouterImages),
+    private val providers: Map<String, ImageProvider> = imageProviders(Endpoints.PRODUCTION),
 ) {
     private val assets = ThreeSceneAssets(context)
     private val cleanup = ThreeSceneAssetCleanup(context)
@@ -213,7 +226,7 @@ internal class ImageGeneration(
             ensureCurrent(selection)
             val work = async(Dispatchers.IO, start = CoroutineStart.LAZY) {
                 withTimeoutOrNull(if (limit == 1) 125_000L else 240_000L) {
-                    val provider = providers.getValue(selection.model.providerId)
+                    val provider = providers.getValue(selection.model.provider.id)
                     val key = settings.key(selection)
                     ensureCurrent(selection)
                     currentCoroutineContext().ensureActive()
@@ -225,7 +238,11 @@ internal class ImageGeneration(
                             withTimeoutOrNull(120_000L) { provider.generate(key, selection.model, intent) }
                                 ?: throw unknownOutcome()
                         }
-                        catch (failure: IOException) {
+                        catch (failure: CloudFailure) {
+                            // The provider answered with an error, so the outcome is known.
+                            currentCoroutineContext().ensureActive()
+                            throw ImageFailure(failure.message)
+                        } catch (failure: IOException) {
                             currentCoroutineContext().ensureActive()
                             throw unknownOutcome()
                         } catch (failure: IllegalArgumentException) {
@@ -233,20 +250,15 @@ internal class ImageGeneration(
                         }
                         currentCoroutineContext().ensureActive()
                         ensureCurrent(selection)
-                        if (output.bytes.size !in 1..10_485_760) throw ImageFailure(context.getString(R.string.image_invalid))
+                        if (output.bytes.size !in 1..MAX_IMAGE_BYTES) throw ImageFailure(context.getString(R.string.image_invalid))
                         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                         BitmapFactory.decodeByteArray(output.bytes, 0, output.bytes.size, bounds)
                         val width = bounds.outWidth
                         val height = bounds.outHeight
                         val mime = bounds.outMimeType
-                        val ratio = when (intent.aspect) {
-                            ImageAspect.SQUARE -> 1.0
-                            ImageAspect.LANDSCAPE -> 1.5
-                            ImageAspect.EQUIRECTANGULAR -> 2.0
-                        }
-                        if (width !in 1..4096 || height !in 1..4096 ||
+                        if (width !in 1..MAX_IMAGE_EDGE || height !in 1..MAX_IMAGE_EDGE ||
                             mime !in imageTypes || output.mime != null && output.mime != mime ||
-                            kotlin.math.abs(width.toDouble() / height - ratio) > .08) {
+                            kotlin.math.abs(width.toDouble() / height - intent.aspect.ratio) > RATIO_TOLERANCE) {
                             throw ImageFailure(context.getString(R.string.image_invalid))
                         }
                         val decoded = BitmapFactory.decodeByteArray(output.bytes, 0, output.bytes.size,
@@ -257,7 +269,7 @@ internal class ImageGeneration(
                         currentCoroutineContext().ensureActive()
                         ensureCurrent(selection)
                         GeneratedImage(intent.slot, intent.alt, intent.aspect, asset, width, height, selection.model.wire,
-                            output.cost, selection.model.providerId, output.receipt)
+                            output.cost, selection.model.provider.id, output.receipt)
                     }
                 } ?: throw unknownOutcome()
             }
@@ -298,43 +310,99 @@ internal class ImageGeneration(
 
 internal class ImageFailure(message: String, val unknownOutcome: Boolean = false) : RuntimeException(message)
 
-private object OpenRouterImages : ImageProvider {
-    private val client = OkHttpClient.Builder().callTimeout(120, TimeUnit.SECONDS).readTimeout(110, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false).build()
+internal fun imageProviders(endpoints: Endpoints): Map<String, ImageProvider> =
+    mapOf(AiProvider.OPENROUTER.id to OpenRouterImages(endpoints), AiProvider.OPENAI.id to OpenAiImages(endpoints))
 
-    override suspend fun generate(key: String, model: ImageModel, intent: ImageIntent): ProviderImage =
-        suspendCancellableCoroutine { continuation ->
-            val body = JSONObject().put("model", model.wire).put("prompt", intent.prompt)
-                .put("resolution", if (model == ImageModel.SEEDREAM) "2K" else "1K").put("aspect_ratio", intent.aspect.wire).put("n", 1)
-                .put("provider", JSONObject().put("only", JSONArray().put(model.route)).put("allow_fallbacks", false))
-                .toString()
-            val call = client.newCall(Request.Builder().url("https://openrouter.ai/api/v1/images")
-                .header("Authorization", "Bearer $key").post(body.toRequestBody("application/json".toMediaType())).build())
-            continuation.invokeOnCancellation { call.cancel() }
-            call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) = continuation.resumeWith(Result.failure(e))
-                override fun onResponse(call: Call, response: Response) {
-                    continuation.resumeWith(runCatching {
-                        response.use {
-                            if (!it.isSuccessful) throw ImageFailure("OpenRouter returned HTTP ${it.code}.")
-                            val source = checkNotNull(it.body).source()
-                            require(!source.request(16L * 1024 * 1024 + 1))
-                            val json = JSONObject(source.readUtf8())
-                            val data = json.getJSONArray("data")
-                            require(data.length() == 1)
-                            val item = data.getJSONObject(0)
-                            ProviderImage(Base64.decode(item.getString("b64_json"), Base64.DEFAULT),
-                                item.optString("media_type").takeIf(String::isNotBlank),
-                                json.optJSONObject("usage")?.optDouble("cost")?.takeIf(Double::isFinite),
-                                sequenceOf(json.optString("id"), it.header("x-generation-id"), it.header("x-request-id"))
-                                    .filterNotNull().firstOrNull { id -> id.matches(Regex("[A-Za-z0-9_.:-]{1,160}")) }
-                                    ?: json.optLong("created").takeIf { time -> time > 0 }?.toString())
-                        }
-                    }.recoverCatching { failure ->
-                        if (failure is org.json.JSONException) throw IllegalArgumentException("Invalid image response")
-                        throw failure
-                    })
-                }
-            })
+private const val MAX_IMAGE_RESPONSE = 16 * 1024 * 1024
+
+/** The read timeout stays below the 120 second limit of one image in [ImageGeneration]. */
+private val imageHttp = CloudHttp(null, 110_000)
+
+/**
+ * Sends one image request and gives [read] the JSON reply and a reader of the response headers. A canceled
+ * coroutine disconnects only this request. An HTTP error becomes the [providerFailure] of [provider]. An invalid
+ * reply becomes an [IllegalArgumentException].
+ */
+private suspend fun <T> imageReply(provider: AiProvider, endpoints: Endpoints, path: String, key: String, body: JSONObject,
+    read: (JSONObject, (String) -> String?) -> T): T =
+    imageHttp.reply(provider, endpoints.checked(provider) + path, bearerHeaders(key) + ("Accept" to "application/json"),
+        "application/json", body.utf8(), MAX_IMAGE_RESPONSE, CloudSession()) { bytes, header ->
+        require(bytes != null)
+        val reply = try { JSONObject(String(bytes, Charsets.UTF_8)) } catch (_: org.json.JSONException) { throw IllegalArgumentException("Invalid image response") }
+        try { read(reply, header) } catch (_: org.json.JSONException) { throw IllegalArgumentException("Invalid image response") }
+    }
+
+/** The one image of `data[0].b64_json` in [reply]. */
+private fun JSONObject.firstImage(): ByteArray {
+    val data = getJSONArray("data")
+    require(data.length() == 1)
+    return Base64.decode(data.getJSONObject(0).getString("b64_json"), Base64.DEFAULT)
+}
+
+private val RECEIPT = Regex("[A-Za-z0-9_.:-]{1,160}")
+
+internal class OpenRouterImages(private val endpoints: Endpoints) : ImageProvider {
+    override suspend fun generate(key: String, model: ImageModel, intent: ImageIntent): ProviderImage {
+        val body = JSONObject().put("model", model.wire).put("prompt", intent.prompt)
+            .put("resolution", if (model == ImageModel.SEEDREAM) "2K" else "1K").put("aspect_ratio", intent.aspect.wire).put("n", 1)
+            .put("provider", JSONObject().put("only", JSONArray().put(checkNotNull(model.route)))
+                .put("allow_fallbacks", false))
+        return imageReply(AiProvider.OPENROUTER, endpoints, "/api/v1/images", key, body) { json, header ->
+            ProviderImage(json.firstImage(), json.getJSONArray("data").getJSONObject(0).optString("media_type").takeIf(String::isNotBlank),
+                json.optJSONObject("usage")?.optDouble("cost")?.takeIf(Double::isFinite),
+                sequenceOf(json.optString("id"), header("x-generation-id"), header("x-request-id"))
+                    .filterNotNull().firstOrNull { RECEIPT.matches(it) }
+                    ?: json.optLong("created").takeIf { time -> time > 0 }?.toString())
         }
+    }
+}
+
+/**
+ * OpenAI Images API. The size list comes from the OpenAI image generation guide, checked on 2026-11-16
+ * (https://developers.openai.com/api/docs/guides/image-generation): the recommended sizes are 1024x1024, 1536x1024,
+ * and 1024x1536. The guide gives no 2:1 size for the 2.6 models, so a 2:1 image is a 1536x1024 image with its center
+ * cut to 1536x768 (spec 11.6). shortcut: the guide allows custom sizes such as 1536x864 for the 2.5 models only,
+ * so request 1536x768 directly when the guide lists custom sizes for the 2.6 models.
+ */
+internal class OpenAiImages(private val endpoints: Endpoints) : ImageProvider {
+    override suspend fun generate(key: String, model: ImageModel, intent: ImageIntent): ProviderImage {
+        val size = if (intent.aspect == ImageAspect.SQUARE) "1024x1024" else "1536x1024"
+        val body = JSONObject().put("model", model.wire).put("prompt", intent.prompt).put("size", size).put("n", 1)
+        return imageReply(AiProvider.OPENAI, endpoints, AI_IMAGES_PATH, key, body) { json, header ->
+            ProviderImage(cropToAspect(json.firstImage(), intent.aspect), receipt = header("x-request-id")?.takeIf { RECEIPT.matches(it) }
+                ?: json.optLong("created").takeIf { time -> time > 0 }?.toString())
+        }
+    }
+
+    private companion object { const val AI_IMAGES_PATH = "/v1/images/generations" }
+}
+
+/**
+ * Cuts the center of [bytes] to the ratio of [aspect] when the image is off that ratio by more than the check in
+ * [ImageGeneration] allows. The output keeps the format of the input. Bytes that are not an image stay unchanged.
+ */
+internal fun cropToAspect(bytes: ByteArray, aspect: ImageAspect): ByteArray {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    val target = aspect.ratio
+    // An image over a limit stays unchanged, so the check in generate rejects it before any full decode.
+    if (bytes.size > MAX_IMAGE_BYTES || bounds.outWidth !in 1..MAX_IMAGE_EDGE || bounds.outHeight !in 1..MAX_IMAGE_EDGE ||
+        kotlin.math.abs(bounds.outWidth.toDouble() / bounds.outHeight - target) <= RATIO_TOLERANCE) return bytes
+    val format = when (bounds.outMimeType) {
+        "image/png" -> Bitmap.CompressFormat.PNG
+        "image/jpeg" -> Bitmap.CompressFormat.JPEG
+        "image/webp" -> Bitmap.CompressFormat.WEBP_LOSSLESS
+        else -> return bytes
+    }
+    val source = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return bytes
+    var cut: Bitmap? = null
+    try {
+        val width = if (source.width.toDouble() / source.height > target) (source.height * target).toInt() else source.width
+        val height = if (source.width.toDouble() / source.height > target) source.height else (source.width / target).toInt()
+        cut = Bitmap.createBitmap(source, (source.width - width) / 2, (source.height - height) / 2, width, height)
+        return java.io.ByteArrayOutputStream().also { check(cut.compress(format, 95, it)) }.toByteArray()
+    } finally {
+        if (cut !== source) cut?.recycle()
+        source.recycle()
+    }
 }

@@ -116,9 +116,9 @@
     <string name="automation_agent_action">Задача Alphy</string>
     <string name="automation_agent_destination">Результат появится в чате «%1$s». Уведомление откроет этот чат.</string>
     <string name="automation_agent_missing_chat">Чат недоступен</string>
-    <string name="automation_agent_consent">Alphy отправляет в DeepSeek инструкцию, время запуска и поисковые запросы. Доступны открытые веб-источники.</string>
+    <string name="automation_agent_consent">Alphy отправляет в сервис ИИ инструкцию, время запуска и поисковые запросы. Доступны открытые веб-источники.</string>
     <string name="automation_agent_timing">Подготовка начинается за 15 минут. Если Android задержит работу, доставка возможна в течение часа после указанного времени.</string>
-    <string name="automation_agent_test_scope">Проверка отправит задачу в DeepSeek и покажет ответ здесь. Расписание и уведомления не запускаются.</string>
+    <string name="automation_agent_test_scope">Проверка отправит задачу в сервис ИИ и покажет ответ здесь. Расписание и уведомления не запускаются.</string>
     <string name="automation_calendar_sync_retired">Сценарий отключён. Синхронизация календаря с мини-приложением больше недоступна.</string>
     <string name="automation_retired_history">Журнал запусков</string>
 </resources>

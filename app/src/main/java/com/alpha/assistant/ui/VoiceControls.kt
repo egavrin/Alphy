@@ -11,6 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,6 +22,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
@@ -28,8 +30,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.alpha.assistant.R
+import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.surfaces.AssistCapture
+import com.alpha.assistant.voice.SpeechSource
 import com.alpha.assistant.voice.VoiceSession
+import com.alpha.assistant.voice.VoiceSettings
+import com.alpha.assistant.voice.speechSources
 
 @Composable fun VoiceVisibility(voice: VoiceSession) {
     val context = LocalContext.current
@@ -137,27 +143,84 @@ import com.alpha.assistant.voice.VoiceSession
     }
 }
 
-@Composable fun VoiceControls(model: ShellViewModel, settingsDisclosure: Boolean = false) {
+/** [settings] opens «Сервис ИИ». */
+@Composable fun VoiceControls(model: ShellViewModel, settings: () -> Unit, inSettings: Boolean = false) {
     val voice = model.voice
     val start = rememberVoiceStart(model, oneShot = false)
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(vertical = 12.dp)) {
         Text(stringResource(R.string.voice_session), style = MaterialTheme.typography.titleMedium)
         Text(stringResource(R.string.voice_session_text))
-        if (!settingsDisclosure) VoiceModelDetails()
+        VoiceNote(model.accountProvider)
+        if (inSettings) {
+            ReadAloudSwitch(voice.settings)
+            SpeechSourceChoice(voice.settings, model.accountProvider)
+        }
         if (voice.permissionRequired) MicrophonePermissionGuidance(voice, start)
-        else if (voice.status.isNotBlank()) StatusLine(Glyph.Mic, MaterialTheme.colorScheme.onSurfaceVariant, voice.status)
+        else VoiceStatus(voice, settings)
         if (voice.partial.isNotBlank()) Text(voice.partial)
         if (voice.active) FilledTonalButton(onClick = { voice.stop() }) { Text(stringResource(R.string.voice_stop)) }
-        else if (settingsDisclosure) Button(onClick = start, shape = MaterialTheme.shapes.small) { Text(stringResource(R.string.voice_start)) }
+        else if (inSettings) Button(onClick = start, shape = MaterialTheme.shapes.small) { Text(stringResource(R.string.voice_start)) }
         else FilledTonalButton(onClick = start) { Text(stringResource(R.string.voice_start)) }
-        if (settingsDisclosure) SettingsDisclosure(R.string.settings_voice_disclosure) { VoiceModelDetails() }
     }
 }
 
+/** The microphone note names the path of the account (spec 12A.8). Without an account, voice input does not start, so no note shows. */
 @Composable
-private fun VoiceModelDetails() {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(stringResource(R.string.voice_models))
-        Text(stringResource(R.string.voice_licenses))
+private fun VoiceNote(provider: AiProvider?) {
+    if (provider == null) return
+    Text(if (provider.profile.transcription == null) stringResource(R.string.voice_note_phone)
+        else stringResource(R.string.voice_note_cloud, provider.displayName))
+}
+
+/** «Читать ответы вслух» (spec 12.2). The row is the switch, so its text labels the switch. */
+@Composable
+private fun ReadAloudSwitch(settings: VoiceSettings) {
+    var on by remember(settings) { mutableStateOf(settings.readAloud) }
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(on, role = Role.Switch) { on = it; settings.readAloud = it },
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.voice_read_aloud), Modifier.weight(1f))
+        Switch(on, onCheckedChange = null)
+    }
+}
+
+/**
+ * «Источник голоса» (spec 12.2). «Облако» shows only when [provider] has cloud voice. Without it, «Телефон» shows, and the
+ * stored choice stays. The choice asks for no consent: the consent of the account already names the reply text (spec 14.7).
+ */
+@Composable
+private fun SpeechSourceChoice(settings: VoiceSettings, provider: AiProvider?) {
+    var source by remember(settings, provider) { mutableStateOf(settings.sourceFor(provider)) }
+    val phone = stringResource(R.string.voice_source_phone)
+    val cloud = stringResource(R.string.voice_source_cloud)
+    SettingsChoice(R.string.voice_source, speechSources(provider), source, { if (it == SpeechSource.CLOUD) cloud else phone }) {
+        settings.source = it
+        source = it
+    }
+}
+
+/**
+ * The last reply was not read (spec 12.4): the status. Only for a missing Russian voice, also «Открыть настройки» for the
+ * system speech settings when the phone has them.
+ */
+@Composable internal fun SpeechStatus(voice: VoiceSession) {
+    if (voice.speechStatus.isBlank()) return
+    val context = LocalContext.current
+    StatusLine(Glyph.Mic, MaterialTheme.colorScheme.onSurfaceVariant, voice.speechStatus, PoliteLiveRegion)
+    val speechSettings = remember(context) {
+        Intent("com.android.settings.TTS_SETTINGS").takeIf { it.resolveActivity(context.packageManager) != null }
+    }
+    if (voice.speechVoiceMissing && speechSettings != null) TextButton(onClick = { runCatching { context.startActivity(speechSettings) } },
+        Modifier.heightIn(min = 48.dp)) {
+        Text(stringResource(R.string.open_settings))
+    }
+}
+
+/** The status of the last voice input and its fix: «Открыть настройки» (spec 12A.6) or «Скачать русский язык» (spec 12A.5). */
+@Composable internal fun VoiceStatus(voice: VoiceSession, settings: () -> Unit) {
+    if (voice.status.isNotBlank()) StatusLine(Glyph.Mic, MaterialTheme.colorScheme.onSurfaceVariant, voice.status, PoliteLiveRegion)
+    SpeechStatus(voice)
+    if (voice.settingsRequired) TextButton(onClick = settings, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.open_settings)) }
+    if (voice.downloadOffered) TextButton(onClick = voice::downloadLanguage, Modifier.heightIn(min = 48.dp)) {
+        Text(stringResource(R.string.voice_phone_download))
     }
 }

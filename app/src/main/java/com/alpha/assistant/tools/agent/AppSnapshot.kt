@@ -22,6 +22,7 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.alpha.assistant.cloud.ImageInput
 import com.alpha.assistant.tools.ToolContent
 import com.alpha.assistant.tools.ToolPreview
 import com.alpha.assistant.tools.three.ThreeSceneAssets
@@ -87,11 +88,12 @@ internal object AppSnapshot {
         }
     }
 
-    /** A JPEG data URL, small enough to send with a model turn. */
+    /** A JPEG data URL, small enough to send with a model turn. It goes through the 2048 px limit of every picture. */
     fun dataUrl(bitmap: Bitmap): String {
         val bytes = ByteArrayOutputStream()
         check(bitmap.compress(Bitmap.CompressFormat.JPEG, 80, bytes))
-        return "data:image/jpeg;base64," + Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP)
+        val (sent, mime) = ImageInput.forSending(bytes.toByteArray(), "image/jpeg")
+        return "data:$mime;base64," + Base64.encodeToString(sent, Base64.NO_WRAP)
     }
 
     private fun Image.toBitmap(width: Int, height: Int): Bitmap {

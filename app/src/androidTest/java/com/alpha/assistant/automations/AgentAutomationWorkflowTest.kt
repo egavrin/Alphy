@@ -1,5 +1,6 @@
 package com.alpha.assistant.automations
 
+import com.alpha.assistant.cloud.AiProvider
 import android.Manifest
 import android.app.NotificationManager
 import android.database.sqlite.SQLiteDatabase
@@ -59,7 +60,7 @@ class AgentAutomationWorkflowTest {
                 emit(CloudEvent.RoundComplete(response, false))
             }
         }
-        assertTrue(keys.save("alpha-test-only").isSuccess)
+        assertTrue(keys.save("alpha-test-only", AiProvider.OPENAI).isSuccess)
         try {
             ShellStore(context).use { shell ->
                 shell.saveConversation(saved)
@@ -165,7 +166,7 @@ class AgentAutomationWorkflowTest {
                                 withTimeout(5000) { entered.await() }
                                 when (change) {
                                     "pause" -> assertTrue(store.pause(rule.id, rule.revision))
-                                    "key change" -> assertTrue(keys.save("alpha-test-rotated").isSuccess)
+                                    "key change" -> assertTrue(keys.save("alpha-test-rotated", AiProvider.OPENAI).isSuccess)
                                     else -> shell.deleteConversation(chat)
                                 }
                                 AgentAutomationRuntime.reconcile(context, store, now, clock)
@@ -210,7 +211,7 @@ class AgentAutomationWorkflowTest {
                 emit(CloudEvent.RoundComplete("The Moon orbits Earth.", false))
             }
         }
-        assertTrue(keys.save("alpha-test-only").isSuccess)
+        assertTrue(keys.save("alpha-test-only", AiProvider.OPENAI).isSuccess)
         try {
             ShellStore(context).use { shell ->
                 shell.saveConversation(Conversation(chat, "Exact delivery destination", now, now))

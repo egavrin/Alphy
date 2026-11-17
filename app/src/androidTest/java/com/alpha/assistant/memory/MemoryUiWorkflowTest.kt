@@ -15,6 +15,7 @@ import com.alpha.assistant.R
 import com.alpha.assistant.ui.AlphaTheme
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
+import com.alpha.assistant.ui.removeSemanticIndexes
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -32,6 +33,7 @@ class MemoryUiWorkflowTest {
     @After fun remove() {
         store.close()
         fixture.context.deleteDatabase(name)
+        removeSemanticIndexes(fixture.context, "memory:$name")
         fixture.remove()
     }
 

@@ -1,6 +1,7 @@
 package com.alpha.assistant.tools
 
 import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.removeShellIndexes
 import com.alpha.assistant.ui.seedOpenChat
 import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import android.os.SystemClock
@@ -19,6 +20,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.UUID
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 /** Failure cases encoded before implementation: forged/mistyped/duplicate choices, invalid ranges and dates,
  * inactive pager actions, hidden modal dismissals, duplicate interaction IDs, unsupported keys/semantics,
@@ -130,10 +135,10 @@ class NativeMaterialWorkflowTest {
             val all=getJSONArray("children");put("children",JSONArray().apply {repeat(all.length()){val child=all.getJSONObject(it);if(child.getString("type") in setOf("segmented","button","dialog","pager"))put(child)}})
         });tools.saveTool(ToolRecord("material",1,1,selected.json,selected.initialState,selected.ui.toString(),"chat",true),true)
         shell.saveConversation(Conversation("chat","Native Material",1,1,messages=listOf(Message("artifact","assistant","Native controls are ready.",1,"complete",toolId="material",toolRevision=1))))
-        shell.seedOpenChat("chat");keys.save("offline-fixture-only").getOrThrow()
+        shell.seedOpenChat("chat");keys.save("offline-fixture-only", AiProvider.OPENAI).getOrThrow()
         lateinit var model:ShellViewModel
         val provider=object:ChatProvider {override suspend fun respond(key:String,request:CloudRequest,session:CloudSession,emit:suspend(CloudEvent)->Unit) {error("Offline workflow must not call a provider")}}
-        CloudTestActivity.factory={ShellViewModel(it,provider,shell,keys).openSeededChat(shell).also {created->model=created}}
+        CloudTestActivity.factory={ShellViewModel(it,provider,shell,keys, legacy = isolatedLegacyKeys(it), models = isolatedModels(it), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(shell).also {created->model=created}}
         val diagnostics=UiFailureDiagnostics("material-presentation").apply {state={"state="+tools.tool("material")?.state}}
         fun find(label:String,node:AccessibilityNodeInfo?=diagnostics.freshRoot()):AccessibilityNodeInfo? {if(node==null)return null;if(node.text?.toString()==label||node.contentDescription?.toString()==label)return node;repeat(node.childCount){find(label,node.getChild(it))?.let{return it}};return null}
         fun await(message:String,condition:()->Boolean) {val end=SystemClock.uptimeMillis()+15000;while(SystemClock.uptimeMillis()<end){if(condition())return;SystemClock.sleep(50)};diagnostics.capture("wait-timeout");fail(message)}
@@ -166,7 +171,7 @@ class NativeMaterialWorkflowTest {
             click("Далее: Pages");await("Pager did not change"){JSONObject(tools.tool("material")!!.state).getInt("page")==1&&!model.tools.busy};capture("page-2")
             scenario.recreate();shown("Second page");assertEquals("b",JSONObject(tools.tool("material")!!.state).getString("mode"));capture("reopened")
         };assertTrue(tools.effects("material").isEmpty());println("NATIVE_MATERIAL choice=PASS dialog=PASS pager=PASS reopen=PASS effects=0")}
-        finally {CloudTestActivity.factory=null;tools.close();shell.close();keys.clear();app.deleteDatabase("$name.db");app.deleteDatabase(toolDatabase);app.deleteSharedPreferences(name);java.security.KeyStore.getInstance("AndroidKeyStore").apply{load(null);deleteEntry(name)}}
+        finally {CloudTestActivity.factory=null;tools.close();shell.close();keys.clear();app.deleteDatabase("$name.db");app.deleteDatabase(toolDatabase);removeShellIndexes(app,"$name.db");app.deleteSharedPreferences(name);java.security.KeyStore.getInstance("AndroidKeyStore").apply{load(null);deleteEntry(name)}}
     }
 }
 internal object NativeMaterialFixture {

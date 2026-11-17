@@ -1,6 +1,7 @@
 package com.alpha.assistant.tools
 
 import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.removeShellIndexes
 import com.alpha.assistant.ui.seedOpenChat
 import android.app.Activity
 import android.app.Instrumentation
@@ -53,6 +54,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 /** Black-box failure cases: stale or inactive chat cards, lost app context/draft, scrolling composer,
  * active candidate controls, accidental apply, and lost apply/discard controls with long content.
@@ -205,7 +210,7 @@ class MiniAppPresentationWorkflowTest {
         if(secondReference) shell.saveConversation(Conversation("other","Second discussion",2,2,
             messages=listOf(Message("second-artifact","assistant","Second card.",2,"complete",toolId=tool.id,toolRevision=1))))
         if(showChat) shell.seedOpenChat("chat")
-        keys.save("presentation-fixture-only").getOrThrow()
+        keys.save("presentation-fixture-only", AiProvider.OPENAI).getOrThrow()
         lateinit var model: ShellViewModel
         val responder=provider ?: object: ChatProvider {
             override suspend fun respond(key: String,request: CloudRequest,session: CloudSession,emit: suspend (CloudEvent)->Unit) {
@@ -213,7 +218,7 @@ class MiniAppPresentationWorkflowTest {
                 emit(CloudEvent.Text(ItineraryFixture.spec("Revised lake day")))
             }
         }
-        CloudTestActivity.factory={ShellViewModel(it,responder,shell,keys).openSeededChat(shell).also {created -> model=created}}
+        CloudTestActivity.factory={ShellViewModel(it,responder,shell,keys, legacy = isolatedLegacyKeys(it), models = isolatedModels(it), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(shell).also {created -> model=created}}
         try {
             ActivityScenario.launch(CloudTestActivity::class.java).use {scenario ->
                 waitUntil {!model.loading && !model.tools.busy}
@@ -221,7 +226,7 @@ class MiniAppPresentationWorkflowTest {
             }
         } finally {
             CloudTestActivity.factory=null; SystemClock.sleep(150); tools.close(); shell.close()
-            app.deleteDatabase("$name.db"); app.deleteDatabase("$name.db-tools.db")
+            app.deleteDatabase("$name.db"); app.deleteDatabase("$name.db-tools.db"); removeShellIndexes(app, "$name.db")
             keys.clear(); app.deleteSharedPreferences(name)
             java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null); deleteEntry(name)}
         }

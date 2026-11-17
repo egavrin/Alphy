@@ -1,5 +1,6 @@
 package com.alpha.assistant.automations
 
+import com.alpha.assistant.cloud.AiProvider
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Intent
@@ -82,7 +83,7 @@ class LegacyCleanupUpgradeWorkflowTest {
                 store.setState("cleanup-fixture-ids",JSONArray(listOf(scheduled.id,pending.id)).toString())
                 assertNotNull(store.oneTimeRule(AutomationOneTime.request(store,pending)))
             }
-            keys.save("legacy-cleanup-fixture-key").getOrThrow()
+            keys.save("legacy-cleanup-fixture-key", AiProvider.OPENAI).getOrThrow()
             return@runBlocking
         }
 

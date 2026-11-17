@@ -13,6 +13,7 @@ import com.alpha.assistant.tools.ToolStore
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ArtifactCoordinator
+import com.alpha.assistant.ui.removeSemanticIndexes
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -304,6 +305,7 @@ class AgentWorkflowTest {
             }
         } finally {
             listOf("$prefix.db", "$prefix-memory.db", "$prefix-tools.db").forEach(context::deleteDatabase)
+            removeSemanticIndexes(context, "memory:$prefix-memory.db")
         }
     }
 }

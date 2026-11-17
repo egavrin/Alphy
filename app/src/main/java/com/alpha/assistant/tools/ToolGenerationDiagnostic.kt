@@ -98,7 +98,7 @@ internal class ToolGenerationTrace(
 /** Only known failure codes leave the device. Any other code becomes "unknown". */
 internal fun safeGenerationCode(code: String)=code.takeIf {it in safeGenerationCodes || it.matches(Regex("http_[0-9]{3}"))} ?: "unknown"
 
-private val safeGenerationCodes=setOf("none","unknown","auth","cancelled","empty_response","incomplete","provider","quota","rate_limit",
+private val safeGenerationCodes=setOf("none","unknown","auth","cancelled","empty_response","incomplete","provider","quota","rate_limit","refusal",
     "response_length","response_size","stream_invalid","stream_timeout","stream_io","pre_headers_io",
     "pre_headers_timeout","source_attribution","decision_language",
     "unavailable","tool_invalid","tool_limit","widget_generation","widget_response_size",

@@ -18,6 +18,11 @@
         <intent><action android:name="android.intent.action.SET_ALARM" /></intent>
         <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>
         <intent><action android:name="android.intent.action.SEND" /><data android:mimeType="text/plain" /></intent>
+        <!-- SpeechRecognizer of the phone voice input (spec 12A.4). -->
+        <intent><action android:name="android.speech.RecognitionService" /></intent>
+        <!-- TextToSpeech of the phone voice output, and the system speech settings of its missing-voice status (spec 12.4). -->
+        <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
+        <intent><action android:name="com.android.settings.TTS_SETTINGS" /></intent>
         <package android:name="com.google.android.apps.maps" /><package android:name="com.autonavi.minimap" /><intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent></queries>
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />

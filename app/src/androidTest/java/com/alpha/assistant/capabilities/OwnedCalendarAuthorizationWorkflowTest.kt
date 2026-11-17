@@ -13,12 +13,17 @@ import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.data.ShellStore
 import com.alpha.assistant.tools.*
 import com.alpha.assistant.ui.ShellViewModel
+import com.alpha.assistant.ui.removeShellIndexes
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
 import java.util.UUID
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 /** Actual native clicks, isolated JavaScript, native controls and ordinary Calendar Provider writes. */
 class OwnedCalendarAuthorizationWorkflowTest {
@@ -98,7 +103,7 @@ class OwnedCalendarAuthorizationWorkflowTest {
             }
             lateinit var model: ShellViewModel
             val offline=object:ChatProvider {override suspend fun respond(key:String,request:CloudRequest,session:CloudSession,emit:suspend(CloudEvent)->Unit)=error("Offline UI fixture")}
-            CloudTestActivity.factory={ShellViewModel(it,offline,shell,keys).also {created->model=created}}
+            CloudTestActivity.factory={ShellViewModel(it,offline,shell,keys, legacy = isolatedLegacyKeys(it), models = isolatedModels(it), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).also {created->model=created}}
             ActivityScenario.launch(CloudTestActivity::class.java).use {
                 waitUntil {!model.loading && !model.tools.busy}
                 instrumentation.runOnMainSync {model.openSurface(tool.id)}
@@ -138,7 +143,7 @@ class OwnedCalendarAuthorizationWorkflowTest {
                 File(dir,"$stem.json").writeText(JSONObject().put("input",JSONObject().put("semantic",semantic).put("substitute",substitute).put("bulk",bulk).put("lateCreate",lateCreate))
                     .put("expectedRows",if(semantic && !substitute && !bulk)1 else 0).put("observedRows",count).put("effectStatus",effect.result.status).put("effectPhase",effect.phase).toString(2))
             }
-        }} finally {CloudTestActivity.factory=null;SystemClock.sleep(100);store.close();shell.close();context.deleteDatabase("$name.db");context.deleteDatabase("$name.db-tools.db");context.deleteSharedPreferences(name)}
+        }} finally {CloudTestActivity.factory=null;SystemClock.sleep(100);store.close();shell.close();context.deleteDatabase("$name.db");context.deleteDatabase("$name.db-tools.db"); removeShellIndexes(context, "$name.db");context.deleteSharedPreferences(name)}
     }
     @Test fun approvedPendingCreateRefreshesTheDisplayedDeleteAllSnapshot()=workflow(semantic=true,substitute=false,bulk=true,lateCreate=true)
     @Test fun oneSemanticClickDeletesAllFiveOwnedEventsWithoutAnotherDialog()=workflow(semantic=true,substitute=false,bulk=true)

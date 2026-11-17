@@ -120,7 +120,7 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
             CapabilityAction.DEVICE_READ -> CapabilityResult("unavailable","Чтение доступно только из открытого мини-приложения.")
             CapabilityAction.NETWORK_REQUEST -> CapabilityResult("unavailable","Сетевой запрос требует текущего сеанса мини-приложения.")
             CapabilityAction.IMAGE_GENERATE -> CapabilityResult("unavailable", "Для генерации изображения откройте мини-приложение.")
-            CapabilityAction.AI_ASK -> CapabilityResult("unavailable","Для запроса к DeepSeek откройте мини-приложение.")
+            CapabilityAction.AI_ASK -> CapabilityResult("unavailable","Для запроса к сервису ИИ откройте мини-приложение.")
             CapabilityAction.AUDIO_PLAYBACK -> CapabilityResult("unavailable","Воспроизведение доступно только из открытого мини-приложения.")
             CapabilityAction.VIDEO_PLAYBACK -> CapabilityResult("unavailable","Видео требует видимого элемента воспроизведения.")
             CapabilityAction.NOTIFICATION_POST -> {
@@ -205,7 +205,7 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
                 })
             }
         }
-        return CapabilityResult("succeeded","События выбранного календаря за указанный период прочитаны на устройстве. Данные не отправлялись в DeepSeek.",JSONObject().put("events",events).put("limit",50))
+        return CapabilityResult("succeeded","События выбранного календаря за указанный период прочитаны на устройстве. Данные не отправлялись в сервис ИИ.",JSONObject().put("events",events).put("limit",50))
     }
 
     companion object {
@@ -213,7 +213,7 @@ class AndroidCapabilities internal constructor(private val context: Context,priv
             if(resultCode == Activity.RESULT_CANCELED) return CapabilityResult("cancelled","Выбор в системном окне отменён.")
             if(resultCode != Activity.RESULT_OK) return CapabilityResult("unknownOutcome","Android не подтвердил результат выбора.")
             val uri = intent?.data
-            return if(uri?.scheme == "content") CapabilityResult("succeeded","Выбранные данные остаются на устройстве. Они не отправлялись в DeepSeek.",JSONObject().put("uri",uri.toString()))
+            return if(uri?.scheme == "content") CapabilityResult("succeeded","Выбранные данные остаются на устройстве. Они не отправлялись в сервис ИИ.",JSONObject().put("uri",uri.toString()))
                 else CapabilityResult("unknownOutcome","Android не вернул выбранные данные в поддерживаемом формате.")
         }
     }

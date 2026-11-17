@@ -9,7 +9,8 @@ import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
-import com.alpha.assistant.cloud.DeepSeekProvider
+import com.alpha.assistant.cloud.CloudChatProvider
+import com.alpha.assistant.cloud.Endpoints
 import com.alpha.assistant.data.Draft
 import com.alpha.assistant.semantic.SemanticRuntime
 import com.alpha.assistant.ui.ShellFixture
@@ -24,6 +25,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_IMAGES
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 @RunWith(AndroidJUnit4::class)
 class LivePhoneSelectionWorkflow {
@@ -49,11 +54,12 @@ class LivePhoneSelectionWorkflow {
         val report = JSONObject().put("revision", args.getString("testedRevision")).put("runId", runId)
             .put("cases", rows)
         fun save() = File(dir, "report.json").writeText(report.toString(2))
-        val credential = OneUseCredential.receive(runId) {
+        val account = OneUseCredential.receive(runId) {
             report.put("phase", "credentialReady")
             save()
         }
-        report.put("phase", "running")
+        val chatModel = account.liveChatModel()
+        report.put("phase", "running").put("provider", account.provider.id).put("model", chatModel)
         save()
 
         val calls = CopyOnWriteArrayList<JSONObject>()
@@ -75,7 +81,7 @@ class LivePhoneSelectionWorkflow {
                 calls += entry
                 session.decisionRejectionObserver = { rejections += "${it.stage}:${it.shape.rule}:${it.shape.path}" }
                 try {
-                    DeepSeekProvider("https://api.deepseek.com", onHttpCall = { http += stage }) {}.respond(credential, request, session) { event ->
+                    CloudChatProvider({ account }, Endpoints.PRODUCTION, chatModel = { chatModel }, onHttpCall = { http += stage }) {}.respond(account.key, request, session) { event ->
                         if (event is CloudEvent.RoundComplete) {
                             event.devicePlanSteps?.let { entry.put("extracted", JSONArray(it.map { step -> step.json() })) }
                             if (event.memoryFact != null) entry.put("prepared", "memory_fact")
@@ -96,7 +102,7 @@ class LivePhoneSelectionWorkflow {
         }
         fixture.install()
         CloudTestActivity.factory = { app ->
-            ShellViewModel(app, provider, fixture.store, fixture.keys)
+            ShellViewModel(app, provider, fixture.store, fixture.keys, legacy = isolatedLegacyKeys(app), models = isolatedModels(app), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE)
                 .openSeededChat(fixture.store).also { fixture.model = it }
         }
         val robot = ShellRobot("phone-selection-live")

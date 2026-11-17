@@ -20,7 +20,7 @@
     <string name="live_source_widget_stale">%1$s · %2$s · не обновилось</string>
     <string name="recurring_search_title">Регулярный поиск</string>
     <string name="recurring_search_query">Поисковый запрос</string>
-    <string name="recurring_search_consent">Alphy отправляет этот запрос в DeepSeek примерно раз в шесть часов и показывает заголовки и ссылки здесь. Android выбирает время запуска. Поиск можно остановить в этом окне.</string>
+    <string name="recurring_search_consent">Alphy отправляет этот запрос в сервис ИИ примерно раз в шесть часов и показывает заголовки и ссылки здесь. Android выбирает время запуска. Поиск можно остановить в этом окне.</string>
     <string name="recurring_search_start">Разрешить регулярный поиск</string>
-    <string name="recurring_search_error">Расписание не сохранено. Проверьте ключ DeepSeek и количество активных расписаний.</string>
+    <string name="recurring_search_error">Расписание не сохранено. Проверьте ключ сервиса ИИ и количество активных расписаний.</string>
 </resources>

@@ -3,6 +3,7 @@ package com.alpha.assistant.memory
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteException
 import androidx.test.platform.app.InstrumentationRegistry
+import com.alpha.assistant.ui.removeSemanticIndexes
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -313,6 +314,7 @@ class MemoryFoundationWorkflowTest {
             test(name, file)
         } finally {
             context.deleteDatabase(name)
+            removeSemanticIndexes(context, "memory:$name")
         }
     }
 }

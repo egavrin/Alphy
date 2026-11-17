@@ -1,22 +1,22 @@
 # Alphy
 
-Alphy is an Android assistant with cloud chat, local voice processing, generated tools, and automations. It is an early development project. The current interface is primarily in Russian.
+Alphy is an Android assistant with cloud chat, voice input and output, generated tools, and automations. It is an early development project. The current interface is primarily in Russian.
 
 ## Features
 
-- Chat with DeepSeek using your own API key. You give consent one time, at key entry. «Настройки» show the consent text again.
+- Connect one AI service with your own API key from OpenAI, Anthropic, OpenRouter, or DeepSeek. Alphy does not ask for a second key. The key runs chat, web search, image input, image generation, and voice. You give consent one time, at key entry. «Настройки» → «Сервис ИИ» show the consent text again. [Provider details](docs/cloud-integration.md)
 - Create interactive tools with native controls and isolated JavaScript execution.
 - Use widgets and approved device capabilities, including notifications and calendar access.
 - Configure local automations for schedules, location, charging, and selected notifications.
-- Use T-one for local speech recognition. Continuous voice sessions show replies in the chat and then resume recognition.
+- Speak to Alphy. OpenAI, OpenRouter, and DeepSeek recognize the speech with your key. With an Anthropic key, the phone recognizes the speech on the device. Continuous voice sessions can read each reply aloud with the phone voice, or with a cloud voice (OpenRouter), and then listen again. [Voice details](docs/voice-integration.md)
 
-Alphy stores conversations and tool data on the device. It stores the provider key with Android Keystore. Cloud requests send the content that the consent text names to DeepSeek and can incur provider charges. «Удалить ключ» stops all cloud requests. Device actions and permissions require user approval.
+Alphy stores conversations and tool data on the device. It stores the provider key with Android Keystore. Cloud requests send the content that the consent text names to the provider of your key and can incur provider charges. «Удалить ключ» stops all cloud requests. Device actions and permissions require user approval.
 
 ## Requirements
 
 - Android 10 or later on an ARM64 device.
 - Git LFS, JDK 17, Android SDK platform 37, Android NDK 27.0.12077973, and CMake 3.22.1.
-- A DeepSeek API key for cloud chat and tool generation.
+- An API key from OpenAI, Anthropic, OpenRouter, or DeepSeek for cloud chat and tool generation. An OpenRouter key enables every feature. Anthropic and DeepSeek keys have no image generation. OpenAI, Anthropic, and DeepSeek keys have no cloud voice.
 
 ## Build
 
@@ -52,9 +52,9 @@ Use a semantic version that matches the APK's `versionName` and a `versionCode` 
 Use the application ID `com.alpha.assistant` and the same signing certificate as the previous release.
 GitHub provides the asset size and SHA-256 digest that Alphy uses to verify the download.
 
-## Voice models
+## Voice
 
-The APK includes the T-one recognition model from Git LFS. The app verifies each file's size and SHA-256 before use. [Asset manifest](app/src/main/assets/voice/manifest.json) · [Voice integration and licenses](docs/voice-integration.md)
+The APK contains no speech model. Voice input and output use your API key or the phone. See [Voice integration](docs/voice-integration.md).
 
 ## Tests
 
@@ -66,7 +66,7 @@ python3 tools/compose_acceptance/run.py suite --serial emulator-5556 --label LAB
 
 The command builds both APKs, installs them with `adb install -r` on the selected emulator, and verifies the installed SHA-256 hashes. It records the emulator API level, build fingerprint, and WebView version. The build uses `JAVA_HOME=/opt/homebrew/opt/openjdk@17` and `ANDROID_HOME=/opt/homebrew/share/android-commandlinetools`. Use the `--adb` option for a different adb path. `LABEL` names a new evidence directory in `evidence/alphy-ui/`. Add test classes or methods after the label to run only those tests. Use the suite runner to retain app data and credentials between runs.
 
-Some workflows require device permissions, Google Play services, or the local voice models. See the documents in [`docs/`](docs/) for feature details and test limits.
+Some workflows require device permissions, Google Play services, or a speech service. See the documents in [`docs/`](docs/) for feature details and test limits.
 
 ### Update installer workflow
 
@@ -101,4 +101,4 @@ Verify the installed version and retained data after replacement.
 
 ## License
 
-Alphy's own source code is available under the [MIT License](LICENSE). Third-party components and models retain their own licenses. See [`app/src/main/assets/licenses/VOICE-NOTICE.txt`](app/src/main/assets/licenses/VOICE-NOTICE.txt) for voice component notices.
+Alphy's own source code is available under the [MIT License](LICENSE). Third-party components retain their own licenses.

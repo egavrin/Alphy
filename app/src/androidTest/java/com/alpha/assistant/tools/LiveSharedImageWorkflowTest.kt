@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.cloud.AiProvider
 import android.graphics.Bitmap
 import android.net.ConnectivityManager
 import android.os.SystemClock
@@ -13,7 +14,9 @@ import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
-import com.alpha.assistant.cloud.DeepSeekProvider
+import com.alpha.assistant.cloud.AiModels
+import com.alpha.assistant.cloud.Capability
+import com.alpha.assistant.cloud.CloudChatProvider
 import com.alpha.assistant.courses.CourseLessonPlan
 import com.alpha.assistant.courses.CourseOutline
 import com.alpha.assistant.courses.CourseSetup
@@ -27,6 +30,7 @@ import com.alpha.assistant.images.ImageSettings
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
 import com.alpha.assistant.ui.openSeededChat
+import com.alpha.assistant.ui.removeShellIndexes
 import com.alpha.assistant.ui.seedOpenChat
 import java.io.File
 import java.security.MessageDigest
@@ -34,6 +38,9 @@ import org.json.JSONObject
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import com.alpha.assistant.ui.isolatedLegacyKeys
+import com.alpha.assistant.ui.isolatedModels
+import com.alpha.assistant.ui.ISOLATED_VOICE
 
 @RunWith(AndroidJUnit4::class)
 class LiveSharedImageWorkflowTest {
@@ -53,7 +60,10 @@ class LiveSharedImageWorkflowTest {
         val phase = File(out, "phase.txt")
         val storeName = "image-live-$run.db"
         val keys = com.alpha.assistant.data.SecureKeyStore(context, "image-live-$run", "image-live-$run")
-        val settings = ImageSettings(context)
+        val settings = ImageSettings(context, keys)
+        // The model has its own image file and gets the same choice, so its chat images work. The tool path reads the app file.
+        val modelImages = "image-live-$run"
+        val chatSettings = ImageSettings(context, keys, modelImages)
         val robot = ShellRobot("image-$mode-$run")
         val store = com.alpha.assistant.data.ShellStore(context, storeName)
         val toolDatabase = "$storeName-tools.db"
@@ -65,12 +75,19 @@ class LiveSharedImageWorkflowTest {
             ToolRecord(it.getString("id"), it.getInt("revision"), it.getInt("stateVersion"), spec.toString(),
                 it.getJSONObject("state").toString(), spec.getJSONObject("ui").toString(), chat, true)
         }
+        lateinit var imageModel: ImageModel
         if (!reopen) {
-            val key = OneUseCredential.receive("$run-deepseek", 60_000) { phase.writeText("deepseek-ready") }
-            keys.save(key).getOrThrow()
-            settings.saveKey(OneUseCredential.receive("$run-openrouter", 60_000) { phase.writeText("openrouter-ready") }).getOrThrow()
-            settings.select(if (mode == "chat") ImageModel.SEEDREAM else ImageModel.QWEN)
-            settings.setEnabled(true).getOrThrow()
+            // One account serves the chat and the images.
+            val account = OneUseCredential.receive(run, 60_000) { phase.writeText("credentialReady") }
+            assumeTrue("${account.provider.displayName} has no image generation.", Capability.IMAGES in account.provider.profile.capabilities)
+            keys.save(account.key, account.provider).getOrThrow()
+            imageModel = if (account.provider == AiProvider.OPENROUTER) {
+                if (mode == "chat") ImageModel.SEEDREAM else ImageModel.QWEN
+            } else ImageModel.GPT_IMAGE_FLARE
+            for (images in listOf(settings, chatSettings)) {
+                images.select(imageModel)
+                images.setEnabled(true).getOrThrow()
+            }
             if (mode != "native-runtime") {
                 original?.let { ToolStore(context, toolDatabase).use { db -> db.saveTool(it, revision = true) } }
                 val now = System.currentTimeMillis()
@@ -82,7 +99,7 @@ class LiveSharedImageWorkflowTest {
             check(context.getSystemService(ConnectivityManager::class.java).activeNetwork == null)
         }
         var model: ShellViewModel? = null
-        val live = DeepSeekProvider()
+        val live = CloudChatProvider(keys, AiModels(context))
         val provider = object : ChatProvider by live {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                 check(!reopen)
@@ -152,7 +169,7 @@ class LiveSharedImageWorkflowTest {
             File(out, "$prefix${image.slot}-receipt.json").writeText(image.json().toString(2))
             if (mode != "offline") File(out, "${image.slot}.${image.asset.mime.substringAfter('/')}").writeBytes(bytes)
         }
-        CloudTestActivity.factory = { app -> ShellViewModel(app, provider, store, keys).openSeededChat(store).also { model = it } }
+        CloudTestActivity.factory = { app -> ShellViewModel(app, provider, store, keys, legacy = isolatedLegacyKeys(app), models = isolatedModels(app), imageStore = modelImages, voiceStore = ISOLATED_VOICE).openSeededChat(store).also { model = it } }
         try {
             androidx.test.core.app.ActivityScenario.launch(CloudTestActivity::class.java).use {
                 robot.waitUntil(30_000) { main { !model().loading && (original == null || model().tools.tools.any { it.id == original.id }) } }
@@ -192,7 +209,7 @@ class LiveSharedImageWorkflowTest {
                         check(spec.generatedImages.size == 4 && planets.all { planet ->
                             spec.generatedImages.count { it.slot.contains(planet, ignoreCase = true) } == 1
                         })
-                        check(spec.generatedImages.all { it.model == ImageModel.QWEN.wire && it.receipt != null })
+                        check(spec.generatedImages.all { it.model == imageModel.wire && it.receipt != null })
                         check(spec.generatedImages.map { it.asset.id }.distinct().size == 4)
                         check(submissions() - startingSubmissions == 4L)
                         spec.generatedImages.forEach(::attest)
@@ -228,9 +245,9 @@ class LiveSharedImageWorkflowTest {
                             }
                         }
                         val result = checkNotNull(image)
-                        check(result.model == ImageModel.SEEDREAM.wire)
+                        check(result.model == imageModel.wire)
                         attest(result)
-                        shot(out, "chat-seedream.png")
+                        shot(out, "chat-${imageModel.name.lowercase()}.png")
                     }
                     "native", "native-runtime", "native-button", "game" -> {
                         val isNative = mode != "game"
@@ -269,7 +286,7 @@ class LiveSharedImageWorkflowTest {
                         check(spec.threeScene == (mode == "game"))
                         when (mode) {
                             "native-button" -> check(spec.generatedImages.isEmpty() && submissions() == startingSubmissions)
-                            else -> spec.generatedImages.single().also { check(it.model == ImageModel.QWEN.wire) }.let(::attest)
+                            else -> spec.generatedImages.single().also { check(it.model == imageModel.wire) }.let(::attest)
                         }
                         File(out, "saved.json").writeText(JSONObject(tool.spec).toString(2))
                         main { model().openSurface(tool.id) }
@@ -284,7 +301,7 @@ class LiveSharedImageWorkflowTest {
                                 robot.waitFor(robot.text(R.string.image_generate_confirm))
                                 robot.waitUntil {
                                     val texts = robot.texts().joinToString("\n")
-                                    ImageModel.QWEN.title in texts && prompt in texts
+                                    imageModel.title in texts && prompt in texts
                                 }
                             }
                             verifyConfirmation()
@@ -335,7 +352,7 @@ class LiveSharedImageWorkflowTest {
                                         check(digest(bytes) == resource.locator && bytes.size.toLong() == resource.sizeBytes)
                                         check(effect!!.request.args.getString("prompt") == prompt)
                                         File(out, "runtime-result.json").writeText(effect.result.json()
-                                            .put("sha256", resource.locator).put("model", ImageModel.QWEN.wire).toString(2))
+                                            .put("sha256", resource.locator).put("model", imageModel.wire).toString(2))
                                         File(out, "runtime-image.${resource.mimeType.substringAfter('/')}").writeBytes(bytes)
                                         tools.tool(tool.id)?.state?.contains(resource.id) == true || tools.tool(tool.id)?.ui?.contains(resource.id) == true
                                     }
@@ -408,8 +425,9 @@ class LiveSharedImageWorkflowTest {
         } finally {
             CloudTestActivity.factory = null
             store.close()
-            settings.clearKey()
             keys.clear()
+            context.deleteSharedPreferences(modelImages)
+            removeShellIndexes(context, storeName)
         }
     }
 

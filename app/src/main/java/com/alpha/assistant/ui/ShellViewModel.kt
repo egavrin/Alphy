@@ -96,16 +96,31 @@ internal data class ShellCourseSetup(
 
 internal data class ShellCourseEntry(val request: CourseEntryRequest, val inChat: Boolean)
 
-class ShellViewModel @JvmOverloads constructor(application: Application,
-    private val provider: ChatProvider = DeepSeekProvider(),
+class ShellViewModel @JvmOverloads internal constructor(application: Application,
+    // No default: the app builds the provider from the same AiModels as [models], so the requests use the choices of «Модели».
+    private val provider: ChatProvider,
     private val store: ShellStore = ShellStore(application),
     private val keys: SecureKeyStore = SecureKeyStore(application),
     voiceFactory: ((Application, kotlinx.coroutines.CoroutineScope, (String) -> Unit) -> com.alpha.assistant.voice.VoiceSession)? = null,
     private val weatherLocator: WeatherLocator = AndroidWeatherLocator(application),
     // Only the app's own model offers the first-run flow. Test models opt in.
     private val offerOnboarding: Boolean = false,
+    // Device tests give a fixed result, so they never send a key to a real provider.
+    private val keyCheck: suspend (AiAccount) -> KeyCheck = { checkKey(it) },
+    // No default, so no test reaches the real old key stores by omission (decision 10). The app passes LegacyKeys(application).
+    private val legacy: LegacyKeys,
+    // The chosen models of «Модели». No default, so no test reaches the real choices by omission. The app passes AiModels(application).
+    internal val models: AiModels,
+    // The preference file of the image settings, for the same reason. The app passes ImageSettings.STORE.
+    imageStore: String,
+    // The preference file of «Читать ответы вслух», for the same reason. The app passes VoiceSettings.STORE.
+    voiceStore: String,
+    // A live device test that keeps the key out of the shell maps its marker to the key here.
+    imageProviders: Map<String, com.alpha.assistant.images.ImageProvider> =
+        com.alpha.assistant.images.imageProviders(com.alpha.assistant.cloud.Endpoints.PRODUCTION),
 ) : AndroidViewModel(application) {
-    internal val imageGeneration = com.alpha.assistant.images.ImageGeneration(application)
+    internal val imageGeneration = com.alpha.assistant.images.ImageGeneration(application,
+        com.alpha.assistant.images.ImageSettings(application, keys, imageStore), imageProviders)
     internal val updates = AppUpdater.get(application)
     private data class VoiceOrigin(
         val destination: CourseComposerState?,
@@ -117,8 +132,15 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     private var voiceOrigin: VoiceOrigin? = null
     private var voiceDestination by mutableStateOf<CourseComposerState?>(null)
     private var submitVoiceOnTranscript = false
-    val voice = voiceFactory?.invoke(application, viewModelScope, ::receiveTranscript)
-        ?: com.alpha.assistant.voice.VoiceSession(application, viewModelScope, ::receiveTranscript)
+    val voice = voiceFactory?.invoke(application, viewModelScope, ::receiveTranscript) ?: run {
+        val settings = com.alpha.assistant.voice.VoiceSettings(application, voiceStore)
+        // The output chooses the cloud or the phone voice for each reply (spec 12.2).
+        val output = com.alpha.assistant.voice.CloudSpeech(application, settings, { keys.voiceAccount(application) }, models::speech,
+            Endpoints.PRODUCTION, com.alpha.assistant.voice.DeviceSpeech(application))
+        com.alpha.assistant.voice.VoiceSession(application, viewModelScope, ::receiveTranscript, settings, output) {
+            keys.voiceAccount(application)?.let { com.alpha.assistant.voice.speechInputFor(it, application, Endpoints.PRODUCTION) }
+        }
+    }
 
     internal fun composerDraft(destination: CourseComposerState?): Draft = destination?.draft ?: snapshot.draft
     internal fun voiceBelongsTo(destination: CourseComposerState?) = voiceDestination === destination
@@ -185,7 +207,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         assistantInvocation: String? = null,
         displayedCapture: AssistCapture? = null,
     ) {
-        if (loading || loadFailed || attachmentBusy || voice.active || destination?.active == false) return
+        if (loading || loadFailed || attachmentBusy || voice.running || destination?.active == false) return
         if (assistantInvocation != null && AssistantCapture.current?.id != assistantInvocation) return
         submitVoiceOnTranscript = false
         voiceDestination = destination
@@ -615,6 +637,8 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         }
         queueSurface(destination)
     }
+    /** Opens «Сервис ИИ» in the shell, for a composer that has no route of its own. */
+    internal fun openAiSettings() = queueSurface(ShellDestination.Settings)
     internal fun openAutomationSurface(id: String) {
         queueSurface(ShellDestination.Automations, automationRuleId = id)
     }
@@ -641,10 +665,23 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     var loadFailed by mutableStateOf(false); private set
     var saveFailed by mutableStateOf(false); private set
     var keyStatus by mutableStateOf(KeyStatus.Checking); private set
+    /** The provider of the stored account, or null without a readable account. */
+    internal var accountProvider by mutableStateOf<AiProvider?>(null); private set
     /** The first-run flow is visible. The model decides one time at load, so a key saved in the flow does not close it. */
     var onboarding by mutableStateOf(false); private set
-    @get:StringRes var keyFailure by mutableStateOf<Int?>(null); private set
+    /** The failure of the last key action. A failed key check also keeps the typed key (spec 6.5). */
+    var keyFailure by mutableStateOf<String?>(null); private set
+    /** A limit of a key that the check accepted, such as an empty balance. */
+    var keyNotice by mutableStateOf<String?>(null); private set
     var keyBusy by mutableStateOf(false); private set
+    /** The old key stores that hold a key. It comes from presence, so a store that does not decrypt keeps its card (spec 14.6). */
+    internal var legacyKeys by mutableStateOf<Set<AiProvider>>(emptySet()); private set
+    /** The old key that «Использовать» read, until the key panel puts it in its field. */
+    internal var legacyEntry by mutableStateOf<AiAccount?>(null); private set
+    /** The failure of the last old-key action. The found-key cards show it. */
+    internal var legacyFailure by mutableStateOf<String?>(null); private set
+    // The old key that «Использовать» supplied, and its store. Only a save of this exact key clears that store (decision 3).
+    private var legacySupplied: AiAccount? = null
     var requestError by mutableStateOf<String?>(null); private set
     var attachmentBusy by mutableStateOf(false); private set
     var activeConversationId by mutableStateOf<String?>(null); private set
@@ -1816,7 +1853,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 }
                 if (isActive(request) && voiceBelongsTo(null)) {
                     snapshot.conversations.find { it.id == conversationId }?.messages
-                        ?.find { it.id == assistant.id }?.let { voice.replyCompleted() }
+                        ?.find { it.id == assistant.id }?.let { voice.replyCompleted(it.text) }
                 }
             } catch (_: CancellationException) {
                 // cancelRequest saves the terminal status. Restart handles a closed model.
@@ -1830,7 +1867,7 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
                 if (voiceBelongsTo(null)) voice.requestFailed()
                 val known = failure as? CloudFailure
                 updateMessage(request, user.id) { if (it.status == "pending") it.copy(status = "not_sent") else it }
-                updateMessage(request, assistant.id) { it.copy(status = "error", errorCode = known?.code ?: "network", error = known?.message ?: if(it.toolOperationId != null) "The widget could not be created safely. Existing tools and data are unchanged. Retry the request." else "Нет соединения с DeepSeek. Проверьте сеть и повторите запрос.", searchStatus = if (it.searchStatus == "searching") "error" else it.searchStatus) }
+                updateMessage(request, assistant.id) { it.copy(status = "error", errorCode = known?.code ?: "network", error = known?.message ?: if(it.toolOperationId != null) "The widget could not be created safely. Existing tools and data are unchanged. Retry the request." else accountProvider?.let { provider -> text(R.string.chat_offline, provider.displayName) } ?: text(R.string.chat_offline_unknown), searchStatus = if (it.searchStatus == "searching") "error" else it.searchStatus) }
             } finally {
                 if (active === request) {
                     clearActiveRequest()
@@ -1919,8 +1956,98 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
     private fun replace(conversation: Conversation) {
         snapshot = snapshot.copy(conversations = (snapshot.conversations.filterNot { it.id == conversation.id } + conversation).sortedByDescending { it.updatedAt })
     }
-    fun saveKey(value: String, done: (Boolean) -> Unit) = keyAction(R.string.key_save_failed, { keys.save(value) }, done)
-    fun acceptConsent() = keyAction(R.string.consent_failed, keys::recordConsent)
+    /** Checks the key with [provider] only (spec 2.11). Then one commit saves the key, the provider, and the consent. */
+    internal fun saveKey(value: String, provider: AiProvider, done: (Boolean) -> Unit) {
+        if (keyBusy) return
+        keyFailure = null
+        keyNotice = null
+        legacyFailure = null
+        if (!provider.accepts(value)) {
+            // accepts() also refuses other characters, so only a key with the admin prefix gets the admin text.
+            keyFailure = text(if (value.trim().startsWith("sk-ant-admin")) R.string.key_admin else R.string.key_format)
+            done(false)
+            return
+        }
+        keyBusy = true
+        keyStatus = KeyStatus.Verifying
+        viewModelScope.launch {
+            var saved = false
+            try {
+                // An exception text can hold the key, so it is not logged or shown. The result is the same as without network.
+                val check = try {
+                    keyCheck(AiAccount(provider, value.trim()))
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (failure: Exception) {
+                    KeyCheck.UNREACHABLE
+                }
+                keyFailure = when (check) {
+                    KeyCheck.REJECTED -> text(R.string.key_rejected, provider.displayName)
+                    KeyCheck.UNREACHABLE -> text(R.string.key_unreachable)
+                    else -> {
+                        saved = withContext(Dispatchers.IO) {
+                            keys.save(value, provider).onSuccess {
+                                // A key of a different provider resets the model choices to its defaults (spec 6.7).
+                                models.keepFor(provider)
+                                imageGeneration.settings.keepFor(provider)
+                            }
+                        }.isSuccess
+                        if (saved) null else text(R.string.key_save_failed)
+                    }
+                }
+                keyNotice = when {
+                    !saved -> null
+                    check == KeyCheck.LIMITED -> text(R.string.key_limited)
+                    check == KeyCheck.NO_CREDIT -> text(R.string.key_no_credit, provider.displayName)
+                    else -> null
+                }
+                if (saved) {
+                    val supplied = legacySupplied
+                    legacySupplied = null
+                    // A failed clear keeps the saved account, and the card stays for another «Удалить» (decision 4).
+                    if (supplied != null && supplied.key.trim() == value.trim() && !withContext(Dispatchers.IO) { legacyCleared(supplied.provider) })
+                        legacyFailure = text(R.string.key_delete_failed)
+                }
+            } finally {
+                refreshKey()
+                keyBusy = false
+            }
+            if (saved) {
+                // The session keeps the input of the old account, so a replaced key ends it (spec 2.11).
+                voice.stop()
+                com.alpha.assistant.automations.AutomationRuntime.refresh(getApplication())
+            }
+            done(saved)
+        }
+    }
+    private fun text(@StringRes id: Int, vararg args: Any): String = getApplication<Application>().getString(id, *args)
+    /** Puts the old key of the [provider] store in the key panel. The store stays until the user saves that key or deletes it. */
+    internal fun useLegacyKey(provider: AiProvider) {
+        legacyAction {
+            val value = withContext(Dispatchers.IO) { legacy.key(provider) }.getOrNull()
+            if (value == null) legacyFailure = text(R.string.key_unreadable)
+            else AiAccount(provider, value).let { legacySupplied = it; legacyEntry = it }
+        }
+    }
+    internal fun takeLegacyEntry() { legacyEntry = null }
+    /** «Удалить» on a found-key card. It deletes the old store at once and never touches the account. */
+    internal fun clearLegacyKey(provider: AiProvider) {
+        legacyAction { if (!withContext(Dispatchers.IO) { legacyCleared(provider) }) legacyFailure = text(R.string.key_delete_failed) }
+    }
+    /** The clear of the [provider] old store. It gives false only while the store still holds a key (decision 4). A failed alias delete after the key data went leaves no key out of sight, so no message shows. */
+    private fun legacyCleared(provider: AiProvider): Boolean = legacy.clear(provider).isSuccess || !legacy.has(provider)
+    // keyBusy keeps a key save from starting, so the refresh never replaces the Verifying status.
+    private fun legacyAction(action: suspend () -> Unit) {
+        if (keyBusy) return
+        keyBusy = true
+        legacyFailure = null
+        viewModelScope.launch {
+            try { action() } finally {
+                refreshKey()
+                keyBusy = false
+            }
+        }
+    }
     // A running request keeps its key in memory, so the cloud work stops before the key goes.
     fun clearKey() {
         if (keyBusy) return
@@ -1929,20 +2056,22 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         cancelCourseRequests()
         if (phoneAgent.isInitialized()) agent.cancelRevision()
         tools.cancel()
+        // A continuous voice session holds the old account, so it ends before the key goes (spec 6.8).
+        voice.stop()
         keyAction(R.string.key_delete_failed, keys::clear)
     }
-    private fun keyAction(@StringRes failure: Int, action: () -> Result<Unit>, done: (Boolean) -> Unit = {}) {
+    private fun keyAction(@StringRes failure: Int, action: () -> Result<Unit>) {
         if (keyBusy) return
         keyBusy = true
         keyFailure = null
+        keyNotice = null
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { action() }
             if (result.isSuccess) {
                 refreshKey()
                 com.alpha.assistant.automations.AutomationRuntime.refresh(getApplication())
-            } else keyFailure = failure
+            } else keyFailure = text(failure)
             keyBusy = false
-            done(result.isSuccess)
         }
     }
     private companion object {
@@ -1953,16 +2082,21 @@ class ShellViewModel @JvmOverloads constructor(application: Application,
         val retryableStatuses = setOf("error", "cancelled", "interrupted")
     }
     private suspend fun refreshKey() {
-        keyStatus = withContext(Dispatchers.IO) {
-            val result = keys.read()
-            when {
+        val (status, provider, found) = withContext(Dispatchers.IO) {
+            // A stored key without a known provider is unreadable, so the panel offers «Удалить ключ».
+            val result = keys.account()
+            val account = result.getOrNull()
+            Triple(when {
                 result.isFailure -> KeyStatus.Unreadable
-                result.getOrNull() == null -> KeyStatus.Missing
-                !keys.consented() -> KeyStatus.NeedsConsent
+                account == null -> KeyStatus.Missing
                 else -> KeyStatus.Ready
-            }
+            }, account?.provider, legacy.providers.filterTo(LinkedHashSet()) { legacy.has(it) })
         }
+        keyStatus = status
+        accountProvider = provider
+        legacyKeys = found
     }
 }
 
-enum class KeyStatus { Checking, Missing, NeedsConsent, Ready, Unreadable }
+/** A rejected key or a failed check is a message in Missing or Ready, not a status (spec 14.4). */
+enum class KeyStatus { Checking, Missing, Verifying, Ready, Unreadable }

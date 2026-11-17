@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Run corpus requests live through the Alphy chat on one test emulator.
 
-Each case sends one request through the real composer with DeepSeek, waits for the
-chat to settle, opens the saved app, and pulls the device evidence. The key comes
-from DEEPSEEK_API_KEY or ~/.env and goes to the device through the one-use channel.
+Each case sends one request through the real composer with the AI provider of
+ALPHY_AI_PROVIDER, waits for the chat to settle, opens the saved app, and pulls the
+device evidence. The key of that provider comes from the environment or ~/.env and
+goes to the device through the one-use channel. Pictures use the same key, so --images
+needs an OpenAI or OpenRouter key.
 
 Build and install the debug and Android test APKs on the emulator first.
 """
@@ -19,7 +21,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/compose_acceptance"))
-from run import ADB, RUNNER, adb_command, child_environment, read_live_key, transfer_key  # noqa: E402
+from run import ADB, RUNNER, adb_command, child_environment, read_live_account, transfer_key  # noqa: E402
 
 TEST = "com.alpha.assistant.tools.ComparisonChatCaptureTest#captureFrozenSlot"
 PACKAGE = "com.alpha.assistant"
@@ -79,30 +81,23 @@ def run_case(serial, case, corpus_hash, output, chat_seconds, review_seconds, ve
     directory.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=child_environment())
-    key = read_live_key()
-    image_key = read_live_key(name="OPENROUTER_API_KEY") if images else None
-    transferred = False
+    account = read_live_account()
     deadline = started + chat_seconds + review_seconds + 120
     try:
         while process.poll() is None and time.monotonic() < deadline:
-            if not transferred:
+            if account is not None:
                 result = adb(serial, "shell", "cat", remote + "/report.json")
                 if result.returncode == 0:
                     try:
                         phase = json.loads(result.stdout).get("phase")
                     except ValueError:
                         phase = None
-                    if phase == "credentialReady" and key is not None:
-                        transfer_key(ADB, run_id, key, serial=serial)
-                        key = None
-                        transferred = image_key is None
-                    elif phase == "imageCredentialReady" and image_key is not None:
-                        transfer_key(ADB, run_id + "-openrouter", image_key, serial=serial)
-                        image_key = None
-                        transferred = True
+                    if phase == "credentialReady":
+                        transfer_key(ADB, run_id, account, serial=serial)
+                        account = None
             time.sleep(0.5)
     finally:
-        key = image_key = None
+        account = None
         if process.poll() is None:
             process.kill()
         stdout = process.communicate(timeout=30)[0].decode("utf-8", "replace")
@@ -154,8 +149,7 @@ def main():
                              "workflow check. Requires --verify-workflow and --request.")
     parser.add_argument("--request", help="The follow-up edit text for --saved-edit. It replaces the corpus request.")
     parser.add_argument("--images", action="store_true",
-                        help="Turn on pictures. OPENROUTER_API_KEY goes to the device through a second one-use transfer. "
-                             "Each generation makes at most 4 pictures.")
+                        help="Turn on pictures with the key of the AI provider. Each generation makes at most 4 pictures.")
     parser.add_argument("--screenshot-review", action="store_true", help="Turn on the optional screenshot review.")
     parser.add_argument("cases", nargs="*", help="Case IDs. Empty runs every case.")
     args = parser.parse_args()
