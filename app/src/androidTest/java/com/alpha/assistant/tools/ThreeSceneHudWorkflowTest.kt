@@ -42,6 +42,12 @@ class ThreeSceneHudWorkflowTest {
         assertEquals(ThreeSceneProblem.INVALID_HUD, (unknown as? ThreeSceneFailure)?.problem)
     }
 
+    /** Review finding: a scene that returned hud:null before a game started stopped with an invalid hud. */
+    @Test fun aNullHudIsNoLayer() {
+        val checked = ThreeSceneSnapshot.validated(spec, JSONObject().put("state", JSONObject("""{"score":2}""")).put("hud", JSONObject.NULL), spec.ui.toString())
+        assertEquals(null, checked.hud)
+    }
+
     @Test fun hudTextJoinsTheAgentScreen() {
         val checked = snapshot(score)
         val screen = AppScreen.render(JSONObject(checked.ui), JSONObject(checked.state), checked.hudSurfaces("scene"), 0L, checked.hudSizes("scene")).text

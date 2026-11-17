@@ -234,8 +234,12 @@ internal class ToolGenerationSmoke(
             settle()
         }
 
+        // On the phone, an inline app gets tilt only after it requests the stream, and until it stops it.
+        private var tiltStarted = false
+
         private fun settle() {
             requested = branch.fencedEffects.map { it.capability } + if (branch.fenced && branch.fencedEffects.isEmpty()) listOf("records") else emptyList()
+            branch.fencedEffects.lastOrNull { it.capability == TiltContract.ID }?.let { tiltStarted = it.args.optBoolean("enabled") }
             // Native results are outside this probe. Later steps continue as if the request finished without a result event.
             branch.fenced = false
         }
@@ -269,6 +273,8 @@ internal class ToolGenerationSmoke(
 
         override suspend fun tilt(x: Double, y: Double) {
             if (TiltContract.ID !in spec.capabilities) throw AppStepError("Declare ${TiltContract.ID} in capabilities to receive tilt.")
+            if (spec.presentation != "immersive" && !tiltStarted) throw AppStepError("On the phone, this app gets no tilt. " +
+                "The host streams tilt to an immersive app while it plays. An inline app gets tilt only after a button requests ${TiltContract.ID} with enabled true.")
             branch.event(GraphicsContract.tilt(x, y, ++tiltSequence, clock()), "$.capabilities")
             settle()
         }

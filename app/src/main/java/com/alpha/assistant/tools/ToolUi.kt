@@ -291,10 +291,10 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
         }
     }
 
-@Composable private fun DraftPreviewContent.Render(drawingHeight: Dp, roundInlineViewport: Boolean = false) {
-    if (canvasSurfaceIds(spec.ui).isEmpty()) StaticDraftDrawing(spec, drawing, drawingHeight, roundInlineViewport = roundInlineViewport)
+@Composable private fun DraftPreviewContent.Render(drawingHeight: Dp) {
+    if (canvasSurfaceIds(spec.ui).isEmpty()) StaticDraftDrawing(spec, drawing, drawingHeight)
     val canvas: @Composable (List<String>, String, Modifier, Boolean) -> Unit = { ids, label, modifier, _ ->
-        StaticDraftDrawing(spec, drawing, drawingHeight, ids, label, modifier, roundInlineViewport)
+        StaticDraftDrawing(spec, drawing, drawingHeight, ids, label, modifier)
     }
     val context = LocalContext.current
     val assets = remember(context) { com.alpha.assistant.tools.three.ThreeSceneAssets(context) }
@@ -829,7 +829,7 @@ catch (_: Exception) { null }
                 }
             }
             if (!standaloneStage || details != null) AccessAndEffects()
-            if(preview != null) preview.Render(canvasHeight, roundInlineViewport = true)
+            if(preview != null) preview.Render(canvasHeight)
             else if(tool != null) {
                 if(tool.archived) {
                     Text(stringResource(R.string.tool_archived_detail), color = MaterialTheme.colorScheme.onSurfaceVariant)

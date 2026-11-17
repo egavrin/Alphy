@@ -40,7 +40,7 @@ internal data class ThreeSceneSnapshot(val state: String, val ui: String, val hu
 
     companion object {
         fun validated(spec: ToolSpec, result: JSONObject, fallbackUi: String): ThreeSceneSnapshot {
-            val hud = if (result.has("hud")) hud(result.opt("hud")) else null
+            val hud = if (result.isNull("hud")) null else hud(result.get("hud"))
             return try {
                 require(result.keys().asSequence().all { it in setOf("state", "ui", "audio", "hud") })
                 val state = spec.validateState(result.getJSONObject("state").toString())

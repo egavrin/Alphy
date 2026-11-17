@@ -104,6 +104,13 @@ class GenerationContractGuidanceTest {
         assertTrue("${guide.length}", guide.length <= 56298 * 11 / 10)
     }
 
+    /** Review finding: the catalog guidance named no new variant, so the agent could not find circle checks, field icons, or a vertical divider. */
+    @Test fun theGuideNamesTheNewVariants() {
+        val guide = com.alpha.assistant.tools.agent.AppAgentGuide.system("", "")
+        for (part in listOf("\"variant\":\"circle\"", "leading icon", "vertical divider", "\"variant\":\"dots\"", "emphasis display")) assertTrue(part, guide.contains(part))
+        assertTrue("the protocol still says that the canvas uses the surface color", !guide.contains("system surface color"))
+    }
+
     @Test fun gamesAreImmersiveAndSelfDrawn() {
         // Failure case: generated games put Left, Right, and Restart buttons and hint texts under a small canvas.
         val guide = com.alpha.assistant.tools.agent.AppAgentGuide.system("", "")

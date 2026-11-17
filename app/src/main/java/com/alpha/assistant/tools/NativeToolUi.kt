@@ -56,6 +56,7 @@ import com.alpha.assistant.R
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
@@ -67,6 +68,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -577,8 +580,10 @@ private fun showsToolHeading(text: String, hostHeading: String?) =
     else ProvideTextStyle(style) { StatusLine(glyph, LocalContentColor.current, text, modifier) }
 }
 
-/** Draws a catalog icon: a shell glyph or a domain icon. */
-/** A large progress ring of about 200 dp with its children centered inside. It grows when the children need more room. */
+/**
+ * A large progress ring of about 200 dp with its children centered inside. It grows when the children need more room.
+ * When its cell is too narrow to grow, the children shrink to fit inside the circle.
+ */
 @Composable private fun NativeRing(progress: Float, description: String, amount: String, content: @Composable () -> Unit) {
     val stroke = 14.dp
     Layout(content = {
@@ -590,12 +595,13 @@ private fun showsToolHeading(text: String, hostHeading: String?) =
         val base = 200.dp.roundToPx()
         val inset = (stroke + 12.dp).roundToPx()
         val inner = measurables[1].measure(Constraints(maxWidth = (minOf(constraints.maxWidth, base) - 2 * inset).coerceAtLeast(0)))
-        val size = maxOf(base, (kotlin.math.hypot(inner.width.toFloat(), inner.height.toFloat()) + 2 * inset).toInt())
-            .coerceAtMost(constraints.maxWidth)
+        val diagonal = kotlin.math.hypot(inner.width.toFloat(), inner.height.toFloat())
+        val size = maxOf(base, (diagonal + 2 * inset).toInt()).coerceAtMost(constraints.maxWidth)
+        val scale = if (diagonal > 0f) minOf(1f, (size - 2 * inset).coerceAtLeast(0) / diagonal) else 1f
         val ring = measurables[0].measure(Constraints.fixed(size, size))
         layout(size, size) {
             ring.place(0, 0)
-            inner.place((size - inner.width) / 2, (size - inner.height) / 2)
+            inner.placeWithLayer((size - inner.width) / 2, (size - inner.height) / 2) { scaleX = scale; scaleY = scale }
         }
     }
 }
@@ -641,6 +647,7 @@ private fun showsToolHeading(text: String, hostHeading: String?) =
     }
 }
 
+/** Draws a catalog icon: a shell glyph or a domain icon. */
 @Composable private fun ToolGlyph(name: String, modifier: Modifier = Modifier, color: Color = LocalContentColor.current) =
     StrokeIcon(Glyph.entries.firstOrNull { it.name == name }?.path ?: checkNotNull(ToolIcons.paths[name]), modifier, color)
 
@@ -721,15 +728,17 @@ private fun verticalArrangement(style: JSONObject?,gap: Dp): Arrangement.Vertica
     val textModifier=if(selectable) Modifier else modifier
     // A short text in a row, such as a name beside a stepper, shrinks so that no word breaks. Other text keeps its size and wraps.
     val short=LocalFixedRow.current && label.length <= COMPACT_METRIC_LENGTH
+    // A short display value, such as a time in a ring, shrinks to fit one line.
+    val display=style?.optString("emphasis") == "display" && label.length <= COMPACT_METRIC_LENGTH
     val base=textStyle(style)
-    val shortStyle=if(short && base.lineHeight.isSp && base.fontSize.isSp) base.copy(lineHeight=(base.lineHeight.value / base.fontSize.value).em) else base
+    val shortStyle=if((short || display) && base.lineHeight.isSp && base.fontSize.isSp) base.copy(lineHeight=(base.lineHeight.value / base.fontSize.value).em) else base
     val content: @Composable () -> Unit = {
         Text(annotated.toAnnotatedString(),if(!enabled && spans != null) textModifier.semantics {disabled()} else textModifier,style=shortStyle,color=toolInk(style?.optString("tone")),
             textAlign=textAlignOf(style),
             maxLines=node.optInt("maxLines",Int.MAX_VALUE),softWrap=node.optBoolean("softWrap",true),
             overflow=if(node.optString("overflow") == "ellipsis") TextOverflow.Ellipsis else TextOverflow.Clip,
             lineHeight=if(node.has("lineHeight")) node.getDouble("lineHeight").sp else androidx.compose.ui.unit.TextUnit.Unspecified,
-            autoSize=if(short) WholeWordAutoSize(10.sp,base.fontSize) else null)
+            autoSize=if(display) WholeWordAutoSize(12.sp,base.fontSize,oneLineFirst=true) else if(short) WholeWordAutoSize(10.sp,base.fontSize) else null)
     }
     if(selectable) SelectionContainer(modifier=modifier) {content()} else content()
 }
@@ -901,12 +910,20 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             val items = checkNotNull(children)
             val secondary = secondaryButtons(items, state, enabled)
             if(type == "row" && !node.optBoolean("wrap",true)) {
-                val dividers = (0 until items.length()).any { items.getJSONObject(it).optString("type") == "divider" }
-                // A divider between row items is vertical. The row takes the height of its tallest item for it.
-                Row(if (dividers) modifier.height(IntrinsicSize.Min) else modifier,horizontalArrangement=horizontalArrangement(style,gap),verticalAlignment=verticalAlignment(style?.optString("crossAlign"))) {
+                // A divider between row items is a vertical line across the row. The row draws it from the place of a thin spacer,
+                // because items such as facts cannot report the intrinsic height that a full-height divider needs.
+                val dividerX = remember(node) { mutableStateMapOf<Int, Float>() }
+                val dividerColor = DividerDefaults.color
+                Row(modifier.drawBehind {
+                    val thickness = DividerDefaults.Thickness.toPx()
+                    dividerX.values.forEach { x -> drawLine(dividerColor, Offset(x + thickness / 2, 0f), Offset(x + thickness / 2, size.height), thickness) }
+                },horizontalArrangement=horizontalArrangement(style,gap),verticalAlignment=verticalAlignment(style?.optString("crossAlign"))) {
                     CompositionLocalProvider(LocalFixedRow provides true) { repeat(items.length()) {index ->
                         val child=items.getJSONObject(index); val layout=child.optJSONObject("layout")
-                        if (child.optString("type") == "divider") { VerticalDivider(); return@repeat }
+                        if (child.optString("type") == "divider") {
+                            Spacer(Modifier.width(DividerDefaults.Thickness).onPlaced { dividerX[index] = it.positionInParent().x })
+                            return@repeat
+                        }
                         var slot: Modifier=Modifier
                         if(layout?.has("weight") == true) slot=slot.weight(layout.getDouble("weight").toFloat())
                         // Text without a weight shares the free width, so one long text cannot squeeze the next to one letter per line.
@@ -1276,9 +1293,11 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             } else if(node.optString("variant") == "dots") Column(modifier,verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 Text(ToolUiCatalog.display(node,state))
                 val filled=(ToolUiCatalog.value(state,binding) as Number).toInt()
-                Row(Modifier.semantics {contentDescription=text; stateDescription=amount},horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                // A dot is 20 dp. In a narrow row, all dots shrink by the same amount, so every step stays visible.
+                Row(Modifier.fillMaxWidth().semantics {contentDescription=text; stateDescription=amount},horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     repeat(high.toInt()) {index ->
-                        Box(Modifier.size(20.dp).clip(CircleShape).background(if(index < filled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest))
+                        Box(Modifier.weight(1f, fill = false).widthIn(max = 20.dp).aspectRatio(1f).clip(CircleShape)
+                            .background(if(index < filled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest))
                     }
                 }
             } else Column(modifier,verticalArrangement=Arrangement.spacedBy(6.dp)) {
@@ -1315,13 +1334,15 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             }
         }
         "emoji" -> {
-            val glyph=if(binding.isNotEmpty()) ToolUiCatalog.value(state,binding).toString() else node.optString("value")
+            val value=if(binding.isNotEmpty()) ToolUiCatalog.value(state,binding).toString() else node.optString("value")
+            // An empty value, or one that the fonts cannot draw as one glyph, leaves the tile empty instead of drawing a box.
+            val glyph=remember(value) { value.takeIf { it.isNotEmpty() && android.graphics.Paint().hasGlyph(it) } }
             val size=node.optString("size")
             val tile=when(size) {"small" -> 40.dp; "large" -> 112.dp; else -> 64.dp}
-            // A large emoji is an illustration. Smaller ones sit on a tile like an icon badge.
-            val back=if(size == "large") Modifier else Modifier.clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            // A large emoji is an illustration. Smaller ones, and a large one with nothing to draw, sit on a tile like an icon badge.
+            val back=if(size == "large" && glyph != null) Modifier else Modifier.clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.surfaceContainerHigh)
             Box(modifier.size(tile).then(back).clearAndSetSemantics {contentDescription=text},contentAlignment=Alignment.Center) {
-                Text(glyph,fontSize=with(LocalDensity.current) {(tile*0.6f).toSp()},maxLines=1)
+                if(glyph != null) Text(glyph,fontSize=with(LocalDensity.current) {(tile*0.6f).toSp()},maxLines=1)
             }
         }
         "divider" -> HorizontalDivider(modifier)

@@ -468,7 +468,22 @@ class AgentGenerationWorkflowTest {
             "return {state:s,surfaces:{main:{commands:[{type:'text',x:10,y:30,size:16,text:'tilt '+s.n.toFixed(1),color:'default'}]}}};",
             ui = """{"type":"column","children":[{"type":"canvas","text":"Board","surfaces":["main"]},{"type":"button","text":"Start tilt","action":"go"}]}""")
             .put("capabilities", JSONArray().put("sensor.accelerometer.stream"))
-        passesInOneCall(app, """[{"tilt":[2,0]},{"expect":"text","contains":"tilt 2.0"}]""", "Tilt the phone to roll a ball")
+        passesInOneCall(app, """[{"tap":"go"},{"tilt":[2,0]},{"expect":"text","contains":"tilt 2.0"}]""", "Tilt the phone to roll a ball")
+    }
+
+    /** Review finding: a check tilted an inline app that never started tilt. On the phone, that app gets no tilt. */
+    @Test fun aTiltStepNeedsAnImmersiveAppOrAStartedStream(): Unit = runBlocking {
+        val source = "const s=input.state,e=input.event;if(e.type==='sensor')s.n=e.x;" +
+            "return {state:s,surfaces:{main:{commands:[{type:'text',x:10,y:30,size:16,text:'tilt '+s.n.toFixed(1),color:'default'}]}}};"
+        val app = drawingApp(source).put("capabilities", JSONArray().put("sensor.accelerometer.stream"))
+        val checks = JSONArray().put(JSONObject().put("name", "tilt").put("steps", JSONArray("""[{"tilt":[2,0]},{"expect":"text","contains":"tilt 2.0"}]""")))
+        val provider = AgentScriptProvider(JSONObject(writeAppReply(app)).put("checks", checks).put("summary", "Ready.").toString(), finish(anyScreen))
+        generate(provider, "Tilt the phone to roll a ball")
+        assertTrue(provider.feedback(1), provider.feedback(1).contains("immersive"))
+        val immersive = drawingApp(source, ui = """{"type":"column","children":[{"type":"text","text":"Settings"}]}""",
+            surface = """{"id":"main","width":360,"height":640,"sizing":"viewport"}""")
+            .put("presentation", JSONObject().put("mode", "immersive")).put("capabilities", JSONArray().put("sensor.accelerometer.stream"))
+        passesInOneCall(immersive, """[{"tilt":[2,0]},{"expect":"text","contains":"tilt 2.0"}]""", "Tilt the phone to roll a ball")
     }
 
     /** Review focus: drawn text from a busy frame must not flood the agent screen. */

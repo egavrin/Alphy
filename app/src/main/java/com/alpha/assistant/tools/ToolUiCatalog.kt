@@ -1090,7 +1090,7 @@ object ToolUiCatalog {
         if(node.getString("type") in setOf("progress","progressRing") && v is Number) {
             // A progress label shows the filled share of its range, as the bar does.
             val (low,high)=bounds(node)
-            if(node.optString("variant") == "dots") return "${v.toInt().coerceIn(0,high.toInt())} of ${high.toInt()}"
+            if(node.optString("variant") == "dots") return "${v.toInt().coerceIn(0,high.toInt())} / ${high.toInt()}"
             return "${(((v.toDouble()-low)/(high-low)).coerceIn(0.0,1.0)*100).roundToInt()}%"
         }
         return if(node.optString("format") == "clock" && v is Number) "%02d:%02d".format(java.util.Locale.ROOT,v.toInt()/60,v.toInt()%60) else v.toString()
@@ -1135,6 +1135,7 @@ Use native choice controls bound to state for selections. Use buttons for comman
 Give the workflow a clear focal element, such as its form, result, or scene. Group related controls in a form, section, or row. Use one prominent action in a group when the task has a primary command. Use the host defaults for spacing and button emphasis unless the workflow requires a different treatment.
 Place allowed tone and emphasis inside the component's style object. For example, use {"type":"metric","text":"Total","bind":"total","style":{"emphasis":"number"}}. Omit style if it is unnecessary.
 Every supplied text value must contain 1 to 300 characters. For a checklist, use short, meaningful labels on bound row text, checkboxes, and inputs. Put empty strings in initialState when the data starts empty. Omit text on nodes where the catalog permits an unlabeled node.
+Look variants: a progressRing with "size":"large" is about 200 dp wide and holds centered children, such as the main value. A progress with "variant":"level" is a tank that fills from the bottom and holds centered children. A progress with "variant":"dots" shows 1 to 12 steps and has no children. An emoji node shows one emoji from value or bind, with size small, medium, or large. A card with "variant":"hero" is tinted. A checkbox with "variant":"circle" is a round check with its label above, such as a weekday. input, numberInput, select, dateInput, and timeInput take a leading icon with "icon". A divider directly inside a row with wrap false is a vertical divider. text and metric with emphasis display show the largest value on one line.
 Native UI catalog: ${components.keys.joinToString(", ")}. Properties by type: ${components.values.joinToString("; ") {"${it.type}=${(it.properties-common).sorted().joinToString(",")} (style: ${it.styles.sorted().joinToString(",")})"}}.
 Binding schema types by component: ${components.values.filter {it.binding.isNotEmpty()}.joinToString("; ") {"${it.type}=${it.binding.sorted().joinToString("|")}"}}.
 Required bind: ${components.values.filter {it.binding.isNotEmpty() && it.type !in optionalBindings}.joinToString(", ") {it.type}}. Optional bind: ${components.values.filter {it.binding.isNotEmpty() && it.type in optionalBindings}.joinToString(", ") {it.type}}. Every supplied bind must resolve in both stateSchema and state. Use only a compatible schema type from that component's binding list. Lists and arrays need structured schema objects, not scalar aliases.

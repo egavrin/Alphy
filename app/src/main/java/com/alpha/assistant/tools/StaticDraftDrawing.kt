@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -14,8 +13,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
@@ -26,7 +25,7 @@ import com.alpha.assistant.R
 import org.json.JSONObject
 
 @Composable internal fun StaticDraftDrawing(spec: ToolSpec, surfacesJson: String?, maxHeight: Dp, ids: List<String> = spec.surfaces.keys.toList(),
-    label: String? = null, modifier: Modifier = Modifier, roundInlineViewport: Boolean = false) {
+    label: String? = null, modifier: Modifier = Modifier) {
     if (spec.surfaces.isEmpty()) return
     if (surfacesJson == null) {
         Text(stringResource(R.string.tool_preview_drawing_unavailable), style = MaterialTheme.typography.bodySmall)
@@ -50,12 +49,12 @@ import org.json.JSONObject
     val drawingLabel = label ?: stringResource(R.string.tool_preview_drawing)
     val description = if (labels.isEmpty()) drawingLabel else "$drawingLabel. $labels"
     val scheme = MaterialTheme.colorScheme
-    val canvasBackground = scheme.surface
+    // As in the accepted app, the canvas takes the color of the card or page around it.
+    val canvasBackground = LocalToolBackground.current.takeOrElse { scheme.surface }
     val roleColors = remember(scheme) { ToolUiCatalog.tones.associateWith { scheme.toolInk(it, canvasBackground).toArgb() } }
 
     BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        val clip = if (roundInlineViewport) Modifier.clip(RoundedCornerShape(InlineToolViewportCornerRadius)) else Modifier.clipToBounds()
-        Canvas(Modifier.width(minOf(maxWidth, maxHeight * ratio)).aspectRatio(ratio).then(clip)
+        Canvas(Modifier.width(minOf(maxWidth, maxHeight * ratio)).aspectRatio(ratio).clip(MaterialTheme.shapes.medium)
             .background(canvasBackground).semantics { contentDescription = description }) {
             val canvas = drawContext.canvas.nativeCanvas
             val stage = canvas.save()

@@ -2,7 +2,6 @@ package com.alpha.assistant.tools
 
 import android.graphics.Bitmap
 import android.graphics.Rect
-import androidx.core.graphics.ColorUtils
 import com.alpha.assistant.R
 import com.alpha.assistant.ui.ShellRobot
 import org.json.JSONArray
@@ -26,9 +25,6 @@ class NativeLookWorkflowTest {
 
     private fun render(ui: JSONObject, last: String, state: String = "{}", check: (Bitmap) -> Unit) =
         robot.renderApps("look", listOf(ui.toString()), state, last, check = check)
-
-    private fun ink(shot: Bitmap, x: Int, y: Int, background: Int) =
-        abs(ColorUtils.calculateLuminance(shot.getPixel(x, y)) - ColorUtils.calculateLuminance(background)) > 0.15
 
     @Test fun metricValuesFollowTheEmphasisScale() {
         val metric = { label: String, bind: String, emphasis: String? ->
@@ -58,7 +54,7 @@ class NativeLookWorkflowTest {
             val bar = robot.bounds("Packing progress")
             val x = bar.left + bar.width() / 5
             val background = shot.getPixel(x, bar.top - dp(12))
-            val thickness = (bar.top - dp(8) until bar.bottom + dp(8)).count { y -> ink(shot, x, y, background) }
+            val thickness = (bar.top - dp(8) until bar.bottom + dp(8)).count { y -> shot.ink(x, y, background) }
             assertTrue("the filled bar is at least 8 dp thick: $thickness px", thickness >= dp(8))
         }
     }
@@ -86,7 +82,23 @@ class NativeLookWorkflowTest {
             assertEquals(left.centerY().toFloat(), right.centerY().toFloat(), dp(2).toFloat())
             assertTrue("the divider takes little width: ${right.left - left.right} px", right.left - left.right in 1 until dp(40))
             val background = shot.getPixel(left.left - dp(4), left.top)
-            assertTrue("a line stands between the texts", (left.right until right.left).any { x -> ink(shot, x, left.top + dp(2), background) })
+            assertTrue("a line stands between the texts", (left.right until right.left).any { x -> shot.ink(x, left.top + dp(2), background) })
+        }
+    }
+
+    /** Review finding: a divider asked the facts beside it for intrinsic sizes, which they cannot give, and the app crashed. */
+    @Test fun aDividerBesideFactsKeepsTheRow() {
+        val ui = themedColumn(JSONObject("""{"type":"row","wrap":false,"children":[
+            {"type":"fact","text":"Distance","bind":"a"},{"type":"divider"},{"type":"fact","text":"Time","bind":"b"}]}"""),
+            JSONObject("""{"type":"text","text":"End of facts"}"""))
+        val state = """{"a":"5 km","b":"30 min"}"""
+        assertEquals(null, validateNativeUi(ui, JSONObject("""{"a":"string","b":"string"}"""), JSONObject(state)))
+        render(ui, "End of facts", state) { shot ->
+            val left = maxOf(robot.bounds("Distance").right, robot.bounds("5 km").right)
+            val right = minOf(robot.bounds("Time").left, robot.bounds("30 min").left)
+            val y = robot.bounds("Distance").bottom
+            val background = shot.getPixel(robot.bounds("Distance").left - dp(4), y)
+            assertTrue("a line stands between the facts", (left until right).any { x -> shot.ink(x, y, background) })
         }
     }
 
@@ -101,7 +113,7 @@ class NativeLookWorkflowTest {
             fun rightmostInk(label: String): Int {
                 val field = Rect().also(robot.field(label)::getBoundsInScreen)
                 val background = shot.getPixel(field.right - dp(12), field.centerY())
-                return (field.left + dp(4) until field.right - dp(12)).last { x -> ink(shot, x, field.centerY(), background) } - field.left
+                return (field.left + dp(4) until field.right - dp(12)).last { x -> shot.ink(x, field.centerY(), background) } - field.left
             }
             val plain = rightmostInk("Plain item")
             val icon = rightmostInk("Icon item")

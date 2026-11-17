@@ -112,8 +112,9 @@ internal fun ThreeScenePane(
     var error by remember(tool.id, tool.revision) { mutableStateOf<String?>(null) }
     var paused by rememberSaveable(tool.id, tool.revision) { mutableStateOf(false) }
     var retry by remember(tool.id, tool.revision) { mutableStateOf(0) }
-    // An immersive scene, such as a 3D game, opens across the whole window.
-    var fullscreen by remember(visible, session) { mutableStateOf(spec.presentation == "immersive") }
+    // An immersive scene, such as a 3D game, opens across the whole window. After the user leaves it, it stays inline.
+    var immersiveExited by rememberSaveable(tool.id, tool.revision) { mutableStateOf(false) }
+    var fullscreen by remember(visible, session) { mutableStateOf(spec.presentation == "immersive" && !immersiveExited) }
     val events = remember(tool.id, tool.revision, visible, retry) { Channel<JSONObject>(32) }
     val moves = remember(events) { linkedMapOf<Int, JSONObject>() }
     val pointers = remember(events) { linkedMapOf<Int, JSONObject>() }
@@ -268,7 +269,7 @@ internal fun ThreeScenePane(
             playback()
         })
         if (fullscreen) {
-            Dialog(onDismissRequest = { fullscreen = false },
+            Dialog(onDismissRequest = { fullscreen = false; immersiveExited = true },
                 properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
                 ImmersiveSystemBars(enabled = true)
                 val expanded = remember { FrameLayout(context) }
@@ -293,7 +294,7 @@ internal fun ThreeScenePane(
                                     expanded.apply { attachSceneView(view) }
                                 }, modifier = Modifier.fillMaxSize())
                                 snapshot.hud?.let { ThreeSceneHud(it, spec.title) }
-                                SceneOverlay(paused, expanded = true, spec.appLanguage, onFullscreen = { fullscreen = false })
+                                SceneOverlay(paused, expanded = true, spec.appLanguage, onFullscreen = { fullscreen = false; immersiveExited = true })
                             }
                             Column(Modifier.fillMaxWidth()
                                 .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))

@@ -54,6 +54,16 @@ internal fun ShellRobot.renderApps(folder: String, uis: List<String>, state: Str
     } finally { fixture.remove() }
 }
 
+/** True when the pixel at [x], [y] differs in luminance from [background] by more than 0.15. */
+internal fun Bitmap.ink(x: Int, y: Int, background: Int) =
+    kotlin.math.abs(androidx.core.graphics.ColorUtils.calculateLuminance(getPixel(x, y)) - androidx.core.graphics.ColorUtils.calculateLuminance(background)) > 0.15
+
+/** Asserts that two screenshot colors differ by at most 3 in each of red, green, and blue. */
+internal fun assertSameColor(message: String, actual: Int, expected: Int) {
+    for (shift in listOf(16, 8, 0)) org.junit.Assert.assertTrue("$message: ${Integer.toHexString(actual)} against ${Integer.toHexString(expected)}",
+        kotlin.math.abs((actual shr shift and 0xFF) - (expected shr shift and 0xFF)) <= 3)
+}
+
 /** The validation failure of a native UI with its diagnostic, or null when the UI is valid. */
 internal fun validateNativeUi(ui: JSONObject, fields: JSONObject = JSONObject(), state: JSONObject = JSONObject()): String? {
     var diagnostic: ToolUiDiagnostic? = null

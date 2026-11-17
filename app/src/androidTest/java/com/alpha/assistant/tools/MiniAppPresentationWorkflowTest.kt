@@ -251,8 +251,7 @@ class MiniAppPresentationWorkflowTest {
             try {
                 val canvas = shot.getPixel(board.centerX(), board.centerY())
                 val card = shot.getPixel(board.left - (8 * shot.density / 160), board.centerY())
-                for (shift in listOf(16, 8, 0)) assertTrue("the canvas ${Integer.toHexString(canvas)} matches its card ${Integer.toHexString(card)}",
-                    abs((canvas shr shift and 0xFF) - (card shr shift and 0xFF)) <= 3)
+                assertSameColor("the canvas matches its card", canvas, card)
             } finally { shot.recycle() }
         }
     }

@@ -129,7 +129,9 @@ class NativePresentationWorkflowTest {
             preview(scenario, PresentationFixtures.habit, dark)
             val number = textLayout(scenario, "7").layoutInput.style
             val label = textLayout(scenario, "Дней подряд").layoutInput.style
-            assertEquals(FontFamily.Monospace, number.fontFamily)
+            // The technical preset keeps the body font and aligns digits with tabular figures.
+            assertNotEquals(FontFamily.Monospace, number.fontFamily)
+            assertEquals("tnum", number.fontFeatureSettings)
             assertTrue("The result is the focal text", number.fontSize.value > label.fontSize.value)
             assertNotEquals(FontFamily.Monospace, textLayout(scenario, "Готово").layoutInput.style.fontFamily)
         }

@@ -54,6 +54,50 @@ class NativeHeroWorkflowTest {
         }
     }
 
+    /** Review finding: display text wrapped inside a large ring, so a time such as 1:05:30 broke across lines. */
+    @Test fun displayTextInALargeRingStaysOnOneLine() {
+        val long = JSONObject(ring.toString()).put("children", JSONArray().put(JSONObject("""{"type":"text","text":"1:05:30","style":{"emphasis":"display"}}""")))
+        val ui = themedColumn(JSONObject("""{"type":"text","text":"8","style":{"emphasis":"display"}}"""), long, JSONObject("""{"type":"text","text":"End of ring"}"""))
+        assertEquals(null, validateNativeUi(ui, done, JSONObject("""{"done":25}""")))
+        robot.renderApps("hero", listOf(ui.toString()), """{"done":25}""", "End of ring", fontScale = 2f) {
+            val line = robot.bounds("8").height()
+            val time = robot.bounds("1:05:30").height()
+            assertTrue("the time keeps one line: $time px against $line px", time <= line * 5 / 4)
+        }
+    }
+
+    /** Review finding: in a half-width cell the ring cannot grow, so long text at 200% font ran out of the circle. */
+    @Test fun aLargeRingInAHalfCellKeepsItsTextInside() {
+        val long = JSONObject(ring.toString()).put("children", JSONArray().put(JSONObject("""{"type":"text","text":"Belastungsphase läuft"}""")))
+        val grid = JSONObject().put("type", "grid").put("columns", 2).put("children", JSONArray().put(long).put(JSONObject("""{"type":"text","text":"Other cell"}""")))
+        val ui = themedColumn(grid, JSONObject("""{"type":"text","text":"End of ring"}"""))
+        assertEquals(null, validateNativeUi(ui, done, JSONObject("""{"done":60}""")))
+        robot.renderApps("hero", listOf(ui.toString()), """{"done":60}""", "End of ring", fontScale = 2f) {
+            val frame = robot.bounds("Round time")
+            val text = robot.bounds("Belastungsphase läuft")
+            // The ring stroke is 14 dp. Every corner of the text box stays inside the circle within the stroke.
+            val radius = frame.width() / 2.0 - dp(14)
+            val corners = listOf(text.left to text.top, text.right to text.top, text.left to text.bottom, text.right to text.bottom)
+            assertTrue("the text $text stays inside the circle of $frame",
+                corners.all { (x, y) -> kotlin.math.hypot(x - frame.exactCenterX().toDouble(), y - frame.exactCenterY().toDouble()) <= radius + 2 })
+        }
+    }
+
+    /** Review finding: twelve 20 dp dots need 328 dp, so in a narrow cell the last dots got no width. */
+    @Test fun twelveDotsFitInAHalfCell() {
+        val dots = JSONObject("""{"type":"progress","text":"Glasses","variant":"dots","bind":"glasses","min":0,"max":12}""")
+        val grid = JSONObject().put("type", "grid").put("columns", 2).put("children", JSONArray().put(dots).put(JSONObject("""{"type":"text","text":"Other cell"}""")))
+        val ui = themedColumn(grid, JSONObject("""{"type":"text","text":"End of dots"}"""))
+        assertEquals(null, validateNativeUi(ui, JSONObject("""{"glasses":"number"}"""), JSONObject("""{"glasses":12}""")))
+        robot.renderApps("hero", listOf(ui.toString()), """{"glasses":12}""", "End of dots") { shot ->
+            val row = robot.bounds("Glasses")
+            val background = shot.getPixel(row.centerX(), row.bottom + dp(3))
+            val ink = (row.left until row.right).map { x -> shot.ink(x, row.centerY(), background) }
+            val dotsSeen = ink.indices.count { ink[it] && (it == 0 || !ink[it - 1]) }
+            assertEquals("dots drawn in $row", 12, dotsSeen)
+        }
+    }
+
     @Test fun dotsShowStepsAndRejectMoreThanTwelve() {
         val dots = JSONObject("""{"type":"progress","text":"Glasses","variant":"dots","bind":"glasses","min":0,"max":5}""")
         val fields = JSONObject("""{"glasses":"number"}""")
@@ -62,7 +106,7 @@ class NativeHeroWorkflowTest {
         val many = validateNativeUi(themedColumn(JSONObject(dots.toString()).put("max", 13)), fields, JSONObject("""{"glasses":3}"""))
         assertTrue("$many", many?.contains("Dots show at most 12 steps.") == true)
         robot.renderApps("hero", listOf(ui.toString()), """{"glasses":3}""", "End of dots") {
-            assertEquals("3 of 5", robot.waitFor("Glasses").stateDescription?.toString())
+            assertEquals("3 / 5", robot.waitFor("Glasses").stateDescription?.toString())
         }
     }
 
@@ -107,6 +151,25 @@ class NativeHeroWorkflowTest {
         }
     }
 
+    /** Review focus: an empty or undrawable emoji keeps an empty tile and its description, not a blank gap or a box glyph. */
+    @Test fun anEmojiWithoutAGlyphShowsAnEmptyTile() {
+        val ui = themedColumn(JSONObject("""{"type":"emoji","text":"Empty picture","bind":"empty","size":"large"}"""),
+            JSONObject("""{"type":"emoji","text":"Unknown picture","bind":"unknown","size":"large"}"""),
+            JSONObject("""{"type":"text","text":"End of pictures"}"""))
+        val state = JSONObject().put("empty", "").put("unknown", "\uE000")
+        assertEquals(null, validateNativeUi(ui, JSONObject("""{"empty":"string","unknown":"string"}"""), state))
+        robot.renderApps("hero", listOf(ui.toString()), state.toString(), "End of pictures") { shot ->
+            for (label in listOf("Empty picture", "Unknown picture")) {
+                val tile = robot.bounds(label)
+                val page = shot.getPixel(tile.right + dp(8), tile.centerY())
+                val center = shot.getPixel(tile.centerX(), tile.centerY())
+                assertTrue("$label draws a tile", center != page)
+                val inside = (2..8).flatMap { i -> (2..8).map { j -> shot.getPixel(tile.left + tile.width() * i / 10, tile.top + tile.height() * j / 10) } }
+                assertTrue("$label draws no glyph", inside.all { it == center })
+            }
+        }
+    }
+
     @Test fun circleCheckboxesShowTheLabelAbove() {
         val days = listOf("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su")
         val grid = JSONObject().put("type", "row").put("wrap", false).put("style", JSONObject().put("arrangement", "between")).put("children", JSONArray(days.map { day ->
@@ -131,6 +194,6 @@ class NativeHeroWorkflowTest {
         val state = JSONObject("""{"done":25,"glasses":3}""")
         assertEquals(null, validateNativeUi(ui, JSONObject("""{"done":"number","glasses":"number"}"""), state))
         val screen = AppScreen.render(ui, state, JSONObject(), 0L).text
-        for (part in listOf("progressRing large", "00:40", "3 of 5", "emoji \"Milk\" 🥛")) assertTrue("$part in\n$screen", part in screen)
+        for (part in listOf("progressRing large", "00:40", "3 / 5", "emoji \"Milk\" 🥛")) assertTrue("$part in\n$screen", part in screen)
     }
 }

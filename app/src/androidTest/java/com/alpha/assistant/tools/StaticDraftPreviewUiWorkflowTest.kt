@@ -2,6 +2,7 @@ package com.alpha.assistant.tools
 
 import android.graphics.Color
 import android.view.accessibility.AccessibilityNodeInfo
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -35,13 +36,7 @@ class StaticDraftPreviewUiWorkflowTest {
             val first = snapshot(draft.id, "request", 1, "First")
             val corrected = snapshot(draft.id, "request", 2, "Second")
             fixture.launch().use { scenario ->
-                scenario.onActivity { activity ->
-                    activity.setContent {
-                        AlphaTheme {
-                            Box(Modifier.safeDrawingPadding()) { GeneratedToolPreview(draft, previews.previewFor(draft.id)) }
-                        }
-                    }
-                }
+                scenario.onActivity { it.showPreview(draft, previews) }
                 val before = SurfaceFrameMetrics.snapshot()?.generation
                 request.onPreview(first)
                 val firstDrawing = canvasLabel("First first. First second.")
@@ -67,6 +62,37 @@ class StaticDraftPreviewUiWorkflowTest {
             }
         }
     }
+
+    /** Review finding: the draft drew its canvas on the surface color, a gray box in a tinted card, unlike the accepted app. */
+    @Test fun aDraftCanvasTakesItsCardColor(): Unit = runBlocking {
+        withFixture(Provider) { fixture, _ ->
+            val draft = ToolDraft("draft", null, 0, 0, "Board in chat", null, null, null, "chat")
+            val previews = ToolControllerDraftPreviews(this) { draft }
+            val request = previews.begin(draft.id, "request")
+            val canvas = JSONObject("""{"type":"canvas","text":"Drawing board","surfaces":["board"]}""")
+            val spec = ToolSpec.parse(JSONObject().put("formatVersion", 3).put("title", "Board").put("description", "").put("capabilities", JSONArray())
+                .put("stateSchema", JSONObject().put("n", "number")).put("initialState", JSONObject().put("n", 0))
+                .put("surfaces", JSONArray("""[{"id":"board","width":300,"height":200}]"""))
+                .put("source", "return {state:input.state,surfaces:{board:{commands:[]}}};")
+                .put("ui", JSONObject().put("type", "theme").put("preset", "playful").put("palette", "orange").put("children", JSONArray().put(
+                    JSONObject().put("type", "card").put("text", "Board card").put("children", JSONArray().put(canvas))))).toString())
+            fixture.launch().use { scenario ->
+                scenario.onActivity { it.showPreview(draft, previews) }
+                request.onPreview(ToolDraftPreview(ToolDraftPreviewIdentity(draft.id, "request", 1), spec.json, spec.initialState, spec.ui.toString(),
+                    """{"board":{"commands":[]}}"""))
+                val board = robot.bounds("Drawing board")
+                val shot = checkNotNull(robot.automation.takeScreenshot())
+                try {
+                    val inside = shot.getPixel(board.centerX(), board.centerY())
+                    val card = shot.getPixel(board.left - (8 * shot.density / 160), board.centerY())
+                    assertSameColor("the canvas matches its card", inside, card)
+                } finally { shot.recycle() }
+            }
+        }
+    }
+
+    private fun ComponentActivity.showPreview(draft: ToolDraft, previews: ToolControllerDraftPreviews) =
+        setContent { AlphaTheme { Box(Modifier.safeDrawingPadding()) { GeneratedToolPreview(draft, previews.previewFor(draft.id)) } } }
 
     private fun assertPaintOrderAndClipping(label: String) {
         val bounds = robot.bounds(label)
