@@ -270,7 +270,7 @@ internal object AppSteps {
 
     private fun collectionFor(root: JSONObject, id: String): JSONObject? {
         fun visit(node: JSONObject): JSONObject? {
-            if (node.optString("type") in setOf("list", "table", "groupedList", "lazyList", "lazyGrid")) {
+            if (node.optString("type") in ToolUiCatalog.recordTypes) {
                 val owns = node.optString("action") == id || isRowAction(node, id) ||
                     node.optJSONObject("rowTemplate")?.let { ToolUiCatalog.actionTarget(it, id) } != null
                 if (owns) return node

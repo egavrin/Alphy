@@ -557,7 +557,6 @@ private fun space(value: String?, default: Int = 0) = when(value) {"none" -> 0; 
 private fun alignment(style: JSONObject?) = when(style?.optString("align")) {"center" -> Alignment.CenterHorizontally; "end" -> Alignment.End; else -> Alignment.Start}
 private fun showsToolHeading(text: String, hostHeading: String?) =
     text.isNotBlank() && !text.trim().equals(hostHeading?.trim(), ignoreCase = true)
-private val recordTypes = setOf("list","table","groupedList","lazyList","lazyGrid")
 private val titledChoices = setOf("singleChoice","multiChoice","segmented","select")
 /** The end of the texts after a leading large emoji in a hero card, or 0 when the card does not start with one. */
 private fun heroEmojiSide(children: JSONArray): Int {
@@ -830,7 +829,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
     // So the page does not name one thing twice.
     val named = if (children != null && group && showsToolHeading(text, heading)) buildSet {
         val nodes = (0 until children.length()).map { children.getJSONObject(it) }
-        nodes.indices.singleOrNull { nodes[it].getString("type") in recordTypes }?.let(::add)
+        nodes.indices.singleOrNull { nodes[it].getString("type") in ToolUiCatalog.recordTypes }?.let(::add)
         addAll(nodes.indices.filter { nodes[it].getString("type") in titledChoices && !showsToolHeading(text, nodes[it].optString("text")) })
     } else emptySet()
     val renderChildren: @Composable (IntRange) -> Unit = { range ->

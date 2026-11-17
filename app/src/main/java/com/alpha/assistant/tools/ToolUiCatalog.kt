@@ -32,6 +32,7 @@ object ToolUiCatalog {
     val choiceTypes=setOf("select","tabs","singleChoice","multiChoice","segmented","navigationBar","navigationRail","menu")
     val booleanInputTypes = setOf("toggle", "checkbox", "chip")
     val modalTypes=setOf("dialog","bottomSheet")
+    val recordTypes=setOf("list","table","groupedList","lazyList","lazyGrid")
     val interactionKeys=setOf("enter","space","escape","up","down","left","right")
     private class MissingBindingPath : IllegalArgumentException("Binding path is missing.")
     internal class InvalidBooleanActionPayload(val control: JSONObject) : IllegalArgumentException("Invalid action value.")
@@ -89,7 +90,7 @@ object ToolUiCatalog {
             val inputProps = if (type in liveInputTypes) iconProps + "inputMode" else iconProps
             add(entry(type,setOf("bind","action")+inputProps,if(type == "toggle") Projection.LOCAL_ACTION else Projection.SUMMARY,binding,action=true))
         }
-        for(type in listOf("list","table","groupedList","lazyList","lazyGrid")) {
+        for(type in recordTypes) {
             val rowProperties=if(type == "table") emptySet() else setOf("rowActions","rowTemplate","emptyText","groupBy","swipeAction")
             val viewportProperties=if(type in setOf("lazyList","lazyGrid")) setOf("viewportHeight","selectedKeyBind","scrollToKeyBind")+(if(type == "lazyList") setOf("stickyHeaders") else setOf("spanField")) else emptySet()
             val reorderProperties = if (type == "list" || type == "lazyList") setOf("reorder") else emptySet()
@@ -896,7 +897,7 @@ object ToolUiCatalog {
     internal fun actionTarget(root: JSONObject, id: String): ActionTarget? = findAction(root, id, activeOnly = false)
 
     internal fun scenarioRowPayload(collection: JSONObject, action: String, key: String, value: Any?): Any? {
-        if (collection.getString("type") !in setOf("list", "table", "groupedList", "lazyList", "lazyGrid")) return null
+        if (collection.getString("type") !in recordTypes) return null
         val template = collection.optJSONObject("rowTemplate")
         if (template != null && findAction(template, action, activeOnly = false) != null) {
             return JSONObject().put("key", key).put("value", value ?: JSONObject.NULL)

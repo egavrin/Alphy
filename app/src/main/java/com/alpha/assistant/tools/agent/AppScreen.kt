@@ -42,7 +42,6 @@ internal class AppScreen private constructor(val lines: List<String>, val visibl
         private const val MAX_LINES = 160
         /** Drawn text of one surface on the screen. A game redraws often, so only the last frame counts. */
         private const val MAX_DRAWN_TEXT = 400
-        private val collections = setOf("list", "table", "groupedList", "lazyList", "lazyGrid")
         private val flattened = setOf("column", "scroll", "theme", "box", "motion", "transform", "transition")
         private val silent = setOf("divider", "spacer", "skeleton")
 
@@ -106,10 +105,10 @@ internal class AppScreen private constructor(val lines: List<String>, val visibl
                 val id = action?.let { " [" + it + (rowKey?.let { key -> " key=$key" } ?: "") + "]" }.orEmpty()
                 val off = if (active) "" else " (disabled)"
                 fun childNodes(next: Int) = shownChildren(node, values).forEach { visit(it, values, next, active, rowKey) }
-                if (label.isNotEmpty() && type !in collections) visible += label
+                if (label.isNotEmpty() && type !in ToolUiCatalog.recordTypes) visible += label
                 when {
                     type in silent -> Unit
-                    type in collections -> {
+                    type in ToolUiCatalog.recordTypes -> {
                         val rows = runCatching { ToolUiCatalog.records(node, values) }.getOrNull() ?: JSONArray()
                         line(depth, "$type$id${if (label.isNotEmpty()) " " + quote(label) else ""}: ${rows.length()} rows$off")
                         if (label.isNotEmpty()) visible += label

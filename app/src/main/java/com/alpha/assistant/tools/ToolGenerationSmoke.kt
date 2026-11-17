@@ -364,7 +364,7 @@ internal class ToolGenerationSmoke(
                 val span=spans.getJSONObject(index)
                 if(span.has("action")) add(span.getString("action"),span.getString("url"),"$path.spans[$index]",key)
             }}
-            if(type in setOf("list","table","groupedList","lazyList","lazyGrid")) {
+            if(type in ToolUiCatalog.recordTypes) {
                 val rows=ToolUiCatalog.records(node,values)
                 val indices=(0 until rows.length()).take(1).plus(if(rows.length()>1)listOf(rows.length()-1) else emptyList())
                 for(index in indices) {
