@@ -104,4 +104,11 @@ class GenerationContractGuidanceTest {
         assertTrue("${guide.length}", guide.length <= 56298 * 11 / 10)
     }
 
+    @Test fun gamesAreImmersiveAndSelfDrawn() {
+        // Failure case: generated games put Left, Right, and Restart buttons and hint texts under a small canvas.
+        val guide = com.alpha.assistant.tools.agent.AppAgentGuide.system("", "")
+        for (part in listOf("\"mode\":\"immersive\"", "\"sizing\":\"viewport\"", "draw the score")) assertTrue(part, guide.contains(part))
+        assertTrue("the guide still asks for a native Restart button", !guide.contains("a Restart button"))
+    }
+
 }
