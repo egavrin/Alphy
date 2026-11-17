@@ -29,6 +29,8 @@ internal sealed interface CoursePage {
         internal val imageDefinition: ToolSpec? = null,
         /** An earlier slide that the learner opens again. It is read-only and has no next request. */
         val review: Boolean = false,
+        /** The count of wrong answers to this slide. Each one starts the preparation of the next slide again. */
+        val errors: Int = 0,
     ) : CoursePage
 
     data class Unavailable(
@@ -132,7 +134,8 @@ internal class CoursePresentation(
         return update(slide.course.id) {
             val updated = controller.submitAnswer(slide.course.id, slide.course.revision, slide.step.slide.id, operationId, answer)
             val correct = updated.progress.completedSlides > slide.course.progress.completedSlides
-            slide.copy(course = updated, feedback = CourseAnswerFeedback(answer, correct))
+            slide.copy(course = updated, feedback = CourseAnswerFeedback(answer, correct),
+                errors = slide.errors + if (correct) 0 else 1)
         }
     }
 
@@ -154,12 +157,12 @@ internal class CoursePresentation(
         val slot = GenerationSlot(prefetch = true)
         check(acquireGeneration(request.courseId, slot))
         try {
-            val course = store.courseAt(request.courseId, request.revision)
-            val target = course.nextTarget(request.visibleSlideId) ?: return CourseNextPreparation.Stale
+            val course = store.courseFor(request)
+            val target = course.nextTarget(request.visibleSlideId, prepare = true) ?: return CourseNextPreparation.Stale
             val saved = store.slide(course.id, target.step.slide.id)?.content
             val content = saved ?: host?.generate(request) ?: return CourseNextPreparation.Unavailable
             currentCoroutineContext().ensureActive()
-            store.courseAt(request.courseId, request.revision)
+            store.courseFor(request)
             val attempt = if (saved != null) lastAttempt(course.id, target.step) else null
             val page = checkedSlide(course, target.step, target.index + 1, attempt, content)
             return CourseNextPreparation.Ready(request, page, content.takeIf { saved == null })
@@ -295,7 +298,8 @@ internal class CoursePresentation(
         val feedback = attempt?.let { CourseAnswerFeedback(it.answer, it.correct) }
         return CoursePage.Slide(course, step, number, saved.ui.toString(), saved.state.toString(), saved.exercise?.prompt,
             content.sources, content.adaptationNote, feedback, saved.scene,
-            imageDefinition = saved.spec.takeIf { it.lessonImageIntent != null || it.generatedImages.isNotEmpty() })
+            imageDefinition = saved.spec.takeIf { it.lessonImageIntent != null || it.generatedImages.isNotEmpty() },
+            errors = if (step.slide.kind.requiresAnswer) store.wrongAnswers(course.id, step.slide.id) else 0)
     }
 
     private fun lastAttempt(courseId: String, step: CourseStep): CourseAnswerAttempt? =
@@ -350,9 +354,10 @@ internal class CoursePresentation(
     }
 }
 
+/** An exercise has its request before the answer, so the preparation of the next slide starts when the slide opens. */
 internal val CoursePage.Slide.nextRequest: CourseNextRequest?
-    get() = if (!review && number < course.progress.totalSlides && (prompt == null || feedback?.correct == true)) {
-        CourseNextRequest(course.id, course.revision, step.slide.id)
+    get() = if (!review && number < course.progress.totalSlides) {
+        CourseNextRequest(course.id, course.outlineRevision, step.slide.id, errors)
     } else null
 
 /** A saved slide in the form that the player shows. */

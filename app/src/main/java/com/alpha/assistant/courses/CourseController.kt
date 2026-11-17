@@ -62,15 +62,15 @@ internal class CourseController(
     }
 
     suspend fun prepareNext(request: CourseNextRequest, key: String, session: CloudSession): CourseSlideContent {
-        val course = store.courseAt(request.courseId, request.revision)
-        val target = course.nextTarget(request.visibleSlideId) ?: reject(CourseRejection.SLIDE_NOT_REACHED)
+        val course = store.courseFor(request)
+        val target = course.nextTarget(request.visibleSlideId, prepare = true) ?: reject(CourseRejection.SLIDE_NOT_REACHED)
         checkActive(session)
         val input = generation.input(store, course, target.index, emptyList())
-        store.courseAt(request.courseId, request.revision)
+        store.courseFor(request)
         val step = target.step.slide
         return generation.generate(key, input, session, artifactId(course.id, step.id), step.kind).also {
             checkActive(session)
-            store.courseAt(request.courseId, request.revision)
+            store.courseFor(request)
         }
     }
 

@@ -192,10 +192,94 @@ class CoursePlayerGenerationUiWorkflowTest {
         }
     }
 
+    @Test fun exerciseStartsTheNextSlideBeforeTheAnswerAndKeepsItAfterTheCorrectOne() {
+        val release = CompletableDeferred<Unit>()
+        val runtime = Runtime { attempt -> if (attempt == 1) release.await() }
+        withPlayer(runtime, prefetch = true, startAtPractice = CourseSlideKind.CHOICE) { store, saved ->
+            robot.click("Fractions")
+            click(R.string.course_open)
+            robot.waitFor("Whole")
+            robot.waitUntil { runtime.prompts.size == 1 }
+            assertEquals(1, runtime.preparations.size)
+            assertFalse(runtime.prompts.single().contains("\"correct\""))
+            assertNull(robot.find(robot.text(R.string.course_next)))
+            assertNull(robot.find(robot.text(R.string.course_next_preparing)))
+
+            robot.click("Half")
+            waitFor(R.string.course_answer_correct)
+            waitFor(R.string.course_next_preparing)
+            release.complete(Unit)
+            waitFor(R.string.course_next)
+            assertEquals(1, runtime.preparations.size)
+            assertEquals(1, runtime.prompts.size)
+            assertNull(store.slide(saved.id, "explanation"))
+            click(R.string.course_next)
+            robot.waitFor(generatedText)
+            assertTrue(store.slide(saved.id, "explanation") != null)
+            assertTrue(runtime.requests.isEmpty())
+            assertEquals(listOf(true), store.answers(saved.id).map { it.correct })
+        }
+    }
+
+    @Test fun aWrongAnswerStartsThePreparationAgainWithTheError() {
+        val hold = CompletableDeferred<Unit>()
+        val canceled = CompletableDeferred<Unit>()
+        val runtime = Runtime { attempt ->
+            if (attempt == 1) try {
+                hold.await()
+            } finally {
+                canceled.complete(Unit)
+            }
+        }
+        withPlayer(runtime, prefetch = true, startAtPractice = CourseSlideKind.CHOICE) { store, saved ->
+            robot.click("Fractions")
+            click(R.string.course_open)
+            robot.waitUntil { runtime.prompts.size == 1 }
+            robot.click("Whole")
+            waitFor(R.string.course_answer_wrong)
+            robot.waitUntil { canceled.isCompleted && runtime.prompts.size == 2 }
+            assertEquals(2, runtime.preparations.size)
+            assertTrue(runtime.prompts.last().contains("\"correct\":false"))
+            assertFalse(runtime.prompts.last().contains("\"correct\":true"))
+            assertNull(store.slide(saved.id, "explanation"))
+
+            robot.click("Half")
+            waitFor(R.string.course_answer_correct)
+            waitFor(R.string.course_next)
+            assertEquals(2, runtime.preparations.size)
+            click(R.string.course_next)
+            robot.waitFor(generatedText)
+            assertTrue(runtime.requests.isEmpty())
+        }
+    }
+
+    @Test fun aPreparationThatFailsBeforeTheAnswerGetsOneNewAttemptOnTheCorrectAnswer() {
+        val runtime = Runtime { attempt -> if (attempt == 1) error("Private preparation failure") }
+        withPlayer(runtime, prefetch = true, startAtPractice = CourseSlideKind.CHOICE) { store, saved ->
+            robot.click("Fractions")
+            click(R.string.course_open)
+            robot.waitFor("Whole")
+            robot.waitUntil { runtime.finished.get() == 1 }
+            // The failure is not shown before the answer. Give the player a few frames to record it.
+            robot.awaitFrames(10)
+            assertNull(robot.find(robot.text(R.string.course_next_failed)))
+
+            robot.click("Half")
+            waitFor(R.string.course_answer_correct)
+            waitFor(R.string.course_next)
+            assertNull(robot.find(robot.text(R.string.course_next_failed)))
+            assertEquals(2, runtime.preparations.size)
+            click(R.string.course_next)
+            robot.waitFor(generatedText)
+            assertTrue(runtime.requests.isEmpty())
+        }
+    }
+
     @Test fun correctFeedbackStaysVisibleDuringPreparationAndRetry() {
         val release = CompletableDeferred<Unit>()
+        // The first preparation starts when the slide opens. The wrong answer starts the second one.
         val runtime = Runtime { attempt ->
-            if (attempt == 1) {
+            if (attempt == 2) {
                 release.await()
                 error("Private preparation failure")
             }
@@ -208,7 +292,8 @@ class CoursePlayerGenerationUiWorkflowTest {
             robot.reveal(robot.text(R.string.course_check))
             click(R.string.course_check)
             robot.reveal(robot.text(R.string.course_answer_wrong))
-            assertTrue(runtime.preparations.isEmpty())
+            robot.waitUntil { runtime.prompts.size == 2 }
+            assertEquals(2, runtime.preparations.size)
 
             robot.reveal(answer, forward = false)
             robot.edit(answer, "half")
@@ -228,8 +313,12 @@ class CoursePlayerGenerationUiWorkflowTest {
             robot.waitFor(generatedText)
             assertEquals(progress, store.course(saved.id)?.progress)
             assertEquals(listOf(false, true), store.answers(saved.id).map { it.correct })
-            assertTrue(runtime.prompts.first().contains("\"correct\":false"))
-            assertTrue(runtime.prompts.first().contains("\"correct\":true"))
+            assertFalse(runtime.prompts.first().contains("\"correct\""))
+            assertTrue(runtime.prompts[1].contains("\"correct\":false"))
+            assertFalse(runtime.prompts[1].contains("\"correct\":true"))
+            // The retry after the correct answer knows both answers. The opened slide then prepares its own next slide.
+            assertTrue(runtime.prompts[2].contains("\"correct\":false"))
+            assertTrue(runtime.prompts[2].contains("\"correct\":true"))
             assertTrue(runtime.requests.isEmpty())
         }
     }
@@ -237,13 +326,14 @@ class CoursePlayerGenerationUiWorkflowTest {
     @Test fun choiceTapSavesOneAttemptAndKeepsFeedbackUntilNext() {
         val release = CompletableDeferred<Unit>()
         val retry = CompletableDeferred<Unit>()
+        // The first preparation starts when the slide opens. The wrong answer starts the second one.
         val runtime = Runtime { attempt ->
             when (attempt) {
-                1 -> {
+                2 -> {
                     release.await()
                     error("Fixture preparation failure")
                 }
-                2 -> retry.await()
+                3 -> retry.await()
             }
         }
         withPlayer(runtime, prefetch = true, startAtPractice = CourseSlideKind.CHOICE) { store, saved ->
@@ -254,7 +344,8 @@ class CoursePlayerGenerationUiWorkflowTest {
             assertNull(robot.find(robot.text(R.string.course_check)))
             assertEquals(saved.progress, store.course(saved.id)?.progress)
             assertEquals(listOf(CourseAnswer.Choice("whole")), store.answers(saved.id).map { it.answer })
-            assertTrue(runtime.preparations.isEmpty())
+            robot.waitUntil { runtime.prompts.size == 2 }
+            assertEquals(2, runtime.preparations.size)
 
             val option = generateSequence(robot.waitFor("Half")) { it.parent }.first { it.isClickable }
             assertEquals("android.widget.Button", option.className.toString())
@@ -689,7 +780,11 @@ class CoursePlayerGenerationUiWorkflowTest {
                                     sourcedGeneration = sourcedHost,
                                     nextGeneration = if (prefetch) CourseNextGenerationHost { request ->
                                         runtime.preparations += request
-                                        controller.prepareNext(request, "fixture", CloudSession())
+                                        try {
+                                            controller.prepareNext(request, "fixture", CloudSession())
+                                        } finally {
+                                            runtime.finished.incrementAndGet()
+                                        }
                                     } else null,
                                 )
                             }
@@ -739,6 +834,8 @@ class CoursePlayerGenerationUiWorkflowTest {
         val preparations = CopyOnWriteArrayList<CourseNextRequest>()
         val prompts = CopyOnWriteArrayList<String>()
         val sourceRequests = CopyOnWriteArrayList<Pair<CourseSlideGenerationRequest, String>>()
+        /** The preparation calls that returned or failed. */
+        val finished = AtomicInteger()
         private val calls = AtomicInteger()
         val generation = CourseGeneration(
             generateTool = { _, input, _, _, policy, _ ->

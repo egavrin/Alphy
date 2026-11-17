@@ -185,6 +185,14 @@ internal fun CourseLibraryScreen(
             nextPreparation = result
         }
     }
+    // A preparation can fail before the answer, where the page shows no notice. The correct answer starts it once more.
+    val answered = reachedSlide?.feedback?.correct == true
+    LaunchedEffect(nextRequest, answered) {
+        if (answered && nextPreparation == CourseNextPreparation.Failed) {
+            nextPreparation = null
+            nextRetry++
+        }
+    }
     val currentSlide by rememberUpdatedState(slide)
     val tutorSession = remember(slide?.course?.id, slide?.step?.slide?.id, tutor, composerModel) {
         CourseTutorSession(scope, composerModel) { draft, history ->

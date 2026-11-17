@@ -114,17 +114,22 @@ class CourseStoreException(val reason: CourseRejection) : IllegalStateException(
 
 internal data class CourseStep(val lessonId: String, val lessonTitle: String, val slide: CourseSlidePlan)
 
-internal data class CourseNextRequest(val courseId: String, val revision: Long, val visibleSlideId: String)
+/**
+ * Identifies the prepared slide after [visibleSlideId]. A correct answer keeps the request, so a preparation that
+ * started before the answer stays valid. An outline edit or a wrong answer to the visible slide makes a new request.
+ */
+internal data class CourseNextRequest(val courseId: String, val outlineRevision: Long, val visibleSlideId: String, val errors: Int)
 
 internal data class CourseNextTarget(val index: Int, val step: CourseStep)
 
-internal fun CourseSnapshot.nextTarget(visibleSlideId: String): CourseNextTarget? {
+/** With [prepare], a reached exercise has a next slide before its answer. Without it, the exercise needs its correct answer. */
+internal fun CourseSnapshot.nextTarget(visibleSlideId: String, prepare: Boolean = false): CourseNextTarget? {
     val steps = outline.steps()
     val position = progress.completedSlides
     val reached = steps.getOrNull(position)
     val previous = steps.getOrNull(position - 1)
     val index = when {
-        reached?.slide?.id == visibleSlideId && !reached.slide.kind.requiresAnswer -> position + 1
+        reached?.slide?.id == visibleSlideId && (prepare || !reached.slide.kind.requiresAnswer) -> position + 1
         previous?.slide?.id == visibleSlideId && previous.slide.kind.requiresAnswer -> position
         else -> throw CourseStoreException(CourseRejection.SLIDE_NOT_REACHED)
     }

@@ -169,6 +169,40 @@ class CoursePresentationWorkflowTest {
         assertEquals(reached, openSlide(player, saved.id))
     }
 
+    @Test fun aReachedExercisePreparesItsNextSlideAndNextNeedsTheCorrectAnswer() = workflow { store, player, _, _ ->
+        val saved = create(store, CourseSlideKind.CHOICE, CourseSlideKind.SUMMARY)
+        saveSlide(store, saved, slide(choice()))
+        val host = CourseNextGenerationHost { slide() }
+        val first = openSlide(player, saved.id)
+        val request = checkNotNull(first.nextRequest) { "A reached exercise must prepare its next slide before the answer." }
+        val early = player.prepareNext(request, host) as CourseNextPreparation.Ready
+        assertEquals("slide-2", early.page.step.slide.id)
+
+        // Next needs the correct answer.
+        assertTrue((player.next(first, early) as CoursePlayerUpdate.Open).reloaded)
+        assertNull(store.slide(saved.id, "slide-2"))
+        assertEquals(first.course, store.course(saved.id))
+
+        // A wrong answer makes the early draft stale, in the page and in the store.
+        val wrong = player.submit(first, "wrong", CourseAnswer.Choice("b")).opened() as CoursePage.Slide
+        assertTrue(wrong.nextRequest != request)
+        assertEquals(wrong.nextRequest, openSlide(player, saved.id).nextRequest)
+        assertEquals(CourseNextPreparation.Stale, player.prepareNext(request, host))
+        val rejected = runCatching { store.adoptNext(early.request, early.draft) }.exceptionOrNull() as CourseStoreException
+        assertEquals(CourseRejection.STALE_REVISION, rejected.reason)
+        assertNull(store.slide(saved.id, "slide-2"))
+
+        // A correct answer keeps the draft that knows the error.
+        val adapted = player.prepareNext(checkNotNull(wrong.nextRequest), host) as CourseNextPreparation.Ready
+        val correct = player.submit(wrong, "right", CourseAnswer.Choice("a")).opened() as CoursePage.Slide
+        assertEquals(wrong.nextRequest, correct.nextRequest)
+        assertEquals(correct.nextRequest, (player.player(saved.id, completedAnswerId = "right") as CoursePage.Slide).nextRequest)
+        val next = player.next(correct, adapted).opened() as CoursePage.Slide
+        assertEquals("slide-2", next.step.slide.id)
+        assertEquals(1, next.course.progress.completedSlides)
+        assertTrue(store.slide(saved.id, "slide-2") != null)
+    }
+
     private fun create(store: CourseStore, vararg kinds: CourseSlideKind): CourseSnapshot = store.create(
         CourseSetup("Past tense", "Beginner", "Use two past tense forms"),
         CourseOutline(listOf(CourseLessonPlan("lesson", "Forms", kinds.mapIndexed { index, kind ->

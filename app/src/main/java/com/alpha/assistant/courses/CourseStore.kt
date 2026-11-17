@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
 import android.database.DatabaseErrorHandler
+import android.database.DatabaseUtils
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import java.io.Closeable
@@ -51,6 +52,11 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
     fun course(id: String): CourseSnapshot? = read { readCourse(id) }
 
     internal fun courseAt(id: String, revision: Long): CourseSnapshot = read { requireRevision(id, revision) }
+
+    /** Rejects a request after an outline edit or after another wrong answer to its visible slide. */
+    internal fun courseFor(request: CourseNextRequest): CourseSnapshot = read { requireNext(request) }
+
+    internal fun wrongAnswers(courseId: String, slideId: String): Int = read { countWrongAnswers(courseId, slideId) }
 
     fun courses(): List<CourseSnapshot> = read {
         rawQuery("SELECT $COURSE_COLUMNS FROM courses ORDER BY rowid DESC", null).use { rows ->
@@ -167,7 +173,7 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
     }
 
     internal fun adoptNext(request: CourseNextRequest, content: CourseSlideContent?): CourseSnapshot = write {
-        val course = requireRevision(request.courseId, request.revision)
+        val course = requireNext(request)
         val target = course.nextTarget(request.visibleSlideId) ?: reject(CourseRejection.SLIDE_NOT_REACHED)
         val slideId = target.step.slide.id
         if (!slideExists(course.id, request.visibleSlideId)) reject(CourseRejection.SLIDE_NOT_GENERATED)
@@ -280,6 +286,16 @@ class CourseStore(context: Context, name: String = "alpha-courses.db") : Closeab
         if (course.revision != revision) reject(CourseRejection.STALE_REVISION)
         return course
     }
+
+    private fun SQLiteDatabase.requireNext(request: CourseNextRequest): CourseSnapshot {
+        val course = requireCourse(request.courseId)
+        if (course.outlineRevision != request.outlineRevision ||
+            countWrongAnswers(course.id, request.visibleSlideId) != request.errors) reject(CourseRejection.STALE_REVISION)
+        return course
+    }
+
+    private fun SQLiteDatabase.countWrongAnswers(courseId: String, slideId: String): Int = DatabaseUtils.queryNumEntries(
+        this, "answers", "course_id=? AND slide_id=? AND correct=0", arrayOf(courseId, slideId)).toInt()
 
     private fun SQLiteDatabase.requireGeneration(operation: CourseGenerationOperation): CourseSnapshot {
         val course = requireCourse(operation.courseId)
