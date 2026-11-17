@@ -72,7 +72,6 @@ internal val LocalToolCanvas = compositionLocalOf<(@Composable (List<String>, St
 
 private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
 
-@OptIn(ExperimentalLayoutApi::class)
 /** The screen boxes of the text that [snapshot] draws on a stage at [stage]. Text in transformed groups is left out. */
 private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurface>,stage: Rect): List<Rect> {
     val placements=surfacePlacements(surfaces)
@@ -86,6 +85,7 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable internal fun NativeToolSurface(tool: ToolRecord,spec: ToolSpec,enabled: Boolean,maxCanvasHeight: Dp,host: ArtifactUiHost,immersive: Boolean=false,covered: Boolean=false,onCoverReady: (Boolean)->Unit = {},topControls: @Composable () -> Unit = {},stageAvailableHeight: Dp? = null,
     content: @Composable () -> Unit = {},onSnapshot: (ArtifactSnapshot) -> Unit = {}) {
     val context=LocalContext.current
