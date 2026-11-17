@@ -140,28 +140,37 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         else TestFixResult(TestFixStatus.PASSED, result.summary)
     }
 
-    private fun appAgent(key: String, session: CloudSession) = AppAgent(this, sandbox) { turns, instructions ->
-        response(key, turns, session, CloudGenerationStage.AGENT, instructions, expandedWriterOutput = true)
-    }
+    private fun appAgent(key: String, session: CloudSession, onCompletion: ((ModelCompletionTiming) -> Unit)? = null) =
+        AppAgent(this, sandbox) { turns, instructions ->
+            response(key, turns, session, CloudGenerationStage.AGENT, instructions, expandedWriterOutput = true, onCompletion)
+        }
 
     internal suspend fun response(key: String, turns: List<CloudTurn>, session: CloudSession, stage: CloudGenerationStage?,
-        instructions: String = "", expandedWriterOutput: Boolean = false): String {
+        instructions: String = "", expandedWriterOutput: Boolean = false,
+        onCompletion: ((ModelCompletionTiming) -> Unit)? = null): String {
         val maxBytes = if (expandedWriterOutput) ToolSpec.MAX_DEFINITION_BYTES else SandboxContract.MAX_BYTES
         val output = StringBuilder()
         fun tooLarge() = CloudFailure("widget_response_size", "The generator response exceeds the allowed size. Request a smaller tool.")
         session.checkActive(currentCoroutineContext())
+        val started = System.nanoTime()
+        var firstText: Long? = null
+        var completed = false
         try {
             provider.respond(key, CloudRequest(turns, false, systemInstructions = instructions, jsonObject = true,
                 generationStage = stage, expandedWriterOutput = expandedWriterOutput), session) { event ->
                 if (event is CloudEvent.Text) {
                     if (event.value.length > maxBytes - output.length) throw tooLarge()
+                    if (firstText == null && event.value.isNotBlank()) firstText = System.nanoTime() - started
                     output.append(event.value)
                 }
             }
+            completed = true
         } catch (failure: java.io.IOException) {
             session.checkActive(currentCoroutineContext())
             if (failure is CloudFailure) throw failure
             throw CloudFailure("widget_generation", "The tool generation connection failed. Retry the request.")
+        } finally {
+            onCompletion?.let { runCatching { it(ModelCompletionTiming(firstText, System.nanoTime() - started, output.length, completed)) } }
         }
         session.checkActive(currentCoroutineContext())
         return output.toString().also { if (it.toByteArray(Charsets.UTF_8).size > maxBytes) throw tooLarge() }
@@ -192,7 +201,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             }
             return generateWithAgent(key, prompt, base, images, session, artifactId, privateState, progress, onPublicUpdate,
                 onStep = run?.let { { step, tool, reply, result, nanos -> it.agentStep(step, tool, reply, result, nanos) } },
-                imageMaker = imageMaker, sceneAssets = sceneAssets)
+                onCompletion = run?.let { it::completion }, imageMaker = imageMaker, sceneAssets = sceneAssets)
                 .preview.also { checkOwner(); run?.finish() }
         } catch (failure: Throwable) {
             run?.finish(failure)
@@ -205,14 +214,15 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
     private suspend fun generateWithAgent(key: String, prompt: String, base: ToolRecord?, images: List<String>, session: CloudSession,
         artifactId: String, privateState: Boolean, progress: ((ToolGenerationProgress) -> Unit)?,
         onPublicUpdate: (suspend (String) -> Unit)?, extraInstructions: String = "",
-        onStep: ((Int, String, String, String, Long) -> Unit)? = null, imageMaker: AppImageMaker? = null,
+        onStep: ((Int, String, String, String, Long) -> Unit)? = null, onCompletion: ((ModelCompletionTiming) -> Unit)? = null,
+        imageMaker: AppImageMaker? = null,
         sceneAssets: List<ThreeSceneAssetRef> = emptyList(), lesson: AppLessonTarget? = null,
         lessonIllustration: Boolean = false): AppAgentResult {
         val screenshot: (suspend (ToolPreview) -> String)? = if (!GenerationSettings(sandbox.context).screenshotReview) null else { preview ->
             val shot = AppSnapshot.capture(sandbox.context, preview)
             try { AppSnapshot.dataUrl(shot) } finally { shot.recycle() }
         }
-        return appAgent(key, session).run(AppAgentRequest(prompt, base, images, artifactId, privateState, extraInstructions,
+        return appAgent(key, session, onCompletion).run(AppAgentRequest(prompt, base, images, artifactId, privateState, extraInstructions,
             onPublicUpdate, progress, onStep, imageMaker = imageMaker, sceneAssets = sceneAssets, screenshot = screenshot, lesson = lesson,
             lessonIllustration = lessonIllustration), session)
     }

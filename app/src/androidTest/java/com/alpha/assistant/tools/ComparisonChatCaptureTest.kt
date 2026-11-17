@@ -338,6 +338,8 @@ class ComparisonChatCaptureTest {
             save("sent")
             failureAt = "chat-terminal"
             var previewObserved = false
+            // The app card's Open action marks the first usable app. It is read before any test step after the chat settles.
+            var openVisibleAt: Long? = null
             val settled = waitFor(chatSeconds * 1_000L) {
                 if (!previewObserved && visible(R.string.tool_preview_provisional) != null) {
                     previewObserved = true
@@ -345,6 +347,7 @@ class ComparisonChatCaptureTest {
                     report.put("provisional_label_observed", true)
                     report.put("provisional_screen", screenshot("provisional"))
                 }
+                if (openVisibleAt == null && visible(R.string.tool_open) != null) openVisibleAt = SystemClock.elapsedRealtimeNanos()
                 onMain {
                     val assistant = vm.snapshot.selected?.messages?.lastOrNull()?.takeIf { it.role == "assistant" }
                     !vm.tools.busy && vm.activeConversationId == null && assistant?.status in terminalChatStatuses
@@ -380,6 +383,14 @@ class ComparisonChatCaptureTest {
             val sentAt = report.getLong("send_action_elapsed_ns")
             report.getJSONObject("measurements").put("terminal_chat_ms",
                 (SystemClock.elapsedRealtimeNanos() - sentAt) / 1_000_000)
+            if (openVisibleAt == null && assistant.toolId != null) waitFor(5_000) {
+                (visible(R.string.tool_open) != null).also { if (it) openVisibleAt = SystemClock.elapsedRealtimeNanos() }
+            }
+            val provisionalAt = report.optLong("provisional_visible_elapsed_ns", 0L).takeIf { it > 0 }
+            listOfNotNull(provisionalAt, openVisibleAt).minOrNull()?.let {
+                report.getJSONObject("measurements").put("first_ui_ms", (it - sentAt) / 1_000_000)
+            }
+            openVisibleAt?.let { report.getJSONObject("measurements").put("completed_ui_ms", (it - sentAt) / 1_000_000) }
             if (decision == "device_plan") {
                 onMain { vm.agent.plan?.takeIf { it.conversationId == chat.id } }?.let { plan ->
                     report.put("phone_plan", JSONObject().put("phase", plan.phase.name)
@@ -783,6 +794,11 @@ class ComparisonChatCaptureTest {
                 is ToolGenerationTraceEvent.AgentStep -> {
                     put("kind", "agent-step").put("tool", event.tool).put("reply", event.reply).put("result", event.result)
                         .put("duration_ms", event.durationNanos / 1_000_000)
+                        .put("model_calls", JSONArray(event.completions.map { call ->
+                            JSONObject().put("first_text_ms", call.firstTextNanos?.div(1_000_000) ?: JSONObject.NULL)
+                                .put("end_ms", call.endNanos / 1_000_000).put("text_chars", call.textChars)
+                                .put("completed", call.completed)
+                        }))
                 }
                 is ToolGenerationTraceEvent.Finished -> {
                     put("kind", "finished").put("outcome", event.outcome.name).put("failure_code", event.failureCode)

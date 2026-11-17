@@ -522,6 +522,59 @@ class CloudWorkflowTest {
         }
     }
 
+    /** Failure case: a step recorded only its total time, so the silent reasoning wait and the writing could not be told apart. */
+    @Test fun agentStepsRecordTheReasoningWaitAndTheWritingTime() {
+        val prompt = "Build a local counter that adds one."
+        val reply = agentWrite("""{"formatVersion":3,"title":"Counter","description":"Add one","capabilities":[],
+            "stateSchema":{"count":"number"},"initialState":{"count":0},
+            "ui":{"type":"column","children":[{"type":"metric","text":"Count","bind":"count"},{"type":"button","text":"Add","action":"add"}]},
+            "source":"const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='add')s.count++;return {state:s};"}""")
+        val reasoning = "Plan the counter."
+        val calls = AtomicInteger()
+        Server { request, output ->
+            if (request.classifying) output.classification(decision("I can build that.", "create", "none", prompt))
+            else when (calls.incrementAndGet()) {
+                1 -> {
+                    output.headers()
+                    output.event(JSONObject().put("choices", JSONArray().put(JSONObject().put("delta",
+                        JSONObject().put("reasoning_content", reasoning)))))
+                    SystemClock.sleep(500)
+                    // DeepSeek can send blank lines before the JSON. They must not start the writing time.
+                    output.event(textChunk("\n\n  "))
+                    SystemClock.sleep(700)
+                    output.event(textChunk(reply.take(reply.length / 2)))
+                    SystemClock.sleep(500)
+                    output.event(textChunk(reply.drop(reply.length / 2)))
+                    output.event(end()); output.write("data: [DONE]\n\n".toByteArray()); output.flush()
+                }
+                2 -> output.answer(agentFixtureFinish)
+                else -> error("Unexpected generation call.")
+            }
+        }.use { server ->
+            Fixture(DeepSeekProvider(server.url)).use { fixture ->
+                val trace = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
+                main { fixture.model.tools.generationTraceObserver = { trace += it } }
+                fixture.submit(prompt)
+                fixture.idle()
+                assertEquals(fixture.last.error, "complete", fixture.last.status)
+                val steps = trace.filterIsInstance<ToolGenerationTraceEvent.AgentStep>()
+                assertEquals(listOf("write_app", "finish"), steps.map { it.tool })
+                val write = steps[0].completions.single()
+                assertTrue(write.completed)
+                val textAt = checkNotNull(write.firstTextNanos)
+                // 1200 ms pass before the JSON. A blank chunk counted as writing would give about 500 ms.
+                assertTrue("wait ${textAt / 1_000_000} ms", textAt >= 1_100_000_000)
+                assertTrue("write ${(write.endNanos - textAt) / 1_000_000} ms", write.endNanos - textAt >= 300_000_000)
+                assertTrue(write.endNanos <= steps[0].durationNanos)
+                assertEquals(4 + reply.length, write.textChars)
+                val finish = steps[1].completions.single()
+                assertTrue(finish.completed)
+                assertEquals(agentFixtureFinish.length, finish.textChars)
+                assertTrue(server.failures.toString(), server.failures.isEmpty())
+            }
+        }
+    }
+
     @Test fun explicitAppVersionsOfAmbiguousRequestsReachCreateOffline() = kotlinx.coroutines.runBlocking {
         val cases = listOf(
             "Build a mini-app to convert litres to US gallons at 0.264 gallons per litre.",

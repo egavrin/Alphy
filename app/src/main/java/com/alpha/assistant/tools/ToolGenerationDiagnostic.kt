@@ -10,6 +10,12 @@ import java.util.UUID
 
 internal enum class ToolGenerationTraceOutcome { VALIDATED, FAILED, CANCELED }
 
+/**
+ * One model completion in nanoseconds from its request, a provider retry included. It holds counts only, never text.
+ * The wait before the first text is mostly reasoning. Leading blank text is not writing.
+ */
+internal data class ModelCompletionTiming(val firstTextNanos: Long?, val endNanos: Long, val textChars: Int, val completed: Boolean)
+
 /** Operation evidence contains no candidate data or diagnostic details from generated content. */
 internal sealed interface ToolGenerationTraceEvent {
     val operationId: UUID
@@ -32,6 +38,7 @@ internal sealed interface ToolGenerationTraceEvent {
         val reply: String,
         val result: String,
         val durationNanos: Long,
+        val completions: List<ModelCompletionTiming> = emptyList(),
     ) : ToolGenerationTraceEvent
 
     /** VALIDATED marks the candidate boundary. The caller owns publication. */
@@ -56,10 +63,15 @@ internal class ToolGenerationTrace(
 
     inner class Run {
         private var lastAttempt = 1
+        private val completions = mutableListOf<ModelCompletionTiming>()
+
+        /** The next agent step takes the completions made before it. */
+        fun completion(timing: ModelCompletionTiming) { completions += timing }
 
         fun agentStep(step: Int, tool: String, reply: String, result: String, durationNanos: Long) {
             lastAttempt = maxOf(lastAttempt, step)
-            emit { ToolGenerationTraceEvent.AgentStep(operationId, step, it, tool, reply, result, durationNanos) }
+            val taken = completions.toList().also { completions.clear() }
+            emit { ToolGenerationTraceEvent.AgentStep(operationId, step, it, tool, reply, result, durationNanos, taken) }
         }
 
         fun transport(failure: GenerationTransportFailure) {

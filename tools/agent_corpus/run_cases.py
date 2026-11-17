@@ -38,6 +38,21 @@ def adb(serial, *args, timeout=30):
                           timeout=timeout, env=child_environment())
 
 
+def step_timing(event):
+    """Split one agent step into the wait before content, the writing, and the host checks, in milliseconds.
+
+    The wait and the writing come from the last model call of the step. The host time is the step minus all its calls.
+    """
+    calls = event.get("model_calls") or []
+    timing = {"tool": event.get("tool"), "ms": event.get("duration_ms"), "calls": len(calls)}
+    if calls:
+        last = calls[-1]
+        first_text = last.get("first_text_ms")
+        timing.update(wait_ms=first_text, write_ms=None if first_text is None else last["end_ms"] - first_text,
+                      host_ms=event["duration_ms"] - sum(call["end_ms"] for call in calls))
+    return timing
+
+
 def run_case(serial, case, corpus_hash, output, chat_seconds, review_seconds, verify_workflow=False, saved_edit=False,
              images=False, screenshot_review=False):
     run_id = uuid.uuid4().hex
@@ -100,11 +115,14 @@ def run_case(serial, case, corpus_hash, output, chat_seconds, review_seconds, ve
     if report_path.exists():
         report = json.loads(report_path.read_text())
         steps = [event for event in report.get("operation_trace", {}).get("generation", []) if event.get("kind") == "agent-step"]
+        measurements = report.get("measurements", {})
         summary.update({
             "outcome": report.get("chat_outcome"), "failure_code": report.get("failure_code"),
             "decision": report.get("chat_decision"), "phase": report.get("phase"),
             "steps": len(steps), "tools": [event.get("tool") for event in steps],
-            "chat_ms": report.get("measurements", {}).get("terminal_chat_ms"),
+            "chat_ms": measurements.get("terminal_chat_ms"),
+            "first_ui_ms": measurements.get("first_ui_ms"), "completed_ui_ms": measurements.get("completed_ui_ms"),
+            "step_timing": [step_timing(event) for event in steps],
             "assistant_text": (report.get("assistant_text") or "")[:300],
         })
         if "workflow" in report:
