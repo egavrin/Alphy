@@ -40,7 +40,9 @@ GAME_CONTROL_WORDS = [
     "влево", "вправо", "вверх", "вниз", "заново", "новая игра", "начать",
     "左", "右", "上", "下", "重新", "再来", "开始", "왼쪽", "오른쪽", "다시", "시작",
 ]
-HIGHER = ["hero", "picture", "immersive", "viewport", "tilt"]
+# Gradient fill, object color, or a soft shadow: a black with alpha other than FF.
+DEPTH_SOURCE = re.compile(r"gradient\s*:|color\s*:\s*\{\s*type|#(?!ff)[0-9a-f]{2}000000", re.I)
+HIGHER = ["hero", "picture", "immersive", "viewport", "depth", "tilt"]
 LOWER = ["fields", "rowFields", "nativeGameButtons"]
 
 
@@ -116,6 +118,7 @@ def score_app(spec, tags):
         movement = (spec.get("hostControls") or {}).get("movement") or []
         s["immersive"] = int(immersive)
         s["viewport"] = int(any(x.get("sizing") == "viewport" for x in surfaces) or immersive and "runtime" in spec)
+        s["depth"] = int(bool(surfaces or spec.get("runtime")) and bool(DEPTH_SOURCE.search(str(spec.get("source") or ""))))
         s["nativeGameButtons"] = sum(_game_control(n) for n, _ in all_nodes) + 2 * len(movement)
     if "tilt" in tags:
         s["tilt"] = int("sensor.accelerometer.stream" in json.dumps(spec.get("capabilities") or []))
@@ -231,6 +234,17 @@ def self_test():
     assert score_app(game, ["game"])["nativeGameButtons"] == 1
     game["ui"]["children"][1] = {"type": "button", "text": "Update", "action": "setup"}
     assert score_app(game, ["game"])["nativeGameButtons"] == 0
+    lit = {"initialState": {}, "surfaces": [{"id": "board", "width": 300, "height": 300}], "ui": {"type": "column"},
+           "source": "c.push({type:'circle',x:1,y:1,radius:2,gradient:{type:'radial',x:1,y:1,radius:2,stops:[]}})"}
+    assert score_app(lit, ["game"])["depth"] == 1
+    lit["source"] = "c.push({type:'rect',color:'#FF000000'});c.push({type:'rect',color:'#80000000'})"
+    assert score_app(lit, ["game"])["depth"] == 1
+    lit["source"] = "c.push({type:'circle',x:1,y:1,radius:2,color:'#FF0000'});c.push({type:'rect',color:'#FF000000'})"
+    assert score_app(lit, ["game"])["depth"] == 0
+    lit["surfaces"] = []
+    lit["source"] = "x={gradient:{}}"
+    assert score_app(lit, ["game"])["depth"] == 0
+    assert verdict({"committed": 1, "depth": 0}, {"committed": 1, "depth": 1}) == ("PASS", ["depth"], [])
     print("self-test ok")
 
 
