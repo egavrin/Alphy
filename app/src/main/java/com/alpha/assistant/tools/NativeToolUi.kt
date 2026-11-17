@@ -558,6 +558,7 @@ private fun alignment(style: JSONObject?) = when(style?.optString("align")) {"ce
 private fun showsToolHeading(text: String, hostHeading: String?) =
     text.isNotBlank() && !text.trim().equals(hostHeading?.trim(), ignoreCase = true)
 private val recordTypes = setOf("list","table","groupedList","lazyList","lazyGrid")
+private val titledChoices = setOf("singleChoice","multiChoice","segmented","select")
 /** The end of the texts after a leading large emoji in a hero card, or 0 when the card does not start with one. */
 private fun heroEmojiSide(children: JSONArray): Int {
     val first = children.optJSONObject(0) ?: return 0
@@ -825,12 +826,16 @@ private fun courseSceneSlot(root: JSONObject): Int? {
     val children=node.optJSONArray("children")
     val group = type == "section" || type == "card"
     val secondary = if (children != null && group) secondaryButtons(children, state, enabled) else emptySet()
-    // The only list under a shown title takes its name from that title, so the page does not name it twice.
-    val namedChild = if (children != null && group && showsToolHeading(text, heading))
-        (0 until children.length()).filter { children.getJSONObject(it).getString("type") in recordTypes }.singleOrNull() else null
+    // The only list under a shown title, and a choice with the same name as the title, take their name from that title.
+    // So the page does not name one thing twice.
+    val named = if (children != null && group && showsToolHeading(text, heading)) buildSet {
+        val nodes = (0 until children.length()).map { children.getJSONObject(it) }
+        nodes.indices.singleOrNull { nodes[it].getString("type") in recordTypes }?.let(::add)
+        addAll(nodes.indices.filter { nodes[it].getString("type") in titledChoices && !showsToolHeading(text, nodes[it].optString("text")) })
+    } else emptySet()
     val renderChildren: @Composable (IntRange) -> Unit = { range ->
         for (index in range) NativeNode(checkNotNull(children).getJSONObject(index),state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,
-            secondaryButton = index in secondary, namedByTitle = index == namedChild, event=event)
+            secondaryButton = index in secondary, namedByTitle = index in named, event=event)
     }
     val content: @Composable () -> Unit = { if (children != null) renderChildren(0 until children.length()) }
     if (LocalEmbeddedTool.current && type in ToolUiCatalog.modalTypes) {
@@ -1228,7 +1233,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             }
         }
         "dateRangeInput" -> NativeDateRange(node,state,enabled,modifier,event)
-        "singleChoice","multiChoice","segmented","navigationBar","navigationRail","menu" -> NativeChoices(node,state,enabled,modifier,event)
+        "singleChoice","multiChoice","segmented","navigationBar","navigationRail","menu" -> NativeChoices(node,state,enabled,modifier,namedByTitle,event)
         "input","numberInput","search" -> NativeInput(node,state,enabled,modifier,event)
         "timeInput","dateInput" -> {
             val context=LocalContext.current
@@ -1278,9 +1283,11 @@ private fun courseSceneSlot(root: JSONObject): Int? {
         }
         "select","tabs" -> {
             val options=node.getJSONArray("options"); val selected=ToolUiCatalog.value(state,binding)
-            // A tab row shows its options instead of its name. The name stays for screen readers.
-            Column(if(type == "tabs") modifier.semantics {contentDescription=text} else modifier,verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                if(type != "tabs") Text(text,style=MaterialTheme.typography.labelLarge)
+            // A tab row shows its options instead of its name, and so does a select that the title above names.
+            // The name stays for screen readers.
+            val unlabeled=type == "tabs" || namedByTitle
+            Column(if(unlabeled) modifier.semantics {contentDescription=text} else modifier,verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                if(!unlabeled) Text(text,style=MaterialTheme.typography.labelLarge)
                 if(type == "tabs") ScrollableTabRow(
                     selectedTabIndex=(0 until options.length()).first {scalarEqual(selected,options.getJSONObject(it).get("value"))},
                     modifier=Modifier.fillMaxWidth(),edgePadding=0.dp) {
@@ -1971,7 +1978,7 @@ internal fun rootThemeColors(ui: String, shellDark: Boolean): ColorScheme? =
 }
 
 @OptIn(ExperimentalMaterial3Api::class,ExperimentalLayoutApi::class)
-@Composable private fun NativeChoices(node:JSONObject,state:JSONObject,enabled:Boolean,modifier:Modifier,event:(String,Any?)->Unit) {
+@Composable private fun NativeChoices(node:JSONObject,state:JSONObject,enabled:Boolean,modifier:Modifier,namedByTitle:Boolean,event:(String,Any?)->Unit) {
     val type=node.getString("type");val options=node.getJSONArray("options");val current=ToolUiCatalog.value(state,node.getString("bind"));val action=node.getString("action")
     val values=(0 until options.length()).map {options.getJSONObject(it)}
     fun selected(value:Any)=if(current is JSONArray)(0 until current.length()).any {scalarEqual(current.get(it),value)} else scalarEqual(current,value)
@@ -1983,8 +1990,8 @@ internal fun rootThemeColors(ui: String, shellDark: Boolean): ColorScheme? =
         NativeSceneChoices(node.getString("text"), values, enabled, modifier, ::selected, ::choose)
         return
     }
-    Column(modifier,verticalArrangement=Arrangement.spacedBy(6.dp)) {
-        Text(node.getString("text"),style=MaterialTheme.typography.labelLarge)
+    Column(if(namedByTitle) modifier.semantics {contentDescription=node.getString("text")} else modifier,verticalArrangement=Arrangement.spacedBy(6.dp)) {
+        if(!namedByTitle) Text(node.getString("text"),style=MaterialTheme.typography.labelLarge)
         when(type) {
             // The options share the width. A scrolling row looked cut off at the screen edge.
             // All options take the height of the tallest one, so a two-line label does not stand out.
