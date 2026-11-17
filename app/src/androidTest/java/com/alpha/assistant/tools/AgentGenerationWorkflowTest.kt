@@ -329,6 +329,15 @@ class AgentGenerationWorkflowTest {
         val provider = AgentScriptProvider(broken, writeAppReply(tipApp()), finish(splitCheck))
         generate(provider)
         assertTrue(provider.feedback(1), provider.feedback(1).contains("Validation category"))
+        assertTrue(provider.feedback(1), provider.feedback(1).contains("write_app: REJECTED"))
+    }
+
+    @Test fun aReplyEndingInAStringGetsThePositionFeedback(): Unit = runBlocking {
+        val provider = AgentScriptProvider(writeAppReply(tipApp()), """{"tool":"run","steps":[{"tap":"go}]}""", finish(splitCheck))
+        generate(provider)
+        val feedback = provider.feedback(2)
+        assertFalse(feedback, feedback.contains("no closing"))
+        assertTrue(feedback, feedback.contains("Unterminated string"))
     }
 
     @Test fun finishNeedsAnExpectationAfterTheLastOperation(): Unit = runBlocking {

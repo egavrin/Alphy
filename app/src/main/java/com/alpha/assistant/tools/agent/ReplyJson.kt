@@ -32,9 +32,11 @@ internal object ReplyJson {
         return scan.open.reversed().joinToString("") { if (text[it] == '{') "}" else "]" }
     }
 
-    /** The innermost opener still open at the first mismatched closer, or at the end of the text. */
+    /** The innermost opener still open at the first mismatched closer, or at the end of the text. Null when the text ends inside a string. */
     fun unclosedOpener(text: String): Opener? {
-        val index = scan(text).open.lastOrNull() ?: return null
+        val scan = scan(text)
+        if (scan.inString) return null
+        val index = scan.open.lastOrNull() ?: return null
         return Opener(index, text[index], text.substring(maxOf(0, index - 39), index + 1))
     }
 }

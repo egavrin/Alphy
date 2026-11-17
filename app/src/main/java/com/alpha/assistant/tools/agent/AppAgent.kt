@@ -396,17 +396,18 @@ internal class AppAgent(
             val started = System.nanoTime()
             val reply = completeWithRetry(turns, instructions, session)
             history += CloudTurn("assistant", reply)
+            var parsed: JSONObject? = null
             val result = try {
-                val parsed = parseReply(reply)
+                parsed = parseReply(reply)
                 handle(parsed)
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Feedback) {
-                val tool = runCatching { JSONObject(reply).optString("tool") }.getOrNull().orEmpty().ifEmpty { "reply" }
+                val tool = parsed?.optString("tool").orEmpty().ifEmpty { "reply" }
                 lastProblem = failure.message.orEmpty()
                 "$tool: REJECTED. ${failure.message}"
             }
-            val tool = runCatching { JSONObject(reply).optString("tool") }.getOrNull().orEmpty()
+            val tool = parsed?.optString("tool").orEmpty()
             runCatching { request.onStep?.invoke(step, tool, reply, if (result is Finished) "finish: PASSED" else result.toString(), System.nanoTime() - started) }
             if (result is Finished) {
                 val accepted = checkNotNull(current)
