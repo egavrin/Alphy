@@ -18,7 +18,7 @@ class NativeIconWorkflowTest {
 
 
     private fun render(ui: JSONObject, last: String, state: String = "{}", check: (Bitmap) -> Unit) =
-        robot.renderApps("icons", listOf(ui.toString()), state, last, check)
+        robot.renderApps("icons", listOf(ui.toString()), state, last, check = check)
 
     /** The most saturated pixel in a horizontal band left of a text. */
     private fun Bitmap.colorLeftOf(label: String): Float {

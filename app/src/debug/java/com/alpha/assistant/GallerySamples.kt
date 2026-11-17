@@ -163,7 +163,11 @@ internal val GallerySamples = listOf(
         section("chart", """{"type":"chart","text":"Расходы по дням","kind":"bar","categories":"days","series":[{"text":"Дневные расходы","bind":"values"}]}"""),
         section("progress", """
             {"type":"progress","text":"Недельный лимит","bind":"count","min":0,"max":5},
-            {"type":"progressRing","text":"Оплачено","bind":"count","min":0,"max":5}
+            {"type":"progressRing","text":"Оплачено","bind":"count","min":0,"max":5},
+            {"type":"progress","text":"Шаги оплаты","variant":"dots","bind":"count","min":0,"max":5},
+            {"type":"progressRing","text":"Оплачено полностью","size":"large","bind":"count","min":0,"max":5,
+             "children":[{"type":"text","text":"Счета","style":{"emphasis":"title"}}]},
+            {"type":"emoji","text":"Копилка","value":"🐷","size":"medium"}
         """),
         section("list", recordList("list", "Заметки", ""","columns":[{"text":"Заметка","field":"title"}]""")),
         section("grouped", recordList("groupedList", "По месяцам", ",\"groupBy\":\"group\"")),

@@ -25,7 +25,7 @@ class NativeLookWorkflowTest {
 
 
     private fun render(ui: JSONObject, last: String, state: String = "{}", check: (Bitmap) -> Unit) =
-        robot.renderApps("look", listOf(ui.toString()), state, last, check)
+        robot.renderApps("look", listOf(ui.toString()), state, last, check = check)
 
     private fun ink(shot: Bitmap, x: Int, y: Int, background: Int) =
         abs(ColorUtils.calculateLuminance(shot.getPixel(x, y)) - ColorUtils.calculateLuminance(background)) > 0.15

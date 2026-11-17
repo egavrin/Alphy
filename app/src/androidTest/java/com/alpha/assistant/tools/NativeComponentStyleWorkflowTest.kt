@@ -36,11 +36,10 @@ class NativeComponentStyleWorkflowTest {
         """{"type":"theme","preset":"soft","palette":"purple","children":[{"type":"column","style":{"gap":"medium","padding":"medium"},"children":[${children.joinToString(",")}]}]}"""
 
     private fun render(ui: String, state: String, last: String, check: (Bitmap) -> Unit) =
-        robot.renderApps("components", listOf(ui), state, last, check)
+        robot.renderApps("components", listOf(ui), state, last, check = check)
 
     private fun dp(value: Int) = (robot.instrumentation.targetContext.resources.displayMetrics.density * value).toInt()
 
-    private fun saturation(color: Int) = FloatArray(3).also { ColorUtils.colorToHSL(color, it) }[1]
 
     @Test fun shortWeekdayChoicesShareOneRowOfCircles() {
         val days = listOf("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su")
@@ -53,7 +52,7 @@ class NativeComponentStyleWorkflowTest {
             // Left of the label center, inside a 40 dp circle, whether the bounds are the label or the whole cell.
             val chosen = shot.getPixel(first.centerX() - dp(12), first.centerY())
             val open = shot.getPixel(last.centerX() - dp(12), last.centerY())
-            assertTrue("a chosen day is a strong colored circle", saturation(chosen) > 0.3f && ColorUtils.calculateLuminance(chosen) < 0.3)
+            assertTrue("a chosen day is a strong colored circle", colorSaturation(chosen) > 0.3f && ColorUtils.calculateLuminance(chosen) < 0.3)
             assertTrue("a day that is not chosen stays light", ColorUtils.calculateLuminance(open) > 0.6)
         }
     }

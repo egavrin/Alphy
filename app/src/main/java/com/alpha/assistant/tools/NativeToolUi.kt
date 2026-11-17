@@ -20,6 +20,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -60,6 +61,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
@@ -400,6 +402,12 @@ internal val LocalMiniAppControlsLanguage = staticCompositionLocalOf<String?> { 
 
 // True inside a row without wrap. Its children share a fixed width, so a short text there shrinks before a word breaks.
 private val LocalFixedRow = staticCompositionLocalOf { false }
+/** Text inside a ring or a level gauge is centered unless its style sets an alignment. */
+private val LocalCenteredContent = staticCompositionLocalOf { false }
+@Composable private fun textAlignOf(style: JSONObject?) = when(style?.optString("align")) {
+    "center" -> TextAlign.Center; "end" -> TextAlign.End; "start" -> TextAlign.Start
+    else -> if (LocalCenteredContent.current) TextAlign.Center else TextAlign.Start
+}
 
 // The text for an app in another language than Russian. values/ holds English, and values-<language>/ holds translations.
 private val miniAppOtherLanguage = mapOf(
@@ -570,6 +578,40 @@ private fun showsToolHeading(text: String, hostHeading: String?) =
 }
 
 /** Draws a catalog icon: a shell glyph or a domain icon. */
+/** A large progress ring of about 200 dp with its children centered inside. It grows when the children need more room. */
+@Composable private fun NativeRing(progress: Float, description: String, amount: String, content: @Composable () -> Unit) {
+    val stroke = 14.dp
+    Layout(content = {
+        CircularProgressIndicator(progress = { progress }, strokeWidth = stroke, strokeCap = StrokeCap.Round,
+            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            modifier = Modifier.semantics { contentDescription = description; stateDescription = amount })
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) { content() }
+    }) { measurables, constraints ->
+        val base = 200.dp.roundToPx()
+        val inset = (stroke + 12.dp).roundToPx()
+        val inner = measurables[1].measure(Constraints(maxWidth = (minOf(constraints.maxWidth, base) - 2 * inset).coerceAtLeast(0)))
+        val size = maxOf(base, (kotlin.math.hypot(inner.width.toFloat(), inner.height.toFloat()) + 2 * inset).toInt())
+            .coerceAtMost(constraints.maxWidth)
+        val ring = measurables[0].measure(Constraints.fixed(size, size))
+        layout(size, size) {
+            ring.place(0, 0)
+            inner.place((size - inner.width) / 2, (size - inner.height) / 2)
+        }
+    }
+}
+
+/** A level gauge: a tank that fills from the bottom, with its children centered inside. */
+@Composable private fun NativeLevel(progress: Float, description: String, amount: String, content: @Composable () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Box(Modifier.widthIn(max = 180.dp).fillMaxWidth().heightIn(min = 220.dp).clip(MaterialTheme.shapes.large).background(scheme.surfaceContainerHigh)
+        .semantics { contentDescription = description; stateDescription = amount }) {
+        Box(Modifier.matchParentSize()) {
+            Box(Modifier.fillMaxWidth().fillMaxHeight(progress).align(Alignment.BottomCenter).background(scheme.primary.copy(alpha = 0.45f)))
+        }
+        Column(Modifier.align(Alignment.Center).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) { content() }
+    }
+}
+
 /** The leading icon of a field-like button, such as a select or a date input. */
 @Composable private fun RowScope.NativeButtonIcon(node: JSONObject) {
     val icon = node.optString("icon")
@@ -683,7 +725,7 @@ private fun verticalArrangement(style: JSONObject?,gap: Dp): Arrangement.Vertica
     val shortStyle=if(short && base.lineHeight.isSp && base.fontSize.isSp) base.copy(lineHeight=(base.lineHeight.value / base.fontSize.value).em) else base
     val content: @Composable () -> Unit = {
         Text(annotated.toAnnotatedString(),if(!enabled && spans != null) textModifier.semantics {disabled()} else textModifier,style=shortStyle,color=toolInk(style?.optString("tone")),
-            textAlign=when(style?.optString("align")) {"center" -> TextAlign.Center; "end" -> TextAlign.End; else -> TextAlign.Start},
+            textAlign=textAlignOf(style),
             maxLines=node.optInt("maxLines",Int.MAX_VALUE),softWrap=node.optBoolean("softWrap",true),
             overflow=if(node.optString("overflow") == "ellipsis") TextOverflow.Ellipsis else TextOverflow.Clip,
             lineHeight=if(node.has("lineHeight")) node.getDouble("lineHeight").sp else androidx.compose.ui.unit.TextUnit.Unspecified,
@@ -978,8 +1020,12 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 style = MaterialTheme.typography.titleLarge, color = toolInk(tone))
             content()
         }
-        "card" -> ToolRoleSurface(modifier, MaterialTheme.colorScheme.toolRole(tone)) {
-            Column(Modifier.padding(space(style?.optString("padding"), 16)), verticalArrangement = Arrangement.spacedBy(gap), horizontalAlignment = alignment(style)) {
+        "card" -> {
+          val hero = node.optString("variant") == "hero"
+          val scheme = MaterialTheme.colorScheme
+          // A hero card holds the main result in the palette's container color.
+          ToolRoleSurface(modifier, if (hero) ToolRole(scheme.primary, scheme.primaryContainer, scheme.onPrimaryContainer) else scheme.toolRole(tone)) {
+            Column(Modifier.padding(space(style?.optString("padding"), if (hero) 20 else 16)), verticalArrangement = Arrangement.spacedBy(gap), horizontalAlignment = alignment(style)) {
                 val icon = node.optString("icon")
                 val title = showsToolHeading(text, heading)
                 if (icon.isNotEmpty() || title) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -988,6 +1034,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 }
                 content()
             }
+          }
         }
         "listItem" -> Column(modifier) {
             val click = if (action.isNotEmpty()) Modifier.clickable(enabled = enabled, role = Role.Button) { event(action, null) } else Modifier
@@ -1004,7 +1051,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
         "spacer" -> Spacer(modifier.size(node.optInt("size",12).dp))
         "text","metric","badge" -> {
             val label=ToolUiCatalog.display(node,state)
-            val align=when(style?.optString("align")) {"center" -> TextAlign.Center; "end" -> TextAlign.End; else -> TextAlign.Start}
+            val align=textAlignOf(style)
             if(type == "badge") {
                 val role = MaterialTheme.colorScheme.toolRole(tone)
                 Surface(modifier,shape=MaterialTheme.shapes.small,color=role.background,contentColor=role.foreground) {
@@ -1016,7 +1063,8 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                         Text(label, style = MaterialTheme.typography.labelLarge.copy(textAlign = align))
                     }
                 }
-            } else if(type == "metric" && node.has("bind")) Column(modifier,verticalArrangement=Arrangement.spacedBy(4.dp), horizontalAlignment = alignment(style)) {
+            } else if(type == "metric" && node.has("bind")) Column(modifier,verticalArrangement=Arrangement.spacedBy(4.dp),
+                horizontalAlignment = if (LocalCenteredContent.current && style?.has("align") != true) Alignment.CenterHorizontally else alignment(style)) {
                 val icon = node.optString("icon")
                 if (icon.isNotEmpty() || showsToolHeading(text, heading)) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (icon.isNotEmpty()) ToolGlyph(icon, Modifier.size(18.dp), MaterialTheme.colorScheme.primary)
@@ -1093,7 +1141,19 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             if(action.isNotEmpty()) IconButton(onClick={event(action,null)},enabled=enabled,modifier=modifier.sizeIn(minWidth=48.dp,minHeight=48.dp)) {icon()}
             else Box(modifier) {icon()}
         }
-        "toggle","checkbox" -> Row(modifier.heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically) {
+        "toggle","checkbox" -> if(node.optString("variant") == "circle") {
+            val checked=ToolUiCatalog.value(state,binding) as Boolean
+            val scheme=MaterialTheme.colorScheme
+            // A day of a week row: the label above a round check, as in habit trackers.
+            Column(modifier.widthIn(min=48.dp).toggleable(checked,enabled=enabled,role=Role.Checkbox) {event(action,it)}.semantics {contentDescription=text},
+                horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                Text(text,Modifier.clearAndSetSemantics {},style=MaterialTheme.typography.labelMedium,maxLines=1)
+                Box(Modifier.size(36.dp).clip(CircleShape).background(if(checked) scheme.primary else Color.Transparent)
+                    .border(2.dp,if(checked) scheme.primary else scheme.outline,CircleShape),contentAlignment=Alignment.Center) {
+                    if(checked) AlphaIcon(Glyph.Check,Modifier.size(20.dp),color=scheme.onPrimary)
+                }
+            }
+        } else Row(modifier.heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically) {
             val checked=ToolUiCatalog.value(state,binding) as Boolean
             val label=Modifier.semantics {contentDescription=text}
             if(type == "toggle") Switch(checked,{event(action,it)},label,enabled=enabled)
@@ -1206,7 +1266,22 @@ private fun courseSceneSlot(root: JSONObject): Int? {
         "progress","progressRing" -> {
             val (low,high)=ToolUiCatalog.bounds(node)
             val progress=if(binding.isNotEmpty()) (((ToolUiCatalog.value(state,binding) as Number).toDouble()-low)/(high-low)).toFloat().coerceIn(0f,1f) else 0f
-            Column(modifier,verticalArrangement=Arrangement.spacedBy(6.dp)) {
+            val amount=if(binding.isNotEmpty()) ToolUiCatalog.boundText(node,state) else ""
+            if(ToolUiCatalog.holdsChildren(node)) Column(modifier.fillMaxWidth(),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                CompositionLocalProvider(LocalCenteredContent provides true) {
+                    if(type == "progressRing") NativeRing(progress,text,amount,content) else NativeLevel(progress,text,amount,content)
+                }
+                // The frame already announces the label, so the caption is visible only.
+                if(showsToolHeading(text, heading)) Text(text,Modifier.clearAndSetSemantics {},style=MaterialTheme.typography.titleMedium,color=toolInk("muted"))
+            } else if(node.optString("variant") == "dots") Column(modifier,verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                Text(ToolUiCatalog.display(node,state))
+                val filled=(ToolUiCatalog.value(state,binding) as Number).toInt()
+                Row(Modifier.semantics {contentDescription=text; stateDescription=amount},horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    repeat(high.toInt()) {index ->
+                        Box(Modifier.size(20.dp).clip(CircleShape).background(if(index < filled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest))
+                    }
+                }
+            } else Column(modifier,verticalArrangement=Arrangement.spacedBy(6.dp)) {
                 Text(ToolUiCatalog.display(node,state))
                 if(node.optBoolean("indeterminate")) {
                     if(type == "progress") LinearProgressIndicator(modifier=Modifier.fillMaxWidth().height(10.dp).semantics {contentDescription=text})
@@ -1237,6 +1312,16 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 if(image == null) Surface(modifier.height(160.dp),color=MaterialTheme.colorScheme.surfaceVariant) {
                     Box(contentAlignment=Alignment.Center) {Text(miniAppString(R.string.tool_image_unavailable, text),Modifier.padding(16.dp))}
                 } else Image(checkNotNull(image).asImageBitmap(),text,modifier.heightIn(min=80.dp,max=280.dp),contentScale=if(node.optString("fit") == "crop") ContentScale.Crop else ContentScale.Fit)
+            }
+        }
+        "emoji" -> {
+            val glyph=if(binding.isNotEmpty()) ToolUiCatalog.value(state,binding).toString() else node.optString("value")
+            val size=node.optString("size")
+            val tile=when(size) {"small" -> 40.dp; "large" -> 112.dp; else -> 64.dp}
+            // A large emoji is an illustration. Smaller ones sit on a tile like an icon badge.
+            val back=if(size == "large") Modifier else Modifier.clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            Box(modifier.size(tile).then(back).clearAndSetSemantics {contentDescription=text},contentAlignment=Alignment.Center) {
+                Text(glyph,fontSize=with(LocalDensity.current) {(tile*0.6f).toSp()},maxLines=1)
             }
         }
         "divider" -> HorizontalDivider(modifier)

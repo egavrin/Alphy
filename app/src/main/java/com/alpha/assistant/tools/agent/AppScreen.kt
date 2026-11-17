@@ -124,6 +124,21 @@ internal class AppScreen private constructor(val lines: List<String>, val visibl
                         if (rows.length() == 0) node.optString("emptyText").takeIf { it.isNotEmpty() }?.let { visible += it; line(depth + 1, "empty: ${quote(it)}") }
                     }
                     type in flattened && label.isEmpty() && action == null -> childNodes(depth)
+                    type in setOf("progress", "progressRing") -> {
+                        val value = bound(node, values)
+                        val shown = if (value is Number) runCatching { ToolUiCatalog.boundText(node, values) }.getOrNull() else null
+                        if (value is Number) runCatching { ToolUiCatalog.display(node, values) }.getOrNull()?.let { visible += it }
+                        val (min, max) = runCatching { ToolUiCatalog.bounds(node) }.getOrDefault(0.0 to 100.0)
+                        val kind = listOf(node.optString("size"), node.optString("variant")).filter { it == "large" || it == "dots" || it == "level" }
+                            .joinToString("") { " $it" }
+                        val amount = if (node.optString("variant") == "dots" && shown != null) shown else "= ${scalar(value)} of $min..$max"
+                        line(depth, "$type$kind$id ${quote(label)} $amount$off")
+                        childNodes(depth + 1)
+                    }
+                    type == "emoji" -> {
+                        val glyph = if (node.has("bind")) bound(node, values)?.toString().orEmpty() else node.optString("value")
+                        line(depth, "emoji ${quote(label)} $glyph$off")
+                    }
                     node.has("children") -> {
                         val extra = when (type) {
                             "grid" -> " columns=${node.opt("columns") ?: "auto"}"
@@ -172,9 +187,8 @@ internal class AppScreen private constructor(val lines: List<String>, val visibl
                         val variant = node.optString("variant").takeIf { it.isNotEmpty() }?.let { " ($it)" }.orEmpty()
                         line(depth, "$type$id ${quote(label)}$variant$off")
                     }
-                    type in setOf("progress", "progressRing", "slider") -> {
+                    type == "slider" -> {
                         val value = bound(node, values)
-                        if (type != "slider" && value is Number) runCatching { ToolUiCatalog.display(node, values) }.getOrNull()?.let { visible += it }
                         val (min, max) = runCatching { ToolUiCatalog.bounds(node) }.getOrDefault(0.0 to 100.0)
                         line(depth, "$type$id ${quote(label)} = ${scalar(value)} of $min..$max$off")
                     }

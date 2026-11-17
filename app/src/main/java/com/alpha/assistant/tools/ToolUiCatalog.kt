@@ -28,7 +28,7 @@ object ToolUiCatalog {
     private val scalar=setOf("string","number","boolean")
     private val liveInputTypes = setOf("input", "slider")
     private val timerModes = setOf("countdown", "stopwatch")
-    private val optionalBindings=setOf("text","metric","badge","fact","timelineItem","image","progress","progressRing")
+    private val optionalBindings=setOf("text","metric","badge","fact","timelineItem","image","progress","progressRing","emoji")
     val choiceTypes=setOf("select","tabs","singleChoice","multiChoice","segmented","navigationBar","navigationRail","menu")
     val booleanInputTypes = setOf("toggle", "checkbox", "chip")
     val modalTypes=setOf("dialog","bottomSheet")
@@ -60,7 +60,7 @@ object ToolUiCatalog {
             })
     val components: Map<String,Component> = buildList {
         for(type in listOf("column","row","flowRow","box","grid","scroll","theme","card","section","listItem","form","listGroup","facts","timeline","banner","emptyState","motion","transform","stage")) add(entry(type,
-            setOf("children") + when(type) {"grid" -> setOf("columns","minCellWidth"); "row" -> setOf("wrap"); "theme" -> setOf("preset","palette","dark","typeScale","cornerRadius"); "listItem" -> setOf("action","icon"); "card","banner","emptyState" -> setOf("icon"); "motion" -> setOf("preset","trigger","animateInitial"); "transform" -> setOf("pose","poseBind","durationMs","size","solid"); "stage" -> setOf("height","perspective","floor"); else -> emptySet()},
+            setOf("children") + when(type) {"grid" -> setOf("columns","minCellWidth"); "row" -> setOf("wrap"); "theme" -> setOf("preset","palette","dark","typeScale","cornerRadius"); "listItem" -> setOf("action","icon"); "card" -> setOf("icon","variant"); "banner","emptyState" -> setOf("icon"); "motion" -> setOf("preset","trigger","animateInitial"); "transform" -> setOf("pose","poseBind","durationMs","size","solid"); "stage" -> setOf("height","perspective","floor"); else -> emptySet()},
             Projection.CONTAINER,container=true))
         for(type in listOf("appBar","bottomBar","dialog","bottomSheet","pager","transition")) add(entry(type,
             setOf("children") + when(type) {
@@ -84,7 +84,7 @@ object ToolUiCatalog {
         add(entry("icon",setOf("name","action"),Projection.SUMMARY))
         for(type in listOf("input","numberInput","timeInput","dateInput","toggle","checkbox","slider","select","tabs","chip","singleChoice","multiChoice","segmented","navigationBar","navigationRail","menu","rangeSlider","dateRangeInput","search")) {
             val binding=when(type) {"input","search","dateInput" -> setOf("string"); "rangeSlider","dateRangeInput","multiChoice" -> setOf("array"); in booleanInputTypes -> setOf("boolean"); "numberInput","timeInput","slider" -> setOf("number"); else -> scalar}
-            val props=when(type) {"chip" -> setOf("variant","dismissAction","icon"); "input","search" -> setOf("maxLength","keyboard","imeAction","maxLines"); "numberInput","slider","rangeSlider" -> setOf("min","max","step"); "singleChoice" -> setOf("options","variant"); in choiceTypes -> setOf("options"); else -> emptySet()}
+            val props=when(type) {"chip" -> setOf("variant","dismissAction","icon"); "input","search" -> setOf("maxLength","keyboard","imeAction","maxLines"); "numberInput","slider","rangeSlider" -> setOf("min","max","step"); "singleChoice" -> setOf("options","variant"); "checkbox" -> setOf("variant"); in choiceTypes -> setOf("options"); else -> emptySet()}
             val iconProps = if (type in setOf("input","numberInput","select","dateInput","timeInput")) props + "icon" else props
             val inputProps = if (type in liveInputTypes) iconProps + "inputMode" else iconProps
             add(entry(type,setOf("bind","action")+inputProps,if(type == "toggle") Projection.LOCAL_ACTION else Projection.SUMMARY,binding,action=true))
@@ -97,7 +97,9 @@ object ToolUiCatalog {
         }
         add(entry("fact",setOf("bind","format"),Projection.TEXT,scalar))
         add(entry("timelineItem",setOf("bind","detail","time","detailBind","timeBind","action"),binding=scalar))
-        for(type in listOf("progress","progressRing")) add(entry(type,setOf("bind","min","max","indeterminate"),Projection.TEXT,setOf("number")))
+        add(entry("progress",setOf("bind","min","max","indeterminate","variant","children"),Projection.TEXT,setOf("number")))
+        add(entry("progressRing",setOf("bind","min","max","indeterminate","size","children"),Projection.TEXT,setOf("number")))
+        add(entry("emoji",setOf("value","bind","size"),Projection.OMIT,setOf("string")))
         add(entry("chart",setOf("kind","categories","series")))
         add(entry("image",setOf("bind","resourceId","assetSlot","fit"),binding=setOf("string")))
         add(entry("video", setOf("bind", "action"), binding = setOf("string"), action = true)
@@ -582,6 +584,22 @@ object ToolUiCatalog {
             if(type in setOf("progress","progressRing")) {
                 if(node.has("indeterminate")) require(node.get("indeterminate") is Boolean)
                 require(node.has("bind") || node.optBoolean("indeterminate"))
+                if(node.has("variant")) require(node.get("variant") in setOf("bar","dots","level")) {"Progress variants are bar, dots, and level."}
+                if(node.has("size")) require(node.get("size") in setOf("small","large")) {"Ring sizes are small and large."}
+                if(node.has("children")) require(holdsChildren(node)) {
+                    if(type == "progressRing") "Only a large progressRing holds children." else "Only a level progress holds children."
+                }
+                if(node.optString("variant") == "dots") {
+                    val (low,high)=bounds(node)
+                    require(low == 0.0 && high in 1.0..12.0 && high % 1.0 == 0.0 && !node.optBoolean("indeterminate")) {"Dots show at most 12 steps."}
+                }
+            }
+            if(type == "card" && node.has("variant")) require(node.get("variant") == "hero") {"The card variant is hero."}
+            if(type == "checkbox" && node.has("variant")) require(node.get("variant") == "circle") {"The checkbox variant is circle."}
+            if(type == "emoji") {
+                require(node.has("value") != node.has("bind")) {"An emoji needs a value or a binding."}
+                if(node.has("value")) require(node.get("value") is String && node.getString("value").length in 1..16) {"An emoji value is one short emoji."}
+                if(node.has("size")) require(node.get("size") in setOf("small","medium","large")) {"Emoji sizes are small, medium, and large."}
             }
             if(type in setOf("numberInput","slider","progress","progressRing")) {
                 trace.checking("numeric_bounds",location,"finite_ordered_bounds_and_value",node) {
@@ -607,7 +625,7 @@ object ToolUiCatalog {
                 }
             }
             if(type == "text") trace.checking("text_properties", location, "catalog_text_properties", node) { validateText(node,actions,register,stage) }
-            if(definition.container) {
+            if(definition.container || holdsChildren(node) && node.has("children")) {
                 val children = trace.checking("container_children","$location.children","children_1_50",node.opt("children"),node.optJSONArray("children")?.length()) {
                     val children=node.getJSONArray("children"); require(children.length() in 1..50)
                     children
@@ -1063,12 +1081,16 @@ object ToolUiCatalog {
             else -> "$label: $text"
         }
     }
+    /** A large ring and a level gauge draw their children inside them. */
+    fun holdsChildren(node: JSONObject) = node.optString("type") == "progressRing" && node.optString("size") == "large" ||
+        node.optString("type") == "progress" && node.optString("variant") == "level"
     /** The bound value as the UI shows it, without the label. */
     fun boundText(node: JSONObject, state: JSONObject): String {
         val v=value(state,node.getString("bind"))
         if(node.getString("type") in setOf("progress","progressRing") && v is Number) {
             // A progress label shows the filled share of its range, as the bar does.
             val (low,high)=bounds(node)
+            if(node.optString("variant") == "dots") return "${v.toInt().coerceIn(0,high.toInt())} of ${high.toInt()}"
             return "${(((v.toDouble()-low)/(high-low)).coerceIn(0.0,1.0)*100).roundToInt()}%"
         }
         return if(node.optString("format") == "clock" && v is Number) "%02d:%02d".format(java.util.Locale.ROOT,v.toInt()/60,v.toInt()%60) else v.toString()

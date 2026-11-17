@@ -30,7 +30,7 @@ class NativePaletteWorkflowTest {
 
     /** Renders the apps one below the other, and returns a screenshot. */
     private fun render(vararg uis: String, check: (Bitmap) -> Unit) =
-        robot.renderApps("palette", uis.toList(), "{}", Regex("\"text\":\"([^\"]+)\"").findAll(uis.last()).last().groupValues[1], check)
+        robot.renderApps("palette", uis.toList(), "{}", Regex("\"text\":\"([^\"]+)\"").findAll(uis.last()).last().groupValues[1], check = check)
 
     /** A pixel inside the left part of a control, away from its label. */
     // The bounds can be those of the label inside a control, so the samples use the screen edges.
