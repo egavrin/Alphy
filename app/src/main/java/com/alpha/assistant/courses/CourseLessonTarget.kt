@@ -45,6 +45,10 @@ private fun lessonGuide(kind: CourseSlideKind): String = buildString {
         - For a picture of one object (a fruit, an animal, the sun, a cloud), put its emoji in a text node with "style":{"emphasis":"headline"} next to its name.
     """.trimIndent())
     append('\n')
+    // The shortest player window is an unfolded phone: about 530 dp for the slide. The host answer control takes about half of it.
+    append("- Make the slide fit one phone screen without scroll. It gets about ${if (kind.requiresAnswer) 250 else 500} dp of height")
+    append(if (kind.requiresAnswer) ", because the host adds the answer control below it. " else ". ")
+    append("Use short texts and only the blocks that the goal needs. A grid can show a set of similar items side by side.\n")
     if (!kind.requiresAnswer) append("- Show the words, letters, numbers, and facts that the slide goal names as visible text in the first screen. No input may hide them.\n")
     append(if (kind.allowsScene) "- When the goal needs a diagram or a live model, this slide can use a scene: a canvas with declared surfaces. " +
         "It must draw visible content in the first screen. " +

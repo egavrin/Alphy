@@ -1,6 +1,5 @@
 package com.alpha.assistant.courses
 
-import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.clickable
@@ -10,6 +9,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
@@ -34,13 +35,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -68,7 +72,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -154,14 +158,18 @@ internal fun CourseLibraryScreen(
     var draftOrder by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
     var refresh by remember { mutableIntStateOf(0) }
     var page by remember { mutableStateOf<CoursePage?>(null) }
+    // An earlier slide that the learner opens again. The reached page stays loaded, so its next slide stays prepared.
+    var reviewIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    var reviewed by remember { mutableStateOf<CoursePage.Slide?>(null) }
     var busy by remember { mutableStateOf(false) }
     var notice by rememberSaveable { mutableIntStateOf(0) }
     var generationJob by remember { mutableStateOf<Job?>(null) }
     var generationAttempts by rememberSaveable { mutableStateOf(hashMapOf<String, String>()) }
     var handledEntryId by rememberSaveable { mutableStateOf<String?>(null) }
     val handleEntry by rememberUpdatedState(onEntryHandled)
-    val slide = page as? CoursePage.Slide
-    val nextRequest = slide?.nextRequest
+    val reachedSlide = page as? CoursePage.Slide
+    val slide = reviewed ?: reachedSlide
+    val nextRequest = reachedSlide?.nextRequest
     val context = LocalContext.current
     val imageGeneration = remember(context) { com.alpha.assistant.images.ImageGeneration(context.applicationContext) }
     val imageDefinition = slide?.imageDefinition
@@ -247,7 +255,15 @@ internal fun CourseLibraryScreen(
         draftOrder = arrayListOf()
         notice = 0
         page = null
+        reviewIndex = null
+        reviewed = null
         refresh++
+    }
+
+    // An index at or after the reached slide returns to it.
+    fun review(index: Int) {
+        reviewIndex = index.takeIf { it in 0 until (reachedSlide?.number ?: 1) - 1 }
+        if (reviewIndex == null) reviewed = null
     }
 
     fun back() {
@@ -333,6 +349,16 @@ internal fun CourseLibraryScreen(
         }
         show(loaded, generateOnReach = play && prepare)
     }
+    LaunchedEffect(presentation, courseId, playing, reviewIndex, refresh) {
+        val id = courseId
+        val index = reviewIndex
+        val loaded = if (id != null && playing && index != null) withContext(Dispatchers.IO) { presentation.review(id, index) } else null
+        reviewed = loaded
+        if (loaded == null && index != null) {
+            reviewIndex = null
+            notice = R.string.course_load_failed
+        }
+    }
     val fullWindow = playing || returnToHost
     val hostedEntryPending = entryRequest?.let { it.exitToHostOnBack && it.requestId != handledEntryId } == true
     BackHandler(enabled = !fullWindow && (courseId != null || hostedEntryPending)) { back() }
@@ -345,7 +371,7 @@ internal fun CourseLibraryScreen(
     }
     @Composable
     fun PageContent(sceneCovered: Boolean = false) {
-        when (val current = page) {
+        when (val current = reviewed ?: page) {
             null -> LinearProgressIndicator(Modifier.fillMaxWidth())
             CoursePage.LoadFailed -> CourseRecovery(R.string.course_load_failed) { refresh++ }
             is CoursePage.Library -> SavedCourses(current.courses, onStartCourse) { navigate(it) }
@@ -482,8 +508,10 @@ internal fun CourseLibraryScreen(
                         }
                     },
                     onNext = {
-                        val prepared = nextPreparation as? CourseNextPreparation.Ready
-                        update { presentation.next(current, prepared) }
+                        if (current.review) review(current.number) else {
+                            val prepared = nextPreparation as? CourseNextPreparation.Ready
+                            update { presentation.next(current, prepared) }
+                        }
                     },
                     scroll = lessonScroll,
                 )
@@ -501,6 +529,7 @@ internal fun CourseLibraryScreen(
                     backLabel = backLabel,
                     busy = busy,
                     onBack = ::back,
+                    onReview = ::review,
                     slidePane = { sceneCovered ->
                         if (slide == null) {
                             CoursePageFrame(Modifier.fillMaxSize(), backLabel, busy, notice, ::back) { PageContent() }
@@ -545,6 +574,7 @@ private fun CoursePlayerLayout(
     backLabel: Int,
     busy: Boolean,
     onBack: () -> Unit,
+    onReview: (Int) -> Unit,
     slidePane: @Composable (Boolean) -> Unit,
 ) {
     var mapOpen by rememberSaveable(slide?.course?.id) { mutableStateOf(false) }
@@ -558,23 +588,46 @@ private fun CoursePlayerLayout(
             return@AdaptiveShellLayout
         }
 
+        // One row holds the lesson title, both positions, and every action, so the slide gets the rest of the window.
         @Composable fun Toolbar() {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                val back = stringResource(backLabel)
-                IconButton(onClick = onBack, enabled = !busy, modifier = Modifier.semantics { contentDescription = back }) {
-                    AlphaIcon(Glyph.Back)
-                }
-                Text(slide.course.setup.topic, Modifier.weight(1f).padding(horizontal = 8.dp),
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge)
-                TextButton(onClick = { mapOpen = true }, enabled = !busy) {
-                    Text(stringResource(R.string.course_lessons))
-                }
-                FilledTonalButton(
-                    onClick = { if (session.open) session.close() else session.show() },
-                    enabled = !busy || session.open,
-                ) {
-                    AlphaIcon(Glyph.Chat)
-                    Text(stringResource(R.string.course_tutor_open), Modifier.padding(start = 6.dp))
+            BoxWithConstraints {
+                val roomy = maxWidth >= 600.dp
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val back = stringResource(backLabel)
+                    IconButton(onClick = onBack, enabled = !busy, modifier = Modifier.semantics { contentDescription = back }) {
+                        AlphaIcon(Glyph.Back)
+                    }
+                    Text(slide.step.lessonTitle, Modifier.weight(1f).padding(horizontal = 8.dp).semantics { heading() },
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                    val previous = stringResource(R.string.course_slide_previous)
+                    IconButton(onClick = { onReview(slide.number - 2) }, enabled = !busy && slide.number > 1,
+                        modifier = Modifier.semantics { contentDescription = previous }) {
+                        AlphaIcon(Glyph.Chevron, Modifier.rotate(180f), color = LocalContentColor.current)
+                    }
+                    val total = slide.course.progress.totalSlides
+                    val position = stringResource(R.string.course_slide_position, slide.number, total)
+                    Text(if (roomy) position else stringResource(R.string.desktop_course_lesson_progress, slide.number, total),
+                        Modifier.padding(end = 8.dp).semantics { contentDescription = position }, maxLines = 1,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
+                    val lessons = slide.course.outline.lessons
+                    val lesson = lessons.indexOfFirst { it.id == slide.step.lessonId } + 1
+                    val lessonPosition = stringResource(R.string.course_lesson_position, lesson, lessons.size)
+                    OutlinedButton(onClick = { mapOpen = true }, enabled = !busy, contentPadding = PaddingValues(horizontal = 12.dp),
+                        modifier = Modifier.padding(end = 8.dp).semantics { contentDescription = lessonPosition }) {
+                        Text(if (roomy) lessonPosition else stringResource(R.string.course_lesson_position_short, lesson, lessons.size),
+                            maxLines = 1)
+                        AlphaIcon(Glyph.Chevron, Modifier.padding(start = 4.dp).size(16.dp).rotate(90f))
+                    }
+                    val chat = stringResource(R.string.course_tutor_open)
+                    FilledTonalButton(
+                        onClick = { if (session.open) session.close() else session.show() },
+                        enabled = !busy || session.open,
+                        contentPadding = if (roomy) ButtonDefaults.ContentPadding else PaddingValues(horizontal = 12.dp),
+                        modifier = Modifier.semantics { contentDescription = chat },
+                    ) {
+                        AlphaIcon(Glyph.Chat)
+                        if (roomy) Text(chat, Modifier.padding(start = 6.dp))
+                    }
                 }
             }
             HorizontalDivider()
@@ -634,7 +687,7 @@ private fun CoursePlayerLayout(
                     Box(safe.padding(16.dp), contentAlignment = Alignment.Center) {
                         Surface(Modifier.widthIn(max = 520.dp).fillMaxWidth().fillMaxHeight(0.8f),
                             shape = MaterialTheme.shapes.large) {
-                            CourseLessonIndex(slide) { mapOpen = false }
+                            CourseLessonIndex(slide, onOpen = { mapOpen = false; onReview(it) }) { mapOpen = false }
                         }
                     }
                 }
@@ -644,10 +697,11 @@ private fun CoursePlayerLayout(
 }
 
 @Composable
-private fun CourseLessonIndex(slide: CoursePage.Slide, onClose: () -> Unit) {
+private fun CourseLessonIndex(slide: CoursePage.Slide, onOpen: (Int) -> Unit, onClose: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val course = slide.course
-    val currentIndex = course.outline.lessons.indexOfFirst { it.id == slide.step.lessonId }
+    val steps = course.outline.steps()
+    val completed = course.progress.completedSlides
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -660,15 +714,17 @@ private fun CourseLessonIndex(slide: CoursePage.Slide, onClose: () -> Unit) {
             }
         }
         itemsIndexed(course.outline.lessons, key = { _, lesson -> lesson.id }) { index, lesson ->
-            val current = index == currentIndex
-            Surface(shape = MaterialTheme.shapes.medium,
-                color = if (current) colors.primaryContainer else colors.surfaceContainerLow,
-                contentColor = if (current) colors.onPrimaryContainer else colors.onSurface) {
+            val shown = lesson.id == slide.step.lessonId
+            val first = steps.indexOfFirst { it.lessonId == lesson.id }
+            // A reached lesson opens at its first slide. A later lesson has no slides yet.
+            Surface(onClick = { onOpen(first) }, enabled = first in 0..completed, shape = MaterialTheme.shapes.medium,
+                color = if (shown) colors.primaryContainer else colors.surfaceContainerLow,
+                contentColor = if (shown) colors.onPrimaryContainer else colors.onSurface) {
                 Column(Modifier.fillMaxWidth().padding(12.dp)) {
                     Text("${index + 1}. ${lesson.title}", style = MaterialTheme.typography.titleSmall)
                     Text(stringResource(when {
-                        current -> R.string.course_lesson_current
-                        index < currentIndex -> R.string.course_lesson_completed
+                        steps.indexOfLast { it.lessonId == lesson.id } < completed -> R.string.course_lesson_completed
+                        first <= completed -> R.string.course_lesson_current
                         else -> R.string.course_lesson_pending
                     }), style = MaterialTheme.typography.labelSmall)
                 }
@@ -1058,8 +1114,6 @@ private fun CourseSlidePlayer(
 ) {
     val colors = MaterialTheme.colorScheme
     var sceneEditing by remember(sceneHost) { mutableStateOf(false) }
-    val lessonIndex = slide.course.outline.lessons.indexOfFirst { it.id == slide.step.lessonId }
-    val landscapeScene = sceneHost != null && LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val nextBeforeDetails = sceneHost == null && slide.prompt == null &&
         (slide.adaptationNote != null || slide.sources.isNotEmpty())
     @Composable fun NextAction() {
@@ -1081,23 +1135,12 @@ private fun CourseSlidePlayer(
         }
     }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        Column(Modifier.widthIn(max = if (landscapeScene) 960.dp else 680.dp).fillMaxSize().padding(top = 14.dp, bottom = 12.dp),
+        Column(Modifier.widthIn(max = 960.dp).fillMaxSize().padding(vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(stringResource(R.string.course_lesson_position, lessonIndex + 1, slide.course.outline.lessons.size),
-                    style = MaterialTheme.typography.labelLarge)
-                Text(stringResource(R.string.course_slide_position, slide.number, slide.course.progress.totalSlides),
-                    color = colors.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
-            }
-            LinearProgressIndicator(
-                progress = { slide.number.toFloat() / slide.course.progress.totalSlides },
-                modifier = Modifier.fillMaxWidth(),
-            )
             val correct = slide.feedback?.correct
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                 val canvasHeight = maxHeight * 0.60f
                 Column(Modifier.fillMaxWidth().verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(slide.step.lessonTitle, Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
                     if (sceneHost == null) ToolContent(ui = slide.ui, state = slide.state, enabled = false, embedded = true, event = { _, _ -> })
                     else CourseScene(sceneHost, !busy && !sceneCovered, canvasHeight) { sceneEditing = it }
                     slide.imageDefinition?.generatedImages?.singleOrNull()?.let {

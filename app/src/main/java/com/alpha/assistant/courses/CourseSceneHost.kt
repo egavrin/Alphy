@@ -132,7 +132,8 @@ internal class CourseSceneHost(
             check(settingEvent || !changed) { "Autonomous events cannot change lesson settings." }
             currentCoroutineContext().ensureActive()
             check(!disposed && active())
-            if (settingEvent && changed) {
+            // A reviewed slide is read-only: its scene takes input and saves no setting.
+            if (settingEvent && changed && !page.review) {
                 stage = "persist"
                 val values = JSONObject()
                 for (field in fields) values.put(field, ToolUiCatalog.value(state, field))

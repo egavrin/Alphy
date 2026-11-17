@@ -111,6 +111,58 @@ class CoursePlayerGenerationUiWorkflowTest {
         }
     }
 
+    @Test fun topBarHoldsThePositionsAndTheSlideStartsRightBelowIt() {
+        withPlayer(Runtime {}) { _, _ ->
+            openPlayer()
+            val content = robot.bounds(generatedText)
+            val back = robot.bounds(robot.text(R.string.course_back_to_outline))
+            val slide = robot.bounds(robot.text(R.string.course_slide_position, 2, 3))
+            val lesson = robot.bounds(robot.text(R.string.course_lesson_position, 1, 1))
+            robot.diagnostics.capture("compact-top-bar")
+            assertTrue("The slide position must be in the top bar: $slide / $back", slide.top < back.bottom && slide.bottom > back.top)
+            assertTrue("The lesson position must be in the top bar: $lesson / $back", lesson.top < back.bottom && lesson.bottom > back.top)
+            val gap = (content.top - back.bottom) / InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+            assertTrue("The slide must start right below the top bar, but the gap is $gap dp", gap <= 24f)
+        }
+    }
+
+    @Test fun backAndForwardReviewEarlierSlidesWithoutNewWork() {
+        val runtime = Runtime {}
+        withPlayer(runtime, prefetch = true) { store, saved ->
+            val previous = robot.text(R.string.course_slide_previous)
+            openPlayer()
+            robot.waitFor(generatedText)
+            waitFor(R.string.course_next)
+            val reached = checkNotNull(store.course(saved.id))
+
+            click(R.string.course_slide_previous)
+            robot.waitFor("Saved practice")
+            robot.waitFor(robot.text(R.string.course_slide_position, 1, 3))
+            waitFor(R.string.course_answer_correct)
+            // The label is a child of the button node. The first slide has no earlier slide.
+            robot.waitUntil { generateSequence(robot.find(previous)) { it.parent }.firstOrNull { it.isClickable }?.isEnabled == false }
+            robot.diagnostics.capture("review-first-slide")
+
+            click(R.string.course_next)
+            robot.waitFor(generatedText)
+            robot.waitFor(robot.text(R.string.course_slide_position, 2, 3))
+
+            // The lesson list opens the first slide of a reached lesson.
+            robot.click(robot.text(R.string.course_lesson_position, 1, 1))
+            robot.click("1. Compare fractions")
+            robot.waitFor("Saved practice")
+            click(R.string.course_next)
+            robot.waitFor(generatedText)
+
+            assertEquals(reached, store.course(saved.id))
+            assertEquals(1, runtime.requests.size)
+            assertEquals(1, runtime.preparations.size)
+            click(R.string.course_next)
+            robot.waitFor(generatedFuture)
+            assertEquals("future", store.course(saved.id)?.progress?.currentSlideId)
+        }
+    }
+
     @Test fun leavingWhilePreparingCancelsTheDraftAndResumeStartsAReplacement() {
         val canceled = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()

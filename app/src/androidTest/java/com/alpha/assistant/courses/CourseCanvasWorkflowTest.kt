@@ -40,6 +40,43 @@ class CourseCanvasWorkflowTest {
         }
     }
 
+    @Test fun reviewedSceneTakesInputAndSavesNoSetting(): Unit = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val name = "course-canvas-review-${UUID.randomUUID()}.db"
+        val kind = CourseSlideKind.EXPLANATION
+        val tools = ToolGenerationService(provider(kind), SandboxClient(context))
+        try {
+            CourseStore(context, name).use { store ->
+                val course = store.create(CourseSetup("Drawing", "Beginner", "Explore a shape"),
+                    CourseOutline(listOf(CourseLessonPlan("lesson", "Shape", listOf(
+                        CourseSlidePlan("slide", kind, "Move a circle"),
+                        CourseSlidePlan("summary", CourseSlideKind.SUMMARY, "Review the shape"),
+                    )))))
+                val controller = CourseController(store, tools)
+                val generated = controller.generate(course.id, course.revision, "slide", "offline", CloudSession())
+                val advanced = controller.advance(course.id, generated.revision, "slide")
+                val page = checkNotNull(CoursePresentation(store, controller).review(course.id, 0))
+                val host = controller.sceneHost(page)
+                try {
+                    val opened = host.open()
+                    val pending = host.finishLiveInput(opened, "speed_edit", 8.0) { true } as LiveInputSubmission.Pending
+                    host.liveInputFrame(10)
+                    val result = withTimeout(5000) { pending.receipt.await() }
+                    assertTrue("A reviewed scene must accept input: $result", result is LiveInputResult.Accepted)
+                    assertEquals(8.0, x((result as LiveInputResult.Accepted).snapshot.surfaces), 0.0)
+                    host.close()
+                    assertEquals("A review must not save a setting", 2.0, x(host.open().surfaces), 0.0)
+                    assertEquals(advanced, store.course(course.id))
+                } finally {
+                    host.close()
+                    host.dispose()
+                }
+            }
+        } finally {
+            context.deleteDatabase(name)
+        }
+    }
+
     @Test fun sceneAndControlsReflowWithAcceptedSettingsAndLessonMap() {
         val fixture = ShellFixture("course-scene-layout")
         val robot = ShellRobot("course-scene-layout")
@@ -70,7 +107,7 @@ class CourseCanvasWorkflowTest {
                 robot.click(topic)
                 robot.click(robot.text(R.string.course_open))
                 val finish = robot.text(R.string.course_finish)
-                val map = robot.text(R.string.course_lessons)
+                val map = robot.text(R.string.course_lesson_position, 1, 1)
                 val canvas = "Diagram. "
                 val slider = "Speed"
                 robot.waitFor(finish)

@@ -27,6 +27,8 @@ internal sealed interface CoursePage {
         val scene: ToolSpec? = null,
         val sceneRevision: Long = course.outlineRevision,
         internal val imageDefinition: ToolSpec? = null,
+        /** An earlier slide that the learner opens again. It is read-only and has no next request. */
+        val review: Boolean = false,
     ) : CoursePage
 
     data class Unavailable(
@@ -114,11 +116,16 @@ internal class CoursePresentation(
         }
 
         val step = steps.getOrNull(position) ?: return@read CoursePage.Complete(course)
-        val attempt = if (step.slide.kind.requiresAnswer) {
-            store.answerAttempts(courseId).lastOrNull { it.slideId == step.slide.id }
-        } else null
-        slide(course, step, position + 1, attempt)
+        slide(course, step, position + 1, lastAttempt(courseId, step))
     }
+
+    /** An earlier slide for a second look. Null when [index] is not before the reached slide or the slide does not load. */
+    fun review(courseId: String, index: Int): CoursePage.Slide? = (read {
+        val course = requireCourse(courseId)
+        check(index < course.progress.completedSlides)
+        val step = course.outline.steps()[index]
+        slide(course, step, index + 1, lastAttempt(courseId, step))
+    } as? CoursePage.Slide)?.copy(review = true)
 
     suspend fun submit(slide: CoursePage.Slide, operationId: String, answer: CourseAnswer): CoursePlayerUpdate {
         if (slide.prompt == null || slide.feedback?.correct == true) return CoursePlayerUpdate.SaveFailed
@@ -153,9 +160,7 @@ internal class CoursePresentation(
             val content = saved ?: host?.generate(request) ?: return CourseNextPreparation.Unavailable
             currentCoroutineContext().ensureActive()
             store.courseAt(request.courseId, request.revision)
-            val attempt = if (saved != null && target.step.slide.kind.requiresAnswer) {
-                store.answerAttempts(course.id).lastOrNull { it.slideId == target.step.slide.id }
-            } else null
+            val attempt = if (saved != null) lastAttempt(course.id, target.step) else null
             val page = checkedSlide(course, target.step, target.index + 1, attempt, content)
             return CourseNextPreparation.Ready(request, page, content.takeIf { saved == null })
         } catch (_: CancellationException) {
@@ -293,6 +298,9 @@ internal class CoursePresentation(
             imageDefinition = saved.spec.takeIf { it.lessonImageIntent != null || it.generatedImages.isNotEmpty() })
     }
 
+    private fun lastAttempt(courseId: String, step: CourseStep): CourseAnswerAttempt? =
+        if (step.slide.kind.requiresAnswer) store.answerAttempts(courseId).lastOrNull { it.slideId == step.slide.id } else null
+
     private fun requireCourse(id: String): CourseSnapshot =
         store.course(id) ?: throw CourseStoreException(CourseRejection.COURSE_NOT_FOUND)
 
@@ -343,7 +351,7 @@ internal class CoursePresentation(
 }
 
 internal val CoursePage.Slide.nextRequest: CourseNextRequest?
-    get() = if (number < course.progress.totalSlides && (prompt == null || feedback?.correct == true)) {
+    get() = if (!review && number < course.progress.totalSlides && (prompt == null || feedback?.correct == true)) {
         CourseNextRequest(course.id, course.revision, step.slide.id)
     } else null
 

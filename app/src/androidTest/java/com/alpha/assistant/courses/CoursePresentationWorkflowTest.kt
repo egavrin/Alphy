@@ -145,6 +145,30 @@ class CoursePresentationWorkflowTest {
         assertEquals(listOf("request"), store.answers(saved.id).map { it.operationId })
     }
 
+    @Test fun reviewOpensAnEarlierSlideReadOnlyAndKeepsProgress() = workflow { store, player, _, _ ->
+        val saved = create(store, CourseSlideKind.CHOICE, CourseSlideKind.SUMMARY)
+        saveSlide(store, saved, slide(choice()))
+        val answer = CourseAnswer.Choice("a")
+        val answered = player.submit(openSlide(player, saved.id), "right", answer).opened() as CoursePage.Slide
+        saveSlide(store, answered.course, slide())
+        val reached = player.next(answered).opened() as CoursePage.Slide
+        assertEquals("slide-2", reached.step.slide.id)
+        val before = store.course(saved.id)
+
+        val earlier = checkNotNull(player.review(saved.id, 0)) { "A completed slide must open for review." }
+        assertTrue(earlier.review)
+        assertEquals("slide-1", earlier.step.slide.id)
+        assertEquals(1, earlier.number)
+        assertEquals(CourseAnswerFeedback(answer, true), earlier.feedback)
+        assertNull("A review must not prepare or save a next slide.", earlier.nextRequest)
+
+        assertNull("The reached slide is not a review.", player.review(saved.id, 1))
+        assertNull(player.review(saved.id, -1))
+        assertNull(player.review("unknown", 0))
+        assertEquals(before, store.course(saved.id))
+        assertEquals(reached, openSlide(player, saved.id))
+    }
+
     private fun create(store: CourseStore, vararg kinds: CourseSlideKind): CourseSnapshot = store.create(
         CourseSetup("Past tense", "Beginner", "Use two past tense forms"),
         CourseOutline(listOf(CourseLessonPlan("lesson", "Forms", kinds.mapIndexed { index, kind ->
