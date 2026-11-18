@@ -5,7 +5,8 @@ import { App, foreground, given, shownFormulas } from "./core.js";
 import { show } from "./dsl.js";
 import { ALPHY, MAX_ROW_FIELDS, MAX_ROWS, namer, own } from "./rows.js";
 import { LIMITS, budgetOf, utf8 } from "./draw.js";
-import { ALERT_CAPABILITIES, IDLE, MAX_ARRAY, MAX_POINTS, PER_OBJECT, TYPED, header, load, screen, stateOf } from "./run.js";
+import { IDLE } from "./drag.js";
+import { ALERT_CAPABILITIES, MAX_ARRAY, MAX_POINTS, PER_OBJECT, TYPED, header, load, screen, stateOf } from "./run.js";
 
 /** The text of the run-time. kit/build.js puts it into the bundle, and a test of the sources sets it from the sources. */
 export const runtime = { text: "" };
@@ -145,7 +146,7 @@ export function emit(file) {
     owners.push(first);
     if (moved.size > PER_OBJECT) faults.push(`${first}: animate moves ${moved.size} values of the app, and an object of Alphy holds at most ${PER_OBJECT} fields. Animate fewer values`);
   }
-  // A model with a turn gets the pointer events of its surface: the drag that runs (run.js IDLE) is one field of the state.
+  // A model with a turn gets the pointer events of its surface: the drag that runs (drag.js IDLE) is one field of the state.
   const turned = file.of("component").find((entry) => entry.tree.k === "call" && entry.tree.name === "Model3d" && given(entry.tree).bind);
   if (turned) {
     app.drag = name("drag", "drag");

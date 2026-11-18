@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";
 import { ACTIONS, App, settings } from "../src/core.js";
 import { parseLine } from "../src/dsl.js";
-import { ACCENTS, LIMITS, budgetOf, commandsOf, polygonsOf } from "../src/draw.js";
+import { ACCENTS, LIMITS, STAGE, budgetOf, commandsOf, polygonsOf } from "../src/draw.js";
 import { emit, runtime } from "../src/emit.js";
 import { handle, kitOf } from "../src/run.js";
 import { T0, allPlans, clocked, gateEach, plan, planned } from "./helpers.js";
@@ -417,8 +417,6 @@ test("run: a reply of exactly 32768 bytes keeps each command, and one byte more 
   expect(budgetOf([["lines_view", cut.lines_view.commands]]).bytes).toBe(31889);
 });
 
-/** The stage of a model: a light box under its faces, so the model reads on a light and on a dark theme. */
-const STAGE = { type: "rect", x: 0, y: 0, width: 320, height: 240, color: "#e8f1ef" };
 /** The surface of the rover of model3d.plan as the kit's App gives it: the stage, and the faces of the App's bodies at the App's turn. The App takes the bodies apart itself. */
 const rover = (kit) => { const { bodies, value, selected } = kit.find("rover_model").props; return [STAGE, ...polygonsOf(bodies, value, false, selected, 320, 240, ACCENTS.teal)]; };
 const pointer = (phase, x, surfaceId = "rover_model", id = 0) => ({ type: "pointer", surfaceId, x, y: 120, phase, pointer: id });
@@ -453,11 +451,14 @@ test("run: a drag keeps the turn from 0 to 360, and a pointer that is not a drag
   expect(drag(left, 0, 100).rover.turn).toBe(30);
   expect(drag(definition.initialState, 100, 100.5).rover.turn).toBe(30.3);
   const down = send(definition.initialState, pointer("down", 100)).state;
-  // An up or a move with no down, a place that is not a number, a second pointer, and a surface that the app does not have.
+  // An up or a move with no down, a place that is not a number, a second pointer (also its down while the drag of the first runs), and a surface that the app does not have.
   for (const [state, event] of [[definition.initialState, pointer("up", 150)], [definition.initialState, pointer("move", 150)], [down, pointer("move", Number.NaN)],
-    [definition.initialState, pointer("down", "100")], [down, pointer("move", 150, "rover_model", 1)], [down, pointer("up", 150, "rover_model", 1)], [down, pointer("move", 150, "nothing")]]) {
+    [definition.initialState, pointer("down", "100")], [down, pointer("move", 150, "rover_model", 1)], [down, pointer("up", 150, "rover_model", 1)],
+    [down, pointer("down", 150, "rover_model", 1)], [down, pointer("move", 150, "nothing")]]) {
     expect(send(state, event)).toEqual({ state });
   }
+  // A down of the same pointer starts its drag again at its own x.
+  expect(send(down, pointer("down", 200)).state.drag).toEqual({ surface: "rover_model", pointer: 0, x: 200 });
 });
 
 test("run: the part buttons and the arrows give the values of the kit's App, and the arrows keep its turn past 0 and 360", async () => {

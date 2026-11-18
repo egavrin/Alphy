@@ -117,7 +117,7 @@ test("draw: a box at the origin gives three polygons at turn 30", () => {
   // At turn 30 the person sees the top, the front, and the left side of the box. At turn 0 the sides are edge-on, and only the top and the front show.
   const faces = polygonsOf([box("", 0, 0, 0, 2, 2, 2)], 30, false, "", 320, 240);
   expect(faces.map((face) => [face.type, face.points.length])).toEqual([["polygon", 4], ["polygon", 4], ["polygon", 4]]);
-  expect(faces.every((face) => face.points.flat().every((value) => value >= 0 && value <= 320))).toBe(true);
+  expect(faces.every((face) => face.points.every(([x, y]) => x >= 0 && x <= 320 && y >= 0 && y <= 240))).toBe(true);
   expect(polygonsOf([box("", 0, 0, 0, 2, 2, 2)], 0, false, "", 320, 240)).toHaveLength(2);
   // A cylinder is a prism of 12 sides. At turn 30 the person sees its near cap and 5 sides: with no perspective the side whose normal
   // is at 225 degrees would look at the person too, but the eye at 5 times the reach of the model sees it from behind (n · eye 0.34 < n · p 0.97).

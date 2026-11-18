@@ -3,13 +3,10 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { App, settings } from "../src/core.js";
-import { ACCENTS, LIMITS, budgetOf, polygonsOf } from "../src/draw.js";
+import { ACCENTS, LIMITS, STAGE, budgetOf, polygonsOf } from "../src/draw.js";
 import { emit } from "../src/emit.js";
 import { handle, kitOf, screen } from "../src/run.js";
 import { allPlans, fixture, plan, planned } from "./helpers.js";
-
-/** The stage of a model: a light box under its faces, so the model reads on a light and on a dark theme. */
-const STAGE = { type: "rect", x: 0, y: 0, width: 320, height: 240, color: "#e8f1ef" };
 
 /** Alphy's rule for a state field and an action id (ToolValueSchema.name, ToolUiCatalog). */
 const SAFE = /^[A-Za-z][A-Za-z0-9_]{0,47}$/;

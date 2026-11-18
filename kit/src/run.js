@@ -5,7 +5,8 @@
 import { AppFile, parseExpression, show } from "./dsl.js";
 import { App, foreground, given, settings } from "./core.js";
 import { MAX_ROWS, cast, castRow, clockOf, namer, own, relative, rows, shownAs, wished } from "./rows.js";
-import { BAR_SURFACE, MODEL, STAGE, accentOf, barOf, commandsOf, fit, fixed, polygonsOf, sideOf } from "./draw.js";
+import { BAR_SURFACE, MODEL, STAGE, accentOf, barOf, commandsOf, fit, polygonsOf, sideOf } from "./draw.js";
+import { IDLE, dragged } from "./drag.js";
 
 /** False in the run-time text of an app (dsl.js): the run-time reads no fault of the screen. */
 const MESSAGES = true;
@@ -28,8 +29,6 @@ export const ALERT_CAPABILITIES = ["audio.tone", "vibration.play"];
 const MIN_TIMER_MS = 1000, MAX_TIMER_MS = 86400000, TICK_MS = 1000, ANIM_MS = 50;
 /** The change of a value that no animate moves now. */
 const STILL = { from: 0, to: 0, start: 0, end: 0, at: 0 };
-/** The drag of a model when no drag runs: the surface, the pointer, and the last x of a drag. */
-export const IDLE = { surface: "", pointer: 0, x: 0 };
 
 /** The values of the app line: app("Title", lang="en", kind="Lesson", preset="clean", palette="teal"). */
 export function header(kit) {
@@ -396,27 +395,12 @@ export function kitOf(app, state) {
 }
 
 /**
- * A pointer event of a surface: on the surface of a model with a turn, a down starts a drag at its x, a move or an up turns the model
- * by 0.6 degrees for each pixel since the last event (the prototype's rule), and an up or a cancel ends the drag. The turn stays in 0 to 360. A pointer of another
- * surface, a place that is not a number, and a move, an up, or a cancel of no drag of that surface and pointer change nothing (false).
- */
-function dragged(kit, drawn, { surfaceId, x, phase, pointer }) {
-  const model = drawn.find((surface) => surface.id === surfaceId)?.model, drag = kit.state._drag ?? IDLE;
-  if (!model || !Number.isFinite(x)) return false;
-  if (phase === "down") { kit.state._drag = { surface: surfaceId, pointer, x }; return ""; }
-  if (!["move", "up", "cancel"].includes(phase) || drag.surface !== surfaceId || drag.pointer !== pointer) return false;
-  kit.state._drag = phase === "move" ? { ...drag, x } : IDLE;
-  const from = Number.isFinite(model.props.value) ? model.props.value : 0;
-  return phase === "cancel" ? "" : kit.change(model, fixed(((fixed(from + (x - drag.x) * 0.6) % 360) + 360) % 360));
-}
-
-/**
  * Answers one event of the sandbox request {artifactId, revision, state, event}. app is the compiled data of emit.js, and now
  * is the clock of the host. A read-only event, an action id that the app does not have, an action that changes nothing, and an
  * action that takes a list past its count of rows (app.caps) or an array past Alphy's limit give the state back as it is. A bound
  * number past its bounds comes back at its bound. The reply holds a new ui only when the screen differs from the screen of the state before the event.
  * An open and a timer event of a timer or a change that runs move each timer and each change to the clock of now. A pointer event
- * of the surface of a model turns the model (dragged). A timer event of nothing that runs, also a late one after a pause or after
+ * of the surface of a model turns the model (drag.js dragged). A timer event of nothing that runs, also a late one after a pause or after
  * the end of a change, and each other event of a surface give the state back as it is.
  */
 export function handle(input, app, now = Date.now()) {
