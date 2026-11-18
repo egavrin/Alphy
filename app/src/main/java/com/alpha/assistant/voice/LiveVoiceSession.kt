@@ -232,10 +232,11 @@ internal class LiveVoiceSession(
         // Blocks that were on the way at a mute.
         if (captureMuted) return
         val playing = speaking()
-        // Barge-in: the user's voice over the playback stops it at once (spec 5.4.5).
-        if (detector.accept(block, playing) && playing) {
+        val plays = device.playbackActive
+        // Barge-in: the user's voice over the playback stops it at once (spec 5.4.5). Only the device flag teaches the echo (R35).
+        if (detector.accept(block, playing, plays) && playing) {
             // A barge-in in a dry pause did not start over Alphy's voice, so only the device flag marks the next turn (R11).
-            if (device.playbackActive) interrupted = true
+            if (plays) interrupted = true
             flush()
         }
         if (detector.userSpeaking != userSpeaking) {

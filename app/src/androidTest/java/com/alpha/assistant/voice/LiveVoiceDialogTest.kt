@@ -522,7 +522,8 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
 
     private fun info(name: String, detail: String) { checks += "INFO $name: $detail" }
 
-    private fun outputs(from: Long, to: Long = Long.MAX_VALUE) = events.filter { it.type == OUTPUT && it.at > from && it.at <= to }
+    // The send time is taken before the send, so a part that arrives in the same millisecond answers it.
+    private fun outputs(from: Long, to: Long = Long.MAX_VALUE) = events.filter { it.type == OUTPUT && it.at >= from && it.at <= to }
     private fun inputs(from: Long) = events.filter { it.type == INPUT && it.at > from }
     private fun errors(from: Long) = events.filter { it.type == "error" && it.at >= from }.map { "${it.text} for ${it.id}" }
     private fun text(seen: List<Seen>) = seen.joinToString("") { it.text }

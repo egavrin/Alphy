@@ -79,7 +79,8 @@ class VoiceModeSessionTest {
 
     /**
      * GPT-Live's output stream (ruling R24): one chunk every 100 ms from `session.started`, silent unless the test has queued chunks.
-     * It also delivers a capture block every 20 ms, as the microphone does: quiet, or the user's voice while [loud].
+     * It also delivers a capture block every 20 ms, as the microphone does: quiet, [echo] while the device plays, or the user's voice
+     * while [loud].
      */
     private inner class Stream(private val rig: Rig) : AutoCloseable {
         private val queue = LinkedBlockingQueue<String>()
@@ -87,6 +88,8 @@ class VoiceModeSessionTest {
         private val sent = AtomicInteger()
         private val voice = Random(11)
         @Volatile var loud = false
+        /** The level of Alphy's voice in the microphone while the device plays. */
+        @Volatile var echo = 0.002
         @Volatile private var running = true
         private val worker = thread(name = "live-output-stream") {
             val start = SystemClock.uptimeMillis()
@@ -97,7 +100,7 @@ class VoiceModeSessionTest {
                     if (chunk == null) rig.socket.emit(silentAudio())
                     else { if (chunk.isNotEmpty()) rig.socket.emit(chunk); sent.incrementAndGet() }
                 }
-                rig.audio.capture(voice.pcmBlock(if (loud) 0.15 else 0.002))
+                rig.audio.capture(voice.pcmBlock(if (loud) 0.15 else if (rig.audio.playbackActive) echo else 0.002))
                 tick++
                 SystemClock.sleep(maxOf(0, start + tick * 20 - SystemClock.uptimeMillis()))
             }
@@ -507,6 +510,21 @@ class VoiceModeSessionTest {
             stream.drain()
             waitUntil("output end") { rig.outputEnds() == 1 }
             waitUntil("listening") { rig.session.phase == LivePhase.LISTENING }
+        }
+    }
+
+    /** Ruling R35: a dry pause of an open reply keeps the learned echo level, so the echo after the pause is not the user's voice. */
+    @Test fun echoAfterADryPauseIsNoBargeIn() {
+        val rig = Rig(STREAM.copy(replyGapMs = 2_000), realTime = true).started()
+        Stream(rig).use { stream ->
+            stream.echo = 0.02
+            // 1 s of voice arrives in 500 ms. The device then runs dry for about 1,100 ms of the 1,600 ms pause, and the reply stays open.
+            stream.voiced(1, 5); stream.silent(16); stream.voiced(2, 5)
+            waitUntil("dry pause", 3_000) { rig.markers().count { it == 1_000 } == 5 && !rig.audio.playbackActive }
+            stream.drain()
+            waitUntil("output end", 5_000) { rig.outputEnds() == 1 }
+            assertEquals("The echo after the pause flushed the reply", 0, rig.audio.flushes.get())
+            assertEquals(5, rig.markers().count { it == 2_000 })
         }
     }
 
