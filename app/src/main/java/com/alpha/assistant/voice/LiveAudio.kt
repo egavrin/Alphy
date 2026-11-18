@@ -96,6 +96,8 @@ internal class AndroidLiveAudio(context: Context) : LiveAudio {
                 .setBufferSizeInBytes(LIVE_RATE * 2 * 5).build()
             track = newTrack
             check(newTrack.state == AudioTrack.STATE_INITIALIZED) { "Playback initialization failed" }
+            // The default start threshold is the 5 s buffer, so a short reply would wait for later audio (review C1).
+            newTrack.setStartThresholdInFrames(LIVE_BLOCK)
             newTrack.play()
             val minimum = AudioRecord.getMinBufferSize(LIVE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
             check(minimum > 0) { "PCM16 microphone is unsupported" }

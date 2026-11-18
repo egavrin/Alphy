@@ -94,8 +94,8 @@ class VoiceModeSessionTest {
             while (running) {
                 if (tick % 5 == 0L) {
                     val chunk = queue.poll()
-                    rig.socket.emit(chunk ?: silentAudio())
-                    if (chunk != null) sent.incrementAndGet()
+                    if (chunk == null) rig.socket.emit(silentAudio())
+                    else { if (chunk.isNotEmpty()) rig.socket.emit(chunk); sent.incrementAndGet() }
                 }
                 rig.audio.capture(voice.pcmBlock(if (loud) 0.15 else 0.002))
                 tick++
@@ -103,9 +103,21 @@ class VoiceModeSessionTest {
             }
         }
 
-        /** Queues [count] voiced chunks of [marker]. Each holds 200 ms of audio, so the real-time playback has no gap inside a reply. */
-        fun voiced(marker: Int, count: Int) = repeat(count) { queued.incrementAndGet(); queue += outputAudio(marker, REPLY_SAMPLES) }
+        /** Queues [count] voiced chunks of [marker]. 200 ms chunks every 100 ms give the real-time playback no gap inside a reply. */
+        fun voiced(marker: Int, count: Int, samples: Int = REPLY_SAMPLES) =
+            repeat(count) { queued.incrementAndGet(); queue += outputAudio(marker, samples) }
         fun silent(count: Int) = repeat(count) { queued.incrementAndGet(); queue += silentAudio() }
+        /** Queues [count] 100 ms slots without a chunk, so the next chunk comes late. */
+        fun skip(count: Int) = repeat(count) { queued.incrementAndGet(); queue += "" }
+        /** The user speaks over the playback until it flushes, then stops. The detector first learns the echo level in its 240 ms grace. */
+        fun bargeIn() {
+            val flushes = rig.audio.flushes.get()
+            SystemClock.sleep(300)
+            loud = true
+            waitUntil("barge-in") { rig.audio.flushes.get() == flushes + 1 }
+            loud = false
+            waitUntil("user stopped") { !rig.session.userSpeaking }
+        }
         /** Waits until every queued chunk has gone out and the main thread has taken it. */
         fun drain() = waitUntil("queued output") { sent.get() == queued.get() }
         override fun close() { running = false; worker.join() }
@@ -374,8 +386,9 @@ class VoiceModeSessionTest {
             stream.drain()
             waitUntil("output end") { rig.outputEnds() == 1 }
             waitUntil("listening") { rig.session.phase == LivePhase.LISTENING }
-            val first = List(3) { 1_000 } + List(6) { SILENT_SAMPLE.toInt() } + List(3) { 1_000 }
-            assertEquals("Only the pause inside the reply plays", first, rig.markers())
+            // The device ran dry 300 ms into the pause, so its underrun played the pause, and no silence before or after it plays.
+            val first = List(6) { 1_000 }
+            assertEquals("Only voiced audio plays", first, rig.markers())
             stream.voiced(2, 2)
             stream.drain()
             waitUntil("second output end") { rig.outputEnds() == 2 }
@@ -386,18 +399,67 @@ class VoiceModeSessionTest {
         }
     }
 
+    /** Ruling R26: the held pause is written only while the device still plays. */
+    @Test fun heldPauseIsWrittenOnlyWhileTheDeviceStillPlays() {
+        val rig = Rig(STREAM, realTime = true).started()
+        Stream(rig).use { stream ->
+            // 600 ms of voice that arrives in 300 ms: the device runs dry 300 ms into the 600 ms pause.
+            stream.voiced(1, 3); stream.silent(6); stream.voiced(1, 1)
+            stream.drain()
+            waitUntil("first output end") { rig.outputEnds() == 1 }
+            assertEquals(List(4) { 1_000 }, rig.markers())
+            // 1.6 s of voice that arrives in 800 ms: the device still plays when the pause ends.
+            stream.voiced(2, 8); stream.silent(6); stream.voiced(2, 1)
+            stream.drain()
+            waitUntil("second output end") { rig.outputEnds() == 2 }
+            assertEquals(List(4) { 1_000 } + List(8) { 2_000 } + List(6) { SILENT_SAMPLE.toInt() } + listOf(2_000), rig.markers())
+        }
+    }
+
+    /** Ruling R27: the reply gap counts silent stream audio, so a late chunk does not split a reply. */
+    @Test fun lateChunkAfterAPauseKeepsTheReply() {
+        val rig = Rig(STREAM, realTime = true).started()
+        Stream(rig).use { stream ->
+            // The first voiced chunk after a 600 ms pause comes 300 ms late, as network jitter can make it.
+            stream.voiced(1, 3, CHUNK); stream.silent(6); stream.skip(3); stream.voiced(1, 3, CHUNK)
+            stream.drain()
+            waitUntil("output end") { rig.outputEnds() == 1 }
+            SystemClock.sleep(1_000)
+            assertEquals("One reply has one output end", 1, rig.outputEnds())
+            // The same reply with a barge-in in its first part. GPT-Live streams on, and the session drops the rest of it.
+            rig.audio.playbackActive = true
+            stream.voiced(2, 8, CHUNK); stream.silent(6); stream.skip(3); stream.voiced(3, 3, CHUNK)
+            waitUntil("second reply") { 2_000 in rig.markers() }
+            stream.bargeIn()
+            rig.audio.playbackActive = false
+            stream.drain()
+            waitUntil("second output end") { rig.outputEnds() == 2 }
+            val markers = rig.markers()
+            assertTrue("The rest of the interrupted reply stays dropped: $markers", 3_000 !in markers && markers.count { it == 2_000 } < 8)
+        }
+    }
+
+    /** Ruling R27: when the stream stops, the reply ends replyGapMs after its last chunk of any kind. */
+    @Test fun stalledStreamEndsTheReply() {
+        val rig = Rig(STREAM).started()
+        repeat(2) { rig.socket.emit(outputAudio(1, CHUNK)); SystemClock.sleep(100) }
+        repeat(3) { rig.socket.emit(silentAudio()); SystemClock.sleep(100) }
+        rig.socket.emit(silentAudio())
+        val last = SystemClock.uptimeMillis()
+        waitUntil("output end") { rig.outputEnds() == 1 }
+        val elapsed = SystemClock.uptimeMillis() - last
+        assertTrue("The output end came $elapsed ms after the last chunk", elapsed >= STREAM.replyGapMs - 50)
+        SystemClock.sleep(1_000)
+        assertEquals(1, rig.outputEnds())
+    }
+
     @Test fun repliesPlayAfterABargeInAndAfterAway() {
         val rig = Rig(STREAM, realTime = true).started()
         Stream(rig).use { stream ->
             stream.voiced(1, 15)
             waitUntil("speaking") { rig.session.phase == LivePhase.SPEAKING }
-            // The detector learns the echo level in its 240 ms grace, then 200 ms of loud blocks are the user.
-            SystemClock.sleep(300)
-            stream.loud = true
-            waitUntil("barge-in") { rig.audio.flushes.get() == 1 }
+            stream.bargeIn()
             stream.drain()
-            stream.loud = false
-            waitUntil("user stopped") { !rig.session.userSpeaking }
             // GPT-Live answers after a pause longer than the reply gap.
             stream.silent(10); stream.voiced(2, 3)
             stream.drain()
@@ -572,10 +634,12 @@ class VoiceModeSessionTest {
         val LOOPBACK = Endpoints { "http://127.0.0.1:4000" }
         val TIMING = LiveTiming(startedMs = 5_000, silenceMs = 30_000, firstSpeechMs = 30_000, requestWaitMs = 400, turnGapMs = 30_000,
             replyGapMs = 300)
-        /** The reply gap of ruling R24, pinned here: the 600 ms pause in a reply must not end it. */
-        val STREAM = TIMING.copy(replyGapMs = 900)
+        /** The reply gap of ruling R27, pinned here: 600 ms of silent audio in a reply must not end it. */
+        val STREAM = TIMING.copy(replyGapMs = 800)
         /** 200 ms of audio in each voiced chunk of [Stream]. */
         const val REPLY_SAMPLES = LIVE_RATE / 5
+        /** 100 ms of audio: the chunk of the GPT-Live output stream. */
+        const val CHUNK = LIVE_RATE / 10
 
         fun closed(reason: String) = JSONObject().put("type", "session.closed").put("reason", reason).toString()
         fun failure(eventId: String) = JSONObject().put("type", "error")
