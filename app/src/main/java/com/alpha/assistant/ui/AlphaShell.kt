@@ -366,7 +366,8 @@ private data class MiniAppOrigin(
                         val voiceShown = chatVisible || pairedChat ||
                             (destination == ShellDestination.Settings && settingsSection == SettingsSection.Voice)
                         LaunchedEffect(voiceShown) { if (!voiceShown) model.voice.stop() }
-                        // The voice mode screen is over the chat. A screen of the shell that leaves the chat ends the mode without a status.
+                        // The voice mode screen is over the chat. A screen of the shell that leaves the chat ends the mode without a status,
+                        // and it clears the status of an earlier end.
                         LaunchedEffect(chatVisible) { if (!chatVisible) model.endLiveVoice() }
                         // Navigation 3 retains each entry by content key when the scene changes.
                         val currentLayout by rememberUpdatedState(paneLayout)

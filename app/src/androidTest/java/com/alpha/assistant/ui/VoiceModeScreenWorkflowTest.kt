@@ -10,6 +10,9 @@ import android.os.SystemClock
 import android.provider.AlarmClock
 import android.view.View
 import android.view.ViewGroup
+import android.view.accessibility.AccessibilityNodeInfo
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import com.alpha.assistant.CloudTestActivity
@@ -22,14 +25,17 @@ import com.alpha.assistant.voice.FakeLiveAudio
 import com.alpha.assistant.voice.FakeLiveTransport
 import com.alpha.assistant.voice.LIVE_STARTED
 import com.alpha.assistant.voice.LivePhase
+import com.alpha.assistant.voice.outputAudio
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeFalse
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** The voice mode screen over the full chat (spec 5.1.2, 5.2, 5.7, 5.8, 5.8.1): the real shell with a scripted GPT-Live socket and audio. */
 class VoiceModeScreenWorkflowTest {
@@ -63,16 +69,24 @@ class VoiceModeScreenWorkflowTest {
         }
     }
 
-    /** Spec 5.2.3 to 5.2.5: the card of the hand-off, the status line, and the microphone and end controls. */
+    /**
+     * Spec 5.2.3 to 5.2.5: the card of the hand-off, the status line, and the microphone and end controls. Spec 5.1.4: the mode starts
+     * with no selected chat, and the card shows the reply in the chat that the first hand-off creates.
+     */
     @Test fun layerShowsCardStatusAndControls() {
         fixture.provider.gate = CompletableDeferred()
         install()
-        voiceMode { scenario, _ ->
+        voiceMode { scenario, model ->
+            assertNull(model.snapshot.selectedId)
             robot.waitFor(robot.text(R.string.live_voice_listening))
+            // The chat composer under the layer keeps its voice mode button, but the button is out of the accessibility tree.
+            assertTrue(robot.composedNode(scenario) { it.getOrNull(SemanticsProperties.ContentDescription)?.contains(voiceButton) == true })
+            assertNull(robot.find(voiceButton))
             socket.say("Какая погода", "d1", 100)
             robot.waitFor(robot.text(R.string.live_voice_working))
             checkNotNull(fixture.provider.gate).complete(Unit)
             robot.waitUntil { inLayer(scenario, "Fixture response") }
+            assertNotNull(model.snapshot.selectedId)
             robot.waitFor(robot.text(R.string.live_voice_listening))
             robot.waitFor(robot.text(R.string.live_voice_end))
             robot.click(robot.text(R.string.live_voice_mute))
@@ -82,7 +96,10 @@ class VoiceModeScreenWorkflowTest {
         }
     }
 
-    /** Spec 5.8: an end closes the layer, and the composer status line shows the end status. */
+    /**
+     * Spec 5.8: an end closes the layer, and the composer status line shows the end status. Review I2: after a key fix through
+     * «Открыть настройки», the chat shows no stale status and no link.
+     */
     @Test fun endStatusShowsInTheComposer() {
         install()
         voiceMode { scenario, model ->
@@ -95,9 +112,34 @@ class VoiceModeScreenWorkflowTest {
             start(model)
             socket.fail(401)
             robot.waitUntil { !robot.composed(scenario, LAYER) }
-            robot.waitFor(providerFailure(AiProvider.OPENAI, 401, null, false).message)
+            val failure = providerFailure(AiProvider.OPENAI, 401, null, false).message
+            robot.waitFor(failure)
             robot.click(robot.text(R.string.open_settings))
             robot.waitUntil { robot.composed(scenario, "settings-pane") }
+            val saved = AtomicBoolean()
+            scenario.onActivity { model.saveKey("sk-proj-replacement-test-only", AiProvider.OPENAI) { saved.set(it) } }
+            robot.waitUntil { saved.get() }
+            robot.back()
+            robot.waitFor(voiceButton)
+            assertEquals("", model.liveVoice.status)
+            assertNull(robot.find(failure))
+            assertNull(robot.find(robot.text(R.string.open_settings)))
+        }
+    }
+
+    /** Review I2: a chat change and a new chat clear the end status, as they clear the one-shot voice status. */
+    @Test fun chatChangeClearsTheEndStatus() {
+        fixture.seedChat("a", "Первый", "Привет")
+        install()
+        voiceMode { scenario, model ->
+            listOf<(ShellViewModel) -> Unit>({ it.select("a") }, { it.select(null) }).forEachIndexed { index, change ->
+                if (index > 0) start(model)
+                socket.closeRemote()
+                robot.waitFor(robot.text(R.string.live_voice_connection))
+                scenario.onActivity { change(model) }
+                robot.waitGone(robot.text(R.string.live_voice_connection))
+                assertEquals("", model.liveVoice.status)
+            }
         }
     }
 
@@ -138,17 +180,39 @@ class VoiceModeScreenWorkflowTest {
         }
     }
 
-    /** Review Focus 1: a configuration change keeps the session and its socket. */
+    /**
+     * Review Focus 1 and ruling R20: a configuration change keeps the session and its socket. Alphy speaks across the recreate, and
+     * the reply is not flushed, and GPT-Live gets no mute or unmute.
+     */
     @Test fun rotationKeepsTheSession() {
         install()
         voiceMode { scenario, model ->
+            audio.playbackActive = true
+            socket.emit(outputAudio(1))
+            robot.waitUntil { model.liveVoice.phase == LivePhase.SPEAKING }
+            val flushes = audio.flushes.get()
+            val sent = socket.sent.size
             scenario.recreate()
             robot.waitFor(robot.text(R.string.live_voice_end))
+            robot.awaitFrames(2)
             assertTrue(model.liveVoice.active)
             assertEquals(0, socket.closes.get())
             assertFalse("session.close" in socket.types())
-            robot.waitUntil { model.liveVoice.phase == LivePhase.LISTENING }
+            assertEquals(flushes, audio.flushes.get())
+            val events = socket.types().drop(sent)
+            assertFalse("$events", "session.input_audio.mute" in events || "session.input_audio.unmute" in events)
+            assertEquals(LivePhase.SPEAKING, model.liveVoice.phase)
             assertFalse(audio.captureMuted)
+        }
+    }
+
+    /** Review check: in landscape with the keyboard up, the microphone and end controls of the layer stay above the keyboard. */
+    @Test fun landscapeKeyboardKeepsTheControls() {
+        install()
+        voiceMode { scenario, _ ->
+            robot.assertAboveLandscapeKeyboard(scenario, listOf(R.string.live_voice_mute, R.string.live_voice_end).map { robot.text(it) }) {
+                assertTrue(robot.field(robot.text(R.string.composer_label)).performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            }
         }
     }
 

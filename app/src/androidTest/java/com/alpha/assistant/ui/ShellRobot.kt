@@ -34,6 +34,7 @@ import androidx.compose.ui.semantics.getAllSemanticsNodes
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.navigationevent.NavigationEvent
 import androidx.navigationevent.NavigationEventDispatcherOwner
@@ -370,6 +371,32 @@ internal class ShellRobot(fixture: String) {
         }
         return top
     }
+    /**
+     * In landscape, [focus] raises the keyboard. Then each of [labels] must be a full target that ends at or above the keyboard top.
+     * The keyboard and the portrait orientation are restored after the check.
+     */
+    fun assertAboveLandscapeKeyboard(scenario: ActivityScenario<*>, labels: List<String>, focus: () -> Unit) {
+        try {
+            rotate(scenario, landscape = true)
+            focus()
+            // The keyboard inset animates, so the check waits until the keyboard top and the bounds stay the same for 500 ms.
+            var last = ""
+            var since = SystemClock.uptimeMillis()
+            waitUntil {
+                val sample = "${keyboardTop(scenario)} " + labels.map { label -> find(label)?.let { node -> Rect().also { node.getBoundsInScreen(it) } } }
+                if (sample != last) { last = sample; since = SystemClock.uptimeMillis() }
+                keyboardTop(scenario) != null && SystemClock.uptimeMillis() - since >= 500
+            }
+            val keyboardTop = checkNotNull(keyboardTop(scenario))
+            for (label in labels) {
+                val bounds = assertTarget(label)
+                assertTrue("$label $bounds ends at or above the keyboard top $keyboardTop", bounds.bottom <= keyboardTop)
+            }
+        } finally {
+            scenario.onActivity { WindowCompat.getInsetsController(it.window, it.window.decorView).hide(WindowInsetsCompat.Type.ime()) }
+            rotate(scenario, landscape = false)
+        }
+    }
     /** Returns the screen bounds of the checked clickable node. */
     fun assertTarget(label: String): Rect {
         var node: AccessibilityNodeInfo? = waitFor(label)
@@ -594,7 +621,7 @@ internal class ShellRobot(fixture: String) {
         scenario.onActivity { label = it.getString(androidx.compose.ui.R.string.close_drawer) }
         return label
     }
-    private fun composedNode(scenario: ActivityScenario<*>, match: (SemanticsConfiguration) -> Boolean): Boolean {
+    fun composedNode(scenario: ActivityScenario<*>, match: (SemanticsConfiguration) -> Boolean): Boolean {
         var composed = false
         scenario.onActivity { activity -> composed = nodes(activity).any { match(it.config) } }
         return composed

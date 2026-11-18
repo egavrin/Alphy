@@ -58,7 +58,7 @@ internal class LiveVoiceSession(
     var active by mutableStateOf(false); private set
     var phase by mutableStateOf(LivePhase.IDLE); private set
     var level by mutableStateOf(0f); private set
-    /** The end status. It is empty while the session runs. */
+    /** The end status. It is empty while the session runs, and [stop] without a session clears it. */
     var status by mutableStateOf(""); private set
     /** The end status is a key error, so the chat offers «Сервис ИИ» (spec 5.8). */
     var settingsRequired by mutableStateOf(false); private set
@@ -153,7 +153,8 @@ internal class LiveVoiceSession(
         countSilence()
     }
 
-    fun stop(status: String = "") = end(status)
+    /** Ends the session. Without a session, it clears the last end status, as a stop of the one-shot voice clears its status (review I2). */
+    fun stop(status: String = "") { if (active) end(status) else { this.status = ""; settingsRequired = false } }
 
     /** Every end path: sends `session.close` while the socket is open, releases the socket and the audio once, then tells the host (spec 5.8). */
     private fun end(status: String, settingsRequired: Boolean = false, socketOpen: Boolean = true) {

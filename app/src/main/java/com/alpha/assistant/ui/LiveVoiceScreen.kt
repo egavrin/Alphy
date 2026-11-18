@@ -78,7 +78,8 @@ internal fun ShellViewModel.expectAlphyScreen() { alphyScreenUntil = SystemClock
 
 /**
  * The lifecycle rule of the voice mode (spec 5.8.1). [VoiceVisibility] stops at a pause, so the voice mode has its own rule:
- * a pause mutes, a resume unmutes, and a stop ends the mode unless the configuration changes or Alphy expects its own screen.
+ * a pause mutes, a resume unmutes, and a stop ends the mode. A configuration change does none of these. A stop also keeps the
+ * mode while Alphy expects its own screen.
  * The screen off always ends it.
  */
 @Composable internal fun LiveVoiceLifecycle(model: ShellViewModel) {
@@ -88,7 +89,8 @@ internal fun ShellViewModel.expectAlphyScreen() { alphyScreenUntil = SystemClock
         val voice = model.liveVoice
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_PAUSE -> voice.away(true)
+                // A configuration change keeps Alphy's reply and the microphone (ruling R20).
+                Lifecycle.Event.ON_PAUSE -> if (activity?.isChangingConfigurations != true) voice.away(true)
                 Lifecycle.Event.ON_RESUME -> { model.alphyScreenUntil = 0; voice.away(false) }
                 Lifecycle.Event.ON_STOP -> if (activity?.isChangingConfigurations != true &&
                     SystemClock.uptimeMillis() >= model.alphyScreenUntil) model.endLiveVoice()
@@ -135,7 +137,8 @@ internal fun ShellViewModel.expectAlphyScreen() { alphyScreenUntil = SystemClock
     // The pane covers the chat, so the chat under it is out of the accessibility tree.
     Surface(Modifier.fillMaxSize().testTag("live_voice_layer").semantics { paneTitle = title }) {
         BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
-            val character = minOf(if (compact) 96.dp else 160.dp, maxHeight / 4)
+            // In a short space, such as landscape with the keyboard, the decorative character goes, so the composer row stays in view.
+            val character = minOf(if (compact) 96.dp else 160.dp, maxHeight / 4).takeIf { it >= 48.dp }
             Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
                 AgentRunBar(model.agent)
                 // Empty before the first hand-off. The card scrolls when it is taller than its space (spec 5.2.3).
@@ -150,7 +153,7 @@ internal fun ShellViewModel.expectAlphyScreen() { alphyScreenUntil = SystemClock
                         model.agent.plan?.takeIf { it.conversationId == chat.id }?.let { AgentPlanCard(model.agent, it) }
                     }
                 }
-                AlphyCharacter(voice, character)
+                character?.let { AlphyCharacter(voice, it) }
                 Text(stringResource(when {
                     voice.phase == LivePhase.CONNECTING -> R.string.live_voice_connecting
                     voice.phase == LivePhase.MUTED -> R.string.live_voice_muted
