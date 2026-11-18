@@ -104,6 +104,18 @@ test("emit: a plan over a limit is a fault of its need line", async () => {
   expect(definition).toBeNull();
   expect(faults).toHaveLength(1);
   expect(faults[0]).toStartWith("need x41: ");
+  // The drawings of the first state count together, as in one reply of Alphy: the fault names the drawing that passes a limit.
+  const drawn = async (line) => emit(await planned(['app("Big", lang="en")', 'need small = drawing("Small", 64, 64, [circle(1, 1, 1, "ink")])', line].join("\n"))).faults;
+  const over = (count, unit, limit) => `need big: with this drawing the app draws ${count} ${unit} at the start, and Alphy draws at most ${limit} ${unit} in one reply. Draw fewer shapes`;
+  expect(await drawn('need big = drawing("Big", 320, 64, [each(500, circle(1, 1, 1, "ink")), each(12, circle(1, 1, 1, "ink"))])')).toEqual([over(513, "commands", 512)]);
+  const points = Array.from({ length: 300 }, (_, index) => `${index % 100}, 1`).join(", ");
+  expect(await drawn(`need big = drawing("Big", 320, 64, [each(7, polygon([${points}], "ink"))])`)).toEqual([over(2101, "coordinate pairs", 2048)]);
+  expect(await drawn(`need big = drawing("Big", 320, 64, [each(2, text(1, 1, "${"x".repeat(1100)}", "ink"))])`)).toEqual([over(2200, "text characters", 2048)]);
+  const wide = await drawn('need big = drawing("Big", 320, 64, [each(500, line($index + 0.25, $index + 0.25, $index + 0.75, $index + 0.75, "#80ff0000", width=1.25))])');
+  expect(wide).toEqual([expect.stringMatching(/^need big: with this drawing the app draws \d+ bytes at the start, and Alphy draws at most 32768 bytes in one reply/)]);
+  // Alphy declares at most 4 surfaces: one for each drawing and each timer that the run-time draws.
+  const five = emit(await planned(['app("Five", lang="en")', ...[1, 2, 3, 4, 5].map((n) => `need d${n} = drawing("D${n}", 64, 64, [circle(1, 1, 1, "ink")])`)].join("\n")));
+  expect(five.faults).toEqual(["need d5: the app draws 5 surfaces, and Alphy draws at most 4: one for each drawing and each timer with rounds or with no alert. Use fewer"]);
 });
 
 test("emit: a source over 64 KiB is a fault of the app", async () => {
@@ -637,7 +649,7 @@ test("emit: the texts that are the name of a line, in each saved plan and fixtur
   // The list of now, so that a later task sees when it grows. The row controls with no label of their own are in it by a ruling.
   const PINNED = {
     "plans/calc.plan": [], "plans/list.plan": ["prodotti remove", "prodotti preso"], "plans/quiz.plan": [], "plans/section.plan": ["habits remove"],
-    "plans/tabs-chart.plan": ["gastos remove"], "plans/tea.plan": [], "plans/timer-rounds.plan": [],
+    "plans/tabs-chart.plan": ["gastos remove"], "plans/tea.plan": [], "plans/timer-rounds.plan": [], "plans/lesson.plan": [], "test/shapes.plan": [],
     "test/cards.plan": ["tasks remove"], "test/free.plan": [], "test/fixtures/habits.plan": ["habits remove", "habits done"], "test/fixtures/price-filter.plan": [],
     "test/fixtures/shopping.plan": ["items remove", "items done"], "test/fixtures/units-pl.plan": [], "test/fixtures/water-ko.plan": ["ml minus", "ml plus"],
     "test/lists.plan": ["acts remove", "acts close", "doses taken minus", "doses taken plus", "doses remove", "steps remove"],
@@ -695,6 +707,9 @@ test("emit: an inline child gets a stable name", async () => {
   const more = press(definition.initialState, app, "bar_0").state;
   expect([more.count, more.d.bar_1_text, more.d.f1]).toEqual([1, "Count 1", "Twice 2"]);
   expect(press(more, app, "f0").state.count).toBe(0);
+  // An author's line with when(...): an odd count goes to the next even count, and an even count stays.
+  const even = press(more, app, "even").state;
+  expect([even.count, press(even, app, "even")]).toEqual([2, { state: even }]);
   // The walk of each event gives each node the name that the emitter gave it.
   expect(screen(kitOf(app, more), app).ui).toEqual(definition.ui);
 });
@@ -734,12 +749,34 @@ test("emit: a line that the screen shows two times is a fault of the line that s
   expect((await lists("[label]")).faults).toEqual([]);
 });
 
-test("emit: an animate action is a fault of its line", async () => {
-  // The run-time keeps no timed change yet, so the value would never move (Task 8 builds it).
-  const { definition, faults } = emit(await planned(['app("Spin", lang="en")', 'need angle = input("number", "Angle", 40, min=0, max=360)',
-    'need lap = button("One turn", [set($/angle, 0), animate($/angle, 360, 5000)])'].join("\n")));
-  expect(definition).toBeNull();
-  expect(faults).toEqual(["need lap: animate is not built yet"]);
+test("emit: lesson.plan gives a surface, a canvas, and commands in the open reply", async () => {
+  // The device test lessonPassesParseAndSmoke sends the same plan through Alphy's validators.
+  const { definition, faults, app } = emit(await planned(plan("lesson")));
+  expect(faults).toEqual([]);
+  valid(definition);
+  expect(definition.surfaces).toEqual([{ id: "orbit_view", width: 320, height: 320 }]);
+  expect(every(definition.ui).filter((node) => node.type === "canvas")).toEqual([{ type: "canvas", text: "Земля в центре, Луна на орбите и метка её стороны", surfaces: ["orbit_view"] }]);
+  // The object anim keeps the change of each value that an animate moves: all 0 while the value stands.
+  const run = { type: "object", fields: { from: "number", to: "number", start: "number", end: "number", at: "number" } };
+  expect([definition.stateSchema.anim, definition.initialState.anim]).toEqual([{ type: "object", fields: { angle: run } }, { angle: { from: 0, to: 0, start: 0, end: 0, at: 0 } }]);
+  // The orbit, the Earth, its name, the Moon at 40 degrees, and the mark of its side. The guide line shows from step 2 of the lesson.
+  expect(open(definition.initialState, app)).toEqual({ state: definition.initialState, timers: [], surfaces: { orbit_view: { commands: [
+    { type: "arc", x: 50, y: 50, width: 220, height: 220, start: 0, sweep: 360, stroke: 2, color: "muted" },
+    { type: "circle", x: 160, y: 160, radius: 34, color: "#38bdf8" },
+    { type: "text", x: 160, y: 160, size: 12, text: "Земля", align: "center", baseline: "middle", color: "#ffffff" },
+    { type: "circle", x: 244.26, y: 89.29, radius: 18, color: "#e7d3a8" },
+    { type: "circle", x: 230.48, y: 100.86, radius: 5, color: "accent" }] } } });
+});
+
+test("emit: an animate in an app with no surface, or on a place that is not a number of a state line, is a fault of its line", async () => {
+  // Alphy sends a timer event only to an app with a surface, so the value would never move.
+  const spin = ['app("Spin", lang="en")', 'need angle = input("number", "Angle", 40, min=0, max=360)', 'need lap = button("One turn", [set($/angle, 0), animate($/angle, 360, 5000)])'];
+  const bare = emit(await planned(spin.join("\n")));
+  expect(bare.definition).toBeNull();
+  expect(bare.faults).toEqual(["need lap: animate moves a value with a timer, and Alphy sends timer events only to an app with a surface. Add a drawing that shows the value"]);
+  const odd = emit(await planned([...spin, 'need dial = drawing("Dial", 64, 64, [circle(32, 32, 4, "ink")])', '$/word = "a"', "$/twice := $/angle * 2",
+    "root = Column([angle_field, lap_button, dial_view, wordB, twiceB])", 'wordB = Button("Word", action=animate($/word, 5, 100))', 'twiceB = Button("Twice", action=animate($/twice, 5, 100))'].join("\n")));
+  expect(odd.faults).toEqual(["wordB: animate moves a number of a state line, such as $/angle, and $/word is not one", "twiceB: animate moves a number of a state line, such as $/angle, and $/twice is not one"]);
 });
 
 test("emit: each free form of the free fixture becomes its Alphy node", async () => {

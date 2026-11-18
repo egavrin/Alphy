@@ -3,10 +3,9 @@
 import { expect, test } from "bun:test";
 import { App, settings } from "../src/core.js";
 import { report } from "../src/check.js";
-import { commandsOf } from "../src/draw.js";
 import { emit } from "../src/emit.js";
 import { handle } from "../src/run.js";
-import { gateEach, plan, planned } from "./helpers.js";
+import { T0, clocked, gateEach, plan, planned } from "./helpers.js";
 
 gateEach("smoke");
 
@@ -16,24 +15,8 @@ const request = (state, event) => ({ artifactId: "kit-test", revision: 1, state,
 const press = (actionId, value = null) => ({ type: "action", actionId, value });
 const timer = (timerId) => ({ type: "timer", timerId });
 const duration = (ui) => every(ui).find((node) => node.type === "timer").foreground.durationMs;
-/** A time of the host's clock in ms. Each event of a test gives its time to handle. */
-const T0 = 1_800_000_000_000;
-/**
- * timer-rounds.plan as the run-time and as the kit's App, whose state gives the expected values. send gives one event to both
- * at a time in ms after T0, each on the state of the reply before it: a press, or a timer event (a look at the clock for the kit).
- */
-const rounds = async () => {
-  const { file, definition, app } = await compiled(plan("timer-rounds")), kit = new App(file);
-  let state = definition.initialState;
-  const send = (ms, event) => {
-    settings.now = () => T0 + ms;
-    if (event.type === "action") kit.press(event.actionId); else kit.tick();
-    const reply = handle(request(state, event), app, T0 + ms);
-    state = reply.state;
-    return reply;
-  };
-  return { kit, send };
-};
+/** timer-rounds.plan as the run-time and as the kit's App, with send: a press or a timer event at a time in ms after T0 (helpers.js clocked). */
+const rounds = () => clocked(plan("timer-rounds"));
 /** Two work seconds and two rest seconds in 2 rounds. The device test timerRoundsPassesParseAndSmoke has the same plan. */
 const SHORT = 'app("Short rounds", lang="en")\nneed t = timer("Short", 2, rounds=2, rest=2)\nneed done = progress("Rounds done", $/t, 2)\n';
 
@@ -97,14 +80,6 @@ test("check: alert with rounds is a note, not a fault", async () => {
   expect(result.notes).toContain("need timer: a timer with rounds shows the end of a round on the screen only");
   // A timer with no alert gives no note.
   expect(report(await planned('app("T", lang="en")\nneed t = timer("T", 40, rounds=8, rest=20)')).notes).toEqual([]);
-});
-
-test("draw: a rect of the kit is a rect or a roundRect of Alphy", () => {
-  expect(commandsOf([{ shape: "rect", x: 0, y: 24, w: 320, h: 16, color: "accent", radius: 8 }, { shape: "rect", x: 1, y: 2, w: 3, h: 4, color: "#33808080" }])).toEqual([
-    { type: "roundRect", x: 0, y: 24, width: 320, height: 16, radius: 8, color: "accent" },
-    { type: "rect", x: 1, y: 2, width: 3, height: 4, color: "#33808080" },
-  ]);
-  expect(() => commandsOf([{ shape: "circle", x: 1, y: 1, r: 1, color: "accent" }])).toThrow("a circle is not drawn yet");
 });
 
 /** The bar of a phase: the track, then the share of the phase that passed in its tone. */
@@ -195,12 +170,12 @@ test("run: the timers of two timers that run are one list with distinct ids", as
   expect([ticked.state.a, ticked.state.a_s.round, ticked.state[object][field], ticked.timers.map((each) => each.id)]).toEqual([1, 2, 30, ["a_bar", "b_bar"]]);
 });
 
-test("emit: a fifth timer on a surface is a fault of the app", async () => {
+test("emit: a fifth timer on a surface is a fault of its need line", async () => {
   const needs = (count) => Array.from({ length: count }, (_, index) => `need t${index + 1} = timer("T ${index + 1}", 30, rounds=2)`).join("\n");
   expect((await compiled(`app("Four", lang="en")\n${needs(4)}`)).definition.surfaces).toHaveLength(4);
   const five = await compiled(`app("Five", lang="en")\n${needs(5)}`);
   expect(five.definition).toBeNull();
-  expect(five.faults).toEqual(["app: the screen has 5 timers with rounds or with no alert, and Alphy draws at most 4. Use fewer timers"]);
+  expect(five.faults).toEqual(["need t5: the app draws 5 surfaces, and Alphy draws at most 4: one for each drawing and each timer with rounds or with no alert. Use fewer"]);
 });
 
 test("run: the short plan of the device test ends after its second rest", async () => {

@@ -3,11 +3,14 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";
-import { ACTIONS, App } from "../src/core.js";
+import { ACTIONS, App, settings } from "../src/core.js";
 import { parseLine } from "../src/dsl.js";
+import { LIMITS, commandsOf } from "../src/draw.js";
 import { emit, runtime } from "../src/emit.js";
 import { handle, kitOf } from "../src/run.js";
-import { allPlans, plan, planned } from "./helpers.js";
+import { T0, allPlans, clocked, gateEach, plan, planned } from "./helpers.js";
+
+gateEach("smoke");
 
 const compiled = async (text) => { const file = await planned(text); return { file, ...emit(file) }; };
 const testPlan = (name) => readFileSync(new URL(`./${name}.plan`, import.meta.url), "utf8");
@@ -17,6 +20,8 @@ const nodes = (node) => [node, ...(node.children ?? []).flatMap(nodes)];
 const derived = (state) => Object.entries(state).filter(([key]) => /^[dv]\d*$/.test(key)).flatMap(([, values]) => Object.values(values));
 /** The stored values of a state of the run-time by the kit's name of each value (app.fields). */
 const storedOf = (app, state) => Object.fromEntries(app.fields.map(([root, path]) => [root, path.split(".").reduce((value, key) => value?.[key], state)]));
+/** The same values in the kit's App. */
+const keptOf = (app, kit) => Object.fromEntries(app.fields.map(([root]) => [root, kit.state[root]]));
 
 test("run: an action sets the bound value and the figures follow", async () => {
   const { file, definition, app } = await compiled(plan("calc"));
@@ -40,8 +45,8 @@ test("run: open of the initial state gives the initial state", async () => {
     expect(reply).toEqual({ state: definition.initialState, ...(definition.surfaces && { surfaces: reply.surfaces, timers: [] }) });
     opened.push(path);
   }
-  expect(opened).toHaveLength(17);
-  expect(opened).toEqual(expect.arrayContaining(["plans/tea.plan", "plans/timer-rounds.plan"]));
+  expect(opened).toHaveLength(19);
+  expect(opened).toEqual(expect.arrayContaining(["plans/tea.plan", "plans/timer-rounds.plan", "plans/lesson.plan", "test/shapes.plan"]));
 });
 
 test("run: the kit of an event computes its formulas on the stored state, with no fault", async () => {
@@ -112,12 +117,14 @@ test("run: an action id that the app does not have changes nothing", async () =>
 
 /** The rows of the List line name as the kit draws them, by the id of each row. */
 const shownIds = (prototype, name) => prototype.find(name).children.filter((node) => node.row).map((node) => node.row.id);
-/** The events of one app in sequence, each on the state of the reply before it. */
+/** The events of one app in sequence, each on the state of the reply before it, at the time of settings.now. */
 const session = (definition, app) => {
   let state = definition.initialState;
+  const send = (event) => { const reply = handle(request(state, event), app, settings.now()); state = reply.state; return reply; };
   return {
     get state() { return state; },
-    act: (actionId, value = null) => { const reply = handle(request(state, { type: "action", actionId, value }), app); state = reply.state; return reply; },
+    act: (actionId, value = null) => send({ type: "action", actionId, value }),
+    timer: (timerId) => send({ type: "timer", timerId }),
   };
 };
 /**
@@ -199,10 +206,11 @@ test("run: a list at its limits", async () => {
   expect(single.state.items).toEqual([{ id: "r2", name: "Next" }]);
 });
 
-/** A button for each action kind of the kit, and a List whose row removes itself and moves up. */
+/** A button for each action kind of the kit, a List whose row removes itself and moves up, and a drawing: Alphy sends the timer events of animate to an app with a surface. */
 const KINDS = ['app("Kinds", lang="en")', "$/n = 5", "$/on = false", '$/word = "a"', '$/tags = ["home"]',
   '$/rows = [{name: "Walk", done: false}, {name: "Read", done: true}, {name: "Hike", done: false}]',
-  "root = Column([setB, toggleB, incB, decB, appendB, removeB, clearB, whenB, moveB, flipB, bothB, items])",
+  "root = Column([setB, toggleB, incB, decB, appendB, removeB, clearB, whenB, moveB, flipB, animB, bothB, items, dot])",
+  'animB = Button("Animate", action=animate($/n, 9, 1000))', 'dot = Drawing("N", 64, 64, [circle(32, 32, $/n, "accent")])',
   'setB = Button("Set", action=set($/word, "b"))', 'toggleB = Button("Toggle", action=toggle($/on))', 'incB = Button("Inc", action=inc($/n, 2))',
   'decB = Button("Dec", action=dec($/n))', 'appendB = Button("Append", action=append($/rows, {name: "Swim", done: false}))',
   'removeB = Button("Remove", action=remove($/rows, $done))', 'clearB = Button("Clear", action=clear($/tags))', 'whenB = Button("When", action=when($/on, inc($/n, 10)))',
@@ -227,23 +235,142 @@ test("run: each action kind of the kit changes the state as the prototype's App 
     move: [(t) => { t.act("moveB"); t.reorder("r1", "r2", "up", "r2"); }, ["rows"]],
     // The value joins the list, leaves it, and joins it again.
     flip: [(t) => { t.act("flipB"); t.act("flipB"); t.act("flipB"); }, ["tags"]],
+    // The press starts the change from 5 to 9. The timer event at half of its time gives 7.
+    animate: [(t) => { t.act("animB"); t.tick(500); }, ["n"]],
     list: [(t) => t.act("bothB"), ["on", "word"]],
   };
-  // animate has no case: the run-time keeps no timed change yet, so the emitter refuses it (Task 8 builds it).
-  expect(Object.keys(CASES).sort()).toEqual([...[...ACTIONS].filter((kind) => kind !== "animate"), "list"].sort());
+  expect(Object.keys(CASES).sort()).toEqual([...ACTIONS, "list"].sort());
   for (const [kind, [events, changed]] of Object.entries(CASES)) {
+    settings.now = () => T0;
     const twin = await twins(KINDS), { run, prototype, app } = twin, start = storedOf(app, run.state);
     // The stored values of the run-time and of the kit after each event.
-    const same = () => expect([kind, storedOf(app, run.state)]).toEqual([kind, Object.fromEntries(app.fields.map(([root]) => [root, prototype.state[root]]))]);
+    const same = () => expect([kind, storedOf(app, run.state)]).toEqual([kind, keptOf(app, prototype)]);
     const t = {
       act: (...args) => { twin.act(...args); same(); },
       // Alphy's reorder moves the row of sourceKey to the place of destinationKey. The kit presses the arrow of a row.
       reorder: (sourceKey, destinationKey, arrow, row) => { run.act("items_move", { sourceKey, destinationKey }); prototype.press(arrow, shownIds(prototype, "items").indexOf(row)); same(); },
+      // ms after T0: the timer event of the timed changes, and a look at the clock for the kit.
+      tick: (ms) => { settings.now = () => T0 + ms; run.timer("anim"); prototype.tick(); same(); },
     };
     events(t);
     const end = storedOf(app, run.state);
     expect([kind, Object.keys(end).filter((root) => JSON.stringify(end[root]) !== JSON.stringify(start[root])).sort()]).toEqual([kind, changed]);
   }
+});
+
+const press = (actionId, value = null) => ({ type: "action", actionId, value });
+const timer = (timerId) => ({ type: "timer", timerId });
+/** The stored values of the run-time and of the kit of a clocked plan are equal. */
+const sameStored = (twin) => expect(storedOf(twin.app, twin.state)).toEqual(keptOf(twin.app, twin.kit));
+/** The Moon of lesson.plan: its circle of sand. */
+const moon = (reply) => reply.surfaces.orbit_view.commands.find((command) => command.color === "#e7d3a8");
+
+test("run: a change of the angle moves the Moon", async () => {
+  const { kit, send } = await clocked(plan("lesson"));
+  const turned = send(0, press("angle_field", 90));
+  expect(moon(turned)).toEqual({ type: "circle", x: 160, y: 50, radius: 18, color: "#e7d3a8" });
+  // The run-time draws the shapes of the kit's App.
+  expect(turned.surfaces.orbit_view.commands).toEqual(commandsOf(kit.find("orbit_view").props.shapes));
+  expect(turned.timers).toEqual([]);
+});
+
+test("run: the animate button starts a timer and the value is 180 after half of its time", async () => {
+  const { kit, send } = await clocked(plan("lesson"));
+  const started = send(0, press("lap_button"));
+  expect(started.timers).toEqual([{ id: "anim", intervalMs: 50 }]);
+  expect(started.state.anim).toEqual({ angle: { from: 0, to: 360, start: T0, end: T0 + 5000, at: 0 } });
+  expect([started.state.angle, kit.state.angle, moon(started).x, moon(started).y]).toEqual([0, 0, 270, 160]);
+  const half = send(2500, timer("anim"));
+  expect([half.state.angle, kit.state.angle, moon(half).x, moon(half).y]).toEqual([180, 180, 50, 160]);
+  expect(half.surfaces.orbit_view.commands).toEqual(commandsOf(kit.find("orbit_view").props.shapes));
+  expect(half.timers).toEqual([{ id: "anim", intervalMs: 50 }]);
+});
+
+test("run: the last timer event returns timers: []", async () => {
+  const { kit, send, app } = await clocked(plan("lesson"));
+  send(0, press("lap_button"));
+  send(2500, timer("anim"));
+  const end = send(5000, timer("anim"));
+  expect([end.state.angle, kit.state.angle, end.timers]).toEqual([360, 360, []]);
+  expect(end.state.anim.angle).toEqual({ from: 0, to: 0, start: 0, end: 0, at: 0 });
+  // A late timer event after the end, and a timer id that the app does not have, change nothing.
+  for (const timerId of ["anim", "nothing", "toString"]) expect(handle(request(end.state, timer(timerId)), app, T0 + 9000)).toEqual({ state: end.state });
+});
+
+test("run: a late timer event or an open after a long gap ends a timed change at its value", async () => {
+  // The host can send a timer event late, or close the app while the value moves. The next event ends the change, so no value stays in the middle.
+  const late = await clocked(plan("lesson"));
+  late.send(0, press("lap_button"));
+  const ended = late.send(60000, timer("anim"));
+  expect([ended.state.angle, late.kit.state.angle, ended.timers]).toEqual([360, 360, []]);
+  const { definition, app } = await compiled(plan("lesson"));
+  const started = handle(request(definition.initialState, press("lap_button")), app, T0);
+  const opened = handle(request(started.state, { type: "open" }), app, T0 + 86400000);
+  expect([opened.state.angle, opened.timers, opened.state.anim.angle.end]).toEqual([360, [], 0]);
+  // A timer id that the app does not have changes nothing while the value moves.
+  expect(handle(request(started.state, timer("orbit_view")), app, T0 + 1000)).toEqual({ state: started.state });
+});
+
+test("run: a value that the person sets ends its change, and two values move at once", async () => {
+  const text = ['app("Two", lang="en")', "$/a = 0", "$/b = 0", "root = Column([field, pic, goA, goB, back])", 'field = NumberField("A", $/a, min=0, max=100)',
+    'pic = Drawing("Two", 100, 100, [circle($/a, $/b, 5, "accent")])', 'goA = Button("A", action=animate($/a, 100, 1000))', 'goB = Button("B", action=animate($/b, 50, 2000))',
+    'back = Button("Back", action=animate($/a, 0, 1000))'].join("\n");
+  const hand = await clocked(text);
+  hand.send(0, press("goA"));
+  expect(hand.send(250, timer("anim")).state.a).toBe(25);
+  // The field sets 60 between two timer events: the change ends, and the value stays.
+  const set = hand.send(400, press("field", 60));
+  expect([set.state.a, set.timers, hand.kit.state._run]).toEqual([60, [], undefined]);
+  sameStored(hand);
+  const both = await clocked(text);
+  both.send(0, press("goA"));
+  const two = both.send(500, press("goB"));
+  expect([two.state.a, two.state.b, two.timers]).toEqual([50, 0, [{ id: "anim", intervalMs: 50 }]]);
+  // A second animate of the same value replaces the first: a goes back from 75 to 0 in 1000 ms.
+  const back = both.send(750, press("back"));
+  expect([back.state.a, back.state.b]).toEqual([75, 6.25]);
+  sameStored(both);
+  const mid = both.send(1250, timer("anim"));
+  expect([mid.state.a, mid.state.b]).toEqual([37.5, 18.75]);
+  sameStored(both);
+  expect(both.send(1750, timer("anim")).state.a).toBe(0);
+  const end = both.send(2500, timer("anim"));
+  expect([end.state.a, end.state.b, end.timers]).toEqual([0, 50, []]);
+  sameStored(both);
+});
+
+test("run: the timer of a timer with rounds and the timer of animate are one list with distinct ids", async () => {
+  // shapes.plan is kit/test/shapes.plan: each shape kind, each outline form, each over a list, each kind of color, a text, and animate beside a timer with rounds.
+  const { kit, send } = await clocked(testPlan("shapes"));
+  send(0, press("laps_start"));
+  const both = send(100, press("grow_button"));
+  expect(both.timers).toEqual([{ id: "laps_bar", intervalMs: 1000 }, { id: "anim", intervalMs: 50 }]);
+  // A timer event of one moves both. The size goes from 40 to 100 in 2000 ms, and the work phase of 2 s ends at 2000 ms.
+  const tick = send(1100, timer("anim"));
+  expect([tick.state.size, kit.state.size, tick.state.laps_s.spent]).toEqual([70, 70, 1.1]);
+  const rest = send(2100, timer("laps_bar"));
+  expect([rest.state.size, rest.state.laps_s.resting, rest.timers]).toEqual([100, true, [{ id: "laps_bar", intervalMs: 1000 }]]);
+  expect(rest.surfaces.art_view.commands).toEqual(commandsOf(kit.find("art_view").props.shapes));
+  expect(rest.surfaces.art_view.commands.map((command) => [command.type, command.color])).toEqual([["rect", "#ffffff"], ["roundRect", "#a16207"], ["polyline", "default"],
+    ["circle", "#336699"], ["arc", "#80ff0000"], ["line", "muted"], ["polygon", "success"], ["polyline", "warning"], ["text", "accent"], ["rect", "#facc15"], ["rect", "#facc15"], ["circle", "default"]]);
+});
+
+test("run: a shape that fails at run time is left out, and the other shapes draw", async () => {
+  // 100 / 0 is not a finite number, so the first circle has no x: the kit's App faults it, and the reply draws the second circle.
+  const { definition, app } = await compiled(['app("Dots", lang="en")', 'need n = input("number", "N", 1, min=0, max=5)',
+    'need dots = drawing("Dots", 100, 100, [circle(100 / $/n, 1, 1, "ink"), circle(5, 5, 5, "accent")])'].join("\n"));
+  expect(definition.surfaces).toEqual([{ id: "dots_view", width: 100, height: 100 }]);
+  const reply = handle(request(definition.initialState, press("n_field", 0)), app);
+  expect(reply.surfaces.dots_view.commands).toEqual([{ type: "circle", x: 5, y: 5, radius: 5, color: "accent" }]);
+});
+
+test("run: a reply never goes over the command limit", async () => {
+  // 600 rows drawn with each: the reply keeps the first 512 commands, so Alphy takes it.
+  const { definition, app } = await compiled(['app("Dots", lang="en")', 'need csv = input("text", "Values", "1")', '$/rows := split($/csv, ",")',
+    'need dots = drawing("Dots", 320, 64, [each($/rows, circle($index % 300, 1, 1, "ink"))])'].join("\n"));
+  const reply = handle(request(definition.initialState, press("csv_field", Array(600).fill("1").join(","))), app);
+  expect(reply.surfaces.dots_view.commands).toHaveLength(LIMITS.commands);
+  expect(reply.surfaces.dots_view.commands.at(-1)).toEqual({ type: "circle", x: 211, y: 1, radius: 1, color: "default" });
 });
 
 test("run: a reorder event moves the row", async () => {

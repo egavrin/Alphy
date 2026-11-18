@@ -4,7 +4,7 @@
 import { App, foreground, given, shownFormulas } from "./core.js";
 import { show } from "./dsl.js";
 import { ALPHY, MAX_ROW_FIELDS, MAX_ROWS, namer, own } from "./rows.js";
-import { BAR_SURFACE } from "./draw.js";
+import { LIMITS, budgetOf, utf8 } from "./draw.js";
 import { ALERT_CAPABILITIES, MAX_ARRAY, MAX_POINTS, PER_OBJECT, TYPED, header, load, screen, stateOf } from "./run.js";
 
 /** The text of the run-time. kit/build.js puts it into the bundle, and a test of the sources sets it from the sources. */
@@ -21,20 +21,20 @@ const CHOICES = new Set(["select", "tabs", "singleChoice", "multiChoice", "segme
 const SCALARS = new Set(["number", "string", "boolean"]);
 /** The kind of each field kind of an entries need. A choice and a text are strings. */
 const FIELD_KINDS = { number: "number", money: "number", percent: "number", count: "number", check: "boolean", switch: "boolean", time: "time", date: "date" };
-
-/** The UTF-8 bytes of a text, as the host counts them. The sandbox has no TextEncoder that the kit can count on. */
-const bytes = (text) => {
-  let count = 0;
-  for (const char of text) { const code = char.codePointAt(0); count += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4; }
-  return count;
-};
+/** Alphy declares at most 4 surfaces (ToolSpec). */
+const MAX_SURFACES = 4;
+/** The fields of the change of a value that an animate moves: its start and end values, its start and end times in ms of the host's clock, and its value now. */
+const RUN = { type: "object", fields: { from: "number", to: "number", start: "number", end: "number", at: "number" } };
+/** The limits of one reply by their unit in a fault. */
+const UNITS = { commands: "commands", pairs: "coordinate pairs", chars: "text characters", bytes: "bytes" };
 
 /**
  * The definition of the app, its language beside it, and the faults of what the emitter cannot build. app is the compiled
  * data that the source gives the run-time, and only what the run-time reads: the lines that it evaluates (the app line, the
  * formulas, the components, and the need line of each timer that it moves), the field of each state value, the kind of each time, date, list, and array, the fields of each
  * list, the count of rows of each shown list, each shown value that is a number, the names of the screen that differ from their wish,
- * the next row id, and the values that an entries need shows for each row. Faults give no definition.
+ * the next row id, the values that an entries need shows for each row, and the field of the changes of animate with the key of each value (anim).
+ * Faults give no definition.
  */
 export function emit(file) {
   if (!runtime.text) throw new Error("emit.js has no run-time text: kit/build.js gives it");
@@ -56,9 +56,6 @@ export function emit(file) {
     Object.values(tree).forEach(scan);
   };
   file.of("component").forEach((entry) => scan(entry.tree));
-  // shortcut: animate is a fault, because the run-time keeps no timed change and the value would never move; build it with the drawings, whose surface gets the timer events.
-  const animates = (tree) => tree !== null && typeof tree === "object" && ((tree.k === "call" && tree.name === "animate") || Object.values(tree).some(animates));
-  for (const entry of file.of("component")) if (animates(entry.tree)) faults.push(`${label(entry.key)}: animate is not built yet`);
   for (const [root, component] of bound) if (component !== "Choices") app.kinds[root] = component === "TimeField" ? "time" : "date";
   // The kind of each field of the rows of an entries need, from its fields= line.
   const declared = new Map(file.of("need").filter((entry) => entry.tree.name === "entries")
@@ -124,6 +121,25 @@ export function emit(file) {
     const root = `${entry.key}:tab`, need = partOf.get(entry.key);
     kit.state[root] = "";
     place(root, need, need === undefined ? entry.key : `need ${need}`, "string", "tab");
+  }
+  // Each number of a state line that an animate moves keeps its change in one object of the state, so each event knows where the value is.
+  const stored = new Map(app.fields), moved = new Map();
+  const animated = (tree, owner) => {
+    if (!tree || typeof tree !== "object") return;
+    if (tree.k === "call" && tree.name === "animate") {
+      const place = tree.args[0], root = place?.k === "path" && place.abs && place.segs.length === 1 ? place.segs[0] : null;
+      if (stored.has(root) && typeof kit.state[root] === "number") { if (!moved.has(root)) moved.set(root, owner); }
+      else faults.push(`${owner}: animate moves a number of a state line, such as $/angle, and ${place ? show(place) : "nothing"} is not one`);
+    }
+    Object.values(tree).forEach((inner) => animated(inner, owner));
+  };
+  file.of("component").forEach((entry) => animated(entry.tree, label(entry.key)));
+  if (moved.size) {
+    const key = namer(), first = moved.values().next().value;
+    app.anim = { field: name("anim", "anim"), keys: [...moved.keys()].map((root) => [root, key("$/" + root, root.replace(/\W/g, "_"))]) };
+    stateSchema[app.anim.field] = { type: "object", fields: Object.fromEntries(app.anim.keys.map(([, inner]) => [inner, RUN])) };
+    owners.push(first);
+    if (moved.size > PER_OBJECT) faults.push(`${first}: animate moves ${moved.size} values of the app, and an object of Alphy holds at most ${PER_OBJECT} fields. Animate fewer values`);
   }
   for (const [field, need] of needObjects) {
     const count = Object.keys(stateSchema[field].fields).length;
@@ -199,9 +215,23 @@ export function emit(file) {
     const over = `${where}: $/${root} starts with ${start} rows, and the screen has room for ${rowCount} rows in each list. Give it fewer rows`;
     for (const fault of [...(rowCount < MIN_ROWS ? [few] : []), ...(start > rowCount ? [over] : [])]) if (!faults.includes(fault)) faults.push(fault);
   }
-  // Alphy declares at most 4 surfaces, and each timer that the run-time moves draws one.
-  const surfaces = shown.drawn.map(({ id }) => ({ id, ...BAR_SURFACE }));
-  if (surfaces.length > 4) faults.push(`app: the screen has ${surfaces.length} timers with rounds or with no alert, and Alphy draws at most 4. Use fewer timers`);
+  // Each drawing and each timer that the run-time moves draws one surface. The emitter checks the drawings of the first state against
+  // the limits of one reply, for all surfaces together. At run time a reply keeps its first commands that fit (draw.js fit).
+  const surfaces = shown.drawn.map(({ id, width, height }) => ({ id, width, height }));
+  // The bytes of {"id":{"commands":[...]},...}: the first brace, then for each surface its id in quotes, a colon, and a comma or the last brace.
+  const used = { commands: 0, pairs: 0, chars: 0, bytes: 1 };
+  shown.drawn.forEach(({ id, commands, line }, index) => {
+    const where = label(line), cost = budgetOf(commands);
+    if (index === MAX_SURFACES) faults.push(`${where}: the app draws ${surfaces.length} surfaces, and Alphy draws at most ${MAX_SURFACES}: one for each drawing and each timer with rounds or with no alert. Use fewer`);
+    cost.bytes += id.length + 4;
+    for (const [unit, limit] of Object.entries(LIMITS)) {
+      const before = used[unit];
+      used[unit] += cost[unit];
+      if (before <= limit && used[unit] > limit) faults.push(`${where}: with this drawing the app draws ${used[unit]} ${UNITS[unit]} at the start, and Alphy draws at most ${limit} ${UNITS[unit]} in one reply. Draw fewer shapes`);
+    }
+  });
+  // Alphy sends a timer event only to an app with a surface, so a value that an animate moves needs one.
+  if (moved.size && !surfaces.length) faults.push(`${moved.values().next().value}: animate moves a value with a timer, and Alphy sends timer events only to an app with a surface. Add a drawing that shows the value`);
   const language = typeof lang === "string" ? lang : null;
   // The run-time has no parts, and the state of each event replaces each start value: it reads no state line. It reads the need
   // line of each timer that it moves: App.tick takes the rounds and the rest from it.
@@ -211,7 +241,7 @@ export function emit(file) {
   const shows = shownFormulas(file);
   if (shows.length) app.shown = show({ k: "map", entries: shows });
   if (faults.length) return { definition: null, language, faults, app };
-  const source = `${runtime.text}\nreturn handle(input, ${JSON.stringify(app)});`, size = bytes(source);
+  const source = `${runtime.text}\nreturn handle(input, ${JSON.stringify(app)});`, size = utf8(source);
   if (size > MAX_SOURCE_BYTES) return { definition: null, language, faults: [`app: the source is ${size} bytes, and Alphy keeps at most ${MAX_SOURCE_BYTES} bytes. Use shorter texts and fewer lines`], app };
   // The alert of the host's countdown asks for its capabilities, and Alphy refuses a timer whose app does not declare them.
   const capabilities = file.of("component").some((entry) => entry.tree.k === "call" && entry.tree.name === "Timer") ? [...ALERT_CAPABILITIES] : [];

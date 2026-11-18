@@ -31,7 +31,7 @@ function smokeRun(file, limit, clock) {
   // A state of the run is the text of the app's state and the time of the clock at it. A timer keeps the end of its phase in the state,
   // so the run comes back to a state at its own time: a later time would end the phases of a timer that runs at the next press.
   const save = () => ({ text: JSON.stringify(app.state), now: clock.now });
-  const restore = (saved) => { app.state = JSON.parse(saved.text); clock.now = app.clock = saved.now; app.recompute(); };
+  const restore = (saved) => { app.state = JSON.parse(saved.text); clock.now = saved.now; app.recompute(); };
   // What a person can see of a node. The rows of a list are data, not a look: the look is in the children.
   const look = (node) => JSON.stringify(node, (key, value) => (["row", "list", "template", "action", "bind", "items", "call"].includes(key) ? undefined : value));
   const short = (value) => (Array.isArray(value) ? `[${value.length}]` : JSON.stringify(value) ?? "nothing").slice(0, 40);

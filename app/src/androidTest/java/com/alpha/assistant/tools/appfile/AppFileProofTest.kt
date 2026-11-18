@@ -22,7 +22,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps and each node of the node table in Alphy's checks, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, and the free forms. */
+/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps and each node of the node table in Alphy's checks, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, and the drawings and timed changes. */
 @RunWith(AndroidJUnit4::class)
 class AppFileProofTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
@@ -284,14 +284,29 @@ class AppFileProofTest {
     }
     private fun press(actionId: String)=JSONObject().put("type","action").put("actionId",actionId).put("value",JSONObject.NULL)
     private fun timer(timerId: String)=JSONObject().put("type","timer").put("timerId",timerId)
+    /** The median time in ms of five events through the host path: event gives the event of each turn, and check asserts each reply. The log prints the times with their label. */
+    private suspend fun medianHostMs(app: Host,label: String,event: (Int)->JSONObject,check: (ToolPreview)->Unit): Long {
+        val times=List(5) {
+            val started=SystemClock.elapsedRealtime()
+            val reply=app.send(event(it))
+            val took=SystemClock.elapsedRealtime()-started
+            check(reply)
+            took
+        }
+        val median=times.sorted()[2]
+        Log.i("AppFileProofTest","$label host event times ms=$times median=$median")
+        return median
+    }
+    /** The timer ids that the smoke step sends: it sends each timer of a reply once. */
+    private fun timerIds(sent: MutableSet<String>): (List<String>)->Unit={events ->
+        events.map {JSONObject(it)}.filter {it.getString("type") == "timer"}.forEach {sent+=it.getString("timerId")}
+    }
     @Test fun timerRoundsPassesParseAndSmoke(): Unit=runBlocking {
         val context=instrumentation.targetContext
         val sandbox=SandboxClient(context)
         // The smoke sends each timer of a reply once. A source with timers and no declared surface fails with widget_timer_host.
         val sent=mutableSetOf<String>()
-        val rounds=parsedAndSmoked(sandbox,"timer-rounds","de") {events ->
-            events.map {JSONObject(it)}.filter {it.getString("type") == "timer"}.forEach {sent+=it.getString("timerId")}
-        }
+        val rounds=parsedAndSmoked(sandbox,"timer-rounds","de",observeReplay=timerIds(sent))
         assertEquals(listOf("timer_bar"),rounds.surfaces.keys.toList())
         assertEquals(setOf("timer_bar"),sent)
         // Real time: two work seconds and two rest seconds in 2 rounds (the kit test of the short plan has the same plan and steps).
@@ -319,16 +334,8 @@ class AppFileProofTest {
         try {
             app.open()
             app.send(press("timer_start"))
-            val times=List(5) {
-                val started=SystemClock.elapsedRealtime()
-                val reply=app.send(timer("timer_bar"))
-                val took=SystemClock.elapsedRealtime()-started
-                assertEquals(mapOf("timer_bar" to 1000),reply.timers)
-                took
-            }
-            val median=times.sorted()[2]
-            Log.i("AppFileProofTest","timer event times ms=$times median=$median")
-            assertTrue("median $median ms of $times",median<50)
+            val median=medianHostMs(app,"timer-rounds timer",{timer("timer_bar")}) {assertEquals(mapOf("timer_bar" to 1000),it.timers)}
+            assertTrue("median $median ms",median<50)
         } finally {app.close()}
     }
     @Test fun anActionOnAListOf100RowsTakesUnder250Ms(): Unit=runBlocking {
@@ -391,5 +398,65 @@ class AppFileProofTest {
         val shown=more.getJSONObject("d")
         assertEquals(setOf("home","Count 1","Twice 2"),shown.keys().asSequence().map {shown.getString(it)}.toSet())
         assertEquals(0,app.act(node("Zero").getString("action")).getInt("count"))
+        // An author's line with when(...): an odd count goes to the next even count, and an even count stays.
+        app.act(node("One more").getString("action"))
+        assertEquals(2,app.act(node("Even").getString("action")).getInt("count"))
+        assertEquals(2,app.act(node("Even").getString("action")).getInt("count"))
+    }
+    private fun commands(preview: ToolPreview,surface: String)=checkNotNull(preview.surfaces).getJSONObject(surface).getJSONArray("commands").let {commands ->
+        List(commands.length()) {commands.getJSONObject(it)}
+    }
+    @Test fun lessonPassesParseAndSmoke(): Unit=runBlocking {
+        // lesson.plan is kit/plans/lesson.plan: a drawing of the Moon on its orbit, a field of its angle, and a button that animates the angle
+        // from 0 to 360 in 5 s. The kit tests of lesson.plan have the same plan and steps.
+        val context=instrumentation.targetContext
+        val sandbox=SandboxClient(context)
+        val sent=mutableSetOf<String>()
+        val spec=parsedAndSmoked(sandbox,"lesson","ru",observeReplay=timerIds(sent))
+        assertEquals(listOf("orbit_view"),spec.surfaces.keys.toList())
+        assertEquals(setOf("anim"),sent)
+        // The Moon is the circle of sand.
+        fun moon(preview: ToolPreview)=commands(preview,"orbit_view").single {it.getString("color") == "#e7d3a8"}.let {it.getDouble("x") to it.getDouble("y")}
+        val app=Host(context,sandbox,spec,"appfile-lesson")
+        fun angle(value: Int)=JSONObject().put("type","action").put("actionId","angle_field").put("value",value)
+        try {
+            assertEquals(emptyMap<String,Int>(),app.open().timers)
+            assertEquals(160.0 to 50.0,moon(app.send(angle(90))))
+            // Five actions of the angle field, from 50 to 90 degrees: each reply draws again and names no timer.
+            val action=medianHostMs(app,"lesson action",{angle(50+10*it)}) {assertEquals(emptyMap<String,Int>(),it.timers)}
+            assertTrue("median $action ms",action<250)
+            val started=app.send(press("lap_button"))
+            assertEquals(mapOf("anim" to 50),started.timers)
+            assertEquals(270.0 to 160.0,moon(started))
+            val tick=medianHostMs(app,"lesson timer",{timer("anim")}) {assertEquals(mapOf("anim" to 50),it.timers)}
+            assertTrue("median $tick ms",tick<50)
+            // The change runs on the real clock to its end: the last timer event gives 360 and no timer.
+            val last=withTimeout(10_000) {
+                var reply: ToolPreview
+                do {delay(50);reply=app.send(timer("anim"))} while(reply.timers != emptyMap<String,Int>())
+                reply
+            }
+            assertEquals(360.0,JSONObject(last.state).getDouble("angle"),0.0)
+            assertEquals(270.0 to 160.0,moon(last))
+        } finally {app.close()}
+    }
+    @Test fun eachShapeAndColorPassesParseAndSmoke(): Unit=runBlocking {
+        // shapes.plan is kit/test/shapes.plan: each shape kind, each outline form, each over a list, each kind of color, a text, and animate
+        // beside a timer with rounds. The kit test of the two timers has the same plan.
+        val context=instrumentation.targetContext
+        val sandbox=SandboxClient(context)
+        val sent=mutableSetOf<String>()
+        val spec=parsedAndSmoked(sandbox,"shapes",observeReplay=timerIds(sent))
+        assertEquals(listOf("art_view","laps_bar"),spec.surfaces.keys.toList())
+        assertEquals(setOf("anim","laps_bar"),sent)
+        val app=Host(context,sandbox,spec,"appfile-shapes")
+        try {
+            assertEquals(listOf("rect" to "#ffffff","roundRect" to "#a16207","polyline" to "default","circle" to "#336699","arc" to "#80ff0000","line" to "muted",
+                "polygon" to "success","polyline" to "warning","text" to "accent","rect" to "#facc15","rect" to "#facc15","circle" to "default"),
+                commands(app.open(),"art_view").map {it.getString("type") to it.getString("color")})
+            app.send(press("laps_start"))
+            // One timers list for the bar of the rounds and for the timed change, each by its own id.
+            assertEquals(mapOf("laps_bar" to 1000,"anim" to 50),app.send(press("grow_button")).timers)
+        } finally {app.close()}
     }
 }

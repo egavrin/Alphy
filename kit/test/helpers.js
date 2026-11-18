@@ -6,9 +6,10 @@ import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AppFile } from "../src/dsl.js";
 import { expand } from "../src/parts.js";
-import { settings } from "../src/core.js";
+import { App, settings } from "../src/core.js";
 import { report } from "../src/check.js";
-import { runtime } from "../src/emit.js";
+import { emit, runtime } from "../src/emit.js";
+import { handle } from "../src/run.js";
 import { plansIn, runtimeText } from "../build.js";
 
 // The bundle gives emit.js the text of the run-time (kit/build.js). A test of the sources gives it the same text from the sources of now.
@@ -27,6 +28,25 @@ export const allPlans = () => ["plans", "test", "test/fixtures"].flatMap((dir) =
   .map((path) => [`${dir}/${basename(path)}`, readFileSync(path, "utf8")]));
 
 export const planned = async (text) => { const file = new AppFile().feedText(text); await expand(file); return file; };
+
+/** A time of the host's clock in ms. Each event of a timed test gives its time to handle. */
+export const T0 = 1_800_000_000_000;
+/**
+ * A plan as the run-time and as the kit's App, whose state gives the expected values. send gives one event to both at a time in
+ * ms after T0, each on the state of the reply before it: a field value, a press when the value is null, or a timer event (a look at the clock for the kit).
+ */
+export const clocked = async (text) => {
+  const file = await planned(text), { definition, app } = emit(file), kit = new App(file);
+  let state = definition.initialState;
+  const send = (ms, event) => {
+    settings.now = () => T0 + ms;
+    if (event.type === "timer") kit.tick(); else if (event.value === null) kit.press(event.actionId); else kit.input(event.actionId, event.value);
+    const reply = handle({ artifactId: "kit-test", revision: 1, state, event }, app, T0 + ms);
+    state = reply.state;
+    return reply;
+  };
+  return { kit, send, app, definition, get state() { return state; } };
+};
 export const has = (file, part) => report(file).faults.some((fault) => fault.includes(part));
 
 const clock = settings.now;

@@ -5,7 +5,7 @@
 import { AppFile, parseExpression, show } from "./dsl.js";
 import { App, foreground, given, settings } from "./core.js";
 import { MAX_ROWS, cast, castRow, clockOf, namer, own, relative, rows, shownAs, wished } from "./rows.js";
-import { barOf, commandsOf } from "./draw.js";
+import { BAR_SURFACE, barOf, commandsOf, fit, sideOf } from "./draw.js";
 
 /** An object of Alphy holds at most 32 fields, so the shown values go into d, d2, d3, and the tests into v, v2. */
 export const PER_OBJECT = 32;
@@ -18,8 +18,13 @@ export const MAX_POINTS = 256;
 /** The alert at the end of the host's countdown, and the capabilities that it asks for (ForegroundTimerSpec.requests). */
 const ALERT = { vibrationMs: 600, toneMs: 600 };
 export const ALERT_CAPABILITIES = ["audio.tone", "vibration.play"];
-/** The host's countdown runs from 1 s to 24 h (ForegroundTimerSpec). A timer that the run-time moves gets one timer event each second. */
-const MIN_TIMER_MS = 1000, MAX_TIMER_MS = 86400000, TICK_MS = 1000;
+/**
+ * The host's countdown runs from 1 s to 24 h (ForegroundTimerSpec). A timer that the run-time moves gets one timer event each second,
+ * and a value that an animate moves one each 50 ms.
+ */
+const MIN_TIMER_MS = 1000, MAX_TIMER_MS = 86400000, TICK_MS = 1000, ANIM_MS = 50;
+/** The change of a value that no animate moves now. */
+const STILL = { from: 0, to: 0, start: 0, end: 0, at: 0 };
 
 /** The values of the app line: app("Title", lang="en", kind="Lesson", preset="clean", palette="teal"). */
 export function header(kit) {
@@ -32,8 +37,8 @@ const today = (kit) => kit.value({ k: "call", name: "today", args: [] }, {});
 const STYLES = { eyebrow: { emphasis: "label", tone: "accent" }, muted: { tone: "muted" } };
 /** The kit's icons that Alphy has under a different name (ToolUiCatalog.icons). ArrowDown has no glyph of its own there. */
 const ICON_NAMES = { ArrowUp: "Arrow", ArrowDown: "Sort", ArrowLeft: "Back", ArrowRight: "Chevron", Edit: "Pencil" };
-/** What a row template of Alphy cannot hold (ToolUiCatalog: no list, dialog, or sheet in a row), and what keeps one state field for all rows. */
-const NOT_IN_ROW = new Set(["List", "Dialog", "Chart", "Tabs", "Timer"]);
+/** What a row template of Alphy cannot hold (ToolUiCatalog: no list, dialog, sheet, or canvas in a row), and what keeps one state field for all rows. */
+const NOT_IN_ROW = new Set(["List", "Dialog", "Chart", "Tabs", "Timer", "Drawing"]);
 /** The components of a part that a later task builds: the fault names the kind of the need. */
 const LATER = { Picture: "picture", Link: "link" };
 /** The share of value in max in percent, from 0 to 100: 0 for a max of 0 or below and for a value that is not finite. */
@@ -115,6 +120,8 @@ const NODES = {
     ...(n.props.text !== undefined && { children: [{ type: "text", ...at.text("text") }] }) }),
   Chart: (n, at) => at.chart(),
   Tabs: (n, at) => at.tabs(),
+  // A canvas with one surface, which each reply draws again.
+  Drawing: (n, at) => at.canvas(commandsOf(n.props.shapes), sideOf(n.props.width), sideOf(n.props.height)),
 };
 
 /** The place and the value that make a visible test false: $/open, !$/closed, or $/pick != "". Other tests have none. */
@@ -128,12 +135,12 @@ const readsRow = (tree) => tree !== null && typeof tree === "object" && ((tree.k
  * each time, date, list, and array, the type of each shown value, and the names. Returns the ui, the shown values by object
  * (d, v, ...), the views of lists that the run-time writes (views, their schemas, and their lines), the controls by action id,
  * the bounds of each number control, the faults as [line, text], for the emitter the line of each node of the ui (owners)
- * and the stored list of each list node (listRoots), and each surface that the walk draws as {id, running, commands} (drawn).
+ * and the stored list of each list node (listRoots), and each surface that the walk draws as {id, width, height, running, commands, line} (drawn).
  */
 export function screen(kit, app, first = false) {
-  // The names of the screen avoid the names of the stored fields. The emitter's walk and each event's walk start with the same taken names.
+  // The names of the screen avoid the names of the stored fields and the timer id of animate. The emitter's walk and each event's walk start with the same taken names.
   // shortcut: a key that is new at run time could take a name that the emitter gave at its wish; no walk makes new keys now, add them to app.names when one does.
-  const name = namer(app.names, new Set([...Object.values(app.names), ...app.fields.flatMap(([, path]) => path.split("."))]));
+  const name = namer(app.names, new Set([...Object.values(app.names), ...app.fields.flatMap(([, path]) => path.split(".")), ...(app.anim ? [app.anim.field] : [])]));
   const fields = new Map(app.fields), kinds = app.kinds ?? {}, lists = app.lists ?? {}, day = today(kit);
   // The first walk (the emitter's) fixes the type of each shown value with its first value. The compiled data keeps the numbers, and each other shown value is a text.
   const typeOf = (key, value) => (first ? (app.types[key] ??= typeof value === "number" ? "number" : "string") : app.types[key] ?? "string");
@@ -251,12 +258,15 @@ export function screen(kit, app, first = false) {
         return { type: node.children.some(form) ? "bottomSheet" : "dialog", text: at.caption(node.props.title), dismissAction: dismiss, children: at.children() };
       },
       list: () => rows(shared, node, key, line, expr, at, ctx.title),
-      // The bar of a timer that the run-time moves: a canvas with one surface, which the reply draws. The host sends a timer event only to an app with a surface.
+      // The bar of a timer that the run-time moves: a canvas whose surface gets the timer events. The host sends a timer event only to an app with a surface.
       drawn: (share) => {
         const need = !scope && timed.get(node.name);
-        if (!need) return null;
-        const id = name("surface:" + need, node.name);
-        drawn.push({ id, running: Boolean(kit.state[need + "_on"]), commands: commandsOf(barOf(share, kit.state[need + "_resting"] ? "success" : "accent")) });
+        return need ? at.canvas(commandsOf(barOf(share, kit.state[need + "_resting"] ? "success" : "accent")), BAR_SURFACE.width, BAR_SURFACE.height, Boolean(kit.state[need + "_on"])) : null;
+      },
+      // A canvas with one surface of its own, which the reply draws.
+      canvas: (commands, width, height, running = false) => {
+        const id = name("surface:" + key, wished(key));
+        drawn.push({ id, width, height, running, commands, line });
         return { type: "canvas", text: at.label(), surfaces: [id] };
       },
       // The points of a chart are two arrays that the run-time writes: the labels and the values of the last 256 points.
@@ -321,13 +331,17 @@ function alphyOf(app, root, value, day) {
   return kind === "time" || kind === "date" ? cast(kind, value, day) : value;
 }
 
-/** The Alphy state of the kit's state: each value of a state line in its field, then the views and the shown values. */
+/** The Alphy state of the kit's state: each value of a state line in its field, the change of each value that an animate moves, then the views and the shown values. */
 export function stateOf(kit, app, shown) {
   const state = {}, day = today(kit);
   for (const [root, path] of app.fields) {
     const [field, inner] = path.split("."), value = alphyOf(app, root, kit.state[root], day);
     if (inner) (state[field] ??= {})[inner] = value; else state[field] = value;
   }
+  if (app.anim) state[app.anim.field] = Object.fromEntries(app.anim.keys.map(([root, key]) => {
+    const run = kit.state._run?.find((each) => each.path === root);
+    return [key, run ? { from: run.from, to: run.to, start: run.start, end: run.end, at: run.at } : STILL];
+  }));
   return { ...state, ...shown.views, ...shown.values };
 }
 
@@ -350,6 +364,9 @@ export function load(kit, app, state) {
   }
   // Each event starts a new kit, so a new row gets an id after the highest id of the stored rows.
   kit.nextId = last + 1;
+  // A change with an end runs: the kit's tick moves its value to the clock of the event.
+  const runs = app.anim ? app.anim.keys.map(([root, key]) => ({ path: root, ...state[app.anim.field]?.[key] })).filter((run) => run.end) : [];
+  if (runs.length) kit.state._run = runs; else delete kit.state._run;
   kit.recompute();
 }
 
@@ -370,8 +387,8 @@ export function kitOf(app, state) {
  * is the clock of the host. A read-only event, an action id that the app does not have, an action that changes nothing, and an
  * action that takes a list past its count of rows (app.caps) or an array past Alphy's limit give the state back as it is. A bound
  * number past its bounds comes back at its bound. The reply holds a new ui only when the screen differs from the screen of the state before the event.
- * An open and a timer event of a timer that runs move each timer to the clock of now. A timer event of no timer that runs, also
- * a late one after a pause, and each other event of a surface give the state back as it is.
+ * An open and a timer event of a timer or a change that runs move each timer and each change to the clock of now. A timer event
+ * of nothing that runs, also a late one after a pause or after the end of a change, and each other event of a surface give the state back as it is.
  */
 export function handle(input, app, now = Date.now()) {
   const { state, event } = input;
@@ -380,7 +397,8 @@ export function handle(input, app, now = Date.now()) {
   settings.now = () => now;
   try {
     const kit = kitOf(app, state), kinds = app.kinds ?? {}, before = screen(kit, app);
-    const timed = event.type === "open" || (event.type === "timer" && before.drawn.some((surface) => surface.id === event.timerId && surface.running));
+    const timed = event.type === "open" || (event.type === "timer" && (event.timerId === app.anim?.field ? Boolean(kit.state._run)
+      : before.drawn.some((surface) => surface.id === event.timerId && surface.running)));
     const control = event.type === "action" ? before.controls.get(event.actionId) : timed ? () => kit.tick() : undefined;
     if (!control || control(event.value) === false) return { state };
     for (const [root, kind] of Object.entries(kinds)) {
@@ -394,10 +412,11 @@ export function handle(input, app, now = Date.now()) {
       after = screen(kit, app);
     }
     const next = stateOf(kit, app, after), reply = JSON.stringify(after.ui) === JSON.stringify(before.ui) ? { state: next } : { state: next, ui: after.ui };
-    // Each reply of an app with surfaces draws each one again and names each timer that runs, by the id of its surface: one list for all.
+    // Each reply of an app with surfaces draws each one again, inside Alphy's limits of one reply, and names each timer that runs:
+    // the bar of a timer by the id of its surface, and the changes of animate by the field of their state. One list for all.
     if (after.drawn.length) {
-      reply.surfaces = Object.fromEntries(after.drawn.map(({ id, commands }) => [id, { commands }]));
-      reply.timers = after.drawn.filter((surface) => surface.running).map(({ id }) => ({ id, intervalMs: TICK_MS }));
+      reply.surfaces = fit(after.drawn.map(({ id, commands }) => [id, commands]));
+      reply.timers = [...after.drawn.filter((surface) => surface.running).map(({ id }) => ({ id, intervalMs: TICK_MS })), ...(kit.state._run ? [{ id: app.anim.field, intervalMs: ANIM_MS }] : [])];
     }
     return reply;
   } finally { settings.now = clock; }

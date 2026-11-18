@@ -315,12 +315,13 @@ export class App {
         }
         case "when": if (this.value(first, ctx)) this.act(second, ctx); else this.recompute(); break;
         // animate($/place, to, ms): the number goes to the value in a straight line over ms milliseconds of the host clock. tick() moves it.
+        // The change keeps the times of its start and its end, so a kit that starts from a stored state, as each event of the run-time does, knows where the value is.
         case "animate": {
           if (first?.k !== "path" || !first.abs) throw new DslError("animate needs a value of the app as its place, such as $/angle");
           const path = first.segs.join("/"), from = Number(this.value(first, ctx)) || 0, to = second ? Number(this.value(second, ctx)) : NaN, ms = call.args[2] ? Number(this.value(call.args[2], ctx)) : 0;
           if (!Number.isFinite(to) || !Number.isFinite(ms)) throw new DslError("animate needs a number to go to and a time in milliseconds: animate($/angle, 360, 5000)");
-          const runs = (this.state._run ?? []).filter((run) => run.path !== path);
-          if (ms > 0 && to !== from) runs.push({ path, from, to, ms, spent: 0, at: from }); else this.write(first, to, ctx);
+          const runs = (this.state._run ?? []).filter((run) => run.path !== path), now = settings.now();
+          if (ms > 0 && to !== from) runs.push({ path, from, to, start: now, end: now + ms, at: from }); else this.write(first, to, ctx);
           if (runs.length) this.state._run = runs; else delete this.state._run;
           break;
         }
@@ -391,9 +392,12 @@ export class App {
         delete node.props.items;
       }
       if (tree.name === "Drawing" || tree.name === "Model3d") {
-        const key = tree.name === "Drawing" ? "shapes" : "bodies";
-        try { node.props[key] = this.drawn(key === "shapes" ? SHAPES : BODIES, key === "shapes" ? "shape" : "body", props[key] ?? { k: "list", items: [] }, ctx); }
-        catch (failure) { node.props[key] = []; this.fault(name ?? tree.name, `${key}: ${failure.message}`); }
+        const key = tree.name === "Drawing" ? "shapes" : "bodies", list = props[key] ?? { k: "list", items: [] };
+        // An item that fails, such as a shape whose x is not a number at run time, is a fault and is left out: the other items still draw.
+        node.props[key] = (list.k === "list" ? list.items : [list]).flatMap((item) => {
+          try { return this.drawn(key === "shapes" ? SHAPES : BODIES, key === "shapes" ? "shape" : "body", item, ctx); }
+          catch (failure) { this.fault(name ?? tree.name, `${key}: ${failure.message}`); return []; }
+        });
         if (key === "bodies" && node.props.exploded) explode(node.props.bodies);
         if (key === "shapes" && !(node.props.width > 0 && node.props.height > 0)) this.fault(name ?? tree.name, "a drawing needs a width and a height above 0: drawing(label, 320, 240, [shapes])");
       }
@@ -460,17 +464,16 @@ export class App {
    * it has one, then the next round starts. The timer part made the state names. A test and the smoke run move the clock and call this.
    */
   tick() {
-    const now = settings.now(), passed = (now - (this.clock ?? now)) / 1000, s = this.state;
-    this.clock = now;
-    // A timed change (the animate action) moves by the time that passed. A value that something else set in the meantime ends its change.
-    if (passed > 0 && s._run) {
+    const now = settings.now(), s = this.state;
+    // A timed change (the animate action) is at the share of its time that passed: a late look ends it at its value. A value that
+    // something else set in the meantime ends its change. A clock that goes back keeps the value at its start.
+    if (s._run) {
       s._run = s._run.filter((run) => {
         const place = this.pathOf("$/" + run.path);
         if (this.read(place, {}) !== run.at) return false;
-        run.spent += passed * 1000;
-        run.at = run.spent >= run.ms ? run.to : run.from + ((run.to - run.from) * run.spent) / run.ms;
+        run.at = now >= run.end ? run.to : run.from + ((run.to - run.from) * Math.max(0, now - run.start)) / (run.end - run.start);
         this.write(place, run.at, {});
-        return run.spent < run.ms;
+        return now < run.end;
       });
       if (!s._run.length) delete s._run;
       this.recompute();
@@ -480,8 +483,6 @@ export class App {
       const n = entry.key, number = (tree, fallback) => { try { return Number(tree ? this.value(tree, {}) : fallback) || 0; } catch { return 0; } };
       const phase = () => Number(s[n + "_phase"]) || 0;
       if (!s[n + "_on"]) { s[n + "_end"] = 0; continue; }
-      // The end of a phase is a time of the clock: a clock that goes back makes the phase longer, and the time spent stays at 0 or above.
-      // shortcut: a phase length that changes while its timer runs keeps the end, so the time spent jumps by the change; keep the time spent and move the end when a plan changes a phase while it runs.
       // A start, also after a pause: the phase ends when the time that is left passes.
       if (!s[n + "_end"]) s[n + "_end"] = now + Math.max(0, phase() - s[n + "_spent"]) * 1000;
       // 1000 phases at most in one look, so a phase of no length cannot hold the host.
@@ -495,6 +496,8 @@ export class App {
         // The next phase starts at the end of the last one, not at the look: a late look loses no time.
         if (s[n + "_on"]) s[n + "_end"] = ended + phase() * 1000;
       }
+      // The end of a phase is a time of the clock: a clock that goes back makes the phase longer, and the time spent stays at 0 or above.
+      // shortcut: a phase length that changes while its timer runs keeps the end, so the time spent jumps by the change; keep the time spent and move the end when a plan changes a phase while it runs.
       if (s[n + "_on"]) s[n + "_spent"] = Math.max(0, phase() - (s[n + "_end"] - now) / 1000);
       this.recompute();
     }
