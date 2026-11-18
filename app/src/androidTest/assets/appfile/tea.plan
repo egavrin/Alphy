@@ -1,0 +1,3 @@
+app("Çay Demleme Zamanlayıcısı", lang="tr", preset="soft", palette="green")
+need cay = input("choice", "Çay türü", "Siyah çay", options=["Siyah çay", "Yeşil çay", "Bitki çayı"])
+need demleme = timer("Demleme süresi", ($/cay == "Siyah çay" ? 5 : ($/cay == "Yeşil çay" ? 3 : 7)) * 60, alert=true, start="Başlat", pause="Duraklat", reset="Sıfırla", done="Çayınız hazır")

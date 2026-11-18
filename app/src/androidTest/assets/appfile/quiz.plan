@@ -1,0 +1,19 @@
+# Request: 漢字の練習カード：漢字を見せて、タップすると読み方と意味が出る。覚えた・まだのボタンで数を数えて。
+# No part does a card deck. These are component lines by hand: the form that a model writes for a hole.
+app("漢字カード", lang="ja", preset="playful", palette="purple")
+$/cards = [{n: 0, kanji: "水", reading: "みず", meaning: "water"}, {n: 1, kanji: "火", reading: "ひ", meaning: "fire"}, {n: 2, kanji: "山", reading: "やま", meaning: "mountain"}]
+$/index = 0
+$/shown = false
+$/learned = 0
+$/notYet = 0
+$/card := find($/cards, $n == $/index)
+root = Column([cardView, answer, buttons, counts])
+cardView = Card([kanjiText, revealButton], variant="hero")
+kanjiText = Metric("漢字", $/card/kanji, emphasis="display")
+revealButton = Button("答えを見る", action=set($/shown, true), visible=!$/shown)
+answer = Card([Metric("読み方", $/card/reading), Metric("意味", $/card/meaning)], visible=$/shown)
+buttons = Row([learnedButton, notYetButton])
+learnedButton = Button("覚えた", action=[inc($/learned), set($/index, ($/index + 1) % len($/cards)), set($/shown, false)])
+notYetButton = Button("まだ", action=[inc($/notYet), set($/index, ($/index + 1) % len($/cards)), set($/shown, false)])
+counts = Row([Metric("覚えた", $/learned), Metric("まだ", $/notYet)])
+check("めくって数える", expect($/card/kanji == "水"), tap(revealButton), expect($/shown), tap(learnedButton), expect($/learned == 1), expect($/card/kanji == "火"), expect(!$/shown), tap(notYetButton), tap(notYetButton), expect($/notYet == 2), expect($/card/kanji == "水"))

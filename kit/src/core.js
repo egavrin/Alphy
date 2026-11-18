@@ -32,6 +32,8 @@ const LAST = { text: "size", line: "width", rect: "radius" };
 export const TONES = { ink: "#0f172a", muted: "#94a3b8", accent: null, surface: "#ffffff", water: "#38bdf8", land: "#65a30d", sun: "#facc15", sand: "#e7d3a8", wood: "#a16207", success: "#16a34a", warning: "#ea580c" };
 
 const round = (x, n = 0) => { const f = 10 ** n; return Math.round((x + Number.EPSILON) * f) / f; };
+/** A deep copy of a value of the app. The sandbox has no structuredClone. NaN and Infinity stay, so the report can find them. */
+const clone = (value) => (Array.isArray(value) ? value.map(clone) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, clone(inner)])) : value);
 /** A model that is taken apart: each body of a named part moves away from the center of the model, by half of its distance from it. */
 function explode(bodies) {
   const center = ["x", "y", "z"].map((axis) => bodies.reduce((sum, body) => sum + body[axis], 0) / (bodies.length || 1));
@@ -130,7 +132,7 @@ export class App {
     for (const entry of this.file.of("state")) {
       if (this.seen.get(entry.key) === entry.raw) continue;
       this.seen.set(entry.key, entry.raw);
-      this.write(this.pathOf(entry.key), this.attempt(entry, () => structuredClone(this.value(entry.tree, {}))), {});
+      this.write(this.pathOf(entry.key), this.attempt(entry, () => clone(this.value(entry.tree, {}))), {});
     }
     this.tagRows(this.state);
     this.recompute();
@@ -282,7 +284,7 @@ export class App {
       const target = () => { if (!["path", "field", "index"].includes(first?.k)) throw new DslError(`${call.name} needs a place: a path, a field of a row, or an item of a list`); return first; };
       const rowsOf = (node) => { const rows = this.value(node, ctx); if (!Array.isArray(rows)) throw new DslError(`${call.name} needs a list`); return rows; };
       switch (call.name) {
-        case "set": this.write(target(), structuredClone(this.value(second, ctx)), ctx); break;
+        case "set": this.write(target(), clone(this.value(second, ctx)), ctx); break;
         case "toggle": this.write(target(), !this.value(target(), ctx), ctx); break;
         case "inc": this.write(target(), (this.value(target(), ctx) || 0) + (second ? this.value(second, ctx) : 1), ctx); break;
         case "dec": this.write(target(), (this.value(target(), ctx) || 0) - (second ? this.value(second, ctx) : 1), ctx); break;
@@ -311,7 +313,7 @@ export class App {
           break;
         }
         case "append": {
-          const row = structuredClone(this.value(second, ctx));
+          const row = clone(this.value(second, ctx));
           rowsOf(target()).push(row);
           this.tagRows([row]);
           break;

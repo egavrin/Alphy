@@ -41,6 +41,18 @@ class SandboxClient internal constructor(context: Context,private val runtime: A
             return result
         } finally {isolate.close()}
     }
+    /** A host script and one expression in a fresh isolate of the slot of [execute]. The app contract does not apply to either. */
+    internal suspend fun evaluateScript(script: String,expression: String,deadlineMs: Long,maxReturnBytes: Int): SandboxResult {
+        currentCoroutineContext().ensureActive()
+        val isolate=try {runtime.acquire(retained=false,maxReturnBytes=maxReturnBytes)}
+            catch(cancel: CancellationException) {throw cancel}
+            catch(failure: RuntimeFailure) {return SandboxResult(failure.status)}
+        try {
+            val result=isolate.evaluate(script+"\n"+expression,deadlineMs)
+            currentCoroutineContext().ensureActive()
+            return result
+        } finally {isolate.close()}
+    }
 
     private fun evaluationScript(source: String, input: String): String =
         "JSON.stringify((function(input){'use strict';\n$source\n})(JSON.parse(${JSONObject.quote(input)})))"

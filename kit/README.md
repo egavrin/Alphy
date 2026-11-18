@@ -11,6 +11,8 @@ Then it runs the app (state, formulas, actions, and the component tree) and chec
 | `src/parts.js` | The parts: each one changes a need line into component, state, and formula lines. |
 | `src/core.js` | The evaluator: the `App` that holds the state and builds the component tree. It reads no `process` and no file. |
 | `src/check.js` | The report of the host, the check lines, and the smoke run that uses each control. Only the compile step uses it. |
+| `src/compile.js` | The sandbox entry `compileAppFile`: an app file in, the faults and notes of the report out. |
+| `build.js` | The bundle of the modules as one plain script for the sandbox, and the copies of the plans for the device tests. |
 | `plans/` | The saved plans. |
 | `test/` | The Bun tests. `test/fixtures/` holds example plans of the prototype that only the tests read. |
 
@@ -21,8 +23,9 @@ The gate of the kit is `"smoke"`: an app file of this design has no check lines.
 Run each command from the repository root.
 The kit has no dependencies and no install step.
 
-- `bun test kit` runs the tests. The last line of the output shows `0 fail`.
-- `bun kit/build.js --check` compares the built bundle with `app/src/main/assets/appfile/kit.js`. The sandbox entry task of the plan adds `kit/build.js`.
+- `bun test kit` runs the tests. The summary of the output shows `0 fail`.
+- `bun kit/build.js` writes the sandbox bundle `app/src/main/assets/appfile/kit.js` and copies `plans/*.plan` to `app/src/androidTest/assets/appfile/` for the device tests.
+- `bun kit/build.js --check` writes nothing. It exits 1 when one of these files differs from what the build writes.
 
 ## Origin
 

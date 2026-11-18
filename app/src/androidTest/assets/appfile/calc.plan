@@ -1,0 +1,6 @@
+app("Tip split", lang="en", preset="clean", palette="teal")
+need bill = input("money", "Bill", 80, min=0, max=1000)
+need tip = input("percent", "Tip %", 15, min=0, max=30)
+need people = input("count", "People", 4, min=1, max=20)
+need perPerson = figure("money", "Per person", $/bill * (1 + $/tip / 100) / $/people, example=[{bill: 80, tip: 15, people: 4}, 23])
+need total = figure("money", "Total with tip", $/bill * (1 + $/tip / 100), example=[{bill: 80, tip: 15}, 92])
