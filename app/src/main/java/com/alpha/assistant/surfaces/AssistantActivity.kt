@@ -9,6 +9,7 @@ import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.provider.Settings
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Image
@@ -39,11 +40,14 @@ import com.alpha.assistant.R
 import com.alpha.assistant.ui.*
 
 private const val NEW_CHAT_PENDING = "new_chat_pending"
+private const val LIVE_PRESS = "live_press"
 
 /** The compact and full activities share chat, drafts, and active requests. */
 class AssistantActivity : AlphyActivity() {
     private var invocation by mutableStateOf<String?>(null)
     private var newChatPending by mutableStateOf(false)
+    /** An assistant button press that has not yet decided whether the voice mode starts (spec 5.11.2). */
+    private var livePress by mutableStateOf(false)
     private var lockedLaunch by mutableStateOf(false)
     private val screenOff = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -55,6 +59,7 @@ class AssistantActivity : AlphyActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         newChatPending = savedInstanceState?.getBoolean(NEW_CHAT_PENDING) == true
+        livePress = savedInstanceState?.getBoolean(LIVE_PRESS) == true
         receiveInvocation(intent, newEntry = savedInstanceState == null)
         ContextCompat.registerReceiver(this, screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF), ContextCompat.RECEIVER_NOT_EXPORTED)
         setContent {
@@ -90,12 +95,15 @@ class AssistantActivity : AlphyActivity() {
                                 val latest = chat?.messages?.lastOrNull { it.role == "assistant" }
                                 val answer = latest?.let { model.activeAnswer(it.id) ?: it.text }.orEmpty()
                                 val longAnswer = answer.length >= (520 / density.fontScale).toInt() || answer.count { it == '\n' } >= 9
+                                // The voice view with the screen rows does not fit in the compact height.
                                 val expanded = longAnswer || keyboard || maxHeight < 420.dp ||
-                                    model.snapshot.draft.attachments.isNotEmpty()
+                                    model.snapshot.draft.attachments.isNotEmpty() || model.liveVoice.active && model.ownsLiveVoice(this@AssistantActivity)
                                 Surface(panel.height(if (expanded) maxHeight else compactHeight), shape = MaterialTheme.shapes.extraLarge) {
                                     CompactAssistant(
                                         model = model,
                                         invocation = invocation,
+                                        press = livePress,
+                                        pressHandled = { livePress = false },
                                         canUseCapture = ::canUseCapture,
                                         compact = maxHeight < 360.dp,
                                         full = { openApp() },
@@ -133,6 +141,7 @@ class AssistantActivity : AlphyActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean(NEW_CHAT_PENDING, newChatPending)
+        outState.putBoolean(LIVE_PRESS, livePress)
     }
 
     private fun receiveInvocation(intent: Intent, newEntry: Boolean = true) {
@@ -140,6 +149,7 @@ class AssistantActivity : AlphyActivity() {
         if (newEntry && (incoming == null || incoming != invocation)) {
             newChatPending = intent.action == Intent.ACTION_ASSIST ||
                 (incoming != null && incoming == AssistantCapture.current?.id)
+            livePress = newChatPending
         }
         invocation?.takeIf { it != incoming }?.let(AssistantCapture::close)
         invocation = incoming
@@ -220,6 +230,8 @@ private enum class AssistantMenu { Main, Context, Voice, Permissions, History }
 private fun CompactAssistant(
     model: ShellViewModel,
     invocation: String?,
+    press: Boolean,
+    pressHandled: () -> Unit,
     canUseCapture: (String) -> Boolean,
     compact: Boolean,
     full: () -> Unit,
@@ -246,7 +258,16 @@ private fun CompactAssistant(
     var settingsFailed by remember { mutableStateOf(false) }
 
     VoiceVisibility(model.voice)
+    LiveVoiceLifecycle(model)
     WeatherLocationAccess(model)
+    // An OpenAI press starts the voice mode once, after the new chat and the account are known (spec 5.11.2, 5.11.5).
+    val startPress = rememberLiveVoiceStart(model, capture?.id, capture, firstSpeech = true)
+    LaunchedEffect(press, model.loading, model.keyStatus) {
+        if (press && !model.loading && model.keyStatus != KeyStatus.Checking) {
+            pressHandled()
+            if (model.accountProvider == com.alpha.assistant.cloud.AiProvider.OPENAI) startPress()
+        }
+    }
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.padding(top = 8.dp).size(38.dp, 4.dp).background(MaterialTheme.colorScheme.outlineVariant, CircleShape))
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -268,12 +289,10 @@ private fun CompactAssistant(
                 Text(stringResource(R.string.assistant_load_error))
                 Button(onClick = model::load) { Text(stringResource(R.string.assistant_retry)) }
             }
-            else -> {
-                ChatPane(
-                    model, model.snapshot.selected, tools = openTool,
-                    settings = providerSettings, modifier = Modifier.weight(1f), openAutomation = openAutomation,
-                )
-                if (shown != null) {
+            else -> Box(Modifier.weight(1f)) {
+                // The rows show what goes to Alphy, in the sheet and in its voice view (spec 5.11.3).
+                @Composable fun ContextRows() {
+                    if (shown == null) return
                     Column(Modifier.fillMaxWidth().heightIn(max = if (compact) 108.dp else 180.dp)
                         .verticalScroll(rememberScrollState())) {
                         if (screen != null) {
@@ -304,12 +323,23 @@ private fun CompactAssistant(
                         }
                     }
                 }
-                Composer(
-                    model, context = { menu = AssistantMenu.Context }, modifier = Modifier.widthIn(max = 620.dp),
-                    compact = compact, placeholder = R.string.assistant_ask,
-                    assistantInvocation = capture?.id, requiresQuestion = screenshot != null, displayedCapture = shown,
-                    settings = providerSettings,
-                )
+                Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    ChatPane(
+                        model, model.snapshot.selected, tools = openTool,
+                        settings = providerSettings, modifier = Modifier.weight(1f), openAutomation = openAutomation,
+                    )
+                    ContextRows()
+                    Composer(
+                        model, context = { menu = AssistantMenu.Context }, modifier = Modifier.widthIn(max = 620.dp),
+                        compact = compact, placeholder = R.string.assistant_ask,
+                        assistantInvocation = capture?.id, requiresQuestion = screenshot != null, displayedCapture = shown,
+                        settings = providerSettings, liveVoice = true,
+                    )
+                }
+                // The voice view covers the chat, which stays composed for the agent host of phone actions. ✕ returns to the sheet.
+                if (model.liveVoice.active && model.ownsLiveVoice(LocalActivity.current)) LiveVoiceLayer(model, model.snapshot.selected,
+                    compact = true, openTool = { id -> model.tools.select(id); openTool() }, openAutomation = openAutomation,
+                    settings = providerSettings, onEnd = { model.endLiveVoice() }) { ContextRows() }
             }
         }
     }

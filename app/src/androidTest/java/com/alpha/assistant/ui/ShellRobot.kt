@@ -11,9 +11,12 @@ import android.app.Application
 import android.app.Instrumentation
 import android.app.UiAutomation
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
@@ -54,12 +57,17 @@ import com.alpha.assistant.cloud.Endpoints
 import com.alpha.assistant.data.Conversation
 import com.alpha.assistant.data.LegacyKeys
 import com.alpha.assistant.data.Message
+import com.alpha.assistant.data.ScreenContext
 import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.data.ShellStore
 import com.alpha.assistant.diagnostics.UiFailureDiagnostics
+import com.alpha.assistant.surfaces.ASSIST_INVOCATION
+import com.alpha.assistant.surfaces.AlphaTileService
+import com.alpha.assistant.surfaces.AssistantCapture
 import com.alpha.assistant.tools.agentReply
 import com.alpha.assistant.voice.FakeLiveAudio
 import com.alpha.assistant.voice.FakeLiveTransport
+import com.alpha.assistant.voice.LiveTiming
 import com.alpha.assistant.voice.LiveVoiceSession
 import com.alpha.assistant.voice.VoiceSession
 import kotlinx.coroutines.CompletableDeferred
@@ -155,6 +163,21 @@ internal fun isolatedModels(context: Context): AiModels = AiModels(context, "tes
 /** A fake DeepSeek key ("sk-" and 32 hex digits). It is built at run time, so no source line holds a key-shaped literal that secret scanning blocks. */
 internal fun fakeDeepSeekKey(half: String = "0123456789abcdef"): String = "sk-$half$half"
 
+/** A capture as `AlphaVoiceSession` begins it, with a 32 px screenshot when [withImage]. A null [screen] is a capture before `onHandleAssist`. */
+internal fun beginCapture(screen: ScreenContext?, withImage: Boolean = true): String {
+    lateinit var id: String
+    InstrumentationRegistry.getInstrumentation().runOnMainSync {
+        id = AssistantCapture.begin()
+        screen?.let { AssistantCapture.updateScreen(id, it) }
+        if (withImage) AssistantCapture.updateScreenshot(id, Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.MAGENTA) })
+    }
+    return id
+}
+
+/** The assistant sheet of [invocation], as `AlphaVoiceSession` opens it. A test starts it from the app context, so in a new task. */
+internal fun assistIntent(context: Context, invocation: String?): Intent =
+    AlphaTileService.entryIntent(context).putExtra(ASSIST_INVOCATION, invocation)
+
 /** An image settings file that the app never uses, for a test model outside [ShellFixture]. */
 internal const val ISOLATED_IMAGES = "test-images"
 
@@ -182,8 +205,8 @@ internal class ShellFixture(prefix: String) {
     @Volatile var keyCheck: suspend (AiAccount) -> KeyCheck = { KeyCheck.ACCEPTED }
 
     /** A voice mode with a scripted [socket] and [audio] on a loopback endpoint, so no test reaches OpenAI. */
-    fun liveVoice(socket: FakeLiveTransport, audio: FakeLiveAudio): LiveVoiceFactory =
-        { app, scope -> LiveVoiceSession(app, scope, socket, { audio }, { keys.account().getOrNull() }, Endpoints { "http://127.0.0.1:4000" }) }
+    fun liveVoice(socket: FakeLiveTransport, audio: FakeLiveAudio, timing: LiveTiming = LiveTiming()): LiveVoiceFactory =
+        { app, scope -> LiveVoiceSession(app, scope, socket, { audio }, { keys.account().getOrNull() }, Endpoints { "http://127.0.0.1:4000" }, timing) }
 
     /** A loopback test passes a [chat] provider that reads [models]. */
     fun install(saveKey: Boolean = true, voice: VoiceFactory? = null, onboarding: Boolean = false, chat: ChatProvider = provider,

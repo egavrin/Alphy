@@ -80,7 +80,8 @@ internal class CourseComposerState(
 
 /** The message composer of the shell, the mini-app split, and the assistant half sheet.
  * [compact] puts the field and the round actions in one row and hides the other lines, while the keyboard takes most of a landscape window.
- * [settings] opens «Сервис ИИ». [liveVoice]: the full chat offers the voice mode and shows its end status (spec 5.1.2, 5.8).
+ * [settings] opens «Сервис ИИ». [liveVoice]: the full chat and the assistant sheet offer the voice mode and show its end status
+ * (spec 5.1.2, 5.8, 5.11).
  * [actions] replace the microphone and send buttons and get whether the draft can be sent. The voice mode screen passes its own. */
 @Composable internal fun Composer(
     model: ShellViewModel,
@@ -119,7 +120,8 @@ internal class CourseComposerState(
     val hasInput = draft.text.isNotBlank() || !requiresQuestion && draft.attachments.isNotEmpty()
     val startVoice = rememberVoiceStart(model, oneShot = true, destination = destination, assistantInvocation = assistantInvocation,
         displayedCapture = displayedCapture)
-    val startLiveVoice = if (liveVoice) rememberLiveVoiceStart(model) else null
+    // In the assistant sheet, the first hand-off of a start carries the screen of the press (spec 5.11.4).
+    val startLiveVoice = if (liveVoice) rememberLiveVoiceStart(model, assistantInvocation, displayedCapture) else null
     // The permission guidance retries the start that asked for the microphone.
     var liveAsked by remember { mutableStateOf(false) }
     val ownsVoice = model.voiceBelongsTo(destination)

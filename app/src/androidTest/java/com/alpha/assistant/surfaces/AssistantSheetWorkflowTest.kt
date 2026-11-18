@@ -44,6 +44,9 @@ import com.alpha.assistant.ui.isolatedLegacyKeys
 import com.alpha.assistant.ui.isolatedModels
 import com.alpha.assistant.ui.ISOLATED_IMAGES
 import com.alpha.assistant.ui.ISOLATED_VOICE
+import com.alpha.assistant.ui.assistIntent
+import com.alpha.assistant.ui.beginCapture
+import com.alpha.assistant.ui.fakeDeepSeekKey
 
 @RunWith(AndroidJUnit4::class)
 class AssistantSheetWorkflowTest {
@@ -381,21 +384,10 @@ class AssistantSheetWorkflowTest {
         }
     }
 
-    private fun capture(text: String, withImage: Boolean = true, page: String? = null, url: String? = null): String {
-        lateinit var id: String
-        robot.instrumentation.runOnMainSync {
-            id = AssistantCapture.begin()
-            val image = if (withImage) Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888)
-                .apply { eraseColor(Color.MAGENTA) } else null
-            AssistantCapture.updateScreen(id, ScreenContext(visibleText = text, pageText = page, pageUrl = url))
-            AssistantCapture.updateScreenshot(id, image)
-        }
-        return id
-    }
+    private fun capture(text: String, withImage: Boolean = true, page: String? = null, url: String? = null): String =
+        beginCapture(ScreenContext(visibleText = text, pageText = page, pageUrl = url), withImage)
 
-    private fun intent(invocation: String?) = Intent(app, AssistantActivity::class.java)
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        .putExtra("assist_invocation", invocation)
+    private fun intent(invocation: String?) = assistIntent(app, invocation)
 
     private fun launch(invocation: String? = null): ActivityScenario<AssistantActivity> = ActivityScenario.launch(intent(invocation))
 
@@ -423,7 +415,8 @@ class AssistantSheetWorkflowTest {
     ) {
         val fixture = ShellFixture("assistant-sheet")
         val provider = RecordingProvider("Assistant fixture reply", failFirst)
-        check(fixture.keys.save("alpha-test-only", AiProvider.OPENAI).isSuccess)
+        // An OpenAI press starts the voice mode (spec 5.11.2), so the typed sheet keeps its tests with another provider.
+        check(fixture.keys.save(fakeDeepSeekKey(), AiProvider.DEEPSEEK).isSuccess)
         robot.instrumentation.runOnMainSync {
             app.installAssistantFixture {
                 ShellViewModel(it, provider, fixture.store, fixture.keys, voiceFactory = transcript?.let { result ->

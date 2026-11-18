@@ -517,7 +517,8 @@ private data class MiniAppOrigin(
                 }
             }
         }
-        if (model.liveVoice.active) LiveVoiceLayer(model, snapshot.selected, compact = false,
+        if (model.liveVoice.active && model.ownsLiveVoice(androidx.activity.compose.LocalActivity.current)) LiveVoiceLayer(model,
+            snapshot.selected, compact = false,
             openTool = { id -> model.tools.select(id); openMiniApp() }, openAutomation = ::openAutomation,
             settings = { openSettings(SettingsSection.Ai) }, onEnd = { model.endLiveVoice() })
     }

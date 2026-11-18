@@ -1,6 +1,7 @@
 package com.alpha.assistant.ui
 
 import android.animation.ValueAnimator
+import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -77,9 +78,15 @@ private const val EXPECTATION_MS = 5_000L
 internal fun ShellViewModel.expectAlphyScreen() { alphyScreenUntil = SystemClock.uptimeMillis() + EXPECTATION_MS }
 
 /**
+ * The shell and the assistant sheet share the model, so only the activity that started the voice mode applies its lifecycle rule
+ * and shows the voice view. A start without an owner belongs to every activity.
+ */
+internal fun ShellViewModel.ownsLiveVoice(activity: Activity?): Boolean = liveVoiceOwner.let { it == null || it == activity?.javaClass }
+
+/**
  * The lifecycle rule of the voice mode (spec 5.8.1). [VoiceVisibility] stops at a pause, so the voice mode has its own rule:
  * a pause mutes, a resume unmutes, and a stop ends the mode. A configuration change does none of these. A stop also keeps the
- * mode while Alphy expects its own screen.
+ * mode while Alphy expects its own screen, and a finish ends it anyway (spec 5.11.7).
  * The screen off always ends it.
  */
 @Composable internal fun LiveVoiceLifecycle(model: ShellViewModel) {
@@ -88,12 +95,14 @@ internal fun ShellViewModel.expectAlphyScreen() { alphyScreenUntil = SystemClock
     DisposableEffect(activity, model) {
         val voice = model.liveVoice
         val observer = LifecycleEventObserver { _, event ->
+            if (!model.ownsLiveVoice(activity)) return@LifecycleEventObserver
             when (event) {
                 // A configuration change keeps Alphy's reply and the microphone (ruling R20).
                 Lifecycle.Event.ON_PAUSE -> if (activity?.isChangingConfigurations != true) voice.away(true)
                 Lifecycle.Event.ON_RESUME -> { model.alphyScreenUntil = 0; voice.away(false) }
                 Lifecycle.Event.ON_STOP -> if (activity?.isChangingConfigurations != true &&
                     SystemClock.uptimeMillis() >= model.alphyScreenUntil) model.endLiveVoice()
+                Lifecycle.Event.ON_DESTROY -> if (activity?.isFinishing == true) model.endLiveVoice()
                 else -> Unit
             }
         }
@@ -106,17 +115,19 @@ internal fun ShellViewModel.expectAlphyScreen() { alphyScreenUntil = SystemClock
     }
     // A start clears the away mute, so a mode that starts while Alphy is not in front mutes again.
     LaunchedEffect(model.liveVoice.active) {
-        if (model.liveVoice.active && activity?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == false) model.liveVoice.away(true)
+        if (model.liveVoice.active && model.ownsLiveVoice(activity) &&
+            activity?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == false) model.liveVoice.away(true)
     }
 }
 
 /**
  * The voice mode screen (spec 5.2): the card of the latest hand-off, the Alphy character, the status line, and a composer row with
  * «+», the field, the microphone, and ✕. The full chat shows it over the chat. [compact] makes the character smaller and the
- * composer one row for the assistant sheet (spec 5.11.3). [onEnd] ends the mode, and ✕ and Back call it.
+ * composer one row for the assistant sheet (spec 5.11.3). [onEnd] ends the mode, and ✕ and Back call it. [aboveComposer] is the
+ * screen context of the sheet.
  */
 @Composable internal fun LiveVoiceLayer(model: ShellViewModel, chat: Conversation?, compact: Boolean, openTool: (String) -> Unit,
-    openAutomation: (String) -> Unit, settings: () -> Unit, onEnd: () -> Unit) {
+    openAutomation: (String) -> Unit, settings: () -> Unit, onEnd: () -> Unit, aboveComposer: @Composable () -> Unit = {}) {
     val voice = model.liveVoice
     val end by rememberUpdatedState(onEnd)
     // Back on the layer is ✕ (the 5.8 table). An overlay handler comes before the Back of the chat, which selects no chat.
@@ -162,6 +173,7 @@ internal fun ShellViewModel.expectAlphyScreen() { alphyScreenUntil = SystemClock
                     else -> R.string.live_voice_listening
                 }), Modifier.padding(16.dp).then(PoliteLiveRegion), color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+                aboveComposer()
                 Composer(model, { contextOpen = true }, Modifier.widthIn(max = 620.dp), compact = compact,
                     onContextAnchorChanged = { anchor = it }, settings = settings) { hasInput ->
                     // Implementation choice: typed text goes as a normal message with its own send button (spec 5.7.1).

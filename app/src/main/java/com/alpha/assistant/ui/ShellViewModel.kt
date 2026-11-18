@@ -39,6 +39,7 @@ import com.alpha.assistant.courses.encode
 import com.alpha.assistant.courses.kind
 import com.alpha.assistant.surfaces.AssistContext
 import com.alpha.assistant.surfaces.AssistCapture
+import com.alpha.assistant.surfaces.AssistPageStatus
 import com.alpha.assistant.surfaces.AssistantCapture
 import com.alpha.assistant.surfaces.SharedDraft
 import com.alpha.assistant.surfaces.assistantUnavailable
@@ -84,6 +85,7 @@ import java.io.File
 import java.util.UUID
 import com.alpha.assistant.weather.*
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.TimeoutCancellationException
 import org.json.JSONArray
 import org.json.JSONObject
@@ -108,6 +110,9 @@ internal typealias LiveVoiceFactory = (Application, CoroutineScope) -> LiveVoice
 
 /** One socket client for every voice mode of the process. It is built at the first connect. */
 private val okHttpLive by lazy { OkHttpLiveTransport() }
+
+/** The first assistant hand-off waits this long for a screen capture in progress (spec 5.11.2). */
+private const val ASSIST_CAPTURE_WAIT_MS = 2_000L
 
 class ShellViewModel @JvmOverloads internal constructor(application: Application,
     // No default: the app builds the provider from the same AiModels as [models], so the requests use the choices of «Модели».
@@ -166,6 +171,8 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
     internal val liveVoiceWorking: Boolean get() = liveBridge?.working == true
     /** The uptime until which a screen or an app that Alphy opens is expected in front (spec 5.8.1, [expectAlphyScreen]). */
     internal var alphyScreenUntil = 0L
+    /** The activity class that started the voice mode. The shell and the assistant sheet share this model ([ownsLiveVoice]). */
+    internal var liveVoiceOwner: Class<*>? = null; private set
 
     internal fun composerDraft(destination: CourseComposerState?): Draft = destination?.draft ?: snapshot.draft
     internal fun voiceBelongsTo(destination: CourseComposerState?) = voiceDestination === destination
@@ -259,11 +266,13 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
 
     /**
      * Starts the voice mode in the selected conversation. [firstSpeech]: an assistant button start (spec 5.11.2). [voiceApproval]:
-     * a spoken «да» can run a phone plan, which needs a passed echo check on this phone model (spec 5.5.10 rule 10).
+     * a spoken «да» can run a phone plan, which needs a passed echo check on this phone model (spec 5.5.10 rule 10). [owner]: the
+     * activity class of the start. Null binds the mode to every activity.
      */
     internal fun startLiveVoice(assistantInvocation: String? = null, capture: AssistCapture? = null, firstSpeech: Boolean = false,
-        voiceApproval: Boolean = Build.MODEL in VOICE_APPROVAL_MODELS) {
+        voiceApproval: Boolean = Build.MODEL in VOICE_APPROVAL_MODELS, owner: Class<*>? = null) {
         if (liveVoice.active || loading || loadFailed) return
+        liveVoiceOwner = owner
         if (voice.running) voice.stop()
         voice.clearGrantedPermission()
         liveBridge = LiveVoiceBridge(this, liveVoice, assistantInvocation, capture, voiceApproval).also { it.start(firstSpeech) }
@@ -1411,11 +1420,43 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
         return choices.singleOrNull()?.toolId
     }
     private fun sendAssistant(invocation: String, displayed: AssistCapture?) {
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) { submitAssistant(snapshot.draft, invocation, displayed) }
+    }
+
+    /**
+     * Hands a spoken request to the chat (spec 5.5). The first hand-off of an assistant button press passes the [capture] of its
+     * invocation, and later hand-offs pass null and carry no screen (spec 5.11.4). The capture arrives after the sheet opens, so the
+     * first hand-off waits up to 2 s for one in progress (spec 5.11.2). Then it sends the screen context and the screenshot that the
+     * user did not remove, as a typed assistant request does, and the capture is discarded. Returns the assistant message id, or null.
+     */
+    internal suspend fun submitLiveRequest(text: String, assistantInvocation: String?, capture: AssistCapture?): String? {
+        val draft = Draft(text)
+        val invocation = assistantInvocation?.takeIf { capture?.id == it } ?: return submitDraft(draft, search = true)
+        // Implementation choice: a capture without a screen and a screenshot, or with a page that still loads, is in progress.
+        // A capture whose screen and screenshot the user removed has nothing to wait for.
+        withTimeoutOrNull(ASSIST_CAPTURE_WAIT_MS) {
+            snapshotFlow { AssistantCapture.current?.takeIf { it.id == invocation } }.first {
+                it == null || (it.screen != null || it.screenshot != null || it.screenDiscarded && it.screenshotDiscarded) &&
+                    it.pageStatus != AssistPageStatus.LOADING
+            }
+        }
+        val latest = AssistantCapture.current?.takeIf { it.id == invocation } ?: return submitDraft(draft, search = true)
+        return submitAssistant(draft, invocation, latest)
+    }
+
+    /**
+     * Sends [draft] with the screen context and the screenshot of [displayed] that the user did not remove, then discards the
+     * capture, so a later request carries none. A typed request sends the composer draft, and a voice hand-off its own text.
+     * Returns the assistant message id, or null when nothing is sent.
+     */
+    private suspend fun submitAssistant(draft: Draft, invocation: String, displayed: AssistCapture?): String? {
         val application = getApplication<Application>()
-        if (application.assistantUnavailable()) return
-        val draft = snapshot.draft
-        val shown = displayed?.takeIf { it.id == invocation }?.forDraft(draft.id)
-        val capture = AssistantCapture.current?.takeIf { it.id == invocation } ?: return
+        if (application.assistantUnavailable()) return null
+        // The capture is bound to the composer draft (bindAssistantCapture).
+        val bound = snapshot.draft.id
+        val composer = draft.id == bound
+        val shown = displayed?.takeIf { it.id == invocation }?.forDraft(bound)
+        val capture = AssistantCapture.current?.takeIf { it.id == invocation } ?: return null
 
         fun includedScreen(latest: AssistCapture): ScreenContext? {
             val screen = shown?.screen ?: return null
@@ -1429,50 +1470,47 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
 
         val bitmap = shown?.screenshot?.takeUnless { capture.screenshotDiscarded }
         if (bitmap == null) {
-            if (submitDraft(draft, search = true, screenContext = includedScreen(capture)) != null) {
-                AssistantCapture.discardAll(invocation)
-            }
-            return
+            return submitDraft(draft, search = true, screenContext = includedScreen(capture))?.also { AssistantCapture.discardAll(invocation) }
         }
-        if (loading || loadFailed || attachmentBusy || draft.text.isBlank()) return
+        if (loading || loadFailed || attachmentBusy || draft.text.isBlank()) return null
         if (draft.attachments.size >= ImageInput.MAX_IMAGES) {
             requestError = application.getString(R.string.context_attachment_count_limit)
-            return
+            return null
         }
 
         fun currentScreenshot(): AssistCapture? = AssistantCapture.current?.takeIf {
-            it.id == invocation && it.forDraft(draft.id)?.screenshot === bitmap &&
+            it.id == invocation && it.forDraft(bound)?.screenshot === bitmap &&
                 !application.assistantUnavailable()
         }
 
         attachmentBusy = true
-        viewModelScope.launch {
-            var attachment: Attachment? = null
-            var submitted = false
-            try {
-                // Keep the screenshot in memory until Send. The message owns the file after submission.
-                withContext(Dispatchers.IO) { attachment = AssistContext.screenshot(application, bitmap) }
-                val latest = currentScreenshot()
-                if (latest != null) {
-                    attachmentBusy = false
-                    if (snapshot.draft == draft) {
-                        submitted = submitDraft(draft.copy(attachments = draft.attachments + checkNotNull(attachment)),
-                            search = true, screenContext = includedScreen(latest)) != null
-                        if (submitted) AssistantCapture.discardAll(invocation)
-                    } else requestError = application.getString(R.string.context_draft_changed)
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                if (currentScreenshot() != null) requestError = application.getString(R.string.assistant_image_error)
-            } finally {
+        var attachment: Attachment? = null
+        var submitted: String? = null
+        try {
+            // Keep the screenshot in memory until Send. The message owns the file after submission.
+            withContext(Dispatchers.IO) { attachment = AssistContext.screenshot(application, bitmap) }
+            val latest = currentScreenshot()
+            if (latest != null) {
                 attachmentBusy = false
-                val rejected = attachment?.takeUnless { submitted }
-                if (rejected != null) withContext(NonCancellable + Dispatchers.IO) {
-                    AssistContext.mediaFile(application, Uri.parse(rejected.uri)).delete()
-                }
+                // A typed request goes only with the same composer draft. A voice hand-off has its own text.
+                if (!composer || snapshot.draft == draft) {
+                    submitted = submitDraft(draft.copy(attachments = draft.attachments + checkNotNull(attachment)),
+                        search = true, screenContext = includedScreen(latest))
+                    if (submitted != null) AssistantCapture.discardAll(invocation)
+                } else requestError = application.getString(R.string.context_draft_changed)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            if (currentScreenshot() != null) requestError = application.getString(R.string.assistant_image_error)
+        } finally {
+            attachmentBusy = false
+            val rejected = attachment?.takeUnless { submitted != null }
+            if (rejected != null) withContext(NonCancellable + Dispatchers.IO) {
+                AssistContext.mediaFile(application, Uri.parse(rejected.uri)).delete()
             }
         }
+        return submitted
     }
 
     fun send(search: Boolean = true) {

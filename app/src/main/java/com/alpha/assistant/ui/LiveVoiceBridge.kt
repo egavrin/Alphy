@@ -14,6 +14,7 @@ import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.Message
 import com.alpha.assistant.surfaces.AssistCapture
+import com.alpha.assistant.surfaces.AssistantCapture
 import com.alpha.assistant.voice.ApprovalWindow
 import com.alpha.assistant.voice.LiveProtocol
 import com.alpha.assistant.voice.LiveVoiceHost
@@ -24,7 +25,10 @@ import com.alpha.assistant.voice.spokenAnswer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * The chat side of the voice mode (spec 5.5 to 5.8). Each hand-off goes to the chat agent as a normal message, and its result goes
@@ -33,9 +37,10 @@ import kotlinx.coroutines.launch
 internal class LiveVoiceBridge(
     private val model: ShellViewModel,
     private val session: LiveVoiceSession,
-    // The first hand-off of an assistant button press carries the screen context of this invocation (spec 5.11.4, Task 9).
+    // The first hand-off of an assistant button press carries the screen of this invocation (spec 5.11.4). The capture can hold a
+    // screenshot, so the bridge drops it after that hand-off and at the end.
     private val assistantInvocation: String?,
-    private val capture: AssistCapture?,
+    private var capture: AssistCapture?,
     // A spoken «да» or «нет» can decide a phone plan (spec 5.5.10 rule 10).
     private val voiceApproval: Boolean,
 ) : LiveVoiceHost {
@@ -55,6 +60,8 @@ internal class LiveVoiceBridge(
     private var approval: Approval? = null
     /** The decided answer of the latest user turn and its rule-5 text. A delegation of that turn takes the text (rule 7). */
     private var answered: Pair<SpokenAnswer, String>? = null
+    /** An assistant hand-off can wait for the screen capture, so the hand-offs go to the chat one at a time, in order. */
+    private val handOffOrder = Mutex()
 
     /** The voice approval of one spoken REVIEW revision: its proposal event id and its window (spec 5.5.10 rules 2 and 3). */
     private class Approval(val plan: AgentPlan, val proposal: String) {
@@ -73,6 +80,8 @@ internal class LiveVoiceBridge(
                     if (it != AiProvider.OPENAI) session.stop(string(R.string.live_voice_openai_only))
                 }
             }
+            // onHide, onLockscreenShown, and a new press end the system session of the press, and its voice mode (spec 5.11.6, 5.11.7).
+            assistantInvocation?.let { id -> launch { snapshotFlow { AssistantCapture.isOpen(id) }.first { !it }; session.stop() } }
             snapshotFlow { model.snapshot to model.agent.plan }.collect { report() }
         }
     }
@@ -88,8 +97,15 @@ internal class LiveVoiceBridge(
         // Rule 7: the hand-off of an approval or rejection turn gets the rule-5 text, and the chat saves nothing.
         answered?.takeIf { spokenAnswer(request) == it.first }?.let { answered = null; session.commentary(id, it.second); return }
         if (request.isBlank()) { session.commentary(id, NOT_HEARD); return }
-        // shortcut: every refusal gets the busy text. A spoken request reaches only the full queue or a busy «+» attachment.
-        val messageId = model.submitDraft(Draft(request), search = true) ?: run { session.commentary(id, BUSY); return }
+        if (assistantInvocation == null) { track(id, model.submitDraft(Draft(request), search = true)); return }
+        val first = capture.also { capture = null }
+        model.viewModelScope.launch { track(id, handOffOrder.withLock { model.submitLiveRequest(request, assistantInvocation, first) }) }
+    }
+
+    // shortcut: every refusal gets the busy text. A spoken request reaches only the full queue, a busy «+» attachment, or a failed
+    // screenshot copy, which shows its own error.
+    private fun track(id: String, messageId: String?) {
+        if (messageId == null) { session.commentary(id, BUSY); return }
         handOffs[id] = messageId
         cardId = messageId
     }
@@ -126,7 +142,7 @@ internal class LiveVoiceBridge(
         approval?.takeIf { it.acknowledged && it.window == null }?.let { it.window = ApprovalWindow(it.plan.id, it.plan.revision, endMs) }
     }
 
-    override fun ended(status: String, settingsRequired: Boolean) { watch?.cancel(); watch = null }
+    override fun ended(status: String, settingsRequired: Boolean) { watch?.cancel(); watch = null; capture = null }
 
     /** Sends the mini-app progress and the result of each tracked message once (spec 5.5.5 to 5.5.8, 5.7.2). */
     private fun report() {
