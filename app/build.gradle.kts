@@ -56,6 +56,7 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.window:window-testing:1.5.1")
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver3:5.5.1")
 }
 
 val embeddingModel = layout.projectDirectory.file("src/main/assets/semantic/embeddinggemma-2-text-270m.litertlm")
