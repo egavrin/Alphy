@@ -317,6 +317,8 @@ class ShellLiveVoiceWorkflowTest {
         audio.playbackActive = false
         // The session marks a turn as overlapped when it saw playback within the turn length (400 ms) before its delta.
         SystemClock.sleep(600)
+        // `execute` sets `busy` at once and changes `plan` only after an IO hop, so each negative case checks both.
+        assertFalse(model.agent.busy)
         assertEquals(first, model.agent.plan)
         scenario.onActivity { model.agent.revise(first, "Use green") }
         robot.waitUntil(60_000) { commentary().size == 2 }
@@ -324,16 +326,21 @@ class ShellLiveVoiceWorkflowTest {
         assertEquals(first.id to first.revision + 1, second.id to second.revision)
         // Inside the window of the first revision, [5,000, 35,000) ms, which the revision closed.
         answer("да", 7_000)
+        assertFalse(model.agent.busy)
         assertEquals(second, model.agent.plan)
         assertEquals(listOf("d1" to PROPOSAL_ADD, "d1" to PROPOSAL_ADD), commentary())
         spoken(8_000)
         answer("да", 38_000)
+        assertFalse(model.agent.busy)
         assertEquals(second, model.agent.plan)
         assertEquals(2, commentary().size)
         // ApprovalWindow reads only the start time, so this turn is still the first one inside [8,000, 38,000) ms.
+        // No run is in flight here, so only this «да» can start the run and send «Запускаю.».
         answer("да", 9_000)
         robot.waitUntil { model.agent.plan?.phase == AgentPhase.COMPLETED }
         assertEquals(second.revision, checkNotNull(model.agent.plan).revision)
+        robot.waitUntil { commentary().size == 4 }
+        assertEquals(listOf("d1" to PROPOSAL_ADD, "d1" to PROPOSAL_ADD, "d1" to STARTED, "d1" to DONE), commentary())
     }
 
     /** Spec 5.5.10 rule 7. */
@@ -354,26 +361,32 @@ class ShellLiveVoiceWorkflowTest {
         assertEquals(listOf(PLAN_REQUEST, robot.text(R.string.agent_plan_ready)), messages(model).map { it.text })
     }
 
-    /** Ruling R16: the proposal reads the card details of each step. The limit drops whole steps and keeps the question. */
+    /** Ruling R16: the proposal reads the card details of each step, and «; » separates the steps. */
     @Test fun proposalSpeaksTheCardDetails() {
-        val facts = listOf("A", "B", "C").map { it.repeat(500) }
-        fixture.provider.devicePlanSteps = listOf("memory", "favorite color", "green").map { PhoneActionEvidence(PLAN_REQUEST, it) }
-        fixture.provider.agentProposal = JSONObject().put("steps", JSONArray(facts.map {
-            JSONObject().put("function", "memory.write").put("args", JSONObject().put("text", it))
-        })).toString()
-        install()
-        live(voiceApproval = true) { _, model ->
-            proposed(model, PLAN_REQUEST, "d1", 100)
+        // Two steps of 500-character facts fit in one append (1,181 characters).
+        val facts = listOf("A", "B").map { it.repeat(500) }
+        reviewed(prepare = { writes(facts) }) { _, _, _ ->
             val proposal = commentary().single().second
             assertEquals("Alphy предлагает: ${added(facts[0])}; ${added(facts[1])}.$ASK", proposal)
             assertTrue(proposal.length <= 1_200)
         }
     }
 
+    /** Review I1: a step list that does not fit in one append needs the screen, so a «да» cannot run steps the user did not hear. */
+    @Test fun longPlanNeedsTheScreen() = reviewed(prepare = { writes(listOf("A", "B", "C").map { it.repeat(500) }) }) { _, model, review ->
+        assertEquals(AgentPhase.REVIEW, review.phase)
+        answer("да", 6_000)
+        assertFalse(model.agent.busy)
+        assertEquals(review, model.agent.plan)
+        SystemClock.sleep(500)
+        assertEquals(listOf("d1" to ON_SCREEN), commentary())
+    }
+
     /** Spec 5.5.10 rule 10. */
     @Test fun withoutEchoCheckOnlyTapRuns() = reviewed(voiceApproval = false) { scenario, model, review ->
         assertEquals(listOf("d1" to ON_SCREEN), commentary())
         answer("да", 6_000)
+        assertFalse(model.agent.busy)
         assertEquals(review, model.agent.plan)
         scenario.onActivity { model.agent.execute(review) }
         robot.waitUntil { commentary().size == 2 }
@@ -430,6 +443,7 @@ class ShellLiveVoiceWorkflowTest {
             assertEquals(AgentPhase.NEEDS_SELECTION, selection.phase)
             spoken(5_000)
             answer("да", 6_000)
+            assertFalse(model.agent.busy)
             assertEquals(selection, model.agent.plan)
             fixture.provider.devicePlanSteps = listOf(PhoneActionEvidence("Take a selfie.", "selfie"))
             fixture.provider.agentProposal = """{"steps":[{"function":"camera.capture","args":{"lens":"front"}}]}"""
@@ -441,9 +455,10 @@ class ShellLiveVoiceWorkflowTest {
         }
     }
 
-    /** The plan of [ADD] for the hand-off d1, whose first commentary GPT-Live has acknowledged and spoken until 5,000 ms. */
-    private fun reviewed(voiceApproval: Boolean = true, test: (ActivityScenario<CloudTestActivity>, ShellViewModel, AgentPlan) -> Unit) {
-        plan(ADD)
+    /** The plan of [prepare] for the hand-off d1, whose first commentary GPT-Live has acknowledged and spoken until 5,000 ms. */
+    private fun reviewed(voiceApproval: Boolean = true, prepare: () -> Unit = { plan(ADD) },
+        test: (ActivityScenario<CloudTestActivity>, ShellViewModel, AgentPlan) -> Unit) {
+        prepare()
         install()
         live(voiceApproval) { scenario, model ->
             val review = proposed(model, PLAN_REQUEST, "d1", 100)
@@ -452,11 +467,16 @@ class ShellLiveVoiceWorkflowTest {
         }
     }
 
-    /** The chat agent answers [PLAN_REQUEST] with a phone plan of [proposal]. */
-    private fun plan(proposal: String) {
-        fixture.provider.devicePlanSteps = listOf(PhoneActionEvidence(PLAN_REQUEST, PLAN_REQUEST))
+    /** The chat agent answers [PLAN_REQUEST] with a phone plan of [proposal], one step for each of the [anchors]. */
+    private fun plan(proposal: String, anchors: List<String> = listOf(PLAN_REQUEST)) {
+        fixture.provider.devicePlanSteps = anchors.map { PhoneActionEvidence(PLAN_REQUEST, it) }
         fixture.provider.agentProposal = proposal
     }
+
+    /** A plan with one memory.write step for each of the (at most 3) [facts]. Each step has its own anchor in [PLAN_REQUEST]. */
+    private fun writes(facts: List<String>) = plan(JSONObject().put("steps", JSONArray(facts.map {
+        JSONObject().put("function", "memory.write").put("args", JSONObject().put("text", it))
+    })).toString(), listOf("memory", "favorite color", "green").take(facts.size))
 
     /** Says [request] as the hand-off [id] at [atMs], and waits for the first commentary of its plan. */
     private fun proposed(model: ShellViewModel, request: String, id: String, atMs: Long): AgentPlan {

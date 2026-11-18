@@ -162,8 +162,9 @@ internal class LiveVoiceBridge(
         // Any other revision or phase closes the voice approval of the spoken one (rules 6 and 8).
         if (plan != approval?.plan) approval = null
         if (plan == null || !planStates.add(Triple(plan.id, plan.revision, plan.phase))) return
+        val voiceProposal = plan.takeIf { it.phase == AgentPhase.REVIEW && voiceApproval }?.let(::proposal)
         val text = when (plan.phase) {
-            AgentPhase.REVIEW -> if (voiceApproval) proposal(plan) else ON_SCREEN
+            AgentPhase.REVIEW -> voiceProposal ?: ON_SCREEN
             in SCREEN_PHASES -> ON_SCREEN
             AgentPhase.COMPLETED -> spoken(DONE, string(if (plan.alarmSequence()) R.string.agent_alarms_sent else R.string.agent_completed))
             AgentPhase.FAILED -> spoken(NOT_DONE, plan.results.lastOrNull().orEmpty())
@@ -171,18 +172,15 @@ internal class LiveVoiceBridge(
             else -> return
         }
         val event = session.commentary(delegation, text)
-        if (plan.phase == AgentPhase.REVIEW && voiceApproval) approval = Approval(plan, event)
+        if (voiceProposal != null) approval = Approval(plan, event)
     }
 
-    /** The step list of the plan card (rule 2, ruling R16). The limit drops whole steps and never cuts the question. */
-    private fun proposal(plan: AgentPlan): String {
-        val room = MAX - PROPOSE.length - ASK.length
-        val steps = plan.steps.map(::spokenStep)
-        // A step holds its own commas, so «; » separates the steps. The room keeps one character for the closing period.
-        var list = steps.firstOrNull().orEmpty()
-        for (step in steps.drop(1)) if (list.length + 2 + step.length < room) list += "; $step" else break
-        // Only a first step longer than the room is cut, at a sentence end or a word.
-        return PROPOSE + LiveProtocol.spoken(list, room) + ASK
+    /** The full step list of the plan card (rule 2, ruling R16), or null when it does not fit in one append. */
+    private fun proposal(plan: AgentPlan): String? {
+        // A step holds its own commas, so «; » separates the steps. The list is not cut here.
+        val list = LiveProtocol.spoken(plan.steps.joinToString("; ", transform = ::spokenStep), Int.MAX_VALUE)
+        // A shorter list would let a «да» run steps that the user did not hear, so only a tap can approve it (review I1).
+        return (PROPOSE + list + ASK).takeIf { it.length <= MAX }
     }
 
     /** One step as the plan card shows it: the label, the «before» and «after» texts, and the non-reversible note. */
