@@ -354,12 +354,11 @@ export function load(kit, app, state) {
 }
 
 /**
- * The kit of one event: the lines of the compiled app with the stored state in it. The kit starts with no line, so its first
+ * The kit of one event: the lines of the compiled app with the stored state in it. The kit does not start its lines, so its first
  * compute (in load) sees the stored state, and a formula never runs on a state that is not there yet.
  */
 export function kitOf(app, state) {
-  const kit = new App(new AppFile());
-  kit.file = new AppFile().feedText(app.lines);
+  const kit = new App(new AppFile().feedText(app.lines), false);
   kit.nextId = app.next;
   if (app.shown) kit.shown = Object.fromEntries(parseExpression(app.shown).entries);
   load(kit, app, state);

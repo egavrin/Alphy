@@ -144,6 +144,15 @@ test("a control that changes nothing in each state is a fault, and a control at 
   same(smoke(dead).faults, ["smoke run: noop never changes a value: its action does nothing"], "a dead control is a fault, and a control at its limit is not");
 });
 
+test("the smoke run comes back to a state at the time of that state", async () => {
+  // A button that shows only while the timer runs, and that changes nothing. The run comes back to the state after the start
+  // when its own clock is 30 days later. At that time each phase of the timer is over, and a press would end them.
+  const running = await planned('app("T", lang="en")\n$/x = 1\nneed t = timer("T", 40, rounds=2, rest=10)\nsame = Button("Same", action=set($/x, $/x), visible=$/t_on)\nshown = Text($/x)\nroot = Column([t_view, same, shown])');
+  const run = smoke(running);
+  same(run.faults, ["smoke run: same never changes a value: its action does nothing"], "a button that does nothing while the timer runs is dead");
+  same(run.trace.find((line) => line.startsWith("tap t_pause")), "tap t_pause: t_on true -> false, t_end 40000 -> 0", "the pause stops the timer and ends no phase");
+});
+
 test("a control that does nothing at the start gets a new try in later states", async () => {
   const emptyDeck = await planned('app("T")\nneed words = entries("Words", fields={word: "text", meaning: "text"})\nneed quiz = deck("Quiz", $/words, front=$word, back=$meaning)');
   same(smoke(emptyDeck).faults, [], "a deck over a list that starts empty has no dead control");

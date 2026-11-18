@@ -243,7 +243,7 @@ The first full path: `calc.plan` becomes a definition that passes `ToolSpec.pars
 
 **Files:**
 - Modify: `kit/src/emit.js`, `kit/src/run.js`, tests, `AppFileProofTest.kt`
-- Create: `docs/superpowers/plans/evidence/2026-11-18-app-file-kit-timer.md`
+- Create: the section "Timers" of `docs/superpowers/plans/2026-11-18-app-file-kit-results.md` (Git ignores `evidence/`)
 
 **Rules:**
 

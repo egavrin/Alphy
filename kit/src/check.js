@@ -21,13 +21,17 @@ const finite = (value) => (typeof value === "number" ? Number.isFinite(value) : 
  */
 export function smoke(file, limit = 60) {
   // The run has its own clock, so an app with a timer gives the same result in each run. Only the run moves that clock.
-  const real = settings.now;
-  let clock = 0;
-  settings.now = () => clock;
-  try { return smokeRun(file, limit, () => { clock += 30 * 864e5; }); } finally { settings.now = real; }
+  const real = settings.now, clock = { now: 0 };
+  settings.now = () => clock.now;
+  try { return smokeRun(file, limit, clock); } finally { settings.now = real; }
 }
-function smokeRun(file, limit, wait) {
+function smokeRun(file, limit, clock) {
   const app = new App(file), faults = [], notes = [], trace = [], done = new Set(), reached = new Set(), idle = new Map();
+  const wait = () => { clock.now += 30 * 864e5; };
+  // A state of the run is the text of the app's state and the time of the clock at it. A timer keeps the end of its phase in the state,
+  // so the run comes back to a state at its own time: a later time would end the phases of a timer that runs at the next press.
+  const save = () => ({ text: JSON.stringify(app.state), now: clock.now });
+  const restore = (saved) => { app.state = JSON.parse(saved.text); clock.now = app.clock = saved.now; app.recompute(); };
   // What a person can see of a node. The rows of a list are data, not a look: the look is in the children.
   const look = (node) => JSON.stringify(node, (key, value) => (["row", "list", "template", "action", "bind", "items", "call"].includes(key) ? undefined : value));
   const short = (value) => (Array.isArray(value) ? `[${value.length}]` : JSON.stringify(value) ?? "nothing").slice(0, 40);
@@ -45,15 +49,14 @@ function smokeRun(file, limit, wait) {
     if (usable) out.forEach((control) => reached.add(control.key));
     return out;
   };
-  const start = JSON.stringify(app.state), all = controls(false).map((control) => control.key);
+  const start = save(), all = controls(false).map((control) => control.key);
   /** A control that did nothing so far gets a new try in the state of now. Returns that state. */
   const retryIdle = (list) => {
-    const later = JSON.stringify(app.state);
+    const later = save();
     for (const other of list) {
       if (!idle.has(other.key) || other.node.props.bind) continue;
-      if (!app.fire(other.node) && JSON.stringify(app.state) !== later) idle.delete(other.key);
-      app.state = JSON.parse(later);
-      app.recompute();
+      if (!app.fire(other.node) && JSON.stringify(app.state) !== later.text) idle.delete(other.key);
+      restore(later);
     }
     return later;
   };
@@ -62,7 +65,7 @@ function smokeRun(file, limit, wait) {
   const drain = () => {
     while (queue.length && done.size < limit) {
       const base = queue.shift();
-      const reset = () => { app.state = JSON.parse(base); app.recompute(); };
+      const reset = () => restore(base);
       reset();
       const here = controls().map((control) => control.key);
       for (const key of here) {
@@ -92,7 +95,7 @@ function smokeRun(file, limit, wait) {
         if (late.length) { faults.push(`smoke run: after ${title}, ${late.join("; ")}`); continue; }
         const broken = Object.keys(app.state).filter((name) => !finite(app.state[name]));
         if (broken.length) { faults.push(`smoke run: after ${title}, ${broken.map((name) => "$/" + name).join(", ")} is not a finite number`); continue; }
-        if (JSON.stringify(app.state) === base) {
+        if (JSON.stringify(app.state) === base.text) {
           // A control of a list row gets a second try on the last row: the first row cannot move up.
           const rows = [];
           const find = (other) => { if (other.name === key && other.rowIndex !== undefined) rows.push(other); other.children.forEach(find); };
@@ -100,11 +103,11 @@ function smokeRun(file, limit, wait) {
           find(app.tree());
           // With one row the run cannot tell: a row cannot move, and the run does not judge it.
           const alone = node.rowIndex !== undefined && rows.length < 2;
-          if (!p.bind && !alone && !(rows.length > 1 && !app.fire(rows.at(-1)) && JSON.stringify(app.state) !== base)) idle.set(key, title);
+          if (!p.bind && !alone && !(rows.length > 1 && !app.fire(rows.at(-1)) && JSON.stringify(app.state) !== base.text)) idle.set(key, title);
           continue;
         }
         // For the judge: what each control did to the values of the app.
-        const was = JSON.parse(base);
+        const was = JSON.parse(base.text);
         trace.push(`${p.bind ? "set" : "tap"} ${title}: ` + Object.keys({ ...was, ...app.state }).filter((name) => JSON.stringify(was[name]) !== JSON.stringify(app.state[name]))
           .map((name) => `${name} ${short(was[name])} -> ${short(app.state[name])}`).join(", "));
         if (look(app.tree()) === seen) faults.push(`smoke run: ${title} changes a value, and no part of the screen shows it`);
@@ -119,11 +122,11 @@ function smokeRun(file, limit, wait) {
         // Time passes: each timer that runs goes to its end, and the run goes on from that state too.
         wait();
         app.tick();
-        const ended = JSON.stringify(app.state);
-        if (ended === later) continue;
+        const ended = save();
+        if (ended.text === later.text) continue;
         const stuck = Object.keys(app.state).filter((name) => !finite(app.state[name]));
         if (stuck.length) { faults.push(`smoke run: after the time of a timer passes, ${stuck.map((name) => "$/" + name).join(", ")} is not a finite number`); continue; }
-        trace.push("time passes: " + Object.keys(app.state).filter((name) => JSON.stringify(JSON.parse(later)[name]) !== JSON.stringify(app.state[name])).map((name) => `${name} -> ${short(app.state[name])}`).join(", "));
+        trace.push("time passes: " + Object.keys(app.state).filter((name) => JSON.stringify(JSON.parse(later.text)[name]) !== JSON.stringify(app.state[name])).map((name) => `${name} -> ${short(app.state[name])}`).join(", "));
         queue.push(ended);
       }
     }
@@ -135,39 +138,35 @@ function smokeRun(file, limit, wait) {
   const shape = () => controls().map((control) => control.key).join(",");
   const shapes = new Set(), states = new Set(), taps = new Map();
   const walkFrom = (begin) => {
-    app.state = JSON.parse(begin);
-    app.recompute();
+    restore(begin);
     shapes.add(shape());
     for (let step = 0; step < 60; step++) {
       // A tab button is not a step of the walk. There is one walk for each tab, and it stays in that tab.
       const usable = controls().filter((control) => !control.node.props.bind && !deletes(control.node) && !control.node.tab);
-      if (usable.some((control) => !done.has(control.key))) queue.push(JSON.stringify(app.state));
+      if (usable.some((control) => !done.has(control.key))) queue.push(save());
       if (!usable.length) break;
-      const now = JSON.stringify(app.state);
-      states.add(now);
+      const now = save();
+      states.add(now.text);
       const tried = usable.map((control) => {
         const failed = app.fire(control.node), found = { control, newShape: !failed && !shapes.has(shape()), newState: !failed && !states.has(JSON.stringify(app.state)) };
-        app.state = JSON.parse(now);
-        app.recompute();
+        restore(now);
         return found;
       });
       const count = (item) => taps.get(item.control.key) ?? 0;
       const pick = (tried.find((item) => item.newShape) ?? tried.filter((item) => item.newState).sort((a, b) => count(a) - count(b))[0])?.control ?? usable[step % usable.length];
       taps.set(pick.key, (taps.get(pick.key) ?? 0) + 1);
       if (app.fire(controls().find((control) => control.key === pick.key)?.node ?? pick.node)) break;
-      if (JSON.stringify(app.state) !== now) idle.delete(pick.key);
+      if (JSON.stringify(app.state) !== now.text) idle.delete(pick.key);
       shapes.add(shape());
       // The walk prefers new states, so it does not tap a button that goes back to the start. Such a button gets its try here.
       if (idle.size) retryIdle(controls());
     }
   };
-  app.state = JSON.parse(start);
-  app.recompute();
+  restore(start);
   const tabStates = controls().filter((control) => control.node.tab && !control.node.props.selected).map((control) => {
     app.fire(control.node);
-    const state = JSON.stringify(app.state);
-    app.state = JSON.parse(start);
-    app.recompute();
+    const state = save();
+    restore(start);
     return state;
   });
   [start, ...tabStates].forEach(walkFrom);

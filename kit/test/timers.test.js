@@ -34,8 +34,8 @@ const rounds = async () => {
   };
   return { kit, send };
 };
-/** One work second and one rest second in 2 rounds. The device test timerRoundsPassesParseAndSmoke has the same plan. */
-const SHORT = 'app("Short rounds", lang="en")\nneed t = timer("Short", 1, rounds=2, rest=1)\nneed done = progress("Rounds done", $/t, 2)\n';
+/** Two work seconds and two rest seconds in 2 rounds. The device test timerRoundsPassesParseAndSmoke has the same plan. */
+const SHORT = 'app("Short rounds", lang="en")\nneed t = timer("Short", 2, rounds=2, rest=2)\nneed done = progress("Rounds done", $/t, 2)\n';
 
 test("emit: tea.plan gives a foreground timer with the duration of the chosen tea", async () => {
   const { file, definition, faults } = await compiled(plan("tea"));
@@ -73,6 +73,10 @@ test("emit: a foreground timer outside 1 second to 24 hours is a fault, and the 
   expect(duration(definition.ui)).toBe(60000);
   expect(duration(handle(request(definition.initialState, press("n_field", 0)), app).ui)).toBe(1000);
   expect(duration(handle(request(definition.initialState, press("n_field", 2000)), app).ui)).toBe(86400000);
+  // A duration that is not finite at run time, 60 / 0, runs 1 second.
+  const cups = await compiled('app("T", lang="en")\nneed n = input("number", "Cups", 2, min=0, max=10)\nneed t = timer("T", 60 / $/n, alert=true)');
+  expect(duration(cups.definition.ui)).toBe(30000);
+  expect(duration(handle(request(cups.definition.initialState, press("n_field", 0)), cups.app).ui)).toBe(1000);
 });
 
 test("emit: timer-rounds.plan gives a surface, a canvas, and no foreground timer", async () => {
@@ -208,7 +212,39 @@ test("run: the short plan of the device test ends after its second rest", async 
   for (let step = 0; step < 4; step++) {
     const reply = handle(request(state, timer("t_bar")), app, state.t_s.end + 300);
     state = reply.state;
-    seen.push([state.t_s.over ? "over" : state.t_s.resting ? "rest" : "work", state.t_s.round, state.t, reply.timers.length]);
+    seen.push([state.t_s.over ? "over" : state.t_s.resting ? "rest" : "work", state.t_s.round, state.t, reply.timers]);
   }
-  expect(seen).toEqual([["rest", 1, 1, 1], ["work", 2, 1, 1], ["rest", 2, 2, 1], ["over", 2, 2, 0]]);
+  const ticks = [{ id: "t_bar", intervalMs: 1000 }];
+  expect(seen).toEqual([["rest", 1, 1, ticks], ["work", 2, 1, ticks], ["rest", 2, 2, ticks], ["over", 2, 2, []]]);
+});
+
+test("emit: a Timer in a row of a list is a fault of its line", async () => {
+  const { definition, faults } = await compiled('app("Teas", lang="en")\n$/teas = [{name: "Green", s: 120}]\nroot = Column([teas])\nteas = List($/teas, row)\nrow = Row([Text($name), brew])\nbrew = Timer("Brew", $s)');
+  expect(definition).toBeNull();
+  expect(faults).toEqual(["brew: a Timer in a row of a list is not built yet"]);
+});
+
+test("run: a clock that goes back keeps the end of the phase, and the time spent is never below 0", async () => {
+  const { kit, send } = await rounds();
+  send(0, press("timer_start"));
+  const back = send(-5000, timer("timer_bar"));
+  expect(back.state.timer_s).toEqual({ on: true, round: 1, resting: false, over: false, spent: 0, end: T0 + 40000 });
+  expect([kit.state.timer_spent, kit.state.timer_end]).toEqual([0, T0 + 40000]);
+  // The work phase still ends at its end.
+  expect(send(39000, timer("timer_bar")).state.timer_s).toMatchObject({ resting: false, spent: 39 });
+  expect(send(40500, timer("timer_bar")).state.timer_s).toMatchObject({ resting: true, spent: 0.5, end: T0 + 60000 });
+});
+
+test("run: a phase length that changes while the timer runs keeps the end of the phase", async () => {
+  const { file, definition, app } = await compiled('app("T", lang="en")\nneed work = input("number", "Work", 40, min=10, max=100)\nneed t = timer("T", $/work, rounds=2, rest=10)');
+  const kit = new App(file);
+  settings.now = () => T0;
+  kit.press("t_start");
+  const started = handle(request(definition.initialState, press("t_start")), app, T0);
+  settings.now = () => T0 + 10000;
+  kit.input("work_field", 60);
+  // 10 s of 40 passed. The end stays, so the time spent of the longer phase is 30 s: the bar jumps from a quarter to a half.
+  const longer = handle(request(started.state, press("work_field", 60)), app, T0 + 10000);
+  expect(longer.state.t_s).toMatchObject({ on: true, spent: 30, end: T0 + 40000 });
+  expect([kit.state.t_spent, kit.state.t_end]).toEqual([30, T0 + 40000]);
 });

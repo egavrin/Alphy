@@ -126,13 +126,14 @@ export const shownFormulas = (file) => file.of("need").filter((entry) => entry.t
 export const given = (tree) => ({ ...Object.fromEntries((CATALOG[tree.name] ?? []).map((key, index) => [key, tree.args[index]])), ...tree.named });
 
 export class App {
-  constructor(file) {
+  /** start=false: no state line starts and no formula runs, so the caller puts a stored state in first (run.js kitOf). */
+  constructor(file, start = true) {
     this.file = file;
     this.faults = [];
     this.nextId = 1;
     this.state = {};
     this.seen = new Map();
-    this.follow();
+    if (start) this.follow();
   }
 
   /**
@@ -479,6 +480,8 @@ export class App {
       const n = entry.key, number = (tree, fallback) => { try { return Number(tree ? this.value(tree, {}) : fallback) || 0; } catch { return 0; } };
       const phase = () => Number(s[n + "_phase"]) || 0;
       if (!s[n + "_on"]) { s[n + "_end"] = 0; continue; }
+      // The end of a phase is a time of the clock: a clock that goes back makes the phase longer, and the time spent stays at 0 or above.
+      // shortcut: a phase length that changes while its timer runs keeps the end, so the time spent jumps by the change; keep the time spent and move the end when a plan changes a phase while it runs.
       // A start, also after a pause: the phase ends when the time that is left passes.
       if (!s[n + "_end"]) s[n + "_end"] = now + Math.max(0, phase() - s[n + "_spent"]) * 1000;
       // 1000 phases at most in one look, so a phase of no length cannot hold the host.
