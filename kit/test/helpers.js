@@ -6,6 +6,11 @@ import { AppFile } from "../src/dsl.js";
 import { expand } from "../src/parts.js";
 import { settings } from "../src/core.js";
 import { report } from "../src/check.js";
+import { runtime } from "../src/emit.js";
+import { runtimeText } from "../build.js";
+
+// The bundle gives emit.js the text of the run-time (kit/build.js). A test of the sources gives it the same text from the sources of now.
+runtime.text = runtimeText();
 
 // The prototype compared values as JSON text: the order of keys counts, and undefined in a list is null. The port keeps that.
 export const same = (actual, expected, message) => expect(JSON.stringify(actual), message).toBe(JSON.stringify(expected));

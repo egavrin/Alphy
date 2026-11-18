@@ -2,6 +2,7 @@ package com.alpha.assistant.tools.appfile
 
 import android.content.Context
 import com.alpha.assistant.sandbox.SandboxClient
+import org.json.JSONException
 import org.json.JSONObject
 
 internal const val APP_FILE_COMPILE_MS=3000L
@@ -18,8 +19,13 @@ internal class AppFileCompiler(private val context: Context,private val sandbox:
     suspend fun compile(appFile: String): AppFileCompilation {
         val result=sandbox.evaluateScript(kit,"compileAppFile(${JSONObject.quote(appFile)}).then(JSON.stringify)",APP_FILE_COMPILE_MS,APP_FILE_RETURN_BYTES)
         if(result.status!="OK") return AppFileCompilation(result.status,emptyList(),emptyList(),null,null)
-        // A promise that the engine does not resolve gives an empty text, not JSON.
-        val json=runCatching {JSONObject(checkNotNull(result.json))}.getOrNull() ?: return AppFileCompilation("INVALID_RESULT",emptyList(),emptyList(),null,null)
+        // A promise that the engine does not resolve gives an empty text, not JSON. An output without its faults or notes is not a result either.
+        return try {read(JSONObject(checkNotNull(result.json)))} catch(_: JSONException) {invalid} catch(_: IllegalStateException) {invalid}
+    }
+
+    private val invalid=AppFileCompilation("INVALID_RESULT",emptyList(),emptyList(),null,null)
+
+    private fun read(json: JSONObject): AppFileCompilation {
         fun texts(key: String)=json.getJSONArray(key).let {list -> List(list.length()) {list.getString(it)}}
         val faults=texts("faults")
         val definition=if(json.isNull("definition")) null else json.getJSONObject("definition").toString()

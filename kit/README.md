@@ -11,8 +11,10 @@ Then it runs the app (state, formulas, actions, and the component tree) and chec
 | `src/parts.js` | The parts: each one changes a need line into component, state, and formula lines. |
 | `src/core.js` | The evaluator: the `App` that holds the state and builds the component tree. It reads no `process` and no file. |
 | `src/check.js` | The report of the host, the check lines, and the smoke run that uses each control. Only the compile step uses it. |
-| `src/compile.js` | The sandbox entry `compileAppFile`: an app file in, the faults and notes of the report out. |
-| `build.js` | The bundle of the modules as one plain script for the sandbox, and the copies of the plans for the device tests. |
+| `src/run.js` | The run-time of a compiled app: `handle` answers each event, and `screen` maps each component to its Alphy node. |
+| `src/emit.js` | The emitter: an expanded app file as Alphy's app definition, whose `source` is the run-time and the compiled data of the app. |
+| `src/compile.js` | The sandbox entry `compileAppFile`: an app file in; the faults and notes of the report and the definition out. |
+| `build.js` | The bundle of the modules as one plain script for the sandbox, the run-time text in it, and the copies of the plans for the device tests. |
 | `plans/` | The saved plans. |
 | `test/` | The Bun tests. `test/fixtures/` holds example plans of the prototype that only the tests read. |
 

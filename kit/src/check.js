@@ -29,7 +29,7 @@ export function smoke(file, limit = 60) {
 function smokeRun(file, limit, wait) {
   const app = new App(file), faults = [], notes = [], trace = [], done = new Set(), reached = new Set(), idle = new Map();
   // What a person can see of a node. The rows of a list are data, not a look: the look is in the children.
-  const look = (node) => JSON.stringify(node, (key, value) => (["row", "list", "template", "action", "bind", "items"].includes(key) ? undefined : value));
+  const look = (node) => JSON.stringify(node, (key, value) => (["row", "list", "template", "action", "bind", "items", "call"].includes(key) ? undefined : value));
   const short = (value) => (Array.isArray(value) ? `[${value.length}]` : JSON.stringify(value) ?? "nothing").slice(0, 40);
   const onOff = (node) => !node.props.bind && node.props.action && /\btoggle\(/.test(show(node.props.action));
   const deletes = (node) => /\b(remove|clear)\(/.test(show(node.props.action));

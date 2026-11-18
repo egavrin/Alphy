@@ -349,7 +349,8 @@ export class App {
         this.fault(name ?? "?", tree.k === "path" ? `a child is a component name, not the path ${show(tree)}` : `unknown component ${tree.name ?? tree.k}`);
         return { type: "Missing", name, props: {}, children: [] };
       }
-      const node = { type: tree.name, name, props: {}, children: [], row: ctx.it, rowIndex: ctx.index, list: ctx.list };
+      // call is the expression of the component, so the emitter can tell a constant property from a computed one.
+      const node = { type: tree.name, name, props: {}, children: [], row: ctx.it, rowIndex: ctx.index, list: ctx.list, call: tree };
       const props = given(tree);
       let groups = [];
       for (const [key, arg] of Object.entries(props)) {
