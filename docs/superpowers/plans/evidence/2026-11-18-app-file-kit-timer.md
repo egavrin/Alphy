@@ -11,7 +11,7 @@ The `run.json` of each label is in `evidence/alphy-ui/<label>/`, which Git does 
 | Label | Revision | Targets | Expected | Observed |
 | --- | --- | --- | --- | --- |
 | `appfile-timer-red` | `fb72fb3+dirty` | `teaPassesParseAndSmoke`, `timerRoundsPassesParseAndSmoke` | failed | failed: "need demleme: timer is not built yet" and "need timer: timer is not built yet" |
-| `appfile-timer` | `fb72fb3+dirty` (the content of this commit) | the class, 16 tests | passed | passed, `OK (16 tests)`, 28.6 s |
+| `appfile-timer` | `fb72fb3+dirty`: the kit sources, the bundle, and the device test of commit `6ae3204`. Only kit tests and this file changed after it | the class, 16 tests | passed | passed, `OK (16 tests)`, 28.6 s |
 
 Command of the last run:
 

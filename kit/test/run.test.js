@@ -483,7 +483,8 @@ test("source: the compiled data of rich.plan and cards.plan holds only what the 
     const { file, definition, app } = await compiled(testPlan(name));
     const size = bytes(JSON.stringify(app));
     measured(`test/${name}.plan`, definition, app);
-    // The run-time evaluates the app line, the formulas, and the components. It reads no need line (it has no parts) and no start value (each value comes from the state).
+    // The run-time evaluates the app line, the formulas, and the components. These plans have no timer, so it reads no need line
+    // (it has no parts; only the need line of a timer that it moves comes with it), and no start value (each value comes from the state).
     expect(app.lines.split("\n").map((line) => parseLine(line)?.kind).filter((kind) => !["app", "formula", "component"].includes(kind))).toEqual([]);
     const read = [...file.entries.values()].filter((entry) => ["app", "formula", "component"].includes(entry.kind)).map((entry) => entry.raw).join("\n");
     // Each field of the state: a top-level field, a field of an object, and a field of the rows of a list.

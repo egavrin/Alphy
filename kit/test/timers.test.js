@@ -156,10 +156,16 @@ test("run: the count of finished rounds follows", async () => {
   expect(over.state.timer_s).toEqual({ on: kit.state.timer_on, round: kit.state.timer_round, resting: kit.state.timer_resting, over: kit.state.timer_over, spent: kit.state.timer_spent, end: kit.state.timer_end });
 });
 
-test("run: a timer event with an unknown id changes nothing, and a late one after a stop changes nothing", async () => {
+test("run: a timer event with an unknown id changes nothing", async () => {
   const { definition, app } = await compiled(plan("timer-rounds"));
   const started = handle(request(definition.initialState, press("timer_start")), app, T0);
+  // The time is past the end of the work phase: a timer event of timer_bar would start the rest.
   for (const timerId of ["nothing", "toString", "timer_start"]) expect(handle(request(started.state, timer(timerId)), app, T0 + 41000)).toEqual({ state: started.state });
+});
+
+test("run: a late timer event after a stop changes nothing", async () => {
+  const { definition, app } = await compiled(plan("timer-rounds"));
+  const started = handle(request(definition.initialState, press("timer_start")), app, T0);
   const paused = handle(request(started.state, press("timer_pause")), app, T0 + 5000);
   expect(handle(request(paused.state, timer("timer_bar")), app, T0 + 50000)).toEqual({ state: paused.state });
 });
@@ -183,6 +189,14 @@ test("run: the timers of two timers that run are one list with distinct ids", as
   // A timer event of one moves both: each one keeps its own end. The names of the second need's fields are not their wish.
   const ticked = handle(request(both.state, timer("b_bar")), app, T0 + 31000), [object, field] = new Map(app.fields).get("b_spent").split(".");
   expect([ticked.state.a, ticked.state.a_s.round, ticked.state[object][field], ticked.timers.map((each) => each.id)]).toEqual([1, 2, 30, ["a_bar", "b_bar"]]);
+});
+
+test("emit: a fifth timer on a surface is a fault of the app", async () => {
+  const needs = (count) => Array.from({ length: count }, (_, index) => `need t${index + 1} = timer("T ${index + 1}", 30, rounds=2)`).join("\n");
+  expect((await compiled(`app("Four", lang="en")\n${needs(4)}`)).definition.surfaces).toHaveLength(4);
+  const five = await compiled(`app("Five", lang="en")\n${needs(5)}`);
+  expect(five.definition).toBeNull();
+  expect(five.faults).toEqual(["app: the screen has 5 timers with rounds or with no alert, and Alphy draws at most 4. Use fewer timers"]);
 });
 
 test("run: the short plan of the device test ends after its second rest", async () => {
