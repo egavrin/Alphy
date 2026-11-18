@@ -1,0 +1,4 @@
+app("Daily habits", lang="en", preset="soft", palette="green")
+need done = progress("Done today", count($/habits, $done), len($/habits))
+need habits = entries("Habits", fields={name: "text", done: "check"}, labels={name: "New habit"}, rows=[{name: "Drink water", done: false}, {name: "Walk 30 min", done: false}, {name: "Read 20 pages", done: false}])
+check("Check off, add and remove", set(habits_done, true, row=0), set(habits_new_name, "Stretch"), tap(habits_add), set(habits_done, true, row=3), expect($/done == 2), expect($/done_goal == 4), tap(habits_remove, row=1), expect($/done_goal == 3))

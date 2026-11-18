@@ -1,0 +1,8 @@
+app("Трекер звичок", lang="uk", preset="clean", palette="teal")
+need habits = entries("Звички", fields={name: "text", mon: "check", tue: "check", wed: "check", thu: "check", fri: "check", sat: "check", sun: "check"}, rows=[{name: "Ранкова зарядка", mon: false, tue: false, wed: false, thu: false, fri: false, sat: false, sun: false}, {name: "Читання 20 хвилин", mon: false, tue: false, wed: false, thu: false, fri: false, sat: false, sun: false}, {name: "Склянка води зранку", mon: false, tue: false, wed: false, thu: false, fri: false, sat: false, sun: false}], labels={name: "Звичка", mon: "Пн", tue: "Вт", wed: "Ср", thu: "Чт", fri: "Пт", sat: "Сб", sun: "Нд"}, addText="Додати", emptyText="Ще немає звичок")
+streakrow_view = Section("Серія днів поспіль", [streak_list])
+root = Column([habits_view, streakrow_view])
+streak_text = Text("Серія: " + ($mon == false ? 0 : $tue == false ? 1 : $wed == false ? 2 : $thu == false ? 3 : $fri == false ? 4 : $sat == false ? 5 : $sun == false ? 6 : 7))
+streak_row = Row([habits_name, streak_text])
+streak_list = List($/habits, streak_row, empty="Ще немає звичок")
+need streakrow = hole("Для кожної звички показує серію днів поспіль: кількість відмічених днів від початку тижня (Пн) до першого пропуску. Якщо перший день не відмічено, серія 0. Оновлюється одразу після зміни відміток у списку звичок.")

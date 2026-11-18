@@ -1,0 +1,4 @@
+app("Shopping list", lang="en", preset="clean", palette="blue")
+need left = figure("count", "Left to buy", count($/items, !$done))
+need items = entries("Items", fields={name: "text", aisle: "text", done: "check"}, sort=$aisle, labels={name: "Product", aisle: "Aisle"}, rows=[{name: "Milk", aisle: "Dairy", done: false}, {name: "Bread", aisle: "Bakery", done: false}, {name: "Apples", aisle: "Produce", done: false}])
+check("Sorted by aisle and counted", expect($/left == 3), tap(items_remove, row=0), expect(count($/items, $name == "Bread") == 0), set(items_done, true, row=0), expect($/left == 1))

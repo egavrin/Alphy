@@ -1,0 +1,5 @@
+# Request: Una lista della spesa dove aggiungo prodotti, li spunto quando li compro e posso riordinarli per corsia del supermercato.
+app("Lista della spesa", lang="it", preset="clean", palette="green")
+need daComprare = figure("count", "Da comprare", count($/prodotti, !$preso))
+need prodotti = entries("Prodotti", fields={nome: "text", corsia: "text", preso: "check"}, sort=$corsia, labels={nome: "Prodotto", corsia: "Corsia"}, rows=[{nome: "Latte", corsia: "Latticini", preso: false}, {nome: "Pane", corsia: "Forno", preso: false}, {nome: "Mele", corsia: "Frutta", preso: false}])
+check("Aggiungi, spunta, ordine per corsia", set(prodotti_new_nome, "Burro"), set(prodotti_new_corsia, "Latticini"), tap(prodotti_add), expect($/daComprare == 4), set(prodotti_preso, true, row=0), expect(count($/prodotti, $nome == "Pane" && $preso) == 1), expect($/daComprare == 3))

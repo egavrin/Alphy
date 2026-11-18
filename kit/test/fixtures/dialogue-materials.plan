@@ -1,0 +1,6 @@
+app("По Луне — на колёсах", lang="ru", kind="Вместе исследуем", preset="clean", palette="indigo")
+need photo = picture("Астронавт едет на лунном ровере, за ним стоит лунный модуль", found="Apollo 17 Gene Cernan lunar roving vehicle", caption="Поездка по Луне", credit="NASA / Harrison Schmitt", tag="Apollo 17 · 1972")
+need sketch = picture("Эскиз: лунный ровер и лунный модуль на серой равнине, вид сбоку", caption="Наш эскиз")
+need views = tabs(["Фотография", "Наш эскиз"], [[photo], [sketch]])
+need look = card("Два объекта в одном кадре", "На переднем плане — ровер с астронавтом. За ним — лунный модуль. Можно уточнить любой объект.", eyebrow="Смотрим вместе")
+need source = link("Снимок Apollo 17", "https://science.nasa.gov/resource/apollo-17-gene-cernan-in-lunar-roving-vehicle/", note="Открыть сведения об источнике")

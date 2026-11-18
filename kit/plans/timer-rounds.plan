@@ -1,0 +1,4 @@
+app("Intervalltimer", lang="de", preset="clean", palette="orange")
+need ring = progress("Runden geschafft", $/timer, 8)
+need timer = timer("Training", 40, rounds=8, rest=20, alert=true, start="Start", pause="Pause", reset="Zurücksetzen", done="Fertig", workText="Belastung", restText="Pause")
+need runde = figure("count", "Aktuelle Runde", min($/timer + 1, 8), example=[{timer: 0}, 1])

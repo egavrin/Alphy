@@ -1,0 +1,11 @@
+# Request: Browse a small list of 12 used bikes with a price range filter, type chips like road, mountain and city, and sorting by price.
+# Parts for the inputs, the count, and the list. One line by hand: the list that filters and sorts.
+app("Used bikes", lang="en", preset="clean", palette="blue")
+need shown = figure("count", "Bikes shown", count($/bikes, $price >= $/minPrice && $price <= $/maxPrice && ($/type == "all" || $type == $/type)))
+need minPrice = input("money", "Min price", 100, min=0, max=1500, step=50)
+need maxPrice = input("money", "Max price", 1500, min=0, max=1500, step=50)
+need type = input("choice", "Type", "all", options=["all", "road", "mountain", "city"])
+need order = input("choice", "Price order", "asc", options=["asc", "desc"])
+need bikes = entries("Bikes", fields={name: "text", type: "text", price: "number"}, add=false, remove=false, rows=[{name: "Trek FX 2", type: "city", price: 420}, {name: "Giant Talon", type: "mountain", price: 560}, {name: "Cannondale CAAD", type: "road", price: 980}, {name: "Specialized Sirrus", type: "city", price: 350}, {name: "Scott Aspect", type: "mountain", price: 640}, {name: "Bianchi Via Nirone", type: "road", price: 1150}, {name: "Cube Nature", type: "city", price: 300}, {name: "Marin Bobcat", type: "mountain", price: 480}, {name: "Fuji Sportif", type: "road", price: 720}, {name: "Kona Dew", type: "city", price: 260}, {name: "Orbea Alma", type: "mountain", price: 1340}, {name: "Merida Scultura", type: "road", price: 1490}])
+bikes_list = List(sort(filter($/bikes, $price >= $/minPrice && $price <= $/maxPrice && ($/type == "all" || $type == $/type)), $price, $/order), bikes_row, empty="No bikes match")
+check("Filter by type and price, sort both ways", expect($/shown == 12), set(type_field, "road"), expect($/shown == 4), set(maxPrice_field, 1000), expect($/shown == 2), set(type_field, "all"), set(minPrice_field, 500), expect($/shown == 4))

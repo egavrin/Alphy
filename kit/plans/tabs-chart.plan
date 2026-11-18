@@ -1,0 +1,5 @@
+app("Gastos del mes", lang="es", preset="clean", palette="teal")
+need resumen = tabs(["Resumen", "Añadir"], [[grafico, total], [gastos]])
+need grafico = chart("Gastos por categoría", groups($/gastos, $categoria, $importe), $key, $value)
+need total = figure("money", "Total del mes", sum($/gastos, $importe), example=[{gastos: [{concepto: "Compra", categoria: "Ocio", importe: 100}, {concepto: "Taxi", categoria: "Transporte", importe: 300}]}, 400])
+need gastos = entries("Gastos", fields={concepto: "text", categoria: ["Alimentación", "Transporte", "Vivienda", "Ocio", "Otros"], importe: "money"}, rows=[], labels={concepto: "Concepto", categoria: "Categoría", importe: "Importe"}, addText="Añadir gasto", emptyText="Aún no hay gastos")

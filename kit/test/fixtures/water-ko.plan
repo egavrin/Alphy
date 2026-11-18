@@ -1,0 +1,5 @@
+# Request: 하루 물 마시기 기록 앱을 만들어 줘. 컵 버튼을 누르면 250ml씩 추가되고 목표 2리터 대비 진행률을 보여 줘.
+app("물 마시기 기록", lang="ko", preset="soft", palette="blue")
+need today = progress("오늘 마신 물 (ml)", $/ml, 2000)
+need ml = counter("물 (ml)", 0, step=250, min=0)
+check("컵 세 번, 하나 취소", tap(ml_plus), tap(ml_plus), tap(ml_plus), expect($/ml == 750), expect($/today == 750 && $/today_goal == 2000), tap(ml_minus), expect($/ml == 500), tap(ml_minus), tap(ml_minus), tap(ml_minus), expect($/ml == 0))
