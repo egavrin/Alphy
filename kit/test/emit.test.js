@@ -5,12 +5,18 @@ import { readFileSync } from "node:fs";
 import { settings } from "../src/core.js";
 import { emit } from "../src/emit.js";
 import { handle } from "../src/run.js";
-import { plan, planned } from "./helpers.js";
+import { allPlans, plan, planned } from "./helpers.js";
 
 /** Alphy's rule for a state field and an action id (ToolValueSchema.name, ToolUiCatalog). */
 const SAFE = /^[A-Za-z][A-Za-z0-9_]{0,47}$/;
 const REFUSED = new Set(["__proto__", "prototype", "constructor"]);
 const nodes = (node) => [node, ...(node.children ?? []).flatMap(nodes)];
+/** Each node of a ui, also the nodes of each row template. */
+const every = (node) => [node, ...(node.children ?? []).flatMap(every), ...(node.rowTemplate ? every(node.rowTemplate) : [])];
+/** The text of a node and of each series of a chart. */
+const texts = (node) => [node.text, ...(node.series ?? []).map((series) => series.text)];
+/** The texts of each progress, ring, chart, and tabs control of a ui, after its type. */
+const captions = (ui) => every(ui).filter((node) => ["progress", "progressRing", "chart", "tabs"].includes(node.type)).map((node) => [node.type, ...texts(node)]);
 const testPlan = (name) => readFileSync(new URL(`./${name}.plan`, import.meta.url), "utf8");
 const open = (state, app, now) => handle({ artifactId: "kit-test", revision: 1, state, event: { type: "open" } }, app, now);
 
@@ -60,8 +66,9 @@ test("emit: names that Alphy refuses get safe names", async () => {
   for (const name of [...fields, ...rowFields, ...actions]) expect(SAFE.test(name) && !REFUSED.has(name)).toBe(true);
   expect(new Set([...fields, ...actions]).size).toBe(fields.length + actions.length);
   expect(new Set(rowFields).size).toBe(rowFields.length);
-  // The compiled data maps each safe name back to its kit name, and each kit name to its safe name.
-  for (const name of actions) expect(app.names.safe[app.names.kit[name]]).toBe(name);
+  // The compiled data keeps only the names of the screen that differ from the name that the kit wishes, each one f<index>.
+  expect(Object.values(app.names).filter((name) => actions.includes(name)).length).toBeGreaterThan(0);
+  for (const [key, name] of Object.entries(app.names)) { expect(name).toMatch(/^f\d+$/); expect(key).not.toMatch(/^(\$\/|need:)/); }
   // The label of a control that has no text of its own is the kit's name of its line, never a safe name such as f3.
   const labels = nodes(definition.ui).flatMap((node) => [node, ...nodes(node.rowTemplate ?? { type: "" })]).filter((node) => node.action).map((node) => node.text);
   expect(labels).toContain("покупки remove");
@@ -78,7 +85,8 @@ test("emit: a plan over a limit is a fault of its need line", async () => {
 });
 
 test("emit: a source over 64 KiB is a fault of the app", async () => {
-  const { definition, faults } = emit(await planned(['app("Long", lang="en")', `$/note = "${"x".repeat(70000)}"`, "root = Column([note])", "note = Text($/note)"].join("\n")));
+  // A formula line is in the source: the run-time reads it. A start value is not.
+  const { definition, faults } = emit(await planned(['app("Long", lang="en")', `$/note := "${"x".repeat(70000)}"`, "root = Column([note])", "note = Text($/note)"].join("\n")));
   expect(definition).toBeNull();
   expect(faults).toHaveLength(1);
   expect(faults[0]).toMatch(/^app: the source is \d+ bytes, and Alphy keeps at most 65536 bytes/);
@@ -322,11 +330,14 @@ test("emit: each list holds the most rows that keep the full screen inside the r
     if (count < 100) expect(renderWork(definition.ui, filled(definition, app, count + 1))).toBeGreaterThan(2048);
     counts.push(count);
   }
-  // rich.plan starts with each list full to its count, which its two charts lower, and one start row more is a fault of its need.
-  expect(counts).toEqual([100, 80, 68, 100, 100]);
+  // rich.plan starts with each list full to its count, and one start row more is a fault of its need.
+  expect(counts).toEqual([100, 80, 91, 100, 100]);
   const over = emit(await planned(rich.replace("rows=[", 'rows=[{name: "Extra", size: "M", done: false}, ')));
   expect(over.definition).toBeNull();
-  expect(over.faults).toEqual([expect.stringMatching(/^need shirts: \$\/shirts starts with 69 rows, .*68/)]);
+  expect(over.faults).toEqual([expect.stringMatching(/^need shirts: \$\/shirts starts with 92 rows, .*91/)]);
+  // A chart costs its full 256 points: two charts lower the count to 68, so the 91 start rows of each list are a fault.
+  const charted = emit(await planned(`${rich}need shirtSizes = chart("Shirt sizes", groups($/shirts, $size), $key, $value)\nneed shoeSizes = chart("Shoe sizes", groups($/shoes, $size), $key, $value, kind="line")\n`));
+  expect(charted.faults).toEqual(["shirts", "shoes"].map((list) => expect.stringMatching(new RegExp(`^need ${list}: \\$/${list} starts with 91 rows, and the screen has room for 68 rows`))));
 });
 
 test("emit: a screen whose charts alone pass the render work limit is a fault of the app", async () => {
@@ -448,8 +459,16 @@ test("emit: each component of the node table becomes its Alphy node", async () =
     { type: "text", text: "Hidden", visible: false },
     { type: "text", text: "Many", visibleBind: "v.shownIf_visible" },
     { type: "button", text: "Reset", action: "enabledIf", variant: "filled", enabledBind: "v.enabledIf_enabled" },
+    // A progress bar in a row binds a field of the view that the run-time writes: the share of the row in percent.
+    { type: "section", text: "Goals", children: [{ type: "list", text: "Goals", bind: "goalList", rowTemplate: { type: "row", wrap: false, children: [
+      { type: "text", text: "", bind: "name", layout: { weight: 1 } }, { type: "progress", text: "Goal", variant: "bar", min: 0, max: 100, bind: "goalRow_1_value" }] } }] },
+    // A ring with no text under it has no children, and it takes the title of its Section.
+    { type: "section", text: "Calm", children: [{ type: "progressRing", text: "Calm", size: "large", min: 0, max: 100, bind: "d.calmRing_value" }] },
+    // Dots show a value that is not a whole number as it is.
+    { type: "progress", text: "Half", variant: "dots", min: 0, max: 4, bind: "d.half_value" },
   ]);
-  expect(definition.initialState.d).toEqual({ intro_text: "Hi Ann" });
+  expect(definition.initialState.d).toEqual({ intro_text: "Hi Ann", calmRing_value: 25, half_value: 2.5 });
+  expect(definition.initialState.goalList.map((row) => row.goalRow_1_value)).toEqual([75, 20]);
   expect(definition.initialState.v).toEqual({ shownIf_visible: false, enabledIf_enabled: false });
 });
 
@@ -476,7 +495,7 @@ test("emit: tabs-chart.plan gives a tabs control, groups with visibleBind, and a
   const [tabs] = definition.ui.children[0].children;
   const title = "Gastos por categoría";
   // The open tab is a value of the need that the run-time owns: the title of the tab, the first one at the start.
-  expect(tabs.children[0]).toEqual({ type: "tabs", text: "resumen view", bind: "resumen_s.tab", action: "resumen_view", options: ["Resumen", "Añadir"].map((value) => ({ text: value, value })) });
+  expect(tabs.children[0]).toEqual({ type: "tabs", text: "Resumen, Añadir", bind: "resumen_s.tab", action: "resumen_view", options: ["Resumen", "Añadir"].map((value) => ({ text: value, value })) });
   expect(tabs.children.slice(1).map((group) => [group.type, group.visibleBind, group.children.map((node) => node.type)])).toEqual([
     ["column", "v.resumen_view_tab0", ["section", "card"]], ["column", "v.resumen_view_tab1", ["section"]]]);
   expect(tabs.children[1].children[0]).toEqual({ type: "section", text: title, children: [
@@ -508,7 +527,7 @@ test("emit: a progress need that is the main element is a ring in the hero card"
   // The rule of the main element is the rule of the first figure (parts.js expand): the progress part writes the ring into the hero card.
   expect(definition.ui.children[0].children[0]).toEqual({ type: "card", variant: "hero", children: [
     { type: "text", text: "Done", style: { emphasis: "title" } },
-    { type: "progressRing", text: "done view Ring", size: "large", min: 0, max: 100, bind: "d.done_view_1_value", children: [{ type: "text", text: "", bind: "d.done_text" }] },
+    { type: "progressRing", text: "Done", size: "large", min: 0, max: 100, bind: "d.done_view_1_value", children: [{ type: "text", text: "", bind: "d.done_text" }] },
   ] });
   // The ring shows the share in percent, and its label the count.
   expect(definition.initialState.d).toMatchObject({ done_view_1_value: (1 / 3) * 100, done_text: "1 / 3" });
@@ -521,8 +540,8 @@ test("emit: a lesson of three steps has a dots progress with max 3", async () =>
   const bars = nodes(definition.ui).filter((node) => node.type === "progress");
   // Alphy draws at most 12 dots, so a lesson of 13 steps has a bar of the share in percent.
   expect(bars).toEqual([
-    { type: "progress", text: "les bar", variant: "dots", min: 0, max: 3, bind: "d.les_bar_value" },
-    { type: "progress", text: "long bar", variant: "bar", min: 0, max: 100, bind: "d.long_bar_value" },
+    { type: "progress", text: "Step", variant: "dots", min: 0, max: 3, bind: "d.les_bar_value" },
+    { type: "progress", text: "Step", variant: "bar", min: 0, max: 100, bind: "d.long_bar_value" },
   ]);
   expect(definition.initialState.d).toMatchObject({ les_bar_value: 1, long_bar_value: (1 / 13) * 100 });
 });
@@ -555,4 +574,64 @@ test("emit: each card, chart, tab, lesson, and question of the cards fixture bec
   const ask = all.find((node) => node.children?.some((child) => child.action === "ask_opt0"));
   expect([ask.type, ask.children.map((node) => node.action)]).toEqual(["flowRow", ["ask_opt0", "ask_opt1", "ask_opt2"]]);
   expect(all.find((node) => node.type === "banner" && node.visibleBind === "v.ask_result_visible")).toBeDefined();
+});
+
+test("emit: the text of a progress, a ring, a chart, and the tabs is its label, else the title of its Section, else the name of its line", async () => {
+  const { definition, faults } = emit(await planned([
+    'app("Captions", lang="en")', "$/n = 3", "$/points = [1, 2]", "root = Column([bare, own, sec, pages])",
+    "bare = Progress($/n, 10)", 'own = Progress($/n, 10, label="Own")', 'sec = Section("Sec", [ring, chart, blank, mine])',
+    "ring = Ring($/n, 10)", "chart = Chart($/points, text($it), $it)", 'blank = Progress($/n, 10, label="")', 'mine = Ring($/n, 10, "3 of 10", label="Mine")',
+    'one = Text("One")', 'two = Text("Two")', 'pages = Tabs(["A", "B"], [[one], [two]], label="Pages")',
+  ].join("\n")));
+  expect(faults).toEqual([]);
+  // An empty label is no label. The text of a ring is the text under it, a child of the ring.
+  expect(captions(definition.ui)).toEqual([["progress", "bare"], ["progress", "Own"], ["progressRing", "Sec"], ["chart", "Sec", "Sec"], ["progress", "Sec"], ["progressRing", "Mine"], ["tabs", "Pages"]]);
+  expect(every(definition.ui).find((node) => node.text === "Mine").children).toEqual([{ type: "text", text: "3 of 10" }]);
+});
+
+test("emit: the progress, ring, chart, and tabs of a part show a caption of the part, never the name of a line", async () => {
+  for (const [text, expected] of [
+    [plan("tabs-chart"), [["tabs", "Resumen, Añadir"], ["chart", "Gastos por categoría", "Gastos por categoría"]]],
+    // The title of a need, and the step word of a lesson. A tabs need with no title= shows its titles.
+    [testPlan("cards"), [["progressRing", "Done"], ["tabs", "Charts, Tasks"], ["chart", "Sizes", "Sizes"], ["chart", "Trend", "Trend"], ["progress", "Step"], ["progress", "Step"]]],
+  ]) {
+    const file = await planned(text), { definition } = emit(file);
+    const names = [...file.entries.values()].map((entry) => entry.key.replace(/_/g, " "));
+    expect(captions(definition.ui)).toEqual(expected);
+    for (const caption of captions(definition.ui).flatMap(([, ...shown]) => shown)) expect(names.filter((name) => caption === name || caption.startsWith(name + " "))).toEqual([]);
+  }
+  const titled = emit(await planned(['app("T", lang="en")', 'need a = content("A")', 'need b = content("B")', 'need pages = tabs(["One", "Two"], [[a], [b]], title="Pages")'].join("\n")));
+  expect(captions(titled.definition.ui)).toEqual([["tabs", "Pages"]]);
+});
+
+test("emit: the texts that are the name of a line, in each saved plan and fixture that compiles", async () => {
+  // The list of now, so that a later task sees when it grows. The row controls with no label of their own are in it by a ruling.
+  const PINNED = {
+    "plans/calc.plan": [], "plans/list.plan": ["prodotti remove", "prodotti preso"], "plans/quiz.plan": [], "plans/section.plan": ["habits remove"],
+    "plans/tabs-chart.plan": ["gastos remove"],
+    "test/cards.plan": ["tasks remove"], "test/fixtures/habits.plan": ["habits remove", "habits done"], "test/fixtures/price-filter.plan": [],
+    "test/fixtures/shopping.plan": ["items remove", "items done"], "test/fixtures/units-pl.plan": [], "test/fixtures/water-ko.plan": ["ml minus", "ml plus"],
+    "test/lists.plan": ["acts remove", "acts close", "doses taken minus", "doses taken plus", "doses remove", "steps remove"],
+    "test/nodes.plan": ["up", "down", "left", "right", "edit"],
+    "test/rich.plan": ["shirts size", "shirts remove", "shirts done", "shoes size", "shoes remove", "shoes done"],
+  };
+  const found = {};
+  for (const [path, text] of allPlans()) {
+    const file = await planned(text), { definition } = emit(file);
+    if (!definition) continue;
+    const names = new Set([...file.entries.values()].map((entry) => entry.key.replace(/_/g, " ")));
+    found[path] = every(definition.ui).flatMap(texts).filter((shown) => names.has(shown));
+  }
+  expect(found).toEqual(PINNED);
+});
+
+test("emit: a name that the screen wishes and a state field has already gets a name of its own", async () => {
+  const { definition, faults, app } = emit(await planned(['app("Clash", lang="en")', '$/big_labels = ["x"]', "$/points = [1, 2]", "root = Column([big, add, shown])",
+    "big = Chart($/points, text($it), $it)", 'add = Button("Add", action=append($/points, 3))', "shown = Text(join($/big_labels))"].join("\n")));
+  expect(faults).toEqual([]);
+  const chart = every(definition.ui).find((node) => node.type === "chart");
+  expect(chart.categories).toMatch(/^f\d+$/);
+  expect(definition.stateSchema.big_labels).toEqual({ type: "array", maxItems: 512, items: "string" });
+  const { state } = handle({ artifactId: "kit-test", revision: 1, state: definition.initialState, event: { type: "action", actionId: "add", value: null } }, app);
+  expect([state.big_labels, state[chart.categories], state.d.shown_text]).toEqual([["x"], ["1", "2", "3"], "x"]);
 });

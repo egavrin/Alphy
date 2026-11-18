@@ -7,13 +7,14 @@ import { DslError, show } from "./dsl.js";
 export const CATALOG = {
   Column: ["children"], Row: ["children"], Card: ["children"], Section: ["title", "children"],
   Text: ["text"], Heading: ["text"], Metric: ["label", "value"], Emoji: ["value"], Badge: ["value"],
-  Progress: ["value", "max"], Ring: ["value", "max", "label"], Divider: [], Notice: ["text"],
+  // label is the caption of a progress, a ring, a chart, and tabs. The text of a ring is the text under it.
+  Progress: ["value", "max", "label"], Ring: ["value", "max", "text", "label"], Divider: [], Notice: ["text"],
   Button: ["label", "action"], IconButton: ["icon", "action"],
   TextField: ["label", "bind"], NumberField: ["label", "bind"], Slider: ["label", "bind"],
   Toggle: ["label", "bind"], CheckBox: ["label", "bind"],
   Segmented: ["label", "bind", "options"], Select: ["label", "bind", "options"],
-  List: ["items", "template", "group"], Chart: ["items", "label", "value"],
-  Tabs: ["titles", "groups"], Dialog: ["title", "children"], DateField: ["label", "bind"], TimeField: ["label", "bind"],
+  List: ["items", "template", "group"], Chart: ["items", "point", "value", "label"],
+  Tabs: ["titles", "groups", "label"], Dialog: ["title", "children"], DateField: ["label", "bind"], TimeField: ["label", "bind"],
   Picture: ["text", "found"], Choices: ["label", "bind", "options"],
   // What the host draws from lines of data. The bound value of a Model3d is its turn angle in degrees. A Link only shows its address.
   Drawing: ["label", "width", "height", "shapes"], Model3d: ["label", "bodies", "bind", "exploded", "selected"], Link: ["label", "url", "text"],
@@ -111,6 +112,9 @@ function same(a, b) {
   return keys(a).length === keys(b).length && keys(a).every((key) => same(a[key], b[key]));
 }
 
+/** The values that the entries needs of a file show for each row, show={name: formula}, as [name, formula] pairs. */
+export const shownFormulas = (file) => file.of("need").filter((entry) => entry.tree.name === "entries" && entry.tree.named?.show?.k === "map").flatMap((entry) => entry.tree.named.show.entries);
+
 /** The arguments of a component call by property name: positional ones by the catalog order, then the named ones. */
 export const given = (tree) => ({ ...Object.fromEntries((CATALOG[tree.name] ?? []).map((key, index) => [key, tree.args[index]])), ...tree.named });
 
@@ -188,7 +192,7 @@ export class App {
           // A value that an entries need computes for each row, show={name: formula}, reads as a field of the row
           // in each other formula of a row (v1 sleep-en: a chart of $slept). busy stops a show formula that reads itself.
           const name = node.segs[0];
-          this.shown ??= Object.fromEntries(this.file.of("need").filter((entry) => entry.tree.name === "entries" && entry.tree.named?.show?.k === "map").flatMap((entry) => entry.tree.named.show.entries));
+          this.shown ??= Object.fromEntries(shownFormulas(this.file));
           if (node.segs.length === 1 && this.shown[name] && !ctx.busy?.includes(name)) return this.value(this.shown[name], { ...ctx, busy: [...(ctx.busy ?? []), name] });
           throw new DslError(`the row has no field ${name}`);
         }
@@ -357,7 +361,7 @@ export class App {
         if (arg === undefined) continue;
         // A field takes an action too. It runs after each change of the field.
         if (!CATALOG[tree.name].includes(key) && !NAMED.has(key) && !(key === "action" && props.bind)) { this.fault(name ?? tree.name, `${tree.name} has no property ${key}`); continue; }
-        if ((tree.name === "Chart" && (key === "label" || key === "value")) || (tree.name === "List" && key === "group") || key === "shapes" || key === "bodies") continue;
+        if ((tree.name === "Chart" && (key === "point" || key === "value")) || (tree.name === "List" && key === "group") || key === "shapes" || key === "bodies") continue;
         try {
           if (key === "children") node.children = (arg.k === "list" ? arg.items : [arg]).map((child) => visit(child, ctx, undefined, depth + 1));
           else if (key === "groups") groups = arg.k === "list" ? arg.items : [arg];
@@ -371,10 +375,10 @@ export class App {
         } catch (failure) { this.fault(name ?? tree.name, `${key}: ${failure.message}`); }
       }
       if (tree.name === "Chart") {
-        // One point for each row. label and value are formulas of the row.
+        // One point for each row. point (the label of the point) and value are formulas of the row.
         try {
           node.props.points = (Array.isArray(node.props.items) ? node.props.items : []).map((row) => ({
-            label: props.label ? this.value(props.label, { ...ctx, it: row }) : "", value: Number(props.value ? this.value(props.value, { ...ctx, it: row }) : row) || 0 }));
+            label: props.point ? this.value(props.point, { ...ctx, it: row }) : "", value: Number(props.value ? this.value(props.value, { ...ctx, it: row }) : row) || 0 }));
         } catch (failure) { this.fault(name ?? tree.name, `points: ${failure.message}`); }
         delete node.props.items;
       }

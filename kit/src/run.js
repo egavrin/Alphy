@@ -2,7 +2,7 @@
 // App reads the lines of the app, takes the stored state, runs the event, and gives the next state and screen.
 // The emitter (emit.js) builds the first screen and the first state with the same screen and stateOf functions.
 
-import { AppFile, show } from "./dsl.js";
+import { AppFile, parseExpression, show } from "./dsl.js";
 import { App, given, settings } from "./core.js";
 import { MAX_ROWS, cast, castRow, clockOf, namer, own, relative, rows, shownAs } from "./rows.js";
 
@@ -93,12 +93,12 @@ const NODES = {
   // Alphy's progress binds the share in percent. Dots show the step itself: at most 12, and with one max for all rows of a list.
   Progress: (n, at) => {
     const { value, max } = n.props, dots = n.props.variant === "dots" && !at.scope && Number.isInteger(max) && max >= 1 && max <= 12;
-    return { type: "progress", text: at.caption(at.title), variant: dots ? "dots" : "bar", min: 0, max: dots ? max : 100,
+    return { type: "progress", text: at.label(), variant: dots ? "dots" : "bar", min: 0, max: dots ? max : 100,
       bind: at.computed("value", dots ? (Number.isFinite(value) ? Math.min(max, Math.max(0, value)) : 0) : percent(value, max)) };
   },
-  // A ring takes children only when it is large (ToolUiCatalog): its label is a text under it.
-  Ring: (n, at) => ({ type: "progressRing", text: at.caption(at.title), size: "large", min: 0, max: 100, bind: at.computed("value", percent(n.props.value, n.props.max)),
-    ...(n.props.label !== undefined && { children: [{ type: "text", ...at.text("label") }] }) }),
+  // A ring takes children only when it is large (ToolUiCatalog): its text is a text under it.
+  Ring: (n, at) => ({ type: "progressRing", text: at.label(), size: "large", min: 0, max: 100, bind: at.computed("value", percent(n.props.value, n.props.max)),
+    ...(n.props.text !== undefined && { children: [{ type: "text", ...at.text("text") }] }) }),
   Chart: (n, at) => at.chart(),
   Tabs: (n, at) => at.tabs(),
 };
@@ -116,8 +116,13 @@ const readsRow = (tree) => tree !== null && typeof tree === "object" && ((tree.k
  * the bounds of each number control, the faults as [line, text], and for the emitter the line of each node of the ui (owners)
  * and the stored list of each list node (listRoots).
  */
-export function screen(kit, app) {
-  const name = namer(app.names), fields = new Map(app.fields), kinds = app.kinds ?? {}, lists = app.lists ?? {}, day = today(kit);
+export function screen(kit, app, first = false) {
+  // The names of the screen avoid the names of the stored fields. The emitter's walk and each event's walk start with the same taken names.
+  // shortcut: a key that is new at run time could take a name that the emitter gave at its wish; no walk makes new keys now, add them to app.names when one does.
+  const name = namer(app.names, new Set([...Object.values(app.names), ...app.fields.flatMap(([, path]) => path.split("."))]));
+  const fields = new Map(app.fields), kinds = app.kinds ?? {}, lists = app.lists ?? {}, day = today(kit);
+  // The first walk (the emitter's) fixes the type of each shown value with its first value. The compiled data keeps the numbers, and each other shown value is a text.
+  const typeOf = (key, value) => (first ? (app.types[key] ??= typeof value === "number" ? "number" : "string") : app.types[key] ?? "string");
   const faults = [], controls = new Map(), rowControls = new Map(), owners = new Map(), listRoots = new Map(), bounds = [], views = {}, viewSchemas = {}, viewOwners = [];
   const slots = { d: new Map(), v: new Map() }, values = {};
   /**
@@ -131,7 +136,7 @@ export function screen(kit, app) {
       const stored = scope.stored.get(relative(expr));
       if (stored && stored[1] !== "time" && (kind === "d" || stored[1] === "boolean")) return stored[0];
       const field = scope.name(`${kind}:${key}`, key.replace(/\W/g, "_"));
-      const type = kind === "v" ? "boolean" : (app.types[`${scope.key}/${field}`] ??= typeof value === "number" ? "number" : "string");
+      const type = kind === "v" ? "boolean" : typeOf(`${scope.key}/${field}`, value);
       scope.computed.set(field, type);
       if (scope.out) scope.out[field] = kind === "v" ? Boolean(value) : shownAs(type, value);
       return field;
@@ -142,7 +147,7 @@ export function screen(kit, app) {
     if (!slots[kind].has(field)) {
       const object = kind + (slots[kind].size < PER_OBJECT ? "" : Math.floor(slots[kind].size / PER_OBJECT) + 1);
       slots[kind].set(field, `${object}.${field}`);
-      (values[object] ??= {})[field] = kind === "v" ? Boolean(value) : shownAs(app.types[field] ??= typeof value === "number" ? "number" : "string", value);
+      (values[object] ??= {})[field] = kind === "v" ? Boolean(value) : shownAs(typeOf(field, value), value);
     }
     return slots[kind].get(field);
   };
@@ -172,12 +177,13 @@ export function screen(kit, app) {
     const within = node.type === "Section" ? { ...ctx, title: node.props.title } : ctx;
     const bound = (prop) => (expr[prop] && expr[prop].k !== "lit" ? slot("d", `${key}.${prop}`, expr[prop], node.props[prop], at) : null);
     const at = {
-      // title is the title of the Section around the node.
-      scope, fault, title: ctx.title,
+      scope, fault,
       blank: Boolean(scope && !scope.out),
       children: (weighted = false, inner = within) => node.children.map((child, index) => walk(child, child.name ?? `${key}_${index}`, line, { ...inner, weighted })).filter(Boolean),
       // The text of a control: its label, else the kit's name of its line, which a person can read. Never a safe name such as f3.
       caption: (label) => at.plain(label) || (node.name ? node.name : `${line} ${node.props.icon ?? node.type}`).replace(/_/g, " "),
+      // The text of a progress, a ring, a chart, and tabs: its label=, else the title of the Section around it, else the caption. Alphy shows at most 300 characters.
+      label: () => at.caption(at.plain(node.props.label) || ctx.title).slice(0, 300),
       text: (prop) => { const bind = bound(prop); return bind ? { text: "", bind } : { text: at.plain(node.props[prop]) }; },
       // A text of the screen that is a list or a record is a fault, never "a,b" or "[object Object]".
       plain: (value) => {
@@ -230,7 +236,7 @@ export function screen(kit, app) {
       list: () => rows(shared, node, key, line, expr, at, ctx.title),
       // The points of a chart are two arrays that the run-time writes: the labels and the values of the last 256 points.
       chart: () => {
-        const kind = node.props.kind ?? "bar", text = at.caption(ctx.title).slice(0, 100), points = (Array.isArray(node.props.points) ? node.props.points : []).slice(-MAX_POINTS);
+        const kind = node.props.kind ?? "bar", text = at.label().slice(0, 100), points = (Array.isArray(node.props.points) ? node.props.points : []).slice(-MAX_POINTS);
         if (kind !== "bar" && kind !== "line") fault(`a Chart of kind ${at.plain(kind)} is not built yet: give kind="bar" or kind="line"`);
         const [categories, values] = [["labels", "string", "label"], ["values", "number", "value"]].map(([suffix, type, prop]) => {
           const field = name(`chart:${key}:${suffix}`, `${key}_${suffix}`);
@@ -256,7 +262,7 @@ export function screen(kit, app) {
         if (!shown.includes(kit.state[root])) kit.state[root] = shown[0];
         const open = kit.state[root], select = (value) => { if (!shown.includes(value)) return false; kit.state[root] = value; return ""; };
         return { type: "column", children: [
-          { type: "tabs", text: at.caption(), bind: fields.get(root), action: at.action(select), options: shown.map((title) => ({ text: title, value: title })) },
+          { type: "tabs", text: at.label(), bind: fields.get(root), action: at.action(select), options: shown.map((title) => ({ text: title, value: title })) },
           ...groups.map((group, index) => ({ type: "column", visibleBind: slot("v", `${key}.tab${index}`, null, shown[index] === open, at),
             children: group.children.map((child, inner) => walk(child, child.name ?? `${key}_tab${index}_${inner}`, line, { ...ctx, weighted: true })).filter(Boolean) })),
         ] };
@@ -335,6 +341,8 @@ export function handle(input, app, now = Date.now()) {
   settings.now = () => now;
   try {
     const kit = new App(new AppFile().feedText(app.lines)), kinds = app.kinds ?? {};
+    kit.nextId = app.next;
+    if (app.shown) kit.shown = Object.fromEntries(parseExpression(app.shown).entries);
     load(kit, app, state);
     const before = screen(kit, app), control = event.type === "action" ? before.controls.get(event.actionId) : undefined;
     if (event.type !== "open" && !control) return { state };

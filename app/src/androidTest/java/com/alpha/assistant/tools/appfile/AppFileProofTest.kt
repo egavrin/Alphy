@@ -71,9 +71,21 @@ class AppFileProofTest {
         }
         return spec
     }
+    /** Each node of a ui, also the nodes of each row template. */
+    private fun nodes(node: JSONObject): List<JSONObject> =listOf(node)+
+        (node.optJSONArray("children")?.let {children -> List(children.length()) {nodes(children.getJSONObject(it))}.flatten()} ?: emptyList())+
+        (node.optJSONObject("rowTemplate")?.let {nodes(it)} ?: emptyList())
     @Test fun eachNodeOfTheTablePassesParseAndSmoke(): Unit=runBlocking {
         // nodes.plan is kit/test/nodes.plan: each component of the emitter's node table, and the kit test reads the same text.
-        parsedAndSmoked(SandboxClient(instrumentation.targetContext),"nodes")
+        val spec=parsedAndSmoked(SandboxClient(instrumentation.targetContext),"nodes")
+        val state=JSONObject(spec.initialState)
+        // A progress bar in each row of a list binds a field of the view: the share of the row in percent.
+        val goals=state.getJSONArray("goalList")
+        assertEquals(listOf(75.0,20.0),List(goals.length()) {goals.getJSONObject(it).getDouble("goalRow_1_value")})
+        // A ring with no text under it has no children, and dots show a value that is not a whole number.
+        val ring=nodes(spec.ui).single {it.optString("type") == "progressRing"}
+        assertFalse(ring.toString(),ring.has("children"))
+        assertEquals(2.5,state.getJSONObject("d").getDouble("half_value"),0.0)
     }
     @Test fun calcPassesParseAndSmoke(): Unit=runBlocking {
         val sandbox=SandboxClient(instrumentation.targetContext)
@@ -156,17 +168,20 @@ class AppFileProofTest {
         assertEquals("水",notYet.getJSONObject("d").getString("card_kanji"))
     }
     @Test fun twoRichListsFullToTheirCountPassParseAndSmoke(): Unit=runBlocking {
-        // rich.plan is kit/test/rich.plan: two lists with a choice of 6 options in each row, and a chart of each list at its full 256 points.
+        // rich.plan is kit/test/rich.plan: two lists with a choice of 6 options in each row.
         // Its start rows fill each list to the count that the render work limit leaves.
         val sandbox=SandboxClient(instrumentation.targetContext)
         val spec=parsedAndSmoked(sandbox,"rich")
         val state=JSONObject(spec.initialState)
         for(list in listOf("shirts","shoes")) {
-            assertEquals(list,68,spec.schema.getJSONObject(list).getInt("maxItems"))
-            assertEquals(list,68,state.getJSONArray(list).length())
+            assertEquals(list,91,spec.schema.getJSONObject(list).getInt("maxItems"))
+            assertEquals(list,91,state.getJSONArray(list).length())
         }
-        val checked=Session(sandbox,spec,"appfile-rich").act("shoes_done",row("r69",true))
+        val checked=Session(sandbox,spec,"appfile-rich").act("shoes_done",row("r92",true))
         assertTrue(checked.getJSONArray("shoes").getJSONObject(0).getBoolean("done"))
+        // The source holds no start rows, so an event on 182 rows reads them from the state only.
+        val median=medianEventMs(sandbox,spec,"rich",state,"shoes_done",row("r92",true))
+        assertTrue("median $median ms",median<250)
     }
     /** The median time in ms of one event, five times in the bare sandbox, which the log prints with its label. */
     private suspend fun medianEventMs(sandbox: SandboxClient,spec: ToolSpec,label: String,state: JSONObject,actionId: String,value: Any?): Long {
@@ -209,11 +224,16 @@ class AppFileProofTest {
         val spec=parsedAndSmoked(sandbox,"cards")
         val state=JSONObject(spec.initialState)
         assertEquals(256,state.getJSONArray("trend_chart_labels").length())
+        // The progress, ring, chart, and tabs of a part show a caption of the part, never the name of a line.
+        assertEquals(listOf("Done","Charts, Tasks","Sizes","Trend","Step","Step"),
+            nodes(spec.ui).filter {it.optString("type") in setOf("progress","progressRing","chart","tabs")}.map {it.getString("text")})
         val app=Session(sandbox,spec,"appfile-cards")
         val answered=app.act("ask_opt1")
         assertTrue(answered.getJSONObject("v").getBoolean("ask_result_visible"))
         assertEquals("Right",answered.getJSONObject("d").getString("ask_result_text"))
         assertEquals("Tasks",app.act("pages_view","Tasks").getJSONObject("pages_s").getString("tab"))
+        val median=medianEventMs(sandbox,spec,"cards",state,"ask_opt1",null)
+        assertTrue("median $median ms",median<250)
         // A row with no weighted child is a flowRow, also as the row template of a list (the kit test of the add sheet has the same plan).
         val picks=parsedAndSmoked(sandbox,"picks",text="app(\"Picks\", lang=\"en\")\nneed picks = entries(\"Picks\", fields={day: [\"Sat\", \"Sun\"]}, sheet=true, rows=[])\n")
         assertTrue(picks.ui.toString(),"\"rowTemplate\":{\"type\":\"flowRow\"" in picks.ui.toString())

@@ -1,7 +1,8 @@
 // The emitter: an expanded app file as Alphy's app definition (formatVersion 3). The source of the definition is the
 // run-time (run.js and the modules that it needs) and the compiled data of the app. The run-time answers each event.
 
-import { App, given } from "./core.js";
+import { App, given, shownFormulas } from "./core.js";
+import { show } from "./dsl.js";
 import { ALPHY, MAX_ROW_FIELDS, MAX_ROWS, namer, own } from "./rows.js";
 import { MAX_ARRAY, MAX_POINTS, PER_OBJECT, TYPED, header, load, screen, stateOf } from "./run.js";
 
@@ -29,15 +30,18 @@ const bytes = (text) => {
 
 /**
  * The definition of the app, its language beside it, and the faults of what the emitter cannot build. app is the compiled
- * data that the source gives the run-time: the lines of the app, the field of each state value, the kind of each time, date,
- * list, and array, the fields of each list, the count of rows of each shown list, the type of each shown value, and the names
- * in both directions. Faults give no definition.
+ * data that the source gives the run-time, and only what the run-time reads: the lines that it evaluates (the app line, the
+ * formulas, and the components), the field of each state value, the kind of each time, date, list, and array, the fields of each
+ * list, the count of rows of each shown list, each shown value that is a number, the names of the screen that differ from their wish,
+ * the next row id, and the values that an entries need shows for each row. Faults give no definition.
  */
 export function emit(file) {
   if (!runtime.text) throw new Error("emit.js has no run-time text: kit/build.js gives it");
   const kit = new App(file), { title, lang } = header(kit), faults = [], stateSchema = {}, owners = [], needObjects = new Map();
-  const app = { lines: [...file.entries.values()].filter((entry) => entry.kind !== "check").map((entry) => entry.raw).join("\n"), fields: [], types: {}, names: { safe: {}, kit: {} }, kinds: {}, lists: {}, caps: {} };
-  const name = namer(app.names);
+  // Each event starts its kit with no start values, so a new row gets an id after the ids that the start rows took.
+  const app = { lines: "", fields: [], types: {}, names: {}, kinds: {}, lists: {}, caps: {}, next: kit.nextId };
+  // The run-time gets the field of each state value from app.fields, so these names stay out of app.names.
+  const name = namer();
   if (typeof title !== "string" || title.length < 1 || title.length > 100) faults.push("app: the app line needs a title of 1 to 100 characters");
   // The need whose part wrote each line. A line that an author wrote belongs to no need, and a fault of it names the line.
   const partOf = new Map([...(file.partLines ?? [])].flatMap(([need, keys]) => keys.map((key) => [key, need])));
@@ -125,7 +129,8 @@ export function emit(file) {
   }
   // The first screen comes from the start values as the run-time reads them: an empty date is today, and a text that is not a time is 00:00.
   load(kit, app, stateOf(kit, app, { views: {}, values: {} }));
-  const shown = screen(kit, app);
+  const shown = screen(kit, app, true);
+  for (const [key, type] of Object.entries(app.types)) if (type === "string") delete app.types[key];
   for (const [line, text] of shown.faults) { const fault = `${label(line)}: ${text}`; if (!faults.includes(fault)) faults.push(fault); }
   Object.assign(stateSchema, shown.viewSchemas);
   owners.push(...shown.viewOwners.map(label));
@@ -178,6 +183,11 @@ export function emit(file) {
     for (const fault of [...(rowCount < MIN_ROWS ? [few] : []), ...(start > rowCount ? [over] : [])]) if (!faults.includes(fault)) faults.push(fault);
   }
   const language = typeof lang === "string" ? lang : null;
+  // The run-time has no parts, and the state of each event replaces each start value: it reads no need line and no state line.
+  app.lines = file.of("app").concat(file.of("formula"), file.of("component")).map((entry) => entry.raw).join("\n");
+  // A value that an entries need shows for each row reads as a field of the row in each formula of a row (App.value).
+  const shows = shownFormulas(file);
+  if (shows.length) app.shown = show({ k: "map", entries: shows });
   if (faults.length) return { definition: null, language, faults, app };
   const source = `${runtime.text}\nreturn handle(input, ${JSON.stringify(app)});`, size = bytes(source);
   if (size > MAX_SOURCE_BYTES) return { definition: null, language, faults: [`app: the source is ${size} bytes, and Alphy keeps at most ${MAX_SOURCE_BYTES} bytes. Use shorter texts and fewer lines`], app };

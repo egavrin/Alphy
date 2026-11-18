@@ -14,21 +14,23 @@ export const MAX_ROWS = 100;
 export const ALPHY = { time: "number", date: "string" };
 
 /**
- * The Alphy names of the kit's names, in both directions: map.safe by key and map.kit by Alphy name. A key gets the name that
- * it wishes when Alphy takes that name and no other key has it, else f<index>. With the map of the compiled data it only looks up.
+ * The Alphy names of the kit's keys. A key gets the name that it wishes when Alphy takes that name and no other key has it, else
+ * f<index>. differ keeps by key only the names that are not the wish, and taken holds the names that are given already. A walk of
+ * the same keys in the same order with the same differ and taken gives the same names, so the compiled data keeps only differ.
  */
-export function namer(map = { safe: {}, kit: {} }) {
+export function namer(differ = {}, taken = new Set(Object.values(differ))) {
+  const named = new Map();
   let next = 0;
   return (key, wish = key) => {
-    if (Object.hasOwn(map.safe, key)) return map.safe[key];
-    let name = wish;
+    if (named.has(key)) return named.get(key);
+    let name = Object.hasOwn(differ, key) ? differ[key] : wish;
     // d, v, d2, and so on are the objects of the shown values.
-    if (!SAFE.test(name) || REFUSED.has(name) || /^[dv]\d*$/.test(name) || Object.hasOwn(map.kit, name)) {
-      while (Object.hasOwn(map.kit, "f" + next)) next++;
-      name = "f" + next;
+    if (!Object.hasOwn(differ, key) && (!SAFE.test(name) || REFUSED.has(name) || /^[dv]\d*$/.test(name) || taken.has(name))) {
+      while (taken.has("f" + next)) next++;
+      name = differ[key] = "f" + next;
     }
-    map.safe[key] = name;
-    map.kit[name] = key;
+    named.set(key, name);
+    taken.add(name);
     return name;
   };
 }

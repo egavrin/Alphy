@@ -4,9 +4,10 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";
 import { App } from "../src/core.js";
+import { parseLine } from "../src/dsl.js";
 import { emit, runtime } from "../src/emit.js";
 import { handle } from "../src/run.js";
-import { plan, planned } from "./helpers.js";
+import { allPlans, plan, planned } from "./helpers.js";
 
 const compiled = async (text) => { const file = await planned(text); return { file, ...emit(file) }; };
 const testPlan = (name) => readFileSync(new URL(`./${name}.plan`, import.meta.url), "utf8");
@@ -27,10 +28,15 @@ test("run: an action sets the bound value and the figures follow", async () => {
 });
 
 test("run: open of the initial state gives the initial state", async () => {
-  for (const text of [plan("calc"), plan("list"), plan("quiz"), plan("tabs-chart"), testPlan("lists"), testPlan("rich"), testPlan("cards")]) {
+  // Each saved plan and fixture that compiles. The run-time reads no start value: each value comes from the state.
+  const opened = [];
+  for (const [path, text] of allPlans()) {
     const { definition, app } = await compiled(text);
+    if (!definition) continue;
     expect(handle(request(definition.initialState, { type: "open" }), app)).toEqual({ state: definition.initialState });
+    opened.push(path);
   }
+  expect(opened).toHaveLength(14);
 });
 
 test("run: render and preview change no state", async () => {
@@ -345,6 +351,21 @@ test("run: the chart arrays follow the list", async () => {
   expect(big.big_values.every((value) => Math.abs(value) <= Number.MAX_SAFE_INTEGER)).toBe(true);
 });
 
+test("run: a value that an entries need shows for each row reads in its sort and in a chart", async () => {
+  const text = ['app("Days", lang="en")', 'need days = entries("Days", fields={day: "text", steps: "number"}, rows=[{day: "Mo", steps: 3}, {day: "Tu", steps: 5}], show={twice: $steps * 2}, sort=$twice)',
+    'need bars = chart("Twice", $/days, $day, $twice)'].join("\n");
+  const { definition, app } = await compiled(text);
+  expect(handle(request(definition.initialState, { type: "open" }), app)).toEqual({ state: definition.initialState });
+  const { run, prototype, act } = await twins(text);
+  act("days_new_day", "We");
+  act("days_new_steps", 1);
+  act("days_add");
+  expect([run.state.bars_chart_labels, run.state.bars_chart_values]).toEqual([["Mo", "Tu", "We"], [6, 10, 2]]);
+  expect(run.state.bars_chart_values).toEqual(prototype.find("bars_chart").props.points.map((point) => point.value));
+  expect(run.state.days_list.map((row) => row.id)).toEqual(shownIds(prototype, "days_list"));
+  expect(run.state.days_list.map((row) => row.day)).toEqual(["We", "Mo", "Tu"]);
+});
+
 test("run: a question shows its result after an answer", async () => {
   const { run, prototype, act } = await twins(['app("Ask", lang="en")', 'need ask = question("Is the Moon a star?", options=["Yes", "No"], right="No", rightText="Right", wrongText="Not yet")'].join("\n"));
   expect(run.state.v.ask_result_visible).toBe(false);
@@ -428,6 +449,23 @@ test("source: the source of list.plan is under 60000 bytes and answers an add as
   const add = request(typed, { type: "action", actionId: "prodotti_add", value: null });
   expect(run(add)).toEqual(handle(add, app));
   expect(run(add).state.prodotti).toHaveLength(4);
+});
+
+/** The bytes that a field of the state may cost in the maps of the compiled data: its kit name and its Alphy name of at most 16 characters each, and its kind, in JSON. */
+const PER_FIELD = 48;
+test("source: the compiled data of rich.plan and cards.plan holds only what the run-time reads", async () => {
+  for (const name of ["rich", "cards"]) {
+    const { file, definition, app } = await compiled(testPlan(name));
+    const size = bytes(JSON.stringify(app));
+    measured(`test/${name}.plan`, definition, app);
+    // The run-time evaluates the app line, the formulas, and the components. It reads no need line (it has no parts) and no start value (each value comes from the state).
+    expect(app.lines.split("\n").map((line) => parseLine(line)?.kind).filter((kind) => !["app", "formula", "component"].includes(kind))).toEqual([]);
+    const read = [...file.entries.values()].filter((entry) => ["app", "formula", "component"].includes(entry.kind)).map((entry) => entry.raw).join("\n");
+    // Each field of the state: a top-level field, a field of an object, and a field of the rows of a list.
+    const fields = Object.values(definition.stateSchema).reduce((sum, schema) => sum + 1 + Object.keys(schema.fields ?? {}).length, 0);
+    console.log(`test/${name}.plan compiled data ${size} bytes, bound ${bytes(JSON.stringify(read)) + PER_FIELD * fields} (lines ${bytes(JSON.stringify(read))}, ${fields} fields)`);
+    expect(size).toBeLessThan(bytes(JSON.stringify(read)) + PER_FIELD * fields);
+  }
 });
 
 test("source: the source of calc.plan is under 64 KiB and evaluates as a function body", async () => {

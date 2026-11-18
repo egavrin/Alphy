@@ -6,7 +6,9 @@ $/level = 3
 $/count = 0
 $/big = "XL"
 $/pct = 40
-root = Column([title, intro, note, part, line, card, badge, emoji, rule, notice, nameField, onToggle, onBox, sizePick, sizeList, levelSlider, freeSlider, countField, add, icons, plain, hidden, shownIf, enabledIf])
+$/goals = [{name: "Read", done: 3, total: 4}, {name: "Run", done: 1, total: 5}]
+$/mood = 2.5
+root = Column([title, intro, note, part, line, card, badge, emoji, rule, notice, nameField, onToggle, onBox, sizePick, sizeList, levelSlider, freeSlider, countField, add, icons, plain, hidden, shownIf, enabledIf, goals, calm, half])
 title = Heading("Hello")
 intro = Text("Hi " + $/name, variant="eyebrow")
 note = Text("Plain", variant="muted")
@@ -36,3 +38,10 @@ plain = Text($/level)
 hidden = Text("Hidden", visible=false)
 shownIf = Text("Many", visible=$/count > 2)
 enabledIf = Button("Reset", action=set($/count, 0), enabled=$/count > 0)
+# A progress bar in each row of a list, a ring with no text under it, and dots of a value that is not a whole number.
+goals = Section("Goals", [goalList])
+goalList = List($/goals, goalRow)
+goalRow = Row([Text($name, weight=1), Progress($done, $total, label="Goal")])
+calm = Section("Calm", [calmRing])
+calmRing = Ring($/mood, 10)
+half = Progress($/mood, 4, variant="dots", label="Half")

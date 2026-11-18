@@ -381,7 +381,7 @@ test("the text parts, the arguments of a picture, and the kind of the header", a
 test("a group of tabs or steps names its needs, also as $/NAME and $NAME", async () => {
   settings.gate = "smoke";
   const grouped = await planned('app("T")\nneed a = content("A")\nneed b = content("B")\nneed c = content("C")\nneed pages = tabs(["One", "Two"], [[$/a, b], [$c]])');
-  same([report(grouped).faults, grouped.get("pages_view").raw], [[], 'pages_view = Tabs(["One", "Two"], [[a_view, b_view], [c_view]])'], "a group of tabs with a need by its value name");
+  same([report(grouped).faults, grouped.get("pages_view").raw], [[], 'pages_view = Tabs(["One", "Two"], [[a_view, b_view], [c_view]], label=join(["One", "Two"]))'], "a group of tabs with a need by its value name");
 });
 
 // ---- The four screens of the dialogue mocks as app files, and the turns of a dialogue on them. No model. ----

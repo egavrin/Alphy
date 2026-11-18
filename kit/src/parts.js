@@ -187,7 +187,7 @@ const PARTS = {
   // need line = chart("Steps", $/days, $day, $steps, kind="line"): one bar or point for each row of a list.
   async chart(name, need) {
     const [title, list, point, value] = need.args;
-    return { lines: [`${name}_chart = Chart(${show(list)}, ${show(point)}, ${show(value)}, kind=${show(need.named.kind ?? { k: "lit", v: "bar" })})`, `${name}_view = Section(${show(title)}, [${name}_chart])`], top: [`${name}_view`] };
+    return { lines: [`${name}_chart = Chart(${show(list)}, ${show(point)}, ${show(value)}, kind=${show(need.named.kind ?? { k: "lit", v: "bar" })}, label=${show(title)})`, `${name}_view = Section(${show(title)}, [${name}_chart])`], top: [`${name}_view`] };
   },
 
   // need quiz = deck("Quiz", $/words, front=$word, back=$meaning, mark=$known): one row at a time. A tap shows the back, then yes or no goes to the next row.
@@ -255,17 +255,18 @@ const PARTS = {
     return { lines, top: [`${name}_view`], holds: groups.items.flatMap((group) => group.items.map(memberName)) };
   },
 
-  // need pages = tabs(["Summary", "Add"], [[total, chart], [costs]]): other needs in groups, one group at a time. The person opens a tab at any time.
+  // need pages = tabs(["Summary", "Add"], [[total, chart], [costs]], title="Month"): other needs in groups, one group at a time. The person opens a tab at any time.
+  // The caption of the tabs is the title, else the titles of the tabs.
   async tabs(name, need, { tops }) {
-    const [titles, groups] = need.args;
-    return { lines: [`${name}_view = Tabs(${show(titles)}, [${groups.items.map((group) => `[${group.items.flatMap((member) => tops(memberName(member))).join(", ")}]`).join(", ")}])`],
+    const [titles, groups] = need.args, label = need.named.title ? show(need.named.title) : `join(${show(titles)})`;
+    return { lines: [`${name}_view = Tabs(${show(titles)}, [${groups.items.map((group) => `[${group.items.flatMap((member) => tops(memberName(member))).join(", ")}]`).join(", ")}], label=${label})`],
       top: [`${name}_view`], holds: groups.items.flatMap((group) => group.items.map(memberName)) };
   },
 
   // need done = progress("Done today", count($/habits, $done), len($/habits))
   async progress(name, need, { hero }) {
     const [title, value, goal] = need.args;
-    const ring = `Ring($/${name}, $/${name}_goal, $/${name}_text)`;
+    const ring = `Ring($/${name}, $/${name}_goal, $/${name}_text, label=${show(title)})`;
     return {
       lines: [`$/${name} := ${show(value)}`, `$/${name}_goal := ${show(goal)}`, `$/${name}_text := text($/${name}) + " / " + text($/${name}_goal)`,
         hero === name ? `${name}_view = Card([Heading(${show(title)}), ${ring}], variant="hero")` : `${name}_view = Section(${show(title)}, [${ring}])`],
@@ -376,7 +377,7 @@ const PARTS = {
     const lines = [`$/${name} = 1`, `$/${name}_steps := ${show(steps)}`, `$/${name}_now := at($/${name}_steps, $/${name} - 1)`,
       `${name}_count = Text(${text("stepText", "Step")} + " · " + text($/${name}) + " / " + text(${count}), variant="eyebrow")`,
       // A lesson of at most 12 steps shows one dot for each step (Alphy draws at most 12 dots), and a longer one a bar.
-      `${name}_bar = Progress($/${name}, ${count}${steps.k === "list" && steps.items.length <= 12 ? ', variant="dots"' : ""})`,
+      `${name}_bar = Progress($/${name}, ${count}${steps.k === "list" && steps.items.length <= 12 ? ', variant="dots"' : ""}, label=${text("stepText", "Step")})`,
       `${name}_title = Heading(text($/${name}_now/title))`, `${name}_text = Text(text($/${name}_now/text))`];
     const parts = [`${name}_count`, `${name}_bar`, `${name}_title`, `${name}_text`];
     // One step has no next step, so it gets no buttons: a button that is never active is a fault of the smoke run.
