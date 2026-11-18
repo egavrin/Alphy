@@ -555,12 +555,6 @@ test('emit: a picture need is a fault "picture is not built yet"', async () => {
   expect(faults).toEqual(["need photo: picture is not built yet", "need source: link is not built yet"]);
 });
 
-test("emit: a timer need is a fault until the host moves its clock", async () => {
-  const { definition, faults } = emit(await planned(['app("Tea", lang="en")', 'need tea = timer("Tea", 120)'].join("\n")));
-  expect(definition).toBeNull();
-  expect(faults).toEqual(["need tea: timer is not built yet"]);
-});
-
 test("emit: an author's root beside a tabs need shows each control of the held needs once", async () => {
   // The device test anAuthorsRootBesideATabsNeedPassesParseAndSmoke sends the same plan through ToolSpec.parse.
   const file = await planned(['app("Held", lang="en")', 'need a = counter("A")', 'need b = counter("B")', 'need pages = tabs(["One", "Two"], [[a], [b]])', 'note = Text("Hi")', "root = Column([note])"].join("\n"));
@@ -621,7 +615,7 @@ test("emit: the texts that are the name of a line, in each saved plan and fixtur
   // The list of now, so that a later task sees when it grows. The row controls with no label of their own are in it by a ruling.
   const PINNED = {
     "plans/calc.plan": [], "plans/list.plan": ["prodotti remove", "prodotti preso"], "plans/quiz.plan": [], "plans/section.plan": ["habits remove"],
-    "plans/tabs-chart.plan": ["gastos remove"],
+    "plans/tabs-chart.plan": ["gastos remove"], "plans/tea.plan": [], "plans/timer-rounds.plan": [],
     "test/cards.plan": ["tasks remove"], "test/fixtures/habits.plan": ["habits remove", "habits done"], "test/fixtures/price-filter.plan": [],
     "test/fixtures/shopping.plan": ["items remove", "items done"], "test/fixtures/units-pl.plan": [], "test/fixtures/water-ko.plan": ["ml minus", "ml plus"],
     "test/lists.plan": ["acts remove", "acts close", "doses taken minus", "doses taken plus", "doses remove", "steps remove"],

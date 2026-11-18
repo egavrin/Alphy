@@ -255,9 +255,12 @@ test("timer: a clock that the test sets, rounds with a rest, and seconds from a 
   let clock = 5000;
   settings.now = () => clock;
   const after = (app, seconds) => { clock += seconds * 1000; app.tick(); };
-  const egg = await planned('app("T")\nneed egg = timer("Egg", 90, alert=true)\nneed count = figure("count", "Eggs done", $/egg, example=[{egg: 2}, 2])');
+  const egg = await planned('app("T")\nneed egg = timer("Egg", 90)\nneed count = figure("count", "Eggs done", $/egg, example=[{egg: 2}, 2])');
   const eg = new App(egg), face = (app, name) => app.find(name + "_time").props.value;
-  same([face(eg, "egg"), eg.find("egg_pause").props.visible, eg.find("egg_reset").props.enabled, eg.find("egg_alert").props.text, eg.find("egg_phaseText")], ["01:30", false, false, "alert at the end", null], "a timer of 90 s shows 01:30 and waits");
+  same([face(eg, "egg"), eg.find("egg_pause").props.visible, eg.find("egg_reset").props.enabled, eg.find("egg_phaseText"), eg.find("egg_bar").props.label], ["01:30", false, false, null, "Egg"], "a timer of 90 s shows 01:30 and waits");
+  // With an alert and one round, the timer is the host's own countdown: one Timer line, and no value of the app.
+  const alarm = await planned('app("T")\nneed egg = timer("Egg", 90, alert=true)');
+  same([alarm.get("egg_timer")?.raw, alarm.of("state").length, new App(alarm).find("egg_timer")?.props.seconds], ['egg_timer = Timer("Egg", 90)', 0, 90], "a timer with an alert and one round is a Timer line");
   after(eg, 600);
   same(face(eg, "egg"), "01:30", "no time passes before the start");
   same([eg.press("egg_start"), (after(eg, 30), face(eg, "egg")), eg.press("egg_pause"), (after(eg, 100), face(eg, "egg")), eg.find("egg_start").props.visible], ["", "01:00", "", "01:00", true], "30 s after the start it shows 01:00, and a pause holds it");

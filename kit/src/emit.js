@@ -1,10 +1,11 @@
 // The emitter: an expanded app file as Alphy's app definition (formatVersion 3). The source of the definition is the
 // run-time (run.js and the modules that it needs) and the compiled data of the app. The run-time answers each event.
 
-import { App, given, shownFormulas } from "./core.js";
+import { App, foreground, given, shownFormulas } from "./core.js";
 import { show } from "./dsl.js";
 import { ALPHY, MAX_ROW_FIELDS, MAX_ROWS, namer, own } from "./rows.js";
-import { MAX_ARRAY, MAX_POINTS, PER_OBJECT, TYPED, header, load, screen, stateOf } from "./run.js";
+import { BAR_SURFACE } from "./draw.js";
+import { ALERT_CAPABILITIES, MAX_ARRAY, MAX_POINTS, PER_OBJECT, TYPED, header, load, screen, stateOf } from "./run.js";
 
 /** The text of the run-time. kit/build.js puts it into the bundle, and a test of the sources sets it from the sources. */
 export const runtime = { text: "" };
@@ -31,7 +32,7 @@ const bytes = (text) => {
 /**
  * The definition of the app, its language beside it, and the faults of what the emitter cannot build. app is the compiled
  * data that the source gives the run-time, and only what the run-time reads: the lines that it evaluates (the app line, the
- * formulas, and the components), the field of each state value, the kind of each time, date, list, and array, the fields of each
+ * formulas, the components, and the need line of each timer that it moves), the field of each state value, the kind of each time, date, list, and array, the fields of each
  * list, the count of rows of each shown list, each shown value that is a number, the names of the screen that differ from their wish,
  * the next row id, and the values that an entries need shows for each row. Faults give no definition.
  */
@@ -121,8 +122,6 @@ export function emit(file) {
     kit.state[root] = "";
     place(root, need, need === undefined ? entry.key : `need ${need}`, "string", "tab");
   }
-  // shortcut: each event starts a new kit, so the clock of a timer never moves. Drop this fault when the host moves the clock (Task 6).
-  for (const entry of file.of("need")) if (entry.tree.name === "timer") faults.push(`need ${entry.key}: timer is not built yet`);
   for (const [field, need] of needObjects) {
     const count = Object.keys(stateSchema[field].fields).length;
     if (count > PER_OBJECT) faults.push(`need ${need}: its part keeps ${count} values in the object ${field}, and an object of Alphy holds at most ${PER_OBJECT} fields. Give the need fewer fields`);
@@ -183,16 +182,23 @@ export function emit(file) {
     const over = `${where}: $/${root} starts with ${start} rows, and the screen has room for ${rowCount} rows in each list. Give it fewer rows`;
     for (const fault of [...(rowCount < MIN_ROWS ? [few] : []), ...(start > rowCount ? [over] : [])]) if (!faults.includes(fault)) faults.push(fault);
   }
+  // Alphy declares at most 4 surfaces, and each timer that the run-time moves draws one.
+  const surfaces = shown.drawn.map(({ id }) => ({ id, ...BAR_SURFACE }));
+  if (surfaces.length > 4) faults.push(`app: the screen has ${surfaces.length} timers with rounds or with no alert, and Alphy draws at most 4. Use fewer timers`);
   const language = typeof lang === "string" ? lang : null;
-  // The run-time has no parts, and the state of each event replaces each start value: it reads no need line and no state line.
-  app.lines = file.of("app").concat(file.of("formula"), file.of("component")).map((entry) => entry.raw).join("\n");
+  // The run-time has no parts, and the state of each event replaces each start value: it reads no state line. It reads the need
+  // line of each timer that it moves: App.tick takes the rounds and the rest from it.
+  const timed = file.of("need").filter((entry) => entry.tree.name === "timer" && !foreground(entry.tree));
+  app.lines = file.of("app").concat(file.of("formula"), file.of("component"), timed).map((entry) => entry.raw).join("\n");
   // A value that an entries need shows for each row reads as a field of the row in each formula of a row (App.value).
   const shows = shownFormulas(file);
   if (shows.length) app.shown = show({ k: "map", entries: shows });
   if (faults.length) return { definition: null, language, faults, app };
   const source = `${runtime.text}\nreturn handle(input, ${JSON.stringify(app)});`, size = bytes(source);
   if (size > MAX_SOURCE_BYTES) return { definition: null, language, faults: [`app: the source is ${size} bytes, and Alphy keeps at most ${MAX_SOURCE_BYTES} bytes. Use shorter texts and fewer lines`], app };
-  const definition = { formatVersion: 3, title, description: "", capabilities: [], stateSchema, initialState: stateOf(kit, app, shown), ui: shown.ui, source };
+  // The alert of the host's countdown asks for its capabilities, and Alphy refuses a timer whose app does not declare them.
+  const capabilities = file.of("component").some((entry) => entry.tree.k === "call" && entry.tree.name === "Timer") ? [...ALERT_CAPABILITIES] : [];
+  const definition = { formatVersion: 3, title, description: "", capabilities, ...(surfaces.length && { surfaces }), stateSchema, initialState: stateOf(kit, app, shown), ui: shown.ui, source };
   return { definition, language, faults: [], app };
 }
 

@@ -29,14 +29,17 @@ test("run: an action sets the bound value and the figures follow", async () => {
 
 test("run: open of the initial state gives the initial state", async () => {
   // Each saved plan and fixture that compiles. The run-time reads no start value: each value comes from the state.
+  // An app with a timer on a surface also gets the drawing of each surface and no timer that runs.
   const opened = [];
   for (const [path, text] of allPlans()) {
     const { definition, app } = await compiled(text);
     if (!definition) continue;
-    expect(handle(request(definition.initialState, { type: "open" }), app)).toEqual({ state: definition.initialState });
+    const reply = handle(request(definition.initialState, { type: "open" }), app);
+    expect(reply).toEqual({ state: definition.initialState, ...(definition.surfaces && { surfaces: reply.surfaces, timers: [] }) });
     opened.push(path);
   }
-  expect(opened).toHaveLength(14);
+  expect(opened).toHaveLength(16);
+  expect(opened).toEqual(expect.arrayContaining(["plans/tea.plan", "plans/timer-rounds.plan"]));
 });
 
 test("run: the kit of an event computes its formulas on the stored state, with no fault", async () => {

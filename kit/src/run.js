@@ -3,8 +3,9 @@
 // The emitter (emit.js) builds the first screen and the first state with the same screen and stateOf functions.
 
 import { AppFile, parseExpression, show } from "./dsl.js";
-import { App, given, settings } from "./core.js";
+import { App, foreground, given, settings } from "./core.js";
 import { MAX_ROWS, cast, castRow, clockOf, namer, own, relative, rows, shownAs } from "./rows.js";
+import { barOf, commandsOf } from "./draw.js";
 
 /** An object of Alphy holds at most 32 fields, so the shown values go into d, d2, d3, and the tests into v, v2. */
 export const PER_OBJECT = 32;
@@ -14,6 +15,11 @@ export const MAX_ARRAY = 512;
 export const TYPED = new Set(["TextField", "NumberField", "DateField", "TimeField"]);
 /** A chart of Alphy draws at most 256 points (ToolUiCatalog), so the run-time writes the last 256. */
 export const MAX_POINTS = 256;
+/** The alert at the end of the host's countdown, and the capabilities that it asks for (ForegroundTimerSpec.requests). */
+const ALERT = { vibrationMs: 600, toneMs: 600 };
+export const ALERT_CAPABILITIES = ["audio.tone", "vibration.play"];
+/** The host's countdown runs from 1 s to 24 h (ForegroundTimerSpec). A timer that the run-time moves gets one timer event each second. */
+const MIN_TIMER_MS = 1000, MAX_TIMER_MS = 86400000, TICK_MS = 1000;
 
 /** The values of the app line: app("Title", lang="en", kind="Lesson", preset="clean", palette="teal"). */
 export function header(kit) {
@@ -27,7 +33,7 @@ const STYLES = { eyebrow: { emphasis: "label", tone: "accent" }, muted: { tone: 
 /** The kit's icons that Alphy has under a different name (ToolUiCatalog.icons). ArrowDown has no glyph of its own there. */
 const ICON_NAMES = { ArrowUp: "Arrow", ArrowDown: "Sort", ArrowLeft: "Back", ArrowRight: "Chevron", Edit: "Pencil" };
 /** What a row template of Alphy cannot hold (ToolUiCatalog: no list, dialog, or sheet in a row), and what keeps one state field for all rows. */
-const NOT_IN_ROW = new Set(["List", "Dialog", "Chart", "Tabs"]);
+const NOT_IN_ROW = new Set(["List", "Dialog", "Chart", "Tabs", "Timer"]);
 /** The components of a part that a later task builds: the fault names the kind of the need. */
 const LATER = { Picture: "picture", Link: "link" };
 /** The share of value in max in percent, from 0 to 100: 0 for a max of 0 or below and for a value that is not finite. */
@@ -91,10 +97,18 @@ const NODES = {
   Dialog: (n, at) => at.modal(),
   List: (n, at) => at.list(),
   // Alphy's progress binds the share in percent. Dots show the step itself: at most 12, and with one max for all rows of a list.
+  // The bar of a timer that the run-time moves is a surface that the run-time draws.
   Progress: (n, at) => {
     const { value, max } = n.props, dots = n.props.variant === "dots" && !at.scope && Number.isInteger(max) && max >= 1 && max <= 12;
-    return { type: "progress", text: at.label(), variant: dots ? "dots" : "bar", min: 0, max: dots ? max : 100,
+    return at.drawn(percent(value, max) / 100) ?? { type: "progress", text: at.label(), variant: dots ? "dots" : "bar", min: 0, max: dots ? max : 100,
       bind: at.computed("value", dots ? (Number.isFinite(value) ? Math.min(max, Math.max(0, value)) : 0) : percent(value, max)) };
+  },
+  // The host's own countdown (Alphy's foreground timer): the host keeps its time and sends its action to no source.
+  Timer: (n, at) => {
+    const ms = Math.round(Number(n.props.seconds) * 1000);
+    if (!(ms >= MIN_TIMER_MS && ms <= MAX_TIMER_MS)) at.fault(`a Timer runs from 1 second to 24 hours, and this one has ${n.props.seconds} seconds`);
+    return { type: "timer", text: at.label(), mode: "countdown", action: at.action(() => false),
+      foreground: { durationMs: Number.isFinite(ms) ? Math.min(MAX_TIMER_MS, Math.max(MIN_TIMER_MS, ms)) : MIN_TIMER_MS, ...ALERT } };
   },
   // A ring takes children only when it is large (ToolUiCatalog): its text is a text under it.
   Ring: (n, at) => ({ type: "progressRing", text: at.label(), size: "large", min: 0, max: 100, bind: at.computed("value", percent(n.props.value, n.props.max)),
@@ -113,8 +127,8 @@ const readsRow = (tree) => tree !== null && typeof tree === "object" && ((tree.k
  * The Alphy screen of the kit's tree in the state of now. app is the compiled data: the field of each state value, the kind of
  * each time, date, list, and array, the type of each shown value, and the names. Returns the ui, the shown values by object
  * (d, v, ...), the views of lists that the run-time writes (views, their schemas, and their lines), the controls by action id,
- * the bounds of each number control, the faults as [line, text], and for the emitter the line of each node of the ui (owners)
- * and the stored list of each list node (listRoots).
+ * the bounds of each number control, the faults as [line, text], for the emitter the line of each node of the ui (owners)
+ * and the stored list of each list node (listRoots), and each surface that the walk draws as {id, running, commands} (drawn).
  */
 export function screen(kit, app, first = false) {
   // The names of the screen avoid the names of the stored fields. The emitter's walk and each event's walk start with the same taken names.
@@ -125,6 +139,9 @@ export function screen(kit, app, first = false) {
   const typeOf = (key, value) => (first ? (app.types[key] ??= typeof value === "number" ? "number" : "string") : app.types[key] ?? "string");
   const faults = [], controls = new Map(), rowControls = new Map(), owners = new Map(), listRoots = new Map(), bounds = [], views = {}, viewSchemas = {}, viewOwners = [];
   const slots = { d: new Map(), v: new Map() }, values = {};
+  // The bar of each timer need that the run-time moves, by the name of its line, and each surface that the walk draws.
+  const timed = new Map(kit.file.of("need").filter((entry) => entry.tree.name === "timer" && !foreground(entry.tree)).map((entry) => [`${entry.key}_bar`, entry.key]));
+  const drawn = [];
   /**
    * A value that a node shows: the field of its state line (of its row in a row), or a field that the run-time computes. At the top
    * the field is in d (or in v for a test). In a row it is a field of the row, and the list becomes a view with that field.
@@ -234,6 +251,14 @@ export function screen(kit, app, first = false) {
         return { type: node.children.some(form) ? "bottomSheet" : "dialog", text: at.caption(node.props.title), dismissAction: dismiss, children: at.children() };
       },
       list: () => rows(shared, node, key, line, expr, at, ctx.title),
+      // The bar of a timer that the run-time moves: a canvas with one surface, which the reply draws. The host sends a timer event only to an app with a surface.
+      drawn: (share) => {
+        const need = !scope && timed.get(node.name);
+        if (!need) return null;
+        const id = name("surface:" + need, node.name);
+        drawn.push({ id, running: Boolean(kit.state[need + "_on"]), commands: commandsOf(barOf(share, kit.state[need + "_resting"] ? "success" : "accent")) });
+        return { type: "canvas", text: at.label(), surfaces: [id] };
+      },
       // The points of a chart are two arrays that the run-time writes: the labels and the values of the last 256 points.
       chart: () => {
         const kind = node.props.kind ?? "bar", text = at.label().slice(0, 100), points = (Array.isArray(node.props.points) ? node.props.points : []).slice(-MAX_POINTS);
@@ -285,7 +310,7 @@ export function screen(kit, app, first = false) {
   const { kind, preset, palette } = header(kit), tree = kit.tree(), top = walk(tree, "root", "root", { scope: null, weighted: true });
   const children = [...(kind ? [{ type: "text", text: String(kind), style: STYLES.eyebrow }] : []), ...(tree.type === "Column" ? top?.children ?? [] : [top].filter(Boolean))];
   const ui = { type: "theme", preset: preset ?? "clean", ...(palette && { palette }), cornerRadius: 20, children: [{ type: "column", style: { gap: "medium" }, children }] };
-  return { ui, values, views, viewSchemas, viewOwners, controls, bounds, faults, owners, listRoots };
+  return { ui, values, views, viewSchemas, viewOwners, controls, bounds, faults, owners, listRoots, drawn };
 }
 
 /** The Alphy value of a stored value of the kit: a time as minutes, a date as a real date (today for a text that is not one), and each row cast. */
@@ -346,6 +371,8 @@ export function kitOf(app, state) {
  * is the clock of the host. A read-only event, an action id that the app does not have, an action that changes nothing, and an
  * action that takes a list past its count of rows (app.caps) or an array past Alphy's limit give the state back as it is. A bound
  * number past its bounds comes back at its bound. The reply holds a new ui only when the screen differs from the screen of the state before the event.
+ * An open and a timer event of a timer that runs move each timer to the clock of now. A timer event of no timer that runs, also
+ * a late one after a pause, and each other event of a surface give the state back as it is.
  */
 export function handle(input, app, now = Date.now()) {
   const { state, event } = input;
@@ -353,21 +380,26 @@ export function handle(input, app, now = Date.now()) {
   const clock = settings.now;
   settings.now = () => now;
   try {
-    const kit = kitOf(app, state), kinds = app.kinds ?? {};
-    const before = screen(kit, app), control = event.type === "action" ? before.controls.get(event.actionId) : undefined;
-    if (event.type !== "open" && !control) return { state };
-    if (control && control(event.value) === false) return { state };
+    const kit = kitOf(app, state), kinds = app.kinds ?? {}, before = screen(kit, app);
+    const timed = event.type === "open" || (event.type === "timer" && before.drawn.some((surface) => surface.id === event.timerId && surface.running));
+    const control = event.type === "action" ? before.controls.get(event.actionId) : timed ? () => kit.tick() : undefined;
+    if (!control || control(event.value) === false) return { state };
     for (const [root, kind] of Object.entries(kinds)) {
       if ((kind === "list" && kit.state[root]?.length > (own(app.caps, root) ?? MAX_ROWS)) || (kind === "array" && kit.state[root]?.length > MAX_ARRAY)) return { state };
     }
-    let after = control ? screen(kit, app) : before;
+    let after = screen(kit, app);
     const outside = after.bounds.filter(([node, min, max]) => !(node.props.value >= min && node.props.value <= max));
     if (outside.length) {
       for (const [node, min, max] of outside) kit.write(node.props.bind, Number.isFinite(node.props.value) ? Math.min(max, Math.max(min, node.props.value)) : min, { it: node.row });
       kit.recompute();
       after = screen(kit, app);
     }
-    const next = stateOf(kit, app, after);
-    return JSON.stringify(after.ui) === JSON.stringify(before.ui) ? { state: next } : { state: next, ui: after.ui };
+    const next = stateOf(kit, app, after), reply = JSON.stringify(after.ui) === JSON.stringify(before.ui) ? { state: next } : { state: next, ui: after.ui };
+    // Each reply of an app with surfaces draws each one again and names each timer that runs, by the id of its surface: one list for all.
+    if (after.drawn.length) {
+      reply.surfaces = Object.fromEntries(after.drawn.map(({ id, commands }) => [id, { commands }]));
+      reply.timers = after.drawn.filter((surface) => surface.running).map(({ id }) => ({ id, intervalMs: TICK_MS }));
+    }
+    return reply;
   } finally { settings.now = clock; }
 }

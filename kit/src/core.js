@@ -16,6 +16,8 @@ export const CATALOG = {
   List: ["items", "template", "group"], Chart: ["items", "point", "value", "label"],
   Tabs: ["titles", "groups", "label"], Dialog: ["title", "children"], DateField: ["label", "bind"], TimeField: ["label", "bind"],
   Picture: ["text", "found"], Choices: ["label", "bind", "options"],
+  // The host's own countdown: it keeps its time and has its own buttons and alert (Alphy's foreground timer).
+  Timer: ["label", "seconds"],
   // What the host draws from lines of data. The bound value of a Model3d is its turn angle in degrees. A Link only shows its address.
   Drawing: ["label", "width", "height", "shapes"], Model3d: ["label", "bodies", "bind", "exploded", "selected"], Link: ["label", "url", "text"],
 };
@@ -111,6 +113,11 @@ function same(a, b) {
   const keys = (value) => Object.keys(value).filter((key) => key !== "id");
   return keys(a).length === keys(b).length && keys(a).every((key) => same(a[key], b[key]));
 }
+
+/** A timer need with more than one phase: a rest, or more than one round. Its part shows the phase and the round. */
+export const phased = (named) => (named.rest && named.rest.v !== 0) || (named.rounds && named.rounds.v !== 1);
+/** A timer need with an alert and one phase is the host's own countdown (a Timer line). tick() moves each other timer need. */
+export const foreground = (need) => need.named.alert?.v === true && !phased(need.named);
 
 /** The values that the entries needs of a file show for each row, show={name: formula}, as [name, formula] pairs. */
 export const shownFormulas = (file) => file.of("need").filter((entry) => entry.tree.name === "entries" && entry.tree.named?.show?.k === "map").flatMap((entry) => entry.tree.named.show.entries);
@@ -446,9 +453,10 @@ export class App {
   }
 
   /**
-   * The host looks at the clock (settings.now). Each timer need that runs moves forward by the time since the last
-   * look: its work phase ends and counts in $/NAME, then its rest phase runs when it has one, then the next round starts.
-   * The timer part made the state names. A test and the smoke run move the clock and call this.
+   * The host looks at the clock (settings.now). Each timer need that runs keeps the end of its phase in $/NAME_end, in ms of
+   * the clock, and 0 while it stands. So a kit that starts from a stored state, as each event of the run-time does, knows
+   * the time that is left. Each phase whose end passed ends: a work phase counts in $/NAME, then its rest phase runs when
+   * it has one, then the next round starts. The timer part made the state names. A test and the smoke run move the clock and call this.
    */
   tick() {
     const now = settings.now(), passed = (now - (this.clock ?? now)) / 1000, s = this.state;
@@ -466,32 +474,40 @@ export class App {
       if (!s._run.length) delete s._run;
       this.recompute();
     }
-    for (const entry of passed > 0 ? this.file.of("need") : []) {
-      if (entry.tree.name !== "timer") continue;
+    for (const entry of this.file.of("need")) {
+      if (entry.tree.name !== "timer" || foreground(entry.tree)) continue;
       const n = entry.key, number = (tree, fallback) => { try { return Number(tree ? this.value(tree, {}) : fallback) || 0; } catch { return 0; } };
-      let left = passed;
+      const phase = () => Number(s[n + "_phase"]) || 0;
+      if (!s[n + "_on"]) { s[n + "_end"] = 0; continue; }
+      // A start, also after a pause: the phase ends when the time that is left passes.
+      if (!s[n + "_end"]) s[n + "_end"] = now + Math.max(0, phase() - s[n + "_spent"]) * 1000;
       // 1000 phases at most in one look, so a phase of no length cannot hold the host.
-      for (let guard = 0; s[n + "_on"] && left > 0 && guard < 1000; guard++) {
-        const phase = Number(s[n + "_phase"]) || 0, room = phase - s[n + "_spent"];
-        if (left < room) { s[n + "_spent"] += left; break; }
-        left -= Math.max(0, room);
+      for (let guard = 0; s[n + "_on"] && now >= s[n + "_end"] && guard < 1000; guard++) {
+        const ended = s[n + "_end"];
         if (!s[n + "_resting"]) s[n] += 1;
         if (!s[n + "_resting"] && number(entry.tree.named.rest, 0) > 0) { s[n + "_resting"] = true; s[n + "_spent"] = 0; }
-        else if (s[n + "_round"] >= number(entry.tree.named.rounds, 1)) { s[n + "_over"] = true; s[n + "_on"] = false; s[n + "_spent"] = phase; }
+        else if (s[n + "_round"] >= number(entry.tree.named.rounds, 1)) { s[n + "_over"] = true; s[n + "_on"] = false; s[n + "_spent"] = phase(); s[n + "_end"] = 0; }
         else { s[n + "_round"] += 1; s[n + "_resting"] = false; s[n + "_spent"] = 0; }
         this.recompute();
+        // The next phase starts at the end of the last one, not at the look: a late look loses no time.
+        if (s[n + "_on"]) s[n + "_end"] = ended + phase() * 1000;
       }
+      if (s[n + "_on"]) s[n + "_spent"] = Math.max(0, phase() - (s[n + "_end"] - now) / 1000);
       this.recompute();
     }
   }
 
-  /** What a person does to a drawn node: change its field, or press it. Returns an error text or "". */
+  /**
+   * What a person does to a drawn node: change its field, or press it. Returns an error text or "". The look at the clock
+   * after the action gives a timer that the action started or stopped the end of its phase.
+   */
   change(node, value) {
     this.tick();
     try {
       this.write(node.props.bind, value, { it: node.row });
       if (node.props.action) this.act(node.props.action, { it: node.row, list: node.list }); else this.recompute();
     } catch (failure) { return `${node.name ?? node.type}: ${failure.message}`; }
+    this.tick();
     return "";
   }
 
@@ -499,6 +515,7 @@ export class App {
     if (node.props.enabled === false || node.props.visible === false) return `${node.name ?? node.type} is not active`;
     this.tick();
     try { this.act(node.props.action, { it: node.row, list: node.list }); } catch (failure) { return `${node.name ?? node.type}: ${failure.message}`; }
+    this.tick();
     return "";
   }
 

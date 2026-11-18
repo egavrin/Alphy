@@ -1,16 +1,20 @@
 package com.alpha.assistant.tools.appfile
 
+import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.alpha.assistant.sandbox.GraphicsSession
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.AgentScriptProvider
 import com.alpha.assistant.tools.GeneratedOutputDetail
 import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolGenerationSmoke
+import com.alpha.assistant.tools.ToolPreview
 import com.alpha.assistant.tools.ToolSmokeFailure
 import com.alpha.assistant.tools.ToolSpec
+import com.alpha.assistant.tools.ToolUiCatalog
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -18,7 +22,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps and each node of the node table in Alphy's checks, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, and the time of an event. */
+/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps and each node of the node table in Alphy's checks, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, and the timers. */
 @RunWith(AndroidJUnit4::class)
 class AppFileProofTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
@@ -56,7 +60,7 @@ class AppFileProofTest {
         assertTrue("median $median ms of $times",median<1000)
     }
     /** A saved plan through compile, ToolSpec.parse, and the smoke step as AppAgent.validate builds it. */
-    private suspend fun parsedAndSmoked(sandbox: SandboxClient,name: String,language: String="en",text: String=plan(name)): ToolSpec {
+    private suspend fun parsedAndSmoked(sandbox: SandboxClient,name: String,language: String="en",text: String=plan(name),observeReplay: ((List<String>)->Unit)?=null): ToolSpec {
         val result=AppFileCompiler(instrumentation.targetContext,sandbox).compile(text)
         assertEquals(result.faults.toString(),"ok",result.status)
         assertEquals(language,result.language)
@@ -64,7 +68,7 @@ class AppFileProofTest {
         // The script provider is never asked: the smoke run makes no model call.
         try {
             ToolGenerationSmoke(sandbox,spec,"appfile-$name",1,spec.initialState,checkActive={},
-                generation=ToolGenerationService(AgentScriptProvider(),sandbox)).run()
+                generation=ToolGenerationService(AgentScriptProvider(),sandbox),observeReplay=observeReplay).run()
         } catch(failure: ToolSmokeFailure) {
             // The failure itself has no message: the validator's text is the detail of its cause.
             throw AssertionError("smoke ${failure.event} at ${failure.path}: ${(failure.cause as? GeneratedOutputDetail)?.detail ?: failure.cause} replay=${failure.replay}",failure)
@@ -112,8 +116,10 @@ class AppFileProofTest {
     /** Events in sequence through ToolGenerationService.executeEvent: Alphy checks each event against the screen before it, and each reply. */
     private class Session(private val sandbox: SandboxClient,private val spec: ToolSpec,private val id: String) {
         private val generation=ToolGenerationService(AgentScriptProvider(),sandbox)
-        private var ui=spec.ui.toString()
-        private var state=spec.initialState
+        var ui=spec.ui.toString()
+            private set
+        var state=spec.initialState
+            private set
         suspend fun act(actionId: String,value: Any?=null): JSONObject {
             val event=JSONObject().put("type","action").put("actionId",actionId).put("value",value ?: JSONObject.NULL)
             val preview=generation.executeEvent(spec,id,1,state,event,ui) {source,input -> sandbox.execute(source,input.toString())}
@@ -244,6 +250,83 @@ class AppFileProofTest {
         val text="app(\"Held\", lang=\"en\")\nneed a = counter(\"A\")\nneed b = counter(\"B\")\nneed pages = tabs([\"One\", \"Two\"], [[a], [b]])\nnote = Text(\"Hi\")\nroot = Column([note])\n"
         val spec=parsedAndSmoked(SandboxClient(instrumentation.targetContext),"held",text=text)
         assertEquals(listOf("pages_view","a_minus","a_plus","b_minus","b_plus"),nodes(spec.ui).mapNotNull {it.optString("action").ifEmpty {null}})
+    }
+    @Test fun teaPassesParseAndSmoke(): Unit=runBlocking {
+        // The host's own countdown: a choice of tea gives a new ui whose timer has the duration of that tea, and Alphy's checks take it.
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val spec=parsedAndSmoked(sandbox,"tea","tr")
+        assertEquals(setOf("audio.tone","vibration.play"),spec.capabilities)
+        val app=Session(sandbox,spec,"appfile-tea")
+        fun duration()=ToolUiCatalog.validateForegroundTimer(JSONObject(app.ui),"demleme_timer",JSONObject(app.state)).durationMillis
+        assertEquals(300_000L,duration())
+        app.act("cay_field","Yeşil çay")
+        assertEquals(180_000L,duration())
+        app.act("cay_field","Bitki çayı")
+        assertEquals(420_000L,duration())
+    }
+    /** The path of the host for an open app: one retained session, and executeEvent with dispatch for each event, as ArtifactCoordinator sends a timer. */
+    private class Host(context: Context,sandbox: SandboxClient,private val spec: ToolSpec,private val id: String) {
+        private val generation=ToolGenerationService(AgentScriptProvider(),sandbox)
+        private val session=GraphicsSession(context)
+        private var ui=spec.ui.toString()
+        var state=spec.initialState
+            private set
+        suspend fun open()=send(JSONObject().put("type","open"),open=true)
+        suspend fun send(event: JSONObject,open: Boolean=false): ToolPreview {
+            val preview=generation.executeEvent(spec,id,1,state,event,ui) {source,input ->
+                if(open) session.open(source,input,waitForRetainedRelease=false) {true} else session.dispatch(input)
+            }
+            state=preview.state
+            ui=preview.ui
+            return preview
+        }
+        fun close()=session.close()
+    }
+    private fun press(actionId: String)=JSONObject().put("type","action").put("actionId",actionId).put("value",JSONObject.NULL)
+    private fun timer(timerId: String)=JSONObject().put("type","timer").put("timerId",timerId)
+    @Test fun timerRoundsPassesParseAndSmoke(): Unit=runBlocking {
+        val context=instrumentation.targetContext
+        val sandbox=SandboxClient(context)
+        // The smoke sends each timer of a reply once. A source with timers and no declared surface fails with widget_timer_host.
+        val sent=mutableSetOf<String>()
+        val rounds=parsedAndSmoked(sandbox,"timer-rounds","de") {events ->
+            events.map {JSONObject(it)}.filter {it.getString("type") == "timer"}.forEach {sent+=it.getString("timerId")}
+        }
+        assertEquals(listOf("timer_bar"),rounds.surfaces.keys.toList())
+        assertEquals(setOf("timer_bar"),sent)
+        // Real time: one work second and one rest second in 2 rounds (the kit test of the short plan has the same plan and steps).
+        val text="app(\"Short rounds\", lang=\"en\")\nneed t = timer(\"Short\", 1, rounds=2, rest=1)\nneed done = progress(\"Rounds done\", \$/t, 2)\n"
+        val short=Host(context,sandbox,parsedAndSmoked(sandbox,"short",text=text),"appfile-short")
+        try {
+            assertEquals(emptyMap<String,Int>(),short.open().timers)
+            assertEquals(mapOf("t_bar" to 1000),short.send(press("t_start")).timers)
+            val seen=List(4) {
+                // Each timer event comes 300 ms after the end of the phase in the state of the reply before it.
+                val end=JSONObject(short.state).getJSONObject("t_s").getLong("end")
+                delay(maxOf(0L,end+300-System.currentTimeMillis()))
+                val reply=short.send(timer("t_bar"))
+                val state=JSONObject(reply.state)
+                val t=state.getJSONObject("t_s")
+                listOf(if(t.getBoolean("over")) "over" else if(t.getBoolean("resting")) "rest" else "work",t.getInt("round"),state.getInt("t"),reply.timers?.size)
+            }
+            assertEquals(listOf(listOf("rest",1,1,1),listOf("work",2,1,1),listOf("rest",2,2,1),listOf("over",2,2,0)),seen)
+        } finally {short.close()}
+        // Five timer events of the 40 s work phase of timer-rounds through the same path.
+        val app=Host(context,sandbox,rounds,"appfile-timer-rounds")
+        try {
+            app.open()
+            app.send(press("timer_start"))
+            val times=List(5) {
+                val started=SystemClock.elapsedRealtime()
+                val reply=app.send(timer("timer_bar"))
+                val took=SystemClock.elapsedRealtime()-started
+                assertEquals(mapOf("timer_bar" to 1000),reply.timers)
+                took
+            }
+            val median=times.sorted()[2]
+            Log.i("AppFileProofTest","timer event times ms=$times median=$median")
+            assertTrue("median $median ms of $times",median<50)
+        } finally {app.close()}
     }
     @Test fun anActionOnAListOf100RowsTakesUnder250Ms(): Unit=runBlocking {
         val rows=(1..100).joinToString(", ") {"{name: \"Item $it\", done: false}"}

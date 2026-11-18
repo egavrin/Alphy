@@ -3,6 +3,7 @@
 // A part is a kind of need, never a named app.
 
 import { DslError, parseLine, show } from "./dsl.js";
+import { foreground, phased } from "./core.js";
 
 /** The choice step. Rules here. A closed-choice model (Jev, or the local one) can take its place. */
 export const rules = (question, options, fallback) => fallback ?? options[0];
@@ -287,29 +288,35 @@ const PARTS = {
     };
   },
 
-  // need tea = timer("Tea", $/kind == "green" ? 120 : 180, alert=true): a countdown with start, pause, and reset. The host moves it with its clock (App.tick).
+  // need tea = timer("Tea", $/kind == "green" ? 120 : 180, alert=true): one phase with an alert is the host's own countdown, a Timer line.
   // need set = timer("Workout", 40, rounds=8, rest=20): each round is a work phase and then a rest phase. $/NAME counts the work phases that ended.
-  // Evidence: 4 of Alphy's 45 corpus cases are timers (workout-de, tea-tr, pomodoro-zh, eggs-it). All lines are plain lines. Only the passing of time is the host's.
+  // A timer with more than one phase, or with no alert, is plain lines with start, pause, and reset. The host moves it with its clock (App.tick).
+  // Evidence: 4 of Alphy's 45 corpus cases are timers (workout-de, tea-tr, pomodoro-zh, eggs-it). Only the passing of time is the host's.
   async timer(name, need) {
     const [title, seconds] = need.args, opt = need.named, text = (key, fallback) => (opt[key] ? show(opt[key]) : q(fallback)), at = (part) => `$/${name}_${part}`;
+    if (foreground(need)) {
+      const unshown = ["start", "pause", "reset", "done"].filter((key) => opt[key]);
+      return { lines: [`${name}_timer = Timer(${show(title)}, ${show(seconds ?? { k: "lit", v: 60 })})`, `${name}_view = Card([${name}_timer])`], top: [`${name}_view`],
+        note: unshown.length ? `need ${name}: the host's countdown shows its own buttons and alert, so ${unshown.map((key) => key + "=").join(", ")} do not show` : null };
+    }
     // The phase and the round show when the timer has more than one phase.
-    const phased = (opt.rest && opt.rest.v !== 0) || (opt.rounds && opt.rounds.v !== 1);
-    const lines = [`$/${name} = 0`, `${at("on")} = false`, `${at("round")} = 1`, `${at("resting")} = false`, `${at("over")} = false`, `${at("spent")} = 0`,
+    const many = phased(opt);
+    const lines = [`$/${name} = 0`, `${at("on")} = false`, `${at("round")} = 1`, `${at("resting")} = false`, `${at("over")} = false`, `${at("spent")} = 0`, `${at("end")} = 0`,
       `${at("phase")} := ${at("resting")} ? ${opt.rest ? show(opt.rest) : 0} : ${show(seconds ?? { k: "lit", v: 60 })}`,
       // The time that is left in whole seconds. round(…, 3) keeps a sum of parts of a second from showing one second more.
       `${at("left")} := ceil(round(max(0, ${at("phase")} - ${at("spent")}), 3))`,
       `${at("clock")} := pad2(floor(${at("left")} / 60)) + ":" + pad2(${at("left")} % 60)`,
       `${name}_time = Metric(${show(title)}, ${at("clock")}, emphasis="display")`,
-      ...(phased ? [`${name}_phaseText = Text((${at("resting")} ? ${text("restText", "Rest")} : ${text("workText", "Work")}) + " " + text(${at("round")}) + " / " + text(${opt.rounds ? show(opt.rounds) : 1}))`] : []),
-      `${name}_bar = Progress(${at("spent")}, ${at("phase")})`,
+      ...(many ? [`${name}_phaseText = Text((${at("resting")} ? ${text("restText", "Rest")} : ${text("workText", "Work")}) + " " + text(${at("round")}) + " / " + text(${opt.rounds ? show(opt.rounds) : 1}))`] : []),
+      `${name}_bar = Progress(${at("spent")}, ${at("phase")}, label=${show(title)})`,
       `${name}_start = Button(${text("start", "Start")}, action=set(${at("on")}, true), visible=!${at("on")} && !${at("over")})`,
       `${name}_pause = Button(${text("pause", "Pause")}, action=set(${at("on")}, false), visible=${at("on")})`,
       `${name}_reset = Button(${text("reset", "Reset")}, action=[set(${at("on")}, false), set(${at("spent")}, 0), set(${at("round")}, 1), set(${at("resting")}, false), set(${at("over")}, false)], enabled=${at("on")} || ${at("spent")} > 0 || ${at("round")} > 1 || ${at("resting")} || ${at("over")})`,
-      `${name}_doneNote = Notice(${text("done", "Time is up")}, visible=${at("over")})`,
-      // An alert (a sound or a vibration) is outside the prototype. The note shows that the plan asked for one.
-      ...(opt.alert?.v === true ? [`${name}_alert = Text("alert at the end")`] : [])];
-    const parts = [`${name}_time`, ...(phased ? [`${name}_phaseText`] : []), `${name}_bar`, `Row([${name}_start, ${name}_pause, ${name}_reset])`, `${name}_doneNote`, ...(opt.alert?.v === true ? [`${name}_alert`] : [])];
-    return { lines: [...lines, `${name}_view = Card([${parts.join(", ")}])`], top: [`${name}_view`] };
+      `${name}_doneNote = Notice(${text("done", "Time is up")}, visible=${at("over")})`];
+    const parts = [`${name}_time`, ...(many ? [`${name}_phaseText`] : []), `${name}_bar`, `Row([${name}_start, ${name}_pause, ${name}_reset])`, `${name}_doneNote`];
+    // The run-time draws the bar and moves the clock while the app is open. No sound or vibration comes at the end of a phase.
+    return { lines: [...lines, `${name}_view = Card([${parts.join(", ")}])`], top: [`${name}_view`],
+      note: opt.alert?.v === true ? `need ${name}: a timer with rounds shows the end of a round on the screen only` : null };
   },
 
   // need photo = picture("A plate of pasta with tomato sauce"): the host makes the picture from the description. The prototype draws a box with the description.
@@ -450,6 +457,8 @@ export async function expand(file, choose = rules) {
       continue;
     }
     file.tops.set(entry.key, built.top);
+    // What the part builds in a different way than the need line asks. The report shows it as a note.
+    if (built.note) file.partNotes.push(built.note);
     // The controls that the part made, by name, so that the report can say when a later step took one off the screen.
     const control = (made) => made.kind === "component" && made.tree.k === "call" && (made.tree.named.action || ["Button", "IconButton", "TextField", "NumberField", "Slider", "Toggle", "CheckBox", "Segmented", "Select", "DateField", "TimeField"].includes(made.tree.name));
     (file.made ??= new Map()).set(entry.key, parsed.filter(control).map((made) => made.key));
