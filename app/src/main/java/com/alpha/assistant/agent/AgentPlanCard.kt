@@ -174,8 +174,7 @@ private fun AgentStepCard(agent: AgentConversation, plan: AgentPlan, index: Int,
     Text("${index + 1}. ${target.label}", style = MaterialTheme.typography.titleSmall)
     if (target.before.isNotEmpty()) Text(stringResource(R.string.agent_before, target.before))
     if (target.after.isNotEmpty()) Text(stringResource(R.string.agent_after, target.after))
-    if (step.command.function !in setOf("calendar.read", "calendar.readOwned", "calendar.select", "memory.read", PHOTO_CAPTURE))
-        Text(stringResource(R.string.agent_non_reversible), style = MaterialTheme.typography.bodySmall)
+    if (step.irreversible) Text(stringResource(R.string.agent_non_reversible), style = MaterialTheme.typography.bodySmall)
     val result = plan.results.getOrNull(index)
     when {
         result != null -> Text(result)

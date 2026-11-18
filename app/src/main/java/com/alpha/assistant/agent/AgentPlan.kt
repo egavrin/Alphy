@@ -103,7 +103,12 @@ internal data class AgentTarget(val label: String, val before: String, val after
 
 internal data class AgentStep(val command: AgentCommand, val options: List<AgentTarget>, val selected: Int? = null) {
     val target: AgentTarget? get() = options.getOrNull(selected ?: -1)
+    /** The plan card and the voice proposal note that Alphy cannot undo this step. */
+    val irreversible: Boolean get() = command.function !in noUndoNeeded
 }
+
+private val noUndoNeeded = setOf("calendar.read", "calendar.readOwned", "calendar.select", "memory.read",
+    com.alpha.assistant.capabilities.PHOTO_CAPTURE)
 
 internal data class AgentPlan(val id: String, val conversationId: String, val instruction: String, val revision: Int,
     val steps: List<AgentStep>, val permissions: List<String> = emptyList(), val phase: AgentPhase,

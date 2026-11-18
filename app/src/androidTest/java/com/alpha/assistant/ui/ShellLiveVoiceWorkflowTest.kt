@@ -42,6 +42,7 @@ import com.alpha.assistant.voice.VoiceSession
 import com.alpha.assistant.voice.VoiceSettings
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -343,6 +344,32 @@ class ShellLiveVoiceWorkflowTest {
         assertEquals(listOf(PLAN_REQUEST, robot.text(R.string.agent_plan_ready)), messages(model).map { it.text })
     }
 
+    /** Spec 5.5.10 rule 7, when the turn gap ended the «да» turn before GPT-Live opened its delegation. */
+    @Test fun lateApprovalDelegationSubmitsNoMessage() = reviewed { _, model, _ ->
+        socket.emit(inputDelta("да", 6_000, 6_400))
+        robot.waitUntil { commentary().size == 3 }
+        socket.emit(liveDelegation("d2", 6_600))
+        robot.waitUntil { commentary().size == 4 }
+        assertEquals(listOf("d1" to PROPOSAL_ADD, "d1" to STARTED, "d1" to DONE, "d2" to STARTED), commentary())
+        assertEquals(listOf(PLAN_REQUEST, robot.text(R.string.agent_plan_ready)), messages(model).map { it.text })
+    }
+
+    /** Ruling R16: the proposal reads the card details of each step. The limit drops whole steps and keeps the question. */
+    @Test fun proposalSpeaksTheCardDetails() {
+        val facts = listOf("A", "B", "C").map { it.repeat(500) }
+        fixture.provider.devicePlanSteps = listOf("memory", "favorite color", "green").map { PhoneActionEvidence(PLAN_REQUEST, it) }
+        fixture.provider.agentProposal = JSONObject().put("steps", JSONArray(facts.map {
+            JSONObject().put("function", "memory.write").put("args", JSONObject().put("text", it))
+        })).toString()
+        install()
+        live(voiceApproval = true) { _, model ->
+            proposed(model, PLAN_REQUEST, "d1", 100)
+            val proposal = commentary().single().second
+            assertEquals("Alphy предлагает: ${added(facts[0])}; ${added(facts[1])}.$ASK", proposal)
+            assertTrue(proposal.length <= 1_200)
+        }
+    }
+
     /** Spec 5.5.10 rule 10. */
     @Test fun withoutEchoCheckOnlyTapRuns() = reviewed(voiceApproval = false) { scenario, model, review ->
         assertEquals(listOf("d1" to ON_SCREEN), commentary())
@@ -518,10 +545,14 @@ class ShellLiveVoiceWorkflowTest {
         const val PLAN_REQUEST = "Change my memory of my favorite color to green"
         const val ADD = """{"steps":[{"function":"memory.write","args":{"text":"Favorite color is green"}}]}"""
         const val EDIT = """{"steps":[{"function":"memory.write","args":{"match":"Favorite color","text":"Favorite color is green"}}]}"""
-        const val PROPOSAL_ADD = "Alphy предлагает: Добавить факт. Скажите «да», чтобы выполнить, или «нет», чтобы отменить."
+        const val ASK = " Скажите «да», чтобы выполнить, или «нет», чтобы отменить."
+        val PROPOSAL_ADD = "Alphy предлагает: ${added("Favorite color is green")}.$ASK"
         const val ON_SCREEN = "Нужно подтверждение на экране."
         const val STARTED = "Запускаю."
         const val CANCELLED = "Действие отменено."
         const val DONE = "Готово. План завершён."
+
+        /** A memory-add step as the proposal reads its card: the label, the «after» text, and the non-reversible note. */
+        fun added(fact: String) = "Добавить факт, После: $fact, Нельзя отменить через Alphy"
     }
 }

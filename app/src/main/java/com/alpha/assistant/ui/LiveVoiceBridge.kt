@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.alpha.assistant.R
 import com.alpha.assistant.agent.AgentPhase
 import com.alpha.assistant.agent.AgentPlan
+import com.alpha.assistant.agent.AgentStep
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.Message
@@ -173,9 +174,26 @@ internal class LiveVoiceBridge(
         if (plan.phase == AgentPhase.REVIEW && voiceApproval) approval = Approval(plan, event)
     }
 
-    /** The step titles of the plan card within the limit of one append (rule 2). */
-    private fun proposal(plan: AgentPlan) =
-        PROPOSE + LiveProtocol.spoken(plan.steps.mapNotNull { it.target?.label }.joinToString(", "), MAX - PROPOSE.length - ASK.length) + ASK
+    /** The step list of the plan card (rule 2, ruling R16). The limit drops whole steps and never cuts the question. */
+    private fun proposal(plan: AgentPlan): String {
+        val room = MAX - PROPOSE.length - ASK.length
+        val steps = plan.steps.map(::spokenStep)
+        // A step holds its own commas, so «; » separates the steps. The room keeps one character for the closing period.
+        var list = steps.firstOrNull().orEmpty()
+        for (step in steps.drop(1)) if (list.length + 2 + step.length < room) list += "; $step" else break
+        // Only a first step longer than the room is cut, at a sentence end or a word.
+        return PROPOSE + LiveProtocol.spoken(list, room) + ASK
+    }
+
+    /** One step as the plan card shows it: the label, the «before» and «after» texts, and the non-reversible note. */
+    private fun spokenStep(step: AgentStep): String {
+        val target = step.target ?: return ""
+        val parts = listOfNotNull(target.label,
+            target.before.takeIf { it.isNotEmpty() }?.let { string(R.string.agent_before, it) },
+            target.after.takeIf { it.isNotEmpty() }?.let { string(R.string.agent_after, it) },
+            string(R.string.agent_non_reversible).takeIf { step.irreversible })
+        return parts.joinToString(", ") { it.trimEnd('.') }
+    }
 
     /** The message when it enters `generating` or ends, once for each run. A deleted message ends without a result. */
     private fun changed(id: String): Message? {
@@ -191,7 +209,8 @@ internal class LiveVoiceBridge(
     /** [prefix] and the speakable [reply] within the limit of one append (spec 5.5.5). */
     private fun spoken(prefix: String, reply: String) = prefix + LiveProtocol.spoken(reply, MAX - prefix.length)
 
-    private fun string(id: Int) = model.getApplication<Application>().getString(id)
+    private fun string(id: Int, vararg args: Any): String =
+        model.getApplication<Application>().let { if (args.isEmpty()) it.getString(id) else it.getString(id, *args) }
 
     private companion object {
         const val MAX = 1200
