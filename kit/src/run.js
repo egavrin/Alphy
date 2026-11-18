@@ -54,10 +54,12 @@ const styled = (n, keys, base) => { const style = { ...base, ...defined(n.props,
 const rowStyle = (n, cross = n.props.align) => styled(n, ["gap"], cross && { crossAlign: cross });
 /** The icon of the plan in Alphy's name: a kit name that differs (ICON_NAMES) becomes Alphy's. check.js checks each name. */
 const iconOf = (n) => (n.props.icon === undefined ? {} : { icon: own(ICON_NAMES, n.props.icon) ?? n.props.icon });
+/** The options of a choice as Alphy's options: each value with its label of the plan (core.js labels), else with the value as its text. */
+const optionsOf = (n, at) => (Array.isArray(n.props.options) ? n.props.options : []).map((value, index) => ({ text: at.plain(n.props.labels?.[index] ?? value), value }));
 // A choice of six options or fewer is a segmented control, which takes no icon (ToolUiCatalog).
 const choice = (n, at) => {
-  const options = Array.isArray(n.props.options) ? n.props.options : [], select = options.length > 6;
-  return { type: select ? "select" : "segmented", ...at.field(), ...(select && iconOf(n)), options: options.map((value) => ({ text: at.plain(value), value })) };
+  const options = optionsOf(n, at), select = options.length > 6;
+  return { type: select ? "select" : "segmented", ...at.field(), ...(select && iconOf(n)), options };
 };
 /**
  * A number field or a slider. Alphy wants min below max, the value from min to max, and a step above 0 that fits the range (ToolUiCatalog).
@@ -115,7 +117,7 @@ const NODES = {
   TimeField: (n, at) => ({ type: "timeInput", ...at.field(clockOf), ...iconOf(n) }),
   // max= is the kit's own limit: a choice over it changes nothing.
   Choices: (n, at) => ({ type: "multiChoice", ...at.field((value) => (Array.isArray(value) && !(n.props.max !== undefined && value.length > n.props.max) ? value : undefined)),
-    options: (Array.isArray(n.props.options) ? n.props.options : []).map((value) => ({ text: at.plain(value), value })) }),
+    options: optionsOf(n, at) }),
   Dialog: (n, at) => at.modal(),
   List: (n, at) => at.list(),
   // Alphy's progress binds the share in percent. Dots show the step itself: at most 12, and with one max for all rows of a list.

@@ -389,6 +389,9 @@ export class App {
             node.props.value = arg.k === "path" ? this.read(arg, ctx) : this.value(arg, ctx);
           } else if (key === "template") node.template = arg;
           else node.props[key] = this.value(arg, ctx);
+          // Options as a map of a text value to its label: the state keeps the value, and the control shows the label (check.js refuses number keys).
+          const options = node.props.options;
+          if (key === "options" && options && typeof options === "object" && !Array.isArray(options)) [node.props.options, node.props.labels] = [Object.keys(options), Object.values(options)];
         } catch (failure) { this.fault(name ?? tree.name, MESSAGES ? `${key}: ${failure.message}` : ""); }
       }
       if (tree.name === "Chart") {
@@ -416,7 +419,7 @@ export class App {
         // One on-off button for each option. With max= the other options are disabled when that many are on.
         const on = Array.isArray(node.props.value) ? node.props.value : [], full = node.props.max !== undefined && on.length >= node.props.max;
         node.children = (node.props.options ?? []).map((option, index) => ({ type: "Button", name: name && `${name}_opt${index}`, children: [],
-          props: { label: String(option), selected: on.includes(option), enabled: on.includes(option) || !full, action: { k: "call", name: "flip", args: [props.bind, { k: "lit", v: option }], named: {} } } }));
+          props: { label: String(node.props.labels?.[index] ?? option), selected: on.includes(option), enabled: on.includes(option) || !full, action: { k: "call", name: "flip", args: [props.bind, { k: "lit", v: option }], named: {} } } }));
       }
       if (tree.name === "Tabs") {
         // The open tab is a value of the screen. It is in the state under _ui, so each reset of the state closes it again.

@@ -310,6 +310,9 @@ function looks(file) {
   for (const entry of file.of("component")) walk(entry.tree, (node) => {
     if (node.k !== "call" || !Object.hasOwn(CATALOG, node.name)) return;
     const props = given(node);
+    // JavaScript puts the keys of an object that are numbers first, in the order of the numbers.
+    const number = props.options?.k === "map" ? props.options.entries.find(([key]) => /^\d+$/.test(key)) : null;
+    if (number) out.push(`${entry.key}: a map of options keeps the order of the plan only with keys that are not numbers, and ${JSON.stringify(number[0])} is a number. Give options of numbers as a list`);
     for (const [key, byType] of Object.entries(LOOKS)) {
       if (!props[key]) continue;
       const allowed = Object.hasOwn(byType, node.name) ? byType[node.name] : null, values = choices(props[key]), what = `the ${key} of ${/^[AEIOU]/.test(node.name) ? "an" : "a"} ${node.name}`;

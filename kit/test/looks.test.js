@@ -2,7 +2,10 @@
 
 import { expect, test } from "bun:test";
 import { report } from "../src/check.js";
+import { compileAppFile } from "../src/compile.js";
+import { App } from "../src/core.js";
 import { emit } from "../src/emit.js";
+import { handle } from "../src/run.js";
 import { every, planned } from "./helpers.js";
 
 /** The children of the app's column of a plan that the emitter builds with no fault. */
@@ -116,6 +119,29 @@ test("look: an icon that Alphy does not have, and an icon of a component that ta
     'b: the icon of an IconButton is the name of an icon of Alphy, such as Plus, Check, Trash, Pencil, Star, or Heart, and "Bin" is not one',
     "c: Text has no property icon",
   ]);
+});
+
+test("look: options as a map of a value to its label: the state keeps the value, and the control shows the label, in the order of the plan", async () => {
+  const text = ['app("Bikes", lang="en")', '$/order = "asc"', '$/kind = "road"', '$/tags = ["b"]', "root = Column([order, kind, tags, shown])",
+    'order = Segmented("Order", $/order, {asc: "Low to high", desc: "High to low"})',
+    'kind = Select("Type", $/kind, {road: "Road", city: "City", mtb: "Mountain", kids: "Kids", gravel: "Gravel", cargo: "Cargo", fold: "Folding"})',
+    'tags = Choices("Tags", $/tags, {b: "Bravo", a: "Alpha"})', 'shown = Text($/order + " " + $/kind + " " + join($/tags))'].join("\n");
+  const { definition, faults, app } = emit(await planned(text));
+  expect(faults).toEqual([]);
+  const [order, kind, tags] = definition.ui.children[0].children;
+  expect(order.options).toEqual([{ text: "Low to high", value: "asc" }, { text: "High to low", value: "desc" }]);
+  expect([kind.type, kind.options.map((option) => option.value).join(), kind.options[2]]).toEqual(["select", "road,city,mtb,kids,gravel,cargo,fold", { text: "Mountain", value: "mtb" }]);
+  expect(tags.options).toEqual([{ text: "Bravo", value: "b" }, { text: "Alpha", value: "a" }]);
+  const picked = handle({ artifactId: "kit-test", revision: 1, state: definition.initialState, event: { type: "action", actionId: order.action, value: "desc" } }, app);
+  expect(picked.state.order).toBe("desc");
+  // The kit's own on-off buttons of a Choices show the labels too, and the smoke run picks a value of the map.
+  expect(new App(await planned(text)).find("tags").children.map((button) => button.props.label)).toEqual(["Bravo", "Alpha"]);
+  expect((await compileAppFile(text)).faults).toEqual([]);
+});
+
+test("look: a map of options with a key that is a number is a fault of the line, and options of numbers stay a list", async () => {
+  const faults = await faultsOf("$/n = 1", "root = Column([a, b])", 'a = Segmented("N", $/n, {"1": "One", "2": "Two"})', 'b = Select("M", $/n, [1, 2, 3])');
+  expect(faults).toEqual(['a: a map of options keeps the order of the plan only with keys that are not numbers, and "1" is a number. Give options of numbers as a list']);
 });
 
 test("look: an unknown value of a look option, and an option that the component does not take, are faults of the line", async () => {
