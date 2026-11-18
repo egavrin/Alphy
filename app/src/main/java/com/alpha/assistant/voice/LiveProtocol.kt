@@ -26,8 +26,10 @@ internal sealed interface LiveEvent {
 /** Pure builders and parser for the GPT-Live wire protocol. No network. */
 internal object LiveProtocol {
     private const val HISTORY_MESSAGES = 128
-    private const val HISTORY_CHARS = 8192 * 3
-    private val SENTENCE_ENDS = setOf('.', '!', '?')
+    /** 8,192 tokens at 3 characters each, with a margin because Cyrillic tokenizes worse (spec 5.3.4). */
+    private const val TOKEN_MARGIN = 0.75
+    private val HISTORY_CHARS = (8192 * 3 * TOKEN_MARGIN).toInt()
+    private val SENTENCE_ENDS = setOf('.', '!', '?', '…')
 
     const val INSTRUCTIONS = """Ты голосовой режим помощника Alphy. Говори по-русски, коротко и естественно. Пользователь говорит по-русски или по-английски.
 Ты сам не выполняешь действия и не знаешь свежих фактов. Любую просьбу о действии на телефоне, поиске, свежих фактах, погоде, мини-приложении, памяти, файлах или о том, что на экране, сразу передавай Alphy через делегирование.
@@ -55,10 +57,11 @@ internal object LiveProtocol {
     /** The newest complete text messages inside the documented limits, oldest first. The item format is unverified until the live check. */
     fun history(messages: List<Message>): JSONArray {
         val kept = ArrayList<Message>()
-        var chars = 0
+        var chars = INSTRUCTIONS.length
         for (m in messages.asReversed()) {
             if (m.status != "complete" || m.text.isBlank() || (m.role != "user" && m.role != "assistant")) continue
-            if (kept.size >= HISTORY_MESSAGES || chars + m.text.length > HISTORY_CHARS) break
+            if (kept.size >= HISTORY_MESSAGES) break
+            if (chars + m.text.length > HISTORY_CHARS) continue
             chars += m.text.length
             kept += m
         }
@@ -123,8 +126,10 @@ internal object LiveProtocol {
     fun spoken(markdown: String, max: Int = 1200): String {
         val text = speakableText(markdown).trim()
         if (text.length <= max && text.lastOrNull() in SENTENCE_ENDS) return text
-        val end = text.take(max).indexOfLast { it in SENTENCE_ENDS }
-        if (end >= 0) return text.substring(0, end + 1)
+        if (text.length > max) {
+            val end = sentenceEnd.findAll(text.take(max + 1)).lastOrNull { it.range.first > 0 }
+            if (end != null) return text.substring(0, end.range.first)
+        }
         if (text.isEmpty()) return ""
         val room = text.take(max - 1)
         val cut = if (text.length > max - 1) room.substringBeforeLast(' ', room) else room

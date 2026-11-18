@@ -34,11 +34,17 @@ class VoiceModeProtocolTest {
         val items = LiveProtocol.history((0 until 200).map { message(it) })
         assertTrue(items.length() <= 128)
         val chars = (0 until items.length()).sumOf { items.item(it).getString("text").length }
-        assertTrue(chars <= 24576)
+        assertTrue(chars + LiveProtocol.INSTRUCTIONS.length <= 18432)
         val last = items.item(items.length() - 1)
         assertTrue(last.getString("text").startsWith("m199"))
         assertEquals("output_text", last.getString("type"))
         assertEquals("input_text", items.item(items.length() - 2).getString("type"))
+    }
+
+    @Test fun historySkipsAnOversizeNewestMessageAndKeepsOlderOnes() {
+        val huge = Message("big", "user", "x".repeat(20000), 9, "complete")
+        val items = LiveProtocol.history(listOf(message(0), message(1), huge))
+        assertEquals(2, items.length())
     }
 
     @Test fun historySkipsUnfinishedMessages() {
@@ -95,5 +101,17 @@ class VoiceModeProtocolTest {
         assertTrue(out.length <= 100)
         assertTrue(out.endsWith("."))
         assertEquals("", LiveProtocol.spoken("   "))
+    }
+
+    @Test fun spokenKeepsShortTextWhole() {
+        assertEquals("Готово. Сейчас погода.", LiveProtocol.spoken("Готово. Сейчас погода"))
+        assertEquals("Ровно здесь.", LiveProtocol.spoken("Ровно здесь.", max = 12))
+    }
+
+    @Test fun spokenDoesNotCutInsideADecimalOrEllipsis() {
+        val out = LiveProtocol.spoken("Курс 3.5 процента и еще... " + "слово ".repeat(50), max = 24)
+        assertTrue(out, out.endsWith("."))
+        assertFalse(out, out.endsWith("3."))
+        assertTrue(out, out.startsWith("Курс 3.5"))
     }
 }
