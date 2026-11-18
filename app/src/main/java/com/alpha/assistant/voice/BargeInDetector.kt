@@ -30,7 +30,8 @@ internal class BargeInDetector(private val minSpeechMs: Int = 200) {
         if (!playbackActive) { echoMean = 0.0; graceMs = 0 }
         else if (graceMs < GRACE_MS) {
             graceMs += blockMs
-            echoMean = if (echoMean == 0.0) rms else echoMean + (rms - echoMean) * ECHO_SMOOTHING
+            // The echo ramps up after playback starts, so the grace keeps the loudest block, not a slow average.
+            echoMean = maxOf(echoMean, rms)
             speechMs = 0
             return false
         }

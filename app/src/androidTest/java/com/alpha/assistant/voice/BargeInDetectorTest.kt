@@ -52,4 +52,12 @@ class BargeInDetectorTest {
         repeat(50) { assertFalse(detector.accept(block(0.005), playbackActive = true)) }
         assertTrue((1..10).any { detector.accept(block(0.03), playbackActive = true) })
     }
+
+    @Test fun echoThatRampsUpDuringTheGraceDoesNotFire() {
+        val detector = BargeInDetector()
+        repeat(100) { assertFalse(detector.accept(block(0.002), playbackActive = false)) }
+        repeat(5) { assertFalse(detector.accept(block(0.002), playbackActive = true)) }
+        repeat(250) { assertFalse(detector.accept(block(0.02), playbackActive = true)) }
+        assertTrue((1..10).any { detector.accept(block(0.15), playbackActive = true) })
+    }
 }
