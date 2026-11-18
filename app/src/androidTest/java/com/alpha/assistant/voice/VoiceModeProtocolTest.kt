@@ -30,6 +30,14 @@ class VoiceModeProtocolTest {
         assertFalse(session.has("delegation"))
     }
 
+    /** Ruling R25: an on-screen confirmation is a tap on the card, never a spoken answer. */
+    @Test fun onScreenConfirmationGoesToTheCard() {
+        val lines = LiveProtocol.INSTRUCTIONS.lines()
+        val rule = lines.indexOf("Если Alphy сообщает, что нужно подтверждение на экране, попроси нажать кнопку на карточке " +
+            "и никогда не проси сказать «да» или «нет».")
+        assertTrue("The on-screen rule follows the spoken proposal rule", rule > 0 && lines[rule - 1].startsWith("Когда Alphy предлагает действие"))
+    }
+
     @Test fun historyKeepsNewestCompleteTextWithinLimits() {
         val items = LiveProtocol.history((0 until 200).map { message(it) })
         assertTrue(items.length() <= 128)

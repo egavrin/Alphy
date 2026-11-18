@@ -19,6 +19,18 @@ import kotlin.math.sqrt
 internal const val LIVE_RATE = 16000
 /** 20 ms of samples: the size of one capture block. */
 internal const val LIVE_BLOCK = 320
+/**
+ * An output audio chunk above this RMS is voiced. GPT-Live streams near-silent chunks between replies (ruling R24). The live check
+ * (spec 6.3) split its output stream into voiced and silent runs with this level.
+ */
+internal const val LIVE_VOICED_RMS = 0.01
+
+/** The root mean square of PCM16 [samples], 0 to 1. */
+internal fun rms(samples: ShortArray): Double {
+    var sum = 0.0
+    for (sample in samples) { val value = sample / 32768.0; sum += value * value }
+    return if (samples.isEmpty()) 0.0 else sqrt(sum / samples.size)
+}
 
 /**
  * The `Build.MODEL` values whose loudspeaker echo check passed (spec 6.4). Voice approval (spec 5.5.10) works only on these models.
@@ -163,9 +175,7 @@ internal class AndroidLiveAudio(context: Context) : LiveAudio {
             val count = input.read(block, 0, block.size, AudioRecord.READ_BLOCKING)
             // A stop for mute or close ends the read with 0 or an error. The loop then checks its flags.
             if (count != block.size) { Thread.sleep(5); continue }
-            var sum = 0.0
-            for (sample in block) { val value = sample / 32768.0; sum += value * value }
-            level = (sqrt(sum / block.size).toFloat() * 12f).coerceIn(0f, 1f)
+            level = (rms(block).toFloat() * 12f).coerceIn(0f, 1f)
             onCapture(block)
         }
     }

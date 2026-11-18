@@ -23,9 +23,13 @@ import kotlinx.coroutines.withContext
 
 internal enum class LivePhase { IDLE, CONNECTING, LISTENING, SPEAKING, MUTED }
 
-/** The timers of spec 5.8 and 5.4.5. A user turn also ends after [turnGapMs] without input transcript deltas. */
+/**
+ * The timers of spec 5.8 and 5.4.5. A user turn also ends after [turnGapMs] without input transcript deltas. A reply of Alphy ends
+ * after [replyGapMs] without voiced output audio (ruling R24). The live check heard voiced chunks 700 ms apart across a pause inside
+ * a reply and 998 ms apart between two replies, so the gap lies between them.
+ */
 internal data class LiveTiming(val startedMs: Long = 10_000, val silenceMs: Long = 60_000, val firstSpeechMs: Long = 10_000,
-    val requestWaitMs: Long = 500, val turnGapMs: Long = 1_200, val replyGapMs: Long = 300)
+    val requestWaitMs: Long = 500, val turnGapMs: Long = 1_200, val replyGapMs: Long = 900)
 
 /** The chat side of the voice mode. The session calls it on the main thread only. */
 internal interface LiveVoiceHost {
@@ -36,7 +40,7 @@ internal interface LiveVoiceHost {
     fun handOffRunning(): Boolean
     /** At `session.commentary.appended` for the client event id that [LiveVoiceSession.commentary] returned. */
     fun appended(eventId: String)
-    /** Output audio has been silent for [LiveTiming.replyGapMs]. [endMs] is [LiveTranscript.outputEndMs]. */
+    /** No voiced output audio has come for [LiveTiming.replyGapMs]. [endMs] is [LiveTranscript.outputEndMs]. */
     fun outputEnded(endMs: Long)
     fun ended(status: String, settingsRequired: Boolean)
 }
@@ -80,7 +84,10 @@ internal class LiveVoiceSession(
     private var dropping = false
     /** A barge-in emptied the playback, so the next user turn still started over Alphy's voice. */
     private var interrupted = false
+    /** The arrival of the last voiced output chunk. */
     private var lastOutputMs = 0L
+    /** The silent output chunks after the last voiced chunk of the open reply. They play only if a voiced chunk of the reply follows. */
+    private val held = ArrayList<ShortArray>()
     /** The uptime of the last capture block or output chunk that saw playback audio. */
     private var playbackSeenMs = Long.MIN_VALUE
     private var waiting: LiveEvent.Delegation? = null
@@ -103,7 +110,7 @@ internal class LiveVoiceSession(
         this.firstSpeech = firstSpeech
         transcript = LiveTranscript(); detector = BargeInDetector(); waiting = null; appends.clear()
         started = false; userMuted = false; awayMuted = false; captureMuted = false; dropping = false; interrupted = false; lastOutputMs = 0
-        playbackSeenMs = Long.MIN_VALUE
+        playbackSeenMs = Long.MIN_VALUE; held.clear()
         active = true; status = ""; phase = LivePhase.CONNECTING
         scope.launch {
             try {
@@ -161,6 +168,8 @@ internal class LiveVoiceSession(
         if (!active) return
         generation++
         active = false; started = false; this.status = status; this.settingsRequired = settingsRequired; userSpeaking = false; level = 0f; waiting = null; appends.clear()
+        // An open reply of this session must not count as open in the next one.
+        replyJob?.cancel(); held.clear()
         playback++
         connection?.let { if (socketOpen) it.send(LiveProtocol.close()); it.close() }
         connection = null
@@ -233,16 +242,32 @@ internal class LiveVoiceSession(
         refresh()
     }
 
+    /**
+     * GPT-Live streams output audio also between replies, so only voiced chunks start, continue, and end a reply (ruling R24). The
+     * playback, the speaking phase, the barge-in check, the output end, and the silence count all follow this one definition.
+     */
     private fun output(samples: ShortArray) {
         val device = live ?: return
+        if (rms(samples) <= LIVE_VOICED_RMS) {
+            // shortcut: a held pause plays after the speaker has run dry, so it delays the rest of the reply by its length, and the
+            // barge-in grace after it hears silence; write the pause at once if the live check shows a late reply or a false barge-in.
+            if (!dropping && replyJob?.isActive == true) held += samples
+            refresh()
+            return
+        }
         val now = SystemClock.uptimeMillis()
-        // The next reply starts at output audio after replyGapMs of output silence, once the user has stopped (spec 5.4.5).
+        // The next reply starts at voiced audio after replyGapMs without it, once the user has stopped (spec 5.4.5).
         if (dropping && !detector.userSpeaking && now - lastOutputMs >= timing.replyGapMs) { dropping = false; interrupted = false }
         lastOutputMs = now
         // shortcut: a chunk that the player has already taken can still play after a flush; lock it if the echo check hears it.
-        if (!dropping) { val epoch = playback; player.launch { if (epoch == playback) device.play(samples) } }
+        if (!dropping) {
+            val chunks = held + samples
+            val epoch = playback
+            player.launch { for (chunk in chunks) if (epoch == playback) device.play(chunk) }
+        }
+        held.clear()
         replyJob?.cancel()
-        replyJob = after(timing.replyGapMs) { host?.outputEnded(transcript.outputEndMs); countSilence() }
+        replyJob = after(timing.replyGapMs) { held.clear(); host?.outputEnded(transcript.outputEndMs); countSilence() }
         refresh()
     }
 
@@ -268,6 +293,7 @@ internal class LiveVoiceSession(
     private fun flush() {
         playback++
         dropping = true
+        held.clear()
         live?.flushPlayback()
     }
 
@@ -287,7 +313,7 @@ internal class LiveVoiceSession(
     }
 
     /**
-     * Counts the 60 s without user speech again. At its end, a running hand-off or Alphy's own reply (arriving output audio or
+     * Counts the 60 s without user speech again. At its end, a running hand-off or Alphy's own reply (voiced output audio or
      * playback) restarts the count. The output end, a commentary, and a thinking text also restart it, because the user needs
      * time to hear a result (spec 5.8, ruling R12).
      */

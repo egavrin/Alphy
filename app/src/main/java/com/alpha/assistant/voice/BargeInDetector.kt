@@ -1,7 +1,5 @@
 package com.alpha.assistant.voice
 
-import kotlin.math.sqrt
-
 /**
  * The local barge-in detector of spec 5.4.5, on the echo-cancelled microphone blocks. A block is speech when its level is
  * more than three times the quietest block of the last 10 s, as in [SpeechDetector]. Each playback period starts with a grace
@@ -19,9 +17,7 @@ internal class BargeInDetector(private val minSpeechMs: Int = 200) {
 
     /** Takes one block. Returns true at the block where the user's voice has lasted [minSpeechMs]. */
     fun accept(block: ShortArray, playbackActive: Boolean): Boolean {
-        var sum = 0.0
-        for (sample in block) { val value = sample / 32768.0; sum += value * value }
-        val rms = sqrt(sum / block.size)
+        val rms = rms(block)
         if (rms >= DIGITAL_SILENCE) {
             recent.addLast(rms)
             if (recent.size > WINDOW_BLOCKS) recent.removeFirst()

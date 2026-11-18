@@ -27,6 +27,8 @@ import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.concurrent.thread
 import kotlin.random.Random
 
 /** The live voice session of spec 5.3.2, 5.4.5, 5.4.6, 5.8 and 5.8.1, with a scripted socket and scripted audio. */
@@ -52,9 +54,9 @@ class VoiceModeSessionTest {
     }
 
     private inner class Rig(timing: LiveTiming = TIMING, account: suspend () -> AiAccount? = { OPENAI }, transport: LiveTransport? = null,
-        endpoints: Endpoints = LOOPBACK, history: List<Message> = emptyList()) {
+        endpoints: Endpoints = LOOPBACK, history: List<Message> = emptyList(), realTime: Boolean = false) {
         val socket = FakeLiveTransport()
-        val audio = FakeLiveAudio()
+        val audio = FakeLiveAudio(realTime)
         val host = Host(history)
         val session = LiveVoiceSession(context, scope, transport ?: socket, { audio }, account, endpoints, timing)
 
@@ -70,6 +72,43 @@ class VoiceModeSessionTest {
         fun appends() = socket.types().count { it == "session.input_audio.append" }
         fun ends() = host.calls.filter { it.startsWith("ended:") }
         fun turns() = host.calls.filter { it.startsWith("turn:") }
+        fun outputEnds() = host.calls.count { it.startsWith("outputEnded:") }
+        /** The first sample of each written chunk: the marker × 1,000 of a voiced chunk, or [SILENT_SAMPLE]. */
+        fun markers() = audio.played.map { it[0].toInt() }
+    }
+
+    /**
+     * GPT-Live's output stream (ruling R24): one chunk every 100 ms from `session.started`, silent unless the test has queued chunks.
+     * It also delivers a capture block every 20 ms, as the microphone does: quiet, or the user's voice while [loud].
+     */
+    private inner class Stream(private val rig: Rig) : AutoCloseable {
+        private val queue = LinkedBlockingQueue<String>()
+        private val queued = AtomicInteger()
+        private val sent = AtomicInteger()
+        private val voice = Random(11)
+        @Volatile var loud = false
+        @Volatile private var running = true
+        private val worker = thread(name = "live-output-stream") {
+            val start = SystemClock.uptimeMillis()
+            var tick = 0L
+            while (running) {
+                if (tick % 5 == 0L) {
+                    val chunk = queue.poll()
+                    rig.socket.emit(chunk ?: silentAudio())
+                    if (chunk != null) sent.incrementAndGet()
+                }
+                rig.audio.capture(voice.pcmBlock(if (loud) 0.15 else 0.002))
+                tick++
+                SystemClock.sleep(maxOf(0, start + tick * 20 - SystemClock.uptimeMillis()))
+            }
+        }
+
+        /** Queues [count] voiced chunks of [marker]. Each holds 200 ms of audio, so the real-time playback has no gap inside a reply. */
+        fun voiced(marker: Int, count: Int) = repeat(count) { queued.incrementAndGet(); queue += outputAudio(marker, REPLY_SAMPLES) }
+        fun silent(count: Int) = repeat(count) { queued.incrementAndGet(); queue += silentAudio() }
+        /** Waits until every queued chunk has gone out and the main thread has taken it. */
+        fun drain() = waitUntil("queued output") { sent.get() == queued.get() }
+        override fun close() { running = false; worker.join() }
     }
 
     private fun <T> main(block: () -> T): T {
@@ -127,7 +166,7 @@ class VoiceModeSessionTest {
         rig.audio.playbackActive = true
         rig.socket.emit(outputAudio(1))
         waitUntil("playback") { rig.audio.played.size == 1 }
-        assertEquals(listOf<Short>(1, 1, 1, 1), rig.audio.played.single().toList())
+        assertEquals(listOf<Short>(1_000, 1_000, 1_000, 1_000), rig.audio.played.single().toList())
         waitUntil("speaking") { rig.session.phase == LivePhase.SPEAKING }
         rig.audio.playbackActive = false
         rig.audio.capture(quiet())
@@ -161,7 +200,7 @@ class VoiceModeSessionTest {
         rig.socket.emit(outputDelta("Понял", 2_000, 2_500))
         waitUntil("next reply") { rig.audio.played.size == 2 && rig.turns().size == 2 }
         // The playback is serial, so a dropped chunk would have played before chunk 4.
-        assertEquals(listOf<Short>(1, 4), rig.audio.played.map { it[0] })
+        assertEquals(listOf(1_000, 4_000), rig.markers())
         assertEquals(1, rig.audio.flushes.get())
         assertEquals(listOf("turn:Стоп:100:400:true", "turn:Да:1600:1900:false"), rig.turns())
     }
@@ -307,6 +346,92 @@ class VoiceModeSessionTest {
         assertEquals(listOf("ended:${text(R.string.live_voice_no_speech)}:false"), rig.ends())
     }
 
+    @Test fun silentStreamIsNoReply() {
+        val rig = Rig(STREAM, realTime = true).started()
+        Stream(rig).use { stream ->
+            SystemClock.sleep(500)
+            // The user's first words come while GPT-Live streams only silence.
+            stream.loud = true
+            waitUntil("user speaking") { rig.session.userSpeaking }
+            SystemClock.sleep(200)
+            stream.loud = false
+            waitUntil("user stopped") { !rig.session.userSpeaking }
+            SystemClock.sleep(1_200)
+            assertEquals("Silence is no playback, so the user's voice is no barge-in", 0, rig.audio.flushes.get())
+            assertEquals(emptyList<Int>(), rig.markers())
+            assertEquals(LivePhase.LISTENING, main { rig.session.phase })
+            assertEquals(0, rig.outputEnds())
+        }
+    }
+
+    @Test fun replyKeepsItsPausesAndEndsAfterItsLastVoicedChunk() {
+        val rig = Rig(STREAM, realTime = true).started()
+        Stream(rig).use { stream ->
+            SystemClock.sleep(300)
+            // A reply with a 600 ms pause, as the live check heard between two sentences.
+            stream.voiced(1, 3); stream.silent(6); stream.voiced(1, 3)
+            waitUntil("speaking") { rig.session.phase == LivePhase.SPEAKING }
+            stream.drain()
+            waitUntil("output end") { rig.outputEnds() == 1 }
+            waitUntil("listening") { rig.session.phase == LivePhase.LISTENING }
+            val first = List(3) { 1_000 } + List(6) { SILENT_SAMPLE.toInt() } + List(3) { 1_000 }
+            assertEquals("Only the pause inside the reply plays", first, rig.markers())
+            stream.voiced(2, 2)
+            stream.drain()
+            waitUntil("second output end") { rig.outputEnds() == 2 }
+            SystemClock.sleep(1_500)
+            assertEquals("The silent stream ends no reply", 2, rig.outputEnds())
+            assertEquals(LivePhase.LISTENING, main { rig.session.phase })
+            assertEquals(first + listOf(2_000, 2_000), rig.markers())
+        }
+    }
+
+    @Test fun repliesPlayAfterABargeInAndAfterAway() {
+        val rig = Rig(STREAM, realTime = true).started()
+        Stream(rig).use { stream ->
+            stream.voiced(1, 15)
+            waitUntil("speaking") { rig.session.phase == LivePhase.SPEAKING }
+            // The detector learns the echo level in its 240 ms grace, then 200 ms of loud blocks are the user.
+            SystemClock.sleep(300)
+            stream.loud = true
+            waitUntil("barge-in") { rig.audio.flushes.get() == 1 }
+            stream.drain()
+            stream.loud = false
+            waitUntil("user stopped") { !rig.session.userSpeaking }
+            // GPT-Live answers after a pause longer than the reply gap.
+            stream.silent(10); stream.voiced(2, 3)
+            stream.drain()
+            waitUntil("reply after the barge-in") { 2_000 in rig.markers() }
+            stream.voiced(3, 15)
+            waitUntil("third reply") { 3_000 in rig.markers() }
+            main { rig.session.away(true) }
+            main { rig.session.away(false) }
+            stream.silent(10); stream.voiced(4, 3)
+            stream.drain()
+            waitUntil("reply after the return") { 4_000 in rig.markers() }
+            assertEquals(2, rig.audio.flushes.get())
+            val markers = rig.markers()
+            assertTrue("The flushes dropped the rest of replies 1 and 3: $markers", markers.count { it == 1_000 } < 15 && markers.count { it == 3_000 } < 15)
+        }
+    }
+
+    @Test fun silenceCountsFromTheLastVoicedChunkOfTheStream() {
+        val timing = STREAM.copy(silenceMs = 1_500)
+        val rig = Rig(timing, realTime = true).started()
+        Stream(rig).use { stream ->
+            stream.voiced(1, 2)
+            stream.drain()
+            val last = SystemClock.uptimeMillis()
+            SystemClock.sleep(timing.silenceMs - 200)
+            assertTrue("The mode waits silenceMs after the last voiced chunk", main { rig.session.active })
+            waitUntil("silence end") { !rig.session.active }
+            val elapsed = SystemClock.uptimeMillis() - last
+            assertEquals(listOf("ended:${text(R.string.live_voice_no_speech)}:false"), rig.ends())
+            // The count starts again at the output end, replyGapMs after the last voiced chunk (ruling R12).
+            assertTrue("Ended $elapsed ms after the last voiced chunk", elapsed < timing.replyGapMs + timing.silenceMs + 1_000)
+        }
+    }
+
     @Test fun firstSpeechTimerOnlyForButtonStart() {
         val button = Rig(TIMING.copy(firstSpeechMs = 300)).started(firstSpeech = true)
         val plain = Rig(TIMING.copy(firstSpeechMs = 300)).started()
@@ -447,6 +572,10 @@ class VoiceModeSessionTest {
         val LOOPBACK = Endpoints { "http://127.0.0.1:4000" }
         val TIMING = LiveTiming(startedMs = 5_000, silenceMs = 30_000, firstSpeechMs = 30_000, requestWaitMs = 400, turnGapMs = 30_000,
             replyGapMs = 300)
+        /** The reply gap of ruling R24, pinned here: the 600 ms pause in a reply must not end it. */
+        val STREAM = TIMING.copy(replyGapMs = 900)
+        /** 200 ms of audio in each voiced chunk of [Stream]. */
+        const val REPLY_SAMPLES = LIVE_RATE / 5
 
         fun closed(reason: String) = JSONObject().put("type", "session.closed").put("reason", reason).toString()
         fun failure(eventId: String) = JSONObject().put("type", "error")

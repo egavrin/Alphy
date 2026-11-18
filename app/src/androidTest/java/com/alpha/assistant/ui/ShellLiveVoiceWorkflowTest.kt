@@ -490,8 +490,8 @@ class ShellLiveVoiceWorkflowTest {
         socket.emit("""{"type":"session.commentary.appended","client_event_id":"$event"}""")
         socket.emit(outputDelta("Скажите «да» или «нет».", endMs - 500, endMs))
         socket.emit(outputAudio(1))
-        // The session reports the output end after 300 ms without output audio.
-        SystemClock.sleep(700)
+        // The session reports the output end after the default reply gap of 900 ms without voiced output audio.
+        SystemClock.sleep(1_300)
         robot.instrumentation.runOnMainSync { }
     }
 

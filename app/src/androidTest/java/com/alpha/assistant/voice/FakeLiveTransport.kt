@@ -1,11 +1,8 @@
 package com.alpha.assistant.voice
 
-import android.util.Base64
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.providerFailure
 import org.json.JSONObject
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -15,11 +12,15 @@ internal fun inputDelta(delta: String, startMs: Long, endMs: Long) = liveTranscr
 internal fun outputDelta(delta: String, startMs: Long, endMs: Long) = liveTranscript("session.output_transcript.delta", delta, startMs, endMs)
 internal fun liveDelegation(id: String, offsetMs: Long) =
     JSONObject().put("type", "session.delegation.created").put("offset_ms", offsetMs).put("delegation", JSONObject().put("id", id)).toString()
-/** Four samples of [value], so a test can tell the chunks apart. */
-internal fun outputAudio(value: Short): String {
-    val bytes = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).apply { repeat(4) { putShort(value) } }.array()
-    return JSONObject().put("type", "session.output_audio.delta").put("delta", Base64.encodeToString(bytes, Base64.NO_WRAP)).toString()
-}
+/** Voiced output audio: [samples] samples of [marker] × 1,000, so a test can tell the chunks apart. */
+internal fun outputAudio(marker: Int, samples: Int = 4) = outputChunk(ShortArray(samples) { (marker * 1_000).toShort() })
+/** The sample value of [silentAudio]. Its level is far below the voiced level of the output stream. */
+internal const val SILENT_SAMPLE: Short = 100
+/** 100 ms of the near-silent audio that GPT-Live streams between replies (ruling R24). */
+internal fun silentAudio() = outputChunk(ShortArray(LIVE_RATE / 10) { (if (it % 2 == 0) SILENT_SAMPLE else -SILENT_SAMPLE).toShort() })
+/** An output chunk has the PCM16 encoding of an input append, which `audioIsBase64LittleEndian` pins. */
+private fun outputChunk(samples: ShortArray) = JSONObject().put("type", "session.output_audio.delta")
+    .put("delta", JSONObject(LiveProtocol.audio(samples)).getString("audio")).toString()
 private fun liveTranscript(type: String, delta: String, startMs: Long, endMs: Long) =
     JSONObject().put("type", type).put("delta", delta).put("start_ms", startMs).put("end_ms", endMs).toString()
 
