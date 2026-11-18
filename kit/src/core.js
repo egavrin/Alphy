@@ -9,8 +9,8 @@ const MESSAGES = true;
 /** Positional arguments of each component of the prototype catalog. */
 export const CATALOG = {
   Column: ["children"], Row: ["children"], Card: ["children"], Section: ["title", "children"],
-  Text: ["text"], Heading: ["text"], Metric: ["label", "value"], Emoji: ["value"], Badge: ["value"],
-  // label is the caption of a progress, a ring, a chart, and tabs. The text of a ring is the text under it.
+  Text: ["text"], Heading: ["text"], Metric: ["label", "value"], Emoji: ["value"], Badge: ["value"], Grid: ["children"],
+  // label is the caption of a progress, a ring, a chart, and tabs. The text of a ring is the large text inside it.
   Progress: ["value", "max", "label"], Ring: ["value", "max", "text", "label"], Divider: [], Notice: ["text"],
   // label is the text of an icon button for a person who does not see the icon.
   Button: ["label", "action"], IconButton: ["icon", "action", "label"],
@@ -26,7 +26,7 @@ export const CATALOG = {
   Drawing: ["label", "width", "height", "shapes"], Model3d: ["label", "bodies", "bind", "exploded", "selected"], Link: ["label", "url", "text"],
 };
 export const ICONS = { Trash: "🗑", Plus: "+", Minus: "−", Refresh: "↻", Check: "✓", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Edit: "✎", Close: "✕" };
-const NAMED = new Set(["visible", "enabled", "variant", "tone", "emphasis", "weight", "min", "max", "step", "empty", "placeholder", "gap", "selected", "kind"]);
+const NAMED = new Set(["visible", "enabled", "variant", "tone", "emphasis", "weight", "min", "max", "step", "empty", "placeholder", "gap", "selected", "kind", "size", "align", "columns"]);
 export const ACTIONS = new Set(["set", "toggle", "inc", "dec", "append", "remove", "clear", "when", "move", "flip", "animate"]);
 /** The data calls of a Drawing and of a Model3d, with the arguments of each one in order. A color follows them. */
 const SHAPES = { circle: ["x", "y", "r"], rect: ["x", "y", "w", "h"], line: ["x1", "y1", "x2", "y2"], text: ["x", "y", "text"], polygon: ["points"] };

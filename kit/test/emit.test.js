@@ -188,16 +188,16 @@ test("emit: list.plan gives a list with a row template and an add form", async (
     d: { daComprare_text: "3" }, v: { prodotti_add_enabled: false },
   });
   expect(definition.ui.children[0].children[1]).toEqual({ type: "section", text: "Prodotti", children: [
-    { type: "list", text: "Prodotti", bind: "prodotti_list", emptyText: "Nothing here yet", rowTemplate: { type: "row", wrap: false, children: [
+    { type: "list", text: "Prodotti", bind: "prodotti_list", emptyText: "Nothing here yet", rowTemplate: { type: "row", wrap: false, style: { crossAlign: "center" }, children: [
       { type: "text", text: "", bind: "nome", layout: { weight: 1 } },
       { type: "text", text: "", bind: "corsia" },
       { type: "icon", name: "Trash", text: "prodotti remove", action: "prodotti_remove" },
       { type: "checkbox", text: "prodotti preso", bind: "preso", action: "prodotti_preso" },
     ] } },
-    { type: "row", wrap: false, children: [
+    { type: "row", wrap: false, style: { crossAlign: "center" }, children: [
       { type: "input", text: "Prodotto", bind: "prodotti_s.new_nome", action: "prodotti_new_nome", inputMode: "apply", layout: { weight: 1 } },
       { type: "input", text: "Corsia", bind: "prodotti_s.new_corsia", action: "prodotti_new_corsia", inputMode: "apply", layout: { weight: 1 } },
-      { type: "button", text: "Add", action: "prodotti_add", variant: "filled", enabledBind: "v.prodotti_add_enabled" },
+      { type: "button", text: "Add", action: "prodotti_add", enabledBind: "v.prodotti_add_enabled" },
     ] },
   ] });
 });
@@ -209,7 +209,7 @@ test("emit: an add form with more than two typed fields is a bottom sheet", asyn
     { type: "input", text: "Note", bind: "tasks_s.new_note", action: "tasks_new_note", inputMode: "apply" },
     { type: "dateInput", text: "Due", bind: "tasks_s.new_due", action: "tasks_new_due" },
   ];
-  const add = { type: "button", text: "Add", action: "tasks_add", variant: "filled", enabledBind: "v.tasks_add_enabled" };
+  const add = { type: "button", text: "Add", action: "tasks_add", enabledBind: "v.tasks_add_enabled" };
   const { definition, faults } = emit(await planned(['app("Tasks", lang="en")', `${need})`].join("\n")));
   expect(faults).toEqual([]);
   // The open flag is a value of the need that the run-time owns. A field in a sheet has no weight: its parent is not a row.
@@ -224,7 +224,7 @@ test("emit: an add form with more than two typed fields is a bottom sheet", asyn
   const sheet = emit(await planned(['app("Tasks", lang="en")', `${need}, sheet=true)`].join("\n")));
   expect(sheet.faults).toEqual([]);
   expect(sheet.definition.ui.children[0].children[0].children.slice(1)).toEqual([
-    { type: "button", text: "Add", action: "tasks_open", variant: "filled" },
+    { type: "button", text: "Add", action: "tasks_open" },
     { type: "bottomSheet", text: "Add", visibleBind: "tasks_s.adding", dismissAction: "tasks_addRow_dismiss", children: [...fields,
       { type: "flowRow", children: [{ type: "icon", name: "Close", text: "tasks close", action: "tasks_close" }, add] }] },
   ]);
@@ -264,7 +264,7 @@ test("emit: each list, modal, and new input of the lists fixture becomes its Alp
   expect(definition.stateSchema.acts.fields).toEqual({ id: "string", what: "string", day: "string", at: "number" });
   expect(definition.initialState.acts.map((row) => row.at)).toEqual([540, 1140, 600]);
   // A list and a row control announce the captions of their need: its title and its labels=. An icon keeps the name of its line.
-  expect(acts.children[0]).toEqual({ type: "groupedList", text: "Plan", bind: "acts_list", groupBy: "day", emptyText: "Nothing here yet", rowTemplate: { type: "row", wrap: false, children: [
+  expect(acts.children[0]).toEqual({ type: "groupedList", text: "Plan", bind: "acts_list", groupBy: "day", emptyText: "Nothing here yet", rowTemplate: { type: "row", wrap: false, style: { crossAlign: "center" }, children: [
     { type: "text", text: "", bind: "what", layout: { weight: 1 } },
     { type: "segmented", text: "Day", bind: "day", action: "acts_day", options: [{ text: "Sat", value: "Sat" }, { text: "Sun", value: "Sun" }] },
     { type: "badge", text: "", bind: "acts_at_value" },
@@ -282,7 +282,7 @@ test("emit: each list, modal, and new input of the lists fixture becomes its Alp
   ]);
   expect(definition.initialState.doses.map((row) => row.at)).toEqual([480, 1200]);
   expect(confirm).toEqual({ type: "dialog", text: "Delete this dose?", visibleBind: "v.doses_confirm_visible", dismissAction: "doses_confirm_dismiss", children: [{ type: "flowRow", children: [
-    { type: "button", text: "Delete", action: "doses_yes", variant: "filled" }, { type: "button", text: "Keep", action: "doses_no", variant: "filled" }] }] });
+    { type: "button", text: "Delete", action: "doses_yes" }, { type: "button", text: "Keep", action: "doses_no" }] }] });
   expect(form.children.map((node) => node.type)).toEqual(["button", "bottomSheet"]);
   expect(form.children[1].children.map((node) => node.type)).toEqual(["input", "numberInput", "dateInput", "timeInput", "segmented", "button"]);
   // The arrows of a row become the reorder of the list. Its label is a text that the run-time computes and that is never blank.
@@ -473,7 +473,7 @@ test("emit: each component of the node table becomes its Alphy node", async () =
     { type: "text", text: "", bind: "d.intro_text", style: { emphasis: "label", tone: "accent" } },
     { type: "text", text: "Plain", style: { tone: "muted" } },
     { type: "section", text: "Part", children: [{ type: "text", text: "Inside" }] },
-    { type: "row", wrap: false, children: [{ type: "text", text: "", bind: "name", layout: { weight: 1 } }, { type: "badge", text: "", bind: "count" }] },
+    { type: "row", wrap: false, style: { crossAlign: "center" }, children: [{ type: "text", text: "", bind: "name", layout: { weight: 1 } }, { type: "badge", text: "", bind: "count" }] },
     { type: "card", variant: "hero", children: [{ type: "metric", text: "Count", bind: "count", style: { emphasis: "display" } }] },
     { type: "badge", text: "New" },
     { type: "emoji", text: "🍵", value: "🍵" },
@@ -494,9 +494,9 @@ test("emit: each component of the node table becomes its Alphy node", async () =
     { type: "text", text: "", bind: "level" },
     { type: "text", text: "Hidden", visible: false },
     { type: "text", text: "Many", visibleBind: "v.shownIf_visible" },
-    { type: "button", text: "Reset", action: "enabledIf", variant: "filled", enabledBind: "v.enabledIf_enabled" },
+    { type: "button", text: "Reset", action: "enabledIf", enabledBind: "v.enabledIf_enabled" },
     // A progress bar in a row binds a field of the view that the run-time writes: the share of the row in percent.
-    { type: "section", text: "Goals", children: [{ type: "list", text: "Goals", bind: "goalList", rowTemplate: { type: "row", wrap: false, children: [
+    { type: "section", text: "Goals", children: [{ type: "list", text: "Goals", bind: "goalList", rowTemplate: { type: "row", wrap: false, style: { crossAlign: "center" }, children: [
       { type: "text", text: "", bind: "name", layout: { weight: 1 } }, { type: "progress", text: "Goal", variant: "bar", min: 0, max: 100, bind: "goalRow_1_value" }] } }] },
     // A ring with no text under it has no children, and it takes the title of its Section.
     { type: "section", text: "Calm", children: [{ type: "progressRing", text: "Calm", size: "large", min: 0, max: 100, bind: "d.calmRing_value" }] },
@@ -514,12 +514,12 @@ test("emit: quiz.plan gives a card with the question and its buttons", async () 
   expect(definition.ui.children[0].children).toEqual([
     { type: "card", variant: "hero", children: [
       { type: "metric", text: "漢字", bind: "d.card_kanji", style: { emphasis: "display" } },
-      { type: "button", text: "答えを見る", action: "revealButton", variant: "filled", visibleBind: "v.revealButton_visible" },
+      { type: "button", text: "答えを見る", action: "revealButton", visibleBind: "v.revealButton_visible" },
     ] },
     // A test that reads one boolean value of a state line binds that field itself.
     { type: "card", children: [{ type: "metric", text: "読み方", bind: "d.card_reading" }, { type: "metric", text: "意味", bind: "d.card_meaning" }], visibleBind: "shown" },
     { type: "flowRow", children: [
-      { type: "button", text: "覚えた", action: "learnedButton", variant: "filled" }, { type: "button", text: "まだ", action: "notYetButton", variant: "filled" }] },
+      { type: "button", text: "覚えた", action: "learnedButton" }, { type: "button", text: "まだ", action: "notYetButton" }] },
     { type: "flowRow", children: [{ type: "metric", text: "覚えた", bind: "learned" }, { type: "metric", text: "まだ", bind: "notYet" }] },
   ]);
   expect(definition.initialState).toMatchObject({ index: 0, shown: false, learned: 0, notYet: 0, d: { card_kanji: "水" }, v: { revealButton_visible: true } });
@@ -561,12 +561,12 @@ test("emit: a progress need that is the main element is a ring in the hero card"
     'need habits = entries("Habits", fields={name: "text", done: "check"}, rows=[{name: "Run", done: true}, {name: "Read", done: false}, {name: "Sleep", done: false}])'].join("\n")));
   expect(faults).toEqual([]);
   // The rule of the main element is the rule of the first figure (parts.js expand): the progress part writes the ring into the hero card.
+  // The host shows the label of the ring under it, so the card has no heading of the same title.
   expect(definition.ui.children[0].children[0]).toEqual({ type: "card", variant: "hero", children: [
-    { type: "text", text: "Done", style: { emphasis: "title" } },
-    { type: "progressRing", text: "Done", size: "large", min: 0, max: 100, bind: "d.done_view_1_value", children: [{ type: "text", text: "", bind: "d.done_text" }] },
+    { type: "progressRing", text: "Done", size: "large", min: 0, max: 100, bind: "d.done_view_0_value", children: [{ type: "text", text: "", bind: "d.done_text", style: { emphasis: "display" } }] },
   ] });
-  // The ring shows the share in percent, and its label the count.
-  expect(definition.initialState.d).toMatchObject({ done_view_1_value: (1 / 3) * 100, done_text: "1 / 3" });
+  // The ring shows the share in percent, and its text inside it the count.
+  expect(definition.initialState.d).toMatchObject({ done_view_0_value: (1 / 3) * 100, done_text: "1 / 3" });
 });
 
 test("emit: a lesson of three steps has a dots progress with max 3", async () => {
@@ -602,7 +602,7 @@ test("emit: model3d.plan gives a surface, a canvas, three part buttons, two arro
   const card = nodes(definition.ui).find((node) => node.type === "card" && node.children[0].type === "canvas");
   expect(card.children.map((node) => [node.type, ...(node.children ?? []).map((child) => [child.type, child.name ?? child.variant, child.text, child.action])])).toEqual([
     ["canvas"], ["flowRow", ["button", "tonal", "Камера", "rover_part_camera"], ["button", "tonal", "Панель", "rover_part_panel"], ["button", "tonal", "Колёса", "rover_part_wheels"]],
-    ["flowRow", ["icon", "Back", "−30°", "rover_left"], ["icon", "Chevron", "+30°", "rover_right"], ["button", "filled", "Разобрать", "rover_explode"]]]);
+    ["flowRow", ["icon", "Back", "−30°", "rover_left"], ["icon", "Chevron", "+30°", "rover_right"], ["button", undefined, "Разобрать", "rover_explode"]]]);
   expect(card.children[0]).toEqual({ type: "canvas", text: "Живая 3D-сцена", surfaces: ["rover_model"] });
   // The record of the part is a field of plain values, and the drag of the model is a field of the run-time.
   expect([definition.stateSchema.rover, definition.initialState.rover]).toEqual([{ type: "object", fields: { selected: "string", exploded: "boolean", turn: "number" } }, { selected: "", exploded: false, turn: 30 }]);
@@ -664,7 +664,7 @@ test("emit: each card, chart, tab, lesson, and question of the cards fixture bec
   const { definition, faults } = emit(await planned(testPlan("cards")));
   expect(faults).toEqual([]);
   const all = nodes(definition.ui), state = definition.initialState;
-  expect(all[2]).toMatchObject({ type: "card", variant: "hero", children: [{ type: "text" }, { type: "progressRing", size: "large" }] });
+  expect(all[2]).toMatchObject({ type: "card", variant: "hero", children: [{ type: "progressRing", size: "large" }] });
   expect(all.filter((node) => node.type === "chart").map((node) => [node.kind, state[node.categories].length, state[node.series[0].bind].length])).toEqual([["bar", 3, 3], ["line", 256, 256]]);
   // The line chart keeps the last 256 of its 300 points.
   expect([state.trend_chart_labels[0], state.trend_chart_values.at(-1)]).toEqual(["45", 600]);
@@ -685,9 +685,9 @@ test("emit: the text of a progress, a ring, a chart, and the tabs is its label, 
     'one = Text("One")', 'two = Text("Two")', 'pages = Tabs(["A", "B"], [[one], [two]], label="Pages")',
   ].join("\n")));
   expect(faults).toEqual([]);
-  // An empty label is no label. The text of a ring is the text under it, a child of the ring.
+  // An empty label is no label. The text of a ring is a large text inside it, a child of the ring.
   expect(captions(definition.ui)).toEqual([["progress", "bare"], ["progress", "Own"], ["progressRing", "Sec"], ["chart", "Sec", "Sec"], ["progress", "Sec"], ["progressRing", "Mine"], ["tabs", "Pages"]]);
-  expect(every(definition.ui).find((node) => node.text === "Mine").children).toEqual([{ type: "text", text: "3 of 10" }]);
+  expect(every(definition.ui).find((node) => node.text === "Mine").children).toEqual([{ type: "text", text: "3 of 10", style: { emphasis: "display" } }]);
 });
 
 test("emit: the progress, ring, chart, and tabs of a part show a caption of the part, never the name of a line", async () => {
@@ -745,7 +745,7 @@ test("emit: section.plan gives a valid definition", async () => {
   valid(definition);
   // The free lines of the hole: a Section with a List of the habits, whose row of its own shows the name and a text that each row computes.
   expect(definition.ui.children[0].children[1]).toEqual({ type: "section", text: "Серія днів поспіль", children: [
-    { type: "list", text: "Серія днів поспіль", bind: "streak_list", emptyText: "Ще немає звичок", rowTemplate: { type: "row", wrap: false, children: [
+    { type: "list", text: "Серія днів поспіль", bind: "streak_list", emptyText: "Ще немає звичок", rowTemplate: { type: "row", wrap: false, style: { crossAlign: "center" }, children: [
       { type: "text", text: "", bind: "name", layout: { weight: 1 } }, { type: "text", text: "", bind: "streak_text_text" }] } }] });
   expect(definition.initialState.streak_list.map((row) => [row.id, row.streak_text_text])).toEqual([["r1", "Серія: 0"], ["r2", "Серія: 0"], ["r3", "Серія: 0"]]);
   expect(ids(definition.ui)).toEqual(["habits_remove", ...["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((day) => `habits_${day}`), "habits_new_name", "habits_add"]);
@@ -845,11 +845,11 @@ test("emit: each free form of the free fixture becomes its Alphy node", async ()
   expect(faults).toEqual([]);
   const [plan, tools] = definition.ui.children[0].children;
   // An inline Row as the template of a List, with a field and buttons of its own. A test of the row makes the list a view.
-  expect(plan).toEqual({ type: "section", text: "Plan", children: [{ type: "list", text: "Plan", bind: "items", rowTemplate: { type: "row", wrap: false, children: [
+  expect(plan).toEqual({ type: "section", text: "Plan", children: [{ type: "list", text: "Plan", bind: "items", rowTemplate: { type: "row", wrap: false, style: { crossAlign: "center" }, children: [
     { type: "checkbox", text: "Done", bind: "done", action: "items_row_0" }, { type: "text", text: "", bind: "name", layout: { weight: 1 } },
-    { type: "button", text: "Mark", action: "items_row_2", variant: "filled", enabledBind: "items_row_2_enabled" },
-    { type: "button", text: "Undo", action: "items_row_3", variant: "filled", enabledBind: "done" }] } }] });
+    { type: "button", text: "Mark", action: "items_row_2", enabledBind: "items_row_2_enabled" },
+    { type: "button", text: "Undo", action: "items_row_3", enabledBind: "done" }] } }] });
   // move with a test and flip are buttons of an inline Row.
-  expect(tools).toEqual({ type: "flowRow", children: [{ type: "button", text: "Hike first", action: "tools_0", variant: "filled" },
-    { type: "button", text: "Work", action: "tools_1", variant: "filled" }, { type: "text", text: "", bind: "d.tools_2_text" }] });
+  expect(tools).toEqual({ type: "flowRow", children: [{ type: "button", text: "Hike first", action: "tools_0" },
+    { type: "button", text: "Work", action: "tools_1" }, { type: "text", text: "", bind: "d.tools_2_text" }] });
 });

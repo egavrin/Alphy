@@ -793,9 +793,9 @@ test("source: the source of list.plan is under 60000 bytes and answers an add as
   expect(run(add).state.prodotti).toHaveLength(4);
 });
 
-test("source: the run-time text is at most 46500 bytes", () => {
+test("source: the run-time text is at most 48500 bytes", () => {
   // kit/build.js leaves out each text that only the compile step reads (dsl.js MESSAGES), so each source has room to grow.
-  expect(bytes(runtime.text)).toBeLessThanOrEqual(46500);
+  expect(bytes(runtime.text)).toBeLessThanOrEqual(48500);
 });
 
 test("source: a refused add leaves the add sheet open in the run-time text, as handle does", async () => {

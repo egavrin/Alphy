@@ -50,6 +50,10 @@ const percent = (value, max) => (Number.isFinite(value) && Number.isFinite(max) 
 /** True when an action appends a row: append(...) alone, in a list of actions, or in when(...). */
 const appends = (tree) => (tree?.k === "call" ? tree.name === "append" || tree.args.some(appends) : tree?.k === "list" && tree.items.some(appends));
 const defined = (props, keys) => Object.fromEntries(keys.filter((key) => props[key] !== undefined).map((key) => [key, props[key]]));
+/** The style of a node: its own look (base), then the look options of the plan in keys (check.js checks their values). None when it is empty. */
+const styled = (n, keys, base) => { const style = { ...base, ...defined(n.props, keys) }; return Object.keys(style).length ? { style } : {}; };
+/** A row of no wrap centers its children across its height, as each row of a list of Alphy's own apps does. align= sets it. */
+const rowStyle = (n, cross = n.props.align) => styled(n, ["gap"], cross && { crossAlign: cross });
 const choice = (n, at) => {
   const options = Array.isArray(n.props.options) ? n.props.options : [];
   return { type: options.length <= 6 ? "segmented" : "select", ...at.field(), options: options.map((value) => ({ text: at.plain(value), value })) };
@@ -72,29 +76,37 @@ const ranged = (type, low, high) => (n, at) => {
  * that it changes, and its action. A component that is not here is a fault "is not built yet".
  */
 const NODES = {
-  Column: (n, at) => ({ type: "column", children: at.children(true) }),
+  Column: (n, at) => ({ type: "column", ...styled(n, ["gap"]), children: at.children(true) }),
   // An add form with more than two typed fields is a column of a button and the bottom sheet that the button opens. A weighted
   // child needs a row that does not wrap. Alphy draws a row with no wrap=false as a flow row, so that row is a flowRow.
-  Row: (n, at) => at.form() ?? (n.children.some((child) => child.props.weight !== undefined) ? { type: "row", wrap: false, children: at.children(true) } : { type: "flowRow", children: at.children() }),
+  Row: (n, at) => at.form() ?? (n.children.some((child) => child.props.weight !== undefined) ? { type: "row", wrap: false, ...rowStyle(n, n.props.align ?? "center"), children: at.children(true) }
+    : { type: "flowRow", ...rowStyle(n), children: at.children() }),
+  Grid: (n, at) => ({ type: "grid", columns: n.props.columns ?? 2, children: at.children() }),
   Card: (n, at) => ({ type: "card", ...(n.props.variant === "hero" && { variant: "hero" }), children: at.children() }),
   Section: (n, at) => ({ type: "section", text: at.plain(n.props.title), children: at.children() }),
-  Text: (n, at) => ({ type: "text", ...at.text("text"), ...(own(STYLES, n.props.variant) && { style: STYLES[n.props.variant] }) }),
+  // A tone or an emphasis of the plan wins over the one of its variant.
+  Text: (n, at) => ({ type: "text", ...at.text("text"), ...styled(n, ["emphasis", "align", "tone"], own(STYLES, n.props.variant)) }),
   Heading: (n, at) => ({ type: "text", ...at.text("text"), style: { emphasis: "title" } }),
-  Metric: (n, at) => ({ type: "metric", text: at.plain(n.props.label), bind: at.shown("value"), ...(n.props.emphasis === "display" && { style: { emphasis: "display" } }) }),
-  Badge: (n, at) => ({ type: "badge", ...at.text("value") }),
-  // Alphy wants a label on an emoji too: the emoji itself.
-  Emoji: (n, at) => ({ type: "emoji", text: at.plain(n.props.value), ...at.value("value") }),
+  Metric: (n, at) => ({ type: "metric", text: at.plain(n.props.label), bind: at.shown("value"), ...styled(n, ["emphasis", "tone"]) }),
+  Badge: (n, at) => ({ type: "badge", ...at.text("value"), ...styled(n, ["tone"]) }),
+  // Alphy wants a label on an emoji too: the emoji itself. One template draws each row of a list, so a blank row gives the kit's name of the line.
+  Emoji: (n, at) => ({ type: "emoji", text: at.plain(n.props.value) || at.caption(), ...at.value("value"), ...defined(n.props, ["size"]) }),
   Divider: () => ({ type: "divider" }),
   // A banner is a container in Alphy's catalog, with 1 to 50 children, so its message is a child.
-  Notice: (n, at) => ({ type: "banner", children: [{ type: "text", ...at.text("text") }] }),
-  Button: (n, at) => ({ type: "button", text: at.caption(n.props.label), action: at.action(), variant: n.props.selected === undefined || n.props.selected ? "filled" : "tonal" }),
+  Notice: (n, at) => ({ type: "banner", ...styled(n, ["tone"]), children: [{ type: "text", ...at.text("text") }] }),
+  // With no variant the host decides: one button of a group is filled and its other buttons with no variant are outlined.
+  // A selected button stays filled, also beside a second selected one, and a button that is not selected is tonal.
+  Button: (n, at) => {
+    const variant = n.props.variant ?? (n.props.selected === undefined ? undefined : n.props.selected ? "filled" : "tonal");
+    return { type: "button", text: at.caption(n.props.label), action: at.action(), ...(variant && { variant }) };
+  },
   IconButton: (n, at) => ({ type: "icon", name: own(ICON_NAMES, n.props.icon) ?? n.props.icon, text: at.caption(n.props.label), action: at.action() }),
   NumberField: ranged("numberInput", 0, 1000000),
   // Alphy gives a slider without bounds 0 to 100.
   Slider: ranged("slider", 0, 100),
   TextField: (n, at) => ({ type: "input", ...at.field(), inputMode: "apply" }),
   Toggle: (n, at) => ({ type: "toggle", ...at.field() }),
-  CheckBox: (n, at) => ({ type: "checkbox", ...at.field() }),
+  CheckBox: (n, at) => ({ type: "checkbox", ...at.field(), ...defined(n.props, ["variant"]) }),
   Segmented: choice,
   Select: choice,
   DateField: (n, at) => ({ type: "dateInput", ...at.field() }),
@@ -119,9 +131,9 @@ const NODES = {
     return { type: "timer", text: at.label(), mode: "countdown", action: at.action(() => false),
       foreground: { durationMs: Number.isFinite(ms) ? Math.min(MAX_TIMER_MS, Math.max(MIN_TIMER_MS, ms)) : MIN_TIMER_MS, ...ALERT } };
   },
-  // A ring takes children only when it is large (ToolUiCatalog): its text is a text under it.
+  // A ring takes children only when it is large (ToolUiCatalog): its text is a large text inside it, and the host shows its label under it.
   Ring: (n, at) => ({ type: "progressRing", text: at.label(), size: "large", min: 0, max: 100, bind: at.computed("value", percent(n.props.value, n.props.max)),
-    ...(n.props.text !== undefined && { children: [{ type: "text", ...at.text("text") }] }) }),
+    ...(n.props.text !== undefined && { children: [{ type: "text", ...at.text("text"), style: { emphasis: "display" } }] }) }),
   Chart: (n, at) => at.chart(),
   Tabs: (n, at) => at.tabs(),
   // A canvas with one surface, which each reply draws again.
@@ -329,7 +341,7 @@ export function screen(kit, app, first = false) {
   const shared = { kit, name, walk, day, fields, lists, views, viewSchemas, viewOwners, listRoots };
   const tree = kit.tree(), top = walk(tree, "root", "root", { scope: null, weighted: true });
   const children = [...(kind ? [{ type: "text", text: String(kind), style: STYLES.eyebrow }] : []), ...(tree.type === "Column" ? top?.children ?? [] : [top].filter(Boolean))];
-  const ui = { type: "theme", preset: preset ?? "clean", ...(palette && { palette }), cornerRadius: 20, children: [{ type: "column", style: { gap: "medium" }, children }] };
+  const ui = { type: "theme", preset: preset ?? "clean", ...(palette && { palette }), cornerRadius: 20, children: [{ type: "column", style: { gap: "medium", padding: "medium" }, children }] };
   return { ui, values, views, viewSchemas, viewOwners, controls, bounds, faults, owners, listRoots, drawn };
 }
 

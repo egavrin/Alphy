@@ -270,7 +270,7 @@ const PARTS = {
     const ring = `Ring($/${name}, $/${name}_goal, $/${name}_text, label=${show(title)})`;
     return {
       lines: [`$/${name} := ${show(value)}`, `$/${name}_goal := ${show(goal)}`, `$/${name}_text := text($/${name}) + " / " + text($/${name}_goal)`,
-        hero === name ? `${name}_view = Card([Heading(${show(title)}), ${ring}], variant="hero")` : `${name}_view = Section(${show(title)}, [${ring}])`],
+        hero === name ? `${name}_view = Card([${ring}], variant="hero")` : `${name}_view = Section(${show(title)}, [${ring}])`],
       top: [`${name}_view`],
     };
   },

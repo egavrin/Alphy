@@ -275,7 +275,49 @@ function gaps(file, reached) {
   return out;
 }
 
-/** Everything the host can find wrong without a model: line faults, tree faults, values that are not finite, and gaps. */
+const SIZES = ["small", "medium", "large"], ALIGNS = ["start", "center", "end"], GAPS = ["none", "small", "medium", "large"], TONES = ["muted", "accent", "success", "warning", "error"];
+/**
+ * The look options of the components, and the values of each one that the kit gives: values of Alphy's catalog (ToolUiCatalog).
+ * The run-time puts each value into its node as it is, so only the compile step reads this table.
+ */
+const LOOKS = {
+  variant: { Button: ["filled", "outlined", "text", "tonal"], Text: ["muted", "eyebrow"], Card: ["hero"], CheckBox: ["circle"], Progress: ["bar", "dots"] },
+  size: { Emoji: SIZES },
+  emphasis: { Text: ["body", "title", "headline", "label", "number", "display"], Metric: ["display", "number"] },
+  align: { Text: ALIGNS, Row: ALIGNS },
+  tone: { Text: TONES, Metric: TONES, Badge: TONES, Notice: TONES },
+  gap: { Row: GAPS, Column: GAPS },
+  columns: { Grid: [1, 2, 3, 4] },
+};
+/** The values that an option can take: a value in the line, or each value of a choice (test ? a : b, or if(test, a, b)). Null for each other expression. */
+const choices = (tree) => {
+  const pair = tree.k === "if" ? [tree.yes, tree.no] : tree.k === "call" && tree.name === "if" && tree.args.length === 3 ? tree.args.slice(1) : null;
+  if (!pair) return tree.k === "lit" ? [tree.v] : null;
+  const [yes, no] = pair.map(choices);
+  return yes && no && [...yes, ...no];
+};
+
+/**
+ * The faults of the look options of each component line: an option that the component does not take, and a value that Alphy does not
+ * take. Each value of a choice is checked, also in a row of a list and in a part of the screen that is hidden, so Alphy never refuses one later.
+ */
+function looks(file) {
+  const out = [];
+  for (const entry of file.of("component")) walk(entry.tree, (node) => {
+    if (node.k !== "call" || !Object.hasOwn(CATALOG, node.name)) return;
+    const props = given(node);
+    for (const [key, byType] of Object.entries(LOOKS)) {
+      if (!props[key]) continue;
+      const allowed = Object.hasOwn(byType, node.name) ? byType[node.name] : null, values = choices(props[key]), what = `the ${key} of ${/^[AEIOU]/.test(node.name) ? "an" : "a"} ${node.name}`;
+      if (!allowed) out.push(`${entry.key}: ${node.name} has no property ${key}`);
+      else if (!values) out.push(`${entry.key}: ${what} is a value in the line, or a choice of values such as $/on ? "a" : "b"`);
+      else for (const value of values) if (!allowed.includes(value)) out.push(`${entry.key}: ${what} is one of ${allowed.join(", ")}, and ${JSON.stringify(value)} is not one`);
+    }
+  });
+  return out;
+}
+
+/** Everything the host can find wrong without a model: line faults, tree faults, values that are not finite, gaps, and look options. */
 export function report(file) {
   const app = new App(file);
   app.tree(true);
@@ -286,6 +328,7 @@ export function report(file) {
     ...broken,
     ...(file.get("root") ? [] : ["no root line"]),
     ...gaps(file, app.reached),
+    ...looks(file),
   ];
   // The smoke run needs a screen that builds. So it runs only when nothing else is wrong.
   const run = settings.gate === "smoke" && !faults.length ? smoke(file) : { faults: [], notes: [] };
