@@ -42,6 +42,8 @@ internal class OkHttpLiveTransport : LiveTransport {
         val socket = client.newWebSocket(Request.Builder().url(url).header("Authorization", "Bearer $key").build(),
             object : WebSocketListener() {
                 override fun onMessage(webSocket: WebSocket, text: String) = listener.onText(text)
+                // Without this reply OkHttp never finishes the handshake of a server close, and onClosed would not fire.
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(1000, null) }
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = listener.onClosed()
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     // Only the status and fixed texts leave here: a throwable message could echo the request.

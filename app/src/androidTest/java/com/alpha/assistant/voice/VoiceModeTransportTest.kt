@@ -18,7 +18,22 @@ class VoiceModeTransportTest {
         val failures = LinkedBlockingQueue<Pair<Int?, String>>()
         override fun onText(text: String) { texts += text }
         override fun onFailure(status: Int?, message: String) { failures += status to message }
-        override fun onClosed() = Unit
+        val closed = java.util.concurrent.LinkedBlockingQueue<Unit>()
+        override fun onClosed() { closed += Unit }
+    }
+
+    /** Starts [server] with one WebSocket upgrade handled by [serverSide], and connects the transport to it. */
+    private fun connect(server: MockWebServer, events: Events, serverSide: WebSocketListener): LiveConnection {
+        server.enqueue(MockResponse.Builder().webSocketUpgrade(serverSide).build())
+        server.start()
+        return OkHttpLiveTransport().connect(liveUrl(Endpoints { server.url("/").toString().trimEnd('/') }), "alpha-test-only", events)
+    }
+
+    /** `onClosed` fires once and `onFailure` never fires. */
+    private fun assertClosedOnce(events: Events) {
+        assertNotNull(events.closed.poll(5, TimeUnit.SECONDS))
+        assertNull(events.closed.poll(500, TimeUnit.MILLISECONDS))
+        assertTrue(events.failures.isEmpty())
     }
 
     @Test fun urlUsesWssInProductionAndWsOnLoopback() {
@@ -29,13 +44,11 @@ class VoiceModeTransportTest {
     @Test fun connectSendsBearerAndPassesMessagesBothWays() {
         val received = LinkedBlockingQueue<String>()
         MockWebServer().use { server ->
-            server.enqueue(MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
+            val events = Events()
+            val connection = connect(server, events, object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) { webSocket.send("from-server") }
                 override fun onMessage(webSocket: WebSocket, text: String) { received += text }
-            }).build())
-            server.start()
-            val events = Events()
-            val connection = OkHttpLiveTransport().connect(liveUrl(Endpoints { server.url("/").toString().trimEnd('/') }), "alpha-test-only", events)
+            })
             try {
                 assertEquals("from-server", events.texts.poll(5, TimeUnit.SECONDS))
                 assertTrue(connection.send("from-client"))
@@ -56,6 +69,28 @@ class VoiceModeTransportTest {
             val (status, message) = checkNotNull(events.failures.poll(5, TimeUnit.SECONDS))
             assertEquals(401, status)
             assertFalse(message, "alpha-test-only" in message)
+        }
+    }
+
+    @Test fun serverCloseReportsClosedOnceAndNoFailure() {
+        MockWebServer().use { server ->
+            val events = Events()
+            connect(server, events, object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) { webSocket.close(1000, "done") }
+            })
+            assertClosedOnce(events)
+        }
+    }
+
+    @Test fun clientCloseReportsClosedOnce() {
+        MockWebServer().use { server ->
+            val events = Events()
+            val connection = connect(server, events, object : WebSocketListener() {
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(1000, null) }
+            })
+            server.takeRequest()
+            connection.close()
+            assertClosedOnce(events)
         }
     }
 }
