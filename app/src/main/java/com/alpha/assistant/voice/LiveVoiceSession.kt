@@ -79,6 +79,8 @@ internal class LiveVoiceSession(
     private var interrupted = false
     private var lastOutputMs = 0L
     private var waiting: LiveEvent.Delegation? = null
+    /** The client event ids of the commentary and thinking appends of this session. */
+    private val appends = HashSet<String>()
     private var silenceJob: Job? = null
     private var firstJob: Job? = null
     private var gapJob: Job? = null
@@ -94,7 +96,7 @@ internal class LiveVoiceSession(
         val token = ++generation
         this.host = host
         this.firstSpeech = firstSpeech
-        transcript = LiveTranscript(); detector = BargeInDetector(); waiting = null
+        transcript = LiveTranscript(); detector = BargeInDetector(); waiting = null; appends.clear()
         started = false; userMuted = false; awayMuted = false; captureMuted = false; dropping = false; interrupted = false; lastOutputMs = 0
         active = true; status = ""; phase = LivePhase.CONNECTING
         scope.launch {
@@ -132,13 +134,17 @@ internal class LiveVoiceSession(
     /** Sends a hand-off result and returns its client event id. After the end it sends nothing, as hand-offs outlive it (spec 5.5.9). */
     fun commentary(delegationId: String, text: String): String {
         val id = LiveProtocol.newId()
-        if (started) { send(LiveProtocol.commentary(id, delegationId, text)); countSilence() }
+        if (started) { appends += id; send(LiveProtocol.commentary(id, delegationId, text)); countSilence() }
         return id
     }
 
     /** Quiet context for a typed turn (spec 5.7.2). */
     fun thinking(text: String) {
-        if (started) { send(LiveProtocol.thinking(LiveProtocol.newId(), text)); countSilence() }
+        if (!started) return
+        val id = LiveProtocol.newId()
+        appends += id
+        send(LiveProtocol.thinking(id, text))
+        countSilence()
     }
 
     fun stop(status: String = "") = end(status)
@@ -147,7 +153,7 @@ internal class LiveVoiceSession(
     private fun end(status: String, settingsRequired: Boolean = false, socketOpen: Boolean = true) {
         if (!active) return
         generation++
-        active = false; started = false; this.status = status; userSpeaking = false; level = 0f; waiting = null
+        active = false; started = false; this.status = status; userSpeaking = false; level = 0f; waiting = null; appends.clear()
         playback++
         connection?.let { if (socketOpen) it.send(LiveProtocol.close()); it.close() }
         connection = null
@@ -192,8 +198,9 @@ internal class LiveVoiceSession(
                 "content" -> R.string.live_voice_content
                 else -> R.string.live_voice_connection
             }), socketOpen = false)
-            // The server message can echo part of the key, so it is never shown (spec 5.3.6).
-            is LiveEvent.Failure -> end(string(R.string.live_voice_failed))
+            // A rejected append keeps the mode (the fallbacks of spec 5.5.6 and 5.7.2). The server message can echo part of the key,
+            // so it is never shown (spec 5.3.6).
+            is LiveEvent.Failure -> if (event.clientEventId !in appends) end(string(R.string.live_voice_failed))
             LiveEvent.Other -> Unit
         }
     }

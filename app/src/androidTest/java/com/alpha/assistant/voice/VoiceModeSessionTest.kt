@@ -227,7 +227,7 @@ class VoiceModeSessionTest {
                 it.socket.fail(401)
             },
             Case("error event", text(R.string.live_voice_failed)) {
-                it.socket.emit("""{"type":"error","error":{"message":"Invalid key alpha-test-only","event_id":null}}""")
+                it.socket.emit("""{"type":"error","error":{"message":"Invalid key alpha-test-only"}}""")
             },
             Case("focus loss", text(R.string.live_voice_focus_lost)) { it.audio.loseFocus() },
             Case("no account", openAiOnly, settingsRequired = true, closeSent = false, audioCloses = 0, socketCloses = 0,
@@ -336,6 +336,25 @@ class VoiceModeSessionTest {
         assertEquals("session.thinking.append", rig.socket.types().last())
     }
 
+    @Test fun rejectedAppendKeepsTheMode() {
+        val rig = Rig().started()
+        val commentary = main { rig.session.commentary("d1", "Ответ Alphy: готово.") }
+        main { rig.session.thinking("Пользователь написал: привет.") }
+        val thinking = JSONObject(rig.socket.sent.last()).getString("event_id")
+        rig.socket.emit(failure(commentary))
+        rig.socket.emit(failure(thinking))
+        main { }
+        assertTrue("A rejected append keeps the voice mode", main { rig.session.active })
+        assertEquals("", main { rig.session.status })
+        assertFalse("session.close" in rig.socket.types())
+        assertTrue(rig.host.calls.isEmpty())
+        // An error for an id that is not an append of this session is a session error.
+        rig.socket.emit(failure("event_unknown"))
+        waitUntil("unknown id end") { !rig.session.active }
+        assertEquals(listOf("ended:${text(R.string.live_voice_failed)}:false"), rig.ends())
+        assertTrue("session.close" in rig.socket.types())
+    }
+
     @Test fun sessionRunsOverTheRealTransport() {
         val received = LinkedBlockingQueue<String>()
         MockWebServer().use { server ->
@@ -401,5 +420,7 @@ class VoiceModeSessionTest {
         fun delegation(id: String, offsetMs: Long) =
             JSONObject().put("type", "session.delegation.created").put("offset_ms", offsetMs).put("delegation", JSONObject().put("id", id)).toString()
         fun closed(reason: String) = JSONObject().put("type", "session.closed").put("reason", reason).toString()
+        fun failure(eventId: String) = JSONObject().put("type", "error")
+            .put("error", JSONObject().put("message", "Rejected append").put("event_id", eventId)).toString()
     }
 }
