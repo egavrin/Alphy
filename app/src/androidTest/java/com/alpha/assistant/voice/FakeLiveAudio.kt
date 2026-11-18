@@ -15,6 +15,8 @@ internal class FakeLiveAudio : LiveAudio {
     @Volatile var captureMuted = false; private set
     @Volatile override var playbackActive = false
     @Volatile override var level = 0f
+    /** False answers [open] as a denied audio focus does. */
+    @Volatile var focusGranted = true
     @Volatile private var onCapture: ((ShortArray) -> Unit)? = null
     @Volatile private var onFocusLost: (() -> Unit)? = null
 
@@ -22,7 +24,7 @@ internal class FakeLiveAudio : LiveAudio {
 
     override fun open(onCapture: (ShortArray) -> Unit, onFocusLost: () -> Unit): Boolean {
         this.onCapture = onCapture; this.onFocusLost = onFocusLost
-        return true
+        return focusGranted
     }
     override fun setCaptureMuted(muted: Boolean) { captureMuted = muted }
     override fun play(samples: ShortArray) { played += samples }

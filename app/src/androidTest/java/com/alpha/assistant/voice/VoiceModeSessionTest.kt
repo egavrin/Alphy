@@ -6,6 +6,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.AiAccount
 import com.alpha.assistant.cloud.AiProvider
+import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.Endpoints
 import com.alpha.assistant.cloud.providerFailure
 import com.alpha.assistant.data.Message
@@ -53,12 +54,12 @@ class VoiceModeSessionTest {
         override fun ended(status: String, settingsRequired: Boolean) { calls += "ended:$status:$settingsRequired" }
     }
 
-    private inner class Rig(timing: LiveTiming = TIMING, account: AiAccount? = OPENAI, transport: LiveTransport? = null,
+    private inner class Rig(timing: LiveTiming = TIMING, account: suspend () -> AiAccount? = { OPENAI }, transport: LiveTransport? = null,
         endpoints: Endpoints = LOOPBACK, history: List<Message> = emptyList()) {
         val socket = FakeLiveTransport()
         val audio = FakeLiveAudio()
         val host = Host(history)
-        val session = LiveVoiceSession(context, scope, transport ?: socket, { audio }, { account }, endpoints, timing)
+        val session = LiveVoiceSession(context, scope, transport ?: socket, { audio }, account, endpoints, timing)
 
         fun start(firstSpeech: Boolean = false) = main { session.start(host, firstSpeech) }
         /** Starts the session and answers `session.started`. */
@@ -154,15 +155,18 @@ class VoiceModeSessionTest {
         rig.audio.capture(quiet())
         waitUntil("user stopped") { !rig.session.userSpeaking }
         rig.socket.emit(outputAudio(3))
+        rig.socket.emit(outputDelta("Хорошо", 1_000, 1_500))
+        // A second turn before the next reply did not start over Alphy's voice.
+        rig.socket.emit(inputDelta("Да", 1_600, 1_900))
         main { }
         SystemClock.sleep(700)
         rig.socket.emit(outputAudio(4))
-        rig.socket.emit(outputDelta("Хорошо", 1_000, 1_500))
-        waitUntil("next reply") { rig.audio.played.size == 2 && rig.turns().isNotEmpty() }
+        rig.socket.emit(outputDelta("Понял", 2_000, 2_500))
+        waitUntil("next reply") { rig.audio.played.size == 2 && rig.turns().size == 2 }
         // The playback is serial, so a dropped chunk would have played before chunk 4.
         assertEquals(listOf<Short>(1, 4), rig.audio.played.map { it[0] })
         assertEquals(1, rig.audio.flushes.get())
-        assertEquals(listOf("turn:Стоп:100:400:true"), rig.turns())
+        assertEquals(listOf("turn:Стоп:100:400:true", "turn:Да:1600:1900:false"), rig.turns())
     }
 
     @Test fun muteSendsEventsAndStopsCapture() {
@@ -192,6 +196,11 @@ class VoiceModeSessionTest {
         assertFalse(rig.audio.captureMuted)
         assertEquals(LivePhase.LISTENING, main { rig.session.phase })
         assertEquals(listOf("session.start", "session.input_audio.mute", "session.input_audio.unmute"), rig.socket.types())
+        // The flush is not a barge-in, so the first turn after the return did not start over Alphy's voice.
+        rig.socket.emit(inputDelta("Привет", 0, 500))
+        rig.socket.emit(outputDelta("Привет!", 600, 900))
+        waitUntil("turn") { rig.turns().isNotEmpty() }
+        assertEquals(listOf("turn:Привет:0:500:false"), rig.turns())
         // The return does not undo the user's own mute.
         main { rig.session.mute(true); rig.session.away(true); rig.session.away(false) }
         assertTrue(rig.audio.captureMuted)
@@ -204,7 +213,9 @@ class VoiceModeSessionTest {
         val connection = text(R.string.live_voice_connection)
         val openAiOnly = text(R.string.live_voice_openai_only)
         class Case(val name: String, val status: String, val settingsRequired: Boolean = false, val closeSent: Boolean = true,
-            val account: AiAccount? = OPENAI, val timing: LiveTiming = TIMING, val started: Boolean = true, val trigger: (Rig) -> Unit)
+            val audioCloses: Int = 1, val socketCloses: Int = 1, val account: suspend () -> AiAccount? = { OPENAI },
+            val endpoints: Endpoints = LOOPBACK, val focusGranted: Boolean = true, val timing: LiveTiming = TIMING,
+            val started: Boolean = true, val trigger: (Rig) -> Unit = { })
         val cases = listOf(
             Case("no session.started", connection, timing = TIMING.copy(startedMs = 300), started = false) { },
             Case("expired", text(R.string.live_voice_expired), closeSent = false) { it.socket.emit(closed("expired")) },
@@ -219,24 +230,30 @@ class VoiceModeSessionTest {
                 it.socket.emit("""{"type":"error","error":{"message":"Invalid key alpha-test-only","event_id":null}}""")
             },
             Case("focus loss", text(R.string.live_voice_focus_lost)) { it.audio.loseFocus() },
-            Case("no account", openAiOnly, settingsRequired = true, closeSent = false, account = null, started = false) { },
-            Case("other provider", openAiOnly, settingsRequired = true, closeSent = false,
-                account = AiAccount(AiProvider.ANTHROPIC, "alpha-test-only"), started = false) { },
+            Case("no account", openAiOnly, settingsRequired = true, closeSent = false, audioCloses = 0, socketCloses = 0,
+                account = { null }, started = false),
+            Case("other provider", openAiOnly, settingsRequired = true, closeSent = false, audioCloses = 0, socketCloses = 0,
+                account = { AiAccount(AiProvider.ANTHROPIC, "alpha-test-only") }, started = false),
+            Case("account read failure", "Ключ не прочитан.", settingsRequired = true, closeSent = false, audioCloses = 0, socketCloses = 0,
+                account = { throw CloudFailure("key_read", "Ключ не прочитан.") }, started = false),
+            Case("focus denied", text(R.string.live_voice_focus_lost), closeSent = false, socketCloses = 0, focusGranted = false, started = false),
+            Case("start error", text(R.string.live_voice_failed), closeSent = false, audioCloses = 0, socketCloses = 0,
+                endpoints = Endpoints { "https://example.invalid" }, started = false),
         )
         for (case in cases) {
-            val rig = Rig(case.timing, case.account)
+            val rig = Rig(case.timing, case.account, endpoints = case.endpoints)
+            rig.audio.focusGranted = case.focusGranted
             if (case.started) rig.started() else rig.start()
             case.trigger(rig)
             waitUntil(case.name) { !rig.session.active }
-            val opened = case.account?.provider == AiProvider.OPENAI
             // A late socket close after the end must not end the session again.
             if (rig.socket.connected) rig.socket.closeRemote()
             main { }
             assertEquals(case.name, listOf("ended:${case.status}:${case.settingsRequired}"), rig.ends())
             assertEquals(case.name, case.status, main { rig.session.status })
             assertEquals(case.name, LivePhase.IDLE, main { rig.session.phase })
-            assertEquals(case.name, if (opened) 1 else 0, rig.audio.closes.get())
-            assertEquals(case.name, if (opened) 1 else 0, rig.socket.closes.get())
+            assertEquals(case.name, case.audioCloses, rig.audio.closes.get())
+            assertEquals(case.name, case.socketCloses, rig.socket.closes.get())
             assertEquals(case.name, case.closeSent, "session.close" in rig.socket.types())
         }
     }

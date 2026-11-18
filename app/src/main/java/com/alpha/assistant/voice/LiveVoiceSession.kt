@@ -75,6 +75,8 @@ internal class LiveVoiceSession(
     private var captureMuted = false
     /** After a barge-in or a flush, the rest of the current reply is dropped (spec 5.4.5). */
     private var dropping = false
+    /** A barge-in emptied the playback, so the next user turn still started over Alphy's voice. */
+    private var interrupted = false
     private var lastOutputMs = 0L
     private var waiting: LiveEvent.Delegation? = null
     private var silenceJob: Job? = null
@@ -93,7 +95,7 @@ internal class LiveVoiceSession(
         this.host = host
         this.firstSpeech = firstSpeech
         transcript = LiveTranscript(); detector = BargeInDetector(); waiting = null
-        started = false; userMuted = false; awayMuted = false; captureMuted = false; dropping = false; lastOutputMs = 0
+        started = false; userMuted = false; awayMuted = false; captureMuted = false; dropping = false; interrupted = false; lastOutputMs = 0
         active = true; status = ""; phase = LivePhase.CONNECTING
         scope.launch {
             try {
@@ -177,8 +179,8 @@ internal class LiveVoiceSession(
             }
             is LiveEvent.OutputAudio -> output(event.samples)
             is LiveEvent.InputTranscript -> {
-                // After a barge-in the flush has emptied the playback, but the turn still started over Alphy's voice.
-                transcript.input(event.delta, event.startMs, event.endMs, live?.playbackActive == true || dropping)
+                transcript.input(event.delta, event.startMs, event.endMs, live?.playbackActive == true || interrupted)
+                interrupted = false
                 gapJob?.cancel()
                 gapJob = after(timing.turnGapMs) { turn(transcript.endTurn()) }
             }
@@ -202,7 +204,7 @@ internal class LiveVoiceSession(
         if (captureMuted) return
         val playing = device.playbackActive
         // Barge-in: the user's voice over the playback stops it at once (spec 5.4.5).
-        if (detector.accept(block, playing) && playing) flush()
+        if (detector.accept(block, playing) && playing) { flush(); interrupted = true }
         if (detector.userSpeaking != userSpeaking) {
             userSpeaking = detector.userSpeaking
             if (userSpeaking) { firstSpeech = false; firstJob?.cancel() }
@@ -218,7 +220,7 @@ internal class LiveVoiceSession(
         val device = live ?: return
         val now = SystemClock.uptimeMillis()
         // The next reply starts at output audio after replyGapMs of output silence, once the user has stopped (spec 5.4.5).
-        if (dropping && !detector.userSpeaking && now - lastOutputMs >= timing.replyGapMs) dropping = false
+        if (dropping && !detector.userSpeaking && now - lastOutputMs >= timing.replyGapMs) { dropping = false; interrupted = false }
         lastOutputMs = now
         // shortcut: a chunk that the player has already taken can still play after a flush; lock it if the echo check hears it.
         if (!dropping) { val epoch = playback; player.launch { if (epoch == playback) device.play(samples) } }
