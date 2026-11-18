@@ -36,4 +36,20 @@ class BargeInDetectorTest {
         val fired = (1..10).any { detector.accept(block(0.15), playbackActive = true) }
         assertTrue(fired)
     }
+
+    @Test fun echoAfterAQuietRoomDoesNotFireAndSpeechOverItDoes() {
+        val detector = BargeInDetector()
+        repeat(100) { assertFalse(detector.accept(block(0.002), playbackActive = false)) }
+        repeat(250) { assertFalse(detector.accept(block(0.02), playbackActive = true)) }
+        assertTrue((1..10).any { detector.accept(block(0.15), playbackActive = true) })
+    }
+
+    @Test fun echoLevelResetsAfterPlaybackStops() {
+        val detector = BargeInDetector()
+        repeat(100) { detector.accept(block(0.02), playbackActive = true) }
+        repeat(50) { detector.accept(block(0.002), playbackActive = false) }
+        // A quieter reply: a stale echo level of 0.02 would put the threshold at 0.04 and hide this speech.
+        repeat(50) { assertFalse(detector.accept(block(0.005), playbackActive = true)) }
+        assertTrue((1..10).any { detector.accept(block(0.03), playbackActive = true) })
+    }
 }

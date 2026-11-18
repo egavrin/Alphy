@@ -54,7 +54,9 @@ internal class AndroidLiveAudio(context: Context) : LiveAudio {
     private var record: AudioRecord? = null
     private var echoCanceler: AcousticEchoCanceler? = null
     private var noiseSuppressor: NoiseSuppressor? = null
-    private var track: AudioTrack? = null
+    @Volatile private var track: AudioTrack? = null
+    // Bumped by each flush, so frames of a write that the flush cut short are not counted.
+    private var generation = 0
     private var thread: Thread? = null
     private var opened = false
     private var routed = false
@@ -106,21 +108,25 @@ internal class AndroidLiveAudio(context: Context) : LiveAudio {
 
     override fun play(samples: ShortArray) {
         val output = track ?: return
-        written.addAndGet(samples.size.toLong())
-        output.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
+        val before = synchronized(written) { generation }
+        val count = output.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
+        if (count > 0) synchronized(written) { if (generation == before) written.addAndGet(count.toLong()) }
     }
 
     override fun flushPlayback() {
         val output = track ?: return
-        output.pause()
-        output.flush()
-        output.play()
-        // The head position keeps counting after a flush, so the new count of written frames starts at it.
-        written.set(head(output))
+        synchronized(written) {
+            generation++
+            output.pause()
+            output.flush()
+            output.play()
+            // The head position keeps counting after a flush, so the new count of written frames starts at it.
+            written.set(head(output))
+        }
     }
 
     override val playbackActive: Boolean
-        get() = track?.let { written.get() > head(it) } ?: false
+        get() = track?.let { written.get() > head(it) } ?: false  // one read of track: release() can null it
 
     override fun close() = synchronized(lock) { release() }
 

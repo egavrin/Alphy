@@ -24,6 +24,10 @@ class EchoCheckDeviceTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
     private val audio = AndroidLiveAudio(context)
+    // Written on the capture thread, read on the test thread.
+    @Volatile private var flushAt = -1L
+    @Volatile private var flushes = 0
+    @Volatile private var spokenAt = -1L
 
     @Before fun grantMicrophoneOnARealPhone() {
         assumeFalse("An emulator has no acoustic echo.", getprop("ro.kernel.qemu") == "1")
@@ -42,9 +46,6 @@ class EchoCheckDeviceTest {
         val detector = BargeInDetector()
         val captured = Collections.synchronizedList(mutableListOf<ShortArray>())
         val start = SystemClock.elapsedRealtime()
-        var flushAt = -1L
-        var flushes = 0
-        var spokenAt = -1L
         assertTrue("Audio focus was denied.", audio.open({ block ->
             captured += block
             val now = SystemClock.elapsedRealtime() - start
@@ -55,6 +56,7 @@ class EchoCheckDeviceTest {
         player.start()
         while (SystemClock.elapsedRealtime() - start < RUN_MS) Thread.sleep(50)
         player.join(2000)
+        audio.close()
         save("speech-over", captured)
         Log.i(TAG, "speak-now at $spokenAt ms, flush at $flushAt ms after the start of playback, flushes $flushes")
         assertEquals("flushes", 1, flushes)
@@ -74,8 +76,9 @@ class EchoCheckDeviceTest {
         feed(samples) { true }
         while (audio.playbackActive) Thread.sleep(20)
         Thread.sleep(500)
+        audio.close()
         val played = rms(listOf(samples))
-        val heard = rms(captured.toList().take(samples.size / LIVE_BLOCK))
+        val heard = rms(synchronized(captured) { captured.toList() }.take(samples.size / LIVE_BLOCK))
         val ratio = save(name, captured, "playback rms $played, capture rms $heard, ratio ${heard / played}")
         Log.i(TAG, "$name: $ratio")
         assertTrue("The detector fired at $fired ms on echo. $ratio", fired.isEmpty())
@@ -95,10 +98,11 @@ class EchoCheckDeviceTest {
         return sqrt(sum / count)
     }
 
-    /** Writes the capture as WAV and returns [note]. */
+    /** Writes the capture as WAV and returns [note]. The caller closed the audio, so no block arrives any more. */
     private fun save(name: String, blocks: List<ShortArray>, note: String = ""): String {
-        val directory = File(context.getExternalFilesDir(null), "echo-check").apply { mkdirs() }
-        val samples = ShortArray(blocks.sumOf { it.size }).also { out -> var at = 0; for (block in blocks.toList()) { block.copyInto(out, at); at += block.size } }
+        val snapshot = synchronized(blocks) { blocks.toList() }
+        val directory = File(checkNotNull(context.getExternalFilesDir(null)) { "External files directory is unavailable." }, "echo-check").apply { mkdirs() }
+        val samples = ShortArray(snapshot.sumOf { it.size }).also { out -> var at = 0; for (block in snapshot) { block.copyInto(out, at); at += block.size } }
         File(directory, "${Build.MODEL}-$name.wav").writeBytes(wavBytes(samples))
         return note
     }
