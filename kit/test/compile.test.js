@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createContext, runInContext } from "node:vm";
 import { compileAppFile } from "../src/compile.js";
-import { bundle, planCopies, script } from "../build.js";
+import { bundle, planCopies, plansIn, script } from "../build.js";
 import { plan } from "./helpers.js";
 
 test("compileAppFile: calc.plan gives a definition and no fault", async () => {
@@ -33,7 +33,7 @@ test("bundle: it defines only compileAppFile, and the sandbox expression compile
   const context = createContext();
   const names = () => [...runInContext("Object.getOwnPropertyNames(globalThis)", context)];
   const before = names();
-  const text = await runInContext(`${bundle()}\ncompileAppFile(${JSON.stringify(plan("calc"))}).then(JSON.stringify)`, context);
+  const text = await runInContext(`${await bundle()}\ncompileAppFile(${JSON.stringify(plan("calc"))}).then(JSON.stringify)`, context);
   expect(names().filter((name) => !before.includes(name))).toEqual(["compileAppFile"]);
   expect(JSON.parse(text)).toEqual(JSON.parse(JSON.stringify(await compileAppFile(plan("calc")))));
 });
@@ -59,6 +59,6 @@ test("build: a copy of a plan whose source is gone is in the outputs with no tex
     writeFileSync(join(root, "plans", "kept.plan"), "kept\n");
     writeFileSync(join(root, "copies", "kept.plan"), "kept\n");
     writeFileSync(join(root, "copies", "gone.plan"), "gone\n");
-    expect(planCopies(join(root, "plans"), join(root, "copies"))).toEqual([[join(root, "copies", "kept.plan"), "kept\n"], [join(root, "copies", "gone.plan"), null]]);
+    expect(planCopies(plansIn(join(root, "plans")), join(root, "copies"))).toEqual([[join(root, "copies", "kept.plan"), "kept\n"], [join(root, "copies", "gone.plan"), null]]);
   } finally { rmSync(root, { recursive: true }); }
 });

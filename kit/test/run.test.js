@@ -52,6 +52,17 @@ test("run: extreme inputs keep each derived value finite", async () => {
   expect(state.d.ratio_view_text).toBe(0);
 });
 
+test("run: a shown value keeps the type of its schema field when its formula changes type", async () => {
+  const { definition, app } = await compiled([
+    'app("Kinds", lang="en")', "$/n = 0", "root = Column([field, word, count])", 'field = NumberField("N", $/n, min=0, max=10)',
+    'word = Text(if($/n > 0, $/n * 2, "none"))', 'count = Metric("Count", if($/n > 0, "many", 1))',
+  ].join("\n"));
+  expect(definition.stateSchema.d.fields).toEqual({ word_text: "string", count_value: "number" });
+  const { state } = handle(request(definition.initialState, { type: "action", actionId: "field", value: 3 }), app);
+  // A text field takes the number as text. A number field takes 0 for a value that is not a number.
+  expect(state.d).toEqual({ word_text: "6", count_value: 0 });
+});
+
 test("run: a reply holds a new ui only when the screen changes", async () => {
   const { definition, app } = await compiled([
     'app("Pick", lang="en")', "$/on = false", "$/count = 0", "root = Column([pick, more, shown])",
@@ -79,8 +90,11 @@ test("source: the source of calc.plan is under 64 KiB and evaluates as a functio
   expect(bytes(definition.source)).toBeLessThan(60000);
   // The sandbox's own wrapper (SandboxClient.evaluationScript) in a context with only the language's globals.
   const context = createContext();
+  const names = () => runInContext("Object.getOwnPropertyNames(globalThis).join()", context), before = names();
   const run = (input) => JSON.parse(runInContext(`JSON.stringify((function(input){'use strict';\n${definition.source}\n})(JSON.parse(${JSON.stringify(JSON.stringify(input))})))`, context));
   expect(run(request(definition.initialState, { type: "open" }))).toEqual({ state: definition.initialState });
+  // The source is a function body: it gives the global object no name.
+  expect(names()).toBe(before);
   const action = request(definition.initialState, { type: "action", actionId: "bill_field", value: 200 });
   const reply = run(action);
   expect(reply.state.bill).toBe(200);

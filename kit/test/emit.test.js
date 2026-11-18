@@ -1,6 +1,7 @@
 // The emitter: an expanded app file as Alphy's app definition.
 
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { emit } from "../src/emit.js";
 import { plan, planned } from "./helpers.js";
 
@@ -56,6 +57,51 @@ test("emit: a plan over a limit is a fault of its need line", async () => {
   expect(faults[0]).toStartWith("need x41: ");
 });
 
+test("emit: a source over 64 KiB is a fault of the app", async () => {
+  const { definition, faults } = emit(await planned(['app("Long", lang="en")', `$/note = "${"x".repeat(70000)}"`, "root = Column([note])", "note = Text($/note)"].join("\n")));
+  expect(definition).toBeNull();
+  expect(faults).toHaveLength(1);
+  expect(faults[0]).toMatch(/^app: the source is \d+ bytes, and Alphy keeps at most 65536 bytes/);
+});
+
+test("emit: more than 32 other values of a need is a fault of the need", async () => {
+  const fields = Array.from({ length: 33 }, (_, index) => `f${index + 1}: "text"`).join(", ");
+  const { definition, faults } = emit(await planned(['app("Wide", lang="en")', `need wide = entries("Wide", fields={${fields}})`].join("\n")));
+  expect(definition).toBeNull();
+  // The list itself is a fault of Task 4 too. The fault of this limit names the need.
+  expect(faults.filter((fault) => fault.startsWith("need wide: ") && fault.includes("32"))).toHaveLength(1);
+});
+
+test("emit: a screen deeper than 8 is a fault of the component that is too deep", async () => {
+  const chain = Array.from({ length: 7 }, (_, index) => `c${index + 1} = Column([${index === 6 ? "deep" : `c${index + 2}`}])`);
+  const { definition, faults } = emit(await planned(['app("Deep", lang="en")', "root = Column([c1])", ...chain, 'deep = Text("Deep")'].join("\n")));
+  expect(definition).toBeNull();
+  // The theme and the column of the app are levels 0 and 1, so c1 is at 2 and deep is at 9.
+  expect(faults).toEqual([expect.stringMatching(/^deep: .*depth 9.*8/)]);
+});
+
+test("emit: a screen of more than 512 nodes is a fault of the app", async () => {
+  const groups = Array.from({ length: 11 }, (_, index) => `g${index + 1} = Column([${Array(50).fill('Text("a")').join(", ")}])`);
+  const { definition, faults } = emit(await planned(['app("Many", lang="en")', `root = Column([${groups.map((line) => line.split(" ")[0]).join(", ")}])`, ...groups].join("\n")));
+  expect(definition).toBeNull();
+  // The theme, the column of the app, 11 columns, and 550 texts.
+  expect(faults).toEqual([expect.stringMatching(/^app: the screen has 563 nodes, and Alphy keeps at most 512/)]);
+});
+
+test("emit: a Slider or a NumberField whose bounds do not hold its start value is a fault of its line", async () => {
+  const { definition, faults } = emit(await planned([
+    'app("Bounds", lang="en")', "$/a = 50", "$/b = 150", "$/c = 5", "$/d = -5", "$/e = 5",
+    "root = Column([free, over, flat, below, steep])",
+    'free = Slider("Free", $/a)', 'over = Slider("Over", $/b)', 'flat = Slider("Flat", $/c, min=5, max=5)',
+    'below = NumberField("Below", $/d)', 'steep = NumberField("Steep", $/e, min=0, max=10, step=20)',
+  ].join("\n")));
+  expect(definition).toBeNull();
+  // A Slider without bounds has Alphy's 0 to 100, so 50 passes and 150 does not. A NumberField without bounds has 0 to 1000000.
+  expect(faults.map((fault) => fault.split(":")[0])).toEqual(["over", "flat", "below", "steep"]);
+  const { definition: free } = emit(await planned(['app("Free", lang="en")', "$/a = 50", "root = Column([free])", 'free = Slider("Free", $/a)'].join("\n")));
+  expect(free.ui.children[0].children[0]).toEqual({ type: "slider", text: "Free", bind: "a", action: "free", min: 0, max: 100 });
+});
+
 test("emit: the other values of a part are one object of its need, and a computed test is a field of v", async () => {
   const { definition, faults } = emit(await planned([
     'app("Wizard", lang="en")',
@@ -83,18 +129,8 @@ test("emit: shown values past 32 go to the object d2", async () => {
 });
 
 test("emit: each component of the node table becomes its Alphy node", async () => {
-  const { definition, faults } = emit(await planned([
-    'app("All", lang="en", preset="soft", kind="Lesson")',
-    '$/name = "Ann"', "$/on = true", '$/size = "S"', "$/level = 3", "$/count = 0",
-    "root = Column([title, intro, note, part, line, card, badge, emoji, rule, notice, nameField, onToggle, onBox, sizePick, sizeList, levelSlider, countField, add, up])",
-    'title = Heading("Hello")', 'intro = Text("Hi " + $/name, variant="eyebrow")', 'note = Text("Plain", variant="muted")',
-    'part = Section("Part", [Text("Inside")])', "line = Row([Text($/name, weight=1), Badge($/count)])",
-    'card = Card([Metric("Count", $/count, emphasis="display")], variant="hero")', 'badge = Badge("New")', 'emoji = Emoji("🍵")', "rule = Divider()",
-    'notice = Notice("Saved")', 'nameField = TextField("Name", $/name)', 'onToggle = Toggle("On", $/on)', 'onBox = CheckBox("Box", $/on)',
-    'sizePick = Segmented("Size", $/size, ["S", "M", "L"])', 'sizeList = Select("Size", $/size, ["S", "M", "L", "XL", "2XL", "3XL", "4XL"])',
-    'levelSlider = Slider("Level", $/level, min=0, max=10, step=1)', 'countField = NumberField("Count", $/count)',
-    'add = Button("Add", action=inc($/count), selected=!$/on)', 'up = IconButton("ArrowUp", action=inc($/level))',
-  ].join("\n")));
+  // The device test eachNodeOfTheTablePassesParseAndSmoke sends the same plan through Alphy's validators.
+  const { definition, faults } = emit(await planned(readFileSync(new URL("./nodes.plan", import.meta.url), "utf8")));
   expect(faults).toEqual([]);
   expect(definition.ui).toMatchObject({ type: "theme", preset: "soft" });
   expect(definition.ui).not.toHaveProperty("palette");
@@ -114,11 +150,18 @@ test("emit: each component of the node table becomes its Alphy node", async () =
     { type: "toggle", text: "On", bind: "on", action: "onToggle" },
     { type: "checkbox", text: "Box", bind: "on", action: "onBox" },
     { type: "segmented", text: "Size", bind: "size", action: "sizePick", options: ["S", "M", "L"].map((value) => ({ text: value, value })) },
-    { type: "select", text: "Size", bind: "size", action: "sizeList", options: ["S", "M", "L", "XL", "2XL", "3XL", "4XL"].map((value) => ({ text: value, value })) },
+    { type: "select", text: "Big", bind: "big", action: "sizeList", options: ["S", "M", "L", "XL", "2XL", "3XL", "4XL"].map((value) => ({ text: value, value })) },
     { type: "slider", text: "Level", bind: "level", action: "levelSlider", min: 0, max: 10, step: 1 },
+    // A Slider without bounds gets Alphy's own 0 to 100.
+    { type: "slider", text: "Free", bind: "pct", action: "freeSlider", min: 0, max: 100 },
     { type: "numberInput", text: "Count", bind: "count", action: "countField", min: 0, max: 1000000 },
     { type: "button", text: "Add", action: "add", variant: "tonal" },
-    { type: "icon", name: "Arrow", text: "up", action: "up" },
+    { type: "row", children: [["Arrow", "up"], ["Sort", "down"], ["Back", "left"], ["Chevron", "right"], ["Pencil", "edit"]].map(([name, action]) => ({ type: "icon", name, text: action, action })) },
+    { type: "text", text: "", bind: "level" },
+    { type: "text", text: "Hidden", visible: false },
+    { type: "text", text: "Many", visibleBind: "v.shownIf_visible" },
+    { type: "button", text: "Reset", action: "enabledIf", variant: "filled", enabledBind: "v.enabledIf_enabled" },
   ]);
   expect(definition.initialState.d).toEqual({ intro_text: "Hi Ann" });
+  expect(definition.initialState.v).toEqual({ shownIf_visible: false, enabledIf_enabled: false });
 });

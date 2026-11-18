@@ -1,0 +1,38 @@
+app("All", lang="en", preset="soft", kind="Lesson")
+$/name = "Ann"
+$/on = true
+$/size = "S"
+$/level = 3
+$/count = 0
+$/big = "XL"
+$/pct = 40
+root = Column([title, intro, note, part, line, card, badge, emoji, rule, notice, nameField, onToggle, onBox, sizePick, sizeList, levelSlider, freeSlider, countField, add, icons, plain, hidden, shownIf, enabledIf])
+title = Heading("Hello")
+intro = Text("Hi " + $/name, variant="eyebrow")
+note = Text("Plain", variant="muted")
+part = Section("Part", [Text("Inside")])
+line = Row([Text($/name, weight=1), Badge($/count)])
+card = Card([Metric("Count", $/count, emphasis="display")], variant="hero")
+badge = Badge("New")
+emoji = Emoji("🍵")
+rule = Divider()
+notice = Notice("Saved")
+nameField = TextField("Name", $/name)
+onToggle = Toggle("On", $/on)
+onBox = CheckBox("Box", $/on)
+sizePick = Segmented("Size", $/size, ["S", "M", "L"])
+sizeList = Select("Big", $/big, ["S", "M", "L", "XL", "2XL", "3XL", "4XL"])
+levelSlider = Slider("Level", $/level, min=0, max=10, step=1)
+freeSlider = Slider("Free", $/pct)
+countField = NumberField("Count", $/count)
+add = Button("Add", action=inc($/count), selected=!$/on)
+icons = Row([up, down, left, right, edit])
+up = IconButton("ArrowUp", action=set($/level, min(10, $/level + 1)))
+down = IconButton("ArrowDown", action=set($/level, max(0, $/level - 1)))
+left = IconButton("ArrowLeft", action=set($/size, "S"))
+right = IconButton("ArrowRight", action=set($/size, "L"))
+edit = IconButton("Edit", action=set($/name, "Bea"))
+plain = Text($/level)
+hidden = Text("Hidden", visible=false)
+shownIf = Text("Many", visible=$/count > 2)
+enabledIf = Button("Reset", action=set($/count, 0), enabled=$/count > 0)

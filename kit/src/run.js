@@ -9,7 +9,7 @@ import { App, given, settings } from "./core.js";
 const SAFE = /^[A-Za-z][A-Za-z0-9_]{0,47}$/;
 const REFUSED = new Set(["__proto__", "prototype", "constructor"]);
 /** An object of Alphy holds at most 32 fields, so the shown values go into d, d2, d3, and the tests into v, v2. */
-const PER_OBJECT = 32;
+export const PER_OBJECT = 32;
 
 /**
  * The Alphy names of the kit's names, in both directions: map.safe by key and map.kit by Alphy name. A key gets the name that
@@ -46,6 +46,14 @@ const choice = (n, at) => {
   const options = Array.isArray(n.props.options) ? n.props.options : [];
   return { type: options.length <= 6 ? "segmented" : "select", ...at.field(), options: options.map((value) => ({ text: String(value), value })) };
 };
+/** A number field or a slider. Alphy wants min below max, the value from min to max, and a step above 0 that fits the range (ToolUiCatalog). */
+const ranged = (type, low, high) => (n, at) => {
+  const { min = low, max = high, step, value } = n.props;
+  if (![min, max, value].every(Number.isFinite) || !(min < max && value >= min && value <= max) || (step !== undefined && !(step > 0 && step <= max - min))) {
+    at.fault(`a ${n.type} needs min below max, its value from min to max, and a step above 0 and at most max - min. Now min is ${min}, max is ${max}, the value is ${value}${step === undefined ? "" : `, and the step is ${step}`}`);
+  }
+  return { type, ...at.field(), min, max, ...defined(n.props, ["step"]) };
+};
 
 /**
  * Each component of the kit as its Alphy node. at is the walk at the node: its children, its shown values, the field
@@ -67,8 +75,9 @@ const NODES = {
   Notice: (n, at) => ({ type: "banner", children: [{ type: "text", ...at.text("text") }] }),
   Button: (n, at) => ({ type: "button", text: String(n.props.label ?? ""), action: at.action(), variant: n.props.selected === undefined || n.props.selected ? "filled" : "tonal" }),
   IconButton: (n, at) => ({ type: "icon", name: own(ICON_NAMES, n.props.icon) ?? n.props.icon, text: at.action().replace(/_/g, " "), action: at.action() }),
-  NumberField: (n, at) => ({ type: "numberInput", ...at.field(), min: n.props.min ?? 0, max: n.props.max ?? 1000000, ...defined(n.props, ["step"]) }),
-  Slider: (n, at) => ({ type: "slider", ...at.field(), ...defined(n.props, ["min", "max", "step"]) }),
+  NumberField: ranged("numberInput", 0, 1000000),
+  // Alphy gives a slider without bounds 0 to 100.
+  Slider: ranged("slider", 0, 100),
   TextField: (n, at) => ({ type: "input", ...at.field(), inputMode: "apply" }),
   Toggle: (n, at) => ({ type: "toggle", ...at.field() }),
   CheckBox: (n, at) => ({ type: "checkbox", ...at.field() }),
@@ -76,15 +85,19 @@ const NODES = {
   Select: choice,
 };
 
-/** A shown value as Alphy keeps it: a number that is not finite is 0, and a text is never null. */
-const shownValue = (value) => (typeof value === "number" ? (Number.isFinite(value) ? value : 0) : typeof value === "string" ? value : String(value ?? ""));
+/**
+ * A shown value in the type of its field, which the emitter fixes with the first value (app.types): the stateSchema keeps that
+ * type. A number field takes 0 for a value that is not a finite number, and a text field is never null.
+ */
+const shownAs = (type, value) => (type === "number" ? (Number.isFinite(value) ? value : 0) : String(value ?? ""));
 
 /**
- * The Alphy screen of the kit's tree in the state of now. app is the compiled data: the field of each state value and the names.
- * Returns the ui, the shown values by object (d, v, ...), the controls by action id, and the faults of what is not built yet.
+ * The Alphy screen of the kit's tree in the state of now. app is the compiled data: the field of each state value, the type
+ * of each shown value, and the names. Returns the ui, the shown values by object (d, v, ...), the controls by action id, the
+ * faults of what is not built yet, and the component of each node of the ui (owners) for the faults of the emitter.
  */
 export function screen(kit, app) {
-  const name = namer(app.names), fields = new Map(app.fields), faults = [], controls = new Map();
+  const name = namer(app.names), fields = new Map(app.fields), faults = [], controls = new Map(), owners = new Map();
   const slots = { d: new Map(), v: new Map() }, values = {};
   // A value that a node shows: the field of its state line, or a field of d (or of v for a test) that the run-time computes.
   const slot = (kind, key, expr, value) => {
@@ -94,7 +107,7 @@ export function screen(kit, app) {
     if (!slots[kind].has(field)) {
       const object = kind + (slots[kind].size < PER_OBJECT ? "" : Math.floor(slots[kind].size / PER_OBJECT) + 1);
       slots[kind].set(field, `${object}.${field}`);
-      (values[object] ??= {})[field] = kind === "v" ? Boolean(value) : shownValue(value);
+      (values[object] ??= {})[field] = kind === "v" ? Boolean(value) : shownAs(app.types[field] ??= typeof value === "number" ? "number" : "string", value);
     }
     return slots[kind].get(field);
   };
@@ -108,14 +121,16 @@ export function screen(kit, app) {
       text: (prop) => { const bind = bound(prop); return bind ? { text: "", bind } : { text: String(node.props[prop] ?? "") }; },
       value: (prop) => { const bind = bound(prop); return bind ? { bind } : { [prop]: node.props[prop] }; },
       shown: (prop) => bound(prop) ?? slot("d", `${key}.${prop}`, null, node.props[prop]),
+      fault: (text) => faults.push(`${node.name ?? key}: ${text}`),
       field: () => {
         const root = expr.bind?.k === "path" && expr.bind.abs && expr.bind.segs.length === 1 ? expr.bind.segs[0] : null;
-        if (!fields.has(root)) faults.push(`${node.name ?? key}: a binding to ${expr.bind ? show(expr.bind) : "nothing"} is not built yet: a field binds a value of a state line`);
+        if (!fields.has(root)) at.fault(`a binding to ${expr.bind ? show(expr.bind) : "nothing"} is not built yet: a field binds a value of a state line`);
         return { text: String(node.props.label ?? ""), bind: fields.get(root), action: at.action() };
       },
       action: () => { const id = name("@" + key, key); controls.set(id, node); return id; },
     };
     const out = map(node, at);
+    owners.set(out, node.name ?? key);
     for (const flag of ["visible", "enabled"]) {
       if (!expr[flag]) continue;
       if (expr[flag].k !== "lit") out[flag + "Bind"] = slot("v", `${key}.${flag}`, expr[flag], node.props[flag]);
@@ -127,7 +142,7 @@ export function screen(kit, app) {
   const { kind, preset, palette } = header(kit), tree = kit.tree(), top = walk(tree, "root");
   const children = [...(kind ? [{ type: "text", text: String(kind), style: STYLES.eyebrow }] : []), ...(tree.type === "Column" ? top.children : [top].filter(Boolean))];
   const ui = { type: "theme", preset: preset ?? "clean", ...(palette && { palette }), cornerRadius: 20, children: [{ type: "column", style: { gap: "medium" }, children }] };
-  return { ui, values, controls, faults };
+  return { ui, values, controls, faults, owners };
 }
 
 /** The Alphy state of the kit's state: each value of a state line in its field, then the shown values. */
