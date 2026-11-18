@@ -252,9 +252,11 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
         val stopped = userEnd != null && reply.all { (it.startMs ?: 0) <= userEnd + 1_000 }
         expect("the session flushed its playback at the interruption (spec 5.4.5)", flushes.any { it in interruptAt..interruptAt + 4_000 },
             "local flushes at ${flushes.joinToString()}; the long answer was ${if (replying) "playing" else "not heard"}")
-        info("GPT-Live at the interruption (server behavior)", "stopped its reply: ${speaking && stopped}; reply «${text(reply)}» ends at " +
-            "${reply.maxOfOrNull { it.endMs ?: 0 }}; user turn «${text(turn)}» $userStart..$userEnd (fixture onset at session audio $onset); " +
-            "delegation for the spoken request: ${second?.let { "${it.first} request «${it.second}»" } ?: "none"}")
+        expect("the output transcript stops at an interruption (spec 5.4.5)", replying && speaking && stopped,
+            "reply «${text(reply)}» ends at ${reply.maxOfOrNull { it.endMs ?: 0 }}; user turn «${text(turn)}» $userStart..$userEnd " +
+                "(fixture onset at session audio $onset)")
+        info("GPT-Live delegation for the interrupting request (server behavior)",
+            second?.let { "${it.first} request «${it.second}»" } ?: "none")
 
         // Step 5: a proposal on the interruption's delegation, then «да».
         waitFor("quiet before the proposal", 30_000) { now() - lastOutput() >= QUIET_MS }
@@ -555,11 +557,12 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
 }
 
 /**
- * A scripted GPT-Live server for the rehearsal, shaped like the first live run. From `session.started` it streams one 100 ms output
- * chunk every 100 ms: voiced inside a reply, silent between replies and in the pauses of a reply (up to 600 ms). The output transcript
- * comes 2 s ahead of its audio. It hears speech by level on the input audio clock, gives the next scripted transcript after 300 ms of
- * silence, opens a delegation for the first request and for «да» but not for the interrupting request, says a filler line after each
- * delegation, and keeps speaking over the user, as GPT-Live did.
+ * A scripted GPT-Live server for the rehearsal, shaped like the live runs. From `session.started` it streams one 100 ms output chunk
+ * every 100 ms: voiced inside a reply, silent between replies and in the pauses of a reply (up to 600 ms). The output transcript comes
+ * 2 s ahead of its audio. It hears speech by level on the input audio clock and gives the next scripted transcript after 300 ms of
+ * silence. A reply that the user talked over stops at the end of that user turn, as in the second live run: the audio of the words
+ * already in the transcript still streams, and the next reply starts after at least 1.1 s of silent stream audio. Each turn opens a
+ * delegation and gets a filler line.
  */
 private class ScriptedLiveServer : LiveTransport {
     // A daemon worker that is never shut down, so a late audio send after the close cannot throw.
@@ -623,11 +626,15 @@ private class ScriptedLiveServer : LiveTransport {
             lastVoiced = input
         } else if (speechStart >= 0 && input - lastVoiced >= 300) {
             val text = TURNS.getOrElse(turns++) { "Ещё." }
-            emit(JSONObject().put("type", INPUT).put("delta", text).put("start_ms", speechStart).put("end_ms", lastVoiced))
-            if (turns != 2) {
-                emit(JSONObject().put("type", DELEGATION).put("offset_ms", lastVoiced + 100).put("delegation", JSONObject().put("id", "item_$turns")))
-                speak(if (turns == 1) "Секундочку." else "Понял.")
+            if (true in planned) {
+                // The transcript runs 20 chunks ahead of the audio. 6 more silent chunks keep the next reply's stamps 1,000 ms apart.
+                while (planned.size > 20) planned.removeLast()
+                transcript.clear()
+                repeat(6) { planned += false }
             }
+            emit(JSONObject().put("type", INPUT).put("delta", text).put("start_ms", speechStart).put("end_ms", lastVoiced))
+            emit(JSONObject().put("type", DELEGATION).put("offset_ms", lastVoiced + 100).put("delegation", JSONObject().put("id", "item_$turns")))
+            speak(if (turns == 1) "Секундочку." else "Понял.")
             speechStart = -1
         }
     }
