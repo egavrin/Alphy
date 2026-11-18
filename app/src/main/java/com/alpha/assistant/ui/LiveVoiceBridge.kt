@@ -91,6 +91,9 @@ internal class LiveVoiceBridge(
         cardId = messageId
     }
 
+    /** The capture of the press for the first request, spoken or typed. Later requests get null (spec 5.11.4). */
+    fun takeFirstCapture(): AssistCapture? = capture?.takeIf { it.id == assistantInvocation }.also { capture = null }
+
     override fun history(): List<Message> = model.snapshot.selected?.messages.orEmpty()
 
     override fun delegation(id: String, request: String) {
@@ -98,7 +101,7 @@ internal class LiveVoiceBridge(
         answered?.takeIf { spokenAnswer(request) == it.first }?.let { answered = null; session.commentary(id, it.second); return }
         if (request.isBlank()) { session.commentary(id, NOT_HEARD); return }
         if (assistantInvocation == null) { track(id, model.submitDraft(Draft(request), search = true)); return }
-        val first = capture.also { capture = null }
+        val first = takeFirstCapture()
         model.viewModelScope.launch { track(id, handOffOrder.withLock { model.submitLiveRequest(request, assistantInvocation, first) }) }
     }
 

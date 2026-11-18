@@ -250,8 +250,12 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
             destination?.busy ?: (activeConversationId != null), oneShot)
     }
 
-    internal fun denyVoicePermission(destination: CourseComposerState?) {
+    /** The latest microphone refusal came from a voice mode start, so the guidance retries the voice mode (spec 5.11.2). */
+    internal var voiceModeDenied by mutableStateOf(false); private set
+
+    internal fun denyVoicePermission(destination: CourseComposerState?, voiceMode: Boolean = false) {
         voiceDestination = destination
+        voiceModeDenied = voiceMode
         voice.permissionDenied()
     }
 
@@ -280,11 +284,19 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
 
     internal fun endLiveVoice(status: String = "") = liveVoice.stop(status)
 
-    /** Sends the composer draft during the voice mode. The card shows the reply, and GPT-Live gets it as quiet context (spec 5.7). */
+    /**
+     * Sends the composer draft during the voice mode. The card shows the reply, and GPT-Live gets it as quiet context (spec 5.7).
+     * In the sheet, a typed first request of the press carries the kept screen, as a spoken one does (spec 5.11.4, ruling R23).
+     */
     internal fun sendLiveTyped() {
         val text = snapshot.draft.text
-        val id = submitDraft(snapshot.draft, search = true) ?: return
-        liveBridge?.takeIf { liveVoice.active }?.typed(id, text)
+        val bridge = liveBridge?.takeIf { liveVoice.active }
+        val first = bridge?.takeFirstCapture()
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            val id = (if (first == null) submitDraft(snapshot.draft, search = true)
+                else submitAssistant(snapshot.draft, first.id, AssistantCapture.current?.takeIf { it.id == first.id })) ?: return@launch
+            bridge?.typed(id, text)
+        }
     }
 
     fun sendVoice() {

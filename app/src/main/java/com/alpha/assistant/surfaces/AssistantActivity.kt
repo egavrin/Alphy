@@ -147,9 +147,10 @@ class AssistantActivity : AlphyActivity() {
     private fun receiveInvocation(intent: Intent, newEntry: Boolean = true) {
         val incoming = intent.getStringExtra(ASSIST_INVOCATION)
         if (newEntry && (incoming == null || incoming != invocation)) {
-            newChatPending = intent.action == Intent.ACTION_ASSIST ||
-                (incoming != null && incoming == AssistantCapture.current?.id)
-            livePress = newChatPending
+            // Only an invocation of AlphaVoiceSession is a press. An ACTION_ASSIST intent of another app must not start a paid
+            // microphone session (ruling R22).
+            livePress = incoming != null && incoming == AssistantCapture.current?.id
+            newChatPending = intent.action == Intent.ACTION_ASSIST || livePress
         }
         invocation?.takeIf { it != incoming }?.let(AssistantCapture::close)
         invocation = incoming

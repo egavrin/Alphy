@@ -147,6 +147,24 @@ class AssistantLiveVoiceWorkflowTest {
         }
     }
 
+    /** Ruling R23: a typed first request in the voice view carries the kept screen, as a spoken one does. A later spoken one has none. */
+    @Test fun typedFirstTurnCarriesTheKeptScreen() {
+        install()
+        press(capture("Typed screen")).use { scenario ->
+            listening(1)
+            // The voice view sends the composer draft. The same draft id keeps the capture bound to it.
+            scenario.onActivity { model.editDraft(model.snapshot.draft.copy(text = "Что тут написано?")); model.sendLiveTyped() }
+            val typed = user("Что тут написано?")
+            assertEquals("Typed screen", typed.screenContext?.visibleText)
+            assertTrue(typed.attachments.single().automaticScreen)
+            robot.waitGone(robot.text(R.string.assistant_image_attached))
+            socket.say("А теперь?", "d1", 3_000)
+            val spoken = user("А теперь?")
+            assertNull(spoken.screenContext)
+            assertTrue(spoken.attachments.isEmpty())
+        }
+    }
+
     /** Spec 5.11.2: the first hand-off waits up to 2 s for a capture in progress, then goes without it. */
     @Test fun firstHandOffWaitsForALateCapture() {
         install()
@@ -227,6 +245,7 @@ class AssistantLiveVoiceWorkflowTest {
     /**
      * Spec 5.11.2: a denied microphone permission shows the guidance and starts no session. RECORD_AUDIO must not be granted, and a
      * revocation stops the test process, so this test runs after `pm revoke`. The system dialog is blocked with a denial result.
+     * Then the user grants the permission, and «Разрешить» retries the voice mode, not the one-shot microphone.
      */
     @Test fun noPermissionNoSession() {
         assumeFalse("RECORD_AUDIO is granted", fixture.context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
@@ -246,8 +265,28 @@ class AssistantLiveVoiceWorkflowTest {
                 assertFalse(model.liveVoice.active)
                 assertEquals(0, starts())
                 assertFalse(socket.connected)
+
+                robot.instrumentation.uiAutomation.grantRuntimePermission(app.packageName, Manifest.permission.RECORD_AUDIO)
+                robot.click(robot.text(R.string.voice_mic_allow))
+                listening(1)
+                assertFalse(model.voice.running)
+                assertEquals(1, denial.hits)
             }
         } finally { robot.instrumentation.removeMonitor(denial) }
+    }
+
+    /** Ruling R22: an ACTION_ASSIST intent of another app is not a press, so the sheet shows the composer and starts no session. */
+    @Test fun assistIntentOfAnotherAppStartsNoSession() {
+        install()
+        ActivityScenario.launch<AssistantActivity>(assistIntent(app, null).setAction(Intent.ACTION_ASSIST)).use { scenario ->
+            robot.waitUntil { !model.loading && model.keyStatus != KeyStatus.Checking }
+            // The voice mode button stays available.
+            robot.waitFor(robot.text(R.string.live_voice))
+            robot.awaitFrames(5)
+            assertFalse(model.liveVoice.active)
+            assertEquals(0, starts())
+            assertFalse(robot.composed(scenario, LAYER))
+        }
     }
 
     /** Spec 5.11.6: a press while the assistant is unavailable shows the unlock prompt and starts no session. */

@@ -122,8 +122,6 @@ internal class CourseComposerState(
         displayedCapture = displayedCapture)
     // In the assistant sheet, the first hand-off of a start carries the screen of the press (spec 5.11.4).
     val startLiveVoice = if (liveVoice) rememberLiveVoiceStart(model, assistantInvocation, displayedCapture) else null
-    // The permission guidance retries the start that asked for the microphone.
-    var liveAsked by remember { mutableStateOf(false) }
     val ownsVoice = model.voiceBelongsTo(destination)
     val editable = destination == null || destination.active && !destination.busy
     Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
@@ -144,7 +142,9 @@ internal class CourseComposerState(
                         trailingIcon = { AlphaIcon(Glyph.Close) }, modifier = Modifier.semantics { contentDescription = remove })
                 }
             }
-            if (ownsVoice && model.voice.permissionRequired) MicrophonePermissionGuidance(model.voice, startLiveVoice?.takeIf { liveAsked } ?: startVoice)
+            // The permission guidance retries the start that asked for the microphone, also the voice mode start of a press.
+            if (ownsVoice && model.voice.permissionRequired) MicrophonePermissionGuidance(model.voice,
+                startLiveVoice?.takeIf { model.voiceModeDenied } ?: startVoice)
             else if (ownsVoice && !model.voice.active && model.voice.hasAttempted) ProvideTextStyle(MaterialTheme.typography.bodySmall) { VoiceStatus(model.voice, settings) }
             if (liveVoice && !model.liveVoice.active && model.liveVoice.status.isNotBlank()) ProvideTextStyle(MaterialTheme.typography.bodySmall) {
                 StatusLine(Glyph.Mic, MaterialTheme.colorScheme.onSurfaceVariant, model.liveVoice.status, PoliteLiveRegion)
@@ -177,14 +177,14 @@ internal class CourseComposerState(
                             if (cancel != null) {
                                 RoundAction(Glyph.Stop, stringResource(R.string.composer_stop), cancel, primary = destination != null || !hasInput)
                             } else {
-                                RoundAction(Glyph.Mic, stringResource(R.string.composer_voice), { liveAsked = false; startVoice() },
+                                RoundAction(Glyph.Mic, stringResource(R.string.composer_voice), startVoice,
                                     enabled = editable && !busy && !model.attachmentBusy && !model.voice.active)
                             }
                             if (cancel == null || destination == null && hasInput) {
                                 Spacer(Modifier.width(5.dp))
                                 // The disabled send button becomes the voice mode button (spec 5.1.2). A course composer has a destination.
                                 if (startLiveVoice != null && destination == null && !hasInput && model.accountProvider == AiProvider.OPENAI) {
-                                    RoundAction(Glyph.Voice, stringResource(R.string.live_voice), { liveAsked = true; startLiveVoice() }, primary = true,
+                                    RoundAction(Glyph.Voice, stringResource(R.string.live_voice), startLiveVoice, primary = true,
                                         enabled = editable && !model.attachmentBusy)
                                 } else RoundAction(Glyph.Arrow, stringResource(R.string.composer_send), send, primary = true,
                                     enabled = editable && !model.attachmentBusy && hasInput)

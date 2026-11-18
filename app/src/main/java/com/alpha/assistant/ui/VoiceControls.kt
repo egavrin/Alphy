@@ -79,7 +79,7 @@ import com.alpha.assistant.voice.speechSources
     // The voice mode does not use the draft, so any draft keeps a pending start.
     return rememberMicrophoneStart(model, listOf(assistantInvocation, firstSpeech), { "" },
         start = { model.startLiveVoice(assistantInvocation, current, firstSpeech, owner = owner) },
-        denied = { model.denyVoicePermission(null) })
+        denied = { model.denyVoicePermission(null, voiceMode = true) })
 }
 
 /**
