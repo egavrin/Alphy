@@ -17,7 +17,7 @@ Then it runs the app (state, formulas, actions, and the component tree) and chec
 | `src/compile.js` | The sandbox entry `compileAppFile`: an app file in; the faults and notes of the report and the definition out. |
 | `build.js` | The bundle of the modules as one plain script for the sandbox, the run-time text in it (minified by `Bun.build`), and the copies of the plans for the device tests. |
 | `plans/` | The saved plans. |
-| `test/` | The Bun tests. `test/fixtures/` holds example plans of the prototype that only the tests read. `test/nodes.plan` holds each component of the emitter's node table: the kit test and the device test `eachNodeOfTheTablePassesParseAndSmoke` read it. |
+| `test/` | The Bun tests. `test/fixtures/` holds example plans of the prototype that only the tests read. `test/nodes.plan` holds each component of the emitter's node table: the kit test and the device test `eachNodeOfTheTablePassesParseAndSmoke` read it. `test/lists.plan`, `test/rich.plan`, and `test/cards.plan` hold the lists and modals, the lists full to the render work limit, and the cards, charts, tabs, lessons, and questions: each has a kit test and a device test. |
 
 The gate of the kit is `"smoke"`: an app file of this design has no check lines.
 
@@ -27,7 +27,7 @@ Run each command from the repository root.
 The kit has no dependencies and no install step.
 
 - `bun test kit` runs the tests. The summary of the output shows `0 fail`.
-- `bun kit/build.js` writes the sandbox bundle `app/src/main/assets/appfile/kit.js` and copies `plans/*.plan` and `test/nodes.plan` to `app/src/androidTest/assets/appfile/` for the device tests.
+- `bun kit/build.js` writes the sandbox bundle `app/src/main/assets/appfile/kit.js` and copies `plans/*.plan` and the test plans `nodes`, `lists`, `rich`, and `cards` to `app/src/androidTest/assets/appfile/` for the device tests.
 - `bun kit/build.js --check` writes nothing. It exits 1 when one of these files differs from what the build writes, and it prints the version of Bun that ran.
 
 The minifier of Bun makes the run-time text, so the bundle depends on the version of Bun.

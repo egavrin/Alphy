@@ -12,6 +12,8 @@ export const PER_OBJECT = 32;
 export const MAX_ARRAY = 512;
 /** The fields that a person types into. An add form with more than two of them is a bottom sheet. A Dialog that holds any field is one too. */
 export const TYPED = new Set(["TextField", "NumberField", "DateField", "TimeField"]);
+/** A chart of Alphy draws at most 256 points (ToolUiCatalog), so the run-time writes the last 256. */
+export const MAX_POINTS = 256;
 
 /** The values of the app line: app("Title", lang="en", kind="Lesson", preset="clean", palette="teal"). */
 export function header(kit) {
@@ -24,8 +26,14 @@ const today = (kit) => kit.value({ k: "call", name: "today", args: [] }, {});
 const STYLES = { eyebrow: { emphasis: "label", tone: "accent" }, muted: { tone: "muted" } };
 /** The kit's icons that Alphy has under a different name (ToolUiCatalog.icons). ArrowDown has no glyph of its own there. */
 const ICON_NAMES = { ArrowUp: "Arrow", ArrowDown: "Sort", ArrowLeft: "Back", ArrowRight: "Chevron", Edit: "Pencil" };
-/** What a row template of Alphy cannot hold (ToolUiCatalog: no list, dialog, or sheet in a row). */
-const NOT_IN_ROW = new Set(["List", "Dialog"]);
+/** What a row template of Alphy cannot hold (ToolUiCatalog: no list, dialog, or sheet in a row), and what keeps one state field for all rows. */
+const NOT_IN_ROW = new Set(["List", "Dialog", "Chart", "Tabs"]);
+/** The components of a part that a later task builds: the fault names the kind of the need. */
+const LATER = { Picture: "picture", Link: "link" };
+/** The share of value in max in percent, from 0 to 100: 0 for a max of 0 or below and for a value that is not finite. */
+const percent = (value, max) => (Number.isFinite(value) && Number.isFinite(max) && max > 0 ? Math.min(100, Math.max(0, (value / max) * 100)) : 0);
+/** True when an action appends a row: append(...) alone, in a list of actions, or in when(...). */
+const appends = (tree) => (tree?.k === "call" ? tree.name === "append" || tree.args.some(appends) : tree?.k === "list" && tree.items.some(appends));
 const defined = (props, keys) => Object.fromEntries(keys.filter((key) => props[key] !== undefined).map((key) => [key, props[key]]));
 const choice = (n, at) => {
   const options = Array.isArray(n.props.options) ? n.props.options : [];
@@ -50,8 +58,9 @@ const ranged = (type, low, high) => (n, at) => {
  */
 const NODES = {
   Column: (n, at) => ({ type: "column", children: at.children(true) }),
-  // An add form with more than two typed fields is a column of a button and the bottom sheet that the button opens.
-  Row: (n, at) => at.form() ?? ({ type: "row", ...(n.children.some((child) => child.props.weight !== undefined) && { wrap: false }), children: at.children(true) }),
+  // An add form with more than two typed fields is a column of a button and the bottom sheet that the button opens. A weighted
+  // child needs a row that does not wrap. Alphy draws a row with no wrap=false as a flow row, so that row is a flowRow.
+  Row: (n, at) => at.form() ?? (n.children.some((child) => child.props.weight !== undefined) ? { type: "row", wrap: false, children: at.children(true) } : { type: "flowRow", children: at.children() }),
   Card: (n, at) => ({ type: "card", ...(n.props.variant === "hero" && { variant: "hero" }), children: at.children() }),
   Section: (n, at) => ({ type: "section", text: at.plain(n.props.title), children: at.children() }),
   Text: (n, at) => ({ type: "text", ...at.text("text"), ...(own(STYLES, n.props.variant) && { style: STYLES[n.props.variant] }) }),
@@ -81,6 +90,17 @@ const NODES = {
     options: (Array.isArray(n.props.options) ? n.props.options : []).map((value) => ({ text: at.plain(value), value })) }),
   Dialog: (n, at) => at.modal(),
   List: (n, at) => at.list(),
+  // Alphy's progress binds the share in percent. Dots show the step itself: at most 12, and with one max for all rows of a list.
+  Progress: (n, at) => {
+    const { value, max } = n.props, dots = n.props.variant === "dots" && !at.scope && Number.isInteger(max) && max >= 1 && max <= 12;
+    return { type: "progress", text: at.caption(at.title), variant: dots ? "dots" : "bar", min: 0, max: dots ? max : 100,
+      bind: at.computed("value", dots ? (Number.isFinite(value) ? Math.min(max, Math.max(0, value)) : 0) : percent(value, max)) };
+  },
+  // A ring takes children only when it is large (ToolUiCatalog): its label is a text under it.
+  Ring: (n, at) => ({ type: "progressRing", text: at.caption(at.title), size: "large", min: 0, max: 100, bind: at.computed("value", percent(n.props.value, n.props.max)),
+    ...(n.props.label !== undefined && { children: [{ type: "text", ...at.text("label") }] }) }),
+  Chart: (n, at) => at.chart(),
+  Tabs: (n, at) => at.tabs(),
 };
 
 /** The place and the value that make a visible test false: $/open, !$/closed, or $/pick != "". Other tests have none. */
@@ -138,7 +158,7 @@ export function screen(kit, app) {
   const walk = (node, key, line, ctx) => {
     line = node.name ?? line;
     const scope = ctx.scope, map = own(NODES, node.type), fault = (text) => faults.push([line, text]);
-    if (!map) { fault(`${node.type} is not built yet`); return null; }
+    if (!map) { fault(`${own(LATER, node.type) ?? node.type} is not built yet`); return null; }
     if (scope && NOT_IN_ROW.has(node.type)) { fault(`a ${node.type} in a row of a list is not built yet`); return null; }
     const expr = node.call ? given(node.call) : {};
     // The arrows of a row, move(-1) and move(1), become the reorder of its list.
@@ -152,7 +172,8 @@ export function screen(kit, app) {
     const within = node.type === "Section" ? { ...ctx, title: node.props.title } : ctx;
     const bound = (prop) => (expr[prop] && expr[prop].k !== "lit" ? slot("d", `${key}.${prop}`, expr[prop], node.props[prop], at) : null);
     const at = {
-      scope, fault,
+      // title is the title of the Section around the node.
+      scope, fault, title: ctx.title,
       blank: Boolean(scope && !scope.out),
       children: (weighted = false, inner = within) => node.children.map((child, index) => walk(child, child.name ?? `${key}_${index}`, line, { ...inner, weighted })).filter(Boolean),
       // The text of a control: its label, else the kit's name of its line, which a person can read. Never a safe name such as f3.
@@ -165,7 +186,9 @@ export function screen(kit, app) {
         return "";
       },
       value: (prop) => { const bind = bound(prop); return bind ? { bind } : { [prop]: node.props[prop] }; },
-      shown: (prop) => bound(prop) ?? slot("d", `${key}.${prop}`, null, node.props[prop], at),
+      shown: (prop) => bound(prop) ?? at.computed(prop, node.props[prop]),
+      // A value that the run-time computes for the node, such as the share of a progress.
+      computed: (prop, value) => slot("d", `${key}.${prop}`, null, value, at),
       bounds: (min, max) => { if (!at.blank) bounds.push([node, min, max]); },
       field: (convert = (value) => value) => {
         let bind;
@@ -182,8 +205,8 @@ export function screen(kit, app) {
         }
         return { text: at.caption(node.props.label), bind, action: at.action((value) => { const next = convert(value); return next === undefined ? false : kit.change(node, next); }) };
       },
-      // An action returns "" or the kit's error text, or false for an event that changes nothing. A press in an add sheet that the kit takes closes the sheet.
-      action: (run = () => { const done = kit.fire(node); if (done === "" && ctx.sheet && node.type === "Button") kit.state[ctx.sheet] = false; return done; }, suffix = "") => {
+      // An action returns "" or the kit's error text, or false for an event that changes nothing. A press of the add button of an add sheet that the kit takes closes the sheet.
+      action: (run = () => { const done = kit.fire(node); if (done === "" && ctx.sheet?.add === node) kit.state[ctx.sheet.flag] = false; return done; }, suffix = "") => {
         const id = name("@" + key + suffix, key + suffix);
         register(scope, id, run);
         return id;
@@ -191,10 +214,11 @@ export function screen(kit, app) {
       form: () => {
         const flag = `${key}:open`;
         if (!fields.has(flag)) return null;
-        const text = at.caption(node.children.find((child) => child.type === "Button")?.props.label);
+        // The add button of the form appends the row. Only its press closes the sheet: a second button, such as a clear button, leaves it open.
+        const add = node.children.find((child) => child.type === "Button" && appends(child.props.action)), text = at.caption(add?.props.label);
         const open = (to) => () => { kit.state[flag] = to; return ""; };
         return { type: "column", children: [{ type: "button", text, action: at.action(open(true), "_open"), variant: "filled", icon: "Plus" },
-          { type: "bottomSheet", text, visibleBind: fields.get(flag), dismissAction: at.action(open(false), "_dismiss"), children: at.children(false, { ...ctx, sheet: flag }) }] };
+          { type: "bottomSheet", text, visibleBind: fields.get(flag), dismissAction: at.action(open(false), "_dismiss"), children: at.children(false, { ...ctx, sheet: { flag, add } }) }] };
       },
       modal: () => {
         if (!expr.visible || expr.visible.k === "lit") fault("a Dialog shows while a test of the app is true, so it needs visible=test, such as visible=$/open");
@@ -204,6 +228,39 @@ export function screen(kit, app) {
         return { type: node.children.some(form) ? "bottomSheet" : "dialog", text: at.caption(node.props.title), dismissAction: dismiss, children: at.children() };
       },
       list: () => rows(shared, node, key, line, expr, at, ctx.title),
+      // The points of a chart are two arrays that the run-time writes: the labels and the values of the last 256 points.
+      chart: () => {
+        const kind = node.props.kind ?? "bar", text = at.caption(ctx.title).slice(0, 100), points = (Array.isArray(node.props.points) ? node.props.points : []).slice(-MAX_POINTS);
+        if (kind !== "bar" && kind !== "line") fault(`a Chart of kind ${at.plain(kind)} is not built yet: give kind="bar" or kind="line"`);
+        const [categories, values] = [["labels", "string", "label"], ["values", "number", "value"]].map(([suffix, type, prop]) => {
+          const field = name(`chart:${key}:${suffix}`, `${key}_${suffix}`);
+          views[field] = points.map((point) => shownAs(type, point[prop]));
+          viewSchemas[field] = { type: "array", maxItems: MAX_POINTS, items: type };
+          viewOwners.push(line);
+          return field;
+        });
+        return { type: "chart", text, kind, categories, series: [{ text, bind: values }] };
+      },
+      // The open tab is a text of the state: its title. The run-time opens the first tab when that text names no tab, also after a title changes.
+      tabs: () => {
+        const root = `${node.name}:tab`, groups = node.children.slice(1), titles = (Array.isArray(node.props.titles) ? node.props.titles : []).map((title) => at.plain(title));
+        const empty = groups.findIndex((group) => !group.children.length);
+        const problem = !node.name || !fields.has(root) ? "a Tabs needs a line of its own, such as pages = Tabs(titles, groups), for the field of its open tab"
+          : !groups.length || groups.length > 30 ? `a Tabs has 1 to 30 groups, and this one has ${groups.length}`
+            : empty >= 0 ? `group ${empty + 1} of this Tabs is empty, and Alphy draws no empty group. Put a component into it` : null;
+        if (problem) { fault(problem); return null; }
+        const valid = titles.length === groups.length && new Set(titles).size === titles.length && titles.every((title) => title.trim() && title.length <= 100);
+        if (!valid) fault(`a Tabs needs one title for each of its ${groups.length} groups: texts of 1 to 100 characters, each one different. Now they are ${JSON.stringify(titles)}`);
+        // A change of computed titles can make them invalid after the start: the screen then numbers the tabs, so each reply still holds a tabs control.
+        const shown = valid ? titles : groups.map((_, index) => String(index + 1));
+        if (!shown.includes(kit.state[root])) kit.state[root] = shown[0];
+        const open = kit.state[root], select = (value) => { if (!shown.includes(value)) return false; kit.state[root] = value; return ""; };
+        return { type: "column", children: [
+          { type: "tabs", text: at.caption(), bind: fields.get(root), action: at.action(select), options: shown.map((title) => ({ text: title, value: title })) },
+          ...groups.map((group, index) => ({ type: "column", visibleBind: slot("v", `${key}.tab${index}`, null, shown[index] === open, at),
+            children: group.children.map((child, inner) => walk(child, child.name ?? `${key}_tab${index}_${inner}`, line, { ...ctx, weighted: true })).filter(Boolean) })),
+        ] };
+      },
     };
     const out = map(node, at);
     if (!out) return null;

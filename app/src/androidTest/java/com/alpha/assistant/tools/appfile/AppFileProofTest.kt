@@ -18,7 +18,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps and each node of the node table in Alphy's checks, events on lists and on the quiz, lists full to the render work limit, and the time of an event. */
+/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps and each node of the node table in Alphy's checks, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, and the time of an event. */
 @RunWith(AndroidJUnit4::class)
 class AppFileProofTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
@@ -156,16 +156,67 @@ class AppFileProofTest {
         assertEquals("水",notYet.getJSONObject("d").getString("card_kanji"))
     }
     @Test fun twoRichListsFullToTheirCountPassParseAndSmoke(): Unit=runBlocking {
-        // rich.plan is kit/test/rich.plan: two lists with a choice of 6 options in each row. Its start rows fill each list to the count that the render work limit leaves.
+        // rich.plan is kit/test/rich.plan: two lists with a choice of 6 options in each row, and a chart of each list at its full 256 points.
+        // Its start rows fill each list to the count that the render work limit leaves.
         val sandbox=SandboxClient(instrumentation.targetContext)
         val spec=parsedAndSmoked(sandbox,"rich")
         val state=JSONObject(spec.initialState)
         for(list in listOf("shirts","shoes")) {
-            assertEquals(list,91,spec.schema.getJSONObject(list).getInt("maxItems"))
-            assertEquals(list,91,state.getJSONArray(list).length())
+            assertEquals(list,68,spec.schema.getJSONObject(list).getInt("maxItems"))
+            assertEquals(list,68,state.getJSONArray(list).length())
         }
-        val checked=Session(sandbox,spec,"appfile-rich").act("shoes_done",row("r92",true))
+        val checked=Session(sandbox,spec,"appfile-rich").act("shoes_done",row("r69",true))
         assertTrue(checked.getJSONArray("shoes").getJSONObject(0).getBoolean("done"))
+    }
+    /** The median time in ms of one event, five times in the bare sandbox, which the log prints with its label. */
+    private suspend fun medianEventMs(sandbox: SandboxClient,spec: ToolSpec,label: String,state: JSONObject,actionId: String,value: Any?): Long {
+        val input=JSONObject().put("artifactId","appfile-$label").put("revision",1).put("state",state)
+            .put("event",JSONObject().put("type","action").put("actionId",actionId).put("value",value ?: JSONObject.NULL)).toString()
+        val times=List(5) {
+            val started=SystemClock.elapsedRealtime()
+            val reply=sandbox.execute(spec.source,input)
+            val took=SystemClock.elapsedRealtime()-started
+            assertEquals(reply.status,"OK",reply.status)
+            took
+        }
+        val median=times.sorted()[2]
+        Log.i("AppFileProofTest","$label event times ms=$times median=$median")
+        return median
+    }
+    @Test fun tabsChartPassesParseAndSmoke(): Unit=runBlocking {
+        // A tab press and an add that the chart follows, each through Alphy's checks of the event and of its reply.
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val spec=parsedAndSmoked(sandbox,"tabs-chart","es")
+        val app=Session(sandbox,spec,"appfile-tabs-chart")
+        val opened=app.act("resumen_view","Añadir")
+        assertEquals("Añadir",opened.getJSONObject("resumen_s").getString("tab"))
+        assertFalse(opened.getJSONObject("v").getBoolean("resumen_view_tab0"))
+        assertTrue(opened.getJSONObject("v").getBoolean("resumen_view_tab1"))
+        app.act("gastos_new_concepto","Taxi")
+        app.act("gastos_new_categoria","Transporte")
+        val ready=app.act("gastos_new_importe",300)
+        val added=app.act("gastos_add")
+        assertEquals("[\"Transporte\"]",added.getJSONArray("grafico_chart_labels").toString())
+        assertEquals("[300]",added.getJSONArray("grafico_chart_values").toString())
+        // The add, with the chart and the total that follow it, is the heavier event of the plan.
+        val median=medianEventMs(sandbox,spec,"tabs-chart",ready,"gastos_add",null)
+        assertTrue("median $median ms",median<250)
+    }
+    @Test fun eachCardChartAndTabPassesParseAndSmoke(): Unit=runBlocking {
+        // cards.plan is kit/test/cards.plan: a ring in the hero card, a dots and a bar progress, a bar chart and a line chart at 256 points,
+        // tabs, the steps of a wizard, two lessons, a question, and a deck.
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val spec=parsedAndSmoked(sandbox,"cards")
+        val state=JSONObject(spec.initialState)
+        assertEquals(256,state.getJSONArray("trend_chart_labels").length())
+        val app=Session(sandbox,spec,"appfile-cards")
+        val answered=app.act("ask_opt1")
+        assertTrue(answered.getJSONObject("v").getBoolean("ask_result_visible"))
+        assertEquals("Right",answered.getJSONObject("d").getString("ask_result_text"))
+        assertEquals("Tasks",app.act("pages_view","Tasks").getJSONObject("pages_s").getString("tab"))
+        // A row with no weighted child is a flowRow, also as the row template of a list (the kit test of the add sheet has the same plan).
+        val picks=parsedAndSmoked(sandbox,"picks",text="app(\"Picks\", lang=\"en\")\nneed picks = entries(\"Picks\", fields={day: [\"Sat\", \"Sun\"]}, sheet=true, rows=[])\n")
+        assertTrue(picks.ui.toString(),"\"rowTemplate\":{\"type\":\"flowRow\"" in picks.ui.toString())
     }
     @Test fun anActionOnAListOf100RowsTakesUnder250Ms(): Unit=runBlocking {
         val rows=(1..100).joinToString(", ") {"{name: \"Item $it\", done: false}"}
@@ -177,17 +228,7 @@ class AppFileProofTest {
         val checked=Session(sandbox,spec,"appfile-items").act("items_done",row("r50",true))
         assertTrue(checked.getJSONArray("items").getJSONObject(49).getBoolean("done"))
         assertEquals(100,checked.getJSONArray("items_list").length())
-        val input=JSONObject().put("artifactId","appfile-items").put("revision",1).put("state",JSONObject(spec.initialState))
-            .put("event",JSONObject().put("type","action").put("actionId","items_done").put("value",row("r50",true))).toString()
-        val times=List(5) {
-            val started=SystemClock.elapsedRealtime()
-            val reply=sandbox.execute(spec.source,input)
-            val took=SystemClock.elapsedRealtime()-started
-            assertEquals(reply.status,"OK",reply.status)
-            took
-        }
-        val median=times.sorted()[2]
-        Log.i("AppFileProofTest","100-row event times ms=$times median=$median")
-        assertTrue("median $median ms of $times",median<250)
+        val median=medianEventMs(sandbox,spec,"items",JSONObject(spec.initialState),"items_done",row("r50",true))
+        assertTrue("median $median ms",median<250)
     }
 }

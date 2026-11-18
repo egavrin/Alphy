@@ -47,11 +47,15 @@ export const cast = (kind, value, today) => (kind === "time" ? minutesOf(value) 
 /** A row of the kit as an Alphy row. spec is the field, the Alphy name, and the kind of each stored field (app.lists). */
 export const castRow = (row, spec, today) => ({ id: String(row?.id ?? ""), ...Object.fromEntries(spec.map(([field, safe, kind]) => [safe, cast(kind, row?.[field], today)])) });
 export const own = (map, key) => (Object.hasOwn(map, key) ? map[key] : undefined);
+/** Alphy's state holds a text of at most 2048 characters (ToolValueSchema). */
+const MAX_TEXT = 2048;
 /**
  * A shown value in the type of its field, which the emitter fixes with the first value (app.types): the stateSchema keeps that
  * type. A number field takes 0 for a value that is not a finite number, and a text field is never null, a list, or a record.
+ * Each value stays inside what Alphy's state holds: a number of at most 2^53 - 1 either way, and a text of at most 2048 characters.
  */
-export const shownAs = (type, value) => (type === "number" ? (Number.isFinite(value) ? value : 0) : value !== null && typeof value === "object" ? "" : String(value ?? ""));
+export const shownAs = (type, value) => (type === "number" ? (Number.isFinite(value) ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(-Number.MAX_SAFE_INTEGER, value)) : 0)
+  : (value !== null && typeof value === "object" ? "" : String(value ?? "")).slice(0, MAX_TEXT));
 /** The field name of a path of the row, such as $name, or null. */
 export const relative = (expr) => (expr?.k === "path" && !expr.abs && expr.segs.length === 1 ? expr.segs[0] : null);
 

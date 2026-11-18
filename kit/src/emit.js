@@ -3,7 +3,7 @@
 
 import { App, given } from "./core.js";
 import { ALPHY, MAX_ROW_FIELDS, MAX_ROWS, namer, own } from "./rows.js";
-import { MAX_ARRAY, PER_OBJECT, TYPED, header, load, screen, stateOf } from "./run.js";
+import { MAX_ARRAY, MAX_POINTS, PER_OBJECT, TYPED, header, load, screen, stateOf } from "./run.js";
 
 /** The text of the run-time. kit/build.js puts it into the bundle, and a test of the sources sets it from the sources. */
 export const runtime = { text: "" };
@@ -87,7 +87,7 @@ export function emit(file) {
    */
   const place = (root, need, owner, schema, wish = root.slice(need?.length + 1)) => {
     const inner = typeof schema === "string" && need !== undefined && root !== need && root.startsWith(need + "_");
-    const field = inner ? name("need:" + need, need + "_s") : name("$/" + root, root);
+    const field = inner ? name("need:" + need, need + "_s") : name("$/" + root, root.replace(/\W/g, "_"));
     if (!stateSchema[field]) owners.push(owner);
     if (!inner) { stateSchema[field] = schema; app.fields.push([root, field]); return; }
     const key = name("$/" + root, wish);
@@ -111,6 +111,14 @@ export function emit(file) {
     kit.state[root] = false;
     place(root, need, `need ${need}`, "boolean", "adding");
   }
+  // The open tab of each Tabs line: a text of its need, or of the line, that only the run-time sets. The screen opens the first tab.
+  for (const entry of file.of("component").filter((entry) => entry.tree.k === "call" && entry.tree.name === "Tabs")) {
+    const root = `${entry.key}:tab`, need = partOf.get(entry.key);
+    kit.state[root] = "";
+    place(root, need, need === undefined ? entry.key : `need ${need}`, "string", "tab");
+  }
+  // shortcut: each event starts a new kit, so the clock of a timer never moves. Drop this fault when the host moves the clock (Task 6).
+  for (const entry of file.of("need")) if (entry.tree.name === "timer") faults.push(`need ${entry.key}: timer is not built yet`);
   for (const [field, need] of needObjects) {
     const count = Object.keys(stateSchema[field].fields).length;
     if (count > PER_OBJECT) faults.push(`need ${need}: its part keeps ${count} values in the object ${field}, and an object of Alphy holds at most ${PER_OBJECT} fields. Give the need fewer fields`);
@@ -141,9 +149,11 @@ export function emit(file) {
   };
   measure(shown.ui, 0, "app");
   if (nodes > MAX_NODES) faults.push(`app: the screen has ${nodes} nodes, and Alphy keeps at most ${MAX_NODES}. Show fewer components`);
-  // The render work of the screen as ToolUiCatalog.validateRenderedWork counts it: each node costs 1 (a hidden node too), and a
-  // choice costs its options too. A list draws its row template once for each row, and its groupBy and its reorder cost 1 more for each row.
-  const work = (node) => 1 + (CHOICES.has(node.type) ? node.options.length : 0) + (node.children ?? []).reduce((sum, child) => sum + work(child), 0);
+  // The render work of the screen as ToolUiCatalog.validateRenderedWork counts it: each node costs 1 (a hidden node too), a
+  // choice costs its options too, and a chart its points times its series, here at its full 256 points. A list draws its row
+  // template once for each row, and its groupBy and its reorder cost 1 more for each row.
+  const work = (node) => 1 + (CHOICES.has(node.type) ? node.options.length : 0) + (node.type === "chart" ? MAX_POINTS * node.series.length : 0)
+    + (node.children ?? []).reduce((sum, child) => sum + work(child), 0);
   const perRow = new Map(), shownLists = [];
   const collect = (node) => {
     const root = shown.listRoots.get(node);
@@ -154,9 +164,11 @@ export function emit(file) {
     (node.children ?? []).forEach(collect);
   };
   collect(shown.ui);
+  const fixed = work(shown.ui);
+  if (fixed > MAX_RENDER_WORK) faults.push(`app: the screen costs ${fixed} of render work with each chart full at ${MAX_POINTS} points, and Alphy keeps at most ${MAX_RENDER_WORK}. Show fewer charts or components`);
   // One count for all lists of the app: the most rows for which the screen stays inside the limit when each list is full.
   const cost = [...perRow.values()].reduce((sum, each) => sum + each, 0);
-  const rowCount = cost ? Math.min(MAX_ROWS, Math.floor((MAX_RENDER_WORK - work(shown.ui)) / cost)) : MAX_ROWS, storedField = new Map(app.fields);
+  const rowCount = cost ? Math.min(MAX_ROWS, Math.floor((MAX_RENDER_WORK - fixed) / cost)) : MAX_ROWS, storedField = new Map(app.fields);
   for (const node of shownLists) {
     const root = shown.listRoots.get(node), where = label(shown.owners.get(node)), start = kit.state[root].length;
     app.caps[root] = rowCount;

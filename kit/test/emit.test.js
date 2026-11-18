@@ -34,14 +34,14 @@ test("emit: the first figure is a hero card", async () => {
 });
 
 test("emit: names that Alphy refuses get safe names", async () => {
-  const long = "a".repeat(60);
+  const long = "a".repeat(60), longField = "b".repeat(60);
   const { definition, faults, app } = emit(await planned([
     'app("Names", lang="en")',
     'need 단어 = input("number", "Word", 1, min=0, max=10)',
     'need constructor = input("number", "Build", 2, min=0, max=10)',
     `need ${long} = input("number", "Long", 3, min=0, max=10)`,
     `need sum = figure("number", "Sum", $/단어 + $/constructor + $/${long})`,
-    'need покупки = entries("Покупки", fields={назва: "text", куплено: "check", constructor: "text"}, rows=[{назва: "Хліб", куплено: false, constructor: "x"}])',
+    `need покупки = entries("Покупки", fields={назва: "text", куплено: "check", constructor: "text", ${longField}: "text", 가격: "text"}, rows=[{назва: "Хліб", куплено: false, constructor: "x", ${longField}: "y", 가격: "z"}])`,
   ].join("\n")));
   expect(faults).toEqual([]);
   const schema = definition.stateSchema;
@@ -49,10 +49,13 @@ test("emit: names that Alphy refuses get safe names", async () => {
   const fields = Object.keys(schema).flatMap((key) => [key, ...(schema[key].type === "object" ? Object.keys(schema[key].fields) : [])]);
   const rowFields = lists.flatMap((list) => Object.keys(list.fields));
   const actions = nodes(definition.ui).flatMap((node) => [node.action, node.dismissAction, node.reorder?.action, ...nodes(node.rowTemplate ?? { type: "" }).map((inner) => inner.action)]).filter(Boolean);
-  // Three number fields, the add form (two fields and a button), and the delete button and the check of a row.
-  expect(actions).toHaveLength(8);
+  // Three number fields, the add form in its sheet (open, dismiss, four fields, and a button), and the delete button and the check of a row.
+  expect(actions).toHaveLength(12);
   expect(lists).toHaveLength(1);
-  expect(Object.keys(lists[0].fields)).toHaveLength(4);
+  // The id, the three fields before, a field of 60 letters, and a Korean field.
+  expect(Object.keys(lists[0].fields)).toHaveLength(6);
+  const [row] = definition.initialState[Object.keys(schema).find((key) => schema[key].type === "list")];
+  expect(Object.values(row)).toEqual(["r1", "Хліб", false, "x", "y", "z"]);
   expect(lists[0].fields.id).toBe("string");
   for (const name of [...fields, ...rowFields, ...actions]) expect(SAFE.test(name) && !REFUSED.has(name)).toBe(true);
   expect(new Set([...fields, ...actions]).size).toBe(fields.length + actions.length);
@@ -182,12 +185,14 @@ test("emit: an add form with more than two typed fields is a bottom sheet", asyn
   expect(sheet.definition.ui.children[0].children[0].children.slice(1)).toEqual([
     { type: "button", text: "Add", action: "tasks_open", variant: "filled" },
     { type: "bottomSheet", text: "Add", visibleBind: "tasks_s.adding", dismissAction: "tasks_addRow_dismiss", children: [...fields,
-      { type: "row", children: [{ type: "icon", name: "Close", text: "tasks close", action: "tasks_close" }, add] }] },
+      { type: "flowRow", children: [{ type: "icon", name: "Close", text: "tasks close", action: "tasks_close" }, add] }] },
   ]);
   // sheet=true with no typed field: a dialog that holds a field of the form is a bottom sheet too.
   const picks = emit(await planned(['app("Picks", lang="en")', 'need picks = entries("Picks", fields={day: ["Sat", "Sun"]}, sheet=true, rows=[])'].join("\n")));
   expect(picks.faults).toEqual([]);
   expect(picks.definition.ui.children[0].children[0].children.map((node) => node.type)).toEqual(["list", "button", "bottomSheet"]);
+  // A row with no weighted child is a flowRow in a row template too. The device test eachCardChartAndTabPassesParseAndSmoke sends this plan through Alphy's validators.
+  expect(picks.definition.ui.children[0].children[0].children[0].rowTemplate.type).toBe("flowRow");
 });
 
 test("emit: a row with more than 12 fields is a fault of its need line", async () => {
@@ -235,7 +240,7 @@ test("emit: each list, modal, and new input of the lists fixture becomes its Alp
     ["icon", "doses taken plus", "Plus"], ["dateInput", "Day", "day"], ["timeInput", "Time", "at"], ["segmented", "Kind", "kind"], ["icon", "doses remove", "Trash"],
   ]);
   expect(definition.initialState.doses.map((row) => row.at)).toEqual([480, 1200]);
-  expect(confirm).toEqual({ type: "dialog", text: "Delete this dose?", visibleBind: "v.doses_confirm_visible", dismissAction: "doses_confirm_dismiss", children: [{ type: "row", children: [
+  expect(confirm).toEqual({ type: "dialog", text: "Delete this dose?", visibleBind: "v.doses_confirm_visible", dismissAction: "doses_confirm_dismiss", children: [{ type: "flowRow", children: [
     { type: "button", text: "Delete", action: "doses_yes", variant: "filled" }, { type: "button", text: "Keep", action: "doses_no", variant: "filled" }] }] });
   expect(form.children.map((node) => node.type)).toEqual(["button", "bottomSheet"]);
   expect(form.children[1].children.map((node) => node.type)).toEqual(["input", "numberInput", "dateInput", "timeInput", "segmented", "button"]);
@@ -274,7 +279,10 @@ test("emit: a label, an option, or an icon that changes with the row is a fault 
   ]);
 });
 
-/** The rendered work of a screen as ToolUiCatalog.validateRenderedWork counts it: each node, the template once for each row, the options of a choice, and one more for each row of a groupBy and of a reorder. */
+/**
+ * The rendered work of a screen as ToolUiCatalog.validateRenderedWork counts it: each node, the template once for each row, the options of a choice,
+ * one more for each row of a groupBy and of a reorder, and each point of a chart: its categories times its series.
+ */
 const CHOICES = new Set(["select", "tabs", "singleChoice", "multiChoice", "segmented", "navigationBar", "navigationRail", "menu"]);
 const renderWork = (node, values) => {
   let work = 1;
@@ -284,21 +292,27 @@ const renderWork = (node, values) => {
     work += (node.groupBy === undefined ? 0 : rows.length) + (node.reorder === undefined ? 0 : rows.length);
   } else if (CHOICES.has(node.type)) work += node.options.length;
   else if (node.type === "text") work += node.spans?.length ?? 0;
+  else if (node.type === "chart") work += values[node.categories].length * node.series.length;
   return work + (node.children ?? []).reduce((sum, child) => sum + renderWork(child, values), 0);
 };
-/** The state with each stored list at count rows (copies of its start rows), and the views that the run-time writes for it. */
+/** The state with each stored list at count rows (copies of its start rows), the views that the run-time writes for it, and each chart full at 256 points. */
 const filled = (definition, app, count) => {
   const state = structuredClone(definition.initialState);
   for (const [root, field] of app.fields) {
     if (app.kinds[root] === "list") state[field] = Array.from({ length: count }, (_, index) => ({ ...state[field][index % state[field].length], id: `r${1000 + index}` }));
   }
   // Without the caps the run-time takes count rows past them, so the test can count the work of one row more.
-  return open(state, { ...app, caps: {} }).state;
+  const full = open(state, { ...app, caps: {} }).state;
+  for (const chart of nodes(definition.ui).filter((node) => node.type === "chart")) {
+    full[chart.categories] = Array.from({ length: 256 }, (_, index) => `p${index}`);
+    for (const series of chart.series) full[series.bind] = Array(256).fill(1);
+  }
+  return full;
 };
 
 test("emit: each list holds the most rows that keep the full screen inside the render work limit", async () => {
   const rich = testPlan("rich"), counts = [];
-  for (const text of [plan("list"), testPlan("lists"), rich]) {
+  for (const text of [plan("list"), testPlan("lists"), rich, plan("tabs-chart"), testPlan("cards")]) {
     const { definition, faults, app } = emit(await planned(text));
     expect(faults).toEqual([]);
     // One count for each list of the app: the stored lists and their views.
@@ -308,11 +322,19 @@ test("emit: each list holds the most rows that keep the full screen inside the r
     if (count < 100) expect(renderWork(definition.ui, filled(definition, app, count + 1))).toBeGreaterThan(2048);
     counts.push(count);
   }
-  // rich.plan starts with each list full to its count, and one start row more is a fault of its need.
-  expect(counts).toEqual([100, 80, 91]);
+  // rich.plan starts with each list full to its count, which its two charts lower, and one start row more is a fault of its need.
+  expect(counts).toEqual([100, 80, 68, 100, 100]);
   const over = emit(await planned(rich.replace("rows=[", 'rows=[{name: "Extra", size: "M", done: false}, ')));
   expect(over.definition).toBeNull();
-  expect(over.faults).toEqual([expect.stringMatching(/^need shirts: \$\/shirts starts with 92 rows, .*91/)]);
+  expect(over.faults).toEqual([expect.stringMatching(/^need shirts: \$\/shirts starts with 69 rows, .*68/)]);
+});
+
+test("emit: a screen whose charts alone pass the render work limit is a fault of the app", async () => {
+  const charts = Array.from({ length: 8 }, (_, index) => `need c${index + 1} = chart("C ${index + 1}", $/points, text($it), $it)`);
+  const { definition, faults } = emit(await planned(['app("Charts", lang="en")', "$/points = [1, 2, 3]", ...charts].join("\n")));
+  expect(definition).toBeNull();
+  // 8 charts full at 256 points cost 2048, and the nodes of the screen come on top.
+  expect(faults).toEqual([expect.stringMatching(/^app: .*render work.*2048/)]);
 });
 
 test("emit: a list with room for fewer than 20 rows is a fault of its need", async () => {
@@ -420,7 +442,8 @@ test("emit: each component of the node table becomes its Alphy node", async () =
     { type: "slider", text: "Free", bind: "pct", action: "freeSlider", min: 0, max: 100 },
     { type: "numberInput", text: "Count", bind: "count", action: "countField", min: 0, max: 1000000 },
     { type: "button", text: "Add", action: "add", variant: "tonal" },
-    { type: "row", children: [["Arrow", "up"], ["Sort", "down"], ["Back", "left"], ["Chevron", "right"], ["Pencil", "edit"]].map(([name, action]) => ({ type: "icon", name, text: action, action })) },
+    // A row with no weighted child wraps (the native row has wrap true by default): Alphy's flowRow.
+    { type: "flowRow", children: [["Arrow", "up"], ["Sort", "down"], ["Back", "left"], ["Chevron", "right"], ["Pencil", "edit"]].map(([name, action]) => ({ type: "icon", name, text: action, action })) },
     { type: "text", text: "", bind: "level" },
     { type: "text", text: "Hidden", visible: false },
     { type: "text", text: "Many", visibleBind: "v.shownIf_visible" },
@@ -428,4 +451,108 @@ test("emit: each component of the node table becomes its Alphy node", async () =
   ]);
   expect(definition.initialState.d).toEqual({ intro_text: "Hi Ann" });
   expect(definition.initialState.v).toEqual({ shownIf_visible: false, enabledIf_enabled: false });
+});
+
+test("emit: quiz.plan gives a card with the question and its buttons", async () => {
+  const { definition, faults } = emit(await planned(plan("quiz")));
+  expect(faults).toEqual([]);
+  expect(definition.ui.children[0].children).toEqual([
+    { type: "card", variant: "hero", children: [
+      { type: "metric", text: "漢字", bind: "d.card_kanji", style: { emphasis: "display" } },
+      { type: "button", text: "答えを見る", action: "revealButton", variant: "filled", visibleBind: "v.revealButton_visible" },
+    ] },
+    // A test that reads one boolean value of a state line binds that field itself.
+    { type: "card", children: [{ type: "metric", text: "読み方", bind: "d.card_reading" }, { type: "metric", text: "意味", bind: "d.card_meaning" }], visibleBind: "shown" },
+    { type: "flowRow", children: [
+      { type: "button", text: "覚えた", action: "learnedButton", variant: "filled" }, { type: "button", text: "まだ", action: "notYetButton", variant: "filled" }] },
+    { type: "flowRow", children: [{ type: "metric", text: "覚えた", bind: "learned" }, { type: "metric", text: "まだ", bind: "notYet" }] },
+  ]);
+  expect(definition.initialState).toMatchObject({ index: 0, shown: false, learned: 0, notYet: 0, d: { card_kanji: "水" }, v: { revealButton_visible: true } });
+});
+
+test("emit: tabs-chart.plan gives a tabs control, groups with visibleBind, and a chart with two array fields", async () => {
+  const { definition, faults } = emit(await planned(plan("tabs-chart")));
+  expect(faults).toEqual([]);
+  const [tabs] = definition.ui.children[0].children;
+  const title = "Gastos por categoría";
+  // The open tab is a value of the need that the run-time owns: the title of the tab, the first one at the start.
+  expect(tabs.children[0]).toEqual({ type: "tabs", text: "resumen view", bind: "resumen_s.tab", action: "resumen_view", options: ["Resumen", "Añadir"].map((value) => ({ text: value, value })) });
+  expect(tabs.children.slice(1).map((group) => [group.type, group.visibleBind, group.children.map((node) => node.type)])).toEqual([
+    ["column", "v.resumen_view_tab0", ["section", "card"]], ["column", "v.resumen_view_tab1", ["section"]]]);
+  expect(tabs.children[1].children[0]).toEqual({ type: "section", text: title, children: [
+    { type: "chart", text: title, kind: "bar", categories: "grafico_chart_labels", series: [{ text: title, bind: "grafico_chart_values" }] }] });
+  // The figure that is the main element stays the hero card in its tab.
+  expect(tabs.children[1].children[1]).toMatchObject({ type: "card", variant: "hero" });
+  expect(definition.stateSchema).toMatchObject({ resumen_s: { type: "object", fields: { tab: "string" } },
+    grafico_chart_labels: { type: "array", maxItems: 256, items: "string" }, grafico_chart_values: { type: "array", maxItems: 256, items: "number" } });
+  expect(definition.initialState).toMatchObject({ resumen_s: { tab: "Resumen" }, grafico_chart_labels: [], grafico_chart_values: [], v: { resumen_view_tab0: true, resumen_view_tab1: false } });
+});
+
+test("emit: a Tabs that Alphy cannot draw is a fault of its line", async () => {
+  const { definition, faults } = emit(await planned([
+    'app("Tabs", lang="en")', '$/a = "A"', "root = Column([inline, same, few, empty])", 'one = Text("One")', 'two = Text("Two")',
+    'inline = Column([Tabs(["A", "B"], [[one], [two]])])', 'same = Tabs(["A", "A"], [[one], [two]])', 'few = Tabs(["A", "B", "C"], [[one], [two]])',
+    'empty = Tabs(["A", $/a + "B"], [[one], []])',
+  ].join("\n")));
+  expect(definition).toBeNull();
+  expect(faults).toEqual([
+    expect.stringMatching(/^inline: a Tabs needs a line of its own/), expect.stringMatching(/^same: .*each one different. Now they are \["A","A"\]/),
+    expect.stringMatching(/^few: .*one title for each of its 2 groups/), expect.stringMatching(/^empty: .*group 2 .*empty/),
+  ]);
+});
+
+test("emit: a progress need that is the main element is a ring in the hero card", async () => {
+  const { definition, faults } = emit(await planned(['app("Habits", lang="en")', 'need done = progress("Done", count($/habits, $done), len($/habits))',
+    'need habits = entries("Habits", fields={name: "text", done: "check"}, rows=[{name: "Run", done: true}, {name: "Read", done: false}, {name: "Sleep", done: false}])'].join("\n")));
+  expect(faults).toEqual([]);
+  // The rule of the main element is the rule of the first figure (parts.js expand): the progress part writes the ring into the hero card.
+  expect(definition.ui.children[0].children[0]).toEqual({ type: "card", variant: "hero", children: [
+    { type: "text", text: "Done", style: { emphasis: "title" } },
+    { type: "progressRing", text: "done view Ring", size: "large", min: 0, max: 100, bind: "d.done_view_1_value", children: [{ type: "text", text: "", bind: "d.done_text" }] },
+  ] });
+  // The ring shows the share in percent, and its label the count.
+  expect(definition.initialState.d).toMatchObject({ done_view_1_value: (1 / 3) * 100, done_text: "1 / 3" });
+});
+
+test("emit: a lesson of three steps has a dots progress with max 3", async () => {
+  const steps = (count) => `[${Array.from({ length: count }, (_, index) => `{title: "Part ${index + 1}", text: "Step ${index + 1}."}`).join(", ")}]`;
+  const { definition, faults } = emit(await planned(['app("Lessons", lang="en")', `need les = lesson(${steps(3)})`, `need long = lesson(${steps(13)})`].join("\n")));
+  expect(faults).toEqual([]);
+  const bars = nodes(definition.ui).filter((node) => node.type === "progress");
+  // Alphy draws at most 12 dots, so a lesson of 13 steps has a bar of the share in percent.
+  expect(bars).toEqual([
+    { type: "progress", text: "les bar", variant: "dots", min: 0, max: 3, bind: "d.les_bar_value" },
+    { type: "progress", text: "long bar", variant: "bar", min: 0, max: 100, bind: "d.long_bar_value" },
+  ]);
+  expect(definition.initialState.d).toMatchObject({ les_bar_value: 1, long_bar_value: (1 / 13) * 100 });
+});
+
+test('emit: a picture need is a fault "picture is not built yet"', async () => {
+  const { definition, faults } = emit(await planned(['app("Later", lang="en")', 'need photo = picture("A plate of pasta")', 'need source = link("Docs", "https://example.com/docs")'].join("\n")));
+  expect(definition).toBeNull();
+  expect(faults).toEqual(["need photo: picture is not built yet", "need source: link is not built yet"]);
+});
+
+test("emit: a timer need is a fault until the host moves its clock", async () => {
+  const { definition, faults } = emit(await planned(['app("Tea", lang="en")', 'need tea = timer("Tea", 120)'].join("\n")));
+  expect(definition).toBeNull();
+  expect(faults).toEqual(["need tea: timer is not built yet"]);
+});
+
+test("emit: each card, chart, tab, lesson, and question of the cards fixture becomes its Alphy node", async () => {
+  // The device test eachCardChartAndTabPassesParseAndSmoke sends the same plan through Alphy's validators.
+  const { definition, faults } = emit(await planned(testPlan("cards")));
+  expect(faults).toEqual([]);
+  const all = nodes(definition.ui), state = definition.initialState;
+  expect(all[2]).toMatchObject({ type: "card", variant: "hero", children: [{ type: "text" }, { type: "progressRing", size: "large" }] });
+  expect(all.filter((node) => node.type === "chart").map((node) => [node.kind, state[node.categories].length, state[node.series[0].bind].length])).toEqual([["bar", 3, 3], ["line", 256, 256]]);
+  // The line chart keeps the last 256 of its 300 points.
+  expect([state.trend_chart_labels[0], state.trend_chart_values.at(-1)]).toEqual(["45", 600]);
+  expect(all.filter((node) => node.type === "progress").map((node) => [node.variant, node.max])).toEqual([["dots", 3], ["bar", 100]]);
+  expect(all.find((node) => node.type === "tabs").options.map((option) => option.value)).toEqual(["Charts", "Tasks"]);
+  // The steps of wiz are columns with visibleBind, and the question has its answers in a flow row and its result in a banner.
+  expect(all.filter((node) => node.type === "column" && node.visibleBind?.startsWith("v.wiz_")).map((node) => node.visibleBind)).toEqual(["v.wiz_step0_visible", "v.wiz_step1_visible"]);
+  const ask = all.find((node) => node.children?.some((child) => child.action === "ask_opt0"));
+  expect([ask.type, ask.children.map((node) => node.action)]).toEqual(["flowRow", ["ask_opt0", "ask_opt1", "ask_opt2"]]);
+  expect(all.find((node) => node.type === "banner" && node.visibleBind === "v.ask_result_visible")).toBeDefined();
 });

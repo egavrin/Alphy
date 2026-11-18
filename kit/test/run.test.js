@@ -27,7 +27,7 @@ test("run: an action sets the bound value and the figures follow", async () => {
 });
 
 test("run: open of the initial state gives the initial state", async () => {
-  for (const text of [plan("calc"), plan("list"), testPlan("lists")]) {
+  for (const text of [plan("calc"), plan("list"), plan("quiz"), plan("tabs-chart"), testPlan("lists"), testPlan("rich"), testPlan("cards")]) {
     const { definition, app } = await compiled(text);
     expect(handle(request(definition.initialState, { type: "open" }), app)).toEqual({ state: definition.initialState });
   }
@@ -164,6 +164,16 @@ test("run: a list at its limits", async () => {
   wardrobe.act("shirts_new_name", "Tie");
   const fullRich = wardrobe.state;
   expect(handle(request(fullRich, { type: "action", actionId: "shirts_add", value: null }), rich.app)).toEqual({ state: fullRich });
+  // The delete of the last row gives an empty list, a second delete of the same key changes nothing, and the next add gets a new id.
+  const one = await compiled(['app("One", lang="en")', 'need items = entries("Items", fields={name: "text"}, rows=[{name: "Only"}])'].join("\n"));
+  const single = session(one.definition, one.app);
+  single.act("items_remove", { key: "r1", value: null });
+  expect(single.state.items).toEqual([]);
+  const empty = single.state;
+  expect(handle(request(empty, { type: "action", actionId: "items_remove", value: { key: "r1", value: null } }), one.app)).toEqual({ state: empty });
+  single.act("items_new_name", "Next");
+  single.act("items_add");
+  expect(single.state.items).toEqual([{ id: "r2", name: "Next" }]);
 });
 
 test("run: a reorder event moves the row", async () => {
@@ -248,6 +258,124 @@ test("run: the add sheet opens, adds a row, and closes", async () => {
   run.act("tasks_add");
   expect(run.state.tasks).toEqual([{ id: "r1", task: "Call", note: "", due: "2026-12-01" }]);
   expect(run.state.tasks_s.adding).toBe(false);
+  // A second button of the form, such as a clear button, leaves the sheet open: only the add button of the form closes it.
+  const custom = await compiled(['app("Tasks", lang="en")', 'need tasks = entries("Tasks", fields={task: "text", note: "text", due: "date"}, rows=[])',
+    "tasks_addRow = Row([tasks_new_task, tasks_new_note, tasks_new_due, tasks_clear, tasks_add])", 'tasks_clear = Button("Clear", action=[set($/tasks_new_task, ""), set($/tasks_new_note, "")])'].join("\n"));
+  // The button that opens the sheet has the caption of the add button.
+  expect(nodes(custom.definition.ui).find((node) => node.action === "tasks_addRow_open").text).toBe("Add");
+  const cleared = session(custom.definition, custom.app);
+  cleared.act("tasks_addRow_open");
+  cleared.act("tasks_new_task", "Call");
+  cleared.act("tasks_clear");
+  expect(cleared.state.tasks_s).toMatchObject({ adding: true, new_task: "" });
+  cleared.act("tasks_new_task", "Mail");
+  cleared.act("tasks_add");
+  expect(cleared.state.tasks.map((row) => row.task)).toEqual(["Mail"]);
+  expect(cleared.state.tasks_s.adding).toBe(false);
+});
+
+test("run: a tab press shows its group and hides the others", async () => {
+  const { file, definition, app } = await compiled(plan("tabs-chart"));
+  const run = session(definition, app), prototype = new App(file);
+  const groups = () => [run.state.v.resumen_view_tab0, run.state.v.resumen_view_tab1];
+  // The kit presses the button of the tab, and Alphy's tabs control gives the title of the tab.
+  run.act("resumen_view", "Añadir");
+  prototype.press("resumen_view_tab1");
+  expect(run.state.resumen_s.tab).toBe("Añadir");
+  expect(groups()).toEqual(prototype.find("resumen_view").children.slice(1).map((group) => group.props.visible));
+  expect(groups()).toEqual([false, true]);
+  // A title that is not a tab changes nothing, and a start value that names no tab opens the first tab.
+  const open = run.state;
+  expect(handle(request(open, { type: "action", actionId: "resumen_view", value: "Nada" }), app)).toEqual({ state: open });
+  const lost = handle(request({ ...open, resumen_s: { tab: "Nada" } }, { type: "open" }), app).state;
+  expect([lost.resumen_s.tab, lost.v.resumen_view_tab0, lost.v.resumen_view_tab1]).toEqual(["Resumen", true, false]);
+  // A title that changes takes the open tab with it to the first tab.
+  const renamed = await compiled(['app("Names", lang="en")', '$/first = "A"', "root = Column([pages, rename, clash])", 'one = Text("One")', 'two = Text("Two")',
+    'pages = Tabs([$/first, "B"], [[one], [two]])', 'rename = Button("Rename", action=set($/first, "Z"))', 'clash = Button("Clash", action=set($/first, "B"))'].join("\n"));
+  const names = session(renamed.definition, renamed.app);
+  expect(names.state.pages_tab).toBe("A");
+  names.act("rename");
+  expect(names.state.pages_tab).toBe("Z");
+  // Titles that become the same text are numbered, so the reply still holds a tabs control that Alphy takes, and the first tab opens.
+  const clashed = names.act("clash");
+  expect(nodes(clashed.ui).find((node) => node.type === "tabs").options.map((option) => option.value)).toEqual(["1", "2"]);
+  expect([names.state.pages_tab, names.state.v.pages_tab0, names.state.v.pages_tab1]).toEqual(["1", true, false]);
+});
+
+test("run: a quiz answer counts a point", async () => {
+  // The kanji cards count each answer, and the deck with answer= counts one point for a right answer. The values are the kit's.
+  const kanji = await twins(plan("quiz"));
+  kanji.act("revealButton");
+  kanji.act("learnedButton");
+  const { run, prototype } = kanji;
+  expect([run.state.learned, run.state.index, run.state.shown, run.state.d.card_kanji]).toEqual([prototype.state.learned, prototype.state.index, prototype.state.shown, prototype.state.card.kanji]);
+  expect([run.state.learned, run.state.d.card_kanji]).toEqual([1, "火"]);
+  const deck = await twins(testPlan("cards"));
+  deck.act("words_field", "Sol ");
+  deck.act("words_check");
+  expect([deck.run.state.words_s.points, deck.run.state.words_s.checked]).toEqual([deck.prototype.state.words_points, deck.prototype.state.words_checked]);
+  expect(deck.run.state.words_s.points).toBe(1);
+});
+
+test("run: the chart arrays follow the list", async () => {
+  const { run, prototype, act } = await twins(plan("tabs-chart"));
+  const follows = () => {
+    const points = prototype.find("grafico_chart").props.points;
+    expect(run.state.grafico_chart_labels).toEqual(points.map((point) => point.label));
+    expect(run.state.grafico_chart_values).toEqual(points.map((point) => point.value));
+  };
+  const add = (concepto, categoria, importe) => { act("gastos_new_concepto", concepto); act("gastos_new_categoria", categoria); act("gastos_new_importe", importe); act("gastos_add"); };
+  follows();
+  add("Taxi", "Transporte", 300);
+  follows();
+  expect([run.state.grafico_chart_labels, run.state.grafico_chart_values]).toEqual([["Transporte"], [300]]);
+  add("Bus", "Transporte", 20);
+  add("Cine", "Ocio", 15);
+  follows();
+  expect([run.state.grafico_chart_labels, run.state.grafico_chart_values]).toEqual([["Transporte", "Ocio"], [320, 15]]);
+  act("gastos_remove", null, "gastos_list", run.state.gastos[0].id);
+  follows();
+  // A chart keeps its last 256 points, and a point that Alphy's state cannot hold is its bound, or 0 when it is not a number.
+  const { definition, app } = await compiled(['app("Big", lang="en")', `$/points = [${Array.from({ length: 300 }, (_, index) => index + 1).join(", ")}]`,
+    "$/scale = 1", "root = Column([big, more])", "big = Chart($/points, text($it), $it * $/scale)", 'more = Button("More", action=set($/scale, 100000000000000000000))'].join("\n"));
+  expect(definition.initialState.big_labels).toHaveLength(256);
+  expect([definition.initialState.big_labels[0], definition.initialState.big_values.at(-1)]).toEqual(["45", 300]);
+  const big = handle(request(definition.initialState, { type: "action", actionId: "more", value: null }), app).state;
+  expect(big.big_values.at(-1)).toBe(Number.MAX_SAFE_INTEGER);
+  expect(big.big_values.every((value) => Math.abs(value) <= Number.MAX_SAFE_INTEGER)).toBe(true);
+});
+
+test("run: a question shows its result after an answer", async () => {
+  const { run, prototype, act } = await twins(['app("Ask", lang="en")', 'need ask = question("Is the Moon a star?", options=["Yes", "No"], right="No", rightText="Right", wrongText="Not yet")'].join("\n"));
+  expect(run.state.v.ask_result_visible).toBe(false);
+  act("ask_opt0");
+  expect([run.state.ask_s.answer, run.state.v.ask_result_visible, run.state.d.ask_result_text]).toEqual(["Yes", true, prototype.find("ask_result").props.text]);
+  expect(run.state.d.ask_result_text).toBe("Not yet");
+  act("ask_opt1");
+  expect([run.state.d.ask_result_text, prototype.find("ask_result").props.text]).toEqual(["Right", "Right"]);
+});
+
+test("run: a progress value stays inside its bounds", async () => {
+  const { definition, app } = await compiled([
+    'app("Bars", lang="en")', "$/n = 5", "$/m = 10", "$/r := $/n / $/m", "root = Column([bar, dots, ring, share, over, zero])",
+    "bar = Progress($/n, $/m)", 'dots = Progress($/n, 10, variant="dots")', 'ring = Ring($/n, $/m, "n")', "share = Progress($/r, 1)",
+    'over = Button("Over", action=set($/n, 50))', 'zero = Button("Zero", action=set($/m, 0))',
+  ].join("\n"));
+  const run = session(definition, app), values = () => [run.state.d.bar_value, run.state.d.dots_value, run.state.d.ring_value, run.state.d.share_value];
+  expect(values()).toEqual([50, 5, 50, 50]);
+  run.act("over");
+  expect(values()).toEqual([100, 10, 100, 100]);
+  // A max of 0 gives 0, and so does a value that is not finite: 50 / 0.
+  run.act("zero");
+  expect(values()).toEqual([0, 10, 0, 0]);
+});
+
+test("run: a shown value stays inside Alphy's state limits", async () => {
+  // Alphy's state holds a text of at most 2048 characters and a number of at most 2^53 - 1 (ToolValueSchema).
+  const { definition, app } = await compiled(['app("Long", lang="en")', `$/word = "${"x".repeat(1500)}"`, "$/n = 1", "root = Column([long, big, more])",
+    "long = Text($/word + $/word)", "big = Metric(\"Big\", $/n * 100000000000000000000)", 'more = Button("More", action=set($/n, -1))'].join("\n"));
+  expect(definition.initialState.d).toEqual({ long_text: "x".repeat(2048), big_value: Number.MAX_SAFE_INTEGER });
+  expect(handle(request(definition.initialState, { type: "action", actionId: "more", value: null }), app).state.d.big_value).toBe(-Number.MAX_SAFE_INTEGER);
 });
 
 test("run: the dismiss of a dialog makes its test false", async () => {
