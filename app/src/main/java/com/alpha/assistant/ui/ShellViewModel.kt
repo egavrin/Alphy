@@ -265,6 +265,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
         voiceApproval: Boolean = Build.MODEL in VOICE_APPROVAL_MODELS) {
         if (liveVoice.active || loading || loadFailed) return
         if (voice.running) voice.stop()
+        voice.clearGrantedPermission()
         liveBridge = LiveVoiceBridge(this, liveVoice, assistantInvocation, capture, voiceApproval).also { it.start(firstSpeech) }
     }
 

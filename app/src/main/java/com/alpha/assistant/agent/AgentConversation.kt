@@ -328,6 +328,8 @@ internal class AgentConversation(private val app: Application, private val scope
             if (step == null || alarms.stopping || selectedChat() != expected.conversationId || foreground() !== alarms.activity) {
                 throw SecurityException("Foreground alarm approval expired")
             }
+            // Clock comes to the front for each alarm, so it keeps the voice mode (spec 5.8.1, ruling R18).
+            expectScreen()
             check(alarms.dispatch(intent, step) && awaitForeground(expected.conversationId, alarms))
         } finally {
             // Clock can return while Stop is still being recorded on IO.

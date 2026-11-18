@@ -164,13 +164,8 @@ class VoiceModeScreenWorkflowTest {
         voiceMode { scenario, model ->
             socket.say(TIMER_REQUEST, "d1", 100)
             robot.waitUntil(60_000) { model.agent.plan?.phase == AgentPhase.REVIEW }
-            blocked(AlarmClock.ACTION_SET_TIMER) { clock ->
-                robot.reveal(robot.text(R.string.agent_execute))
-                robot.click(robot.text(R.string.agent_execute))
-                robot.waitUntil { clock.hits == 1 }
-                // Clock comes to the front within the 5 s of the expectation: Alphy pauses and stops.
-                awayAndBack(scenario, model, Lifecycle.State.CREATED)
-            }
+            // Clock comes to the front within the 5 s of the expectation: Alphy pauses and stops.
+            openBlocked(scenario, model, AlarmClock.ACTION_SET_TIMER, R.string.agent_execute, Lifecycle.State.CREATED)
             home()
             robot.waitUntil { !model.liveVoice.active }
             assertEquals("", model.liveVoice.status)
@@ -190,12 +185,43 @@ class VoiceModeScreenWorkflowTest {
         voiceMode { scenario, model ->
             socket.say(SELFIE_REQUEST, "d1", 100)
             robot.waitUntil(60_000) { model.agent.plan?.phase == AgentPhase.NEEDS_PERMISSION }
-            blocked(REQUEST_PERMISSIONS) { dialog ->
-                robot.reveal(robot.text(R.string.agent_permission_allow))
-                robot.click(robot.text(R.string.agent_permission_allow))
-                robot.waitUntil { dialog.hits == 1 }
-                awayAndBack(scenario, model, Lifecycle.State.STARTED)
-            }
+            openBlocked(scenario, model, REQUEST_PERMISSIONS, R.string.agent_permission_allow, Lifecycle.State.STARTED)
+        }
+    }
+
+    /**
+     * Ruling R18 and spec 5.8.1: Clock, which an alarm sequence of a phone plan opens, keeps the mode as the timer step does. The
+     * alarm start is blocked without a result, so no alarm exists on the device. A stop without the expectation would end the mode.
+     */
+    @Test fun alarmSequenceOnlyMutes() {
+        fixture.provider.devicePlanSteps = listOf(PhoneActionEvidence(ALARM_REQUEST, "7:00 AM"), PhoneActionEvidence(ALARM_REQUEST, "9:00 AM"))
+        fixture.provider.agentProposal = ALARMS
+        install()
+        voiceMode { scenario, model ->
+            socket.say(ALARM_REQUEST, "d1", 100)
+            robot.waitUntil(60_000) { model.agent.plan?.phase == AgentPhase.REVIEW }
+            openBlocked(scenario, model, AlarmClock.ACTION_SET_ALARM, R.string.agent_execute, Lifecycle.State.CREATED)
+        }
+    }
+
+    /**
+     * Ruling R19: a voice mode start with the microphone granted clears the guidance of an earlier denial, so it does not come back
+     * after the end. The denial calls the model function of the denied start, because a real RECORD_AUDIO revocation stops the test process.
+     */
+    @Test fun liveStartClearsStaleMicrophoneGuidance() {
+        install()
+        fixture.launch().use { scenario ->
+            val model = ready(scenario)
+            scenario.onActivity { model.denyVoicePermission(null) }
+            robot.waitFor(robot.text(R.string.voice_mic_allow))
+            start(model)
+            robot.click(robot.text(R.string.live_voice_end))
+            robot.waitUntil { !robot.composed(scenario, LAYER) }
+            robot.waitFor(voiceButton)
+            assertFalse(model.voice.permissionRequired)
+            assertEquals("", model.voice.status)
+            assertNull(robot.find(robot.text(R.string.voice_mic_allow)))
+            assertNull(robot.find(robot.text(R.string.voice_mic_permission)))
         }
     }
 
@@ -287,11 +313,20 @@ class VoiceModeScreenWorkflowTest {
         assertFalse(audio.captureMuted)
     }
 
-    /** Runs [block] while each start of an activity for [action] is blocked without a result, so it causes no pause. */
-    private fun blocked(action: String, block: (Instrumentation.ActivityMonitor) -> Unit) {
+    /**
+     * Taps [button] of the plan card while each start of an activity for [action] is blocked without a result, so the start causes
+     * no pause. Then Alphy goes to [state] and back, as the opened screen makes it.
+     */
+    private fun openBlocked(scenario: ActivityScenario<CloudTestActivity>, model: ShellViewModel, action: String, button: Int,
+        state: Lifecycle.State) {
         val monitor = Instrumentation.ActivityMonitor(IntentFilter(action), null, true)
         robot.instrumentation.addMonitor(monitor)
-        try { block(monitor) } finally { robot.instrumentation.removeMonitor(monitor) }
+        try {
+            robot.reveal(robot.text(button))
+            robot.click(robot.text(button))
+            robot.waitUntil { monitor.hits == 1 }
+            awayAndBack(scenario, model, state)
+        } finally { robot.instrumentation.removeMonitor(monitor) }
     }
 
     private fun home() = assertTrue(robot.automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME))
@@ -318,5 +353,7 @@ class VoiceModeScreenWorkflowTest {
         /** The action of the system permission dialog (PackageManager.ACTION_REQUEST_PERMISSIONS, a system API). */
         const val REQUEST_PERMISSIONS = "android.content.pm.action.REQUEST_PERMISSIONS"
         const val SELFIE = """{"steps":[{"function":"camera.capture","args":{"lens":"front"}}]}"""
+        const val ALARM_REQUEST = "Set alarms for 7:00 AM and 9:00 AM."
+        const val ALARMS = """{"steps":[{"function":"clock.setAlarm","args":{"hour":7,"minute":0}},{"function":"clock.setAlarm","args":{"hour":9,"minute":0}}]}"""
     }
 }

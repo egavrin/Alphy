@@ -49,6 +49,13 @@ class VoiceSession internal constructor(
     private val audioManager = context.getSystemService(AudioManager::class.java)
     private var focus: AudioFocusRequest? = null
     fun permissionDenied() { hasAttempted = true; stop(context.getString(R.string.voice_mic_permission)); permissionRequired = true }
+    /** A voice mode start with the microphone granted: the guidance and the status of an earlier denial are stale (ruling R19). */
+    fun clearGrantedPermission() {
+        if (permissionRequired && context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            permissionRequired = false
+            stop()
+        }
+    }
     /** True from the tap until the session stops, including the account read before the capture. */
     val running get() = active || job?.isActive == true
     fun start(draftEmpty: Boolean, busy: Boolean, oneShot: Boolean = false) {
