@@ -95,7 +95,9 @@ Answer: the canvas form works on the device, so the timer part needs no `outside
 ## Sizes and times
 
 This section records Task 10: the size of each compiled plan against each limit of Alphy, and the time of each saved plan on the device.
-The commits are `1a27230` (the run-time text without the compile-only texts), `43b673e` (the drag of a model in `kit/src/drag.js`), and the commit "Check the size and the time of each compiled plan".
+The commits are `1a27230` (the run-time text without the compile-only texts), `43b673e` (the drag of a model in `kit/src/drag.js`), `0b18408` (the budget test and the time test), and the commit "End a drag at each open and time the actions that show after one event".
+In that last commit, an `open` event ends a drag (`kit/src/run.js` `handle`), so a drag that the state kept from an app that stopped in it refuses no down of another pointer.
+The kit test `run: an open ends a drag, so a drag of pointer 1 that the state kept refuses no down of pointer 0` and the device test `model3dPassesParseAndSmoke` hold this rule.
 
 ### Run-time text
 
@@ -109,13 +111,13 @@ Bun 1.3.9 does not put the value of a module-level constant into the lines of a 
 | `core.js` | 19744 | 17557 | -2187 |
 | `draw.js` | 5422 | 5422 | 0 |
 | `rows.js` | 3880 | 3440 | -440 |
-| `run.js` (now with `drag.js`) | 15496 | 12876 | -2620 |
-| Run-time text | 50138 | 44578 | -5560 |
+| `run.js` (now with `drag.js`) | 15496 | 12924 | -2572 |
+| Run-time text | 50138 | 44626 | -5512 |
 
 Method of the split: a scratch script builds the names that `run.js` and `drag.js` import, as `runtimeText` builds them, with one more module each time in the order `dsl`, `core`, `draw`, `rows`.
 The bytes of a module are the increase of the minified text. The rest of the run-time text is `run.js` and `drag.js`.
 The kit test `source: the run-time text is at most 46500 bytes` holds the bar.
-Each source is 5560 bytes smaller than at `850c5e3`.
+Each source is 5512 bytes smaller than at `850c5e3`. The rule of an open after a drag added 48 bytes. The budget table below is from `0b18408`, before these 48 bytes.
 
 ### Budget of each compiled plan
 
@@ -172,29 +174,31 @@ The device test `eachPlanAnswersInTime` does these steps for each saved plan:
 5. Send `open` again, and assert that each list has `maxItems` rows. Time `open` five times through `SandboxClient.execute`.
 6. Run the smoke step again from the full state, and keep each action event that it sends.
 7. Keep each of these actions that `ToolUiCatalog.validateAction` takes on the open screen. Time each one five times on the full state.
-8. Take the slowest action whose reply changes the state, the add included. Send it once more through `executeEvent`.
-9. For a plan with a surface, send the start event and five surface events through one retained `GraphicsSession`.
-10. Log each action id of the open screen that no timed event has.
+8. For an action that shows after one earlier event, send that event through `executeEvent`, time the action five times, and assert that its reply changes the state.
+   Then send the action through `executeEvent`. These are `timer_pause` and `timer_reset` after `timer_start`, and `lesson_back` after `lesson_next`.
+9. Take the slowest action whose reply changes the state, the add and the actions of step 8 included. Send it once more through `executeEvent`.
+10. For a plan with a surface, send the start event and five surface events through one retained `GraphicsSession`.
+11. Log each action id of the open screen that no timed event has.
 
 The limits are 250 ms for `open` and an action, and 50 ms for a surface event.
 Alphy stops an evaluation at 500 ms (`SandboxContract.EVALUATION_MS`), and a frame, pointer, or timer event at 100 ms (`GraphicsContract.EVALUATION_MS`).
-The medians of the run `appfile-sizes-times-7`:
+The medians of the run `appfile-sizes-times-round`:
 
-| Plan | Open (ms) | Slowest action timed (ms) | Action | Add to `maxItems` (ms) | Surface event (ms) | State bytes, full | Actions: change state / on the open screen / smoke | Not timed |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `calc` | 9 | 10 | `bill_field` | none | none | 83 | 6 / 9 / 9 | none |
-| `list` | 17 | 20 | `prodotti_remove` | 17 | none | 12530 | 6 / 10 / 11 | none |
-| `quiz` | 16 | 17 | `learnedButton` | none | none | 7322 | 3 / 3 / 3 | none |
-| `tabs-chart` | 18 | 19 | `gastos_add` | 19 | none | 7498 | 11 / 17 / 18 | none |
-| `timer-rounds` | 11 | 11 | `timer_start` | none | 2 (`timer_bar`) | 282 | 1 / 1 / 3 | `timer_pause`, `timer_reset` |
-| `tea` | 13 | 13 | `cay_field` | none | none | 20 | 1 / 2 / 2 | `demleme_timer` |
-| `section` | 34 | 42 | `habits_remove` | 34 | none | 31652 | 17 / 32 / 33 | none |
-| `lesson` | 16 | 16 | `ask_opt1` | none | 3 (`anim`) | 688 | 7 / 9 / 10 | `lesson_back` |
-| `model3d` | 20 | 20 | `rover_part_camera` | none | 11 (pointer move) | 301 | 6 / 6 / 6 | none |
+| Plan | Open (ms) | Slowest action timed (ms) | Action | Add to `maxItems` (ms) | After one earlier event (ms) | Surface event (ms) | State bytes, full | Actions: change state / on the open screen / smoke | Not timed |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `calc` | 9 | 10 | `bill_field` | none | none | none | 83 | 6 / 9 / 9 | none |
+| `list` | 18 | 18 | `prodotti_add` | 18 | none | none | 12530 | 6 / 10 / 11 | none |
+| `quiz` | 16 | 16 | `revealButton` | none | none | none | 7322 | 3 / 3 / 3 | none |
+| `tabs-chart` | 17 | 19 | `gastos_new_importe` | 18 | none | none | 7498 | 11 / 17 / 18 | none |
+| `timer-rounds` | 10 | 12 | `timer_reset` | none | `timer_pause` 11, `timer_reset` 12 | 3 (`timer_bar`) | 282 | 1 / 1 / 3 | none |
+| `tea` | 13 | 12 | `cay_field` | none | none | none | 20 | 1 / 2 / 2 | `demleme_timer` |
+| `section` | 32 | 36 | `habits_remove` | 32 | none | none | 31652 | 17 / 32 / 33 | none |
+| `lesson` | 15 | 16 | `lesson_next` | none | `lesson_back` 15 | 3 (`anim`) | 688 | 7 / 9 / 10 | none |
+| `model3d` | 19 | 20 | `rover_part_camera` | none | none | 11 (pointer move) | 301 | 6 / 6 / 6 | none |
 
-The slowest time is 42 ms for an action and 11 ms for a surface event, so no event needed a change for speed.
+The slowest time is 36 ms for an action and 11 ms for a surface event, so no event needed a change for speed.
 The actions of one plan differ by a few ms, so the name of the slowest action changes from run to run.
-In this run, the actions of `section.plan` took 37 to 42 ms at first and 32 to 35 ms later, for the same kind of row event.
+In the run `appfile-sizes-times-7`, the slowest action took 42 ms (`section`). Its actions took 37 to 42 ms at first and 32 to 35 ms later, for the same kind of row event.
 In the run `appfile-sizes-times-6` on the same test, the times of `section.plan` rose from 32 to 41 to 57 ms in the middle of the plan, and its slowest action took 52 ms.
 Assumption: other work on the host computer caused these changes. A run with nothing else on the host computer can test this assumption.
 The full lists are 100 rows each: `prodotti` and `prodotti_list`, `cards`, `gastos`, and `habits` and `streak_list`.
@@ -210,24 +214,24 @@ The largest full state is 31652 bytes (`section.plan`), under the limit of 49152
 | `appfile-sizes-times-4` | `43b673e+dirty` | passed, 24 tests, 76.3 s. The log got the actions that keep the state | `00:28:45`, `00:30:26` |
 | `appfile-sizes-times-5` | `43b673e+dirty` | passed, 24 tests, 73.9 s. The log got the actions that are not on the open screen. This test took its actions from the smoke step on the start state, so it did not time the adds or the row actions of `gastos` | `00:30:26`, `00:32:11` |
 | `appfile-sizes-times-6` | `62c87b5+dirty` | passed, 24 tests, 102.1 s. The test times the adds, and takes its actions from a smoke step on the full state | `00:32:11`, `00:45:33` |
-| `appfile-sizes-times-7` | `62c87b5+dirty`: the bundle and the device test of the commit "Check the size and the time of each compiled plan". Only this file changed after it | passed, 24 tests, 88.7 s. One helper builds each action event | `00:45:33`, `00:49:13` |
+| `appfile-sizes-times-7` | `62c87b5+dirty`: the bundle and the device test of `0b18408`. Only this file changed after it | passed, 24 tests, 88.7 s. One helper builds each action event | `00:45:33`, `00:49:13` |
+| `appfile-sizes-times-round` | `0b18408+dirty`: the bundle and the device test of the commit "End a drag at each open and time the actions that show after one event". Only this file changed after it | passed, 24 tests, 87.6 s. The open after a drag, and the three actions after one earlier event | `00:49:13`, `01:01:16` |
 
 All times of the column are on 2026-11-19. No other session installed the test APK during these runs.
-The time lines of `appfile-sizes-times-6` and `appfile-sizes-times-7` are in `evidence/alphy-ui/<label>/logcat.txt` (from `adb -s emulator-5592 logcat -d -s AppFileProofTest`).
+The time lines of `appfile-sizes-times-6`, `appfile-sizes-times-7`, and `appfile-sizes-times-round` are in `evidence/alphy-ui/<label>/logcat.txt` (from `adb -s emulator-5592 logcat -d -s AppFileProofTest`).
 
 Commands:
 
 ```text
 bun test kit
 bun kit/build.js --check
-JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3 tools/compose_acceptance/run.py suite --serial emulator-5592 --label appfile-sizes-times-7 com.alpha.assistant.tools.appfile.AppFileProofTest
+JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3 tools/compose_acceptance/run.py suite --serial emulator-5592 --label appfile-sizes-times-round com.alpha.assistant.tools.appfile.AppFileProofTest
 ```
 
 ### What the time test did not show
 
 - No test timed an add on a list at `maxItems`. The open screen of the full state does not take `prodotti_add`, `habits_add`, or `gastos_add`.
   Assumption: an add is not active while its draft is empty. The test types a draft first, and then `executeEvent` takes the add.
-- The open screen does not take `timer_pause` and `timer_reset` of `timer-rounds.plan`, or `lesson_back` of `lesson.plan`, so the test did not time them.
 - The foreground timer `demleme_timer` of `tea.plan` sends no event to the source: the host owns it. The smoke step and this test do not send it.
 - The open screen of `tabs-chart.plan` is its second tab, "Añadir", because the add steps choose that tab. The list and its row actions are on that tab.
 - The 100 rows of `gastos` are copies of one added row and the add, so the chart of `tabs-chart.plan` shows one category.

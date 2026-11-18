@@ -461,6 +461,18 @@ test("run: a drag keeps the turn from 0 to 360, and a pointer that is not a drag
   expect(send(down, pointer("down", 200)).state.drag).toEqual({ surface: "rover_model", pointer: 0, x: 200 });
 });
 
+test("run: an open ends a drag, so a drag of pointer 1 that the state kept refuses no down of pointer 0", async () => {
+  const { definition, app } = await compiled(plan("model3d"));
+  const send = (state, event) => handle(request(state, event), app);
+  // The app stopped in a drag of pointer 1. With no open between, a down of pointer 0 changes nothing.
+  const stopped = send(definition.initialState, pointer("down", 100, "rover_model", 1)).state;
+  expect(send(stopped, pointer("down", 100))).toEqual({ state: stopped });
+  const opened = send(stopped, { type: "open" }).state;
+  expect([opened.drag, opened.rover.turn]).toEqual([IDLE, 30]);
+  // A drag of pointer 0 from x 100 to x 150 turns the model by 30 degrees.
+  expect(send(send(opened, pointer("down", 100)).state, pointer("move", 150)).state.rover.turn).toBe(60);
+});
+
 test("run: the part buttons and the arrows give the values of the kit's App, and the arrows keep its turn past 0 and 360", async () => {
   const twin = await clocked(plan("model3d"));
   const camera = twin.send(0, press("rover_part_camera"));

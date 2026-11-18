@@ -520,6 +520,10 @@ class AppFileProofTest {
             val median=medianHostMs(app,"model3d pointer",{pointer("rover_model","move",110+10*it)}) {assertTrue(commands(it,"rover_model").isNotEmpty())}
             assertEquals(90.0,rover()[2])
             assertTrue("median $median ms",median<50)
+            // The drag still runs. An open ends it (the kit test of an open after a drag has the same rule).
+            assertEquals("rover_model",JSONObject(app.state).getJSONObject("drag").getString("surface"))
+            val opened=Session(sandbox,spec,"appfile-model3d",app.state).send(JSONObject().put("type","open"))
+            assertEquals("",opened.getJSONObject("drag").getString("surface"))
         } finally {app.close()}
     }
     @Test fun aSmallModelBesideADrawingPassesParseAndSmoke(): Unit=runBlocking {
@@ -577,6 +581,8 @@ class AppFileProofTest {
         val hosted=mapOf("timer-rounds" to (press("timer_start") to {_: Int -> timer("timer_bar")}),
             "lesson" to (press("lap_button") to {_: Int -> timer("anim")}),
             "model3d" to (pointer("rover_model","down",100) to {turn: Int -> pointer("rover_model","move",110+10*turn)}))
+        // The actions that show after one earlier event: the pause and the reset after a start, and the back after the next page.
+        val later=mapOf("timer-rounds" to ("timer_start" to listOf("timer_pause","timer_reset")),"lesson" to ("lesson_next" to listOf("lesson_back")))
         val open=JSONObject().put("type","open")
         val over=mutableListOf<String>()
         for((name,language) in languages) {
@@ -613,11 +619,22 @@ class AppFileProofTest {
                 val (median,state)=timedEvent(sandbox,spec,"$name-a$index",opened,event)
                 Triple(event,median,state.toString() != opened.toString())
             }
-            val slowest=(timed+listOfNotNull(add)).filter {it.third}.maxByOrNull {it.second}
+            // Each later action on the state after its earlier event, then once more through Alphy's checks.
+            val shown=later[name]?.let {(first,ids) -> ids.map {id ->
+                val step=Session(sandbox,spec,"appfile-$name",opened.toString())
+                step.send(open)
+                step.act(first)
+                val before=JSONObject(step.state)
+                val (median,after)=timedEvent(sandbox,spec,"$name-$id",before,press(id))
+                assertNotEquals("$name: $id keeps the state",before.toString(),after.toString())
+                step.act(id)
+                Triple(press(id),median,true)
+            }}.orEmpty()
+            val slowest=(timed+listOfNotNull(add)+shown).filter {it.third}.maxByOrNull {it.second}
             assertNotNull("$name: no action changes the state",slowest)
             val (slow,slowMs)=checkNotNull(slowest)
-            // The slowest action once more through Alphy's checks. The add went through them above.
-            if(slow !== add?.first) app.send(slow)
+            // The slowest action once more through Alphy's checks. The add and the later actions went through them above.
+            if(timed.any {it.first === slow}) app.send(slow)
             val host=hosted[name]?.let {(begin,turn) ->
                 val surface=Host(context,sandbox,spec,"appfile-$name")
                 try {
@@ -630,8 +647,9 @@ class AppFileProofTest {
             // The counts: the actions that change the state, the actions that the open screen takes, and the actions of the smoke step.
             // untimed: each action id of the open screen that no timed event has.
             Log.i("AppFileProofTest","time $name open=$openMs action=$slowMs ${slow.getString("actionId")} add=${add?.second ?: "-"} host=${host ?: "-"} " +
+                "later=${shown.map {"${it.first.getString("actionId")}=${it.second}"}} " +
                 "actions=${timed.count {it.third}}/${timed.size}/${sent.size} kept=${idsOf(timed.filterNot {it.third}.map {it.first})} " +
-                "notOnOpen=${idsOf(notOnOpen)} untimed=${actionIds(root)-idsOf(timed.map {it.first}+listOfNotNull(add?.first)).toSet()} " +
+                "notOnOpen=${idsOf(notOnOpen)} untimed=${actionIds(root)-idsOf(timed.map {it.first}+listOfNotNull(add?.first)+shown.map {it.first}).toSet()} " +
                 "stateBytes=${opened.toString().toByteArray().size}")
             if(openMs>=250) over+="$name open $openMs ms"
             if(slowMs>=250) over+="$name action ${slow.getString("actionId")} $slowMs ms"

@@ -400,7 +400,7 @@ export function kitOf(app, state) {
  * action that takes a list past its count of rows (app.caps) or an array past Alphy's limit give the state back as it is. A bound
  * number past its bounds comes back at its bound. The reply holds a new ui only when the screen differs from the screen of the state before the event.
  * An open and a timer event of a timer or a change that runs move each timer and each change to the clock of now. A pointer event
- * of the surface of a model turns the model (drag.js dragged). A timer event of nothing that runs, also a late one after a pause or after
+ * of the surface of a model turns the model (drag.js dragged), and an open ends a drag. A timer event of nothing that runs, also a late one after a pause or after
  * the end of a change, and each other event of a surface give the state back as it is.
  */
 export function handle(input, app, now = Date.now()) {
@@ -410,6 +410,8 @@ export function handle(input, app, now = Date.now()) {
   settings.now = () => now;
   try {
     const kit = kitOf(app, state), kinds = app.kinds ?? {}, before = screen(kit, app);
+    // A drag that the state kept from an app that stopped in it would refuse the down of each other pointer.
+    if (app.drag && event.type === "open") kit.state._drag = IDLE;
     const timed = event.type === "open" || (event.type === "timer" && (event.timerId === app.anim?.field ? Boolean(kit.state._run)
       : before.drawn.some((surface) => surface.id === event.timerId && surface.running)));
     const control = event.type === "action" ? before.controls.get(event.actionId) : timed ? () => kit.tick() : event.type === "pointer" ? () => dragged(kit, before.drawn, event) : undefined;

@@ -5,7 +5,7 @@ import { fixed } from "./draw.js";
 
 /** The turn of a model for each pixel that a drag moves along x, in degrees. */
 const DEGREES_PER_PIXEL = 0.6;
-/** The drag of a model when no drag runs: the surface, the pointer, and the last x of a drag. The state field of the drag has its fields (emit.js). */
+/** The drag of a model when no drag runs, also after each open (run.js handle): the surface, the pointer, and the last x of a drag. The state field of the drag has its fields (emit.js). */
 export const IDLE = Object.freeze({ surface: "", pointer: 0, x: 0 });
 /** A turn in degrees as a turn from 0 to 360, with 2 decimals. */
 const wrap = (degrees) => fixed(((degrees % 360) + 360) % 360);
@@ -20,7 +20,6 @@ export function dragged(kit, drawn, { surfaceId, x, phase, pointer }) {
   const model = drawn.find((surface) => surface.id === surfaceId)?.model, drag = kit.state._drag ?? IDLE;
   if (!model || !Number.isFinite(x)) return false;
   if (phase === "down") {
-    // shortcut: a drag of pointer 1 that the stored state keeps after the app stopped mid-drag refuses each down of pointer 0 until pointer 1 comes down again; end a drag on open if that shows.
     if (drag.surface && drag.pointer !== pointer) return false;
     kit.state._drag = { surface: surfaceId, pointer, x };
     return "";
