@@ -116,7 +116,7 @@ Bun 1.3.9 does not put the value of a module-level constant into the lines of a 
 
 Method of the split: a scratch script builds the names that `run.js` and `drag.js` import, as `runtimeText` builds them, with one more module each time in the order `dsl`, `core`, `draw`, `rows`.
 The bytes of a module are the increase of the minified text. The rest of the run-time text is `run.js` and `drag.js`.
-The kit test `source: the run-time text is at most 46500 bytes` holds the bar.
+The kit test `source: the run-time text is at most 46500 bytes` held the bar. Task 11b-1 changed the bar to 48500 bytes (see "Look vocabulary").
 Each source is 5512 bytes smaller than at `850c5e3`. The rule of an open after a drag added 48 bytes. The budget table below is from `0b18408`, before these 48 bytes.
 
 ### Budget of each compiled plan
@@ -244,7 +244,7 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3
 The device class `AppFileLookTest` shows each compiled plan as a saved app in the real shell (`ShellFixture`, `ShellRobot`, `ToolStore.saveTool`).
 It compiles each plan with `parsedAndSmoked` of `AppFileProofTest`, which gives the spec the language of the compile result (`ToolSpec.withAppLanguage`). The shell makes no model call.
 
-- `picturesOfEachPlan` opens each of the nine saved plans and each of the five look fixtures of `kit/build.js` (`LOOK_FIXTURES`).
+- `picturesOfEachPlan` opens each of the nine saved plans and each look fixture of `kit/build.js` (`LOOK_FIXTURES`: five in Task 11a, seven since Task 11b-1).
   For each app, it waits for the title, the refine action, and the reply to the open event. Then it takes a screenshot of the first screen.
   For a plan with a surface (`timer-rounds`, `lesson`, `model3d`), it waits until the inside of each canvas holds more than one color.
   It takes the pictures in the light theme and in the dark theme, and it sets the night mode of the emulator back in a `finally` block.
@@ -319,3 +319,68 @@ Command:
 ```text
 JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3 tools/compose_acceptance/run.py suite --serial emulator-5592 --label appfile-look-before-3 com.alpha.assistant.tools.appfile.AppFileProofTest com.alpha.assistant.tools.appfile.AppFileLookTest
 ```
+
+## Look vocabulary
+
+Task 11b-1 gave the components the look options of the host (`kit/README.md`, section "Look options").
+The compile step checks each value, and the run-time puts it into the Alphy node as it is.
+
+| Measure | Before (`e2e9eac`) | After |
+| --- | --- | --- |
+| Run-time text | 44626 bytes | 45417 bytes (bar 48500) |
+| Largest source | `test/cards.plan`, 51524 bytes | `test/cards.plan`, 52296 bytes (bar 60000) |
+| Kit tests | 224 pass | 242 pass |
+
+The run-time text holds no icon list and no fault text. The kit test `source: the run-time text is at most 48500 bytes` holds the bar.
+
+The cut first letter: the root column of each app now has a medium padding.
+"Alphy Learn" (`lesson`), "Мастерская" (`model3d`), and "Çay türü" (`tea`) are whole in the pictures (`evidence/alphy-ui/appfile-look-vocabulary/first-letters.png`).
+The assumption of the gap analysis is true: the clip of the rounded corner of the app cut the letter, and the padding moves the text inside it.
+
+Two requests of the corpus with components only, in the tree of their baseline apps:
+
+| Plan | Hero | Typed fields, first screen | Typed fields in rows | Baseline (same metric) |
+| --- | --- | --- | --- | --- |
+| `look-water-ko` | 1 | 0 | 0 | `showcase-lang-water-ko`: 1, 0, 0 |
+| `look-shopping-it` | 1 | 1 | 0 | `showcase-lang-shopping-it`: 1, 1, 0 |
+
+The number 1234.5 shows as "1234.5" both from a state value (`Metric("Plain", $/n)`) and from a computed value (`Metric("Computed", $/n * 1)`).
+The kit has no number format with digit groups: "남은 양" shows "2000 ml", and the baseline shows "2,000 ml".
+
+The hero cards of the baseline pictures come from the host at `30d43aa`. The host of this branch has `03c6e58` "Stop repeating titles and calm the hero cards".
+That host puts a large emoji at the end of the texts that follow it (`NativeToolUi.kt` `heroEmojiSide`), and it gives a hero card the secondary container color.
+So the emoji of `look-water-ko` stands beside the metric, not above it, and the hero colors differ from the baseline. The plan gives the same tree as the baseline.
+
+### Runs of Task 11b-1
+
+| Label | Revision | Observed | Test APK `lastUpdateTime` before and after |
+| --- | --- | --- | --- |
+| `appfile-look-vocabulary` | `0314cc4` | passed, 29 tests (`AppFileProofTest` and `AppFileLookTest`), 137.2 s. Not used for the pair of `look-shopping-it`: the quantity of a row had the number emphasis, a display size, and "1 kg" took two lines | `01:41:21`, `02:28:22` |
+| `appfile-look-vocabulary-2` | `27fb5e3+dirty` (only `kit/README.md` and this file) | passed, 29 tests, 137.0 s. Not used for the pair of `look-water-ko`: the plan had no manual entry sheet | `02:28:22`, `02:33:38` |
+| `appfile-look-vocabulary-3` | `60a1ed6+dirty` (only `kit/README.md` and this file) | passed, 29 tests, 141.0 s. Not used for the pair of `look-shopping-it`: the row had the default gap of the host | `02:33:38`, `02:37:13` |
+| `appfile-look-vocabulary-4` | `f4cb1ba+dirty` (only `kit/README.md` and this file) | passed, 29 tests, 138.1 s. The pictures and the pairs of this task | `02:37:13`, `02:41:59` |
+
+All times are on 2026-11-19. The runner installed the test APK at each "after" time. No other session installed it during these runs.
+The pictures are in `evidence/alphy-ui/appfile-look-vocabulary-4/light/` and `dark/`, with the contact sheets `contact-light.png` and `contact-dark.png`.
+The pairs beside the baseline are `pair-water-ko.png` and `pair-shopping-it.png` in the same folder. Git does not keep these files.
+Below the status bar, the pictures of the 14 earlier plans are the same in the runs 1, 3, and 4.
+
+Command:
+
+```text
+JAVA_HOME=/opt/homebrew/opt/openjdk@17 python3 tools/compose_acceptance/run.py suite --serial emulator-5592 --label appfile-look-vocabulary-4 com.alpha.assistant.tools.appfile.AppFileProofTest com.alpha.assistant.tools.appfile.AppFileLookTest
+```
+
+### Where the two pairs are still worse than the baseline
+
+| Plan | Difference | Cause |
+| --- | --- | --- |
+| `look-water-ko` | The emoji stands beside the metric, and the hero color differs. | Host revision: the baseline pictures come from `30d43aa`, this branch has `03c6e58`. |
+| `look-water-ko` | "남은 양" shows "2000 ml", the baseline shows "2,000 ml". | Missing option: the kit has no number format with digit groups (C.5). |
+| `look-water-ko` | The success banner has no title "목표 달성". | Missing option: `Notice` takes one text. |
+| `look-water-ko` | The grid "Plain" and "Computed" is not in the baseline. | Choice of the plan: D.3 requires it. |
+| `look-shopping-it` | The button "Aggiungi" is grey on the first screen. | Choice of the plan: `enabled=` keeps the smoke step from a control that changes nothing (the pattern of the entries part). |
+| `look-shopping-it` | The list has no caption "Prodotti". | Missing option: `List` has no caption, and the host hides a section title that repeats the screen. |
+| `look-shopping-it` | The list starts with three rows, so the empty text does not show. The hero shows "2" and "3 prodotti in lista". | Choice of the plan: each check then runs the row of a list. |
+| `look-shopping-it` | "Frutta e verdura" breaks into three lines in a row. | Host limit: the weighted column gets the width that the quantity, the label "Preso", and the trash leave. The host does not shorten the text. |
+| `look-shopping-it` | A row has the trash, the baseline row has a pencil and an edit sheet. | Choice of the plan: the row of B.11. An edit sheet of a row needs a selected-row value. |
