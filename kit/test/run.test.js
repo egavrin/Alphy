@@ -782,7 +782,7 @@ test("source: the source of list.plan is under 60000 bytes and answers an add as
 });
 
 test("source: the run-time text is at most 46500 bytes", () => {
-  // kit/build.js leaves out each text that only the compile step reads (KIT_RUNTIME), so each source has room to grow.
+  // kit/build.js leaves out each text that only the compile step reads (dsl.js MESSAGES), so each source has room to grow.
   console.log(`run-time ${bytes(runtime.text)} bytes`);
   expect(bytes(runtime.text)).toBeLessThanOrEqual(46500);
 });
@@ -795,16 +795,6 @@ test("source: a refused add leaves the add sheet open in the run-time text, as h
   const add = request(open, { type: "action", actionId: "tasks_add", value: null });
   expect(run(add)).toEqual(handle(add, app));
   expect([run(add).state.tasks_s.adding, run(add).state.tasks]).toEqual([true, []]);
-});
-
-test("source: no source of a saved plan or fixture that compiles passes 60000 bytes", async () => {
-  const sizes = [];
-  for (const [path, text] of allPlans()) {
-    const { definition, app } = await compiled(text);
-    if (definition) sizes.push([path, measured(path, definition, app)]);
-  }
-  expect(sizes.filter(([, size]) => size >= 60000)).toEqual([]);
-  expect(sizes.length).toBeGreaterThan(0);
 });
 
 /** The bytes that a field of the state may cost in the maps of the compiled data: its kit name and its Alphy name of at most 16 characters each, and its kind, in JSON. */

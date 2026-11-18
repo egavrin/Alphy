@@ -22,7 +22,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps and each node of the node table in Alphy's checks, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, and the drawings and timed changes. */
+/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps and each node of the node table in Alphy's checks, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, and the time of each saved plan with its lists full. */
 @RunWith(AndroidJUnit4::class)
 class AppFileProofTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
@@ -65,15 +65,19 @@ class AppFileProofTest {
         assertEquals(result.faults.toString(),"ok",result.status)
         assertEquals(language,result.language)
         val spec=ToolSpec.parse(checkNotNull(result.definition))
+        smoked(sandbox,spec,name,spec.initialState,observeReplay)
+        return spec
+    }
+    /** The smoke step as AppAgent.validate builds it, from a state. */
+    private suspend fun smoked(sandbox: SandboxClient,spec: ToolSpec,name: String,state: String,observeReplay: ((List<String>)->Unit)?) {
         // The script provider is never asked: the smoke run makes no model call.
         try {
-            ToolGenerationSmoke(sandbox,spec,"appfile-$name",1,spec.initialState,checkActive={},
+            ToolGenerationSmoke(sandbox,spec,"appfile-$name",1,state,checkActive={},
                 generation=ToolGenerationService(AgentScriptProvider(),sandbox),observeReplay=observeReplay).run()
         } catch(failure: ToolSmokeFailure) {
             // The failure itself has no message: the validator's text is the detail of its cause.
             throw AssertionError("smoke ${failure.event} at ${failure.path}: ${(failure.cause as? GeneratedOutputDetail)?.detail ?: failure.cause} replay=${failure.replay}",failure)
         }
-        return spec
     }
     /** Each node of a ui, also the nodes of each row template. */
     private fun nodes(node: JSONObject): List<JSONObject> =listOf(node)+
@@ -114,14 +118,15 @@ class AppFileProofTest {
         assertTrue("median $median ms of $times",median<250)
     }
     /** Events in sequence through ToolGenerationService.executeEvent: Alphy checks each event against the screen before it, and each reply. */
-    private class Session(private val sandbox: SandboxClient,private val spec: ToolSpec,private val id: String) {
+    private class Session(private val sandbox: SandboxClient,private val spec: ToolSpec,private val id: String,seed: String=spec.initialState) {
         private val generation=ToolGenerationService(AgentScriptProvider(),sandbox)
         var ui=spec.ui.toString()
             private set
-        var state=spec.initialState
+        var state=seed
             private set
-        suspend fun act(actionId: String,value: Any?=null): JSONObject {
-            val event=JSONObject().put("type","action").put("actionId",actionId).put("value",value ?: JSONObject.NULL)
+        suspend fun act(actionId: String,value: Any?=null): JSONObject =
+            send(JSONObject().put("type","action").put("actionId",actionId).put("value",value ?: JSONObject.NULL))
+        suspend fun send(event: JSONObject): JSONObject {
             val preview=generation.executeEvent(spec,id,1,state,event,ui) {source,input -> sandbox.execute(source,input.toString())}
             state=preview.state
             ui=preview.ui
@@ -189,20 +194,24 @@ class AppFileProofTest {
         val median=medianEventMs(sandbox,spec,"rich",state,"shoes_done",row("r92",true))
         assertTrue("median $median ms",median<250)
     }
-    /** The median time in ms of one event, five times in the bare sandbox, which the log prints with its label. */
-    private suspend fun medianEventMs(sandbox: SandboxClient,spec: ToolSpec,label: String,state: JSONObject,actionId: String,value: Any?): Long {
-        val input=JSONObject().put("artifactId","appfile-$label").put("revision",1).put("state",state)
-            .put("event",JSONObject().put("type","action").put("actionId",actionId).put("value",value ?: JSONObject.NULL)).toString()
+    /** The median time in ms of one action, five times in the bare sandbox, which the log prints with its label. */
+    private suspend fun medianEventMs(sandbox: SandboxClient,spec: ToolSpec,label: String,state: JSONObject,actionId: String,value: Any?): Long =
+        timedEvent(sandbox,spec,label,state,action(actionId,value)).first
+    /** The median time in ms of one event, five times in the bare sandbox, which the log prints with its label, and the state of its reply. */
+    private suspend fun timedEvent(sandbox: SandboxClient,spec: ToolSpec,label: String,state: JSONObject,event: JSONObject): Pair<Long,JSONObject> {
+        val input=JSONObject().put("artifactId","appfile-$label").put("revision",1).put("state",state).put("event",event).toString()
+        var replied=JSONObject()
         val times=List(5) {
             val started=SystemClock.elapsedRealtime()
             val reply=sandbox.execute(spec.source,input)
             val took=SystemClock.elapsedRealtime()-started
             assertEquals(reply.status,"OK",reply.status)
+            replied=JSONObject(checkNotNull(reply.json)).getJSONObject("state")
             took
         }
         val median=times.sorted()[2]
         Log.i("AppFileProofTest","$label event times ms=$times median=$median")
-        return median
+        return median to replied
     }
     @Test fun tabsChartPassesParseAndSmoke(): Unit=runBlocking {
         // A tab press and an add that the chart follows, each through Alphy's checks of the event and of its reply.
@@ -282,7 +291,8 @@ class AppFileProofTest {
         }
         fun close()=session.close()
     }
-    private fun press(actionId: String)=JSONObject().put("type","action").put("actionId",actionId).put("value",JSONObject.NULL)
+    private fun action(actionId: String,value: Any?)=JSONObject().put("type","action").put("actionId",actionId).put("value",value ?: JSONObject.NULL)
+    private fun press(actionId: String)=action(actionId,null)
     private fun timer(timerId: String)=JSONObject().put("type","timer").put("timerId",timerId)
     /** The median time in ms of five events through the host path: event gives the event of each turn, and check asserts each reply. The log prints the times with their label. */
     private suspend fun medianHostMs(app: Host,label: String,event: (Int)->JSONObject,check: (ToolPreview)->Unit): Long {
@@ -531,5 +541,102 @@ class AppFileProofTest {
             app.send(pointer("toy_model","move",300))
             assertEquals(204.0,JSONObject(app.state).getJSONObject("toy").getDouble("turn"),0.0)
         } finally {app.close()}
+    }
+    /** Each list of rows in the state schema, with its row count. The schema of a plain field is the name of its type. */
+    private fun lists(spec: ToolSpec)=spec.schema.keys().asSequence().mapNotNull {field ->
+        spec.schema.optJSONObject(field)?.takeIf {it.optString("type") == "list"}?.let {field to it.getInt("maxItems")}
+    }.toList()
+    /** The state with each list full to its row count less short: the rows of the state first, then copies of them in turn with new ids. */
+    private fun full(spec: ToolSpec,state: JSONObject,short: Int): JSONObject {
+        for((field,count) in lists(spec)) {
+            val rows=state.getJSONArray(field)
+            val start=rows.length()
+            assertTrue("$field has no row to copy",start>0)
+            for(n in start until count-short) rows.put(JSONObject(rows.getJSONObject(n%start).toString()).put("id","r${1000+n}"))
+        }
+        return state
+    }
+    /** The action id of each control of a ui: an action, a dismiss action, and the reorder of a list. */
+    private fun actionIds(root: JSONObject)=nodes(root).flatMap {node ->
+        listOf(node.optString("action"),node.optString("dismissAction"),node.optJSONObject("reorder")?.optString("action").orEmpty())
+    }.filter {it.isNotEmpty()}.toSet()
+    @Test fun eachPlanAnswersInTime(): Unit=runBlocking {
+        // Each saved plan with its lists full: the open event, the add of a list that is one row short, and each action that the smoke step
+        // sends from the full state, five times each in the bare sandbox. For a plan with a surface, also its timer or pointer event through
+        // the retained session. Alphy's limit for one event is 500 ms.
+        val context=instrumentation.targetContext
+        val sandbox=SandboxClient(context)
+        val languages=mapOf("calc" to "en","list" to "it","quiz" to "ja","tabs-chart" to "es","timer-rounds" to "de","tea" to "tr","section" to "uk",
+            "lesson" to "ru","model3d" to "ru")
+        // The draft steps and the add of each plan with an add. A list that starts empty gets its first row from the same steps:
+        // the steps of tabs-chart are the add steps of tabsChartPassesParseAndSmoke.
+        val adds=mapOf("list" to listOf("prodotti_new_nome" to "Burro","prodotti_new_corsia" to "Latticini","prodotti_add" to null),
+            "section" to listOf("habits_new_name" to "Біг","habits_add" to null),
+            "tabs-chart" to listOf("resumen_view" to "Añadir","gastos_new_concepto" to "Taxi","gastos_new_categoria" to "Transporte","gastos_new_importe" to 300,"gastos_add" to null))
+        // The event that starts the surface, and the event of each of five turns.
+        val hosted=mapOf("timer-rounds" to (press("timer_start") to {_: Int -> timer("timer_bar")}),
+            "lesson" to (press("lap_button") to {_: Int -> timer("anim")}),
+            "model3d" to (pointer("rover_model","down",100) to {turn: Int -> pointer("rover_model","move",110+10*turn)}))
+        val open=JSONObject().put("type","open")
+        val over=mutableListOf<String>()
+        for((name,language) in languages) {
+            val spec=parsedAndSmoked(sandbox,name,language)
+            assertEquals(name,name in hosted,spec.surfaces.isNotEmpty())
+            val steps=adds[name].orEmpty()
+            val start=Session(sandbox,spec,"appfile-$name")
+            if(lists(spec).any {(field,_) -> JSONObject(start.state).getJSONArray(field).length() == 0}) steps.forEach {(id,value) -> start.act(id,value)}
+            // Each event of a Session goes through Alphy's checks of the state, the event, and the reply.
+            val app=Session(sandbox,spec,"appfile-$name",full(spec,JSONObject(start.state),if(steps.isEmpty()) 0 else 1).toString())
+            app.send(open)
+            val add=steps.lastOrNull()?.let {(id,value) ->
+                steps.dropLast(1).forEach {(step,draft) -> app.act(step,draft)}
+                val before=JSONObject(app.state)
+                val (median,after)=timedEvent(sandbox,spec,"$name-add",before,action(id,value))
+                assertNotEquals("$name: the add keeps the state",before.toString(),after.toString())
+                app.act(id,value)
+                Triple(action(id,value),median,true)
+            }
+            val opened=app.send(open)
+            for((field,count) in lists(spec)) assertEquals("$name $field",count,opened.getJSONArray(field).length())
+            val openMs=timedEvent(sandbox,spec,"$name-open",opened,open).first
+            // Each action event that the smoke step sends from the full state: the list of a branch grows with each event.
+            val sent=linkedSetOf<String>()
+            smoked(sandbox,spec,name,app.state) {events -> events.filter {JSONObject(it).getString("type") == "action"}.forEach {sent+=it}}
+            // Only the actions that the open screen takes: an action of a control that is not on it would time a refusal.
+            val root=JSONObject(app.ui)
+            val (actions,notOnOpen)=sent.map {JSONObject(it)}.partition {event ->
+                runCatching {ToolUiCatalog.validateAction(root,event.getString("actionId"),event.get("value").takeUnless {it == JSONObject.NULL},opened)}.isSuccess
+            }
+            // An action whose reply keeps the state does no work (a value that the state holds already, or a refusal):
+            // the slowest action is the slowest one that changes the state.
+            val timed=actions.mapIndexed {index,event ->
+                val (median,state)=timedEvent(sandbox,spec,"$name-a$index",opened,event)
+                Triple(event,median,state.toString() != opened.toString())
+            }
+            val slowest=(timed+listOfNotNull(add)).filter {it.third}.maxByOrNull {it.second}
+            assertNotNull("$name: no action changes the state",slowest)
+            val (slow,slowMs)=checkNotNull(slowest)
+            // The slowest action once more through Alphy's checks. The add went through them above.
+            if(slow !== add?.first) app.send(slow)
+            val host=hosted[name]?.let {(begin,turn) ->
+                val surface=Host(context,sandbox,spec,"appfile-$name")
+                try {
+                    surface.open()
+                    surface.send(begin)
+                    medianHostMs(surface,"$name surface",turn) {assertTrue(checkNotNull(it.surfaces).length()>0)}
+                } finally {surface.close()}
+            }
+            fun idsOf(events: List<JSONObject>)=events.map {it.getString("actionId")}
+            // The counts: the actions that change the state, the actions that the open screen takes, and the actions of the smoke step.
+            // untimed: each action id of the open screen that no timed event has.
+            Log.i("AppFileProofTest","time $name open=$openMs action=$slowMs ${slow.getString("actionId")} add=${add?.second ?: "-"} host=${host ?: "-"} " +
+                "actions=${timed.count {it.third}}/${timed.size}/${sent.size} kept=${idsOf(timed.filterNot {it.third}.map {it.first})} " +
+                "notOnOpen=${idsOf(notOnOpen)} untimed=${actionIds(root)-idsOf(timed.map {it.first}+listOfNotNull(add?.first)).toSet()} " +
+                "stateBytes=${opened.toString().toByteArray().size}")
+            if(openMs>=250) over+="$name open $openMs ms"
+            if(slowMs>=250) over+="$name action ${slow.getString("actionId")} $slowMs ms"
+            if(host != null && host>=50) over+="$name host $host ms"
+        }
+        assertEquals(emptyList<String>(),over)
     }
 }

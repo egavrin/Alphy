@@ -24,7 +24,7 @@ export const utf8 = (text) => {
   return count;
 };
 /** The bytes of a value in JSON as the host writes it: org.json writes "/" as "\/". */
-const hostBytes = (value) => utf8(JSON.stringify(value).replace(/\//g, "\\/"));
+export const hostBytes = (value) => utf8(JSON.stringify(value).replace(/\//g, "\\/"));
 /** A sum such as x - r keeps 2 decimals, as the kit's numbers do, with no float noise. */
 export const fixed = (value) => Math.round(value * 100) / 100;
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));

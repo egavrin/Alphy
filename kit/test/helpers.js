@@ -28,6 +28,8 @@ export const allPlans = () => ["plans", "test", "test/fixtures"].flatMap((dir) =
   .map((path) => [`${dir}/${basename(path)}`, readFileSync(path, "utf8")]));
 
 export const planned = async (text) => { const file = new AppFile().feedText(text); await expand(file); return file; };
+/** Each node of a ui, also the nodes of each row template. */
+export const every = (node) => [node, ...(node.children ?? []).flatMap(every), ...(node.rowTemplate ? every(node.rowTemplate) : [])];
 
 /** A time of the host's clock in ms. Each event of a timed test gives its time to handle. */
 export const T0 = 1_800_000_000_000;

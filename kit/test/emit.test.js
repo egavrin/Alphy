@@ -6,14 +6,12 @@ import { App, settings } from "../src/core.js";
 import { ACCENTS, LIMITS, STAGE, budgetOf, polygonsOf } from "../src/draw.js";
 import { emit } from "../src/emit.js";
 import { handle, kitOf, screen } from "../src/run.js";
-import { allPlans, fixture, plan, planned } from "./helpers.js";
+import { allPlans, every, fixture, plan, planned } from "./helpers.js";
 
 /** Alphy's rule for a state field and an action id (ToolValueSchema.name, ToolUiCatalog). */
 const SAFE = /^[A-Za-z][A-Za-z0-9_]{0,47}$/;
 const REFUSED = new Set(["__proto__", "prototype", "constructor"]);
 const nodes = (node) => [node, ...(node.children ?? []).flatMap(nodes)];
-/** Each node of a ui, also the nodes of each row template. */
-const every = (node) => [node, ...(node.children ?? []).flatMap(every), ...(node.rowTemplate ? every(node.rowTemplate) : [])];
 /** The text of a node and of each series of a chart. */
 const texts = (node) => [node.text, ...(node.series ?? []).map((series) => series.text)];
 /** The texts of each progress, ring, chart, and tabs control of a ui, after its type. */

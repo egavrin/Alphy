@@ -1740,7 +1740,7 @@ function rows(screen, node, key, line, expr, at, title) {
 return { MAX_ROW_FIELDS, MAX_ROWS, ALPHY, namer, wished, clockOf, cast, castRow, own, shownAs, relative, rows };
 })();
 // draw.js
-const { BAR_SURFACE, sideOf, LIMITS, PALETTE, utf8, fixed, commandsOf, barOf, MODEL, STAGE, ACCENTS, accentOf, polygonsOf, budgetOf, fit } = (() => {
+const { BAR_SURFACE, sideOf, LIMITS, PALETTE, utf8, hostBytes, fixed, commandsOf, barOf, MODEL, STAGE, ACCENTS, accentOf, polygonsOf, budgetOf, fit } = (() => {
 // The drawing of a surface: the kit's shapes as Alphy's drawing commands (GraphicsContract.frame), and the limits of one reply.
 
 
@@ -1924,7 +1924,7 @@ function fit(surfaces) {
   }) }]));
 }
 
-return { BAR_SURFACE, sideOf, LIMITS, PALETTE, utf8, fixed, commandsOf, barOf, MODEL, STAGE, ACCENTS, accentOf, polygonsOf, budgetOf, fit };
+return { BAR_SURFACE, sideOf, LIMITS, PALETTE, utf8, hostBytes, fixed, commandsOf, barOf, MODEL, STAGE, ACCENTS, accentOf, polygonsOf, budgetOf, fit };
 })();
 // drag.js
 const { IDLE, dragged } = (() => {
