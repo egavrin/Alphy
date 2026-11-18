@@ -1,8 +1,11 @@
 package com.alpha.assistant.voice
 
+import android.util.Base64
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.providerFailure
 import org.json.JSONObject
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -12,6 +15,11 @@ internal fun inputDelta(delta: String, startMs: Long, endMs: Long) = liveTranscr
 internal fun outputDelta(delta: String, startMs: Long, endMs: Long) = liveTranscript("session.output_transcript.delta", delta, startMs, endMs)
 internal fun liveDelegation(id: String, offsetMs: Long) =
     JSONObject().put("type", "session.delegation.created").put("offset_ms", offsetMs).put("delegation", JSONObject().put("id", id)).toString()
+/** Four samples of [value], so a test can tell the chunks apart. */
+internal fun outputAudio(value: Short): String {
+    val bytes = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).apply { repeat(4) { putShort(value) } }.array()
+    return JSONObject().put("type", "session.output_audio.delta").put("delta", Base64.encodeToString(bytes, Base64.NO_WRAP)).toString()
+}
 private fun liveTranscript(type: String, delta: String, startMs: Long, endMs: Long) =
     JSONObject().put("type", type).put("delta", delta).put("start_ms", startMs).put("end_ms", endMs).toString()
 

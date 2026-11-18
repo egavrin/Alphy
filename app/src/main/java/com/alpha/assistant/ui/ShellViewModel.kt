@@ -6,6 +6,7 @@ import com.alpha.assistant.tools.three.ThreeSceneAssetCleanup
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +61,7 @@ import com.alpha.assistant.voice.AndroidLiveAudio
 import com.alpha.assistant.voice.LiveTransport
 import com.alpha.assistant.voice.LiveVoiceSession
 import com.alpha.assistant.voice.OkHttpLiveTransport
+import com.alpha.assistant.voice.VOICE_APPROVAL_MODELS
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CancellationException
@@ -253,11 +255,15 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
         }
     }
 
-    /** Starts the voice mode in the selected conversation. [firstSpeech]: an assistant button start (spec 5.11.2). */
-    internal fun startLiveVoice(assistantInvocation: String? = null, capture: AssistCapture? = null, firstSpeech: Boolean = false) {
+    /**
+     * Starts the voice mode in the selected conversation. [firstSpeech]: an assistant button start (spec 5.11.2). [voiceApproval]:
+     * a spoken «да» can run a phone plan, which needs a passed echo check on this phone model (spec 5.5.10 rule 10).
+     */
+    internal fun startLiveVoice(assistantInvocation: String? = null, capture: AssistCapture? = null, firstSpeech: Boolean = false,
+        voiceApproval: Boolean = Build.MODEL in VOICE_APPROVAL_MODELS) {
         if (liveVoice.active || loading || loadFailed) return
         if (voice.running) voice.stop()
-        liveBridge = LiveVoiceBridge(this, liveVoice, assistantInvocation, capture).also { it.start(firstSpeech) }
+        liveBridge = LiveVoiceBridge(this, liveVoice, assistantInvocation, capture, voiceApproval).also { it.start(firstSpeech) }
     }
 
     internal fun endLiveVoice(status: String = "") = liveVoice.stop(status)

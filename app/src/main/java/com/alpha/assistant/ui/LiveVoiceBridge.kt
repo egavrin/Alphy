@@ -7,14 +7,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.viewModelScope
 import com.alpha.assistant.R
+import com.alpha.assistant.agent.AgentPhase
+import com.alpha.assistant.agent.AgentPlan
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.Message
 import com.alpha.assistant.surfaces.AssistCapture
+import com.alpha.assistant.voice.ApprovalWindow
 import com.alpha.assistant.voice.LiveProtocol
 import com.alpha.assistant.voice.LiveVoiceHost
 import com.alpha.assistant.voice.LiveVoiceSession
+import com.alpha.assistant.voice.SpokenAnswer
 import com.alpha.assistant.voice.UserTurn
+import com.alpha.assistant.voice.spokenAnswer
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
@@ -29,6 +35,8 @@ internal class LiveVoiceBridge(
     // The first hand-off of an assistant button press carries the screen context of this invocation (spec 5.11.4, Task 9).
     private val assistantInvocation: String?,
     private val capture: AssistCapture?,
+    // A spoken «да» or «нет» can decide a phone plan (spec 5.5.10 rule 10).
+    private val voiceApproval: Boolean,
 ) : LiveVoiceHost {
     /** The delegation id to the assistant message id of each hand-off (spec 5.5.4). */
     val handOffs = LinkedHashMap<String, String>()
@@ -39,6 +47,19 @@ internal class LiveVoiceBridge(
     /** The assistant message of the latest hand-off or typed turn (spec 5.2.3). */
     var cardId by mutableStateOf<String?>(null); private set
     private var watch: Job? = null
+    /** The delegation id of the hand-off that proposed the phone plan, and the plan id (spec 5.5.8). */
+    private var planHandOff: Pair<String, String>? = null
+    /** Each plan state goes out once: plan id, revision, and phase. */
+    private val planStates = HashSet<Triple<String, Int, AgentPhase>>()
+    private var approval: Approval? = null
+    /** The decided answer of the latest user turn and its rule-5 text. A delegation of that turn takes the text (rule 7). */
+    private var answered: Pair<SpokenAnswer, String>? = null
+
+    /** The voice approval of one spoken REVIEW revision: its proposal event id and its window (spec 5.5.10 rules 2 and 3). */
+    private class Approval(val plan: AgentPlan, val proposal: String) {
+        var acknowledged = false
+        var window: ApprovalWindow? = null
+    }
 
     val working: Boolean get() = (handOffs.values + typed.keys).any { message(it)?.status in unfinishedStatuses }
 
@@ -48,10 +69,10 @@ internal class LiveVoiceBridge(
             // The session reads the account only at its start, so a later provider change or key removal ends it here (spec 5.8).
             launch {
                 snapshotFlow { model.accountProvider }.drop(1).collect {
-                    if (it != AiProvider.OPENAI) session.stop(model.getApplication<Application>().getString(R.string.live_voice_openai_only))
+                    if (it != AiProvider.OPENAI) session.stop(string(R.string.live_voice_openai_only))
                 }
             }
-            snapshotFlow { model.snapshot }.collect { report() }
+            snapshotFlow { model.snapshot to model.agent.plan }.collect { report() }
         }
     }
 
@@ -63,6 +84,8 @@ internal class LiveVoiceBridge(
     override fun history(): List<Message> = model.snapshot.selected?.messages.orEmpty()
 
     override fun delegation(id: String, request: String) {
+        // Rule 7: the hand-off of an approval or rejection turn gets the rule-5 text, and the chat saves nothing.
+        answered?.takeIf { spokenAnswer(request) == it.first }?.let { answered = null; session.commentary(id, it.second); return }
         if (request.isBlank()) { session.commentary(id, NOT_HEARD); return }
         // shortcut: every refusal gets the busy text. A spoken request reaches only the full queue or a busy «+» attachment.
         val messageId = model.submitDraft(Draft(request), search = true) ?: run { session.commentary(id, BUSY); return }
@@ -70,16 +93,50 @@ internal class LiveVoiceBridge(
         cardId = messageId
     }
 
-    override fun turn(turn: UserTurn) = Unit
+    /** Decides a turn in the approval window before the session hands the same turn over (spec 5.5.10 rules 4 to 8). */
+    override fun turn(turn: UserTurn) {
+        answered = null
+        val window = approval?.window ?: return
+        val answer = window.decide(turn)?.takeIf { it != SpokenAnswer.OTHER } ?: return
+        val agent = model.agent
+        // Rule 5: only the spoken revision, still in REVIEW, runs or closes. On any doubt, nothing runs and the card waits for a tap.
+        val plan = agent.plan?.takeIf {
+            it.id == window.planId && it.revision == window.revision && it.phase == AgentPhase.REVIEW && !agent.busy
+        }
+        val text = when {
+            plan == null -> ON_SCREEN
+            answer == SpokenAnswer.APPROVE -> { agent.execute(plan); if (agent.busy) STARTED else ON_SCREEN }
+            else -> { agent.dismiss(plan); if (agent.plan == null) CANCELLED else ON_SCREEN }
+        }
+        val decided = answer to text
+        answered = decided
+        // A delegation of this turn comes in the same main-thread pass and takes the text. Otherwise the plan's hand-off gets it.
+        model.viewModelScope.launch(Dispatchers.Main) {
+            if (answered === decided) planHandOff?.let { session.commentary(it.first, text) }
+        }
+    }
+
     override fun handOffRunning() = working
-    override fun appended(eventId: String) = Unit
-    override fun outputEnded(endMs: Long) = Unit
+    override fun appended(eventId: String) { approval?.takeIf { it.proposal == eventId }?.acknowledged = true }
+
+    // shortcut: the window opens at the first output end after the acknowledgment (rule 3), which can be the tail of an earlier
+    // line or early after a late transcript delta. Add a transcript-based end if the live check (6.3) shows an early window.
+    override fun outputEnded(endMs: Long) {
+        approval?.takeIf { it.acknowledged && it.window == null }?.let { it.window = ApprovalWindow(it.plan.id, it.plan.revision, endMs) }
+    }
+
     override fun ended(status: String, settingsRequired: Boolean) { watch?.cancel(); watch = null }
 
     /** Sends the mini-app progress and the result of each tracked message once (spec 5.5.5 to 5.5.8, 5.7.2). */
     private fun report() {
+        val planReady = string(R.string.agent_plan_ready)
         for ((delegation, id) in handOffs) {
             val message = changed(id) ?: continue
+            // The chat agent sets the plan in the same main-thread pass as this notice, so the plan is the one of this hand-off.
+            if (message.status == "complete" && message.text == planReady) {
+                planHandOff = model.agent.plan?.let { delegation to it.id }
+                continue
+            }
             session.commentary(delegation, when {
                 message.status == "generating" -> MINI_APP_STARTED
                 message.status != "complete" -> FAILED + message.error.take(MAX - FAILED.length)
@@ -90,9 +147,35 @@ internal class LiveVoiceBridge(
         }
         for ((id, text) in typed) {
             val message = changed(id)?.takeIf { it.status == "complete" } ?: continue
+            // A typed plan has no hand-off, so GPT-Live neither reads nor approves it.
+            if (message.text == planReady) planHandOff = null
             session.thinking(spoken("Пользователь написал: ${LiveProtocol.spoken(text, TYPED_MAX)} Ответ Alphy на экране: ", message.text))
         }
+        reportPlan()
     }
+
+    /** Sends each state of the hand-off plan once, and keeps voice approval on its spoken REVIEW revision (spec 5.5.8, 5.5.10). */
+    private fun reportPlan() {
+        val (delegation, planId) = planHandOff ?: return
+        val plan = model.agent.plan?.takeIf { it.id == planId }
+        // Any other revision or phase closes the voice approval of the spoken one (rules 6 and 8).
+        if (plan != approval?.plan) approval = null
+        if (plan == null || !planStates.add(Triple(plan.id, plan.revision, plan.phase))) return
+        val text = when (plan.phase) {
+            AgentPhase.REVIEW -> if (voiceApproval) proposal(plan) else ON_SCREEN
+            in SCREEN_PHASES -> ON_SCREEN
+            AgentPhase.COMPLETED -> spoken(DONE, string(if (plan.alarmSequence()) R.string.agent_alarms_sent else R.string.agent_completed))
+            AgentPhase.FAILED -> spoken(NOT_DONE, plan.results.lastOrNull().orEmpty())
+            AgentPhase.STOPPED -> CANCELLED
+            else -> return
+        }
+        val event = session.commentary(delegation, text)
+        if (plan.phase == AgentPhase.REVIEW && voiceApproval) approval = Approval(plan, event)
+    }
+
+    /** The step titles of the plan card within the limit of one append (rule 2). */
+    private fun proposal(plan: AgentPlan) =
+        PROPOSE + LiveProtocol.spoken(plan.steps.mapNotNull { it.target?.label }.joinToString(", "), MAX - PROPOSE.length - ASK.length) + ASK
 
     /** The message when it enters `generating` or ends, once for each run. A deleted message ends without a result. */
     private fun changed(id: String): Message? {
@@ -108,6 +191,8 @@ internal class LiveVoiceBridge(
     /** [prefix] and the speakable [reply] within the limit of one append (spec 5.5.5). */
     private fun spoken(prefix: String, reply: String) = prefix + LiveProtocol.spoken(reply, MAX - prefix.length)
 
+    private fun string(id: Int) = model.getApplication<Application>().getString(id)
+
     private companion object {
         const val MAX = 1200
         /** The typed text of a thinking append. The rest of the limit is for the reply. */
@@ -119,5 +204,14 @@ internal class LiveVoiceBridge(
         const val MINI_APP_READY = "Мини-приложение готово. Ответ Alphy: "
         const val FAILED = "Alphy не смог выполнить запрос: "
         const val ON_SCREEN = "Нужно подтверждение на экране."
+        const val PROPOSE = "Alphy предлагает: "
+        const val ASK = " Скажите «да», чтобы выполнить, или «нет», чтобы отменить."
+        const val STARTED = "Запускаю."
+        const val CANCELLED = "Действие отменено."
+        const val DONE = "Готово. "
+        const val NOT_DONE = "Не получилось. "
+        /** The plan card needs a tap or a system dialog in these phases (rule 9). */
+        val SCREEN_PHASES =
+            setOf(AgentPhase.NEEDS_PERMISSION, AgentPhase.NEEDS_SELECTION, AgentPhase.UNAVAILABLE, AgentPhase.WAITING_FOR_CAMERA)
     }
 }

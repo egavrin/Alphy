@@ -1,8 +1,18 @@
 package com.alpha.assistant.ui
 
+import android.Manifest
+import android.app.Activity
+import android.app.Instrumentation
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.SystemClock
+import android.provider.AlarmClock
 import androidx.test.core.app.ActivityScenario
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
+import com.alpha.assistant.agent.AgentPhase
+import com.alpha.assistant.agent.AgentPlan
+import com.alpha.assistant.agent.PhoneActionEvidence
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
@@ -13,6 +23,7 @@ import com.alpha.assistant.cloud.Endpoints
 import com.alpha.assistant.data.Conversation
 import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.Message
+import com.alpha.assistant.memory.MemoryStore
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
@@ -25,6 +36,7 @@ import com.alpha.assistant.voice.LivePhase
 import com.alpha.assistant.voice.LiveVoiceSession
 import com.alpha.assistant.voice.inputDelta
 import com.alpha.assistant.voice.liveDelegation
+import com.alpha.assistant.voice.outputAudio
 import com.alpha.assistant.voice.outputDelta
 import com.alpha.assistant.voice.VoiceSession
 import com.alpha.assistant.voice.VoiceSettings
@@ -34,7 +46,9 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -44,7 +58,12 @@ class ShellLiveVoiceWorkflowTest {
     private val robot = ShellRobot("shell-live-voice")
     private val socket = FakeLiveTransport()
     private val audio = FakeLiveAudio()
-    @After fun remove() = fixture.remove()
+    private val memory = "${fixture.store.databaseName}-memory.db"
+    @After fun remove() {
+        fixture.remove()
+        fixture.context.deleteDatabase(memory)
+        fixture.context.deleteDatabase("${fixture.store.databaseName}-agent.db")
+    }
 
     @Test fun startPreloadsTheSelectedConversation() {
         fixture.store.saveConversation(Conversation("chat", "Чат", 1, 2, messages = listOf(
@@ -260,6 +279,184 @@ class ShellLiveVoiceWorkflowTest {
         }
     }
 
+    /** Spec 5.5.10: the proposal goes out, and a «да» after GPT-Live has spoken it runs the same plan revision. */
+    @Test fun reviewPlanIsReadAndYesRunsIt() = reviewed { _, model, review ->
+        assertEquals(AgentPhase.REVIEW, review.phase)
+        // No delegation follows this turn, so it ends after the turn gap, and the plan's hand-off gets «Запускаю.».
+        socket.emit(inputDelta("да", 6_000, 6_400))
+        robot.waitUntil { model.agent.plan?.phase == AgentPhase.COMPLETED }
+        assertEquals(review.id to review.revision, checkNotNull(model.agent.plan).let { it.id to it.revision })
+        assertEquals(listOf("Favorite color is green"), MemoryStore(fixture.context, memory).use { it.list().map { fact -> fact.text } })
+        robot.waitUntil { commentary().size == 3 }
+        assertEquals(listOf("d1" to PROPOSAL_ADD, "d1" to STARTED, "d1" to DONE), commentary())
+    }
+
+    @Test fun noDismissesThePlan() = reviewed { _, model, _ ->
+        say("нет", "d2", 6_000)
+        robot.waitUntil { commentary().size == 2 }
+        assertEquals(listOf("d1" to PROPOSAL_ADD, "d2" to CANCELLED), commentary())
+        assertNull(model.agent.plan)
+        assertEquals(listOf(PLAN_REQUEST), messages(model).filter { it.role == "user" }.map { it.text })
+    }
+
+    /** Spec 5.5.10 rule 6: a longer turn is a normal hand-off, and the plan waits for its own approval. */
+    @Test fun otherTurnBecomesAHandOffAndRunsNothing() = reviewed { _, model, review ->
+        fixture.provider.devicePlanSteps = null
+        say("да, но на десять минут", "d2", 6_000)
+        robot.waitUntil { commentary().size == 2 }
+        assertEquals(listOf("d1" to PROPOSAL_ADD, "d2" to "Ответ Alphy: Fixture response."), commentary())
+        assertEquals(listOf(PLAN_REQUEST, "да, но на десять минут"), messages(model).filter { it.role == "user" }.map { it.text })
+        assertEquals(review, model.agent.plan)
+    }
+
+    /** Spec 5.5.10 rules 3, 5, and 8. Only a clean «да» in the window of the current revision runs the plan. */
+    @Test fun overlapLateOrChangedRevisionRunsNothing() = reviewed { scenario, model, first ->
+        audio.playbackActive = true
+        answer("да", 6_000)
+        audio.playbackActive = false
+        // The session marks a turn as overlapped when it saw playback within the turn length (400 ms) before its delta.
+        SystemClock.sleep(600)
+        assertEquals(first, model.agent.plan)
+        scenario.onActivity { model.agent.revise(first, "Use green") }
+        robot.waitUntil(60_000) { commentary().size == 2 }
+        val second = checkNotNull(model.agent.plan)
+        assertEquals(first.id to first.revision + 1, second.id to second.revision)
+        // Inside the window of the first revision, [5,000, 35,000) ms, which the revision closed.
+        answer("да", 7_000)
+        assertEquals(second, model.agent.plan)
+        assertEquals(listOf("d1" to PROPOSAL_ADD, "d1" to PROPOSAL_ADD), commentary())
+        spoken(8_000)
+        answer("да", 38_000)
+        assertEquals(second, model.agent.plan)
+        assertEquals(2, commentary().size)
+        // ApprovalWindow reads only the start time, so this turn is still the first one inside [8,000, 38,000) ms.
+        answer("да", 9_000)
+        robot.waitUntil { model.agent.plan?.phase == AgentPhase.COMPLETED }
+        assertEquals(second.revision, checkNotNull(model.agent.plan).revision)
+    }
+
+    /** Spec 5.5.10 rule 7. */
+    @Test fun approvalDelegationSubmitsNoMessage() = reviewed { _, model, _ ->
+        say("да", "d2", 6_000)
+        robot.waitUntil { commentary().size == 3 }
+        assertEquals(listOf("d1" to PROPOSAL_ADD, "d2" to STARTED, "d1" to DONE), commentary())
+        assertEquals(listOf(PLAN_REQUEST, robot.text(R.string.agent_plan_ready)), messages(model).map { it.text })
+    }
+
+    /** Spec 5.5.10 rule 10. */
+    @Test fun withoutEchoCheckOnlyTapRuns() = reviewed(voiceApproval = false) { scenario, model, review ->
+        assertEquals(listOf("d1" to ON_SCREEN), commentary())
+        answer("да", 6_000)
+        assertEquals(review, model.agent.plan)
+        scenario.onActivity { model.agent.execute(review) }
+        robot.waitUntil { commentary().size == 2 }
+        assertEquals(listOf("d1" to ON_SCREEN, "d1" to DONE), commentary())
+    }
+
+    /** Spec 5.5.8: the end of each run goes to the hand-off of its plan once. A tap runs each plan. */
+    @Test fun endPhasesAreSpoken() {
+        val fact = MemoryStore(fixture.context, memory).use { it.saveExplicitFact("Favorite color is blue") }
+        install()
+        live { scenario, model ->
+            plan(EDIT)
+            val stale = proposed(model, PLAN_REQUEST, "d1", 100)
+            // The target changes after the review, so the run fails (AgentWorkflowTest.staleTargetCannotWriteMemory).
+            MemoryStore(fixture.context, memory).use { it.edit(fact.id, fact.revision, "Favorite color is purple") }
+            scenario.onActivity { model.agent.execute(stale) }
+            robot.waitUntil { model.agent.plan?.phase == AgentPhase.FAILED }
+            val failed = "Не получилось. " + checkNotNull(model.agent.plan).results.last()
+            plan(ADD)
+            val add = proposed(model, PLAN_REQUEST, "d2", 1_000)
+            scenario.onActivity { model.agent.execute(add) }
+            robot.waitUntil { model.agent.plan?.phase == AgentPhase.COMPLETED }
+            fixture.provider.devicePlanSteps = listOf(PhoneActionEvidence("Set a five-minute timer", "five-minute"),
+                PhoneActionEvidence("change my memory of my favorite color to green", "favorite color"))
+            fixture.provider.agentProposal = """{"steps":[{"function":"clock.setTimer","args":{"seconds":300}},""" +
+                """{"function":"memory.write","args":{"text":"Favorite color is green"}}]}"""
+            val timer = proposed(model, "Set a five-minute timer and change my memory of my favorite color to green", "d3", 2_000)
+            // The Clock request launches, which stops the remaining step. The test blocks it, so no real timer exists.
+            val clock = object : Instrumentation.ActivityMonitor() {
+                override fun onStartActivity(intent: Intent) =
+                    if (intent.action == AlarmClock.ACTION_SET_TIMER) Instrumentation.ActivityResult(Activity.RESULT_OK, null) else null
+            }
+            robot.instrumentation.addMonitor(clock)
+            try {
+                scenario.onActivity { model.agent.execute(timer) }
+                robot.waitUntil { model.agent.plan?.phase == AgentPhase.STOPPED }
+            } finally { robot.instrumentation.removeMonitor(clock) }
+            robot.waitUntil { commentary().size == 6 }
+            SystemClock.sleep(500)
+            assertEquals(listOf("d1" to ON_SCREEN, "d1" to failed, "d2" to ON_SCREEN, "d2" to DONE, "d3" to ON_SCREEN, "d3" to CANCELLED),
+                commentary())
+        }
+    }
+
+    /** Spec 5.5.10 rule 9: a permission or a selection needs the screen, once for each revision, and voice cannot approve it. */
+    @Test fun screenPhasesAskForTheScreen() {
+        MemoryStore(fixture.context, memory).use { store -> listOf("blue", "green").forEach { store.saveExplicitFact("Favorite color is $it") } }
+        assertNotEquals("The camera permission must be denied on the test emulator", PackageManager.PERMISSION_GRANTED,
+            fixture.context.checkSelfPermission(Manifest.permission.CAMERA))
+        plan(EDIT)
+        install()
+        live(voiceApproval = true) { _, model ->
+            val selection = proposed(model, PLAN_REQUEST, "d1", 100)
+            assertEquals(AgentPhase.NEEDS_SELECTION, selection.phase)
+            spoken(5_000)
+            answer("да", 6_000)
+            assertEquals(selection, model.agent.plan)
+            fixture.provider.devicePlanSteps = listOf(PhoneActionEvidence("Take a selfie.", "selfie"))
+            fixture.provider.agentProposal = """{"steps":[{"function":"camera.capture","args":{"lens":"front"}}]}"""
+            val permission = proposed(model, "Take a selfie.", "d2", 7_000)
+            assertEquals(AgentPhase.NEEDS_PERMISSION, permission.phase)
+            assertEquals(selection.id to selection.revision + 1, permission.id to permission.revision)
+            SystemClock.sleep(500)
+            assertEquals(listOf("d1" to ON_SCREEN, "d2" to ON_SCREEN), commentary())
+        }
+    }
+
+    /** The plan of [ADD] for the hand-off d1, whose first commentary GPT-Live has acknowledged and spoken until 5,000 ms. */
+    private fun reviewed(voiceApproval: Boolean = true, test: (ActivityScenario<CloudTestActivity>, ShellViewModel, AgentPlan) -> Unit) {
+        plan(ADD)
+        install()
+        live(voiceApproval) { scenario, model ->
+            val review = proposed(model, PLAN_REQUEST, "d1", 100)
+            spoken(5_000)
+            test(scenario, model, review)
+        }
+    }
+
+    /** The chat agent answers [PLAN_REQUEST] with a phone plan of [proposal]. */
+    private fun plan(proposal: String) {
+        fixture.provider.devicePlanSteps = listOf(PhoneActionEvidence(PLAN_REQUEST, PLAN_REQUEST))
+        fixture.provider.agentProposal = proposal
+    }
+
+    /** Says [request] as the hand-off [id] at [atMs], and waits for the first commentary of its plan. */
+    private fun proposed(model: ShellViewModel, request: String, id: String, atMs: Long): AgentPlan {
+        say(request, id, atMs)
+        // The plan agent ranks the phone capabilities on the device.
+        robot.waitUntil(60_000) { commentary().any { it.first == id } }
+        return checkNotNull(model.agent.plan)
+    }
+
+    /** GPT-Live acknowledges the latest commentary and speaks it until [endMs] of the session timeline. */
+    private fun spoken(endMs: Long) {
+        val event = socket.sent.map(::JSONObject).last { it.getString("type") == "session.commentary.append" }.getString("event_id")
+        socket.emit("""{"type":"session.commentary.appended","client_event_id":"$event"}""")
+        socket.emit(outputDelta("Скажите «да» или «нет».", endMs - 500, endMs))
+        socket.emit(outputAudio(1))
+        // The session reports the output end after 300 ms without output audio.
+        SystemClock.sleep(700)
+        robot.instrumentation.runOnMainSync { }
+    }
+
+    /** The user says [text] at [atMs], and GPT-Live answers it without a hand-off, which ends the turn at once. */
+    private fun answer(text: String, atMs: Long) {
+        socket.emit(inputDelta(text, atMs, atMs + 400))
+        socket.emit(outputDelta("Хорошо.", atMs + 600, atMs + 900))
+        robot.instrumentation.runOnMainSync { }
+    }
+
     /** A hand-off runs to its end after the mode ends by [end] with the status [status] (spec 5.5.9). */
     private fun endKeepsTheRequest(status: Int?, end: (ActivityScenario<CloudTestActivity>, ShellViewModel) -> Unit) {
         fixture.provider.gate = CompletableDeferred()
@@ -294,10 +491,10 @@ class ShellLiveVoiceWorkflowTest {
         liveVoice = { app, scope -> LiveVoiceSession(app, scope, socket, { audio }, { fixture.keys.account().getOrNull() }, LOOPBACK) })
 
     /** Launches the shell, starts the voice mode, and answers `session.started`. */
-    private fun live(test: (ActivityScenario<CloudTestActivity>, ShellViewModel) -> Unit) = fixture.launch().use { scenario ->
+    private fun live(voiceApproval: Boolean = false, test: (ActivityScenario<CloudTestActivity>, ShellViewModel) -> Unit) = fixture.launch().use { scenario ->
         val model = checkNotNull(fixture.model)
         robot.waitUntil { !model.loading }
-        scenario.onActivity { model.startLiveVoice() }
+        scenario.onActivity { model.startLiveVoice(voiceApproval = voiceApproval) }
         robot.waitUntil { socket.connected }
         socket.emit(LIVE_STARTED)
         robot.waitUntil { model.liveVoice.phase == LivePhase.LISTENING }
@@ -318,5 +515,13 @@ class ShellLiveVoiceWorkflowTest {
 
     private companion object {
         val LOOPBACK = Endpoints { "http://127.0.0.1:4000" }
+        const val PLAN_REQUEST = "Change my memory of my favorite color to green"
+        const val ADD = """{"steps":[{"function":"memory.write","args":{"text":"Favorite color is green"}}]}"""
+        const val EDIT = """{"steps":[{"function":"memory.write","args":{"match":"Favorite color","text":"Favorite color is green"}}]}"""
+        const val PROPOSAL_ADD = "Alphy предлагает: Добавить факт. Скажите «да», чтобы выполнить, или «нет», чтобы отменить."
+        const val ON_SCREEN = "Нужно подтверждение на экране."
+        const val STARTED = "Запускаю."
+        const val CANCELLED = "Действие отменено."
+        const val DONE = "Готово. План завершён."
     }
 }

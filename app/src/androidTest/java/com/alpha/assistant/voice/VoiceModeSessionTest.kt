@@ -1,7 +1,6 @@
 package com.alpha.assistant.voice
 
 import android.os.SystemClock
-import android.util.Base64
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.AiAccount
@@ -25,8 +24,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -451,11 +448,6 @@ class VoiceModeSessionTest {
         val TIMING = LiveTiming(startedMs = 5_000, silenceMs = 30_000, firstSpeechMs = 30_000, requestWaitMs = 400, turnGapMs = 30_000,
             replyGapMs = 300)
 
-        /** Four samples of [value], so a test can tell the chunks apart. */
-        fun outputAudio(value: Short): String {
-            val bytes = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).apply { repeat(4) { putShort(value) } }.array()
-            return JSONObject().put("type", "session.output_audio.delta").put("delta", Base64.encodeToString(bytes, Base64.NO_WRAP)).toString()
-        }
         fun closed(reason: String) = JSONObject().put("type", "session.closed").put("reason", reason).toString()
         fun failure(eventId: String) = JSONObject().put("type", "error")
             .put("error", JSONObject().put("message", "Rejected append").put("event_id", eventId)).toString()
