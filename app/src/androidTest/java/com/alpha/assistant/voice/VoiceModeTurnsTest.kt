@@ -47,6 +47,51 @@ class VoiceModeTurnsTest {
         assertEquals("Поставь таймер", t.request(3_000))
     }
 
+    /** Each delta of the live check log spans 200 ms. */
+    private fun LiveTranscript.heard(vararg deltas: Pair<Long, String>) = deltas.forEach { (at, d) -> input(d, at, at + 200, false) }
+    private fun LiveTranscript.spoke(vararg deltas: Pair<Long, String>) = deltas.forEach { (at, d) -> output(d, at, at + 200) }
+
+    /** The transcript of live check run 2 (`live-2a3dd7bb5762`) in arrival order: GPT-Live talked over the second request. */
+    @Test fun requestKeepsTheWordsThatGptLiveTalkedOver() {
+        val t = LiveTranscript()
+        t.heard(1_400L to " Постав", 1_600L to "ь", 2_000L to " таймер", 2_200L to " на", 2_400L to " пять", 2_800L to " минут")
+        assertEquals("Поставь таймер на пять минут", t.request(2_800))
+        t.spoke(3_000L to " Сейчас сдел", 3_200L to "аю.")
+        t.spoke(28_800L to " Пожал", 29_000L to "уйста,", 29_200L to " подтвердите", 29_800L to " действие", 30_400L to " на эк",
+            30_600L to "ране.")
+        t.spoke(33_600L to " Готов", 33_800L to "о,", 34_000L to " план", 34_200L to " завершён", 34_400L to ".")
+        t.spoke(37_400L to " Чет", 37_600L to "ыре", 37_800L to ".")
+        t.spoke(42_200L to " Луна", 42_400L to " —", 42_600L to " единственный", 43_400L to " естественный", 44_000L to " спутник")
+        t.heard(44_200L to " Постав", 44_400L to "ь")
+        t.spoke(44_400L to " Земли", 44_600L to ".")
+        t.heard(44_800L to " таймер на", 45_200L to " пять", 45_600L to " минут")
+        assertEquals("Поставь таймер на пять минут", t.request(45_600))
+    }
+
+    @Test fun answeredSmallTalkIsCutButAPauseInTheRequestIsNot() {
+        val t = transcript()
+        t.input(" на пять минут", 4_500, 5_300, false)
+        assertEquals("Поставь таймер на пять минут", t.request(5_400))
+    }
+
+    @Test fun secondHandOffInOneSpeechRunKeepsOnlyItsOwnWords() {
+        val t = LiveTranscript()
+        t.input("Поставь таймер", 1_000, 1_800, false)
+        assertEquals("Поставь таймер", t.request(1_800))
+        t.output("Сейчас", 2_000, 2_400)
+        t.input(" и включи свет", 2_200, 3_000, false)
+        assertEquals("и включи свет", t.request(3_000))
+    }
+
+    @Test fun delegationBeforeLateRequestDeltasWaitsInsteadOfTakingAnsweredSmallTalk() {
+        val t = LiveTranscript()
+        t.input("Привет", 0, 800, false)
+        t.output("Привет!", 1_000, 1_600)
+        assertEquals("", t.request(3_000))
+        t.input("Поставь таймер", 2_000, 2_800, false)
+        assertEquals("Поставь таймер", t.request(3_000))
+    }
+
     @Test fun outputEndsAndReturnsTheOpenTurn() {
         val t = LiveTranscript()
         t.input("Привет", 0, 800, true)

@@ -3,7 +3,13 @@ package com.alpha.assistant.voice
 /** One user turn of the GPT-Live input transcript. Times are session milliseconds. */
 internal data class UserTurn(val text: String, val startMs: Long, val endMs: Long, val overlappedPlayback: Boolean)
 
-private data class Delta(val text: String, val startMs: Long)
+private data class Delta(val text: String, val startMs: Long, val endMs: Long)
+
+/**
+ * Input deltas at most this far apart are one speech run, and a run is current only when its last delta ends at most this far
+ * before the hand-off (rulings R31 and R32). Gaps inside a turn were at most 400 ms in the live checks.
+ */
+private const val SPEECH_RUN_GAP_MS = 1_000L
 
 /** The session transcript of spec 5.5.1 and 5.5.2: user turns and the request text of a hand-off. */
 internal class LiveTranscript {
@@ -16,7 +22,7 @@ internal class LiveTranscript {
         private set
 
     fun input(delta: String, startMs: Long, endMs: Long, playbackActive: Boolean) {
-        inputs += Delta(delta, startMs)
+        inputs += Delta(delta, startMs, endMs)
         val turn = open
         open = if (turn == null) UserTurn(delta, startMs, endMs, playbackActive)
         else turn.copy(text = turn.text + delta, endMs = maxOf(turn.endMs, endMs))
@@ -31,12 +37,25 @@ internal class LiveTranscript {
     fun endTurn(): UserTurn? = open.also { open = null }
 
     /**
-     * The trimmed input after Alphy's latest spoken output and the previous hand-off, up to [offsetMs]. A blank result does not
-     * count as a hand-off, so the session can ask again after it waits for late input deltas (spec 5.5.2).
+     * The trimmed input after the previous hand-off and after Alphy's latest spoken output, up to [offsetMs]. An output that ends
+     * after the start of the current speech run talked over the user, so it does not cut the request (ruling R31). Without a
+     * current run, every output end cuts (ruling R32). A blank result does not count as a hand-off, so the session can ask again
+     * after it waits for late input deltas (spec 5.5.2).
      */
     fun request(offsetMs: Long): String {
-        val after = maxOf(lastHandOffMs, outputEnds.filter { it <= offsetMs }.maxOrNull() ?: -1L)
-        val text = inputs.filter { it.startMs > after && it.startMs <= offsetMs }.joinToString("") { it.text }.trim()
+        val heard = inputs.filter { it.startMs <= offsetMs }
+        val last = heard.lastOrNull() ?: return ""
+        var runStart = offsetMs
+        if (offsetMs - last.endMs <= SPEECH_RUN_GAP_MS) {
+            runStart = last.startMs
+            for (i in heard.lastIndex downTo 1) {
+                if (heard[i].startMs - heard[i - 1].endMs > SPEECH_RUN_GAP_MS) break
+                runStart = heard[i - 1].startMs
+            }
+        }
+        // An input that starts when an output ends comes after it: the stamps sit on a 200 ms grid, so the two often meet.
+        val answered = outputEnds.filter { it <= runStart }.maxOrNull() ?: -1L
+        val text = heard.filter { it.startMs > lastHandOffMs && it.startMs >= answered }.joinToString("") { it.text }.trim()
         if (text.isNotEmpty()) lastHandOffMs = offsetMs
         return text
     }

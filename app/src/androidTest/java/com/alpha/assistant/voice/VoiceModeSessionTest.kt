@@ -534,11 +534,12 @@ class VoiceModeSessionTest {
         waitUntil("gap turn") { rig.host.calls.size == 2 }
         // The answer after the gap starts the next request.
         rig.socket.emit(outputDelta("Хорошо.", 2_700, 2_900))
-        // Shorter than the 400 ms sleep plus the 300 ms turn gap since the playback stopped.
-        rig.socket.emit(inputDelta("Поставь таймер", 3_000, 3_400))
-        rig.socket.emit(liveDelegation("d1", 4_000))
+        // Shorter than the 400 ms sleep plus the 300 ms turn gap since the playback stopped. On the stamps, the request starts more
+        // than 1,000 ms after «Как дела», so the answered small talk is a separate speech run (ruling R32).
+        rig.socket.emit(inputDelta("Поставь таймер", 3_700, 4_100))
+        rig.socket.emit(liveDelegation("d1", 4_600))
         waitUntil("delegation") { rig.host.calls.size == 4 }
-        assertEquals(listOf("turn:Привет:0:800:true", "turn:Как дела:2000:2600:false", "turn:Поставь таймер:3000:3400:false",
+        assertEquals(listOf("turn:Привет:0:800:true", "turn:Как дела:2000:2600:false", "turn:Поставь таймер:3700:4100:false",
             "delegation:d1:Поставь таймер"), rig.host.calls)
     }
 

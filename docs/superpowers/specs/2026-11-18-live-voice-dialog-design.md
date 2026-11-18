@@ -179,7 +179,11 @@ The session omits `delegation`, so it runs in client mode (section 3). Alphy sen
 
 5.5.1 Alphy keeps the input transcript of the session from `session.input_transcript.delta`, with `start_ms` and `end_ms`.
 
-5.5.2 At `session.delegation.created`, the request text is the last user turn: the input transcript deltas that start after the end of GPT-Live's latest spoken output (the `end_ms` of the latest `session.output_transcript.delta` before the event) and after the previous hand-off, up to the `offset_ms` of the event. Small talk that GPT-Live already answered is not part of the request. If that text is blank, Alphy waits up to 500 ms for more input transcript deltas. If it is still blank, Alphy sends `session.commentary.append` with «Alphy не расслышал запрос.» and does nothing else.
+5.5.2 At `session.delegation.created`, the request text is the last user turn: the input transcript deltas that start after the previous hand-off and at or after the end of GPT-Live's latest spoken output, up to the `offset_ms` of the event. Small talk that GPT-Live already answered is not part of the request. If that text is blank, Alphy waits up to 500 ms for more input transcript deltas. If it is still blank, Alphy sends `session.commentary.append` with «Alphy не расслышал запрос.» and does nothing else.
+
+- The current speech run (rulings R31 and R32): the input deltas back from the last one at or before `offset_ms`, while the gap from one delta's `end_ms` to the next delta's `start_ms` is at most 1,000 ms. The run exists only when its last delta ends at most 1,000 ms before `offset_ms`.
+- An output that ends after the start of the current speech run talked over the user, so it does not cut the request. Output ends at or before the run start still cut. Without a current run, every output end at or before `offset_ms` cuts, so a blank result waits as above.
+- Known limit (R32): answered small talk followed by a request within 1,000 ms on the input stamps joins the request. Assumption: a user who waits for the answer starts later. In run 2, the output audio arrived 0.6 to 1.4 s after the last `end_ms` of its reply.
 
 - Assumption: the input transcript of the turn is complete, or complete within 500 ms, when `session.delegation.created` arrives. The spike did not log the order of these events. Test: the live check (6.3) logs the order.
 
@@ -342,7 +346,7 @@ Live check results (6.3): run 1 (`live-0ac2b42f003f`) and run 2 after rulings R2
 - Thinking without a delegation: no error in both runs. GPT-Live spoke about the thinking text without a user turn, which 5.7.2 does not expect. In run 2 it said «Четыре.».
 - One session timeline: both transcripts use one clock. The output transcript times lead the received output audio by 1.7 to 2.4 s (run 1).
 - Interruption (5.4.5): in run 1, GPT-Live did not stop a commentary and opened no delegation for the request. In run 2, it stopped its reply after the first sentence and opened a delegation, and Alphy flushed its playback.
-- Request text (5.5.2): complete at `session.delegation.created` for a request spoken in silence. For a request that interrupted a reply, the rule dropped the words before the last `end_ms` of that reply. Run 2 got «пять минут» for «Поставь таймер на пять минут».
+- Request text (5.5.2): complete at `session.delegation.created` for a request spoken in silence. For a request that interrupted a reply, the first rule dropped the words before the last `end_ms` of that reply. Run 2 got «пять минут» for «Поставь таймер на пять минут». Rulings R31 and R32 fixed this in the client. The fix is tested on the recorded run 2 timeline, not in a new paid run.
 - The instruction for «Нужно подтверждение на экране.» (ruling R25): in run 1, GPT-Live asked for «да» or «нет». In run 2, it said «Пожалуйста, подтвердите действие на экране.», with no «да», «нет», or tap.
 
 ## 8. Left to the builder

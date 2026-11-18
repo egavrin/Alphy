@@ -94,7 +94,7 @@ The spec is `docs/superpowers/specs/2026-11-18-live-voice-dialog-design.md`.
 The model is `gpt-live-1`, and the voice is `marin`. The audio is `audio/pcm` at 16,000 Hz, mono, in both directions.
 The session omits `delegation`, so GPT-Live runs in client mode. GPT-Live sends `session.delegation.created`, and Alphy answers with `session.commentary.append`.
 
-- The request of a delegation is the last user turn of the input transcript. Alphy submits it as a normal chat message, with web search allowed.
+- The request of a delegation is the last user turn of the input transcript. Words that the user says while GPT-Live speaks stay in the request (spec 5.5.2). Alphy submits it as a normal chat message, with web search allowed.
 - When the reply is complete, Alphy sends «Ответ Alphy: » and the speakable reply, cut at a sentence end to at most 1,200 characters.
 - A mini-app request first sends «Alphy готовит мини-приложение, оно появится на экране.». The ready mini-app sends «Мини-приложение готово. Ответ Alphy: » and the reply.
 - A failed request sends «Alphy не смог выполнить запрос: » and the error text.
@@ -230,7 +230,7 @@ Run 2 (`live-2a3dd7bb5762`) tested that build with a real-time playback fake:
 - The phase returned to listening after each reply, and no error ended the voice mode.
 - Pauses inside a reply were at most 500 ms. Silence between replies was at least 1,000 ms.
 - GPT-Live stopped the reply that the user interrupted after its first sentence, and it opened a delegation for the request. Alphy flushed its playback, and every later reply played.
-- The request text of that delegation was «пять минут», not «Поставь таймер на пять минут». The input deltas that start before the last `end_ms` of the interrupted reply are not part of the request (spec 5.5.2).
+- The request text of that delegation was «пять минут», not «Поставь таймер на пять минут». The first rule dropped the input deltas that start before the last `end_ms` of the interrupted reply. Rulings R31 and R32 fixed this in the client (spec 5.5.2). The fix is tested on the recorded run 2 timeline, not in a new paid run.
 - GPT-Live said «Пожалуйста, подтвердите действие на экране.». It did not ask for «да» or «нет», and it did not name the tap.
 - GPT-Live spoke the answer from the thinking text («Четыре.») without a user turn.
 
