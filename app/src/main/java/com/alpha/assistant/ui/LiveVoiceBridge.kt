@@ -94,11 +94,12 @@ internal class LiveVoiceBridge(
         }
     }
 
-    /** The message when it enters `generating` or ends, once for each. A deleted message ends without a result. */
+    /** The message when it enters `generating` or ends, once for each run. A deleted message ends without a result. */
     private fun changed(id: String): Message? {
-        if (id in done) return null
         val message = message(id)
-        if (message == null || message.status !in unfinishedStatuses) { done += id; return message }
+        if (message == null || message.status !in unfinishedStatuses) return message.takeIf { done.add(id) }
+        // A refinement choice or a retry runs the same message again, and its new result goes to the same delegation (ruling R14).
+        if (done.remove(id)) progressed -= id
         return message.takeIf { it.status == "generating" && progressed.add(id) }
     }
 

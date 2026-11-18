@@ -54,12 +54,20 @@ internal object LiveProtocol {
                 .put("output", JSONObject().put("voice", OPENAI_LIVE_VOICE))))
         .toString()
 
-    /** The newest complete text messages inside the documented limits, oldest first. The item format is unverified until the live check. */
+    /**
+     * The newest finished text messages inside the documented limits, oldest first. The chat saves a sent request as `sent`, so a
+     * user message counts at `sent` or `complete` (ruling R13). The item format is unverified until the live check.
+     */
     fun history(messages: List<Message>): JSONArray {
         val kept = ArrayList<Message>()
         var chars = INSTRUCTIONS.length
         for (m in messages.asReversed()) {
-            if (m.status != "complete" || m.text.isBlank() || (m.role != "user" && m.role != "assistant")) continue
+            val finished = when (m.role) {
+                "user" -> m.status == "sent" || m.status == "complete"
+                "assistant" -> m.status == "complete"
+                else -> false
+            }
+            if (!finished || m.text.isBlank()) continue
             if (kept.size >= HISTORY_MESSAGES) break
             if (chars + m.text.length > HISTORY_CHARS) continue
             chars += m.text.length

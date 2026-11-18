@@ -52,6 +52,13 @@ class VoiceModeProtocolTest {
         assertEquals(2, items.length())
     }
 
+    /** The chat saves a sent request as `sent`, so a user message counts at `sent` or `complete` (ruling R13). */
+    @Test fun historyKeepsSentUserMessages() {
+        val items = LiveProtocol.history(listOf(message(0, "sent"), message(1), message(2, "pending"), message(3, "error"),
+            message(4, "queued"), message(5, "sent"), message(6)))
+        assertEquals(listOf("m0", "m1", "m6"), (0 until items.length()).map { items.item(it).getString("text").take(2) })
+    }
+
     @Test fun audioIsBase64LittleEndian() {
         val json = JSONObject(LiveProtocol.audio(shortArrayOf(1, -2)))
         assertEquals("session.input_audio.append", json.getString("type"))

@@ -16,6 +16,7 @@ import com.alpha.assistant.data.Message
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
+import com.alpha.assistant.tools.agentReply
 import com.alpha.assistant.voice.FakeLiveAudio
 import com.alpha.assistant.voice.FakeLiveTransport
 import com.alpha.assistant.voice.FakeSpeechInput
@@ -47,7 +48,8 @@ class ShellLiveVoiceWorkflowTest {
 
     @Test fun startPreloadsTheSelectedConversation() {
         fixture.store.saveConversation(Conversation("chat", "Чат", 1, 2, messages = listOf(
-            Message("m1", "user", "Первый вопрос", 1, "complete"), Message("m2", "assistant", "Первый ответ", 2, "complete"))))
+            // A sent request and its answer, as the chat saves them (ruling R13).
+            Message("m1", "user", "Первый вопрос", 1, "sent"), Message("m2", "assistant", "Первый ответ", 2, "complete"))))
         fixture.store.seedOpenChat("chat")
         install()
         live { _, _ ->
@@ -162,7 +164,22 @@ class ShellLiveVoiceWorkflowTest {
         }
     }
 
-    @Test fun refinementAsksForTheScreen() {
+    @Test fun refinementAsksForTheScreen() = refinement { _, model ->
+        assertEquals(listOf("d1" to "Нужно подтверждение на экране."), commentary())
+        assertEquals(2, messages(model).last().refinementChoices.size)
+    }
+
+    /** A choice on the card runs the same message again, and its new result goes to the same delegation (ruling R14). */
+    @Test fun refinementChoiceSpeaksTheNewResult() = refinement { scenario, model ->
+        scenario.onActivity { model.chooseRefinementTarget(messages(model).last().id, "a") }
+        robot.waitUntil(60_000) { commentary().size == 3 }
+        assertEquals(listOf("d1" to "Нужно подтверждение на экране.", "d1" to "Alphy готовит мини-приложение, оно появится на экране.",
+            "d1" to "Мини-приложение готово. Ответ Alphy: Готово."), commentary())
+        assertEquals("a", messages(model).last().toolId)
+    }
+
+    /** Two apps in the chat and a change request without a target: Alphy asks which app to change (AutomaticToolWorkflowTest). */
+    private fun refinement(test: (ActivityScenario<CloudTestActivity>, ShellViewModel) -> Unit) {
         ToolStore(fixture.context, "${fixture.name}.db-tools.db").use { tools ->
             listOf("a", "b").forEach { id ->
                 val spec = ToolSpec.parse(FIXTURE_APP)
@@ -173,16 +190,16 @@ class ShellLiveVoiceWorkflowTest {
             Message("card-$it", "assistant", "", 1, "complete", toolId = it, toolRevision = 1)
         }))
         fixture.store.seedOpenChat("chat")
-        // Two apps in the chat and a change request without a target: Alphy asks which app to change (AutomaticToolWorkflowTest).
         install(chat = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) =
-                emit(CloudEvent.RoundComplete(chatDecision("refine", "Готово.", "Change the counter"), false))
+                // The app agent of the chosen refinement writes a changed app.
+                if (request.generationStage != null) emit(CloudEvent.Text(request.agentReply(FIXTURE_APP.replace("\"Fixture\"", "\"Fixture Plus\""))))
+                else emit(CloudEvent.RoundComplete(chatDecision("refine", "Готово.", "Change the counter"), false))
         })
-        live { _, model ->
+        live { scenario, model ->
             say("Измени приложение", "d1", 100)
             robot.waitUntil { commentary().isNotEmpty() }
-            assertEquals(listOf("d1" to "Нужно подтверждение на экране."), commentary())
-            assertEquals(2, messages(model).last().refinementChoices.size)
+            test(scenario, model)
         }
     }
 
@@ -209,6 +226,21 @@ class ShellLiveVoiceWorkflowTest {
 
     @Test fun courseTopicEndsWithContinueOnScreen() = endsOnScreen("Научи меня испанскому языку",
         { fixture.provider.courseTopic = "Испанский язык" }) { it.courseSetup != null }
+
+    /** A chat change ends the mode without a status, as it stops the continuous voice session (ruling R15). */
+    @Test fun selectionChangeEndsTheMode() {
+        fixture.seedChat("a", "Первый", "Привет")
+        install()
+        live { scenario, model ->
+            listOf<(ShellViewModel) -> Unit>({ it.select("a") }, { it.deleteConversation("a") }, { it.clearHistory() }).forEach { change ->
+                scenario.onActivity { model.startLiveVoice() }
+                assertTrue(model.liveVoice.active)
+                scenario.onActivity { change(model) }
+                assertFalse(model.liveVoice.active)
+                assertEquals("", model.liveVoice.status)
+            }
+        }
+    }
 
     @Test fun liveAndContinuousVoiceExclude() {
         val input = FakeSpeechInput { awaitCancellation() }

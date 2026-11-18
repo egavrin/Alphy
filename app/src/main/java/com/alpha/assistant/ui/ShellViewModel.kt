@@ -978,6 +978,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
             if (active?.weatherDraft != null) cancelRequest()
         }
         voice.stop()
+        endLiveVoice()
         snapshot = snapshot.copy(selectedId = id)
         if (phoneAgent.isInitialized()) agent.chatChanged(id)
     }
@@ -1038,6 +1039,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
         if (snapshot.selectedId == id) {
             leaveCourseChat()
             voice.stop()
+            endLiveVoice()
         }
         deletedConversationIds += id
         snapshot = snapshot.copy(conversations = snapshot.conversations.filterNot { it.id == id },
@@ -1054,6 +1056,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
         cancelRequest()
         leaveCourseChat()
         voice.stop()
+        endLiveVoice()
         historyCleared = true
         snapshot = snapshot.copy(conversations = emptyList(), selectedId = null)
         writes.trySend {
