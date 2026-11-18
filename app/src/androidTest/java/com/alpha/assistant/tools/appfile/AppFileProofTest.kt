@@ -48,7 +48,7 @@ internal suspend fun smoked(sandbox: SandboxClient,spec: ToolSpec,name: String,s
     }
 }
 
-/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps and each node of the node table in Alphy's checks, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, and the time of each saved plan with its lists full. */
+/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps, each node of the node table, and each look option in Alphy's checks, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, and the time of each saved plan with its lists full. */
 @RunWith(AndroidJUnit4::class)
 class AppFileProofTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
@@ -99,6 +99,14 @@ class AppFileProofTest {
         val ring=nodes(spec.ui).single {it.optString("type") == "progressRing"}
         assertFalse(ring.toString(),ring.has("children"))
         assertEquals(2.5,state.getJSONObject("d").getDouble("half_value"),0.0)
+    }
+    @Test fun eachLookOptionPassesParseAndSmoke(): Unit=runBlocking {
+        // looks.plan is kit/test/looks.plan: each look option and a Grid, and the kit test reads the same text.
+        val spec=parsedAndSmoked(SandboxClient(instrumentation.targetContext),"looks")
+        val all=nodes(spec.ui)
+        assertEquals(3,all.single {it.optString("type") == "grid"}.getInt("columns"))
+        assertEquals(listOf("Small","Large"),all.first {it.optString("type") == "segmented"}.getJSONArray("options").let {options -> List(options.length()) {options.getJSONObject(it).getString("text")}})
+        assertEquals("display",all.single {it.optString("type") == "progressRing"}.getJSONArray("children").getJSONObject(0).getJSONObject("style").getString("emphasis"))
     }
     @Test fun calcPassesParseAndSmoke(): Unit=runBlocking {
         val sandbox=SandboxClient(instrumentation.targetContext)

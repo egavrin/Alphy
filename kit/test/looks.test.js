@@ -1,12 +1,13 @@
 // The look options of the components: each one as the property of Alphy's node, and each unknown value as a fault of its line.
 
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { report } from "../src/check.js";
 import { compileAppFile } from "../src/compile.js";
 import { App } from "../src/core.js";
 import { emit } from "../src/emit.js";
 import { handle } from "../src/run.js";
-import { every, planned } from "./helpers.js";
+import { every, fixture, planned } from "./helpers.js";
 
 /** The children of the app's column of a plan that the emitter builds with no fault. */
 const shown = async (...lines) => {
@@ -20,6 +21,9 @@ const faultsOf = async (...lines) => report(await planned(['app("Look", lang="en
 test("look: the column of the app has a medium gap and a medium padding", async () => {
   const { definition } = emit(await planned(['app("Pad", lang="en")', 'root = Column([Text("Hi")])'].join("\n")));
   expect(definition.ui.children).toEqual([{ type: "column", style: { gap: "medium", padding: "medium" }, children: [{ type: "text", text: "Hi" }] }]);
+  // The root Column is the column of the app, so its gap= is the gap of the app.
+  const spread = emit(await planned(['app("Pad", lang="en")', 'root = Column([Text("Hi")], gap="large")'].join("\n"))).definition;
+  expect(spread.ui.children[0].style).toEqual({ gap: "large", padding: "medium" });
 });
 
 test("look: an Emoji has the size of the plan, from a sign, a state value, and a field of a row", async () => {
@@ -162,4 +166,50 @@ test("look: an unknown value of a look option, and an option that the component 
     'j: the variant of a CheckBox is one of circle, and "square" is not one',
     'k: the tone of a Text is a value in the line, or a choice of values such as $/on ? "a" : "b"',
   ]);
+});
+
+test("look: the row of a list holds an emoji, a column of two texts, a number, a checkbox, and a trash button", async () => {
+  const { definition, faults } = emit(await planned(['app("Spesa", lang="it")',
+    '$/items = [{emoji: "🥛", name: "Latte", aisle: "Frigo", price: "1,20 €", done: false}]', "root = Column([items])", "items = List($/items, item)",
+    'item = Row([Emoji($emoji, size="small"), Column([Text($name), Text($aisle, tone="muted")], weight=1, gap="none"), Text($price, emphasis="number"), CheckBox("Preso", $done), IconButton("Trash", remove(), "Rimuovi")])'].join("\n")));
+  expect(faults).toEqual([]);
+  const list = definition.ui.children[0].children[0], [emoji, column, price, check, trash] = list.rowTemplate.children;
+  expect(list.rowTemplate).toMatchObject({ type: "row", wrap: false, style: { crossAlign: "center" } });
+  expect(emoji).toEqual({ type: "emoji", text: "item Emoji", bind: "emoji", size: "small" });
+  expect(column).toEqual({ type: "column", style: { gap: "none" }, layout: { weight: 1 },
+    children: [{ type: "text", text: "", bind: "name" }, { type: "text", text: "", bind: "aisle", style: { tone: "muted" } }] });
+  expect(price).toEqual({ type: "text", text: "", bind: "price", style: { emphasis: "number" } });
+  expect(check).toMatchObject({ type: "checkbox", text: "Preso", bind: "done" });
+  expect(trash).toMatchObject({ type: "icon", name: "Trash", text: "Rimuovi" });
+  // The render work of one row is its 8 nodes, so the screen of 3 nodes has room for min(100, floor((2048 - 3) / 8)) = 100 rows.
+  expect(definition.stateSchema.items.maxItems).toBe(100);
+});
+
+test("look: looks.plan holds each look option and a Grid, and compiles with no fault", async () => {
+  // The device test eachLookOptionPassesParseAndSmoke sends the same plan through Alphy's validators.
+  const text = readFileSync(new URL("./looks.plan", import.meta.url), "utf8"), result = await compileAppFile(text);
+  expect(result.faults).toEqual([]);
+  const found = every(result.definition.ui), looks = new Set(found.flatMap((node) => [
+    ...Object.entries(node.style ?? {}).map(([key, value]) => `${node.type} ${key} ${value}`),
+    ...["icon", "size", "columns", "variant"].filter((key) => node[key] !== undefined).map((key) => `${node.type} ${key} ${node[key]}`)]));
+  expect([...looks].sort()).toEqual(expect.arrayContaining([
+    "badge icon Info", "badge tone accent", "badge tone muted", "banner icon Trophy", "banner tone success", "button icon Plus", "button icon Sort",
+    "button variant filled", "button variant outlined", "button variant text", "button variant tonal", "card icon Star", "checkbox variant circle",
+    "column gap large", "column gap medium", "column gap none", "column gap small", "dateInput icon Calendar", "emoji size large", "emoji size medium",
+    "emoji size small", "grid columns 3", "input icon Pencil", "metric emphasis display", "metric emphasis number", "metric icon Drop", "metric icon Target",
+    "metric tone accent", "metric tone warning", "numberInput icon Cup", "row crossAlign center", "flowRow crossAlign start", "flowRow gap small", "select icon Map",
+    "text align center", "text align end", "text emphasis body", "text emphasis display", "text emphasis headline", "text emphasis label",
+    "text emphasis number", "text emphasis title", "text tone error", "text tone muted", "text tone success", "text tone warning", "timeInput icon Clock"]));
+  // The labels of the options of a map, and the display text inside the ring.
+  expect(found.filter((node) => node.options).map((node) => node.options.map((option) => option.text).join(" "))).toEqual(
+    ["Small Large", "Rome Oslo Lima Kyiv Baku Doha Riga", "First Second"]);
+  expect(found.find((node) => node.type === "progressRing").children[0].style).toEqual({ emphasis: "display" });
+});
+
+test("look: the two requests written with components only have no part, no fault, and checks that pass", async () => {
+  for (const name of ["look-water-ko", "look-shopping-it"]) {
+    const text = fixture(name), result = report(await planned(text));
+    expect([name, /^need /m.test(text), result.faults, result.checks.map((check) => check.pass)]).toEqual([name, false, [], [true]]);
+    expect((await compileAppFile(text)).faults).toEqual([]);
+  }
 });

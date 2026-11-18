@@ -1,0 +1,24 @@
+app("Looks", lang="en", preset="clean", palette="blue")
+# Each look option of the components and a Grid. The device test eachLookOptionPassesParseAndSmoke sends this plan through Alphy's validators.
+$/sign = "💧"
+$/n = 3
+$/on = true
+$/size = "s"
+$/city = "rome"
+$/kinds = ["a"]
+$/name = "Ann"
+$/day = "2026-11-19"
+$/at = "08:30"
+$/items = [{emoji: "🥛", name: "Milk", aisle: "Dairy", price: "1.20", done: false}, {emoji: "🍞", name: "Bread", aisle: "Bakery", price: "2.10", done: true}]
+root = Column([hero, words, tones, figures, done, buttons, fields, picks, basket], gap="large")
+basket = Section("Basket", [items])
+hero = Card([Emoji("🛒", size="large"), Emoji($/sign, size="medium"), Ring($/n, 10, $/n + "/10", label="Cups")], variant="hero", icon="Star")
+words = Column([Text("Body", emphasis="body"), Text("Title", emphasis="title"), Text("Headline", emphasis="headline"), Text("Label", emphasis="label"), Text("12.5", emphasis="number"), Text("99", emphasis="display", align="center"), Text("End", align="end", variant="muted")], gap="small")
+tones = Row([Badge("Muted", tone="muted", icon="Info"), Badge("Accent", tone="accent"), Text("Success", tone="success"), Text("Warning", tone="warning"), Text("Error", tone=$/on ? "error" : "muted")], align="start", gap="small")
+figures = Grid([Metric("Drops", $/n, icon="Drop", emphasis="display", tone="accent"), Metric("Goal", 8, icon="Target", emphasis="number"), Metric("Left", 8 - $/n, tone="warning")], columns=3)
+done = Notice("Goal reached", tone="success", icon="Trophy")
+buttons = Row([Button("Add", inc($/n), variant="filled", icon="Plus"), Button("Less", dec($/n), variant="outlined", icon="ArrowDown"), Button("Mid", set($/n, 5), variant="tonal"), Button("Zero", set($/n, 0), variant="text"), IconButton("Heart", inc($/n), "Like")], gap="small")
+fields = Column([TextField("Name", $/name, icon="Pencil"), NumberField("Count", $/n, icon="Cup"), DateField("Day", $/day, icon="Calendar"), TimeField("At", $/at, icon="Clock")], gap="medium")
+picks = Column([Segmented("Size", $/size, {s: "Small", l: "Large"}), Select("City", $/city, {rome: "Rome", oslo: "Oslo", lima: "Lima", kyiv: "Kyiv", baku: "Baku", doha: "Doha", riga: "Riga"}, icon="Map"), Choices("Kinds", $/kinds, {a: "First", b: "Second"}), CheckBox("Agree", $/on, variant="circle")])
+items = List($/items, item)
+item = Row([Emoji($emoji, size="small"), Column([Text($name), Text($aisle, tone="muted")], weight=1, gap="none"), Text($price, emphasis="number"), CheckBox("Got", $done, variant="circle"), IconButton("Trash", remove(), "Remove")])

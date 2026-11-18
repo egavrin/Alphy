@@ -46,7 +46,7 @@ test("run: open of the initial state gives the initial state", async () => {
     expect(reply).toEqual({ state: definition.initialState, ...(definition.surfaces && { surfaces: reply.surfaces, timers: [] }) });
     opened.push(path);
   }
-  expect(opened).toHaveLength(22);
+  expect(opened).toHaveLength(25);
   expect(opened).toEqual(expect.arrayContaining(["plans/tea.plan", "plans/timer-rounds.plan", "plans/lesson.plan", "plans/model3d.plan", "test/shapes.plan", "test/model.plan"]));
 });
 

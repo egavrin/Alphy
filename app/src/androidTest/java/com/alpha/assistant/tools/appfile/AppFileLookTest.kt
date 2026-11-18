@@ -26,7 +26,8 @@ import java.io.File
 import java.util.Locale
 
 /** The fixtures of kit/build.js LOOK_FIXTURES with the language of each app. */
-private val LOOK_FIXTURES=mapOf("water-ko" to "ko","units-pl" to "pl","shopping" to "en","habits" to "en","price-filter" to "en")
+private val LOOK_FIXTURES=mapOf("water-ko" to "ko","units-pl" to "pl","shopping" to "en","habits" to "en","price-filter" to "en",
+    "look-water-ko" to "ko","look-shopping-it" to "it")
 
 /** Each compiled plan as a saved app in the real shell: its pictures in the light and the dark theme, the host's words in the language of the app, a real tap on a row control, and the host's own timer loop of a drawn app. */
 @RunWith(AndroidJUnit4::class)

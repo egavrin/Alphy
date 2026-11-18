@@ -712,6 +712,7 @@ test("emit: the texts that are the name of a line, in each saved plan and fixtur
     "plans/tabs-chart.plan": ["gastos remove"], "plans/tea.plan": [], "plans/timer-rounds.plan": [], "plans/lesson.plan": [], "plans/model3d.plan": [], "test/shapes.plan": [], "test/bytes.plan": [], "test/model.plan": [],
     "test/cards.plan": ["tasks remove"], "test/free.plan": [], "test/fixtures/habits.plan": ["habits remove", "habits done"], "test/fixtures/price-filter.plan": [],
     "test/fixtures/shopping.plan": ["items remove", "items done"], "test/fixtures/units-pl.plan": [], "test/fixtures/water-ko.plan": ["ml minus", "ml plus"],
+    "test/fixtures/look-water-ko.plan": [], "test/fixtures/look-shopping-it.plan": [], "test/looks.plan": [],
     "test/lists.plan": ["acts remove", "acts close", "doses taken minus", "doses taken plus", "doses remove", "steps remove"],
     "test/nodes.plan": ["up", "down", "left", "right", "edit"],
     "test/rich.plan": ["shirts size", "shirts remove", "shirts done", "shoes size", "shoes remove", "shoes done"],
