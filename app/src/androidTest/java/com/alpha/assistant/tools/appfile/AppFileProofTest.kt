@@ -630,7 +630,8 @@ class AppFileProofTest {
                 step.act(id)
                 Triple(press(id),median,true)
             }}.orEmpty()
-            val slowest=(timed+listOfNotNull(add)+shown).filter {it.third}.maxByOrNull {it.second}
+            val measured=timed+listOfNotNull(add)+shown
+            val slowest=measured.filter {it.third}.maxByOrNull {it.second}
             assertNotNull("$name: no action changes the state",slowest)
             val (slow,slowMs)=checkNotNull(slowest)
             // The slowest action once more through Alphy's checks. The add and the later actions went through them above.
@@ -644,15 +645,18 @@ class AppFileProofTest {
                 } finally {surface.close()}
             }
             fun idsOf(events: List<JSONObject>)=events.map {it.getString("actionId")}
-            // The counts: the actions that change the state, the actions that the open screen takes, and the actions of the smoke step.
             // untimed: each action id of the open screen that no timed event has.
+            val untimed=actionIds(root)-idsOf(measured.map {it.first}).toSet()
+            // The counts: the actions that change the state, the actions that the open screen takes, and the actions of the smoke step.
             Log.i("AppFileProofTest","time $name open=$openMs action=$slowMs ${slow.getString("actionId")} add=${add?.second ?: "-"} host=${host ?: "-"} " +
                 "later=${shown.map {"${it.first.getString("actionId")}=${it.second}"}} " +
                 "actions=${timed.count {it.third}}/${timed.size}/${sent.size} kept=${idsOf(timed.filterNot {it.third}.map {it.first})} " +
-                "notOnOpen=${idsOf(notOnOpen)} untimed=${actionIds(root)-idsOf(timed.map {it.first}+listOfNotNull(add?.first)+shown.map {it.first}).toSet()} " +
-                "stateBytes=${opened.toString().toByteArray().size}")
+                "notOnOpen=${idsOf(notOnOpen)} untimed=$untimed stateBytes=${opened.toString().toByteArray().size}")
+            // The host owns the foreground timer of tea: it sends no event to the source.
+            assertEquals(name,if(name == "tea") setOf("demleme_timer") else emptySet(),untimed)
             if(openMs>=250) over+="$name open $openMs ms"
-            if(slowMs>=250) over+="$name action ${slow.getString("actionId")} $slowMs ms"
+            // Each measured action, also an action whose reply keeps the state.
+            for((event,median) in measured) if(median>=250) over+="$name action ${event.getString("actionId")} $median ms"
             if(host != null && host>=50) over+="$name host $host ms"
         }
         assertEquals(emptyList<String>(),over)

@@ -178,9 +178,9 @@ The device test `eachPlanAnswersInTime` does these steps for each saved plan:
    Then send the action through `executeEvent`. These are `timer_pause` and `timer_reset` after `timer_start`, and `lesson_back` after `lesson_next`.
 9. Take the slowest action whose reply changes the state, the add and the actions of step 8 included. Send it once more through `executeEvent`.
 10. For a plan with a surface, send the start event and five surface events through one retained `GraphicsSession`.
-11. Log each action id of the open screen that no timed event has.
+11. Assert the set of action ids of the open screen that no timed event has: `demleme_timer` for `tea`, and no action id for each other plan.
 
-The limits are 250 ms for `open` and an action, and 50 ms for a surface event.
+The limits are 250 ms for `open` and for each timed action, also an action whose reply keeps the state, and 50 ms for a surface event.
 Alphy stops an evaluation at 500 ms (`SandboxContract.EVALUATION_MS`), and a frame, pointer, or timer event at 100 ms (`GraphicsContract.EVALUATION_MS`).
 The medians of the run `appfile-sizes-times-round`:
 
