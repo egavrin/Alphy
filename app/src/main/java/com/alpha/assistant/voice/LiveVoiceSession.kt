@@ -78,6 +78,8 @@ internal class LiveVoiceSession(
     /** A barge-in emptied the playback, so the next user turn still started over Alphy's voice. */
     private var interrupted = false
     private var lastOutputMs = 0L
+    /** The uptime of the last capture block or output chunk that saw playback audio. */
+    private var playbackSeenMs = Long.MIN_VALUE
     private var waiting: LiveEvent.Delegation? = null
     /** The client event ids of the commentary and thinking appends of this session. */
     private val appends = HashSet<String>()
@@ -98,6 +100,7 @@ internal class LiveVoiceSession(
         this.firstSpeech = firstSpeech
         transcript = LiveTranscript(); detector = BargeInDetector(); waiting = null; appends.clear()
         started = false; userMuted = false; awayMuted = false; captureMuted = false; dropping = false; interrupted = false; lastOutputMs = 0
+        playbackSeenMs = Long.MIN_VALUE
         active = true; status = ""; phase = LivePhase.CONNECTING
         scope.launch {
             try {
@@ -185,7 +188,10 @@ internal class LiveVoiceSession(
             }
             is LiveEvent.OutputAudio -> output(event.samples)
             is LiveEvent.InputTranscript -> {
-                transcript.input(event.delta, event.startMs, event.endMs, live?.playbackActive == true || interrupted)
+                refresh()
+                // A delta arrives after its own end, so its phrase began at or before this time (ruling R11).
+                val began = SystemClock.uptimeMillis() - (event.endMs - event.startMs)
+                transcript.input(event.delta, event.startMs, event.endMs, playbackSeenMs >= began || interrupted)
                 interrupted = false
                 gapJob?.cancel()
                 gapJob = after(timing.turnGapMs) { turn(transcript.endTurn()) }
@@ -232,7 +238,7 @@ internal class LiveVoiceSession(
         // shortcut: a chunk that the player has already taken can still play after a flush; lock it if the echo check hears it.
         if (!dropping) { val epoch = playback; player.launch { if (epoch == playback) device.play(samples) } }
         replyJob?.cancel()
-        replyJob = after(timing.replyGapMs) { host?.outputEnded(transcript.outputEndMs) }
+        replyJob = after(timing.replyGapMs) { host?.outputEnded(transcript.outputEndMs); countSilence() }
         refresh()
     }
 
@@ -277,21 +283,27 @@ internal class LiveVoiceSession(
     }
 
     /**
-     * Counts the 60 s without user speech again. At its end, a running hand-off restarts the count. A commentary or a thinking
-     * text also restarts it, because the user needs time to hear a result (spec 5.8).
+     * Counts the 60 s without user speech again. At its end, a running hand-off or Alphy's own reply (arriving output audio or
+     * playback) restarts the count. The output end, a commentary, and a thinking text also restart it, because the user needs
+     * time to hear a result (spec 5.8, ruling R12).
      */
     private fun countSilence() {
         silenceJob?.cancel()
         if (!started || userSpeaking) return
-        silenceJob = after(timing.silenceMs) { if (host?.handOffRunning() == true) countSilence() else end(string(R.string.live_voice_no_speech)) }
+        silenceJob = after(timing.silenceMs) {
+            val replying = replyJob?.isActive == true || live?.playbackActive == true
+            if (replying || host?.handOffRunning() == true) countSilence() else end(string(R.string.live_voice_no_speech))
+        }
     }
 
     private fun refresh() {
+        val playing = live?.playbackActive == true
+        if (playing) playbackSeenMs = SystemClock.uptimeMillis()
         phase = when {
             !active -> LivePhase.IDLE
             !started -> LivePhase.CONNECTING
             captureMuted -> LivePhase.MUTED
-            live?.playbackActive == true -> LivePhase.SPEAKING
+            playing -> LivePhase.SPEAKING
             else -> LivePhase.LISTENING
         }
     }

@@ -156,10 +156,10 @@ class VoiceModeSessionTest {
         waitUntil("user stopped") { !rig.session.userSpeaking }
         rig.socket.emit(outputAudio(3))
         rig.socket.emit(outputDelta("Хорошо", 1_000, 1_500))
-        // A second turn before the next reply did not start over Alphy's voice.
-        rig.socket.emit(inputDelta("Да", 1_600, 1_900))
         main { }
         SystemClock.sleep(700)
+        // A second turn before the next reply, longer after the playback than its own length, did not start over Alphy's voice.
+        rig.socket.emit(inputDelta("Да", 1_600, 1_900))
         rig.socket.emit(outputAudio(4))
         rig.socket.emit(outputDelta("Понял", 2_000, 2_500))
         waitUntil("next reply") { rig.audio.played.size == 2 && rig.turns().size == 2 }
@@ -258,6 +258,47 @@ class VoiceModeSessionTest {
         }
     }
 
+    @Test fun overlapFollowsTheTurnStart() {
+        val rig = Rig().started()
+        rig.audio.playbackActive = true
+        repeat(3) { rig.audio.capture(quiet()) }
+        main { }
+        rig.audio.playbackActive = false
+        rig.audio.capture(quiet())
+        main { }
+        SystemClock.sleep(500)
+        // A delta arrives after its own end: this 800 ms phrase began while the playback still had audio.
+        rig.socket.emit(inputDelta("Да", 1_000, 1_800))
+        rig.socket.emit(outputDelta("Хорошо", 2_000, 2_300))
+        // This 200 ms phrase began after the playback stopped.
+        rig.socket.emit(inputDelta("Нет", 3_000, 3_200))
+        rig.socket.emit(outputDelta("Ладно", 3_400, 3_600))
+        waitUntil("turns") { rig.turns().size == 2 }
+        assertEquals(listOf("turn:Да:1000:1800:true", "turn:Нет:3000:3200:false"), rig.turns())
+    }
+
+    @Test fun silenceCountsFromTheEndOfAlphysReply() {
+        val timing = TIMING.copy(silenceMs = 400, replyGapMs = 200)
+        val rig = Rig(timing).started()
+        repeat(8) { rig.socket.emit(outputAudio(1)); SystemClock.sleep(100) }
+        assertTrue("Arriving output audio keeps the voice mode", main { rig.session.active })
+        // The buffered reply still plays after its last chunk.
+        rig.audio.playbackActive = true
+        SystemClock.sleep(800)
+        assertTrue("Playback keeps the voice mode", main { rig.session.active })
+        rig.audio.playbackActive = false
+        waitUntil("silence end") { !rig.session.active }
+        assertEquals(listOf("ended:${text(R.string.live_voice_no_speech)}:false"), rig.ends())
+        // Without speech, the mode ends silenceMs after the output end, which comes replyGapMs after the last chunk.
+        val quiet = Rig(timing).started()
+        quiet.socket.emit(outputAudio(1))
+        val last = SystemClock.uptimeMillis()
+        SystemClock.sleep(450)
+        assertTrue("The count starts again at the output end", main { quiet.session.active })
+        waitUntil("silence end after the reply") { !quiet.session.active }
+        assertTrue(SystemClock.uptimeMillis() - last >= timing.replyGapMs + timing.silenceMs)
+    }
+
     @Test fun silenceEndsOnlyWithoutRunningHandOff() {
         val rig = Rig(TIMING.copy(silenceMs = 400))
         rig.host.running = true
@@ -302,15 +343,18 @@ class VoiceModeSessionTest {
         main { }
         rig.audio.playbackActive = false
         rig.socket.emit(outputDelta("Привет!", 1_000, 1_600))
+        // The next phrase arrives later after the playback than its own length.
+        SystemClock.sleep(400)
         rig.socket.emit(inputDelta("Как", 2_000, 2_300))
         rig.socket.emit(inputDelta(" дела", 2_300, 2_600))
         waitUntil("gap turn") { rig.host.calls.size == 2 }
         // The answer after the gap starts the next request.
         rig.socket.emit(outputDelta("Хорошо.", 2_700, 2_900))
-        rig.socket.emit(inputDelta("Поставь таймер", 3_000, 3_800))
+        // Shorter than the 400 ms sleep plus the 300 ms turn gap since the playback stopped.
+        rig.socket.emit(inputDelta("Поставь таймер", 3_000, 3_400))
         rig.socket.emit(delegation("d1", 4_000))
         waitUntil("delegation") { rig.host.calls.size == 4 }
-        assertEquals(listOf("turn:Привет:0:800:true", "turn:Как дела:2000:2600:false", "turn:Поставь таймер:3000:3800:false",
+        assertEquals(listOf("turn:Привет:0:800:true", "turn:Как дела:2000:2600:false", "turn:Поставь таймер:3000:3400:false",
             "delegation:d1:Поставь таймер"), rig.host.calls)
     }
 
