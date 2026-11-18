@@ -23,11 +23,12 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.util.Locale
 
 /** The fixtures of kit/build.js LOOK_FIXTURES with the language of each app. */
 private val LOOK_FIXTURES=mapOf("water-ko" to "ko","units-pl" to "pl","shopping" to "en","habits" to "en","price-filter" to "en")
 
-/** Each compiled plan as a saved app in the real shell: its pictures in the light and the dark theme, a real tap on a row control, and the host's own timer loop of a drawn app. */
+/** Each compiled plan as a saved app in the real shell: its pictures in the light and the dark theme, the host's words in the language of the app, a real tap on a row control, and the host's own timer loop of a drawn app. */
 @RunWith(AndroidJUnit4::class)
 class AppFileLookTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
@@ -136,6 +137,21 @@ class AppFileLookTest {
             same
         }
         return checkNotNull(last)
+    }
+
+    @Test fun theHostWordsOfAnAppAreInTheLanguageOfTheApp() {
+        val spec=runBlocking {parsedAndSmoked(SandboxClient(instrumentation.targetContext),"tea","tr")}
+        val context=instrumentation.targetContext
+        fun word(tag: String,resource: Int)=context.createConfigurationContext(Configuration(context.resources.configuration).apply {setLocale(Locale.forLanguageTag(tag))}).getString(resource)
+        // The host's own Russian word, and the word of the other language that miniAppString takes in Turkish.
+        val russian=word("ru",R.string.foreground_timer_start)
+        val turkish=word("tr",R.string.foreground_timer_start_en)
+        assertNotEquals(russian,turkish)
+        inShell("appfile-language",mapOf("appfile-tea" to spec)) {robot,model,_,_ ->
+            open(robot,model,"appfile-tea",spec)
+            robot.waitFor(turkish)
+            assertNull(russian,robot.find(russian))
+        }
     }
 
     @Test fun aTapOnARowControlChangesTheRow() {

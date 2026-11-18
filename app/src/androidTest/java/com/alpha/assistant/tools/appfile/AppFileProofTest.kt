@@ -27,12 +27,12 @@ internal val SAVED_PLANS=mapOf("calc" to "en","list" to "it","quiz" to "ja","tab
     "lesson" to "ru","model3d" to "ru")
 /** A plan of the test assets that kit/build.js copies. */
 internal fun plan(name: String)=InstrumentationRegistry.getInstrumentation().context.assets.open("appfile/$name.plan").use {it.readBytes().decodeToString()}
-/** A saved plan through compile, ToolSpec.parse, and the smoke step as AppAgent.validate builds it. */
+/** A saved plan through compile, ToolSpec.parse with the language of the compile result, and the smoke step as AppAgent.validate builds it. */
 internal suspend fun parsedAndSmoked(sandbox: SandboxClient,name: String,language: String="en",text: String=plan(name),observeReplay: ((List<String>)->Unit)?=null): ToolSpec {
     val result=AppFileCompiler(InstrumentationRegistry.getInstrumentation().targetContext,sandbox).compile(text)
     assertEquals(result.faults.toString(),"ok",result.status)
     assertEquals(language,result.language)
-    val spec=ToolSpec.parse(checkNotNull(result.definition))
+    val spec=ToolSpec.parse(checkNotNull(result.definition)).withAppLanguage(result.language)
     smoked(sandbox,spec,name,spec.initialState,observeReplay)
     return spec
 }
