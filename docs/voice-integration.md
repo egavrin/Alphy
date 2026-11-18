@@ -73,6 +73,152 @@ OpenAI offers no cloud voice. Its `/v1/audio/speech` models shut down on 2027-01
 Anthropic offers no speech endpoint.
 DeepSeek has no cloud voice (user decision, 2026-11-17). An account with a stored «Облако» choice reads replies with the phone voice, and the stored choice stays.
 
+## Voice mode («Голосовой режим»)
+
+The voice mode is a full-duplex spoken dialog with OpenAI GPT-Live. GPT-Live talks with the user and hands each task to the chat agent of Alphy.
+The spec is `docs/superpowers/specs/2026-11-18-live-voice-dialog-design.md`.
+
+### Availability
+
+- The voice mode exists only when the account provider is OpenAI.
+- In the full chat, the send button of an empty composer becomes «Голосовой режим». With text in the field, the button sends the text as before.
+- With an OpenAI account, a press of the assistant button opens the compact assistant with the voice view and starts the voice mode at once. With another provider, the sheet opens as before, and «Непрерывный голосовой сеанс» stays in its menu.
+- The course composers have no voice mode.
+- The start needs the microphone permission. The voice mode and the continuous voice session never run at the same time.
+- The voice screen shows the card of the latest hand-off, the Alphy character, and a status line: «Слушаю», «Alphy говорит», «Alphy выполняет запрос», or «Микрофон выключен».
+- The microphone button mutes the capture and sends `session.input_audio.mute`. ✕ ends the voice mode.
+
+### Session and hand-offs
+
+`voice/LiveVoiceSession.kt` opens one WebSocket to `wss://api.openai.com/v1/live/sessions` with `Authorization: Bearer <key>`.
+The model is `gpt-live-1`, and the voice is `marin`. The audio is `audio/pcm` at 16,000 Hz, mono, in both directions.
+The session omits `delegation`, so GPT-Live runs in client mode. GPT-Live sends `session.delegation.created`, and Alphy answers with `session.commentary.append`.
+
+- The request of a delegation is the last user turn of the input transcript. Alphy submits it as a normal chat message, with web search allowed.
+- When the reply is complete, Alphy sends «Ответ Alphy: » and the speakable reply, cut at a sentence end to at most 1,200 characters.
+- A mini-app request first sends «Alphy готовит мини-приложение, оно появится на экране.». The ready mini-app sends «Мини-приложение готово. Ответ Alphy: » and the reply.
+- A failed request sends «Alphy не смог выполнить запрос: » and the error text.
+- A phone-action plan shows its plan card in the voice card. Each end phase of the plan sends one more commentary: «Готово.», «Не получилось.», or «Действие отменено.».
+- A memory fact, an automation draft, or a course topic ends the voice mode with «Продолжите на экране».
+- A hand-off request runs to its end, also after the voice mode ends. Its result stays in the chat.
+- Text that the user types on the voice screen goes to Alphy. The reply goes to GPT-Live as quiet context (`session.thinking.append`).
+
+### Data sent to OpenAI
+
+- The microphone audio, continuously while the microphone is not muted.
+- Fixed Russian instructions (`LiveProtocol.INSTRUCTIONS` in `voice/LiveProtocol.kt`).
+- A history preload: the latest text messages of the selected conversation, at most 128 messages and 8,192 tokens. Attachments, images, and mini-app content are not sent.
+- The commentary and thinking texts: the replies of Alphy and short status lines.
+
+Each hand-off request also goes to the chat model of the account, as a typed request does.
+The voice mode adds no consent line. The OpenAI consent already names voice recordings for speech recognition, and chat text already goes to OpenAI.
+Alphy does not store the audio. The transcripts stay in memory for the session. Only the hand-off messages are saved in the chat.
+
+### Cost
+
+GPT-Live costs $0.05 per minute. OpenAI bills each second of the open session, silence included.
+Hand-offs also cost the normal chat requests of the account. The voice screen shows no price or timer.
+
+### End of the voice mode
+
+Each end closes the capture and the playback, sends `session.close`, restores the audio mode and focus, and closes the voice screen.
+The chat shows the status in the composer status line.
+
+| Event | Status |
+| --- | --- |
+| ✕ | none |
+| The screen goes off, or the activity stops while no screen or app that Alphy opened is in front | none |
+| 60 s without user speech while no hand-off runs | «Голосовой режим завершён: нет речи 60 с» |
+| 10 s without speech after a press of the assistant button | «Голосовой режим завершён: нет речи» |
+| Audio focus loss | «Голосовой режим прерван другим звуком» |
+| The provider is no longer OpenAI, or the key is removed | «Голосовой режим доступен только с ключом OpenAI» |
+| `session.closed` with `expired` | «Сеанс голосового режима истёк. Начните заново.» |
+| `session.closed` with `content` | «OpenAI прервал голосовой режим по правилам содержания» |
+| A connection loss, or no `session.started` within 10 s | «Связь с OpenAI прервалась» |
+| An HTTP refusal of the upgrade | The provider error text. A key error opens «Сервис ИИ». |
+| An `error` event that is not for a sent commentary or thinking text | «OpenAI: ошибка голосового режима. Начните заново.» |
+
+A permission dialog, a picker of «+», or an app that Alphy opens mutes the microphone and keeps the session. The microphone unmutes when Alphy is in front again.
+In the compact assistant, the voice mode also ends when the sheet closes, at `onHide`, at `onLockscreenShown`, and when the sheet opens the full app.
+
+### Voice approval
+
+GPT-Live reads a phone-action plan aloud and asks for «да» or «нет». The code of Alphy decides the approval, never GPT-Live.
+The window opens when GPT-Live ends the proposal, and it stays open for 30 s. Only a whole user turn from these lists counts, without case and punctuation:
+
+- Approval: «да», «да, запускай», «запускай», «выполняй», «подтверждаю», «давай», «yes», «go ahead».
+- Rejection: «нет», «не надо», «отмена», «отмени», «стоп», «no», «cancel».
+
+A turn that starts while Alphy speaks never approves. The plan runs only when its id and revision are unchanged and it is still in review.
+A tap on the plan card works at all times.
+
+Voice approval is on only for the phone models in `VOICE_APPROVAL_MODELS` (`voice/LiveAudio.kt`).
+The list is empty, so voice approval is off on every device until a phone model passes the echo check.
+While voice approval is off, the plan card needs a tap, and GPT-Live says «Нужно подтверждение на экране.».
+
+### Echo check
+
+The echo check tests that the loudspeaker echo does not reach GPT-Live (spec 6.4). It needs a real phone with the loudspeaker, no headset, and a quiet room.
+
+1. Install the debug and test APKs only on a phone without the release app. A signature mismatch uninstalls the release app and deletes its data.
+2. Run `adb shell am instrument -w -e class com.alpha.assistant.voice.EchoCheckDeviceTest com.alpha.assistant.test/androidx.test.runner.AndroidJUnitRunner` on the phone.
+3. Pull `<Build.MODEL>-reply.wav` and `<Build.MODEL>-proposal.wav` from `/sdcard/Android/data/com.alpha.assistant/files/echo-check/`.
+4. Copy both files to `app/src/androidTest/assets/voice/echo/`.
+5. Run `run.py suite` with `com.alpha.assistant.voice.LiveEchoTranscriptTest` on an owned emulator, because `live-check` uses the installed build.
+6. Run the paid half: `ALPHY_AI_PROVIDER=openai python3 tools/compose_acceptance/run.py live-check --serial emulator-5590 --label live-echo --test com.alpha.assistant.voice.LiveEchoTranscriptTest#echoIsNotTranscribed`.
+7. When both halves pass, add the `Build.MODEL` value to `VOICE_APPROVAL_MODELS`.
+8. Record the revision, the device, the steps, and the results in `evidence/live-voice/echo-check.md`.
+
+### Voice mode tests
+
+The workflow tests use a loopback GPT-Live server and scripted audio:
+
+```sh
+python3 tools/compose_acceptance/run.py suite --serial emulator-5590 --label live-voice-all \
+  com.alpha.assistant.voice.BargeInDetectorTest \
+  com.alpha.assistant.voice.VoiceModeProtocolTest \
+  com.alpha.assistant.voice.VoiceModeTurnsTest \
+  com.alpha.assistant.voice.VoiceModeTransportTest \
+  com.alpha.assistant.voice.VoiceModeSessionTest \
+  com.alpha.assistant.ui.ShellLiveVoiceWorkflowTest \
+  com.alpha.assistant.ui.VoiceModeScreenWorkflowTest \
+  com.alpha.assistant.surfaces.AssistantLiveVoiceWorkflowTest \
+  com.alpha.assistant.ui.ShellVoiceWorkflowTest
+```
+
+`AssistantLiveVoiceWorkflowTest#noPermissionNoSession` skips while the app has the microphone permission.
+
+The live check runs one GPT-Live session of about 80 s with the OpenAI key from `~/.env`. It costs about $0.07.
+Run `run.py suite` with `com.alpha.assistant.voice.LiveVoiceDialogTest` first, because `live-check` uses the installed build:
+
+```sh
+ALPHY_AI_PROVIDER=openai python3 tools/compose_acceptance/run.py live-check --serial emulator-5590 --label live-voice \
+  --test com.alpha.assistant.voice.LiveVoiceDialogTest#russianDialogWithHandOffs
+```
+
+The check writes `events.log` next to `report.json`. The log holds the event types, the ids, the timeline values, and the transcripts, never the key.
+`LiveVoiceDialogTest#dialogScriptPassesOnAScriptedServer` runs the same script on a scripted server without cost.
+
+### Live check result of 2026-11-18
+
+These results held:
+
+- GPT-Live accepted the history preload.
+- The input transcript of the request was complete when `session.delegation.created` arrived.
+- GPT-Live claimed no action before the commentary, and it spoke a commentary that came 25 s after its delegation.
+- GPT-Live spoke a second commentary for the same delegation.
+- `session.thinking.append` without a delegation gave no error.
+- The input and output transcripts use one session clock.
+- GPT-Live opened a delegation for the spoken «да».
+
+These results differ from the spec:
+
+- The output audio is one continuous stream of 100 ms chunks, silence included. The end of a reply is not a pause in the arrival of chunks.
+- The output transcript times lead the output audio. The received audio of a reply ends 1.7 to 2.4 s after its last `end_ms` on the input clock, before the playback delay of the phone.
+- GPT-Live did not stop a commentary when the user spoke over it. It opened no delegation for the request that interrupted it.
+- GPT-Live spoke the thinking text aloud.
+- GPT-Live changed «Нужно подтверждение на экране.» into a request to say «да» or «нет».
+
 ## Removed local speech
 
 Earlier builds packaged the T-one model, the Whisper model, and the sherpa-onnx library, and copied the model into `noBackupFilesDir/voice/alpha-voice-1`.

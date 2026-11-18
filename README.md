@@ -8,7 +8,7 @@ Alphy is an Android assistant with cloud chat, voice input and output, generated
 - Create interactive tools with native controls and isolated JavaScript execution.
 - Use widgets and approved device capabilities, including notifications and calendar access.
 - Configure local automations for schedules, location, charging, and selected notifications.
-- Speak to Alphy. OpenAI, OpenRouter, and DeepSeek recognize the speech with your key. With an Anthropic key, the phone recognizes the speech on the device. Continuous voice sessions can read each reply aloud with the phone voice, or with a cloud voice (OpenRouter), and then listen again. [Voice details](docs/voice-integration.md)
+- Speak to Alphy. OpenAI, OpenRouter, and DeepSeek recognize the speech with your key. With an Anthropic key, the phone recognizes the speech on the device. Continuous voice sessions can read each reply aloud with the phone voice, or with a cloud voice (OpenRouter), and then listen again. With an OpenAI key, «Голосовой режим» gives a spoken dialog with GPT-Live that hands each task to Alphy. It costs $0.05 per minute. [Voice details](docs/voice-integration.md)
 
 Alphy stores conversations and tool data on the device. It stores the provider key with Android Keystore. Cloud requests send the content that the consent text names to the provider of your key and can incur provider charges. «Удалить ключ» stops all cloud requests. Device actions and permissions require user approval.
 
@@ -54,7 +54,7 @@ GitHub provides the asset size and SHA-256 digest that Alphy uses to verify the 
 
 ## Voice
 
-The APK contains no speech model. Voice input and output use your API key or the phone. See [Voice integration](docs/voice-integration.md).
+The APK contains no speech model. Voice input and output use your API key or the phone. With an OpenAI key, the voice mode («Голосовой режим») talks with OpenAI GPT-Live. See [Voice integration](docs/voice-integration.md).
 
 ## Tests
 
