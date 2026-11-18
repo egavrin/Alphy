@@ -1,5 +1,6 @@
 # Request: Una lista della spesa dove aggiungo prodotti, li spunto quando li compro e posso riordinarli per corsia del supermercato.
 # Components only, in the tree of the baseline showcase-lang-shopping-it. The list starts with three rows, so that the row of a list runs in each check.
+# The quantity of a row has the label emphasis: the number emphasis is a display size (NativeToolUi textStyle), too large for a row.
 app("Lista della spesa", lang="it", preset="soft", palette="green")
 $/items = [{emoji: "🥛", name: "Latte", aisle: "Latticini", qty: "1 l", done: false}, {emoji: "🍞", name: "Pane", aisle: "Panetteria", qty: "500 g", done: false}, {emoji: "🍎", name: "Mele", aisle: "Frutta e verdura", qty: "1 kg", done: true}]
 $/draftName = ""
@@ -13,11 +14,11 @@ hero = Card([Row([Emoji("🛒", size="large"), Column([Metric("Da comprare", cou
 add = Section("Aggiungi prodotto", [nameField, aisleField, addButton])
 nameField = TextField("Prodotto", $/draftName, icon="Cart")
 aisleField = Select("Corsia", $/draftAisle, ["Frutta e verdura", "Panetteria", "Latticini", "Carne e pesce", "Surgelati", "Dispensa", "Bevande", "Igiene", "Casa", "Altro"], icon="Tag")
-addButton = Button("Aggiungi", [append($/items, {emoji: $/draftAisle == "Frutta e verdura" ? "🍎" : $/draftAisle == "Panetteria" ? "🍞" : $/draftAisle == "Latticini" ? "🥛" : $/draftAisle == "Carne e pesce" ? "🥩" : $/draftAisle == "Surgelati" ? "🧊" : $/draftAisle == "Dispensa" ? "🥫" : $/draftAisle == "Bevande" ? "🧃" : $/draftAisle == "Igiene" ? "🧼" : $/draftAisle == "Casa" ? "🏠" : "🛒", name: $/draftName, aisle: $/draftAisle, qty: "1", done: false}), set($/draftName, "")], variant="filled", icon="Plus", enabled=$/draftName != "")
+addButton = Button("Aggiungi", [append($/items, {emoji: $/draftAisle == "Frutta e verdura" ? "🍎" : $/draftAisle == "Panetteria" ? "🍞" : $/draftAisle == "Latticini" ? "🥛" : $/draftAisle == "Carne e pesce" ? "🥩" : $/draftAisle == "Surgelati" ? "🧊" : $/draftAisle == "Dispensa" ? "🥫" : $/draftAisle == "Bevande" ? "🧃" : $/draftAisle == "Igiene" ? "🧼" : $/draftAisle == "Casa" ? "🏠" : "🛒", name: $/draftName, aisle: $/draftAisle, qty: "1", done: false}), set($/draftName, "")], variant="filled", icon="Plus", enabled=len(trim($/draftName)) > 0)
 mine = Section("La tua lista", [filterField, orderField, items, clearBought])
 filterField = Segmented("Mostra", $/filter, {tutte: "Tutte", dacomprare: "Da comprare", comprati: "Comprati"})
 orderField = Segmented("Ordina per", $/order, {corsia: "Corsia", inserimento: "Inserimento"})
 items = List($/view, item, empty="La lista è vuota. Aggiungi il primo prodotto.")
-item = Row([Emoji($emoji, size="small"), Column([Text($name), Text($aisle, tone="muted")], weight=1, gap="none"), Text($qty, emphasis="number"), CheckBox("Preso", $done), IconButton("Trash", remove(), "Rimuovi")])
+item = Row([Emoji($emoji, size="small"), Column([Text($name), Text($aisle, tone="muted")], weight=1, gap="none"), Text($qty, emphasis="label"), CheckBox("Preso", $done), IconButton("Trash", remove(), "Rimuovi")])
 clearBought = Button("Svuota comprati", remove($/items, $done), variant="text", icon="Trash")
 check("Aggiungi, spunta, svuota", set(nameField, "Burro"), set(aisleField, "Latticini"), tap(addButton), expect(len($/items) == 4 && count($/items, !$done) == 3), set(orderField, "inserimento"), expect($/view[3]/name == "Burro"), set(filterField, "comprati"), expect(len($/view) == 1), tap(clearBought), expect(len($/items) == 3 && count($/items, $done) == 0))
