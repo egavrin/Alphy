@@ -75,6 +75,8 @@ internal class AndroidLiveAudio(context: Context) : LiveAudio {
     @Volatile private var muted = false
     @Volatile private var running = false
     @Volatile override var level = 0f; private set
+    /** The start threshold in frames that the playback track accepted. A device can clamp the requested [LIVE_BLOCK]. */
+    @Volatile var startThresholdFrames = 0; private set
 
     override fun open(onCapture: (ShortArray) -> Unit, onFocusLost: () -> Unit): Boolean = synchronized(lock) {
         check(!opened) { "The live audio is open." }
@@ -97,7 +99,7 @@ internal class AndroidLiveAudio(context: Context) : LiveAudio {
             track = newTrack
             check(newTrack.state == AudioTrack.STATE_INITIALIZED) { "Playback initialization failed" }
             // The default start threshold is the 5 s buffer, so a short reply would wait for later audio (review C1).
-            newTrack.setStartThresholdInFrames(LIVE_BLOCK)
+            startThresholdFrames = newTrack.setStartThresholdInFrames(LIVE_BLOCK)
             newTrack.play()
             val minimum = AudioRecord.getMinBufferSize(LIVE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
             check(minimum > 0) { "PCM16 microphone is unsupported" }
@@ -134,7 +136,8 @@ internal class AndroidLiveAudio(context: Context) : LiveAudio {
             output.pause()
             output.flush()
             output.play()
-            // The head position keeps counting after a flush, so the new count of written frames starts at it.
+            // The platform resets the head position to zero at a flush. The new count of written frames starts at the head, so it
+            // also holds on a device that keeps counting.
             written.set(head(output))
         }
     }

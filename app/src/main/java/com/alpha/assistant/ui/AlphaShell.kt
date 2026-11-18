@@ -367,8 +367,11 @@ private data class MiniAppOrigin(
                             (destination == ShellDestination.Settings && settingsSection == SettingsSection.Voice)
                         LaunchedEffect(voiceShown) { if (!voiceShown) model.voice.stop() }
                         // The voice mode screen is over the chat. A screen of the shell that leaves the chat ends the mode without a status,
-                        // and it clears the status of an earlier end.
-                        LaunchedEffect(chatVisible) { if (!chatVisible) model.endLiveVoice() }
+                        // and it clears the status of an earlier end. It keeps a mode that the sheet started (review m3).
+                        val shellActivity = androidx.activity.compose.LocalActivity.current
+                        LaunchedEffect(chatVisible) {
+                            if (!chatVisible && (!model.liveVoice.active || model.ownsLiveVoice(shellActivity))) model.endLiveVoice()
+                        }
                         // Navigation 3 retains each entry by content key when the scene changes.
                         val currentLayout by rememberUpdatedState(paneLayout)
                         val currentSnapshot by rememberUpdatedState(snapshot)

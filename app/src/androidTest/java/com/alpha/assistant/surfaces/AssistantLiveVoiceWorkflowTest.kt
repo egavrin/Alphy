@@ -292,23 +292,33 @@ class AssistantLiveVoiceWorkflowTest {
     /** Spec 5.11.6: a press while the assistant is unavailable shows the unlock prompt and starts no session. */
     @Test fun lockedPressStartsNoSession() {
         install()
-        val previousLock = robot.shell("locksettings get-disabled")
-        val keyguard = app.getSystemService(KeyguardManager::class.java)
-        try {
-            robot.shell("locksettings set-disabled false")
-            robot.shell("input keyevent KEYCODE_SLEEP")
-            robot.shell("input keyevent KEYCODE_WAKEUP")
-            robot.waitUntil { keyguard.isKeyguardLocked }
+        whileLocked {
             press(capture("Locked screen"), allow = false).use {
                 robot.waitFor(robot.text(R.string.assistant_unlock_title))
                 robot.awaitFrames(5)
                 assertFalse(shared?.liveVoice?.active == true)
                 assertEquals(0, starts())
             }
-        } finally {
-            robot.shell("input keyevent KEYCODE_WAKEUP")
-            robot.shell("wm dismiss-keyguard")
-            if (previousLock == "true" || previousLock == "false") robot.shell("locksettings set-disabled $previousLock")
+        }
+    }
+
+    /**
+     * Review m5: a restored sheet never starts a paid session. The locked sheet keeps the press unhandled, the sheet is recreated,
+     * and the unlock then composes the restored sheet.
+     */
+    @Test fun restoredPressStartsNoSession() {
+        install()
+        whileLocked {
+            press(capture("Locked screen"), allow = false).use { scenario ->
+                robot.waitFor(robot.text(R.string.assistant_unlock_title))
+                scenario.recreate()
+                robot.click(robot.text(R.string.assistant_unlock))
+                robot.waitFor(composer)
+                robot.awaitFrames(5)
+                SystemClock.sleep(500)
+                assertFalse(model.liveVoice.active)
+                assertEquals(0, starts())
+            }
         }
     }
 
@@ -333,6 +343,44 @@ class AssistantLiveVoiceWorkflowTest {
                 robot.click(robot.text(R.string.assistant_close))
                 robot.waitUntil { !model.liveVoice.active && !inStage(Stage.RESUMED) { it is AssistantActivity } }
             }
+        }
+    }
+
+    /** Review m3: a shell that composes a screen without the chat behind the sheet, here after its recreation, keeps the sheet's mode. */
+    @Test fun shellScreenBehindTheSheetKeepsTheMode() {
+        install()
+        ActivityScenario.launch(MainActivity::class.java).use { shell ->
+            robot.allowMicrophone(shell)
+            robot.waitUntil { shared?.loading == false }
+            shell.onActivity { model.openSurface(null, settings = true) }
+            robot.waitUntil { !model.surfacePending }
+            app.startActivity(intent(capture("Over the settings")))
+            listening(1)
+            // ActivityScenario.recreate() would bring the shell to the front first, so the shell recreates itself behind the sheet.
+            var old: Activity? = null
+            shell.onActivity { old = it; it.recreate() }
+            robot.waitUntil { inStage(Stage.PAUSED) { it is MainActivity && it !== old } }
+            robot.awaitFrames(5)
+            SystemClock.sleep(300)
+            assertTrue("The shell ended the mode of the sheet", model.liveVoice.active)
+            assertEquals(LivePhase.LISTENING, model.liveVoice.phase)
+        }
+    }
+
+    /** Runs [block] with the keyguard shown, then dismisses it and restores the lock setting. */
+    private fun whileLocked(block: () -> Unit) {
+        val previousLock = robot.shell("locksettings get-disabled")
+        val keyguard = app.getSystemService(KeyguardManager::class.java)
+        try {
+            robot.shell("locksettings set-disabled false")
+            robot.shell("input keyevent KEYCODE_SLEEP")
+            robot.shell("input keyevent KEYCODE_WAKEUP")
+            robot.waitUntil { keyguard.isKeyguardLocked }
+            block()
+        } finally {
+            robot.shell("input keyevent KEYCODE_WAKEUP")
+            robot.shell("wm dismiss-keyguard")
+            if (previousLock == "true" || previousLock == "false") robot.shell("locksettings set-disabled $previousLock")
         }
     }
 

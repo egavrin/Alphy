@@ -28,6 +28,8 @@ class EchoCheckDeviceTest {
     @Volatile private var flushAt = -1L
     @Volatile private var flushes = 0
     @Volatile private var spokenAt = -1L
+    /** The elapsed time of the last write to the playback, or -1. */
+    @Volatile private var lastWriteMs = -1L
 
     @Before fun grantMicrophoneOnARealPhone() {
         assumeFalse("An emulator has no acoustic echo.", getprop("ro.kernel.qemu") == "1")
@@ -50,7 +52,7 @@ class EchoCheckDeviceTest {
             captured += block
             val now = SystemClock.elapsedRealtime() - start
             if (now >= SPEAK_AT_MS && spokenAt < 0) { spokenAt = now; Log.i(TAG, "speak now") }
-            if (detector.accept(block, audio.playbackActive) && flushes == 0) { flushes++; flushAt = now; audio.flushPlayback() }
+            if (accept(detector, block) && flushes == 0) { flushes++; flushAt = now; audio.flushPlayback() }
         }, onFocusLost = {}))
         val player = Thread { feed(reply) { flushes == 0 } }
         player.start()
@@ -58,7 +60,8 @@ class EchoCheckDeviceTest {
         player.join(2000)
         audio.close()
         save("speech-over", captured)
-        Log.i(TAG, "speak-now at $spokenAt ms, flush at $flushAt ms after the start of playback, flushes $flushes")
+        Log.i(TAG, "speak-now at $spokenAt ms, flush at $flushAt ms after the start of playback, flushes $flushes, " +
+            "start threshold ${audio.startThresholdFrames} frames")
         assertEquals("flushes", 1, flushes)
         assertTrue("The flush came at $flushAt ms, before second 4: echo fired the detector.", flushAt >= SPEAK_AT_MS)
     }
@@ -71,7 +74,7 @@ class EchoCheckDeviceTest {
         val start = SystemClock.elapsedRealtime()
         assertTrue("Audio focus was denied.", audio.open({ block ->
             captured += block
-            if (detector.accept(block, audio.playbackActive)) fired += SystemClock.elapsedRealtime() - start
+            if (accept(detector, block)) fired += SystemClock.elapsedRealtime() - start
         }, onFocusLost = {}))
         feed(samples) { true }
         while (audio.playbackActive) Thread.sleep(20)
@@ -79,14 +82,29 @@ class EchoCheckDeviceTest {
         audio.close()
         val played = rms(listOf(samples))
         val heard = rms(synchronized(captured) { captured.toList() }.take(samples.size / LIVE_BLOCK))
-        val ratio = save(name, captured, "playback rms $played, capture rms $heard, ratio ${heard / played}")
+        val ratio = save(name, captured, "playback rms $played, capture rms $heard, ratio ${heard / played}, " +
+            "start threshold ${audio.startThresholdFrames} frames")
         Log.i(TAG, "$name: $ratio")
         assertTrue("The detector fired at $fired ms on echo. $ratio", fired.isEmpty())
     }
 
+    /**
+     * Gives [block] to [detector] with the two signals of [LiveVoiceSession] (rulings R34 and R35): a reply is open or the device
+     * plays, and the device flag alone. The reply here is open from the first write until the reply gap after the last write.
+     */
+    private fun accept(detector: BargeInDetector, block: ShortArray): Boolean {
+        val plays = audio.playbackActive
+        val open = lastWriteMs >= 0 && SystemClock.elapsedRealtime() - lastWriteMs < LiveTiming().replyGapMs
+        return detector.accept(block, open || plays, plays)
+    }
+
     /** Plays [samples] in 100 ms pieces while [more] holds. */
     private fun feed(samples: ShortArray, more: () -> Boolean) {
-        for (at in samples.indices step LIVE_BLOCK * 5) { if (!more()) return; audio.play(samples.copyOfRange(at, minOf(at + LIVE_BLOCK * 5, samples.size))) }
+        for (at in samples.indices step LIVE_BLOCK * 5) {
+            if (!more()) return
+            lastWriteMs = SystemClock.elapsedRealtime()
+            audio.play(samples.copyOfRange(at, minOf(at + LIVE_BLOCK * 5, samples.size)))
+        }
     }
 
     private fun fixture(name: String) = wavSamples(InstrumentationRegistry.getInstrumentation().context.assets.open("voice/$name.wav").use { it.readBytes() })

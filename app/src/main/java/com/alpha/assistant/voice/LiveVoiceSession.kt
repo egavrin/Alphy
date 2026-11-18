@@ -26,10 +26,11 @@ internal enum class LivePhase { IDLE, CONNECTING, LISTENING, SPEAKING, MUTED }
 /**
  * The timers of spec 5.8 and 5.4.5. A user turn also ends after [turnGapMs] without input transcript deltas. A reply of Alphy ends
  * after [replyGapMs] of silent stream audio after its last voiced chunk, counted in samples, or after [replyGapMs] without any chunk
- * (rulings R24 and R27). The live check heard 600 ms silent runs inside a reply and a 900 ms run between two replies.
+ * (rulings R24 and R27). The live check heard 600 ms silent runs inside a reply and a 900 ms run between two replies. A running
+ * hand-off holds off the [silenceMs] end for at most [handOffHoldMs] after the last user speech or Alphy output (ruling R38).
  */
 internal data class LiveTiming(val startedMs: Long = 10_000, val silenceMs: Long = 60_000, val firstSpeechMs: Long = 10_000,
-    val requestWaitMs: Long = 500, val turnGapMs: Long = 1_200, val replyGapMs: Long = 800)
+    val requestWaitMs: Long = 500, val turnGapMs: Long = 1_200, val replyGapMs: Long = 800, val handOffHoldMs: Long = 180_000)
 
 /** The chat side of the voice mode. The session calls it on the main thread only. */
 internal interface LiveVoiceHost {
@@ -94,8 +95,10 @@ internal class LiveVoiceSession(
     /** The uptime of the last capture block or output chunk that saw audio in the device. The overlap rule (R11) uses the device flag. */
     private var playbackSeenMs = Long.MIN_VALUE
     private var waiting: LiveEvent.Delegation? = null
-    /** The client event ids of the commentary and thinking appends of this session. */
-    private val appends = HashSet<String>()
+    /** The client event ids of the appends, mutes, and unmutes of this session. An error for one keeps the mode (rulings R10, R37). */
+    private val tolerated = HashSet<String>()
+    /** The uptime of the session start, the last change of the user's speech, or the last output end (ruling R38). */
+    private var heardMs = 0L
     private var silenceJob: Job? = null
     private var firstJob: Job? = null
     private var gapJob: Job? = null
@@ -111,7 +114,7 @@ internal class LiveVoiceSession(
         val token = ++generation
         this.host = host
         this.firstSpeech = firstSpeech
-        transcript = LiveTranscript(); detector = BargeInDetector(); waiting = null; appends.clear()
+        transcript = LiveTranscript(); detector = BargeInDetector(); waiting = null; tolerated.clear()
         started = false; userMuted = false; awayMuted = false; captureMuted = false; dropping = false; interrupted = false
         playbackSeenMs = Long.MIN_VALUE; held.clear()
         active = true; status = ""; phase = LivePhase.CONNECTING
@@ -122,12 +125,14 @@ internal class LiveVoiceSession(
                 if (token != generation) return@launch
                 if (account == null || account.provider != AiProvider.OPENAI) { end(string(R.string.live_voice_openai_only), settingsRequired = true); return@launch }
                 val url = liveUrl(endpoints)
+                // Before the connect, so a failed read leaves no open socket (review m9).
+                val first = LiveProtocol.start(host.history())
                 val device = audio().also { live = it }
                 if (captureMuted) device.setCaptureMuted(true)
                 if (!device.open({ block -> onMain(token) { captured(block) } }, { onMain(token) { end(string(R.string.live_voice_focus_lost)) } })) {
                     end(string(R.string.live_voice_focus_lost)); return@launch
                 }
-                connection = transport.connect(url, account.key, listener(token)).also { it.send(LiveProtocol.start(host.history())) }
+                connection = transport.connect(url, account.key, listener(token)).also { it.send(first) }
                 after(timing.startedMs) { if (!started) end(string(R.string.live_voice_connection)) }
             } catch (error: CancellationException) { throw error }
             catch (error: Throwable) {
@@ -150,7 +155,7 @@ internal class LiveVoiceSession(
     /** Sends a hand-off result and returns its client event id. After the end it sends nothing, as hand-offs outlive it (spec 5.5.9). */
     fun commentary(delegationId: String, text: String): String {
         val id = LiveProtocol.newId()
-        if (started) { appends += id; send(LiveProtocol.commentary(id, delegationId, text)); countSilence() }
+        if (started) { tolerated += id; send(LiveProtocol.commentary(id, delegationId, text)); countSilence() }
         return id
     }
 
@@ -158,7 +163,7 @@ internal class LiveVoiceSession(
     fun thinking(text: String) {
         if (!started) return
         val id = LiveProtocol.newId()
-        appends += id
+        tolerated += id
         send(LiveProtocol.thinking(id, text))
         countSilence()
     }
@@ -170,7 +175,7 @@ internal class LiveVoiceSession(
     private fun end(status: String, settingsRequired: Boolean = false, socketOpen: Boolean = true) {
         if (!active) return
         generation++
-        active = false; started = false; this.status = status; this.settingsRequired = settingsRequired; userSpeaking = false; level = 0f; waiting = null; appends.clear()
+        active = false; started = false; this.status = status; this.settingsRequired = settingsRequired; userSpeaking = false; level = 0f; waiting = null; tolerated.clear()
         // An open reply of this session must not count as open in the next one.
         replyJob?.cancel(); held.clear()
         playback++
@@ -196,8 +201,9 @@ internal class LiveVoiceSession(
         when (event) {
             is LiveEvent.Started -> if (!started) {
                 started = true
-                if (captureMuted) send(LiveProtocol.mute(LiveProtocol.newId()))
+                if (captureMuted) sendMute(true)
                 // Both counts start when GPT-Live can hear the user, so they do not race the connection.
+                heardMs = SystemClock.uptimeMillis()
                 countSilence()
                 if (firstSpeech) firstJob = after(timing.firstSpeechMs) { end(string(R.string.live_voice_no_first_speech)) }
                 refresh()
@@ -220,9 +226,9 @@ internal class LiveVoiceSession(
                 "content" -> R.string.live_voice_content
                 else -> R.string.live_voice_connection
             }), socketOpen = false)
-            // A rejected append keeps the mode (the fallbacks of spec 5.5.6 and 5.7.2). The server message can echo part of the key,
-            // so it is never shown (spec 5.3.6).
-            is LiveEvent.Failure -> if (event.clientEventId !in appends) end(string(R.string.live_voice_failed))
+            // A rejected append keeps the mode (the fallbacks of spec 5.5.6 and 5.7.2), and so does a rejected mute or unmute, as the
+            // capture stops here in any case (R37). The server message can echo part of the key, so it is never shown (spec 5.3.6).
+            is LiveEvent.Failure -> if (event.clientEventId !in tolerated) end(string(R.string.live_voice_failed))
             LiveEvent.Other -> Unit
         }
     }
@@ -242,6 +248,7 @@ internal class LiveVoiceSession(
         if (detector.userSpeaking != userSpeaking) {
             userSpeaking = detector.userSpeaking
             if (userSpeaking) { firstSpeech = false; firstJob?.cancel() }
+            heardMs = SystemClock.uptimeMillis()
             countSilence()
         }
         level = device.level
@@ -296,11 +303,15 @@ internal class LiveVoiceSession(
         replyJob?.cancel(); replyJob = null
         held.clear()
         host?.outputEnded(transcript.outputEndMs)
+        heardMs = SystemClock.uptimeMillis()
         countSilence()
         refresh()
     }
 
-    /** Ruling R34: a reply is open (R27) or the device still plays. The barge-in check, the phase, and the silence count use it. */
+    /**
+     * Ruling R34: a reply is open (R27) or the device still plays. The barge-in check and the silence count use it. The phase uses it
+     * outside a dropped reply.
+     */
     private fun speaking() = replyJob?.isActive == true || live?.playbackActive == true
 
     private fun delegation(event: LiveEvent.Delegation) {
@@ -333,8 +344,10 @@ internal class LiveVoiceSession(
         val muted = userMuted || awayMuted
         if (!active || muted == captureMuted) return
         captureMuted = muted
-        live?.setCaptureMuted(muted)
-        if (started) send(if (muted) LiveProtocol.mute(LiveProtocol.newId()) else LiveProtocol.unmute(LiveProtocol.newId()))
+        // The microphone button and the return to Alphy call this on the main thread, so a microphone that does not start again
+        // ends the mode instead of the app (review I1).
+        try { live?.setCaptureMuted(muted) } catch (_: Exception) { end(string(R.string.live_voice_failed)); return }
+        if (started) sendMute(muted)
         if (muted) {
             // A muted capture has no blocks, so the detector would keep the last state of the user's voice.
             detector = BargeInDetector()
@@ -344,16 +357,27 @@ internal class LiveVoiceSession(
         refresh()
     }
 
+    /** The server mute of spec 5.4.6. Its id joins [tolerated] (ruling R37). */
+    private fun sendMute(muted: Boolean) {
+        val id = LiveProtocol.newId()
+        tolerated += id
+        send(if (muted) LiveProtocol.mute(id) else LiveProtocol.unmute(id))
+    }
+
     /**
-     * Counts the 60 s without user speech again. At its end, a running hand-off or Alphy's own reply (an open reply or playback,
-     * ruling R34) restarts the count. The output end, a commentary, and a thinking text also restart it, because the user needs
-     * time to hear a result (spec 5.8, ruling R12).
+     * Counts the 60 s without user speech again. At its end, Alphy's own reply (an open reply or playback, ruling R34) restarts the
+     * count. A running hand-off also restarts it until [LiveTiming.handOffHoldMs] after the last user speech or Alphy output (ruling
+     * R38). The output end, a commentary, and a thinking text also restart it, because the user needs time to hear a result (spec
+     * 5.8, ruling R12).
      */
     private fun countSilence() {
         silenceJob?.cancel()
         if (!started || userSpeaking) return
         silenceJob = after(timing.silenceMs) {
-            if (speaking() || host?.handOffRunning() == true) countSilence() else end(string(R.string.live_voice_no_speech))
+            val now = SystemClock.uptimeMillis()
+            if (speaking()) heardMs = now
+            val handOff = host?.handOffRunning() == true && now - heardMs < timing.handOffHoldMs
+            if (speaking() || handOff) countSilence() else end(string(R.string.live_voice_no_speech))
         }
     }
 
@@ -363,7 +387,8 @@ internal class LiveVoiceSession(
             !active -> LivePhase.IDLE
             !started -> LivePhase.CONNECTING
             captureMuted -> LivePhase.MUTED
-            speaking() -> LivePhase.SPEAKING
+            // The user hears nothing of a dropped reply (review m4).
+            speaking() && !dropping -> LivePhase.SPEAKING
             else -> LivePhase.LISTENING
         }
     }

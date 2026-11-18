@@ -27,6 +27,8 @@ internal class FakeLiveAudio(private val realTime: Boolean = false) : LiveAudio 
     @Volatile override var level = 0f
     /** False answers [open] as a denied audio focus does. */
     @Volatile var focusGranted = true
+    /** True makes an unmute throw, as [AndroidLiveAudio] does when the microphone does not start again. */
+    @Volatile var failUnmute = false
     @Volatile private var onCapture: ((ShortArray) -> Unit)? = null
     @Volatile private var onFocusLost: (() -> Unit)? = null
 
@@ -36,7 +38,7 @@ internal class FakeLiveAudio(private val realTime: Boolean = false) : LiveAudio 
         this.onCapture = onCapture; this.onFocusLost = onFocusLost
         return focusGranted
     }
-    override fun setCaptureMuted(muted: Boolean) { captureMuted = muted }
+    override fun setCaptureMuted(muted: Boolean) { check(muted || !failUnmute) { "Microphone recording failed" }; captureMuted = muted }
     override fun play(samples: ShortArray) {
         played += samples
         if (realTime) synchronized(lock) { playEnd = maxOf(playEnd, SystemClock.uptimeMillis()) + samples.size * 1000L / LIVE_RATE }

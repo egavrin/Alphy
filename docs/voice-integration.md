@@ -94,7 +94,7 @@ The spec is `docs/superpowers/specs/2026-11-18-live-voice-dialog-design.md`.
 The model is `gpt-live-1`, and the voice is `marin`. The audio is `audio/pcm` at 16,000 Hz, mono, in both directions.
 The session omits `delegation`, so GPT-Live runs in client mode. GPT-Live sends `session.delegation.created`, and Alphy answers with `session.commentary.append`.
 
-- The request of a delegation is the last user turn of the input transcript. Words that the user says while GPT-Live speaks stay in the request (spec 5.5.2). Alphy submits it as a normal chat message, with web search allowed.
+- The request of a delegation is the last user turn of the input transcript. Words that the user says while GPT-Live speaks stay in the request, unless the user pauses for more than 1 s (spec 5.5.2). Alphy submits it as a normal chat message, with web search allowed.
 - When the reply is complete, Alphy sends «Ответ Alphy: » and the speakable reply, cut at a sentence end to at most 1,200 characters.
 - A mini-app request first sends «Alphy готовит мини-приложение, оно появится на экране.». The ready mini-app sends «Мини-приложение готово. Ответ Alphy: » and the reply.
 - A failed request sends «Alphy не смог выполнить запрос: » and the error text.
@@ -128,7 +128,7 @@ The chat shows the status in the composer status line.
 | --- | --- |
 | ✕ | none |
 | The screen goes off, or the activity stops while no screen or app that Alphy opened is in front | none |
-| 60 s without user speech while no hand-off runs | «Голосовой режим завершён: нет речи 60 с» |
+| 60 s without user speech while no hand-off runs. A running hand-off holds this end off for at most 180 s after the last user speech or Alphy output. | «Голосовой режим завершён: нет речи 60 с» |
 | 10 s without speech after a press of the assistant button | «Голосовой режим завершён: нет речи» |
 | Audio focus loss | «Голосовой режим прерван другим звуком» |
 | The provider is no longer OpenAI, or the key is removed | «Голосовой режим доступен только с ключом OpenAI» |
@@ -136,7 +136,7 @@ The chat shows the status in the composer status line.
 | `session.closed` with `content` | «OpenAI прервал голосовой режим по правилам содержания» |
 | A connection loss, or no `session.started` within 10 s | «Связь с OpenAI прервалась» |
 | An HTTP refusal of the upgrade | The provider error text. A key error opens «Сервис ИИ». |
-| An `error` event that is not for a sent commentary or thinking text | «OpenAI: ошибка голосового режима. Начните заново.» |
+| An `error` event that is not for a sent commentary, thinking text, mute, or unmute | «OpenAI: ошибка голосового режима. Начните заново.» |
 
 A permission dialog, a picker of «+», or an app that Alphy opens mutes the microphone and keeps the session. The microphone unmutes when Alphy is in front again.
 In the compact assistant, the voice mode also ends when the sheet closes, at `onHide`, at `onLockscreenShown`, and when the sheet opens the full app.
@@ -168,6 +168,16 @@ The echo check tests that the loudspeaker echo does not reach GPT-Live (spec 6.4
 6. Run the paid half: `ALPHY_AI_PROVIDER=openai python3 tools/compose_acceptance/run.py live-check --serial emulator-5590 --label live-echo --test com.alpha.assistant.voice.LiveEchoTranscriptTest#echoIsNotTranscribed`.
 7. When both halves pass, add the `Build.MODEL` value to `VOICE_APPROVAL_MODELS`.
 8. Record the revision, the device, the steps, and the results in `evidence/live-voice/echo-check.md`.
+
+### Device check
+
+After the echo check, do these checks on the same phone, in this order:
+
+1. Measure the silent gap between an interrupted reply and the next reply. If it is near 800 ms, reset `dropping` at the end of the user's turn (review I3).
+2. Listen for clipped word ends and for stutter inside words (review m1 and m2).
+3. Let Alphy open Clock from the compact assistant, and check that `onHide` does not end the voice mode (Task 9 device risk).
+4. Connect a headset during the session, and record which device plays the audio. The session selects the route only at its start (review m12).
+5. Run the live check, and check that GPT-Live accepts its mute and unmute steps (review I2).
 
 ### Voice mode tests
 

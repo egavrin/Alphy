@@ -29,9 +29,9 @@ import kotlin.math.abs
 
 /**
  * The live check of spec 6.3: one GPT-Live session with the real key runs a Russian request with a 25 s late commentary, a second
- * commentary, a thinking append, an interruption, and a spoken «да» after a proposal. The events go to `events.log` next to the
- * report of `run.py live-check`. [dialogScriptPassesOnAScriptedServer] runs the same script without cost, so a script fault does not
- * spend a paid run.
+ * commentary, a thinking append, an interruption, a spoken «да» after a proposal, and a mute and an unmute. The events go to
+ * `events.log` next to the report of `run.py live-check`. [dialogScriptPassesOnAScriptedServer] runs the same script without cost, so
+ * a script fault does not spend a paid run.
  */
 class LiveVoiceDialogTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -135,7 +135,7 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
         override fun history() = history
         override fun delegation(id: String, request: String) { note("host delegation $id request «$request»"); delegations += id to request }
         override fun turn(turn: UserTurn) = note("host turn «${turn.text}» ${turn.startMs}..${turn.endMs} overlapped=${turn.overlappedPlayback}")
-        // A hand-off is open for the whole check, so the 60 s silence rule never ends it.
+        // A hand-off is open for the whole check. With the speech and output of the script, the 180 s hold of ruling R38 never ends.
         override fun handOffRunning() = true
         override fun appended(eventId: String) = note("host appended $eventId")
         override fun outputEnded(endMs: Long) { note("host outputEnded endMs=$endMs"); outputEnds += now() to endMs }
@@ -288,6 +288,19 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
         val early2 = text(outputs(asking, started.first)).lowercase()
         info("claim after «да» before «Запускаю.» (spec 5.3.3)", "${STARTS.filter { it in early2 }.ifEmpty { "none" }} in «$early2»")
         spoken(started.first, "start confirmation")
+
+        // Step 6 (ruling R37): the microphone button mutes and unmutes, as at a permission dialog. It comes last, because a mute
+        // stops the input audio clock, and the earlier steps compare input and output stamps.
+        val muted = now()
+        main { session.mute(true) }
+        SystemClock.sleep(1_000)
+        main { session.mute(false) }
+        SystemClock.sleep(2_000)
+        val ids = sends.filter { it.at >= muted && it.type in MUTES }.map { "${it.type} ${it.id}" }
+        val rejected = events.filter { it.type == "error" && it.at >= muted && sends.any { s -> s.id == it.id && s.type in MUTES } }
+        expect("mute and unmute keep the mode (ruling R37)", ids.size == 2 && host.ended == null, "sent $ids; errors ${errors(muted)}")
+        expect("GPT-Live accepts mute and unmute (ruling R37)", rejected.isEmpty(), rejected.joinToString { "${it.text} for ${it.id}" }
+            .ifEmpty { "no error for ${ids.joinToString()}" })
     }
 
     /**
@@ -550,6 +563,7 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
             "из-за притяжения Луны, а полный цикл её фаз длится около двадцати девяти с половиной суток."
         const val PROPOSAL = "Alphy предлагает: Таймер, 5 минут. Скажите «да», чтобы выполнить, или «нет», чтобы отменить."
         const val STARTED = "Запускаю."
+        val MUTES = setOf("session.input_audio.mute", "session.input_audio.unmute")
         val CLAIMS = listOf("поставил", "поставлен", "запустил", "запускаю", "готово")
         val STARTS = listOf("запускаю", "запущен", "запустил", "выполняю", "выполнен", "готово", "одобрен", "поставил", "поставлен")
         val ASKS = listOf("«да»", "«нет»", "скажите да", "скажите мне да", "да или нет")

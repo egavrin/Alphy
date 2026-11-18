@@ -40,14 +40,20 @@ class AndroidLiveAudioTest {
     }
 
     @Test fun shortChunksPlayAtOnce() {
-        audio.play(voice(CHUNK))
+        write("A 100 ms chunk on a new track")
         played("A 100 ms chunk on a new track", 1_000)
         SystemClock.sleep(1_000)
-        audio.play(voice(CHUNK))
+        write("A 100 ms chunk after an underrun")
         played("A 100 ms chunk after an underrun", 1_000)
         audio.flushPlayback()
-        audio.play(voice(CHUNK))
+        write("A 100 ms chunk after a flush")
         played("A 100 ms chunk after a flush", 1_000)
+    }
+
+    /** Writes one chunk. A write that the track did not take counts nothing, so the playback must be active after it. */
+    private fun write(what: String) {
+        audio.play(voice(CHUNK))
+        assertTrue("$what was not written.", audio.playbackActive)
     }
 
     private fun played(what: String, timeoutMs: Long) {

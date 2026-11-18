@@ -173,13 +173,13 @@ The session omits `delegation`, so it runs in client mode (section 3). Alphy sen
   - Run 2 result: 8 replies, one reply end for each, the same count as the output transcript. Pauses inside a reply were at most 500 ms. Silence between replies was at least 1,000 ms, after the interrupted reply.
 - Assumption: platform echo cancellation on the loudspeaker removes enough of Alphy's voice that GPT-Live does not hear itself and the local detector does not fire on echo. Test: the device echo check (6.4). If it fails, the fallback is the decision of the user. Options are headset-only use or WebRTC audio processing (a new native dependency).
 
-5.4.6 Mute: 🎤 stops the capture and sends `session.input_audio.mute`. Unmute restarts the capture and sends `session.input_audio.unmute`. GPT-Live can finish its current speech while the microphone is muted.
+5.4.6 Mute: 🎤 stops the capture and sends `session.input_audio.mute`. Unmute restarts the capture and sends `session.input_audio.unmute`. GPT-Live can finish its current speech while the microphone is muted. An `error` event for a sent mute or unmute does not end the voice mode, because the phone stops the capture in any case (ruling R37). The live check (6.3) tests that GPT-Live accepts both events.
 
 ### 5.5 Hand-off to Alphy (client delegation)
 
 5.5.1 Alphy keeps the input transcript of the session from `session.input_transcript.delta`, with `start_ms` and `end_ms`.
 
-5.5.2 At `session.delegation.created`, the request text is the last user turn: the input transcript deltas that start after the previous hand-off and at or after the end of GPT-Live's latest spoken output, up to the `offset_ms` of the event. Small talk that GPT-Live already answered is not part of the request. If that text is blank, Alphy waits up to 500 ms for more input transcript deltas. If it is still blank, Alphy sends `session.commentary.append` with «Alphy не расслышал запрос.» and does nothing else.
+5.5.2 At `session.delegation.created`, the request text is the last user turn, up to the `offset_ms` of the event. It holds the input transcript deltas that start after the previous hand-off. They also start at or after the latest end of a GPT-Live output that did not talk over the current speech run. Small talk that GPT-Live already answered is not part of the request. If that text is blank, Alphy waits up to 500 ms for more input transcript deltas. If it is still blank, Alphy sends `session.commentary.append` with «Alphy не расслышал запрос.» and does nothing else.
 
 - The current speech run (rulings R31 and R32): the input deltas back from the last one at or before `offset_ms`, while the gap from one delta's `end_ms` to the next delta's `start_ms` is at most 1,000 ms. The run exists only when its last delta ends at most 1,000 ms before `offset_ms`.
 - An output that ends after the start of the current speech run talked over the user, so it does not cut the request. Output ends at or before the run start still cut. Without a current run, every output end at or before `offset_ms` cuts, so a blank result waits as above.
@@ -254,7 +254,7 @@ The voice mode ends at any of these events. Each end closes the capture and the 
 | --- | --- |
 | ✕ | none |
 | Screen off, or the activity stops while no screen or app that Alphy opened is in front (1.5, 5.8.1) | none |
-| 60 s without user speech, by the local voice detector, while no hand-off runs (Claude) | «Голосовой режим завершён: нет речи 60 с» |
+| 60 s without user speech, by the local voice detector, while no hand-off runs (Claude). A running hand-off holds this end off for at most 180 s after the last user speech or Alphy output (ruling R38). | «Голосовой режим завершён: нет речи 60 с» |
 | Audio focus loss | «Голосовой режим прерван другим звуком» |
 | The account provider is no longer OpenAI, or the key is removed | «Голосовой режим доступен только с ключом OpenAI» |
 | `session.closed` with `expired` | «Сеанс голосового режима истёк. Начните заново.» |
@@ -322,7 +322,7 @@ GPT-Live costs $0.05 per minute, billed per second of open session, including si
 - assistant button mode (5.11): a press with an OpenAI account starts the session at once, and a press with another provider opens the sheet as today; no permission means no session; 10 s without speech after the press ends the voice mode and keeps the sheet; the first hand-off waits up to 2 s for a capture in progress; the first hand-off carries the screen context and screenshot that the user kept, and later hand-offs carry none; closing the sheet, `onHide`, `onLockscreenShown`, and `openApp` end the voice mode;
 - the voice mode and `VoiceSession` never run together.
 
-6.3 A live check (`run.py live-check`, a test class whose name starts with `Live`) runs one short session with the real key from `~/.env`: one Russian request with a hand-off, one mini-app commentary sequence with the second commentary delayed by 25 s, one typed turn with `session.thinking.append`, one interruption, and one voice approval with a recorded «да» fixture. It logs the order and the timeline values of transcript and delegation events. It tests the assumptions of 5.4.5, 5.5.2, 5.5.6, 5.5.10, and 5.7.2, and it checks that GPT-Live does not claim an action before the commentary.
+6.3 A live check (`run.py live-check`, a test class whose name starts with `Live`) runs one short session with the real key from `~/.env`: one Russian request with a hand-off, one mini-app commentary sequence with the second commentary delayed by 25 s, one typed turn with `session.thinking.append`, one interruption, one voice approval with a recorded «да» fixture, and one mute and unmute (ruling R37). It logs the order and the timeline values of transcript and delegation events. It tests the assumptions of 5.4.5, 5.4.6, 5.5.2, 5.5.6, 5.5.10, and 5.7.2, and it checks that GPT-Live does not claim an action before the commentary.
 
 6.4 A device echo check on a real phone, with the loudspeaker and without a headset. Run it as the first task of the plan, with a minimal capture and playback path, because its result decides the audio path (5.4.5). Alphy speaks a long answer while the room is quiet. Expected: GPT-Live does not hear itself (no input transcript of Alphy's words), and the local detector does not flush the playback. Then the user speaks over Alphy. Expected: the playback stops within 300 ms. Then Alphy reads a proposal that contains the word «да». Expected: no approval and no input transcript of that word. Voice approval (5.5.10) stays off until this check passes. Record the revision, the device, the steps, and the results.
 

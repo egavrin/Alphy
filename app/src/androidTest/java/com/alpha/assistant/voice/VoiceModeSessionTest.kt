@@ -44,7 +44,9 @@ class VoiceModeSessionTest {
     private class Host(private val messages: List<Message>) : LiveVoiceHost {
         val calls = CopyOnWriteArrayList<String>()
         @Volatile var running = false
-        override fun history() = messages
+        /** True makes the history read throw, as a chat that cannot be read does. */
+        @Volatile var historyFails = false
+        override fun history() = messages.also { check(!historyFails) { "The history read failed." } }
         override fun delegation(id: String, request: String) { calls += "delegation:$id:$request" }
         override fun turn(turn: UserTurn) { calls += "turn:${turn.text}:${turn.startMs}:${turn.endMs}:${turn.overlappedPlayback}" }
         override fun handOffRunning() = running
@@ -123,6 +125,8 @@ class VoiceModeSessionTest {
         }
         /** Waits until every queued chunk has gone out and the main thread has taken it. */
         fun drain() = waitUntil("queued output") { sent.get() == queued.get() }
+        /** Queued chunks have not gone out yet. */
+        fun streaming() = sent.get() < queued.get()
         override fun close() { running = false; worker.join() }
     }
 
@@ -260,6 +264,25 @@ class VoiceModeSessionTest {
             rig.socket.types())
     }
 
+    /** Review I1: a microphone that does not start again at an unmute ends the mode with a status, and nothing throws. */
+    @Test fun failedUnmuteEndsTheMode() {
+        val button = Rig().started()
+        main { button.session.mute(true) }
+        button.audio.failUnmute = true
+        main { button.session.mute(false) }
+        // The return from a permission dialog or from Clock.
+        val away = Rig().started()
+        main { away.session.away(true) }
+        away.audio.failUnmute = true
+        main { away.session.away(false) }
+        for (rig in listOf(button, away)) {
+            assertEquals(listOf("ended:${text(R.string.live_voice_failed)}:false"), rig.ends())
+            assertEquals(LivePhase.IDLE, main { rig.session.phase })
+            assertEquals(1, rig.audio.closes.get())
+            assertEquals(1, rig.socket.closes.get())
+        }
+    }
+
     @Test fun endsFollowTheSpecTable() {
         val connection = text(R.string.live_voice_connection)
         val openAiOnly = text(R.string.live_voice_openai_only)
@@ -361,6 +384,20 @@ class VoiceModeSessionTest {
         assertEquals(listOf("ended:${text(R.string.live_voice_no_speech)}:false"), rig.ends())
     }
 
+    /** Ruling R38: a hand-off that waits for the user holds off the silence end only until the hold after the last speech or output. */
+    @Test fun handOffHoldsTheSilenceEndForALimitedTime() {
+        val rig = Rig(TIMING.copy(silenceMs = 300, handOffHoldMs = 1_000))
+        rig.host.running = true
+        rig.started()
+        val started = SystemClock.uptimeMillis()
+        SystemClock.sleep(800)
+        assertTrue("A running hand-off holds off the silence end", main { rig.session.active })
+        waitUntil("silence end while the hand-off runs") { !rig.session.active }
+        val elapsed = SystemClock.uptimeMillis() - started
+        assertEquals(listOf("ended:${text(R.string.live_voice_no_speech)}:false"), rig.ends())
+        assertTrue("Ended $elapsed ms after the start", elapsed >= 1_000)
+    }
+
     @Test fun silentStreamIsNoReply() {
         val rig = Rig(STREAM, realTime = true).started()
         Stream(rig).use { stream ->
@@ -379,7 +416,7 @@ class VoiceModeSessionTest {
         }
     }
 
-    @Test fun replyKeepsItsPausesAndEndsAfterItsLastVoicedChunk() {
+    @Test fun replyWritesOnlyVoicedChunksAndEndsAfterItsLastVoicedChunk() {
         val rig = Rig(STREAM, realTime = true).started()
         Stream(rig).use { stream ->
             SystemClock.sleep(300)
@@ -528,6 +565,18 @@ class VoiceModeSessionTest {
         }
     }
 
+    /** Review m4: the user hears nothing of a dropped reply, so the phase leaves SPEAKING while the reply still streams. */
+    @Test fun phaseLeavesSpeakingWhileADroppedReplyStreams() {
+        val rig = Rig(STREAM, realTime = true).started()
+        Stream(rig).use { stream ->
+            stream.voiced(1, 40)
+            waitUntil("speaking") { rig.session.phase == LivePhase.SPEAKING }
+            stream.bargeIn()
+            waitUntil("listening", 1_000) { rig.session.phase == LivePhase.LISTENING }
+            assertTrue("The dropped reply still streams", stream.streaming())
+        }
+    }
+
     @Test fun repliesPlayAfterABargeInAndAfterAway() {
         val rig = Rig(STREAM, realTime = true).started()
         Stream(rig).use { stream ->
@@ -640,15 +689,19 @@ class VoiceModeSessionTest {
         assertEquals("session.thinking.append", rig.socket.types().last())
     }
 
-    @Test fun rejectedAppendKeepsTheMode() {
+    /** Rulings R10 and R37: an error for an append, a mute, or an unmute of this session keeps the mode. */
+    @Test fun rejectedAppendOrMuteKeepsTheMode() {
         val rig = Rig().started()
         val commentary = main { rig.session.commentary("d1", "Ответ Alphy: готово.") }
         main { rig.session.thinking("Пользователь написал: привет.") }
         val thinking = JSONObject(rig.socket.sent.last()).getString("event_id")
-        rig.socket.emit(failure(commentary))
-        rig.socket.emit(failure(thinking))
+        main { rig.session.mute(true) }
+        val mute = JSONObject(rig.socket.sent.last()).getString("event_id")
+        main { rig.session.mute(false) }
+        val unmute = JSONObject(rig.socket.sent.last()).getString("event_id")
+        for (id in listOf(commentary, thinking, mute, unmute)) rig.socket.emit(failure(id))
         main { }
-        assertTrue("A rejected append keeps the voice mode", main { rig.session.active })
+        assertTrue("A rejected append, mute, or unmute keeps the voice mode", main { rig.session.active })
         assertEquals("", main { rig.session.status })
         assertFalse("session.close" in rig.socket.types())
         assertTrue(rig.host.calls.isEmpty())
@@ -657,6 +710,16 @@ class VoiceModeSessionTest {
         waitUntil("unknown id end") { !rig.session.active }
         assertEquals(listOf("ended:${text(R.string.live_voice_failed)}:false"), rig.ends())
         assertTrue("session.close" in rig.socket.types())
+    }
+
+    /** Review m9: the history is read before the socket connects, so a failed read leaves no open socket. */
+    @Test fun historyFailureOpensNoSocket() {
+        val rig = Rig()
+        rig.host.historyFails = true
+        rig.start()
+        waitUntil("start failure") { !rig.session.active }
+        assertEquals(listOf("ended:${text(R.string.live_voice_failed)}:false"), rig.ends())
+        assertFalse("The socket must not connect", rig.socket.connected)
     }
 
     @Test fun sessionRunsOverTheRealTransport() {

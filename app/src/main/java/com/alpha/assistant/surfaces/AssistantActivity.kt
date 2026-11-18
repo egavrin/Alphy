@@ -40,7 +40,6 @@ import com.alpha.assistant.R
 import com.alpha.assistant.ui.*
 
 private const val NEW_CHAT_PENDING = "new_chat_pending"
-private const val LIVE_PRESS = "live_press"
 
 /** The compact and full activities share chat, drafts, and active requests. */
 class AssistantActivity : AlphyActivity() {
@@ -59,7 +58,7 @@ class AssistantActivity : AlphyActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         newChatPending = savedInstanceState?.getBoolean(NEW_CHAT_PENDING) == true
-        livePress = savedInstanceState?.getBoolean(LIVE_PRESS) == true
+        // A press is not restored, so a restore never starts a paid session without a new press (review m5).
         receiveInvocation(intent, newEntry = savedInstanceState == null)
         ContextCompat.registerReceiver(this, screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF), ContextCompat.RECEIVER_NOT_EXPORTED)
         setContent {
@@ -141,7 +140,6 @@ class AssistantActivity : AlphyActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean(NEW_CHAT_PENDING, newChatPending)
-        outState.putBoolean(LIVE_PRESS, livePress)
     }
 
     private fun receiveInvocation(intent: Intent, newEntry: Boolean = true) {

@@ -53,6 +53,25 @@ class BargeInDetectorTest {
         assertTrue((1..10).any { detector.accept(block(0.03), playbackActive = true) })
     }
 
+    /** Ruling R35: the device flag alone teaches the echo level, so a dry pause of an open reply keeps it. */
+    @Test fun dryPauseKeepsTheEchoLevel() {
+        val detector = BargeInDetector()
+        repeat(100) { detector.accept(block(0.002), playbackActive = false) }
+        repeat(100) { assertFalse(detector.accept(block(0.02), playbackActive = true, devicePlays = true)) }
+        // 2 s of the open reply while the device is dry: the microphone hears the quiet room.
+        repeat(100) { assertFalse(detector.accept(block(0.002), playbackActive = true, devicePlays = false)) }
+        repeat(250) { assertFalse(detector.accept(block(0.02), playbackActive = true, devicePlays = true)) }
+    }
+
+    /** Ruling R36: the grace counts only while the device plays, so a reply that opens dry learns the echo of its first played block. */
+    @Test fun graceCountsOnlyWhileTheDevicePlays() {
+        val detector = BargeInDetector()
+        repeat(100) { detector.accept(block(0.002), playbackActive = false) }
+        // 400 ms of the open reply before the device plays, longer than the 240 ms grace.
+        repeat(20) { assertFalse(detector.accept(block(0.002), playbackActive = true, devicePlays = false)) }
+        repeat(250) { assertFalse(detector.accept(block(0.02), playbackActive = true, devicePlays = true)) }
+    }
+
     @Test fun echoThatRampsUpDuringTheGraceDoesNotFire() {
         val detector = BargeInDetector()
         repeat(100) { assertFalse(detector.accept(block(0.002), playbackActive = false)) }
