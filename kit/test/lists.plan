@@ -1,0 +1,7 @@
+app("Lists", lang="en", preset="clean", palette="blue")
+need trip = input("date", "Trip starts", "2026-11-21")
+need wake = input("time", "Wake up", "07:30")
+need gear = input("choices", "Take with you", ["Map"], options=["Map", "Tent", "Stove"], max=2)
+need acts = entries("Plan", fields={what: "text", day: ["Sat", "Sun"], at: "time"}, group=$day, sheet=true, labels={what: "Activity", day: "Day", at: "Time"}, rows=[{what: "Hike", day: "Sun", at: "09:00"}, {what: "Dinner", day: "Sat", at: "19:00"}, {what: "Museum", day: "Sat", at: "10:00"}])
+need doses = entries("Doses", fields={name: "text", on: "switch", taken: "count", day: "date", at: "time", kind: ["Pill", "Drop"]}, edit=true, confirm="Delete this dose?", yes="Delete", no="Keep", labels={name: "Dose", on: "On", taken: "Taken", day: "Day", at: "Time", kind: "Kind"}, rows=[{name: "Morning", on: true, taken: 0, day: "2026-11-21", at: "08:00", kind: "Pill"}, {name: "Night", on: false, taken: 1, day: "2026-11-22", at: "20:00", kind: "Drop"}])
+need steps = entries("Steps", fields={step: "text", done: "check"}, reorder=true, labels={step: "Step", done: "Done"}, rows=[{step: "Pack", done: false}, {step: "Drive", done: false}, {step: "Hike", done: false}])

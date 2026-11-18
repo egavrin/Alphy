@@ -249,7 +249,7 @@ function show(node) {
 return { DslError, parseExpression, parseLine, AppFile, show };
 })();
 // core.js
-const { CATALOG, ICONS, ACTIONS, TONES, FUNCTIONS, given, App, settings } = (() => {
+const { CATALOG, ICONS, ACTIONS, TONES, dayNumber, FUNCTIONS, given, App, settings } = (() => {
 // Runs an app file without any platform: state, formulas, actions, and the component tree.
 // A renderer draws the tree. The checks of the host are in check.js.
 
@@ -677,6 +677,9 @@ class App {
           heads = sorted.map((item, index) => (index === 0 || sorted[index - 1][1] !== item[1] ? [{ type: "Heading", props: { text: String(item[1] ?? "") }, children: [] }] : []));
         } catch (failure) { this.fault(name ?? tree.name, `group: ${failure.message}`); }
         node.children = rows.flatMap((row, index) => [...(heads[index] ?? []), visit(node.template, { it: row, index, list }, undefined, depth + 1)]);
+        // For the emitter: the stored list of the rows, and the row template drawn for a row that it gives, such as a blank row.
+        node.source = list;
+        node.blank = (row) => visit(node.template, { it: row, index: 0, list }, undefined, depth + 1);
       }
       return node;
     };
@@ -767,7 +770,7 @@ class App {
 // The kit uses the smoke gate: an app file of this design has no check lines.
 const settings = { gate: "smoke", now: () => Date.now() };
 
-return { CATALOG, ICONS, ACTIONS, TONES, FUNCTIONS, given, App, settings };
+return { CATALOG, ICONS, ACTIONS, TONES, dayNumber, FUNCTIONS, given, App, settings };
 })();
 // parts.js
 const { rules, PART_KINDS, expand } = (() => {
@@ -1558,7 +1561,7 @@ function report(file) {
 return { smoke, runChecks, report };
 })();
 // run.js
-const { PER_OBJECT, namer, header, screen, stateOf, handle } = (() => {
+const { PER_OBJECT, MAX_ROW_FIELDS, MAX_ROWS, MAX_ARRAY, TYPED, ALPHY, namer, header, screen, stateOf, handle } = (() => {
 // The run-time of a compiled app. It runs inside the app's source in the sandbox (kit/build.js): for each event, the kit's
 // App reads the lines of the app, takes the stored state, runs the event, and gives the next state and screen.
 // The emitter (emit.js) builds the first screen and the first state with the same screen and stateOf functions.
@@ -1571,6 +1574,14 @@ const SAFE = /^[A-Za-z][A-Za-z0-9_]{0,47}$/;
 const REFUSED = new Set(["__proto__", "prototype", "constructor"]);
 /** An object of Alphy holds at most 32 fields, so the shown values go into d, d2, d3, and the tests into v, v2. */
 const PER_OBJECT = 32;
+/** A row of Alphy has at most 12 flat fields with its id, a list at most 100 rows, and an array at most 512 values (ToolValueSchema). */
+const MAX_ROW_FIELDS = 12;
+const MAX_ROWS = 100;
+const MAX_ARRAY = 512;
+/** The fields that a person types into. An add form with more than two of them is a bottom sheet. A Dialog that holds any field is one too. */
+const TYPED = new Set(["TextField", "NumberField", "DateField", "TimeField"]);
+/** The Alphy type of each kind of row field: a time is minutes, and a date is a "YYYY-MM-DD" text. */
+const ALPHY = { time: "number", date: "string" };
 
 /**
  * The Alphy names of the kit's names, in both directions: map.safe by key and map.kit by Alphy name. A key gets the name that
@@ -1598,21 +1609,42 @@ function header(kit) {
   return { title: read(tree?.args[0]), ...Object.fromEntries(Object.entries(tree?.named ?? {}).map(([key, arg]) => [key, read(arg)])) };
 }
 
+const pad = (number) => String(number).padStart(2, "0");
+/** A time of the kit, "HH:MM", as Alphy's minutes from 0 to 1439. A text that is not a time is 0. */
+const minutesOf = (text) => {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(text ?? "").trim());
+  return match && Number(match[1]) < 24 && Number(match[2]) < 60 ? Number(match[1]) * 60 + Number(match[2]) : 0;
+};
+const clockOf = (minutes) => { const at = Math.min(1439, Math.max(0, Math.round(Number(minutes) || 0))); return `${pad(Math.floor(at / 60))}:${pad(at % 60)}`; };
+/** A value of the kit in the form of its Alphy field. kind is "number", "string", "boolean", "time", or "date". */
+const cast = (kind, value, today) => (kind === "time" ? minutesOf(value) : kind === "date" ? (dayNumber(value) === null ? today : String(value).trim())
+  : kind === "number" ? (typeof value === "number" && Number.isFinite(value) ? value : 0) : kind === "boolean" ? value === true
+  : value === null || value === undefined || typeof value === "object" ? "" : String(value));
+/** A row of the kit as an Alphy row. spec is the field, the Alphy name, and the kind of each stored field (app.lists). */
+const castRow = (row, spec, today) => ({ id: String(row?.id ?? ""), ...Object.fromEntries(spec.map(([field, safe, kind]) => [safe, cast(kind, row?.[field], today)])) });
+const today = (kit) => kit.value({ k: "call", name: "today", args: [] }, {});
+
 const STYLES = { eyebrow: { emphasis: "label", tone: "accent" }, muted: { tone: "muted" } };
 /** The kit's icons that Alphy has under a different name (ToolUiCatalog.icons). ArrowDown has no glyph of its own there. */
 const ICON_NAMES = { ArrowUp: "Arrow", ArrowDown: "Sort", ArrowLeft: "Back", ArrowRight: "Chevron", Edit: "Pencil" };
+/** What a row template of Alphy cannot hold (ToolUiCatalog: no list, dialog, or sheet in a row). */
+const NOT_IN_ROW = new Set(["List", "Dialog"]);
 const own = (map, key) => (Object.hasOwn(map, key) ? map[key] : undefined);
 const defined = (props, keys) => Object.fromEntries(keys.filter((key) => props[key] !== undefined).map((key) => [key, props[key]]));
 const choice = (n, at) => {
   const options = Array.isArray(n.props.options) ? n.props.options : [];
-  return { type: options.length <= 6 ? "segmented" : "select", ...at.field(), options: options.map((value) => ({ text: String(value), value })) };
+  return { type: options.length <= 6 ? "segmented" : "select", ...at.field(), options: options.map((value) => ({ text: at.plain(value), value })) };
 };
-/** A number field or a slider. Alphy wants min below max, the value from min to max, and a step above 0 that fits the range (ToolUiCatalog). */
+/**
+ * A number field or a slider. Alphy wants min below max, the value from min to max, and a step above 0 that fits the range (ToolUiCatalog).
+ * The template of a row has no value of its own, so each row checks its value. After each event the run-time clamps the value into the bounds.
+ */
 const ranged = (type, low, high) => (n, at) => {
   const { min = low, max = high, step, value } = n.props;
-  if (![min, max, value].every(Number.isFinite) || !(min < max && value >= min && value <= max) || (step !== undefined && !(step > 0 && step <= max - min))) {
+  if (![min, max].every(Number.isFinite) || !(min < max) || (!at.blank && !(Number.isFinite(value) && value >= min && value <= max)) || (step !== undefined && !(step > 0 && step <= max - min))) {
     at.fault(`a ${n.type} needs min below max, its value from min to max, and a step above 0 and at most max - min. Now min is ${min}, max is ${max}, the value is ${value}${step === undefined ? "" : `, and the step is ${step}`}`);
   }
+  at.bounds(min, max);
   return { type, ...at.field(), min, max, ...defined(n.props, ["step"]) };
 };
 
@@ -1621,21 +1653,22 @@ const ranged = (type, low, high) => (n, at) => {
  * that it changes, and its action. A component that is not here is a fault "is not built yet".
  */
 const NODES = {
-  Column: (n, at) => ({ type: "column", children: at.children() }),
-  Row: (n, at) => ({ type: "row", ...(n.children.some((child) => child.props.weight !== undefined) && { wrap: false }), children: at.children() }),
+  Column: (n, at) => ({ type: "column", children: at.children(true) }),
+  // An add form with more than two typed fields is a column of a button and the bottom sheet that the button opens.
+  Row: (n, at) => at.form() ?? ({ type: "row", ...(n.children.some((child) => child.props.weight !== undefined) && { wrap: false }), children: at.children(true) }),
   Card: (n, at) => ({ type: "card", ...(n.props.variant === "hero" && { variant: "hero" }), children: at.children() }),
-  Section: (n, at) => ({ type: "section", text: String(n.props.title ?? ""), children: at.children() }),
+  Section: (n, at) => ({ type: "section", text: at.plain(n.props.title), children: at.children() }),
   Text: (n, at) => ({ type: "text", ...at.text("text"), ...(own(STYLES, n.props.variant) && { style: STYLES[n.props.variant] }) }),
   Heading: (n, at) => ({ type: "text", ...at.text("text"), style: { emphasis: "title" } }),
-  Metric: (n, at) => ({ type: "metric", text: String(n.props.label ?? ""), bind: at.shown("value"), ...(n.props.emphasis === "display" && { style: { emphasis: "display" } }) }),
+  Metric: (n, at) => ({ type: "metric", text: at.plain(n.props.label), bind: at.shown("value"), ...(n.props.emphasis === "display" && { style: { emphasis: "display" } }) }),
   Badge: (n, at) => ({ type: "badge", ...at.text("value") }),
   // Alphy wants a label on an emoji too: the emoji itself.
-  Emoji: (n, at) => ({ type: "emoji", text: String(n.props.value ?? ""), ...at.value("value") }),
+  Emoji: (n, at) => ({ type: "emoji", text: at.plain(n.props.value), ...at.value("value") }),
   Divider: () => ({ type: "divider" }),
   // A banner is a container in Alphy's catalog, with 1 to 50 children, so its message is a child.
   Notice: (n, at) => ({ type: "banner", children: [{ type: "text", ...at.text("text") }] }),
-  Button: (n, at) => ({ type: "button", text: String(n.props.label ?? ""), action: at.action(), variant: n.props.selected === undefined || n.props.selected ? "filled" : "tonal" }),
-  IconButton: (n, at) => ({ type: "icon", name: own(ICON_NAMES, n.props.icon) ?? n.props.icon, text: at.action().replace(/_/g, " "), action: at.action() }),
+  Button: (n, at) => ({ type: "button", text: at.caption(n.props.label), action: at.action(), variant: n.props.selected === undefined || n.props.selected ? "filled" : "tonal" }),
+  IconButton: (n, at) => ({ type: "icon", name: own(ICON_NAMES, n.props.icon) ?? n.props.icon, text: at.caption(), action: at.action() }),
   NumberField: ranged("numberInput", 0, 1000000),
   // Alphy gives a slider without bounds 0 to 100.
   Slider: ranged("slider", 0, 100),
@@ -1644,26 +1677,54 @@ const NODES = {
   CheckBox: (n, at) => ({ type: "checkbox", ...at.field() }),
   Segmented: choice,
   Select: choice,
+  DateField: (n, at) => ({ type: "dateInput", ...at.field() }),
+  // Alphy keeps a time as minutes, and the kit as "HH:MM".
+  TimeField: (n, at) => ({ type: "timeInput", ...at.field(clockOf) }),
+  // max= is the kit's own limit: a choice over it changes nothing.
+  Choices: (n, at) => ({ type: "multiChoice", ...at.field((value) => (Array.isArray(value) && !(n.props.max !== undefined && value.length > n.props.max) ? value : undefined)),
+    options: (Array.isArray(n.props.options) ? n.props.options : []).map((value) => ({ text: at.plain(value), value })) }),
+  Dialog: (n, at) => at.modal(),
+  List: (n, at) => at.list(),
 };
 
 /**
  * A shown value in the type of its field, which the emitter fixes with the first value (app.types): the stateSchema keeps that
- * type. A number field takes 0 for a value that is not a finite number, and a text field is never null.
+ * type. A number field takes 0 for a value that is not a finite number, and a text field is never null, a list, or a record.
  */
-const shownAs = (type, value) => (type === "number" ? (Number.isFinite(value) ? value : 0) : String(value ?? ""));
+const shownAs = (type, value) => (type === "number" ? (Number.isFinite(value) ? value : 0) : value !== null && typeof value === "object" ? "" : String(value ?? ""));
+/** The place and the value that make a visible test false: $/open, !$/closed, or $/pick != "". Other tests have none. */
+const falseOf = (test) => (test?.k === "path" && test.abs ? [test, false] : test?.k === "un" && test.op === "!" && test.arg.k === "path" && test.arg.abs ? [test.arg, true]
+  : test?.k === "bin" && test.op === "!=" && test.left.k === "path" && test.left.abs && test.right.k === "lit" ? [test.left, test.right.v] : null);
+const relative = (expr) => (expr?.k === "path" && !expr.abs && expr.segs.length === 1 ? expr.segs[0] : null);
 
 /**
- * The Alphy screen of the kit's tree in the state of now. app is the compiled data: the field of each state value, the type
- * of each shown value, and the names. Returns the ui, the shown values by object (d, v, ...), the controls by action id, the
- * faults of what is not built yet, and the component of each node of the ui (owners) for the faults of the emitter.
+ * The Alphy screen of the kit's tree in the state of now. app is the compiled data: the field of each state value, the kind of
+ * each time, date, list, and array, the type of each shown value, and the names. Returns the ui, the shown values by object
+ * (d, v, ...), the views of lists that the run-time writes (views, their schemas, and their lines), the controls by action id,
+ * the bounds of each number control, the faults as [line, text], and the line of each node of the ui (owners) for the emitter.
  */
 function screen(kit, app) {
-  const name = namer(app.names), fields = new Map(app.fields), faults = [], controls = new Map(), owners = new Map();
+  const name = namer(app.names), fields = new Map(app.fields), kinds = app.kinds ?? {}, lists = app.lists ?? {}, day = today(kit);
+  const faults = [], controls = new Map(), rowControls = new Map(), owners = new Map(), bounds = [], views = {}, viewSchemas = {}, viewOwners = [];
   const slots = { d: new Map(), v: new Map() }, values = {};
-  // A value that a node shows: the field of its state line, or a field of d (or of v for a test) that the run-time computes.
-  const slot = (kind, key, expr, value) => {
+  /**
+   * A value that a node shows: the field of its state line (of its row in a row), or a field that the run-time computes. At the top
+   * the field is in d (or in v for a test). In a row it is a field of the row, and the list becomes a view with that field.
+   */
+  const slot = (kind, key, expr, value, at) => {
+    if (value !== null && typeof value === "object") at.fault(`it shows a ${Array.isArray(value) ? "list" : "record"}, and Alphy shows one text or number there. Show one field of it, or join(list)`);
+    const scope = at.scope;
+    if (scope) {
+      const stored = scope.stored.get(relative(expr));
+      if (stored && stored[1] !== "time" && (kind === "d" || stored[1] === "boolean")) return stored[0];
+      const field = scope.name(`${kind}:${key}`, key.replace(/\W/g, "_"));
+      const type = kind === "v" ? "boolean" : (app.types[`${scope.key}/${field}`] ??= typeof value === "number" ? "number" : "string");
+      scope.computed.set(field, type);
+      if (scope.out) scope.out[field] = kind === "v" ? Boolean(value) : shownAs(type, value);
+      return field;
+    }
     const root = expr?.k === "path" && expr.abs ? expr.segs : null;
-    if (root?.length === 1 && fields.has(root[0]) && (kind === "d" || typeof value === "boolean")) return fields.get(root[0]);
+    if (root?.length === 1 && fields.has(root[0]) && kinds[root[0]] !== "time" && (kind === "d" || typeof value === "boolean")) return fields.get(root[0]);
     const field = name(`${kind}:${key}`, root ? root.join("_") : key.replace(/\W/g, "_"));
     if (!slots[kind].has(field)) {
       const object = kind + (slots[kind].size < PER_OBJECT ? "" : Math.floor(slots[kind].size / PER_OBJECT) + 1);
@@ -1672,53 +1733,166 @@ function screen(kit, app) {
     }
     return slots[kind].get(field);
   };
-  const walk = (node, key) => {
-    const map = own(NODES, node.type);
-    if (!map) { faults.push(`${node.name ?? key}: ${node.type} is not built yet`); return null; }
+  /** A control of a row is one action id for all rows: its value {key, value} names the row. */
+  const register = (scope, id, run) => {
+    if (!scope) return controls.set(id, run);
+    if (scope.id === null) return;
+    let rows = rowControls.get(id);
+    if (!rows) { rowControls.set(id, (rows = new Map())); controls.set(id, (payload) => rows.get(payload?.key)?.(payload.value) ?? false); }
+    rows.set(scope.id, run);
+  };
+  /** ctx: scope is the row of a list (null at the top), sheet is the open flag of the add sheet, weighted is true in a column or a row. */
+  const walk = (node, key, line, ctx) => {
+    line = node.name ?? line;
+    const scope = ctx.scope, map = own(NODES, node.type), fault = (text) => faults.push([line, text]);
+    if (!map) { fault(`${node.type} is not built yet`); return null; }
+    if (scope && NOT_IN_ROW.has(node.type)) { fault(`a ${node.type} in a row of a list is not built yet`); return null; }
     const expr = node.call ? given(node.call) : {};
-    const bound = (prop) => (expr[prop] && expr[prop].k !== "lit" ? slot("d", `${key}.${prop}`, expr[prop], node.props[prop]) : null);
+    // The arrows of a row, move(-1) and move(1), become the reorder of its list.
+    if (scope && expr.action?.k === "call" && expr.action.name === "move" && expr.action.args.length === 1) { scope.flags.moves = true; return null; }
+    const bound = (prop) => (expr[prop] && expr[prop].k !== "lit" ? slot("d", `${key}.${prop}`, expr[prop], node.props[prop], at) : null);
     const at = {
-      children: () => node.children.map((child, index) => walk(child, child.name ?? `${key}_${index}`)).filter(Boolean),
-      text: (prop) => { const bind = bound(prop); return bind ? { text: "", bind } : { text: String(node.props[prop] ?? "") }; },
-      value: (prop) => { const bind = bound(prop); return bind ? { bind } : { [prop]: node.props[prop] }; },
-      shown: (prop) => bound(prop) ?? slot("d", `${key}.${prop}`, null, node.props[prop]),
-      fault: (text) => faults.push(`${node.name ?? key}: ${text}`),
-      field: () => {
-        const root = expr.bind?.k === "path" && expr.bind.abs && expr.bind.segs.length === 1 ? expr.bind.segs[0] : null;
-        if (!fields.has(root)) at.fault(`a binding to ${expr.bind ? show(expr.bind) : "nothing"} is not built yet: a field binds a value of a state line`);
-        return { text: String(node.props.label ?? ""), bind: fields.get(root), action: at.action() };
+      scope, fault,
+      blank: Boolean(scope && !scope.out),
+      children: (weighted = false, inner = ctx) => node.children.map((child, index) => walk(child, child.name ?? `${key}_${index}`, line, { ...inner, weighted })).filter(Boolean),
+      // The text of a control: its label, else the kit's name of its line, which a person can read. Never a safe name such as f3.
+      caption: (label) => at.plain(label) || (node.name ? node.name : `${line} ${node.props.icon ?? node.type}`).replace(/_/g, " "),
+      text: (prop) => { const bind = bound(prop); return bind ? { text: "", bind } : { text: at.plain(node.props[prop]) }; },
+      // A text of the screen that is a list or a record is a fault, never "a,b" or "[object Object]".
+      plain: (value) => {
+        if (value === null || typeof value !== "object") return String(value ?? "");
+        fault(`it shows a ${Array.isArray(value) ? "list" : "record"} as a text, and Alphy shows one text there. Show one field of it, or join(list)`);
+        return "";
       },
-      action: () => { const id = name("@" + key, key); controls.set(id, node); return id; },
+      value: (prop) => { const bind = bound(prop); return bind ? { bind } : { [prop]: node.props[prop] }; },
+      shown: (prop) => bound(prop) ?? slot("d", `${key}.${prop}`, null, node.props[prop], at),
+      bounds: (min, max) => { if (!at.blank) bounds.push([node, min, max]); },
+      field: (convert = (value) => value) => {
+        let bind;
+        if (scope) {
+          const stored = scope.stored.get(relative(expr.bind));
+          if (!stored || (stored[1] === "time") !== (node.type === "TimeField") || (node.type === "DateField" && stored[1] !== "date")) {
+            fault(`a ${node.type} in a row binds a field of the row of its own kind, such as $name. ${expr.bind ? show(expr.bind) : "nothing"} is not built yet`);
+          }
+          bind = stored?.[0];
+        } else {
+          const root = expr.bind?.k === "path" && expr.bind.abs && expr.bind.segs.length === 1 ? expr.bind.segs[0] : null;
+          if (!fields.has(root) || (kinds[root] === "time") !== (node.type === "TimeField")) fault(`a binding to ${expr.bind ? show(expr.bind) : "nothing"} is not built yet: a field binds a value of a state line`);
+          bind = fields.get(root);
+        }
+        return { text: at.caption(node.props.label), bind, action: at.action((value) => { const next = convert(value); return next === undefined ? false : kit.change(node, next); }) };
+      },
+      // An action returns "" or the kit's error text, or false for an event that changes nothing. A press in an add sheet that the kit takes closes the sheet.
+      action: (run = () => { const done = kit.fire(node); if (done === "" && ctx.sheet && node.type === "Button") kit.state[ctx.sheet] = false; return done; }, suffix = "") => {
+        const id = name("@" + key + suffix, key + suffix);
+        register(scope, id, run);
+        return id;
+      },
+      form: () => {
+        const flag = `${key}:open`;
+        if (!fields.has(flag)) return null;
+        const text = at.caption(node.children.find((child) => child.type === "Button")?.props.label);
+        const open = (to) => () => { kit.state[flag] = to; return ""; };
+        return { type: "column", children: [{ type: "button", text, action: at.action(open(true), "_open"), variant: "filled", icon: "Plus" },
+          { type: "bottomSheet", text, visibleBind: fields.get(flag), dismissAction: at.action(open(false), "_dismiss"), children: at.children(false, { ...ctx, sheet: flag }) }] };
+      },
+      modal: () => {
+        if (!expr.visible || expr.visible.k === "lit") fault("a Dialog shows while a test of the app is true, so it needs visible=test, such as visible=$/open");
+        const target = falseOf(expr.visible), form = (child) => child.props.bind !== undefined || child.children.some(form);
+        // The dismiss of Alphy (a tap outside, the back key) makes the test false, as the buttons of the dialog do.
+        const dismiss = at.action(() => { if (!target) return false; kit.write(target[0], target[1], {}); kit.recompute(); return ""; }, "_dismiss");
+        return { type: node.children.some(form) ? "bottomSheet" : "dialog", text: at.caption(node.props.title), dismissAction: dismiss, children: at.children() };
+      },
+      list: () => rows(node, key, line, expr, at),
     };
     const out = map(node, at);
-    owners.set(out, node.name ?? key);
+    if (!out) return null;
+    owners.set(out, line);
     for (const flag of ["visible", "enabled"]) {
       if (!expr[flag]) continue;
-      if (expr[flag].k !== "lit") out[flag + "Bind"] = slot("v", `${key}.${flag}`, expr[flag], node.props[flag]);
+      if (expr[flag].k !== "lit") out[flag + "Bind"] = slot("v", `${key}.${flag}`, expr[flag], node.props[flag], at);
       else if (!node.props[flag]) out[flag] = false;
     }
-    if (node.props.weight !== undefined) out.layout = { weight: node.props.weight };
+    // Alphy takes a weight only in a column or a row.
+    if (node.props.weight !== undefined && ctx.weighted) out.layout = { weight: node.props.weight };
     return out;
   };
-  const { kind, preset, palette } = header(kit), tree = kit.tree(), top = walk(tree, "root");
-  const children = [...(kind ? [{ type: "text", text: String(kind), style: STYLES.eyebrow }] : []), ...(tree.type === "Column" ? top.children : [top].filter(Boolean))];
+  /**
+   * A List as an Alphy list of its stored rows. A row template is the kit's template drawn for a blank row. When the list shows
+   * other rows (sort, filter) or values that the run-time computes, it binds a view: a list field that the run-time writes,
+   * with the rows in the kit's order. A row control of the view changes the stored row with the same id.
+   */
+  const rows = (node, key, line, expr, at) => {
+    const source = node.source, root = source?.k === "path" && source.abs && source.segs.length === 1 && lists[source.segs[0]] ? source.segs[0] : null;
+    if (!root || !node.blank) { at.fault("a List shows the rows of a list of the app, such as $/rows, or sort or filter of it. Other rows are not built yet"); return null; }
+    const spec = lists[root], rowName = namer();
+    rowName("$id", "id");
+    spec.forEach(([field, safe]) => rowName("$" + field, safe));
+    const scope = { key, name: rowName, stored: new Map(spec.map(([field, safe, kind]) => [field, [safe, kind]])), computed: new Map(), flags: { moves: false }, out: null, id: null };
+    const blank = { id: "", ...Object.fromEntries(spec.map(([field, , kind]) => [field, kind === "number" ? 0 : kind === "boolean" ? false : ""])) };
+    const keyOf = (template) => template.name ?? `${key}_row`, template = node.blank(blank);
+    const rowTemplate = walk(template, keyOf(template), line, { scope, weighted: false });
+    const group = expr.group, plain = scope.stored.get(relative(group));
+    const groupBy = group ? (plain && plain[1] !== "time" ? plain[0] : rowName("~group", "group")) : null;
+    if (group && !(plain && plain[1] !== "time")) scope.computed.set(groupBy, "string");
+    // The rows in their stored order: the stored list, or a filter of it.
+    const inOrder = (items) => (items?.k === "path" ? items.abs && items.segs.length === 1 && items.segs[0] === root : items?.k === "call" && items.name === "filter" && inOrder(items.args[0]));
+    const reorder = scope.flags.moves;
+    if (reorder && (group || !inOrder(expr.items))) at.fault("the arrows of a row move it in the stored list, so the list shows its rows in their stored order: no sort and no group");
+    const label = reorder ? rowName("~label", "label") : null;
+    if (label) scope.computed.set(label, "string");
+    const shown = node.children.filter((child) => child.row).map((child) => {
+      const out = {};
+      walk(child, keyOf(child), line, { scope: { ...scope, out, id: String(child.row.id ?? "") }, weighted: false });
+      if (scope.computed.has(groupBy)) { try { out[groupBy] = shownAs("string", kit.value(group, { it: child.row })); } catch { out[groupBy] = ""; } }
+      // Alphy reads the label of a row to a person who moves it, so it is never blank: the first text of the row, else its id.
+      if (label) out[label] = (spec.filter(([, , kind]) => kind === "string").map(([field]) => cast("string", child.row[field]).trim()).find(Boolean) ?? String(child.row.id)).slice(0, 300);
+      return { ...castRow(child.row, spec, day), ...out };
+    });
+    const view = !(expr.items?.k === "path" && inOrder(expr.items)) || scope.computed.size > 0, field = view ? name("view:" + key, key) : fields.get(root);
+    if (view) {
+      const schema = { id: "string", ...Object.fromEntries(spec.map(([, safe, kind]) => [safe, own(ALPHY, kind) ?? kind])), ...Object.fromEntries(scope.computed) };
+      const count = Object.keys(schema).length;
+      if (count > MAX_ROW_FIELDS) at.fault(`the rows of this list have ${count} fields with the id and the values that a row shows, and a row of Alphy has at most ${MAX_ROW_FIELDS}. Show fewer values in a row`);
+      views[field] = shown;
+      viewSchemas[field] = { type: "list", maxItems: MAX_ROWS, fields: schema };
+      viewOwners.push(line);
+    }
+    const move = reorder && at.action((value) => {
+      const list = kit.read(source, {}), from = list.findIndex((row) => row.id === value?.sourceKey), to = list.findIndex((row) => row.id === value?.destinationKey);
+      return from < 0 || to < 0 ? false : kit.fire({ props: { action: { k: "call", name: "move", args: [{ k: "lit", v: to - from }], named: {} } }, row: list[from], list: source });
+    }, "_move");
+    return { type: groupBy ? "groupedList" : "list", text: at.caption(), bind: field, ...(groupBy && { groupBy }), ...(node.props.empty && { emptyText: at.plain(node.props.empty).slice(0, 300) }),
+      ...(move && { reorder: { action: move, labelField: label } }), rowTemplate };
+  };
+  const { kind, preset, palette } = header(kit), tree = kit.tree(), top = walk(tree, "root", "root", { scope: null, weighted: true });
+  const children = [...(kind ? [{ type: "text", text: String(kind), style: STYLES.eyebrow }] : []), ...(tree.type === "Column" ? top?.children ?? [] : [top].filter(Boolean))];
   const ui = { type: "theme", preset: preset ?? "clean", ...(palette && { palette }), cornerRadius: 20, children: [{ type: "column", style: { gap: "medium" }, children }] };
-  return { ui, values, controls, faults, owners };
+  return { ui, values, views, viewSchemas, viewOwners, controls, bounds, faults, owners };
 }
 
-/** The Alphy state of the kit's state: each value of a state line in its field, then the shown values. */
+/** The Alphy value of a stored value of the kit: a time as minutes, a date as a real date (today for a text that is not one), and each row cast. */
+function alphyOf(app, root, value, day) {
+  const kind = app.kinds?.[root];
+  if (kind === "list") return Array.isArray(value) ? value.map((row) => castRow(row, app.lists[root], day)) : [];
+  if (kind === "array") return Array.isArray(value) ? value : [];
+  return kind === "time" || kind === "date" ? cast(kind, value, day) : value;
+}
+
+/** The Alphy state of the kit's state: each value of a state line in its field, then the views and the shown values. */
 function stateOf(kit, app, shown) {
-  const state = {};
+  const state = {}, day = today(kit);
   for (const [root, path] of app.fields) {
-    const [field, inner] = path.split(".");
-    if (inner) (state[field] ??= {})[inner] = kit.state[root]; else state[field] = kit.state[root];
+    const [field, inner] = path.split("."), value = alphyOf(app, root, kit.state[root], day);
+    if (inner) (state[field] ??= {})[inner] = value; else state[field] = value;
   }
-  return { ...state, ...shown.values };
+  return { ...state, ...shown.views, ...shown.values };
 }
 
 /**
  * Answers one event of the sandbox request {artifactId, revision, state, event}. app is the compiled data of emit.js, and now
- * is the clock of the host. A read-only event and an action id that the app does not have give the state back as it is.
+ * is the clock of the host. A read-only event, an action id that the app does not have, an action that changes nothing, and an
+ * action that takes a list past Alphy's limits give the state back as it is. A bound number past its bounds comes back at its bound.
  * The reply holds a new ui only when the screen differs from the screen of the state before the event.
  */
 function handle(input, app, now = Date.now()) {
@@ -1727,21 +1901,38 @@ function handle(input, app, now = Date.now()) {
   const clock = settings.now;
   settings.now = () => now;
   try {
-    const kit = new App(new AppFile().feedText(app.lines));
+    const kit = new App(new AppFile().feedText(app.lines)), kinds = app.kinds ?? {};
+    let last = kit.nextId - 1;
     for (const [root, path] of app.fields) {
       const [field, inner] = path.split("."), value = inner ? state[field]?.[inner] : state[field];
-      if (value !== undefined) kit.state[root] = value;
+      if (value === undefined) continue;
+      if (kinds[root] === "list") {
+        kit.state[root] = (Array.isArray(value) ? value : []).map((row) => {
+          last = Math.max(last, Number(/^r(\d+)$/.exec(row.id)?.[1] ?? 0));
+          return { id: row.id, ...Object.fromEntries(app.lists[root].map(([kitField, safe, kind]) => [kitField, kind === "time" ? clockOf(row[safe]) : row[safe]])) };
+        });
+      } else kit.state[root] = kinds[root] === "time" ? clockOf(value) : kinds[root] === "array" && Array.isArray(value) ? [...value] : value;
     }
+    // Each event starts a new kit, so a new row gets an id after the highest id of the stored rows.
+    kit.nextId = last + 1;
     kit.recompute();
     const before = screen(kit, app), control = event.type === "action" ? before.controls.get(event.actionId) : undefined;
     if (event.type !== "open" && !control) return { state };
-    if (control?.props.bind) kit.change(control, event.value); else if (control) kit.fire(control);
-    const after = control ? screen(kit, app) : before, next = stateOf(kit, app, after);
+    if (control && control(event.value) === false) return { state };
+    for (const [root, kind] of Object.entries(kinds)) if ((kind === "list" && kit.state[root]?.length > MAX_ROWS) || (kind === "array" && kit.state[root]?.length > MAX_ARRAY)) return { state };
+    let after = control ? screen(kit, app) : before;
+    const outside = after.bounds.filter(([node, min, max]) => !(node.props.value >= min && node.props.value <= max));
+    if (outside.length) {
+      for (const [node, min, max] of outside) kit.write(node.props.bind, Number.isFinite(node.props.value) ? Math.min(max, Math.max(min, node.props.value)) : min, { it: node.row });
+      kit.recompute();
+      after = screen(kit, app);
+    }
+    const next = stateOf(kit, app, after);
     return JSON.stringify(after.ui) === JSON.stringify(before.ui) ? { state: next } : { state: next, ui: after.ui };
   } finally { settings.now = clock; }
 }
 
-return { PER_OBJECT, namer, header, screen, stateOf, handle };
+return { PER_OBJECT, MAX_ROW_FIELDS, MAX_ROWS, MAX_ARRAY, TYPED, ALPHY, namer, header, screen, stateOf, handle };
 })();
 // emit.js
 const { runtime, emit } = (() => {
@@ -1755,11 +1946,14 @@ const { runtime, emit } = (() => {
 const runtime = { text: "" };
 /**
  * The limits of Alphy that come from the kit's own mapping, so the author of a plan cannot see them: top-level state fields
- * (ToolValueSchema.validateSchemas), source bytes (SandboxContract.MAX_SOURCE_BYTES), and the nodes and depth of a ui
+ * (ToolValueSchema.validateSchemas), source bytes (SandboxContract.MAX_SOURCE_BYTES), and the nodes, depth, and children of a ui
  * (ToolUiCatalog). ToolSpec.parse stays the check of the ui bytes and the state bytes.
  */
-const MAX_FIELDS = 40, MAX_SOURCE_BYTES = 65536, MAX_NODES = 512, MAX_DEPTH = 8;
+const MAX_FIELDS = 40, MAX_SOURCE_BYTES = 65536, MAX_NODES = 512, MAX_DEPTH = 8, MAX_CHILDREN = 50;
 const SCALARS = new Set(["number", "string", "boolean"]);
+/** The kind of each field kind of an entries need. A choice and a text are strings. */
+const FIELD_KINDS = { number: "number", money: "number", percent: "number", count: "number", check: "boolean", switch: "boolean", time: "time", date: "date" };
+const own = (map, key) => (Object.hasOwn(map, key) ? map[key] : undefined);
 
 /** The UTF-8 bytes of a text, as the host counts them. The sandbox has no TextEncoder that the kit can count on. */
 const bytes = (text) => {
@@ -1770,54 +1964,109 @@ const bytes = (text) => {
 
 /**
  * The definition of the app, its language beside it, and the faults of what the emitter cannot build. app is the compiled
- * data that the source gives the run-time: the lines of the app, the field of each state value, the type of each shown
- * value, and the names in both directions. Faults give no definition.
+ * data that the source gives the run-time: the lines of the app, the field of each state value, the kind of each time, date,
+ * list, and array, the fields of each list, the type of each shown value, and the names in both directions. Faults give no definition.
  */
 function emit(file) {
   if (!runtime.text) throw new Error("emit.js has no run-time text: kit/build.js gives it");
   const kit = new App(file), { title, lang } = header(kit), faults = [], stateSchema = {}, owners = [], needObjects = new Map();
-  const app = { lines: [...file.entries.values()].filter((entry) => entry.kind !== "check").map((entry) => entry.raw).join("\n"), fields: [], types: {}, names: { safe: {}, kit: {} } };
+  const app = { lines: [...file.entries.values()].filter((entry) => entry.kind !== "check").map((entry) => entry.raw).join("\n"), fields: [], types: {}, names: { safe: {}, kit: {} }, kinds: {}, lists: {} };
   const name = namer(app.names);
   if (typeof title !== "string" || title.length < 1 || title.length > 100) faults.push("app: the app line needs a title of 1 to 100 characters");
-  // The need whose part wrote each state line. A line that an author wrote belongs to no need.
+  // The need whose part wrote each line. A line that an author wrote belongs to no need, and a fault of it names the line.
   const partOf = new Map([...(file.partLines ?? [])].flatMap(([need, keys]) => keys.map((key) => [key, need])));
-  for (const entry of file.of("state")) {
-    const root = entry.key.slice(2), value = kit.state[root], need = entry.origin === "part" ? partOf.get(entry.key) : undefined;
-    if (root.includes("/") || !SCALARS.has(typeof value)) { faults.push(`${entry.key}: a ${Array.isArray(value) ? "list" : root.includes("/") ? "path inside a value" : "value of this kind"} is not built yet`); continue; }
-    // A need keeps its value in one field and each other value of its part in one object NAME_s, so it costs at most two fields.
+  const label = (line) => (file.get(line)?.origin === "part" && partOf.has(line) ? `need ${partOf.get(line)}` : line);
+  // The value that each TimeField, DateField, and Choices binds: Alphy keeps a time as minutes, a date as a real date, and choices as an array.
+  const bound = new Map();
+  const scan = (tree) => {
+    if (!tree || typeof tree !== "object") return;
+    const bind = tree.k === "call" && ["TimeField", "DateField", "Choices"].includes(tree.name) ? given(tree).bind : null;
+    if (bind?.k === "path" && bind.abs && bind.segs.length === 1) bound.set(bind.segs[0], tree.name);
+    Object.values(tree).forEach(scan);
+  };
+  file.of("component").forEach((entry) => scan(entry.tree));
+  for (const [root, component] of bound) if (component !== "Choices") app.kinds[root] = component === "TimeField" ? "time" : "date";
+  // The kind of each field of the rows of an entries need, from its fields= line.
+  const declared = new Map(file.of("need").filter((entry) => entry.tree.name === "entries")
+    .map((entry) => [entry.key, (entry.tree.named.fields?.entries ?? [["name", { k: "lit", v: "text" }]]).map(([field, kind]) => [field, own(FIELD_KINDS, kind.v) ?? "string"])]));
+  /** The schema of a list value: a list of flat rows, or an array of plain values. A list that Alphy cannot hold is a fault of its owner. */
+  const listed = (root, value, owner, fields) => {
+    const fault = (text) => { faults.push(`${owner}: ${text}`); return null; };
+    if (value.length ? value.every((item) => item === null || typeof item !== "object") : !fields) {
+      const types = new Set(value.map((item) => typeof item));
+      if (!value.length && bound.get(root) !== "Choices") return fault(`$/${root} starts as an empty list, so the kind of its values is not known. Give it rows or values`);
+      if (types.size > 1 || types.has("object") || types.has("undefined")) return fault(`$/${root} mixes values of different kinds, and a list of Alphy holds one kind`);
+      if (value.length > MAX_ARRAY) return fault(`$/${root} starts with ${value.length} values, and a list of Alphy holds at most ${MAX_ARRAY}`);
+      app.kinds[root] = "array";
+      return { type: "array", maxItems: MAX_ARRAY, items: [...types][0] ?? "string" };
+    }
+    if (!value.every((row) => row && typeof row === "object" && !Array.isArray(row))) return fault(`$/${root} mixes rows and plain values, and a list of Alphy holds one kind`);
+    const kinds = new Map(fields ?? []);
+    for (const row of value) for (const [field, inner] of Object.entries(row)) {
+      if (field === "id" || kinds.has(field)) continue;
+      if (inner !== null && typeof inner === "object") return fault(`a row of $/${root} has a list or a record in its field ${field}, and a row of Alphy holds plain values`);
+      kinds.set(field, typeof inner === "number" || typeof inner === "boolean" ? typeof inner : "string");
+    }
+    if (kinds.size + 1 > MAX_ROW_FIELDS) return fault(`the rows of $/${root} have ${kinds.size + 1} fields with the id, and a row of Alphy has at most ${MAX_ROW_FIELDS}. Give the rows fewer fields`);
+    if (value.length > MAX_ROWS) return fault(`$/${root} starts with ${value.length} rows, and a list of Alphy holds at most ${MAX_ROWS}`);
+    const rowName = namer();
+    rowName("$id", "id");
+    app.lists[root] = [...kinds].map(([field, kind]) => [field, rowName("$" + field, field), kind]);
+    app.kinds[root] = "list";
+    return { type: "list", maxItems: MAX_ROWS, fields: { id: "string", ...Object.fromEntries(app.lists[root].map(([, safe, kind]) => [safe, own(ALPHY, kind) ?? kind])) } };
+  };
+  /** A need keeps its value in one field and each other value of its part in one object NAME_s, so it costs at most two fields. */
+  const place = (root, need, owner, schema, wish = root.slice(need?.length + 1)) => {
     const inner = need !== undefined && root !== need && root.startsWith(need + "_");
     const field = inner ? name("need:" + need, need + "_s") : name("$/" + root, root);
-    if (!stateSchema[field]) owners.push(need === undefined ? entry.key : `need ${need}`);
-    if (inner) {
-      const key = name("$/" + root, root.slice(need.length + 1));
-      (stateSchema[field] ??= { type: "object", fields: {} }).fields[key] = typeof value;
-      needObjects.set(field, need);
-      app.fields.push([root, `${field}.${key}`]);
-    } else {
-      stateSchema[field] = typeof value;
-      app.fields.push([root, field]);
-    }
+    if (!stateSchema[field]) owners.push(owner);
+    if (!inner) { stateSchema[field] = schema; app.fields.push([root, field]); return; }
+    const key = name("$/" + root, wish);
+    (stateSchema[field] ??= { type: "object", fields: {} }).fields[key] = schema;
+    needObjects.set(field, need);
+    app.fields.push([root, `${field}.${key}`]);
+  };
+  for (const entry of file.of("state")) {
+    const root = entry.key.slice(2), value = kit.state[root], need = entry.origin === "part" ? partOf.get(entry.key) : undefined;
+    const owner = need === undefined ? entry.key : `need ${need}`;
+    if (root.includes("/") || !(Array.isArray(value) || SCALARS.has(typeof value))) { faults.push(`${owner}: ${entry.key} is a ${root.includes("/") ? "path inside a value" : value !== null && typeof value === "object" ? "record" : "value of no known kind"}, and that is not built yet`); continue; }
+    const schema = Array.isArray(value) ? listed(root, value, owner, root === need ? declared.get(need) : undefined) : app.kinds[root] === "time" ? "number" : typeof value;
+    if (schema) place(root, need, owner, schema);
+  }
+  // The open flag of an add form that the run-time puts into a bottom sheet: a value of its need that only the run-time sets.
+  for (const need of declared.keys()) {
+    const form = file.get(`${need}_addRow`);
+    const typed = form?.tree.name === "Row" ? (given(form.tree).children?.items ?? []).filter((item) => item.k === "ref" && TYPED.has(file.get(item.name)?.tree.name)).length : 0;
+    if (typed <= 2) continue;
+    const root = `${need}_addRow:open`;
+    kit.state[root] = false;
+    place(root, need, `need ${need}`, "boolean", "adding");
   }
   for (const [field, need] of needObjects) {
     const count = Object.keys(stateSchema[field].fields).length;
     if (count > PER_OBJECT) faults.push(`need ${need}: its part keeps ${count} values in the object ${field}, and an object of Alphy holds at most ${PER_OBJECT} fields. Give the need fewer fields`);
   }
   const shown = screen(kit, app);
-  faults.push(...shown.faults);
+  for (const [line, text] of shown.faults) { const fault = `${label(line)}: ${text}`; if (!faults.includes(fault)) faults.push(fault); }
+  Object.assign(stateSchema, shown.viewSchemas);
+  owners.push(...shown.viewOwners.map(label));
   for (const [object, values] of Object.entries(shown.values)) {
     stateSchema[object] = { type: "object", fields: Object.fromEntries(Object.entries(values).map(([key, value]) => [key, typeof value])) };
   }
   // The objects of the shown values come first, so the fault names the need or the line whose field is the 41st.
   const over = owners[MAX_FIELDS - Object.keys(shown.values).length];
   if (over) faults.push(`${over}: the app needs more than ${MAX_FIELDS} state fields from here on, and Alphy keeps at most ${MAX_FIELDS}. Use fewer needs`);
-  // The theme and the column of the app are depths 0 and 1. A node that the kit adds (the text of a banner) belongs to its component.
+  // The theme and the column of the app are depths 0 and 1. A node that the kit adds (the text of a banner) belongs to its line.
+  // The template of a row is one level below its list, and it counts once.
   let nodes = 0;
   const measure = (node, depth, owner) => {
     nodes++;
     owner = shown.owners.get(node) ?? owner;
-    const deep = `${owner}: this component is at depth ${depth} of the screen, and Alphy keeps at most depth ${MAX_DEPTH}. The frame of the app takes depths 0 and 1. Put it in fewer containers`;
+    const where = label(owner), children = node.children ?? [];
+    const deep = `${where}: this component is at depth ${depth} of the screen, and Alphy keeps at most depth ${MAX_DEPTH}. The frame of the app takes depths 0 and 1. Put it in fewer containers`;
     if (depth > MAX_DEPTH) { if (!faults.includes(deep)) faults.push(deep); return; }
-    for (const child of node.children ?? []) measure(child, depth + 1, owner);
+    if (children.length > MAX_CHILDREN) faults.push(`${where}: this container has ${children.length} children, and Alphy keeps at most ${MAX_CHILDREN}. Put them in groups`);
+    for (const child of [...children, ...(node.rowTemplate ? [node.rowTemplate] : [])]) measure(child, depth + 1, owner);
   };
   measure(shown.ui, 0, "app");
   if (nodes > MAX_NODES) faults.push(`app: the screen has ${nodes} nodes, and Alphy keeps at most ${MAX_NODES}. Show fewer components`);
@@ -1828,6 +2077,7 @@ function emit(file) {
   const definition = { formatVersion: 3, title, description: "", capabilities: [], stateSchema, initialState: stateOf(kit, app, shown), ui: shown.ui, source };
   return { definition, language, faults: [], app };
 }
+
 
 return { runtime, emit };
 })();
@@ -1859,6 +2109,6 @@ async function compileAppFile(text) {
 
 return { compileAppFile };
 })();
-runtime.text = "let handle;const __handle=(f)=>{handle=f};\n(()=>{var c={\"||\":1,\"&&\":2,\"==\":3,\"!=\":3,\"<\":4,\"<=\":4,\">\":4,\">=\":4,\"+\":5,\"-\":5,\"*\":6,\"/\":6,\"%\":6};class F extends Error{}function o(K){let Q=[],V=0,Z=($)=>{throw new F(`${$} at column ${V+1}`)};while(V<K.length){let $=K[V];if(/\\s/.test($)){V++;continue}if($==='\"'){let z=V+1,B=\"\";while(z<K.length&&K[z]!=='\"'){if(K[z]===\"\\\\\")z++,B+={n:`\n`,t:\"\\t\"}[K[z]]??K[z];else B+=K[z];z++}if(z>=K.length)Z(\"string without a closing quote\");Q.push({t:\"str\",v:B}),V=z+1;continue}if($===\"$\"){let z=/^\\$(\\/?)([\\p{L}_][\\p{L}\\p{N}_]*(?:\\/[\\p{L}_][\\p{L}\\p{N}_]*)*)/u.exec(K.slice(V));if(!z)Z(\"path expected after $\");Q.push({t:\"path\",abs:z[1]===\"/\",segs:z[2].split(\"/\")}),V+=z[0].length;continue}let q=/^(\\d+\\.?\\d*|\\.\\d+)/.exec(K.slice(V));if(q){Q.push({t:\"num\",v:Number(q[0])}),V+=q[0].length;continue}let X=/^[\\p{L}_][\\p{L}\\p{N}_]*/u.exec(K.slice(V));if(X){Q.push({t:\"id\",v:X[0]}),V+=X[0].length;continue}let M=K.slice(V,V+2);if([\":=\",\"==\",\"!=\",\"<=\",\">=\",\"&&\",\"||\"].includes(M)){Q.push({t:\"op\",v:M}),V+=2;continue}if(\"()[]{},:=+-*/%<>!?.\".includes($)){Q.push({t:\"op\",v:$}),V++;continue}Z(`unexpected character ${$}`)}return Q}function n(K,Q=0){let V=Q,Z=(U)=>K[V]&&K[V].t===\"op\"&&K[V].v===U,$=(U)=>{if(!Z(U))throw new F(`\"${U}\" expected`);V++};function q(){let U=K[V];if(!U)throw new F(\"value expected at the end of the line\");if(V++,U.t===\"num\")return{k:\"lit\",v:U.v};if(U.t===\"str\")return{k:\"lit\",v:U.v};if(U.t===\"path\")return{k:\"path\",abs:U.abs,segs:U.segs};if(U.t===\"id\"){if(U.v===\"true\"||U.v===\"false\")return{k:\"lit\",v:U.v===\"true\"};if(U.v===\"null\")return{k:\"lit\",v:null};if(!Z(\"(\"))return{k:\"ref\",name:U.v};V++;let H=[],J={};while(!Z(\")\")){if(K[V]?.t===\"id\"&&K[V+1]?.t===\"op\"&&K[V+1].v===\"=\"){let Y=K[V].v;V+=2,J[Y]=z()}else H.push(z());if(!Z(\")\"))$(\",\")}return V++,{k:\"call\",name:U.v,args:H,named:J}}if(U.t===\"op\"&&U.v===\"(\"){let H=z();return $(\")\"),H}if(U.t===\"op\"&&U.v===\"[\"){let H=[];while(!Z(\"]\"))if(H.push(z()),!Z(\"]\"))$(\",\");return V++,{k:\"list\",items:H}}if(U.t===\"op\"&&U.v===\"{\"){let H=[];while(!Z(\"}\")){let J=K[V++];if(!J||J.t!==\"id\"&&J.t!==\"str\")throw new F(\"field name expected in { }\");if($(\":\"),H.push([J.v,z()]),!Z(\"}\"))$(\",\")}return V++,{k:\"map\",entries:H}}if(U.t===\"op\"&&(U.v===\"-\"||U.v===\"!\"))return{k:\"un\",op:U.v,arg:X()};throw new F(`unexpected \"${U.v}\"`)}function X(){let U=q();for(;;){let H=K[V+1];if(Z(\".\")){V++;let J=K[V++];if(!J||J.t!==\"id\")throw new F(\"field name expected after .\");U={k:\"field\",of:U,name:J.v}}else if(Z(\"[\")){V++;let J=z();$(\"]\"),U={k:\"index\",of:U,at:J}}else if(Z(\"/\")&&H?.t===\"id\"&&![\"true\",\"false\",\"null\"].includes(H.v)&&!(K[V+2]?.t===\"op\"&&K[V+2].v===\"(\"))U={k:\"field\",of:U,name:H.v},V+=2;else return U}}function M(U){let H=X();while(K[V]?.t===\"op\"&&c[K[V].v]>=U){let J=K[V++].v;H={k:\"bin\",op:J,left:H,right:M(c[J]+1)}}return H}function z(){let U=M(1);if(!Z(\"?\"))return U;V++;let H=z();return $(\":\"),{k:\"if\",test:U,yes:H,no:z()}}return{tree:z(),used:V-Q}}function l(K){let Q=o(K),{tree:V,used:Z}=n(Q);if(Z!==Q.length)throw new F(`unexpected \"${Q[Z].v??Q[Z].t}\" after the expression`);return V}function t(K){let Q=K.trim();if(!Q||Q.startsWith(\"#\"))return null;let V=($,q,X)=>({kind:$,key:q,tree:l(X),raw:Q}),Z;if(Z=/^delete\\s+check\\s*\\(\\s*\"(.*)\"\\s*\\)$/.exec(Q))return{kind:\"delete\",key:\"check:\"+Z[1],tree:null,raw:Q};if(Z=/^delete\\s+(?:need\\s+)?(\\S+)$/.exec(Q))return{kind:\"delete\",key:Z[1],tree:null,raw:Q};if(Z=/^need\\s+([\\p{L}_][\\p{L}\\p{N}_]*)\\s*=(?!=)(.*)$/u.exec(Q))return V(\"need\",Z[1],Z[2]);if(Z=/^(\\$\\/[\\p{L}\\p{N}_/]+)\\s*:=(.*)$/u.exec(Q))return V(\"formula\",Z[1],Z[2]);if(Z=/^(\\$\\/[\\p{L}\\p{N}_/]+)\\s*=(?!=)(.*)$/u.exec(Q))return V(\"state\",Z[1],Z[2]);if(/^app\\s*\\(/.test(Q))return V(\"app\",\"app\",Q);if(/^check\\s*\\(/.test(Q)){let $=l(Q);return{kind:\"check\",key:\"check:\"+($.args[0]?.v??\"\"),tree:$,raw:Q}}if(Z=/^([\\p{L}_][\\p{L}\\p{N}_]*)\\s*=(?!=)(.*)$/u.exec(Q))return V(\"component\",Z[1],Z[2]);throw new F(\"line not understood\")}class v{constructor(){this.entries=new Map,this.faults=[],this.partFaults=[],this.tops=new Map,this.removed=new Set}beginStep(){this.faults=[]}feed(K,Q=null,V=\"author\"){let Z;try{Z=t(K)}catch(q){if(!(q instanceof F))throw q;return this.faults.push({line:Q,text:K.trim(),message:q.message}),null}if(!Z)return null;if(Z.kind===\"delete\"){let q=[...this.entries.keys()].find((X)=>X===Z.key||X===\"need:\"+Z.key);if(q)this.entries.delete(q),this.removed.add(q);else this.faults.push({line:Q,text:Z.raw,message:`nothing named ${Z.key}`});return Z}let $=Z.kind===\"need\"?\"need:\"+Z.key:Z.key;if(Z.origin=V,V===\"author\")this.removed.delete($);return this.entries.set($,Z),Z}feedText(K){return K.split(`\n`).forEach((Q,V)=>this.feed(Q,V+1)),this}open(K){return!this.removed.has(K)&&(this.entries.get(K)?.origin??\"part\")===\"part\"}of(K){return[...this.entries.values()].filter((Q)=>Q.kind===K)}get(K){return this.entries.get(K)}text(){return[...this.entries.values()].map((K)=>K.raw).join(`\n`)+`\n`}}function P(K){switch(K.k){case\"lit\":return typeof K.v===\"string\"?JSON.stringify(K.v):String(K.v);case\"path\":return\"$\"+(K.abs?\"/\":\"\")+K.segs.join(\"/\");case\"ref\":return K.name;case\"list\":return\"[\"+K.items.map(P).join(\", \")+\"]\";case\"map\":return\"{\"+K.entries.map(([Q,V])=>`${/^[\\p{L}_][\\p{L}\\p{N}_]*$/u.test(Q)?Q:JSON.stringify(Q)}: ${P(V)}`).join(\", \")+\"}\";case\"field\":return P(K.of)+\".\"+K.name;case\"index\":return`${P(K.of)}[${P(K.at)}]`;case\"un\":return K.op+P(K.arg);case\"bin\":return`(${P(K.left)} ${K.op} ${P(K.right)})`;case\"if\":return`(${P(K.test)} ? ${P(K.yes)} : ${P(K.no)})`;case\"call\":return`${K.name}(${[...K.args.map(P),...Object.entries(K.named).map(([Q,V])=>`${Q}=${P(V)}`)].join(\", \")})`}throw new F(\"cannot print \"+K.k)}var f={Column:[\"children\"],Row:[\"children\"],Card:[\"children\"],Section:[\"title\",\"children\"],Text:[\"text\"],Heading:[\"text\"],Metric:[\"label\",\"value\"],Emoji:[\"value\"],Badge:[\"value\"],Progress:[\"value\",\"max\"],Ring:[\"value\",\"max\",\"label\"],Divider:[],Notice:[\"text\"],Button:[\"label\",\"action\"],IconButton:[\"icon\",\"action\"],TextField:[\"label\",\"bind\"],NumberField:[\"label\",\"bind\"],Slider:[\"label\",\"bind\"],Toggle:[\"label\",\"bind\"],CheckBox:[\"label\",\"bind\"],Segmented:[\"label\",\"bind\",\"options\"],Select:[\"label\",\"bind\",\"options\"],List:[\"items\",\"template\",\"group\"],Chart:[\"items\",\"label\",\"value\"],Tabs:[\"titles\",\"groups\"],Dialog:[\"title\",\"children\"],DateField:[\"label\",\"bind\"],TimeField:[\"label\",\"bind\"],Picture:[\"text\",\"found\"],Choices:[\"label\",\"bind\",\"options\"],Drawing:[\"label\",\"width\",\"height\",\"shapes\"],Model3d:[\"label\",\"bodies\",\"bind\",\"exploded\",\"selected\"],Link:[\"label\",\"url\",\"text\"]};var e=new Set([\"visible\",\"enabled\",\"variant\",\"tone\",\"emphasis\",\"weight\",\"min\",\"max\",\"step\",\"empty\",\"placeholder\",\"gap\",\"selected\",\"kind\"]),KK=new Set([\"set\",\"toggle\",\"inc\",\"dec\",\"append\",\"remove\",\"clear\",\"when\",\"move\",\"flip\",\"animate\"]),QK={circle:[\"x\",\"y\",\"r\"],rect:[\"x\",\"y\",\"w\",\"h\"],line:[\"x1\",\"y1\",\"x2\",\"y2\"],text:[\"x\",\"y\",\"text\"],polygon:[\"points\"]},VK={box:[\"part\",\"x\",\"y\",\"z\",\"w\",\"h\",\"d\"],cylinder:[\"part\",\"x\",\"y\",\"z\",\"radius\",\"length\",\"axis\"]},ZK=new Set([\"text\",\"part\",\"axis\"]),$K=[\"radius\",\"width\",\"size\",\"stroke\"],zK={text:\"size\",line:\"width\",rect:\"radius\"};var E=(K,Q=0)=>{let V=10**Q;return Math.round((K+Number.EPSILON)*V)/V},b=(K)=>Array.isArray(K)?K.map(b):K&&typeof K===\"object\"?Object.fromEntries(Object.entries(K).map(([Q,V])=>[Q,b(V)])):K;function HK(K){let Q=[\"x\",\"y\",\"z\"].map((V)=>K.reduce((Z,$)=>Z+$[V],0)/(K.length||1));for(let V of K)if(V.part)[\"x\",\"y\",\"z\"].forEach((Z,$)=>{V[Z]=E(V[Z]+(V[Z]-Q[$])/2,2)})}var h={round:E,floor:Math.floor,ceil:Math.ceil,abs:Math.abs,sin:(K)=>E(Math.sin(K*Math.PI/180),12)+0,cos:(K)=>E(Math.cos(K*Math.PI/180),12)+0,pow:Math.pow,sqrt:Math.sqrt,exp:Math.exp,ln:Math.log,log10:Math.log10,min:(...K)=>K.flat(3).length?Math.min(...K.flat(3)):0,max:(...K)=>K.flat(3).length?Math.max(...K.flat(3)):0,clamp:(K,Q,V)=>Math.min(V,Math.max(Q,K)),len:(K)=>K==null?0:K.length,text:(K)=>String(K??\"\"),number:(K)=>Number(K)||0,fixed:(K,Q=2)=>Number(K).toFixed(Q),pad2:(K)=>String(Math.floor(K)).padStart(2,\"0\"),money:(K,Q=\"\")=>Q+Number(K).toFixed(2),percent:(K,Q=0)=>Number(K).toFixed(Q)+\"%\",join:(K,Q=\", \")=>(K||[]).join(Q),upper:(K)=>String(K).toUpperCase(),lower:(K)=>String(K).toLowerCase(),at:(K,Q)=>Array.isArray(K)?K[Q]??null:null,streak:(K)=>(K??[]).reduce(([Q,V],Z)=>Z?[Math.max(Q,V+1),V+1]:[Q,0],[0,0])[0],near:(K,Q)=>Math.abs(K-Q)<=Math.max(0.01,Math.abs(Q)/1000),trim:(K)=>String(K).trim(),contains:(K,Q)=>String(K).toLowerCase().includes(String(Q).toLowerCase()),has:(K,Q)=>Array.isArray(K)&&K.includes(Q),hours:(K,Q)=>{let[V,Z]=[K,Q].map(qK);return V===null||Z===null?0:(Z-V+1440)%1440/60},today:()=>{let K=new Date;return`${K.getFullYear()}-${String(K.getMonth()+1).padStart(2,\"0\")}-${String(K.getDate()).padStart(2,\"0\")}`},split:(K,Q=\",\")=>String(K??\"\").split(String(Q)||\",\").map((V)=>V.trim()).filter(Boolean),weekday:(K)=>{let Q=D(K);return Q===null?0:(new Date(Q*86400000).getUTCDay()+6)%7+1},month:(K)=>D(K)===null?0:Number(String(K).trim().slice(5,7)),year:(K)=>D(K)===null?0:Number(String(K).trim().slice(0,4)),days:(K,Q)=>{let[V,Z]=[D(K),D(Q)];return V===null||Z===null?0:Z-V},addDays:(K,Q)=>{let V=D(K);return V===null?null:new Date((V+Math.round(Number(Q)||0))*86400000).toISOString().slice(0,10)}};function D(K){let Q=/^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(String(K??\"\").trim());if(!Q)return null;let V=Date.UTC(Number(Q[1]),Number(Q[2])-1,Number(Q[3])),Z=new Date(V);return Z.getUTCMonth()===Number(Q[2])-1&&Z.getUTCDate()===Number(Q[3])?V/86400000:null}function qK(K){let Q=/^(\\d{1,2}):(\\d{2})$/.exec(String(K??\"\").trim());return Q?Number(Q[1])*60+Number(Q[2]):null}var x=(K,Q)=>Array.isArray(K)&&Array.isArray(Q)?K.reduce((V,Z,$)=>V||x(Z,Q[$]),0):K<Q?-1:K>Q?1:0,w={count:(K,Q)=>Q?K.filter(Q).length:K.length,sum:(K,Q)=>K.reduce((V,Z)=>V+Number(Q?Q(Z):Z),0),avg:(K,Q)=>K.length?K.reduce((V,Z)=>V+Number(Q?Q(Z):Z),0)/K.length:0,filter:(K,Q)=>K.filter(Q),any:(K,Q)=>K.some(Q),all:(K,Q)=>K.every(Q),map:(K,Q)=>K.map(Q),find:(K,Q)=>K.find(Q)??null,sort:(K,Q,V)=>[...K].sort((Z,$)=>x(Q(Z),Q($))*(V===\"desc\"?-1:1)),groups:(K,Q,V)=>{if(!Q)throw new F(\"groups needs a key, such as groups($/rows, $category, $amount)\");let Z=new Map;for(let $ of K)Z.set(Q($),(Z.get(Q($))??0)+Number(V?V($):1));return[...Z].map(([$,q])=>({key:$,value:q}))}},PK=new Set([...Object.keys(h),...Object.keys(w),\"if\"]);function m(K,Q){if(K===Q)return!0;if(typeof K!==\"object\"||typeof Q!==\"object\"||!K||!Q||Array.isArray(K)!==Array.isArray(Q))return!1;let V=(Z)=>Object.keys(Z).filter(($)=>$!==\"id\");return V(K).length===V(Q).length&&V(K).every((Z)=>m(K[Z],Q[Z]))}var u=(K)=>({...Object.fromEntries((f[K.name]??[]).map((Q,V)=>[Q,K.args[V]])),...K.named});class y{constructor(K){this.file=K,this.faults=[],this.nextId=1,this.state={},this.seen=new Map,this.follow()}follow(){for(let K of this.file.of(\"state\")){if(this.seen.get(K.key)===K.raw)continue;this.seen.set(K.key,K.raw),this.write(this.pathOf(K.key),this.attempt(K,()=>b(this.value(K.tree,{}))),{})}this.tagRows(this.state),this.recompute()}fault(K,Q){this.faults.push({where:K,message:Q})}attempt(K,Q){try{return Q()}catch(V){return this.fault(K.key,V.message),null}}pathOf(K){return{k:\"path\",abs:!0,segs:K.slice(2).split(\"/\")}}tagRows(K){if(Array.isArray(K))K.forEach((Q)=>{if(Q&&typeof Q===\"object\"&&!Array.isArray(Q))Q.id??=\"r\"+this.nextId++,this.tagRows(Q)});else if(K&&typeof K===\"object\")Object.values(K).forEach((Q)=>this.tagRows(Q))}read(K,Q){let V=K.abs?this.state:Q.it;for(let Z of K.segs)V=V==null?void 0:V[Z];return V}place(K,Q){if(K.k===\"path\"){let Z=K.abs?this.state:Q.it;if(Z==null)throw new F(\"a $field path needs a row\");if(typeof Z!==\"object\")throw new F(\"the row is a plain value with no fields to set\");for(let $ of K.segs.slice(0,-1))Z=Z[$]??={};return[Z,K.segs.at(-1)]}if(K.k!==\"field\"&&K.k!==\"index\")throw new F(\"a place to set is a path, a field of a row, or an item of a list\");let V=this.value(K.of,Q);if(V==null||typeof V!==\"object\")throw new F(`${P(K.of)} has no value, so nothing in it can be set`);return[V,K.k===\"field\"?K.name:this.value(K.at,Q)]}write(K,Q,V){let[Z,$]=this.place(K,V);Z[$]=Q}value(K,Q){switch(K.k){case\"lit\":return K.v;case\"path\":if(!K.abs&&K.segs[0]===\"it\")return K.segs.slice(1).reduce((V,Z)=>V?.[Z],Q.it);if(!K.abs&&Q.each!==void 0&&K.segs.join()===\"index\"&&!(Q.it&&typeof Q.it===\"object\"&&(\"index\"in Q.it)))return Q.each;if(!K.abs&&Q.it===void 0)throw new F(`$${K.segs.join(\"/\")} is a field of a list row, and there is no row here. A value of the app is $/${K.segs.join(\"/\")}`);if(!K.abs&&Q.it!==void 0&&(Q.it===null||typeof Q.it!==\"object\"))throw new F(\"the row is a plain value with no fields. $it reads the row itself\");if(!K.abs&&Q.it&&!(K.segs[0]in Q.it)){let V=K.segs[0];if(this.shown??=Object.fromEntries(this.file.of(\"need\").filter((Z)=>Z.tree.name===\"entries\"&&Z.tree.named?.show?.k===\"map\").flatMap((Z)=>Z.tree.named.show.entries)),K.segs.length===1&&this.shown[V]&&!Q.busy?.includes(V))return this.value(this.shown[V],{...Q,busy:[...Q.busy??[],V]});throw new F(`the row has no field ${V}`)}return this.read(K,Q);case\"list\":return K.items.map((V)=>this.value(V,Q));case\"map\":return Object.fromEntries(K.entries.map(([V,Z])=>[V,this.value(Z,Q)]));case\"field\":return this.value(K.of,Q)?.[K.name];case\"index\":{let V=this.value(K.of,Q);return Array.isArray(V)?V[this.value(K.at,Q)]??null:null}case\"un\":return K.op===\"-\"?-this.value(K.arg,Q):!this.value(K.arg,Q);case\"if\":return this.value(K.test,Q)?this.value(K.yes,Q):this.value(K.no,Q);case\"bin\":{if(K.op===\"&&\")return this.value(K.left,Q)&&this.value(K.right,Q);if(K.op===\"||\")return this.value(K.left,Q)||this.value(K.right,Q);let V=this.value(K.left,Q),Z=this.value(K.right,Q);switch(K.op){case\"+\":return Array.isArray(V)&&Array.isArray(Z)?[...V,...Z]:typeof V===\"string\"||typeof Z===\"string\"?String(V??\"\")+String(Z??\"\"):V+Z;case\"-\":return V-Z;case\"*\":return V*Z;case\"/\":return V/Z;case\"%\":return V%Z;case\"==\":return m(V,Z);case\"!=\":return!m(V,Z);case\"<\":return V<Z;case\"<=\":return V<=Z;case\">\":return V>Z;case\">=\":return V>=Z}break}case\"call\":{if(K.name===\"if\")return this.value(K.args[0],Q)?this.value(K.args[1],Q):this.value(K.args[2],Q);if(w[K.name]){let V=this.value(K.args[0],Q);if(!Array.isArray(V))throw new F(`${K.name} needs a list`);let Z=($)=>$&&((q)=>this.value($,{...Q,it:q}));return w[K.name](V,Z(K.args[1]),K.name===\"groups\"?Z(K.args[2]):K.args[2]&&this.value(K.args[2],Q))}if(h[K.name])return h[K.name](...K.args.map((V)=>this.value(V,Q)));if(f[K.name])throw new F(`${K.name} is a component. A component line has a plain name with no $/ before it`);throw new F(`unknown function ${K.name}`)}case\"ref\":throw new F(`${K.name} is a component name, not a value`)}throw new F(\"expression not understood\")}drawn(K,Q,V,Z){if(V.k===\"list\")return V.items.flatMap((J)=>this.drawn(K,Q,J,Z));let{name:$=\"\",args:q=[],named:X={}}=V.k===\"call\"?V:{};if($===\"each\"&&q.length===2){let J=this.value(q[0],Z),Y=Array.isArray(J)?J:Number.isInteger(J)&&J>=0&&J<=500?Array.from({length:J},(C,W)=>W):null;if(!Y)throw new F(\"each needs a list or a count: each($/rows, shape) or each(5, shape)\");return Y.flatMap((C,W)=>this.drawn(K,Q,q[1],{...Z,it:C,each:W}))}let M=Object.hasOwn(K,$)?K[$]:null;if(!M)throw new F(`${P(V).slice(0,30)} is not one of ${Object.keys(K).join(\", \")}, each`);let z=zK[$],B=`${$} takes ${M.join(\", \")}, color${z?`, ${z}`:\"\"}`;if(q.length<M.length||q.length>M.length+(z?2:1))throw new F(`${P(V).slice(0,60)} has ${q.length} values: ${B}`);if(X.visible&&!this.value(X.visible,Z))return[];let U=(J,Y)=>{if(J===null||J===\"\"||typeof J===\"boolean\"||!Number.isFinite(Number(J)))throw new F(`${Y} of ${$} is not a number: ${B}`);return E(Number(J),2)},H={[Q]:$};if(M.forEach((J,Y)=>{let C=this.value(q[Y],Z);H[J]=ZK.has(J)?String(C??\"\"):J===\"points\"?[C].flat().map((W)=>U(W,J)):U(C,J)}),H.axis!==void 0&&![\"x\",\"y\",\"z\"].includes(H.axis))throw new F(`axis of ${$} is \"x\", \"y\", or \"z\"`);if(H.color=String((q[M.length]?this.value(q[M.length],Z):null)??\"ink\"),q.length===M.length+2)H[z]=U(this.value(q[M.length+1],Z),z);for(let[J,Y]of Object.entries(X)){if(J===\"visible\")continue;if(!$K.includes(J))throw new F(`${$} has no argument ${J}`);let C=this.value(Y,Z);if(J!==\"stroke\")H[J]=U(C,J);else if(C)H.stroke=!0}return[H]}recompute(){let K=this.file.of(\"formula\");for(let Q=0;Q<5;Q++){let V=JSON.stringify(this.state);for(let Z of K)this.attempt(Z,()=>this.write(this.pathOf(Z.key),this.value(Z.tree,{}),{}));if(JSON.stringify(this.state)===V)return}}act(K,Q={}){for(let V of K.k===\"list\"?K.items:[K]){if(V.k!==\"call\"||!KK.has(V.name))throw new F(`unknown action ${V.name??V.k}`);let[Z,$]=V.args;if(V!==(K.k===\"list\"?K.items[0]:K))this.recompute();let q=()=>{if(![\"path\",\"field\",\"index\"].includes(Z?.k))throw new F(`${V.name} needs a place: a path, a field of a row, or an item of a list`);return Z},X=(M)=>{let z=this.value(M,Q);if(!Array.isArray(z))throw new F(`${V.name} needs a list`);return z};switch(V.name){case\"set\":this.write(q(),b(this.value($,Q)),Q);break;case\"toggle\":this.write(q(),!this.value(q(),Q),Q);break;case\"inc\":this.write(q(),(this.value(q(),Q)||0)+($?this.value($,Q):1),Q);break;case\"dec\":this.write(q(),(this.value(q(),Q)||0)-($?this.value($,Q):1),Q);break;case\"clear\":this.write(q(),[],Q);break;case\"flip\":{let M=X(q()),z=this.value($,Q);this.write(q(),M.includes(z)?M.filter((B)=>B!==z):[...M,z],Q);break}case\"move\":{let M=V.args.length===1;if(M&&!Q.list)throw new F(\"move(by) needs a row. Outside a list write move($/list, test, by)\");let z=M?this.read(Q.list,{}):X(q()),B=M?z.indexOf(Q.it):z.findIndex((H)=>this.value($,{...Q,it:H})),U=B+this.value(M?Z:V.args[2],Q);if(B>=0&&U>=0&&U<z.length)z.splice(U,0,z.splice(B,1)[0]);break}case\"when\":if(this.value(Z,Q))this.act($,Q);else this.recompute();break;case\"animate\":{if(Z?.k!==\"path\"||!Z.abs)throw new F(\"animate needs a value of the app as its place, such as $/angle\");let M=Z.segs.join(\"/\"),z=Number(this.value(Z,Q))||0,B=$?Number(this.value($,Q)):NaN,U=V.args[2]?Number(this.value(V.args[2],Q)):0;if(!Number.isFinite(B)||!Number.isFinite(U))throw new F(\"animate needs a number to go to and a time in milliseconds: animate($/angle, 360, 5000)\");let H=(this.state._run??[]).filter((J)=>J.path!==M);if(U>0&&B!==z)H.push({path:M,from:z,to:B,ms:U,spent:0,at:z});else this.write(Z,B,Q);if(H.length)this.state._run=H;else delete this.state._run;break}case\"append\":{let M=b(this.value($,Q));X(q()).push(M),this.tagRows([M]);break}case\"remove\":{if(!Z){if(!Q.list)throw new F(\"remove() without a path needs a row\");this.write(Q.list,this.read(Q.list,{}).filter((M)=>M!==Q.it),{})}else this.write(q(),X(q()).filter((M)=>!this.value($,{...Q,it:M})),Q);break}}}this.recompute()}tree(K=!1){this.reached=new Set;let Q=0,V=($,q,X,M)=>{if(M>40)throw new F(\"components nest too deep or refer to each other\");if($.k===\"ref\"){let H=this.file.get($.name);if(this.reached.add($.name),!H||H.kind!==\"component\"){if(K)this.fault($.name,\"no component line with this name\");return{type:\"Missing\",name:$.name,props:{},children:[]}}return V(H.tree,q,$.name,M+1)}if($.k!==\"call\"||!f[$.name])return this.fault(X??\"?\",$.k===\"path\"?`a child is a component name, not the path ${P($)}`:`unknown component ${$.name??$.k}`),{type:\"Missing\",name:X,props:{},children:[]};let z={type:$.name,name:X,props:{},children:[],row:q.it,rowIndex:q.index,list:q.list,call:$},B=u($),U=[];for(let[H,J]of Object.entries(B)){if(J===void 0)continue;if(!f[$.name].includes(H)&&!e.has(H)&&!(H===\"action\"&&B.bind)){this.fault(X??$.name,`${$.name} has no property ${H}`);continue}if($.name===\"Chart\"&&(H===\"label\"||H===\"value\")||$.name===\"List\"&&H===\"group\"||H===\"shapes\"||H===\"bodies\")continue;try{if(H===\"children\")z.children=(J.k===\"list\"?J.items:[J]).map((Y)=>V(Y,q,void 0,M+1));else if(H===\"groups\")U=J.k===\"list\"?J.items:[J];else if(H===\"action\")z.props.action=J;else if(H===\"bind\"){if(![\"path\",\"field\",\"index\"].includes(J.k))throw new F(\"bind needs a place: a path, a field of a row, or an item of a list\");z.props.bind=J,z.props.value=J.k===\"path\"?this.read(J,q):this.value(J,q)}else if(H===\"template\")z.template=J;else z.props[H]=this.value(J,q)}catch(Y){this.fault(X??$.name,`${H}: ${Y.message}`)}}if($.name===\"Chart\"){try{z.props.points=(Array.isArray(z.props.items)?z.props.items:[]).map((H)=>({label:B.label?this.value(B.label,{...q,it:H}):\"\",value:Number(B.value?this.value(B.value,{...q,it:H}):H)||0}))}catch(H){this.fault(X??$.name,`points: ${H.message}`)}delete z.props.items}if($.name===\"Drawing\"||$.name===\"Model3d\"){let H=$.name===\"Drawing\"?\"shapes\":\"bodies\";try{z.props[H]=this.drawn(H===\"shapes\"?QK:VK,H===\"shapes\"?\"shape\":\"body\",B[H]??{k:\"list\",items:[]},q)}catch(J){z.props[H]=[],this.fault(X??$.name,`${H}: ${J.message}`)}if(H===\"bodies\"&&z.props.exploded)HK(z.props.bodies);if(H===\"shapes\"&&!(z.props.width>0&&z.props.height>0))this.fault(X??$.name,\"a drawing needs a width and a height above 0: drawing(label, 320, 240, [shapes])\")}if($.name===\"Link\"&&!/^https?:\\/\\/\\S+$/.test(String(z.props.url??\"\")))this.fault(X??$.name,\"a Link needs a web address that starts with https://\");if($.name===\"Dialog\"&&!B.visible)this.fault(X??$.name,\"a Dialog needs visible=test and a button that makes the test false. Without them the window never closes\");if($.name===\"Choices\"){let H=Array.isArray(z.props.value)?z.props.value:[],J=z.props.max!==void 0&&H.length>=z.props.max;z.children=(z.props.options??[]).map((Y,C)=>({type:\"Button\",name:X&&`${X}_opt${C}`,children:[],props:{label:String(Y),selected:H.includes(Y),enabled:H.includes(Y)||!J,action:{k:\"call\",name:\"flip\",args:[B.bind,{k:\"lit\",v:Y}],named:{}}}}))}if($.name===\"Tabs\"){let H={k:\"path\",abs:!0,segs:[\"_ui\",X??\"tabs\"+Q++]},J=this.read(H,{})??0;z.props.value=J,z.children=[{type:\"Row\",props:{},children:(z.props.titles??[]).map((Y,C)=>({type:\"Button\",name:X&&`${X}_tab${C}`,tab:!0,children:[],props:{label:Y,selected:C===J,action:{k:\"call\",name:\"set\",args:[H,{k:\"lit\",v:C}],named:{}}}}))},...U.map((Y,C)=>({type:\"Column\",props:{visible:C===J},children:(Y.k===\"list\"?Y.items:[Y]).map((W)=>V(W,q,void 0,M+1))}))]}if($.name===\"List\"&&z.template&&Array.isArray(z.props.items)){let H=(W,R=0)=>{if(!W||R>8)return null;if(W.k===\"call\"&&[\"sort\",\"filter\"].includes(W.name))return H(W.args[0],R+1);if(W.k===\"if\")return H(W.yes,R+1)??H(W.no,R+1);if(W.k!==\"path\")return null;let T=W.abs?this.file.get(\"$/\"+W.segs.join(\"/\")):null;return T?.kind===\"formula\"?H(T.tree,R+1):W},J=H(B.items),Y=z.props.items,C=[];if(B.group)try{let W=Y.map((T)=>this.value(B.group,{...q,it:T})),R=[...new Set(W)].flatMap((T)=>Y.map((_,j)=>[_,T,j]).filter((_)=>W[_[2]]===T));Y=R.map((T)=>T[0]),C=R.map((T,_)=>_===0||R[_-1][1]!==T[1]?[{type:\"Heading\",props:{text:String(T[1]??\"\")},children:[]}]:[])}catch(W){this.fault(X??$.name,`group: ${W.message}`)}z.children=Y.flatMap((W,R)=>[...C[R]??[],V(z.template,{it:W,index:R,list:J},void 0,M+1)])}return z},Z=this.file.get(\"root\");if(!Z)return{type:\"Missing\",name:\"root\",props:{},children:[]};return V(Z.tree,{},\"root\",0)}find(K,Q){let V=(Z)=>Z.name===K&&(Q===void 0||Z.rowIndex===Q)?Z:Z.children.reduce(($,q)=>$??V(q),null);return V(this.tree())}tick(){let K=g.now(),Q=(K-(this.clock??K))/1000,V=this.state;if(this.clock=K,Q>0&&V._run){if(V._run=V._run.filter((Z)=>{let $=this.pathOf(\"$/\"+Z.path);if(this.read($,{})!==Z.at)return!1;return Z.spent+=Q*1000,Z.at=Z.spent>=Z.ms?Z.to:Z.from+(Z.to-Z.from)*Z.spent/Z.ms,this.write($,Z.at,{}),Z.spent<Z.ms}),!V._run.length)delete V._run;this.recompute()}for(let Z of Q>0?this.file.of(\"need\"):[]){if(Z.tree.name!==\"timer\")continue;let $=Z.key,q=(M,z)=>{try{return Number(M?this.value(M,{}):z)||0}catch{return 0}},X=Q;for(let M=0;V[$+\"_on\"]&&X>0&&M<1000;M++){let z=Number(V[$+\"_phase\"])||0,B=z-V[$+\"_spent\"];if(X<B){V[$+\"_spent\"]+=X;break}if(X-=Math.max(0,B),!V[$+\"_resting\"])V[$]+=1;if(!V[$+\"_resting\"]&&q(Z.tree.named.rest,0)>0)V[$+\"_resting\"]=!0,V[$+\"_spent\"]=0;else if(V[$+\"_round\"]>=q(Z.tree.named.rounds,1))V[$+\"_over\"]=!0,V[$+\"_on\"]=!1,V[$+\"_spent\"]=z;else V[$+\"_round\"]+=1,V[$+\"_resting\"]=!1,V[$+\"_spent\"]=0;this.recompute()}this.recompute()}}change(K,Q){this.tick();try{if(this.write(K.props.bind,Q,{it:K.row}),K.props.action)this.act(K.props.action,{it:K.row,list:K.list});else this.recompute()}catch(V){return`${K.name??K.type}: ${V.message}`}return\"\"}fire(K){if(K.props.enabled===!1||K.props.visible===!1)return`${K.name??K.type} is not active`;this.tick();try{this.act(K.props.action,{it:K.row,list:K.list})}catch(Q){return`${K.name??K.type}: ${Q.message}`}return\"\"}input(K,Q,V){let Z=this.find(K,V);if(Z?.props.bind)return this.change(Z,Q);return(!Z?`no field named ${K}`:Z.props.action?`${K} is not a field: use tap(${K})`:`${K} only shows a value and cannot be set. A check sets a field, such as a NumberField`)+(V===void 0?\"\":` in row ${V}`)}press(K,Q){let V=this.find(K,Q);if(V?.props.action)return this.fire(V);return(V?.props.bind?`${K} is a field with no action: use set(${K}, value)`:`no control named ${K}`)+(Q===void 0?\"\":` in row ${Q}`)}}var g={gate:\"smoke\",now:()=>Date.now()};var JK=/^[A-Za-z][A-Za-z0-9_]{0,47}$/,MK=new Set([\"__proto__\",\"prototype\",\"constructor\"]),i=32;function UK(K={safe:{},kit:{}}){let Q=0;return(V,Z=V)=>{if(Object.hasOwn(K.safe,V))return K.safe[V];let $=Z;if(!JK.test($)||MK.has($)||/^[dv]\\d*$/.test($)||Object.hasOwn(K.kit,$)){while(Object.hasOwn(K.kit,\"f\"+Q))Q++;$=\"f\"+Q}return K.safe[V]=$,K.kit[$]=V,$}}function XK(K){let Q=K.file.get(\"app\")?.tree,V=(Z)=>Z?K.value(Z,{}):void 0;return{title:V(Q?.args[0]),...Object.fromEntries(Object.entries(Q?.named??{}).map(([Z,$])=>[Z,V($)]))}}var p={eyebrow:{emphasis:\"label\",tone:\"accent\"},muted:{tone:\"muted\"}},BK={ArrowUp:\"Arrow\",ArrowDown:\"Sort\",ArrowLeft:\"Back\",ArrowRight:\"Chevron\",Edit:\"Pencil\"},k=(K,Q)=>Object.hasOwn(K,Q)?K[Q]:void 0,FK=(K,Q)=>Object.fromEntries(Q.filter((V)=>K[V]!==void 0).map((V)=>[V,K[V]])),s=(K,Q)=>{let V=Array.isArray(K.props.options)?K.props.options:[];return{type:V.length<=6?\"segmented\":\"select\",...Q.field(),options:V.map((Z)=>({text:String(Z),value:Z}))}},d=(K,Q,V)=>(Z,$)=>{let{min:q=Q,max:X=V,step:M,value:z}=Z.props;if(![q,X,z].every(Number.isFinite)||!(q<X&&z>=q&&z<=X)||M!==void 0&&!(M>0&&M<=X-q))$.fault(`a ${Z.type} needs min below max, its value from min to max, and a step above 0 and at most max - min. Now min is ${q}, max is ${X}, the value is ${z}${M===void 0?\"\":`, and the step is ${M}`}`);return{type:K,...$.field(),min:q,max:X,...FK(Z.props,[\"step\"])}},YK={Column:(K,Q)=>({type:\"column\",children:Q.children()}),Row:(K,Q)=>({type:\"row\",...K.children.some((V)=>V.props.weight!==void 0)&&{wrap:!1},children:Q.children()}),Card:(K,Q)=>({type:\"card\",...K.props.variant===\"hero\"&&{variant:\"hero\"},children:Q.children()}),Section:(K,Q)=>({type:\"section\",text:String(K.props.title??\"\"),children:Q.children()}),Text:(K,Q)=>({type:\"text\",...Q.text(\"text\"),...k(p,K.props.variant)&&{style:p[K.props.variant]}}),Heading:(K,Q)=>({type:\"text\",...Q.text(\"text\"),style:{emphasis:\"title\"}}),Metric:(K,Q)=>({type:\"metric\",text:String(K.props.label??\"\"),bind:Q.shown(\"value\"),...K.props.emphasis===\"display\"&&{style:{emphasis:\"display\"}}}),Badge:(K,Q)=>({type:\"badge\",...Q.text(\"value\")}),Emoji:(K,Q)=>({type:\"emoji\",text:String(K.props.value??\"\"),...Q.value(\"value\")}),Divider:()=>({type:\"divider\"}),Notice:(K,Q)=>({type:\"banner\",children:[{type:\"text\",...Q.text(\"text\")}]}),Button:(K,Q)=>({type:\"button\",text:String(K.props.label??\"\"),action:Q.action(),variant:K.props.selected===void 0||K.props.selected?\"filled\":\"tonal\"}),IconButton:(K,Q)=>({type:\"icon\",name:k(BK,K.props.icon)??K.props.icon,text:Q.action().replace(/_/g,\" \"),action:Q.action()}),NumberField:d(\"numberInput\",0,1e6),Slider:d(\"slider\",0,100),TextField:(K,Q)=>({type:\"input\",...Q.field(),inputMode:\"apply\"}),Toggle:(K,Q)=>({type:\"toggle\",...Q.field()}),CheckBox:(K,Q)=>({type:\"checkbox\",...Q.field()}),Segmented:s,Select:s},_K=(K,Q)=>K===\"number\"?Number.isFinite(Q)?Q:0:String(Q??\"\");function a(K,Q){let V=UK(Q.names),Z=new Map(Q.fields),$=[],q=new Map,X=new Map,M={d:new Map,v:new Map},z={},B=(_,j,I,L)=>{let O=I?.k===\"path\"&&I.abs?I.segs:null;if(O?.length===1&&Z.has(O[0])&&(_===\"d\"||typeof L===\"boolean\"))return Z.get(O[0]);let N=V(`${_}:${j}`,O?O.join(\"_\"):j.replace(/\\W/g,\"_\"));if(!M[_].has(N)){let S=_+(M[_].size<i?\"\":Math.floor(M[_].size/i)+1);M[_].set(N,`${S}.${N}`),(z[S]??={})[N]=_===\"v\"?Boolean(L):_K(Q.types[N]??=typeof L===\"number\"?\"number\":\"string\",L)}return M[_].get(N)},U=(_,j)=>{let I=k(YK,_.type);if(!I)return $.push(`${_.name??j}: ${_.type} is not built yet`),null;let L=_.call?u(_.call):{},O=(G)=>L[G]&&L[G].k!==\"lit\"?B(\"d\",`${j}.${G}`,L[G],_.props[G]):null,N={children:()=>_.children.map((G,A)=>U(G,G.name??`${j}_${A}`)).filter(Boolean),text:(G)=>{let A=O(G);return A?{text:\"\",bind:A}:{text:String(_.props[G]??\"\")}},value:(G)=>{let A=O(G);return A?{bind:A}:{[G]:_.props[G]}},shown:(G)=>O(G)??B(\"d\",`${j}.${G}`,null,_.props[G]),fault:(G)=>$.push(`${_.name??j}: ${G}`),field:()=>{let G=L.bind?.k===\"path\"&&L.bind.abs&&L.bind.segs.length===1?L.bind.segs[0]:null;if(!Z.has(G))N.fault(`a binding to ${L.bind?P(L.bind):\"nothing\"} is not built yet: a field binds a value of a state line`);return{text:String(_.props.label??\"\"),bind:Z.get(G),action:N.action()}},action:()=>{let G=V(\"@\"+j,j);return q.set(G,_),G}},S=I(_,N);X.set(S,_.name??j);for(let G of[\"visible\",\"enabled\"]){if(!L[G])continue;if(L[G].k!==\"lit\")S[G+\"Bind\"]=B(\"v\",`${j}.${G}`,L[G],_.props[G]);else if(!_.props[G])S[G]=!1}if(_.props.weight!==void 0)S.layout={weight:_.props.weight};return S},{kind:H,preset:J,palette:Y}=XK(K),C=K.tree(),W=U(C,\"root\"),R=[...H?[{type:\"text\",text:String(H),style:p.eyebrow}]:[],...C.type===\"Column\"?W.children:[W].filter(Boolean)];return{ui:{type:\"theme\",preset:J??\"clean\",...Y&&{palette:Y},cornerRadius:20,children:[{type:\"column\",style:{gap:\"medium\"},children:R}]},values:z,controls:q,faults:$,owners:X}}function GK(K,Q,V){let Z={};for(let[$,q]of Q.fields){let[X,M]=q.split(\".\");if(M)(Z[X]??={})[M]=K.state[$];else Z[X]=K.state[$]}return{...Z,...V.values}}function r(K,Q,V=Date.now()){let{state:Z,event:$}=K;if($.type===\"preview\"||$.type===\"render\")return{state:Z};let q=g.now;g.now=()=>V;try{let X=new y(new v().feedText(Q.lines));for(let[H,J]of Q.fields){let[Y,C]=J.split(\".\"),W=C?Z[Y]?.[C]:Z[Y];if(W!==void 0)X.state[H]=W}X.recompute();let M=a(X,Q),z=$.type===\"action\"?M.controls.get($.actionId):void 0;if($.type!==\"open\"&&!z)return{state:Z};if(z?.props.bind)X.change(z,$.value);else if(z)X.fire(z);let B=z?a(X,Q):M,U=GK(X,Q,B);return JSON.stringify(B.ui)===JSON.stringify(M.ui)?{state:U}:{state:U,ui:B.ui}}finally{g.now=q}}__handle(r);})();";
+runtime.text = "let handle;const __handle=(f)=>{handle=f};\n(()=>{var LK={\"||\":1,\"&&\":2,\"==\":3,\"!=\":3,\"<\":4,\"<=\":4,\">\":4,\">=\":4,\"+\":5,\"-\":5,\"*\":6,\"/\":6,\"%\":6};class C extends Error{}function vK(K){let Q=[],V=0,Z=($)=>{throw new C(`${$} at column ${V+1}`)};while(V<K.length){let $=K[V];if(/\\s/.test($)){V++;continue}if($==='\"'){let q=V+1,X=\"\";while(q<K.length&&K[q]!=='\"'){if(K[q]===\"\\\\\")q++,X+={n:`\n`,t:\"\\t\"}[K[q]]??K[q];else X+=K[q];q++}if(q>=K.length)Z(\"string without a closing quote\");Q.push({t:\"str\",v:X}),V=q+1;continue}if($===\"$\"){let q=/^\\$(\\/?)([\\p{L}_][\\p{L}\\p{N}_]*(?:\\/[\\p{L}_][\\p{L}\\p{N}_]*)*)/u.exec(K.slice(V));if(!q)Z(\"path expected after $\");Q.push({t:\"path\",abs:q[1]===\"/\",segs:q[2].split(\"/\")}),V+=q[0].length;continue}let H=/^(\\d+\\.?\\d*|\\.\\d+)/.exec(K.slice(V));if(H){Q.push({t:\"num\",v:Number(H[0])}),V+=H[0].length;continue}let U=/^[\\p{L}_][\\p{L}\\p{N}_]*/u.exec(K.slice(V));if(U){Q.push({t:\"id\",v:U[0]}),V+=U[0].length;continue}let Y=K.slice(V,V+2);if([\":=\",\"==\",\"!=\",\"<=\",\">=\",\"&&\",\"||\"].includes(Y)){Q.push({t:\"op\",v:Y}),V+=2;continue}if(\"()[]{},:=+-*/%<>!?.\".includes($)){Q.push({t:\"op\",v:$}),V++;continue}Z(`unexpected character ${$}`)}return Q}function wK(K,Q=0){let V=Q,Z=(G)=>K[V]&&K[V].t===\"op\"&&K[V].v===G,$=(G)=>{if(!Z(G))throw new C(`\"${G}\" expected`);V++};function H(){let G=K[V];if(!G)throw new C(\"value expected at the end of the line\");if(V++,G.t===\"num\")return{k:\"lit\",v:G.v};if(G.t===\"str\")return{k:\"lit\",v:G.v};if(G.t===\"path\")return{k:\"path\",abs:G.abs,segs:G.segs};if(G.t===\"id\"){if(G.v===\"true\"||G.v===\"false\")return{k:\"lit\",v:G.v===\"true\"};if(G.v===\"null\")return{k:\"lit\",v:null};if(!Z(\"(\"))return{k:\"ref\",name:G.v};V++;let z=[],J={};while(!Z(\")\")){if(K[V]?.t===\"id\"&&K[V+1]?.t===\"op\"&&K[V+1].v===\"=\"){let W=K[V].v;V+=2,J[W]=q()}else z.push(q());if(!Z(\")\"))$(\",\")}return V++,{k:\"call\",name:G.v,args:z,named:J}}if(G.t===\"op\"&&G.v===\"(\"){let z=q();return $(\")\"),z}if(G.t===\"op\"&&G.v===\"[\"){let z=[];while(!Z(\"]\"))if(z.push(q()),!Z(\"]\"))$(\",\");return V++,{k:\"list\",items:z}}if(G.t===\"op\"&&G.v===\"{\"){let z=[];while(!Z(\"}\")){let J=K[V++];if(!J||J.t!==\"id\"&&J.t!==\"str\")throw new C(\"field name expected in { }\");if($(\":\"),z.push([J.v,q()]),!Z(\"}\"))$(\",\")}return V++,{k:\"map\",entries:z}}if(G.t===\"op\"&&(G.v===\"-\"||G.v===\"!\"))return{k:\"un\",op:G.v,arg:U()};throw new C(`unexpected \"${G.v}\"`)}function U(){let G=H();for(;;){let z=K[V+1];if(Z(\".\")){V++;let J=K[V++];if(!J||J.t!==\"id\")throw new C(\"field name expected after .\");G={k:\"field\",of:G,name:J.v}}else if(Z(\"[\")){V++;let J=q();$(\"]\"),G={k:\"index\",of:G,at:J}}else if(Z(\"/\")&&z?.t===\"id\"&&![\"true\",\"false\",\"null\"].includes(z.v)&&!(K[V+2]?.t===\"op\"&&K[V+2].v===\"(\"))G={k:\"field\",of:G,name:z.v},V+=2;else return G}}function Y(G){let z=U();while(K[V]?.t===\"op\"&&LK[K[V].v]>=G){let J=K[V++].v;z={k:\"bin\",op:J,left:z,right:Y(LK[J]+1)}}return z}function q(){let G=Y(1);if(!Z(\"?\"))return G;V++;let z=q();return $(\":\"),{k:\"if\",test:G,yes:z,no:q()}}return{tree:q(),used:V-Q}}function jK(K){let Q=vK(K),{tree:V,used:Z}=wK(Q);if(Z!==Q.length)throw new C(`unexpected \"${Q[Z].v??Q[Z].t}\" after the expression`);return V}function mK(K){let Q=K.trim();if(!Q||Q.startsWith(\"#\"))return null;let V=($,H,U)=>({kind:$,key:H,tree:jK(U),raw:Q}),Z;if(Z=/^delete\\s+check\\s*\\(\\s*\"(.*)\"\\s*\\)$/.exec(Q))return{kind:\"delete\",key:\"check:\"+Z[1],tree:null,raw:Q};if(Z=/^delete\\s+(?:need\\s+)?(\\S+)$/.exec(Q))return{kind:\"delete\",key:Z[1],tree:null,raw:Q};if(Z=/^need\\s+([\\p{L}_][\\p{L}\\p{N}_]*)\\s*=(?!=)(.*)$/u.exec(Q))return V(\"need\",Z[1],Z[2]);if(Z=/^(\\$\\/[\\p{L}\\p{N}_/]+)\\s*:=(.*)$/u.exec(Q))return V(\"formula\",Z[1],Z[2]);if(Z=/^(\\$\\/[\\p{L}\\p{N}_/]+)\\s*=(?!=)(.*)$/u.exec(Q))return V(\"state\",Z[1],Z[2]);if(/^app\\s*\\(/.test(Q))return V(\"app\",\"app\",Q);if(/^check\\s*\\(/.test(Q)){let $=jK(Q);return{kind:\"check\",key:\"check:\"+($.args[0]?.v??\"\"),tree:$,raw:Q}}if(Z=/^([\\p{L}_][\\p{L}\\p{N}_]*)\\s*=(?!=)(.*)$/u.exec(Q))return V(\"component\",Z[1],Z[2]);throw new C(\"line not understood\")}class ZK{constructor(){this.entries=new Map,this.faults=[],this.partFaults=[],this.tops=new Map,this.removed=new Set}beginStep(){this.faults=[]}feed(K,Q=null,V=\"author\"){let Z;try{Z=mK(K)}catch(H){if(!(H instanceof C))throw H;return this.faults.push({line:Q,text:K.trim(),message:H.message}),null}if(!Z)return null;if(Z.kind===\"delete\"){let H=[...this.entries.keys()].find((U)=>U===Z.key||U===\"need:\"+Z.key);if(H)this.entries.delete(H),this.removed.add(H);else this.faults.push({line:Q,text:Z.raw,message:`nothing named ${Z.key}`});return Z}let $=Z.kind===\"need\"?\"need:\"+Z.key:Z.key;if(Z.origin=V,V===\"author\")this.removed.delete($);return this.entries.set($,Z),Z}feedText(K){return K.split(`\n`).forEach((Q,V)=>this.feed(Q,V+1)),this}open(K){return!this.removed.has(K)&&(this.entries.get(K)?.origin??\"part\")===\"part\"}of(K){return[...this.entries.values()].filter((Q)=>Q.kind===K)}get(K){return this.entries.get(K)}text(){return[...this.entries.values()].map((K)=>K.raw).join(`\n`)+`\n`}}function O(K){switch(K.k){case\"lit\":return typeof K.v===\"string\"?JSON.stringify(K.v):String(K.v);case\"path\":return\"$\"+(K.abs?\"/\":\"\")+K.segs.join(\"/\");case\"ref\":return K.name;case\"list\":return\"[\"+K.items.map(O).join(\", \")+\"]\";case\"map\":return\"{\"+K.entries.map(([Q,V])=>`${/^[\\p{L}_][\\p{L}\\p{N}_]*$/u.test(Q)?Q:JSON.stringify(Q)}: ${O(V)}`).join(\", \")+\"}\";case\"field\":return O(K.of)+\".\"+K.name;case\"index\":return`${O(K.of)}[${O(K.at)}]`;case\"un\":return K.op+O(K.arg);case\"bin\":return`(${O(K.left)} ${K.op} ${O(K.right)})`;case\"if\":return`(${O(K.test)} ? ${O(K.yes)} : ${O(K.no)})`;case\"call\":return`${K.name}(${[...K.args.map(O),...Object.entries(K.named).map(([Q,V])=>`${Q}=${O(V)}`)].join(\", \")})`}throw new C(\"cannot print \"+K.k)}var r={Column:[\"children\"],Row:[\"children\"],Card:[\"children\"],Section:[\"title\",\"children\"],Text:[\"text\"],Heading:[\"text\"],Metric:[\"label\",\"value\"],Emoji:[\"value\"],Badge:[\"value\"],Progress:[\"value\",\"max\"],Ring:[\"value\",\"max\",\"label\"],Divider:[],Notice:[\"text\"],Button:[\"label\",\"action\"],IconButton:[\"icon\",\"action\"],TextField:[\"label\",\"bind\"],NumberField:[\"label\",\"bind\"],Slider:[\"label\",\"bind\"],Toggle:[\"label\",\"bind\"],CheckBox:[\"label\",\"bind\"],Segmented:[\"label\",\"bind\",\"options\"],Select:[\"label\",\"bind\",\"options\"],List:[\"items\",\"template\",\"group\"],Chart:[\"items\",\"label\",\"value\"],Tabs:[\"titles\",\"groups\"],Dialog:[\"title\",\"children\"],DateField:[\"label\",\"bind\"],TimeField:[\"label\",\"bind\"],Picture:[\"text\",\"found\"],Choices:[\"label\",\"bind\",\"options\"],Drawing:[\"label\",\"width\",\"height\",\"shapes\"],Model3d:[\"label\",\"bodies\",\"bind\",\"exploded\",\"selected\"],Link:[\"label\",\"url\",\"text\"]};var yK=new Set([\"visible\",\"enabled\",\"variant\",\"tone\",\"emphasis\",\"weight\",\"min\",\"max\",\"step\",\"empty\",\"placeholder\",\"gap\",\"selected\",\"kind\"]),uK=new Set([\"set\",\"toggle\",\"inc\",\"dec\",\"append\",\"remove\",\"clear\",\"when\",\"move\",\"flip\",\"animate\"]),kK={circle:[\"x\",\"y\",\"r\"],rect:[\"x\",\"y\",\"w\",\"h\"],line:[\"x1\",\"y1\",\"x2\",\"y2\"],text:[\"x\",\"y\",\"text\"],polygon:[\"points\"]},cK={box:[\"part\",\"x\",\"y\",\"z\",\"w\",\"h\",\"d\"],cylinder:[\"part\",\"x\",\"y\",\"z\",\"radius\",\"length\",\"axis\"]},pK=new Set([\"text\",\"part\",\"axis\"]),xK=[\"radius\",\"width\",\"size\",\"stroke\"],lK={text:\"size\",line:\"width\",rect:\"radius\"};var s=(K,Q=0)=>{let V=10**Q;return Math.round((K+Number.EPSILON)*V)/V},d=(K)=>Array.isArray(K)?K.map(d):K&&typeof K===\"object\"?Object.fromEntries(Object.entries(K).map(([Q,V])=>[Q,d(V)])):K;function iK(K){let Q=[\"x\",\"y\",\"z\"].map((V)=>K.reduce((Z,$)=>Z+$[V],0)/(K.length||1));for(let V of K)if(V.part)[\"x\",\"y\",\"z\"].forEach((Z,$)=>{V[Z]=s(V[Z]+(V[Z]-Q[$])/2,2)})}var $K={round:s,floor:Math.floor,ceil:Math.ceil,abs:Math.abs,sin:(K)=>s(Math.sin(K*Math.PI/180),12)+0,cos:(K)=>s(Math.cos(K*Math.PI/180),12)+0,pow:Math.pow,sqrt:Math.sqrt,exp:Math.exp,ln:Math.log,log10:Math.log10,min:(...K)=>K.flat(3).length?Math.min(...K.flat(3)):0,max:(...K)=>K.flat(3).length?Math.max(...K.flat(3)):0,clamp:(K,Q,V)=>Math.min(V,Math.max(Q,K)),len:(K)=>K==null?0:K.length,text:(K)=>String(K??\"\"),number:(K)=>Number(K)||0,fixed:(K,Q=2)=>Number(K).toFixed(Q),pad2:(K)=>String(Math.floor(K)).padStart(2,\"0\"),money:(K,Q=\"\")=>Q+Number(K).toFixed(2),percent:(K,Q=0)=>Number(K).toFixed(Q)+\"%\",join:(K,Q=\", \")=>(K||[]).join(Q),upper:(K)=>String(K).toUpperCase(),lower:(K)=>String(K).toLowerCase(),at:(K,Q)=>Array.isArray(K)?K[Q]??null:null,streak:(K)=>(K??[]).reduce(([Q,V],Z)=>Z?[Math.max(Q,V+1),V+1]:[Q,0],[0,0])[0],near:(K,Q)=>Math.abs(K-Q)<=Math.max(0.01,Math.abs(Q)/1000),trim:(K)=>String(K).trim(),contains:(K,Q)=>String(K).toLowerCase().includes(String(Q).toLowerCase()),has:(K,Q)=>Array.isArray(K)&&K.includes(Q),hours:(K,Q)=>{let[V,Z]=[K,Q].map(sK);return V===null||Z===null?0:(Z-V+1440)%1440/60},today:()=>{let K=new Date;return`${K.getFullYear()}-${String(K.getMonth()+1).padStart(2,\"0\")}-${String(K.getDate()).padStart(2,\"0\")}`},split:(K,Q=\",\")=>String(K??\"\").split(String(Q)||\",\").map((V)=>V.trim()).filter(Boolean),weekday:(K)=>{let Q=k(K);return Q===null?0:(new Date(Q*86400000).getUTCDay()+6)%7+1},month:(K)=>k(K)===null?0:Number(String(K).trim().slice(5,7)),year:(K)=>k(K)===null?0:Number(String(K).trim().slice(0,4)),days:(K,Q)=>{let[V,Z]=[k(K),k(Q)];return V===null||Z===null?0:Z-V},addDays:(K,Q)=>{let V=k(K);return V===null?null:new Date((V+Math.round(Number(Q)||0))*86400000).toISOString().slice(0,10)}};function k(K){let Q=/^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(String(K??\"\").trim());if(!Q)return null;let V=Date.UTC(Number(Q[1]),Number(Q[2])-1,Number(Q[3])),Z=new Date(V);return Z.getUTCMonth()===Number(Q[2])-1&&Z.getUTCDate()===Number(Q[3])?V/86400000:null}function sK(K){let Q=/^(\\d{1,2}):(\\d{2})$/.exec(String(K??\"\").trim());return Q?Number(Q[1])*60+Number(Q[2]):null}var TK=(K,Q)=>Array.isArray(K)&&Array.isArray(Q)?K.reduce((V,Z,$)=>V||TK(Z,Q[$]),0):K<Q?-1:K>Q?1:0,qK={count:(K,Q)=>Q?K.filter(Q).length:K.length,sum:(K,Q)=>K.reduce((V,Z)=>V+Number(Q?Q(Z):Z),0),avg:(K,Q)=>K.length?K.reduce((V,Z)=>V+Number(Q?Q(Z):Z),0)/K.length:0,filter:(K,Q)=>K.filter(Q),any:(K,Q)=>K.some(Q),all:(K,Q)=>K.every(Q),map:(K,Q)=>K.map(Q),find:(K,Q)=>K.find(Q)??null,sort:(K,Q,V)=>[...K].sort((Z,$)=>TK(Q(Z),Q($))*(V===\"desc\"?-1:1)),groups:(K,Q,V)=>{if(!Q)throw new C(\"groups needs a key, such as groups($/rows, $category, $amount)\");let Z=new Map;for(let $ of K)Z.set(Q($),(Z.get(Q($))??0)+Number(V?V($):1));return[...Z].map(([$,H])=>({key:$,value:H}))}},UQ=new Set([...Object.keys($K),...Object.keys(qK),\"if\"]);function zK(K,Q){if(K===Q)return!0;if(typeof K!==\"object\"||typeof Q!==\"object\"||!K||!Q||Array.isArray(K)!==Array.isArray(Q))return!1;let V=(Z)=>Object.keys(Z).filter(($)=>$!==\"id\");return V(K).length===V(Q).length&&V(K).every((Z)=>zK(K[Z],Q[Z]))}var HK=(K)=>({...Object.fromEntries((r[K.name]??[]).map((Q,V)=>[Q,K.args[V]])),...K.named});class JK{constructor(K){this.file=K,this.faults=[],this.nextId=1,this.state={},this.seen=new Map,this.follow()}follow(){for(let K of this.file.of(\"state\")){if(this.seen.get(K.key)===K.raw)continue;this.seen.set(K.key,K.raw),this.write(this.pathOf(K.key),this.attempt(K,()=>d(this.value(K.tree,{}))),{})}this.tagRows(this.state),this.recompute()}fault(K,Q){this.faults.push({where:K,message:Q})}attempt(K,Q){try{return Q()}catch(V){return this.fault(K.key,V.message),null}}pathOf(K){return{k:\"path\",abs:!0,segs:K.slice(2).split(\"/\")}}tagRows(K){if(Array.isArray(K))K.forEach((Q)=>{if(Q&&typeof Q===\"object\"&&!Array.isArray(Q))Q.id??=\"r\"+this.nextId++,this.tagRows(Q)});else if(K&&typeof K===\"object\")Object.values(K).forEach((Q)=>this.tagRows(Q))}read(K,Q){let V=K.abs?this.state:Q.it;for(let Z of K.segs)V=V==null?void 0:V[Z];return V}place(K,Q){if(K.k===\"path\"){let Z=K.abs?this.state:Q.it;if(Z==null)throw new C(\"a $field path needs a row\");if(typeof Z!==\"object\")throw new C(\"the row is a plain value with no fields to set\");for(let $ of K.segs.slice(0,-1))Z=Z[$]??={};return[Z,K.segs.at(-1)]}if(K.k!==\"field\"&&K.k!==\"index\")throw new C(\"a place to set is a path, a field of a row, or an item of a list\");let V=this.value(K.of,Q);if(V==null||typeof V!==\"object\")throw new C(`${O(K.of)} has no value, so nothing in it can be set`);return[V,K.k===\"field\"?K.name:this.value(K.at,Q)]}write(K,Q,V){let[Z,$]=this.place(K,V);Z[$]=Q}value(K,Q){switch(K.k){case\"lit\":return K.v;case\"path\":if(!K.abs&&K.segs[0]===\"it\")return K.segs.slice(1).reduce((V,Z)=>V?.[Z],Q.it);if(!K.abs&&Q.each!==void 0&&K.segs.join()===\"index\"&&!(Q.it&&typeof Q.it===\"object\"&&(\"index\"in Q.it)))return Q.each;if(!K.abs&&Q.it===void 0)throw new C(`$${K.segs.join(\"/\")} is a field of a list row, and there is no row here. A value of the app is $/${K.segs.join(\"/\")}`);if(!K.abs&&Q.it!==void 0&&(Q.it===null||typeof Q.it!==\"object\"))throw new C(\"the row is a plain value with no fields. $it reads the row itself\");if(!K.abs&&Q.it&&!(K.segs[0]in Q.it)){let V=K.segs[0];if(this.shown??=Object.fromEntries(this.file.of(\"need\").filter((Z)=>Z.tree.name===\"entries\"&&Z.tree.named?.show?.k===\"map\").flatMap((Z)=>Z.tree.named.show.entries)),K.segs.length===1&&this.shown[V]&&!Q.busy?.includes(V))return this.value(this.shown[V],{...Q,busy:[...Q.busy??[],V]});throw new C(`the row has no field ${V}`)}return this.read(K,Q);case\"list\":return K.items.map((V)=>this.value(V,Q));case\"map\":return Object.fromEntries(K.entries.map(([V,Z])=>[V,this.value(Z,Q)]));case\"field\":return this.value(K.of,Q)?.[K.name];case\"index\":{let V=this.value(K.of,Q);return Array.isArray(V)?V[this.value(K.at,Q)]??null:null}case\"un\":return K.op===\"-\"?-this.value(K.arg,Q):!this.value(K.arg,Q);case\"if\":return this.value(K.test,Q)?this.value(K.yes,Q):this.value(K.no,Q);case\"bin\":{if(K.op===\"&&\")return this.value(K.left,Q)&&this.value(K.right,Q);if(K.op===\"||\")return this.value(K.left,Q)||this.value(K.right,Q);let V=this.value(K.left,Q),Z=this.value(K.right,Q);switch(K.op){case\"+\":return Array.isArray(V)&&Array.isArray(Z)?[...V,...Z]:typeof V===\"string\"||typeof Z===\"string\"?String(V??\"\")+String(Z??\"\"):V+Z;case\"-\":return V-Z;case\"*\":return V*Z;case\"/\":return V/Z;case\"%\":return V%Z;case\"==\":return zK(V,Z);case\"!=\":return!zK(V,Z);case\"<\":return V<Z;case\"<=\":return V<=Z;case\">\":return V>Z;case\">=\":return V>=Z}break}case\"call\":{if(K.name===\"if\")return this.value(K.args[0],Q)?this.value(K.args[1],Q):this.value(K.args[2],Q);if(qK[K.name]){let V=this.value(K.args[0],Q);if(!Array.isArray(V))throw new C(`${K.name} needs a list`);let Z=($)=>$&&((H)=>this.value($,{...Q,it:H}));return qK[K.name](V,Z(K.args[1]),K.name===\"groups\"?Z(K.args[2]):K.args[2]&&this.value(K.args[2],Q))}if($K[K.name])return $K[K.name](...K.args.map((V)=>this.value(V,Q)));if(r[K.name])throw new C(`${K.name} is a component. A component line has a plain name with no $/ before it`);throw new C(`unknown function ${K.name}`)}case\"ref\":throw new C(`${K.name} is a component name, not a value`)}throw new C(\"expression not understood\")}drawn(K,Q,V,Z){if(V.k===\"list\")return V.items.flatMap((J)=>this.drawn(K,Q,J,Z));let{name:$=\"\",args:H=[],named:U={}}=V.k===\"call\"?V:{};if($===\"each\"&&H.length===2){let J=this.value(H[0],Z),W=Array.isArray(J)?J:Number.isInteger(J)&&J>=0&&J<=500?Array.from({length:J},(B,P)=>P):null;if(!W)throw new C(\"each needs a list or a count: each($/rows, shape) or each(5, shape)\");return W.flatMap((B,P)=>this.drawn(K,Q,H[1],{...Z,it:B,each:P}))}let Y=Object.hasOwn(K,$)?K[$]:null;if(!Y)throw new C(`${O(V).slice(0,30)} is not one of ${Object.keys(K).join(\", \")}, each`);let q=lK[$],X=`${$} takes ${Y.join(\", \")}, color${q?`, ${q}`:\"\"}`;if(H.length<Y.length||H.length>Y.length+(q?2:1))throw new C(`${O(V).slice(0,60)} has ${H.length} values: ${X}`);if(U.visible&&!this.value(U.visible,Z))return[];let G=(J,W)=>{if(J===null||J===\"\"||typeof J===\"boolean\"||!Number.isFinite(Number(J)))throw new C(`${W} of ${$} is not a number: ${X}`);return s(Number(J),2)},z={[Q]:$};if(Y.forEach((J,W)=>{let B=this.value(H[W],Z);z[J]=pK.has(J)?String(B??\"\"):J===\"points\"?[B].flat().map((P)=>G(P,J)):G(B,J)}),z.axis!==void 0&&![\"x\",\"y\",\"z\"].includes(z.axis))throw new C(`axis of ${$} is \"x\", \"y\", or \"z\"`);if(z.color=String((H[Y.length]?this.value(H[Y.length],Z):null)??\"ink\"),H.length===Y.length+2)z[q]=G(this.value(H[Y.length+1],Z),q);for(let[J,W]of Object.entries(U)){if(J===\"visible\")continue;if(!xK.includes(J))throw new C(`${$} has no argument ${J}`);let B=this.value(W,Z);if(J!==\"stroke\")z[J]=G(B,J);else if(B)z.stroke=!0}return[z]}recompute(){let K=this.file.of(\"formula\");for(let Q=0;Q<5;Q++){let V=JSON.stringify(this.state);for(let Z of K)this.attempt(Z,()=>this.write(this.pathOf(Z.key),this.value(Z.tree,{}),{}));if(JSON.stringify(this.state)===V)return}}act(K,Q={}){for(let V of K.k===\"list\"?K.items:[K]){if(V.k!==\"call\"||!uK.has(V.name))throw new C(`unknown action ${V.name??V.k}`);let[Z,$]=V.args;if(V!==(K.k===\"list\"?K.items[0]:K))this.recompute();let H=()=>{if(![\"path\",\"field\",\"index\"].includes(Z?.k))throw new C(`${V.name} needs a place: a path, a field of a row, or an item of a list`);return Z},U=(Y)=>{let q=this.value(Y,Q);if(!Array.isArray(q))throw new C(`${V.name} needs a list`);return q};switch(V.name){case\"set\":this.write(H(),d(this.value($,Q)),Q);break;case\"toggle\":this.write(H(),!this.value(H(),Q),Q);break;case\"inc\":this.write(H(),(this.value(H(),Q)||0)+($?this.value($,Q):1),Q);break;case\"dec\":this.write(H(),(this.value(H(),Q)||0)-($?this.value($,Q):1),Q);break;case\"clear\":this.write(H(),[],Q);break;case\"flip\":{let Y=U(H()),q=this.value($,Q);this.write(H(),Y.includes(q)?Y.filter((X)=>X!==q):[...Y,q],Q);break}case\"move\":{let Y=V.args.length===1;if(Y&&!Q.list)throw new C(\"move(by) needs a row. Outside a list write move($/list, test, by)\");let q=Y?this.read(Q.list,{}):U(H()),X=Y?q.indexOf(Q.it):q.findIndex((z)=>this.value($,{...Q,it:z})),G=X+this.value(Y?Z:V.args[2],Q);if(X>=0&&G>=0&&G<q.length)q.splice(G,0,q.splice(X,1)[0]);break}case\"when\":if(this.value(Z,Q))this.act($,Q);else this.recompute();break;case\"animate\":{if(Z?.k!==\"path\"||!Z.abs)throw new C(\"animate needs a value of the app as its place, such as $/angle\");let Y=Z.segs.join(\"/\"),q=Number(this.value(Z,Q))||0,X=$?Number(this.value($,Q)):NaN,G=V.args[2]?Number(this.value(V.args[2],Q)):0;if(!Number.isFinite(X)||!Number.isFinite(G))throw new C(\"animate needs a number to go to and a time in milliseconds: animate($/angle, 360, 5000)\");let z=(this.state._run??[]).filter((J)=>J.path!==Y);if(G>0&&X!==q)z.push({path:Y,from:q,to:X,ms:G,spent:0,at:q});else this.write(Z,X,Q);if(z.length)this.state._run=z;else delete this.state._run;break}case\"append\":{let Y=d(this.value($,Q));U(H()).push(Y),this.tagRows([Y]);break}case\"remove\":{if(!Z){if(!Q.list)throw new C(\"remove() without a path needs a row\");this.write(Q.list,this.read(Q.list,{}).filter((Y)=>Y!==Q.it),{})}else this.write(H(),U(H()).filter((Y)=>!this.value($,{...Q,it:Y})),Q);break}}}this.recompute()}tree(K=!1){this.reached=new Set;let Q=0,V=($,H,U,Y)=>{if(Y>40)throw new C(\"components nest too deep or refer to each other\");if($.k===\"ref\"){let z=this.file.get($.name);if(this.reached.add($.name),!z||z.kind!==\"component\"){if(K)this.fault($.name,\"no component line with this name\");return{type:\"Missing\",name:$.name,props:{},children:[]}}return V(z.tree,H,$.name,Y+1)}if($.k!==\"call\"||!r[$.name])return this.fault(U??\"?\",$.k===\"path\"?`a child is a component name, not the path ${O($)}`:`unknown component ${$.name??$.k}`),{type:\"Missing\",name:U,props:{},children:[]};let q={type:$.name,name:U,props:{},children:[],row:H.it,rowIndex:H.index,list:H.list,call:$},X=HK($),G=[];for(let[z,J]of Object.entries(X)){if(J===void 0)continue;if(!r[$.name].includes(z)&&!yK.has(z)&&!(z===\"action\"&&X.bind)){this.fault(U??$.name,`${$.name} has no property ${z}`);continue}if($.name===\"Chart\"&&(z===\"label\"||z===\"value\")||$.name===\"List\"&&z===\"group\"||z===\"shapes\"||z===\"bodies\")continue;try{if(z===\"children\")q.children=(J.k===\"list\"?J.items:[J]).map((W)=>V(W,H,void 0,Y+1));else if(z===\"groups\")G=J.k===\"list\"?J.items:[J];else if(z===\"action\")q.props.action=J;else if(z===\"bind\"){if(![\"path\",\"field\",\"index\"].includes(J.k))throw new C(\"bind needs a place: a path, a field of a row, or an item of a list\");q.props.bind=J,q.props.value=J.k===\"path\"?this.read(J,H):this.value(J,H)}else if(z===\"template\")q.template=J;else q.props[z]=this.value(J,H)}catch(W){this.fault(U??$.name,`${z}: ${W.message}`)}}if($.name===\"Chart\"){try{q.props.points=(Array.isArray(q.props.items)?q.props.items:[]).map((z)=>({label:X.label?this.value(X.label,{...H,it:z}):\"\",value:Number(X.value?this.value(X.value,{...H,it:z}):z)||0}))}catch(z){this.fault(U??$.name,`points: ${z.message}`)}delete q.props.items}if($.name===\"Drawing\"||$.name===\"Model3d\"){let z=$.name===\"Drawing\"?\"shapes\":\"bodies\";try{q.props[z]=this.drawn(z===\"shapes\"?kK:cK,z===\"shapes\"?\"shape\":\"body\",X[z]??{k:\"list\",items:[]},H)}catch(J){q.props[z]=[],this.fault(U??$.name,`${z}: ${J.message}`)}if(z===\"bodies\"&&q.props.exploded)iK(q.props.bodies);if(z===\"shapes\"&&!(q.props.width>0&&q.props.height>0))this.fault(U??$.name,\"a drawing needs a width and a height above 0: drawing(label, 320, 240, [shapes])\")}if($.name===\"Link\"&&!/^https?:\\/\\/\\S+$/.test(String(q.props.url??\"\")))this.fault(U??$.name,\"a Link needs a web address that starts with https://\");if($.name===\"Dialog\"&&!X.visible)this.fault(U??$.name,\"a Dialog needs visible=test and a button that makes the test false. Without them the window never closes\");if($.name===\"Choices\"){let z=Array.isArray(q.props.value)?q.props.value:[],J=q.props.max!==void 0&&z.length>=q.props.max;q.children=(q.props.options??[]).map((W,B)=>({type:\"Button\",name:U&&`${U}_opt${B}`,children:[],props:{label:String(W),selected:z.includes(W),enabled:z.includes(W)||!J,action:{k:\"call\",name:\"flip\",args:[X.bind,{k:\"lit\",v:W}],named:{}}}}))}if($.name===\"Tabs\"){let z={k:\"path\",abs:!0,segs:[\"_ui\",U??\"tabs\"+Q++]},J=this.read(z,{})??0;q.props.value=J,q.children=[{type:\"Row\",props:{},children:(q.props.titles??[]).map((W,B)=>({type:\"Button\",name:U&&`${U}_tab${B}`,tab:!0,children:[],props:{label:W,selected:B===J,action:{k:\"call\",name:\"set\",args:[z,{k:\"lit\",v:B}],named:{}}}}))},...G.map((W,B)=>({type:\"Column\",props:{visible:B===J},children:(W.k===\"list\"?W.items:[W]).map((P)=>V(P,H,void 0,Y+1))}))]}if($.name===\"List\"&&q.template&&Array.isArray(q.props.items)){let z=(P,S=0)=>{if(!P||S>8)return null;if(P.k===\"call\"&&[\"sort\",\"filter\"].includes(P.name))return z(P.args[0],S+1);if(P.k===\"if\")return z(P.yes,S+1)??z(P.no,S+1);if(P.k!==\"path\")return null;let D=P.abs?this.file.get(\"$/\"+P.segs.join(\"/\")):null;return D?.kind===\"formula\"?z(D.tree,S+1):P},J=z(X.items),W=q.props.items,B=[];if(X.group)try{let P=W.map((D)=>this.value(X.group,{...H,it:D})),S=[...new Set(P)].flatMap((D)=>W.map((w,m)=>[w,D,m]).filter((w)=>P[w[2]]===D));W=S.map((D)=>D[0]),B=S.map((D,w)=>w===0||S[w-1][1]!==D[1]?[{type:\"Heading\",props:{text:String(D[1]??\"\")},children:[]}]:[])}catch(P){this.fault(U??$.name,`group: ${P.message}`)}q.children=W.flatMap((P,S)=>[...B[S]??[],V(q.template,{it:P,index:S,list:J},void 0,Y+1)]),q.source=J,q.blank=(P)=>V(q.template,{it:P,index:0,list:J},void 0,Y+1)}return q},Z=this.file.get(\"root\");if(!Z)return{type:\"Missing\",name:\"root\",props:{},children:[]};return V(Z.tree,{},\"root\",0)}find(K,Q){let V=(Z)=>Z.name===K&&(Q===void 0||Z.rowIndex===Q)?Z:Z.children.reduce(($,H)=>$??V(H),null);return V(this.tree())}tick(){let K=a.now(),Q=(K-(this.clock??K))/1000,V=this.state;if(this.clock=K,Q>0&&V._run){if(V._run=V._run.filter((Z)=>{let $=this.pathOf(\"$/\"+Z.path);if(this.read($,{})!==Z.at)return!1;return Z.spent+=Q*1000,Z.at=Z.spent>=Z.ms?Z.to:Z.from+(Z.to-Z.from)*Z.spent/Z.ms,this.write($,Z.at,{}),Z.spent<Z.ms}),!V._run.length)delete V._run;this.recompute()}for(let Z of Q>0?this.file.of(\"need\"):[]){if(Z.tree.name!==\"timer\")continue;let $=Z.key,H=(Y,q)=>{try{return Number(Y?this.value(Y,{}):q)||0}catch{return 0}},U=Q;for(let Y=0;V[$+\"_on\"]&&U>0&&Y<1000;Y++){let q=Number(V[$+\"_phase\"])||0,X=q-V[$+\"_spent\"];if(U<X){V[$+\"_spent\"]+=U;break}if(U-=Math.max(0,X),!V[$+\"_resting\"])V[$]+=1;if(!V[$+\"_resting\"]&&H(Z.tree.named.rest,0)>0)V[$+\"_resting\"]=!0,V[$+\"_spent\"]=0;else if(V[$+\"_round\"]>=H(Z.tree.named.rounds,1))V[$+\"_over\"]=!0,V[$+\"_on\"]=!1,V[$+\"_spent\"]=q;else V[$+\"_round\"]+=1,V[$+\"_resting\"]=!1,V[$+\"_spent\"]=0;this.recompute()}this.recompute()}}change(K,Q){this.tick();try{if(this.write(K.props.bind,Q,{it:K.row}),K.props.action)this.act(K.props.action,{it:K.row,list:K.list});else this.recompute()}catch(V){return`${K.name??K.type}: ${V.message}`}return\"\"}fire(K){if(K.props.enabled===!1||K.props.visible===!1)return`${K.name??K.type} is not active`;this.tick();try{this.act(K.props.action,{it:K.row,list:K.list})}catch(Q){return`${K.name??K.type}: ${Q.message}`}return\"\"}input(K,Q,V){let Z=this.find(K,V);if(Z?.props.bind)return this.change(Z,Q);return(!Z?`no field named ${K}`:Z.props.action?`${K} is not a field: use tap(${K})`:`${K} only shows a value and cannot be set. A check sets a field, such as a NumberField`)+(V===void 0?\"\":` in row ${V}`)}press(K,Q){let V=this.find(K,Q);if(V?.props.action)return this.fire(V);return(V?.props.bind?`${K} is a field with no action: use set(${K}, value)`:`no control named ${K}`)+(Q===void 0?\"\":` in row ${Q}`)}}var a={gate:\"smoke\",now:()=>Date.now()};var dK=/^[A-Za-z][A-Za-z0-9_]{0,47}$/,aK=new Set([\"__proto__\",\"prototype\",\"constructor\"]),RK=32,NK=12,DK=100,rK=512;var oK={time:\"number\",date:\"string\"};function IK(K={safe:{},kit:{}}){let Q=0;return(V,Z=V)=>{if(Object.hasOwn(K.safe,V))return K.safe[V];let $=Z;if(!dK.test($)||aK.has($)||/^[dv]\\d*$/.test($)||Object.hasOwn(K.kit,$)){while(Object.hasOwn(K.kit,\"f\"+Q))Q++;$=\"f\"+Q}return K.safe[V]=$,K.kit[$]=V,$}}function nK(K){let Q=K.file.get(\"app\")?.tree,V=(Z)=>Z?K.value(Z,{}):void 0;return{title:V(Q?.args[0]),...Object.fromEntries(Object.entries(Q?.named??{}).map(([Z,$])=>[Z,V($)]))}}var SK=(K)=>String(K).padStart(2,\"0\"),tK=(K)=>{let Q=/^(\\d{1,2}):(\\d{2})$/.exec(String(K??\"\").trim());return Q&&Number(Q[1])<24&&Number(Q[2])<60?Number(Q[1])*60+Number(Q[2]):0},FK=(K)=>{let Q=Math.min(1439,Math.max(0,Math.round(Number(K)||0)));return`${SK(Math.floor(Q/60))}:${SK(Q%60)}`},XK=(K,Q,V)=>K===\"time\"?tK(Q):K===\"date\"?k(Q)===null?V:String(Q).trim():K===\"number\"?typeof Q===\"number\"&&Number.isFinite(Q)?Q:0:K===\"boolean\"?Q===!0:Q===null||Q===void 0||typeof Q===\"object\"?\"\":String(Q),EK=(K,Q,V)=>({id:String(K?.id??\"\"),...Object.fromEntries(Q.map(([Z,$,H])=>[$,XK(H,K?.[Z],V)]))}),bK=(K)=>K.value({k:\"call\",name:\"today\",args:[]},{}),MK={eyebrow:{emphasis:\"label\",tone:\"accent\"},muted:{tone:\"muted\"}},eK={ArrowUp:\"Arrow\",ArrowDown:\"Sort\",ArrowLeft:\"Back\",ArrowRight:\"Chevron\",Edit:\"Pencil\"},KQ=new Set([\"List\",\"Dialog\"]),o=(K,Q)=>Object.hasOwn(K,Q)?K[Q]:void 0,QQ=(K,Q)=>Object.fromEntries(Q.filter((V)=>K[V]!==void 0).map((V)=>[V,K[V]])),AK=(K,Q)=>{let V=Array.isArray(K.props.options)?K.props.options:[];return{type:V.length<=6?\"segmented\":\"select\",...Q.field(),options:V.map((Z)=>({text:Q.plain(Z),value:Z}))}},OK=(K,Q,V)=>(Z,$)=>{let{min:H=Q,max:U=V,step:Y,value:q}=Z.props;if(![H,U].every(Number.isFinite)||!(H<U)||!$.blank&&!(Number.isFinite(q)&&q>=H&&q<=U)||Y!==void 0&&!(Y>0&&Y<=U-H))$.fault(`a ${Z.type} needs min below max, its value from min to max, and a step above 0 and at most max - min. Now min is ${H}, max is ${U}, the value is ${q}${Y===void 0?\"\":`, and the step is ${Y}`}`);return $.bounds(H,U),{type:K,...$.field(),min:H,max:U,...QQ(Z.props,[\"step\"])}},VQ={Column:(K,Q)=>({type:\"column\",children:Q.children(!0)}),Row:(K,Q)=>Q.form()??{type:\"row\",...K.children.some((V)=>V.props.weight!==void 0)&&{wrap:!1},children:Q.children(!0)},Card:(K,Q)=>({type:\"card\",...K.props.variant===\"hero\"&&{variant:\"hero\"},children:Q.children()}),Section:(K,Q)=>({type:\"section\",text:Q.plain(K.props.title),children:Q.children()}),Text:(K,Q)=>({type:\"text\",...Q.text(\"text\"),...o(MK,K.props.variant)&&{style:MK[K.props.variant]}}),Heading:(K,Q)=>({type:\"text\",...Q.text(\"text\"),style:{emphasis:\"title\"}}),Metric:(K,Q)=>({type:\"metric\",text:Q.plain(K.props.label),bind:Q.shown(\"value\"),...K.props.emphasis===\"display\"&&{style:{emphasis:\"display\"}}}),Badge:(K,Q)=>({type:\"badge\",...Q.text(\"value\")}),Emoji:(K,Q)=>({type:\"emoji\",text:Q.plain(K.props.value),...Q.value(\"value\")}),Divider:()=>({type:\"divider\"}),Notice:(K,Q)=>({type:\"banner\",children:[{type:\"text\",...Q.text(\"text\")}]}),Button:(K,Q)=>({type:\"button\",text:Q.caption(K.props.label),action:Q.action(),variant:K.props.selected===void 0||K.props.selected?\"filled\":\"tonal\"}),IconButton:(K,Q)=>({type:\"icon\",name:o(eK,K.props.icon)??K.props.icon,text:Q.caption(),action:Q.action()}),NumberField:OK(\"numberInput\",0,1e6),Slider:OK(\"slider\",0,100),TextField:(K,Q)=>({type:\"input\",...Q.field(),inputMode:\"apply\"}),Toggle:(K,Q)=>({type:\"toggle\",...Q.field()}),CheckBox:(K,Q)=>({type:\"checkbox\",...Q.field()}),Segmented:AK,Select:AK,DateField:(K,Q)=>({type:\"dateInput\",...Q.field()}),TimeField:(K,Q)=>({type:\"timeInput\",...Q.field(FK)}),Choices:(K,Q)=>({type:\"multiChoice\",...Q.field((V)=>Array.isArray(V)&&!(K.props.max!==void 0&&V.length>K.props.max)?V:void 0),options:(Array.isArray(K.props.options)?K.props.options:[]).map((V)=>({text:Q.plain(V),value:V}))}),Dialog:(K,Q)=>Q.modal(),List:(K,Q)=>Q.list()},UK=(K,Q)=>K===\"number\"?Number.isFinite(Q)?Q:0:Q!==null&&typeof Q===\"object\"?\"\":String(Q??\"\"),ZQ=(K)=>K?.k===\"path\"&&K.abs?[K,!1]:K?.k===\"un\"&&K.op===\"!\"&&K.arg.k===\"path\"&&K.arg.abs?[K.arg,!0]:K?.k===\"bin\"&&K.op===\"!=\"&&K.left.k===\"path\"&&K.left.abs&&K.right.k===\"lit\"?[K.left,K.right.v]:null,GK=(K)=>K?.k===\"path\"&&!K.abs&&K.segs.length===1?K.segs[0]:null;function YK(K,Q){let V=IK(Q.names),Z=new Map(Q.fields),$=Q.kinds??{},H=Q.lists??{},U=bK(K),Y=[],q=new Map,X=new Map,G=new Map,z=[],J={},W={},B=[],P={d:new Map,v:new Map},S={},D=(F,I,E,T,A)=>{if(T!==null&&typeof T===\"object\")A.fault(`it shows a ${Array.isArray(T)?\"list\":\"record\"}, and Alphy shows one text or number there. Show one field of it, or join(list)`);let h=A.scope;if(h){let f=h.stored.get(GK(E));if(f&&f[1]!==\"time\"&&(F===\"d\"||f[1]===\"boolean\"))return f[0];let L=h.name(`${F}:${I}`,I.replace(/\\W/g,\"_\")),y=F===\"v\"?\"boolean\":Q.types[`${h.key}/${L}`]??=typeof T===\"number\"?\"number\":\"string\";if(h.computed.set(L,y),h.out)h.out[L]=F===\"v\"?Boolean(T):UK(y,T);return L}let b=E?.k===\"path\"&&E.abs?E.segs:null;if(b?.length===1&&Z.has(b[0])&&$[b[0]]!==\"time\"&&(F===\"d\"||typeof T===\"boolean\"))return Z.get(b[0]);let _=V(`${F}:${I}`,b?b.join(\"_\"):I.replace(/\\W/g,\"_\"));if(!P[F].has(_)){let f=F+(P[F].size<RK?\"\":Math.floor(P[F].size/RK)+1);P[F].set(_,`${f}.${_}`),(S[f]??={})[_]=F===\"v\"?Boolean(T):UK(Q.types[_]??=typeof T===\"number\"?\"number\":\"string\",T)}return P[F].get(_)},w=(F,I,E)=>{if(!F)return q.set(I,E);if(F.id===null)return;let T=X.get(I);if(!T)X.set(I,T=new Map),q.set(I,(A)=>T.get(A?.key)?.(A.value)??!1);T.set(F.id,E)},m=(F,I,E,T)=>{E=F.name??E;let A=T.scope,h=o(VQ,F.type),b=(M)=>Y.push([E,M]);if(!h)return b(`${F.type} is not built yet`),null;if(A&&KQ.has(F.type))return b(`a ${F.type} in a row of a list is not built yet`),null;let _=F.call?HK(F.call):{};if(A&&_.action?.k===\"call\"&&_.action.name===\"move\"&&_.action.args.length===1)return A.flags.moves=!0,null;let f=(M)=>_[M]&&_[M].k!==\"lit\"?D(\"d\",`${I}.${M}`,_[M],F.props[M],L):null,L={scope:A,fault:b,blank:Boolean(A&&!A.out),children:(M=!1,R=T)=>F.children.map((N,v)=>m(N,N.name??`${I}_${v}`,E,{...R,weighted:M})).filter(Boolean),caption:(M)=>L.plain(M)||(F.name?F.name:`${E} ${F.props.icon??F.type}`).replace(/_/g,\" \"),text:(M)=>{let R=f(M);return R?{text:\"\",bind:R}:{text:L.plain(F.props[M])}},plain:(M)=>{if(M===null||typeof M!==\"object\")return String(M??\"\");return b(`it shows a ${Array.isArray(M)?\"list\":\"record\"} as a text, and Alphy shows one text there. Show one field of it, or join(list)`),\"\"},value:(M)=>{let R=f(M);return R?{bind:R}:{[M]:F.props[M]}},shown:(M)=>f(M)??D(\"d\",`${I}.${M}`,null,F.props[M],L),bounds:(M,R)=>{if(!L.blank)z.push([F,M,R])},field:(M=(R)=>R)=>{let R;if(A){let N=A.stored.get(GK(_.bind));if(!N||N[1]===\"time\"!==(F.type===\"TimeField\")||F.type===\"DateField\"&&N[1]!==\"date\")b(`a ${F.type} in a row binds a field of the row of its own kind, such as $name. ${_.bind?O(_.bind):\"nothing\"} is not built yet`);R=N?.[0]}else{let N=_.bind?.k===\"path\"&&_.bind.abs&&_.bind.segs.length===1?_.bind.segs[0]:null;if(!Z.has(N)||$[N]===\"time\"!==(F.type===\"TimeField\"))b(`a binding to ${_.bind?O(_.bind):\"nothing\"} is not built yet: a field binds a value of a state line`);R=Z.get(N)}return{text:L.caption(F.props.label),bind:R,action:L.action((N)=>{let v=M(N);return v===void 0?!1:K.change(F,v)})}},action:(M=()=>{let N=K.fire(F);if(N===\"\"&&T.sheet&&F.type===\"Button\")K.state[T.sheet]=!1;return N},R=\"\")=>{let N=V(\"@\"+I+R,I+R);return w(A,N,M),N},form:()=>{let M=`${I}:open`;if(!Z.has(M))return null;let R=L.caption(F.children.find((v)=>v.type===\"Button\")?.props.label),N=(v)=>()=>{return K.state[M]=v,\"\"};return{type:\"column\",children:[{type:\"button\",text:R,action:L.action(N(!0),\"_open\"),variant:\"filled\",icon:\"Plus\"},{type:\"bottomSheet\",text:R,visibleBind:Z.get(M),dismissAction:L.action(N(!1),\"_dismiss\"),children:L.children(!1,{...T,sheet:M})}]}},modal:()=>{if(!_.visible||_.visible.k===\"lit\")b(\"a Dialog shows while a test of the app is true, so it needs visible=test, such as visible=$/open\");let M=ZQ(_.visible),R=(v)=>v.props.bind!==void 0||v.children.some(R),N=L.action(()=>{if(!M)return!1;return K.write(M[0],M[1],{}),K.recompute(),\"\"},\"_dismiss\");return{type:F.children.some(R)?\"bottomSheet\":\"dialog\",text:L.caption(F.props.title),dismissAction:N,children:L.children()}},list:()=>n(F,I,E,_,L)},y=h(F,L);if(!y)return null;G.set(y,E);for(let M of[\"visible\",\"enabled\"]){if(!_[M])continue;if(_[M].k!==\"lit\")y[M+\"Bind\"]=D(\"v\",`${I}.${M}`,_[M],F.props[M],L);else if(!F.props[M])y[M]=!1}if(F.props.weight!==void 0&&T.weighted)y.layout={weight:F.props.weight};return y},n=(F,I,E,T,A)=>{let h=F.source,b=h?.k===\"path\"&&h.abs&&h.segs.length===1&&H[h.segs[0]]?h.segs[0]:null;if(!b||!F.blank)return A.fault(\"a List shows the rows of a list of the app, such as $/rows, or sort or filter of it. Other rows are not built yet\"),null;let _=H[b],f=IK();f(\"$id\",\"id\"),_.forEach(([j,g])=>f(\"$\"+j,g));let L={key:I,name:f,stored:new Map(_.map(([j,g,u])=>[j,[g,u]])),computed:new Map,flags:{moves:!1},out:null,id:null},y={id:\"\",...Object.fromEntries(_.map(([j,,g])=>[j,g===\"number\"?0:g===\"boolean\"?!1:\"\"]))},M=(j)=>j.name??`${I}_row`,R=F.blank(y),N=m(R,M(R),E,{scope:L,weighted:!1}),v=T.group,x=L.stored.get(GK(v)),c=v?x&&x[1]!==\"time\"?x[0]:f(\"~group\",\"group\"):null;if(v&&!(x&&x[1]!==\"time\"))L.computed.set(c,\"string\");let e=(j)=>j?.k===\"path\"?j.abs&&j.segs.length===1&&j.segs[0]===b:j?.k===\"call\"&&j.name===\"filter\"&&e(j.args[0]),KK=L.flags.moves;if(KK&&(v||!e(T.items)))A.fault(\"the arrows of a row move it in the stored list, so the list shows its rows in their stored order: no sort and no group\");let l=KK?f(\"~label\",\"label\"):null;if(l)L.computed.set(l,\"string\");let fK=F.children.filter((j)=>j.row).map((j)=>{let g={};if(m(j,M(j),E,{scope:{...L,out:g,id:String(j.row.id??\"\")},weighted:!1}),L.computed.has(c))try{g[c]=UK(\"string\",K.value(v,{it:j.row}))}catch{g[c]=\"\"}if(l)g[l]=(_.filter(([,,u])=>u===\"string\").map(([u])=>XK(\"string\",j.row[u]).trim()).find(Boolean)??String(j.row.id)).slice(0,300);return{...EK(j.row,_,U),...g}}),WK=!(T.items?.k===\"path\"&&e(T.items))||L.computed.size>0,QK=WK?V(\"view:\"+I,I):Z.get(b);if(WK){let j={id:\"string\",...Object.fromEntries(_.map(([,u,i])=>[u,o(oK,i)??i])),...Object.fromEntries(L.computed)},g=Object.keys(j).length;if(g>NK)A.fault(`the rows of this list have ${g} fields with the id and the values that a row shows, and a row of Alphy has at most ${NK}. Show fewer values in a row`);J[QK]=fK,W[QK]={type:\"list\",maxItems:DK,fields:j},B.push(E)}let _K=KK&&A.action((j)=>{let g=K.read(h,{}),u=g.findIndex((VK)=>VK.id===j?.sourceKey),i=g.findIndex((VK)=>VK.id===j?.destinationKey);return u<0||i<0?!1:K.fire({props:{action:{k:\"call\",name:\"move\",args:[{k:\"lit\",v:i-u}],named:{}}},row:g[u],list:h})},\"_move\");return{type:c?\"groupedList\":\"list\",text:A.caption(),bind:QK,...c&&{groupBy:c},...F.props.empty&&{emptyText:A.plain(F.props.empty).slice(0,300)},..._K&&{reorder:{action:_K,labelField:l}},rowTemplate:N}},{kind:p,preset:t,palette:PK}=nK(K),BK=K.tree(),CK=m(BK,\"root\",\"root\",{scope:null,weighted:!0}),hK=[...p?[{type:\"text\",text:String(p),style:MK.eyebrow}]:[],...BK.type===\"Column\"?CK?.children??[]:[CK].filter(Boolean)];return{ui:{type:\"theme\",preset:t??\"clean\",...PK&&{palette:PK},cornerRadius:20,children:[{type:\"column\",style:{gap:\"medium\"},children:hK}]},values:S,views:J,viewSchemas:W,viewOwners:B,controls:q,bounds:z,faults:Y,owners:G}}function $Q(K,Q,V,Z){let $=K.kinds?.[Q];if($===\"list\")return Array.isArray(V)?V.map((H)=>EK(H,K.lists[Q],Z)):[];if($===\"array\")return Array.isArray(V)?V:[];return $===\"time\"||$===\"date\"?XK($,V,Z):V}function qQ(K,Q,V){let Z={},$=bK(K);for(let[H,U]of Q.fields){let[Y,q]=U.split(\".\"),X=$Q(Q,H,K.state[H],$);if(q)(Z[Y]??={})[q]=X;else Z[Y]=X}return{...Z,...V.views,...V.values}}function gK(K,Q,V=Date.now()){let{state:Z,event:$}=K;if($.type===\"preview\"||$.type===\"render\")return{state:Z};let H=a.now;a.now=()=>V;try{let U=new JK(new ZK().feedText(Q.lines)),Y=Q.kinds??{},q=U.nextId-1;for(let[B,P]of Q.fields){let[S,D]=P.split(\".\"),w=D?Z[S]?.[D]:Z[S];if(w===void 0)continue;if(Y[B]===\"list\")U.state[B]=(Array.isArray(w)?w:[]).map((m)=>{return q=Math.max(q,Number(/^r(\\d+)$/.exec(m.id)?.[1]??0)),{id:m.id,...Object.fromEntries(Q.lists[B].map(([n,p,t])=>[n,t===\"time\"?FK(m[p]):m[p]]))}});else U.state[B]=Y[B]===\"time\"?FK(w):Y[B]===\"array\"&&Array.isArray(w)?[...w]:w}U.nextId=q+1,U.recompute();let X=YK(U,Q),G=$.type===\"action\"?X.controls.get($.actionId):void 0;if($.type!==\"open\"&&!G)return{state:Z};if(G&&G($.value)===!1)return{state:Z};for(let[B,P]of Object.entries(Y))if(P===\"list\"&&U.state[B]?.length>DK||P===\"array\"&&U.state[B]?.length>rK)return{state:Z};let z=G?YK(U,Q):X,J=z.bounds.filter(([B,P,S])=>!(B.props.value>=P&&B.props.value<=S));if(J.length){for(let[B,P,S]of J)U.write(B.props.bind,Number.isFinite(B.props.value)?Math.min(S,Math.max(P,B.props.value)):P,{it:B.row});U.recompute(),z=YK(U,Q)}let W=qQ(U,Q,z);return JSON.stringify(z.ui)===JSON.stringify(X.ui)?{state:W}:{state:W,ui:z.ui}}finally{a.now=H}}__handle(gK);})();";
 globalThis.compileAppFile = compileAppFile;
 })();

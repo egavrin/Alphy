@@ -73,7 +73,7 @@ const PLAIN = {
   addDays: (date, n) => { const day = dayNumber(date); return day === null ? null : new Date((day + Math.round(Number(n) || 0)) * 864e5).toISOString().slice(0, 10); },
 };
 /** The day of a "YYYY-MM-DD" text as a count of days, or null when the text is not a real date. */
-function dayNumber(text) {
+export function dayNumber(text) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(text ?? "").trim());
   if (!match) return null;
   const time = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])), date = new Date(time);
@@ -425,6 +425,9 @@ export class App {
           heads = sorted.map((item, index) => (index === 0 || sorted[index - 1][1] !== item[1] ? [{ type: "Heading", props: { text: String(item[1] ?? "") }, children: [] }] : []));
         } catch (failure) { this.fault(name ?? tree.name, `group: ${failure.message}`); }
         node.children = rows.flatMap((row, index) => [...(heads[index] ?? []), visit(node.template, { it: row, index, list }, undefined, depth + 1)]);
+        // For the emitter: the stored list of the rows, and the row template drawn for a row that it gives, such as a blank row.
+        node.source = list;
+        node.blank = (row) => visit(node.template, { it: row, index: 0, list }, undefined, depth + 1);
       }
       return node;
     };
