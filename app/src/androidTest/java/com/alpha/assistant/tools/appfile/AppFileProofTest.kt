@@ -22,7 +22,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps and each node of the node table in Alphy's checks, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, and the timers. */
+/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps and each node of the node table in Alphy's checks, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, and the free forms. */
 @RunWith(AndroidJUnit4::class)
 class AppFileProofTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
@@ -343,5 +343,53 @@ class AppFileProofTest {
         assertEquals(100,checked.getJSONArray("items_list").length())
         val median=medianEventMs(sandbox,spec,"items",JSONObject(spec.initialState),"items_done",row("r50",true))
         assertTrue("median $median ms",median<250)
+    }
+    @Test fun sectionPassesParseAndSmoke(): Unit=runBlocking {
+        // section.plan is kit/plans/section.plan: an entries need, and the free lines of a hole: a Section, a List with a row of its own,
+        // and a Text that each row computes. The kit test of section.plan reads the same plan.
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val spec=parsedAndSmoked(sandbox,"section","uk")
+        val app=Session(sandbox,spec,"appfile-section")
+        fun streaks(state: JSONObject)=state.getJSONArray("streak_list").let {rows -> List(rows.length()) {rows.getJSONObject(it).getString("streak_text_text")}}
+        // Each kind of action of the plan through Alphy's checks: the field of a row, the add (a list of append and set), and the remove of a row.
+        val checked=app.act("habits_mon",row("r1",true))
+        assertTrue(checked.getJSONArray("habits").getJSONObject(0).getBoolean("mon"))
+        assertEquals(listOf("Серія: 1","Серія: 0","Серія: 0"),streaks(checked))
+        app.act("habits_new_name","Біг")
+        val added=app.act("habits_add")
+        assertEquals(listOf("r1","r2","r3","r4"),ids(added.getJSONArray("habits")))
+        assertEquals("Біг",added.getJSONArray("habits").getJSONObject(3).getString("name"))
+        assertEquals("",added.getJSONObject("habits_s").getString("new_name"))
+        assertEquals(listOf("Серія: 1","Серія: 0","Серія: 0","Серія: 0"),streaks(added))
+        val removed=app.act("habits_remove",row("r4",null))
+        assertEquals(listOf("r1","r2","r3"),ids(removed.getJSONArray("habits")))
+        assertEquals(listOf("r1","r2","r3"),ids(removed.getJSONArray("streak_list")))
+        val median=medianEventMs(sandbox,spec,"section",JSONObject(spec.initialState),"habits_mon",row("r1",true))
+        assertTrue("median $median ms",median<250)
+    }
+    @Test fun eachFreeFormPassesParseAndSmoke(): Unit=runBlocking {
+        // free.plan is kit/test/free.plan: an inline Row as a List template, a row Button with enabled=, flip, move with a test,
+        // and the lines bar_0 and bar_1 beside the inline children of bar. The kit tests of the free fixture read the same plan.
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val spec=parsedAndSmoked(sandbox,"free")
+        // A control by its text: an inline control has a name from its parent and its place.
+        fun node(text: String)=nodes(spec.ui).single {it.optString("text") == text}
+        val app=Session(sandbox,spec,"appfile-free")
+        val marked=app.act(node("Mark").getString("action"),row("r1",null))
+        assertTrue(marked.getJSONArray("rows").getJSONObject(0).getBoolean("done"))
+        val undone=app.act(node("Undo").getString("action"),row("r2",null))
+        assertFalse(undone.getJSONArray("rows").getJSONObject(1).getBoolean("done"))
+        // Mark is on in each row that is not done: the test of each row follows its row.
+        val items=undone.getJSONArray("items")
+        assertEquals(listOf(false,true,true),List(items.length()) {items.getJSONObject(it).getBoolean(node("Mark").getString("enabledBind"))})
+        assertEquals(listOf("r3","r1","r2"),ids(app.act(node("Hike first").getString("action")).getJSONArray("rows")))
+        assertEquals("[\"home\",\"work\"]",app.act(node("Work").getString("action")).getJSONArray("tags").toString())
+        assertEquals("[\"home\"]",app.act(node("Work").getString("action")).getJSONArray("tags").toString())
+        // The inline text of bar and the line bar_1 show values of their own.
+        val more=app.act(node("One more").getString("action"))
+        assertEquals(1,more.getInt("count"))
+        val shown=more.getJSONObject("d")
+        assertEquals(setOf("home","Count 1","Twice 2"),shown.keys().asSequence().map {shown.getString(it)}.toSet())
+        assertEquals(0,app.act(node("Zero").getString("action")).getInt("count"))
     }
 }

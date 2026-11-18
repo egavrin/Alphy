@@ -3,7 +3,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";
-import { App } from "../src/core.js";
+import { ACTIONS, App } from "../src/core.js";
 import { parseLine } from "../src/dsl.js";
 import { emit, runtime } from "../src/emit.js";
 import { handle, kitOf } from "../src/run.js";
@@ -15,6 +15,8 @@ const request = (state, event) => ({ artifactId: "kit-test", revision: 1, state,
 const nodes = (node) => [node, ...(node.children ?? []).flatMap(nodes)];
 /** The values of the objects d, d2, v, and so on: the values that the run-time computes. */
 const derived = (state) => Object.entries(state).filter(([key]) => /^[dv]\d*$/.test(key)).flatMap(([, values]) => Object.values(values));
+/** The stored values of a state of the run-time by the kit's name of each value (app.fields). */
+const storedOf = (app, state) => Object.fromEntries(app.fields.map(([root, path]) => [root, path.split(".").reduce((value, key) => value?.[key], state)]));
 
 test("run: an action sets the bound value and the figures follow", async () => {
   const { file, definition, app } = await compiled(plan("calc"));
@@ -38,7 +40,7 @@ test("run: open of the initial state gives the initial state", async () => {
     expect(reply).toEqual({ state: definition.initialState, ...(definition.surfaces && { surfaces: reply.surfaces, timers: [] }) });
     opened.push(path);
   }
-  expect(opened).toHaveLength(16);
+  expect(opened).toHaveLength(17);
   expect(opened).toEqual(expect.arrayContaining(["plans/tea.plan", "plans/timer-rounds.plan"]));
 });
 
@@ -130,7 +132,7 @@ const twins = async (text) => {
     const index = key === undefined ? undefined : shownIds(prototype, list).indexOf(key);
     if (value === null) prototype.press(name, index); else prototype.input(name, value, index);
   };
-  return { run, prototype, act };
+  return { run, prototype, act, app };
 };
 
 test("run: add, check, and delete a row", async () => {
@@ -195,6 +197,53 @@ test("run: a list at its limits", async () => {
   single.act("items_new_name", "Next");
   single.act("items_add");
   expect(single.state.items).toEqual([{ id: "r2", name: "Next" }]);
+});
+
+/** A button for each action kind of the kit, and a List whose row removes itself and moves up. */
+const KINDS = ['app("Kinds", lang="en")', "$/n = 5", "$/on = false", '$/word = "a"', '$/tags = ["home"]',
+  '$/rows = [{name: "Walk", done: false}, {name: "Read", done: true}, {name: "Hike", done: false}]',
+  "root = Column([setB, toggleB, incB, decB, appendB, removeB, clearB, whenB, moveB, flipB, bothB, items])",
+  'setB = Button("Set", action=set($/word, "b"))', 'toggleB = Button("Toggle", action=toggle($/on))', 'incB = Button("Inc", action=inc($/n, 2))',
+  'decB = Button("Dec", action=dec($/n))', 'appendB = Button("Append", action=append($/rows, {name: "Swim", done: false}))',
+  'removeB = Button("Remove", action=remove($/rows, $done))', 'clearB = Button("Clear", action=clear($/tags))', 'whenB = Button("When", action=when($/on, inc($/n, 10)))',
+  'moveB = Button("Move", action=move($/rows, $name == "Hike", -2))', 'flipB = Button("Flip", action=flip($/tags, "work"))',
+  'bothB = Button("Both", action=[set($/word, "c"), toggle($/on)])',
+  "items = List($/rows, item)", "item = Row([label, trash, up])", "label = Text($name)", 'trash = IconButton("Trash", action=remove())', 'up = IconButton("ArrowUp", action=move(-1))'].join("\n");
+
+test("run: each action kind of the kit changes the state as the prototype's App does", async () => {
+  /** Each case: its events, and the stored values that differ from the start after them. */
+  const CASES = {
+    set: [(t) => t.act("setB"), ["word"]],
+    toggle: [(t) => t.act("toggleB"), ["on"]],
+    inc: [(t) => t.act("incB"), ["n"]],
+    dec: [(t) => t.act("decB"), ["n"]],
+    append: [(t) => t.act("appendB"), ["rows"]],
+    // The rows that pass a test, then the row of a row control.
+    remove: [(t) => { t.act("removeB"); t.act("trash", null, "items", "r3"); }, ["rows"]],
+    clear: [(t) => t.act("clearB"), ["tags"]],
+    // A false test changes nothing, and a true test runs the action.
+    when: [(t) => { t.act("whenB"); t.act("toggleB"); t.act("whenB"); }, ["n", "on"]],
+    // The first row that passes the test, then the arrow of a row as Alphy's reorder of the list: r1 goes to the place of r2.
+    move: [(t) => { t.act("moveB"); t.reorder("r1", "r2", "up", "r2"); }, ["rows"]],
+    // The value joins the list, leaves it, and joins it again.
+    flip: [(t) => { t.act("flipB"); t.act("flipB"); t.act("flipB"); }, ["tags"]],
+    list: [(t) => t.act("bothB"), ["on", "word"]],
+  };
+  // animate has no case: the run-time keeps no timed change yet, so the emitter refuses it (Task 8 builds it).
+  expect(Object.keys(CASES).sort()).toEqual([...[...ACTIONS].filter((kind) => kind !== "animate"), "list"].sort());
+  for (const [kind, [events, changed]] of Object.entries(CASES)) {
+    const twin = await twins(KINDS), { run, prototype, app } = twin, start = storedOf(app, run.state);
+    // The stored values of the run-time and of the kit after each event.
+    const same = () => expect([kind, storedOf(app, run.state)]).toEqual([kind, Object.fromEntries(app.fields.map(([root]) => [root, prototype.state[root]]))]);
+    const t = {
+      act: (...args) => { twin.act(...args); same(); },
+      // Alphy's reorder moves the row of sourceKey to the place of destinationKey. The kit presses the arrow of a row.
+      reorder: (sourceKey, destinationKey, arrow, row) => { run.act("items_move", { sourceKey, destinationKey }); prototype.press(arrow, shownIds(prototype, "items").indexOf(row)); same(); },
+    };
+    events(t);
+    const end = storedOf(app, run.state);
+    expect([kind, Object.keys(end).filter((root) => JSON.stringify(end[root]) !== JSON.stringify(start[root])).sort()]).toEqual([kind, changed]);
+  }
 });
 
 test("run: a reorder event moves the row", async () => {

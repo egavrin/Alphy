@@ -4,7 +4,7 @@
 
 import { AppFile, parseExpression, show } from "./dsl.js";
 import { App, foreground, given, settings } from "./core.js";
-import { MAX_ROWS, cast, castRow, clockOf, namer, own, relative, rows, shownAs } from "./rows.js";
+import { MAX_ROWS, cast, castRow, clockOf, namer, own, relative, rows, shownAs, wished } from "./rows.js";
 import { barOf, commandsOf } from "./draw.js";
 
 /** An object of Alphy holds at most 32 fields, so the shown values go into d, d2, d3, and the tests into v, v2. */
@@ -196,7 +196,7 @@ export function screen(kit, app, first = false) {
     const at = {
       scope, fault,
       blank: Boolean(scope && !scope.out),
-      children: (weighted = false, inner = within) => node.children.map((child, index) => walk(child, child.name ?? `${key}_${index}`, line, { ...inner, weighted })).filter(Boolean),
+      children: (weighted = false, inner = within) => node.children.map((child, index) => walk(child, child.name ?? `${key}:${index}`, line, { ...inner, weighted })).filter(Boolean),
       // The text of a control: its label, else the kit's name of its line, which a person can read. Never a safe name such as f3.
       caption: (label) => at.plain(label) || (node.name ? node.name : `${line} ${node.props.icon ?? node.type}`).replace(/_/g, " "),
       // The text of a progress, a ring, a chart, and tabs: its label=, else the title of the Section around it, else the caption. Alphy shows at most 300 characters.
@@ -230,7 +230,7 @@ export function screen(kit, app, first = false) {
       },
       // An action returns "" or the kit's error text, or false for an event that changes nothing. A press of the add button of an add sheet that the kit takes closes the sheet.
       action: (run = () => { const done = kit.fire(node); if (done === "" && ctx.sheet?.add === node) kit.state[ctx.sheet.flag] = false; return done; }, suffix = "") => {
-        const id = name("@" + key + suffix, key + suffix);
+        const id = name("@" + key + suffix, wished(key + suffix));
         register(scope, id, run);
         return id;
       },
@@ -264,7 +264,7 @@ export function screen(kit, app, first = false) {
         const kind = node.props.kind ?? "bar", text = at.label().slice(0, 100), points = (Array.isArray(node.props.points) ? node.props.points : []).slice(-MAX_POINTS);
         if (kind !== "bar" && kind !== "line") fault(`a Chart of kind ${at.plain(kind)} is not built yet: give kind="bar" or kind="line"`);
         const [categories, values] = [["labels", "string", "label"], ["values", "number", "value"]].map(([suffix, type, prop]) => {
-          const field = name(`chart:${key}:${suffix}`, `${key}_${suffix}`);
+          const field = name(`chart:${key}:${suffix}`, wished(`${key}_${suffix}`));
           views[field] = points.map((point) => shownAs(type, point[prop]));
           viewSchemas[field] = { type: "array", maxItems: MAX_POINTS, items: type };
           viewOwners.push(line);
@@ -289,7 +289,7 @@ export function screen(kit, app, first = false) {
         return { type: "column", children: [
           { type: "tabs", text: at.label(), bind: fields.get(root), action: at.action(select), options: shown.map((title) => ({ text: title, value: title })) },
           ...groups.map((group, index) => ({ type: "column", visibleBind: slot("v", `${key}.tab${index}`, null, shown[index] === open, at),
-            children: group.children.map((child, inner) => walk(child, child.name ?? `${key}_tab${index}_${inner}`, line, { ...ctx, weighted: true })).filter(Boolean) })),
+            children: group.children.map((child, inner) => walk(child, child.name ?? `${key}:tab${index}:${inner}`, line, { ...ctx, weighted: true })).filter(Boolean) })),
         ] };
       },
     };

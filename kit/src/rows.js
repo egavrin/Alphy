@@ -35,6 +35,12 @@ export function namer(differ = {}, taken = new Set(Object.values(differ))) {
   };
 }
 
+/**
+ * The name that a key of the screen wishes. The key of an inline child joins the key of its parent and its place with ":", which
+ * no line name holds, so it never is the key of a line, such as bar_0. Its wish joins them with "_".
+ */
+export const wished = (key) => key.replaceAll(":", "_");
+
 const pad = (number) => String(number).padStart(2, "0");
 /** A time of the kit, "HH:MM", as Alphy's minutes from 0 to 1439. A text that is not a time is 0. */
 const minutesOf = (text) => {
@@ -76,7 +82,7 @@ export function rows(screen, node, key, line, expr, at, title) {
   spec.forEach(([field, safe]) => rowName("$" + field, safe));
   const scope = { key, name: rowName, stored: new Map(spec.map(([field, safe, kind]) => [field, [safe, kind]])), computed: new Map(), flags: { moves: false }, out: null, id: null };
   const blank = { id: "", ...Object.fromEntries(spec.map(([field, , kind]) => [field, kind === "number" ? 0 : kind === "boolean" ? false : ""])) };
-  const keyOf = (template) => template.name ?? `${key}_row`, template = node.blank(blank);
+  const keyOf = (template) => template.name ?? `${key}:row`, template = node.blank(blank);
   const rowTemplate = walk(template, keyOf(template), line, { scope, weighted: false });
   const group = expr.group, plain = scope.stored.get(relative(group));
   const groupBy = group ? (plain && plain[1] !== "time" ? plain[0] : rowName("~group", "group")) : null;
@@ -95,7 +101,7 @@ export function rows(screen, node, key, line, expr, at, title) {
     if (label) out[label] = (spec.filter(([, , kind]) => kind === "string").map(([field]) => cast("string", child.row[field]).trim()).find(Boolean) ?? String(child.row.id)).slice(0, 300);
     return { ...castRow(child.row, spec, day), ...out };
   });
-  const view = !(expr.items?.k === "path" && inOrder(expr.items)) || scope.computed.size > 0, field = view ? name("view:" + key, key) : fields.get(root);
+  const view = !(expr.items?.k === "path" && inOrder(expr.items)) || scope.computed.size > 0, field = view ? name("view:" + key, wished(key)) : fields.get(root);
   if (view) {
     const schema = { id: "string", ...Object.fromEntries(spec.map(([, safe, kind]) => [safe, own(ALPHY, kind) ?? kind])), ...Object.fromEntries(scope.computed) };
     const count = Object.keys(schema).length;

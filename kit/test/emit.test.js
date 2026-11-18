@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { settings } from "../src/core.js";
 import { emit } from "../src/emit.js";
-import { handle } from "../src/run.js";
+import { handle, kitOf, screen } from "../src/run.js";
 import { allPlans, plan, planned } from "./helpers.js";
 
 /** Alphy's rule for a state field and an action id (ToolValueSchema.name, ToolUiCatalog). */
@@ -19,6 +19,28 @@ const texts = (node) => [node.text, ...(node.series ?? []).map((series) => serie
 const captions = (ui) => every(ui).filter((node) => ["progress", "progressRing", "chart", "tabs"].includes(node.type)).map((node) => [node.type, ...texts(node)]);
 const testPlan = (name) => readFileSync(new URL(`./${name}.plan`, import.meta.url), "utf8");
 const open = (state, app, now) => handle({ artifactId: "kit-test", revision: 1, state, event: { type: "open" } }, app, now);
+const press = (state, app, actionId, value = null) => handle({ artifactId: "kit-test", revision: 1, state, event: { type: "action", actionId, value } }, app);
+/** Each id of a ui in its order: the action of each control, each dismiss and reorder action, and each surface. */
+const ids = (ui) => every(ui).flatMap((node) => [node.action, node.dismissAction, node.reorder?.action, ...(node.surfaces ?? [])]).filter(Boolean);
+/**
+ * The names of a definition as ToolSpec.parse wants them, in the kit: each id once and safe, a start value for each field of the
+ * state, and each binding to a field of the state (or of an object of it), or to a field of the row in a row template.
+ */
+const valid = (definition) => {
+  const all = ids(definition.ui), schema = definition.stateSchema;
+  for (const id of all) expect([id, SAFE.test(id) && !REFUSED.has(id)]).toEqual([id, true]);
+  expect(all.filter((id, index) => all.indexOf(id) !== index)).toEqual([]);
+  expect(Object.keys(definition.initialState).sort()).toEqual(Object.keys(schema).sort());
+  const bound = (node, fields) => {
+    for (const bind of [node.bind, node.visibleBind, node.enabledBind, node.categories, ...(node.series ?? []).map((series) => series.bind)].filter(Boolean)) {
+      const [field, inner] = bind.split(".");
+      expect([bind, Boolean(inner ? fields[field]?.fields?.[inner] : fields[field])]).toEqual([bind, true]);
+    }
+    for (const child of node.children ?? []) bound(child, fields);
+    if (node.rowTemplate) bound(node.rowTemplate, schema[node.bind].fields);
+  };
+  bound(definition.ui, schema);
+};
 
 test("emit: calc.plan gives a definition with the fields of ToolSpec", async () => {
   const { definition, language, faults } = emit(await planned(plan("calc")));
@@ -616,7 +638,7 @@ test("emit: the texts that are the name of a line, in each saved plan and fixtur
   const PINNED = {
     "plans/calc.plan": [], "plans/list.plan": ["prodotti remove", "prodotti preso"], "plans/quiz.plan": [], "plans/section.plan": ["habits remove"],
     "plans/tabs-chart.plan": ["gastos remove"], "plans/tea.plan": [], "plans/timer-rounds.plan": [],
-    "test/cards.plan": ["tasks remove"], "test/fixtures/habits.plan": ["habits remove", "habits done"], "test/fixtures/price-filter.plan": [],
+    "test/cards.plan": ["tasks remove"], "test/free.plan": [], "test/fixtures/habits.plan": ["habits remove", "habits done"], "test/fixtures/price-filter.plan": [],
     "test/fixtures/shopping.plan": ["items remove", "items done"], "test/fixtures/units-pl.plan": [], "test/fixtures/water-ko.plan": ["ml minus", "ml plus"],
     "test/lists.plan": ["acts remove", "acts close", "doses taken minus", "doses taken plus", "doses remove", "steps remove"],
     "test/nodes.plan": ["up", "down", "left", "right", "edit"],
@@ -641,4 +663,96 @@ test("emit: a name that the screen wishes and a state field has already gets a n
   expect(definition.stateSchema.big_labels).toEqual({ type: "array", maxItems: 512, items: "string" });
   const { state } = handle({ artifactId: "kit-test", revision: 1, state: definition.initialState, event: { type: "action", actionId: "add", value: null } }, app);
   expect([state.big_labels, state[chart.categories], state.d.shown_text]).toEqual([["x"], ["1", "2", "3"], "x"]);
+});
+
+test("emit: section.plan gives a valid definition", async () => {
+  // The device test sectionPassesParseAndSmoke sends the same plan through Alphy's validators.
+  const { definition, language, faults, app } = emit(await planned(plan("section")));
+  expect(faults).toEqual([]);
+  expect(language).toBe("uk");
+  valid(definition);
+  // The free lines of the hole: a Section with a List of the habits, whose row of its own shows the name and a text that each row computes.
+  expect(definition.ui.children[0].children[1]).toEqual({ type: "section", text: "Серія днів поспіль", children: [
+    { type: "list", text: "Серія днів поспіль", bind: "streak_list", emptyText: "Ще немає звичок", rowTemplate: { type: "row", wrap: false, children: [
+      { type: "text", text: "", bind: "name", layout: { weight: 1 } }, { type: "text", text: "", bind: "streak_text_text" }] } }] });
+  expect(definition.initialState.streak_list.map((row) => [row.id, row.streak_text_text])).toEqual([["r1", "Серія: 0"], ["r2", "Серія: 0"], ["r3", "Серія: 0"]]);
+  expect(ids(definition.ui)).toEqual(["habits_remove", ...["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((day) => `habits_${day}`), "habits_new_name", "habits_add"]);
+  // The check of Monday makes a streak of 1.
+  const { state } = press(definition.initialState, app, "habits_mon", { key: "r1", value: true });
+  expect(state.streak_list.map((row) => row.streak_text_text)).toEqual(["Серія: 1", "Серія: 0", "Серія: 0"]);
+});
+
+test("emit: an inline child gets a stable name", async () => {
+  // An inline child has the name of its parent and its place: the button of bar is bar_0. The line bar_0 and the line bar_1 keep names of their own.
+  const { definition, faults, app } = emit(await planned(testPlan("free")));
+  expect(faults).toEqual([]);
+  valid(definition);
+  const [, , bar, zero, twice] = definition.ui.children[0].children;
+  expect([bar.children[0].action, bar.children[1].bind]).toEqual(["bar_0", "d.bar_1_text"]);
+  expect([zero.action, twice.bind]).toEqual(["f0", "d.f1"]);
+  // The controls of the inline row template of a List in an inline Section.
+  expect(ids(definition.ui).slice(0, 3)).toEqual(["items_row_0", "items_row_2", "items_row_3"]);
+  const more = press(definition.initialState, app, "bar_0").state;
+  expect([more.count, more.d.bar_1_text, more.d.f1]).toEqual([1, "Count 1", "Twice 2"]);
+  expect(press(more, app, "f0").state.count).toBe(0);
+  // The walk of each event gives each node the name that the emitter gave it.
+  expect(screen(kitOf(app, more), app).ui).toEqual(definition.ui);
+});
+
+test("emit: enabled=test is an enabledBind", async () => {
+  const { definition, faults, app } = emit(await planned(['app("On", lang="en")', "$/n = 0", "$/on = false", "root = Column([reset, flag, off])",
+    'reset = Button("Reset", action=set($/n, 0), enabled=$/n > 0)', 'flag = Button("Flag", action=toggle($/on), enabled=$/on)', 'off = Button("Off", action=inc($/n), enabled=false)'].join("\n")));
+  expect(faults).toEqual([]);
+  // A computed test is a field of v, a test that reads one boolean value binds that value, and false is enabled: false.
+  expect(definition.ui.children[0].children.map((node) => [node.action, node.enabledBind, node.enabled])).toEqual([["reset", "v.reset_enabled", undefined], ["flag", "on", undefined], ["off", undefined, false]]);
+  expect(definition.initialState.v).toEqual({ reset_enabled: false });
+  // In a row of free.plan, $done binds the field of the row, and !$done is a field of the view that the run-time computes for each row.
+  const free = emit(await planned(testPlan("free"))), template = every(free.definition.ui).find((node) => node.rowTemplate).rowTemplate;
+  expect(template.children.slice(2).map((node) => [node.text, node.enabledBind])).toEqual([["Mark", "items_row_2_enabled"], ["Undo", "done"]]);
+  const enabled = (state) => state.items.map((row) => [row.done, row.items_row_2_enabled]);
+  expect(enabled(free.definition.initialState)).toEqual([[false, true], [true, false], [false, true]]);
+  // After the press of Mark in row r1, the test of that row follows.
+  expect(enabled(press(free.definition.initialState, free.app, "items_row_2", { key: "r1", value: null }).state)).toEqual([[true, false], [true, false], [false, true]]);
+  expect(press(definition.initialState, app, "flag").state).toEqual(definition.initialState);
+});
+
+test("emit: a line that the screen shows two times is a fault of the line that shows it the second time", async () => {
+  // Each control in the line would have its action id two times, and ToolSpec.parse takes each action id once.
+  const counters = ['app("Held", lang="en")', 'need a = counter("A")', 'need b = counter("B")'];
+  const tabs = emit(await planned([...counters, 'need pages = tabs(["One", "Two"], [[a], [b]])', "root = Column([a_view])"].join("\n")));
+  expect(tabs.definition).toBeNull();
+  expect(tabs.faults).toEqual([expect.stringMatching(/^need pages: it shows a_view a second time, after root, /)]);
+  const steps = emit(await planned([...counters, 'need wiz = steps(["First", "Second"], [[a], [b]], finish="Done")', "root = Column([b_view])"].join("\n")));
+  expect(steps.faults).toEqual([expect.stringMatching(/^need wiz: it shows b_view a second time, after root, /)]);
+  // A row of the author's that shows a check of the habits need: the need holds the first place. The third place of more gives no second fault of the same text.
+  const habits = emit(await planned(`${plan("section")}\nmore = List($/habits, Row([habits_mon]))\nroot = Column([habits_view, streakrow_view, more, more, more])`));
+  expect(habits.faults).toEqual([expect.stringMatching(/^more: it shows habits_mon a second time, after need habits, /), expect.stringMatching(/^root: it shows more a second time, after root, /)]);
+  const lists = async (template) => emit(await planned(['app("Rows", lang="en")', '$/rows = [{name: "a", done: false}]', "root = Column([one, two])",
+    "one = List($/rows, row)", "two = List($/rows, row)", `row = Row(${template})`, "label = Text($name)", 'mark = CheckBox("Done", $done)'].join("\n")));
+  expect((await lists("[label, mark]")).faults).toEqual([expect.stringMatching(/^two: it shows row a second time, after one, /)]);
+  // A line with no control has no id, so it may show two times: section.plan shows habits_name in two lists.
+  expect((await lists("[label]")).faults).toEqual([]);
+});
+
+test("emit: an animate action is a fault of its line", async () => {
+  // The run-time keeps no timed change yet, so the value would never move (Task 8 builds it).
+  const { definition, faults } = emit(await planned(['app("Spin", lang="en")', 'need angle = input("number", "Angle", 40, min=0, max=360)',
+    'need lap = button("One turn", [set($/angle, 0), animate($/angle, 360, 5000)])'].join("\n")));
+  expect(definition).toBeNull();
+  expect(faults).toEqual(["need lap: animate is not built yet"]);
+});
+
+test("emit: each free form of the free fixture becomes its Alphy node", async () => {
+  // The device test eachFreeFormPassesParseAndSmoke sends the same plan through Alphy's validators.
+  const { definition, faults } = emit(await planned(testPlan("free")));
+  expect(faults).toEqual([]);
+  const [plan, tools] = definition.ui.children[0].children;
+  // An inline Row as the template of a List, with a field and buttons of its own. A test of the row makes the list a view.
+  expect(plan).toEqual({ type: "section", text: "Plan", children: [{ type: "list", text: "Plan", bind: "items", rowTemplate: { type: "row", wrap: false, children: [
+    { type: "checkbox", text: "Done", bind: "done", action: "items_row_0" }, { type: "text", text: "", bind: "name", layout: { weight: 1 } },
+    { type: "button", text: "Mark", action: "items_row_2", variant: "filled", enabledBind: "items_row_2_enabled" },
+    { type: "button", text: "Undo", action: "items_row_3", variant: "filled", enabledBind: "done" }] } }] });
+  // move with a test and flip are buttons of an inline Row.
+  expect(tools).toEqual({ type: "flowRow", children: [{ type: "button", text: "Hike first", action: "tools_0", variant: "filled" },
+    { type: "button", text: "Work", action: "tools_1", variant: "filled" }, { type: "text", text: "", bind: "d.tools_2_text" }] });
 });

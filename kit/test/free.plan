@@ -1,0 +1,10 @@
+app("Free", lang="en", preset="clean", palette="green")
+$/rows = [{name: "Walk", done: false}, {name: "Read", done: true}, {name: "Hike", done: false}]
+$/tags = ["home"]
+$/count = 0
+root = Column([Section("Plan", [items]), tools, bar, bar_0, bar_1])
+items = List($/rows, Row([CheckBox("Done", $done), Text($name, weight=1), Button("Mark", action=set($done, true), enabled=!$done), Button("Undo", action=set($done, false), enabled=$done)]))
+tools = Row([Button("Hike first", action=move($/rows, $name == "Hike", -2)), Button("Work", action=flip($/tags, "work")), Text(join($/tags))])
+bar = Row([Button("One more", action=inc($/count)), Text("Count " + $/count)])
+bar_0 = Button("Zero", action=set($/count, 0))
+bar_1 = Text("Twice " + $/count * 2)

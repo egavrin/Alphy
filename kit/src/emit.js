@@ -56,6 +56,9 @@ export function emit(file) {
     Object.values(tree).forEach(scan);
   };
   file.of("component").forEach((entry) => scan(entry.tree));
+  // shortcut: animate is a fault, because the run-time keeps no timed change and the value would never move; build it with the drawings, whose surface gets the timer events.
+  const animates = (tree) => tree !== null && typeof tree === "object" && ((tree.k === "call" && tree.name === "animate") || Object.values(tree).some(animates));
+  for (const entry of file.of("component")) if (animates(entry.tree)) faults.push(`${label(entry.key)}: animate is not built yet`);
   for (const [root, component] of bound) if (component !== "Choices") app.kinds[root] = component === "TimeField" ? "time" : "date";
   // The kind of each field of the rows of an entries need, from its fields= line.
   const declared = new Map(file.of("need").filter((entry) => entry.tree.name === "entries")
@@ -141,15 +144,29 @@ export function emit(file) {
   if (over) faults.push(`${over}: the app needs more than ${MAX_FIELDS} state fields from here on, and Alphy keeps at most ${MAX_FIELDS}. Use fewer needs`);
   // The theme and the column of the app are depths 0 and 1. A node that the kit adds (the text of a banner) belongs to its line.
   // The template of a row is one level below its list, and it counts once.
+  // A line that the screen shows a second time gives each control in it its action id a second time, and ToolSpec.parse takes each
+  // action id once. firstBy keeps the line that shows each line with an id first. The children of the root are the children of the app's column.
+  const ids = (node) => [node.action, node.dismissAction, node.reorder?.action, ...(node.surfaces ?? []), ...(node.children ?? []).flatMap(ids), ...(node.rowTemplate ? ids(node.rowTemplate) : [])].filter(Boolean);
+  const firstBy = new Map();
   let nodes = 0;
-  const measure = (node, depth, owner) => {
+  const measure = (node, depth, owner, again = false) => {
     nodes++;
+    const holder = owner === "app" ? "root" : owner;
     owner = shown.owners.get(node) ?? owner;
+    if (!again && owner !== holder && owner !== "app" && ids(node).length) {
+      if (!firstBy.has(owner)) firstBy.set(owner, holder);
+      else {
+        // The fault names the shown line itself: the need of a part line can hold both places.
+        const twice = `${label(holder)}: it shows ${owner} a second time, after ${label(firstBy.get(owner))}, and each control in it would have its action id two times. Show it in one place`;
+        again = true;
+        if (!faults.includes(twice)) faults.push(twice);
+      }
+    }
     const where = label(owner), children = node.children ?? [];
     const deep = `${where}: this component is at depth ${depth} of the screen, and Alphy keeps at most depth ${MAX_DEPTH}. The frame of the app takes depths 0 and 1. Put it in fewer containers`;
     if (depth > MAX_DEPTH) { if (!faults.includes(deep)) faults.push(deep); return; }
     if (children.length > MAX_CHILDREN) faults.push(`${where}: this container has ${children.length} children, and Alphy keeps at most ${MAX_CHILDREN}. Put them in groups`);
-    for (const child of [...children, ...(node.rowTemplate ? [node.rowTemplate] : [])]) measure(child, depth + 1, owner);
+    for (const child of [...children, ...(node.rowTemplate ? [node.rowTemplate] : [])]) measure(child, depth + 1, owner, again);
   };
   measure(shown.ui, 0, "app");
   if (nodes > MAX_NODES) faults.push(`app: the screen has ${nodes} nodes, and Alphy keeps at most ${MAX_NODES}. Show fewer components`);
