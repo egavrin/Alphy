@@ -66,7 +66,7 @@ class VoiceModeSessionTest {
         fun started(firstSpeech: Boolean = false): Rig {
             start(firstSpeech)
             waitUntil("connect") { socket.connected }
-            socket.emit(STARTED)
+            socket.emit(LIVE_STARTED)
             waitUntil("session.started") { session.phase == LivePhase.LISTENING }
             return this
         }
@@ -117,7 +117,7 @@ class VoiceModeSessionTest {
         main { }
         assertEquals(LivePhase.CONNECTING, main { rig.session.phase })
         assertEquals("", main { rig.session.status })
-        rig.socket.emit(STARTED)
+        rig.socket.emit(LIVE_STARTED)
         waitUntil("listening") { rig.session.phase == LivePhase.LISTENING }
         rig.audio.capture(quiet())
         waitUntil("append") { rig.appends() == 1 }
@@ -326,12 +326,12 @@ class VoiceModeSessionTest {
 
     @Test fun delegationWaitsForTheRequestText() {
         val rig = Rig().started()
-        rig.socket.emit(delegation("d1", 3_000))
+        rig.socket.emit(liveDelegation("d1", 3_000))
         rig.socket.emit(inputDelta("Поставь таймер", 1_000, 2_500))
         waitUntil("delegation") { rig.host.calls.size == 2 }
         assertEquals(listOf("turn:Поставь таймер:1000:2500:false", "delegation:d1:Поставь таймер"), rig.host.calls)
         // Without text in the wait, the host gets a blank request and answers it.
-        rig.socket.emit(delegation("d2", 5_000))
+        rig.socket.emit(liveDelegation("d2", 5_000))
         waitUntil("blank delegation") { rig.host.calls.size == 3 }
         assertEquals("delegation:d2:", rig.host.calls.last())
     }
@@ -352,7 +352,7 @@ class VoiceModeSessionTest {
         rig.socket.emit(outputDelta("Хорошо.", 2_700, 2_900))
         // Shorter than the 400 ms sleep plus the 300 ms turn gap since the playback stopped.
         rig.socket.emit(inputDelta("Поставь таймер", 3_000, 3_400))
-        rig.socket.emit(delegation("d1", 4_000))
+        rig.socket.emit(liveDelegation("d1", 4_000))
         waitUntil("delegation") { rig.host.calls.size == 4 }
         assertEquals(listOf("turn:Привет:0:800:true", "turn:Как дела:2000:2600:false", "turn:Поставь таймер:3000:3400:false",
             "delegation:d1:Поставь таймер"), rig.host.calls)
@@ -406,7 +406,7 @@ class VoiceModeSessionTest {
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     val type = JSONObject(text).getString("type")
                     received += type
-                    if (type == "session.start") webSocket.send(STARTED)
+                    if (type == "session.start") webSocket.send(LIVE_STARTED)
                 }
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(1000, null) }
             }).build())
@@ -446,7 +446,6 @@ class VoiceModeSessionTest {
     }
 
     private companion object {
-        const val STARTED = """{"type":"session.started","session":{"id":"live_1"}}"""
         val OPENAI = AiAccount(AiProvider.OPENAI, "alpha-test-only")
         val LOOPBACK = Endpoints { "http://127.0.0.1:4000" }
         val TIMING = LiveTiming(startedMs = 5_000, silenceMs = 30_000, firstSpeechMs = 30_000, requestWaitMs = 400, turnGapMs = 30_000,
@@ -457,12 +456,6 @@ class VoiceModeSessionTest {
             val bytes = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).apply { repeat(4) { putShort(value) } }.array()
             return JSONObject().put("type", "session.output_audio.delta").put("delta", Base64.encodeToString(bytes, Base64.NO_WRAP)).toString()
         }
-        fun inputDelta(delta: String, startMs: Long, endMs: Long) = transcript("session.input_transcript.delta", delta, startMs, endMs)
-        fun outputDelta(delta: String, startMs: Long, endMs: Long) = transcript("session.output_transcript.delta", delta, startMs, endMs)
-        fun transcript(type: String, delta: String, startMs: Long, endMs: Long) =
-            JSONObject().put("type", type).put("delta", delta).put("start_ms", startMs).put("end_ms", endMs).toString()
-        fun delegation(id: String, offsetMs: Long) =
-            JSONObject().put("type", "session.delegation.created").put("offset_ms", offsetMs).put("delegation", JSONObject().put("id", id)).toString()
         fun closed(reason: String) = JSONObject().put("type", "session.closed").put("reason", reason).toString()
         fun failure(eventId: String) = JSONObject().put("type", "error")
             .put("error", JSONObject().put("message", "Rejected append").put("event_id", eventId)).toString()

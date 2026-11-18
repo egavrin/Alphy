@@ -70,6 +70,13 @@ import kotlin.math.roundToInt
 
 internal typealias VoiceFactory = (Application, CoroutineScope, (String) -> Unit) -> VoiceSession
 
+/** A chat decision of the agent without search. */
+internal fun chatDecision(kind: String, text: String, brief: String = "") =
+    JSONObject().put("kind", kind).put("text", text).put("brief", brief).put("search", "none").toString()
+
+/** The mini-app that [FixtureProvider] generates. */
+internal const val FIXTURE_APP = """{"formatVersion":3,"title":"Fixture","description":"","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"text","text":"Count","bind":"count"},"source":"return {state:input.state};"}"""
+
 internal class FixtureProvider(private val reply: String = "Fixture response") : ChatProvider {
     @Volatile var calls = 0
     @Volatile var lastRequest: CloudRequest? = null
@@ -79,10 +86,17 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
     var agentProposal: String? = null
     @Volatile var failure: Exception? = null              // thrown after the count
     @Volatile var gate: CompletableDeferred<Unit>? = null // awaited before the answer
+    @Volatile var courseTopic: String? = null
+    /** The chat decision creates the fixture app, so the request goes through the mini-app generation. */
+    @Volatile var createApp = false
     override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
         synchronized(this) { calls++; lastRequest = request }
         failure?.let { throw it }
         gate?.await()
+        courseTopic?.takeIf { request.chatDecision }?.let {
+            emit(CloudEvent.RoundComplete("", false, com.alpha.assistant.data.MessageProvenance.CLEAN, courseTopic = it))
+            return
+        }
         automationDraft?.let { arguments ->
             val definition = com.alpha.assistant.automations.AutomationDraftTool.bind(arguments, checkNotNull(request.automationDraftChatId))
             emit(CloudEvent.RoundComplete("", false, com.alpha.assistant.data.MessageProvenance.CLEAN, automationDraft = definition.json))
@@ -100,16 +114,16 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
             emit(CloudEvent.RoundComplete(it, false))
             return
         }
-        val app = """{"formatVersion":3,"title":"Fixture","description":"","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"text","text":"Count","bind":"count"},"source":"return {state:input.state};"}"""
         if (request.generationStage == CloudGenerationStage.AGENT) {
-            emit(CloudEvent.Text(request.agentReply(app)))
+            emit(CloudEvent.Text(request.agentReply(FIXTURE_APP)))
             return
         }
         if (request.generationStage != null) {
-            emit(CloudEvent.Text(app))
+            emit(CloudEvent.Text(FIXTURE_APP))
             return
         }
-        emit(CloudEvent.RoundComplete("""{"kind":"answer","text":${JSONObject.quote(reply)},"brief":"","search":"none"}""", false))
+        val decision = if (createApp) chatDecision("create", reply, "Make a counter") else chatDecision("answer", reply)
+        emit(CloudEvent.RoundComplete(decision, false))
     }
 }
 
@@ -163,10 +177,11 @@ internal class ShellFixture(prefix: String) {
     @Volatile var keyCheck: suspend (AiAccount) -> KeyCheck = { KeyCheck.ACCEPTED }
 
     /** A loopback test passes a [chat] provider that reads [models]. */
-    fun install(saveKey: Boolean = true, voice: VoiceFactory? = null, onboarding: Boolean = false, chat: ChatProvider = provider) {
+    fun install(saveKey: Boolean = true, voice: VoiceFactory? = null, onboarding: Boolean = false, chat: ChatProvider = provider,
+        liveVoice: LiveVoiceFactory? = null) {
         if (saveKey) check(keys.save("alpha-test-only", AiProvider.OPENAI).isSuccess)
         CloudTestActivity.factory = { app ->
-            ShellViewModel(app, chat, store, keys, voiceFactory = voice, offerOnboarding = onboarding, keyCheck = { keyCheck(it) }, legacy = legacy, models = models, imageStore = imageStore, voiceStore = voiceStore)
+            ShellViewModel(app, chat, store, keys, voiceFactory = voice, liveVoiceFactory = liveVoice, offerOnboarding = onboarding, keyCheck = { keyCheck(it) }, legacy = legacy, models = models, imageStore = imageStore, voiceStore = voiceStore)
                 .openSeededChat(store).also { model = it }
         }
     }

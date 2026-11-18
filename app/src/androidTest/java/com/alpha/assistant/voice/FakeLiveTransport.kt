@@ -6,6 +6,15 @@ import org.json.JSONObject
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
+/** Server events that a test plays on [FakeLiveTransport]. Times are session milliseconds. */
+internal const val LIVE_STARTED = """{"type":"session.started","session":{"id":"live_1"}}"""
+internal fun inputDelta(delta: String, startMs: Long, endMs: Long) = liveTranscript("session.input_transcript.delta", delta, startMs, endMs)
+internal fun outputDelta(delta: String, startMs: Long, endMs: Long) = liveTranscript("session.output_transcript.delta", delta, startMs, endMs)
+internal fun liveDelegation(id: String, offsetMs: Long) =
+    JSONObject().put("type", "session.delegation.created").put("offset_ms", offsetMs).put("delegation", JSONObject().put("id", id)).toString()
+private fun liveTranscript(type: String, delta: String, startMs: Long, endMs: Long) =
+    JSONObject().put("type", type).put("delta", delta).put("start_ms", startMs).put("end_ms", endMs).toString()
+
 /** A scripted GPT-Live socket: it records what the session sends, and the test plays the server side. */
 internal class FakeLiveTransport : LiveTransport {
     val sent = CopyOnWriteArrayList<String>()
