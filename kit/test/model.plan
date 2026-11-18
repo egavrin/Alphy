@@ -1,0 +1,4 @@
+app("Model", lang="en", palette="blue")
+need toy = model3d("Toy", [box("", 0, 0, 0, 2, 1, 1, "sand"), cylinder("top", 0, 1, 0, 0.5, 0.5, "y", "accent")], parts={top: "Top"})
+need n = input("number", "Lines", 1, min=0, max=500)
+need lines = drawing("Lines", 320, 64, [each($/n, line($index % 300 + 0.25, 1.25, $index % 300 + 0.75, 1.75, "muted", width=1.25))])

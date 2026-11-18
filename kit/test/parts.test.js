@@ -436,7 +436,7 @@ test("screen 3, game and tutor: two pieces on the bridge, and the pieces are emp
 test("screen 4, 3D and sketch: the rover is taken apart, and the camera is the selected part", async () => {
   settings.gate = "smoke";
   // The center of the nine bodies is (0, 1, 0). "Разбери по частям": each named part moves away by half of its distance.
-  const workshop = await mock("rover", plan("model3d")), ro = new App(workshop), body = (index) => { const at = ro.find("rover_model").props.bodies[index]; return [at.x, at.y, at.z]; };
+  const workshop = await mock("rover", fixture("dialogue-rover")), ro = new App(workshop), body = (index) => { const at = ro.find("rover_model").props.bodies[index]; return [at.x, at.y, at.z]; };
   same([body(0), body(1), body(6), body(8), ro.press("rover_explode"), ro.state.rover.exploded, body(0), body(1), body(6), body(8), ro.find("rover_explode").props.label],
     [[0, 0.9, 0], [-1.1, 0.4, 1], [1, 2.2, 0], [-1, 1.4, 0], "", true, [0, 0.9, 0], [-1.65, 0.1, 1.5], [1.5, 2.8, 0], [-1.5, 1.6, 0], "Собрать"], "the rover is taken apart: the frame stays, and a wheel, the camera, and the panel move");
   // "Стоп, только камеру": the model is put together, the camera is the selected part, and the card has the camera text.

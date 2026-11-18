@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";
 import { ACTIONS, App, settings } from "../src/core.js";
 import { parseLine } from "../src/dsl.js";
-import { LIMITS, budgetOf, commandsOf } from "../src/draw.js";
+import { ACCENTS, LIMITS, budgetOf, commandsOf, polygonsOf } from "../src/draw.js";
 import { emit, runtime } from "../src/emit.js";
 import { handle, kitOf } from "../src/run.js";
 import { T0, allPlans, clocked, gateEach, plan, planned } from "./helpers.js";
@@ -45,8 +45,8 @@ test("run: open of the initial state gives the initial state", async () => {
     expect(reply).toEqual({ state: definition.initialState, ...(definition.surfaces && { surfaces: reply.surfaces, timers: [] }) });
     opened.push(path);
   }
-  expect(opened).toHaveLength(20);
-  expect(opened).toEqual(expect.arrayContaining(["plans/tea.plan", "plans/timer-rounds.plan", "plans/lesson.plan", "test/shapes.plan"]));
+  expect(opened).toHaveLength(22);
+  expect(opened).toEqual(expect.arrayContaining(["plans/tea.plan", "plans/timer-rounds.plan", "plans/lesson.plan", "plans/model3d.plan", "test/shapes.plan", "test/model.plan"]));
 });
 
 test("run: the kit of an event computes its formulas on the stored state, with no fault", async () => {
@@ -415,6 +415,100 @@ test("run: a reply of exactly 32768 bytes keeps each command, and one byte more 
   // The text of 774 characters would pass the limit by 1 byte, so the reply keeps the 350 lines before it.
   expect(cut.lines_view.commands).toEqual(exact.lines_view.commands.slice(0, 350));
   expect(budgetOf([["lines_view", cut.lines_view.commands]]).bytes).toBe(31889);
+});
+
+/** The stage of a model: a light box under its faces, so the model reads on a light and on a dark theme. */
+const STAGE = { type: "rect", x: 0, y: 0, width: 320, height: 240, color: "#e8f1ef" };
+/** The surface of the rover of model3d.plan as the kit's App gives it: the stage, and the faces of the App's bodies at the App's turn. The App takes the bodies apart itself. */
+const rover = (kit) => { const { bodies, value, selected } = kit.find("rover_model").props; return [STAGE, ...polygonsOf(bodies, value, false, selected, 320, 240, ACCENTS.teal)]; };
+const pointer = (phase, x, surfaceId = "rover_model", id = 0) => ({ type: "pointer", surfaceId, x, y: 120, phase, pointer: id });
+const IDLE = { surface: "", pointer: 0, x: 0 };
+
+test("run: a pointer drag of 50 pixels turns the model by 30 degrees", async () => {
+  const { file, definition, app } = await compiled(plan("model3d"));
+  const send = (state, event) => handle(request(state, event), app);
+  const down = send(definition.initialState, pointer("down", 100));
+  expect([down.state.rover, down.state.drag, down.ui, down.surfaces.rover_model.commands]).toEqual([{ selected: "", exploded: false, turn: 30 }, { surface: "rover_model", pointer: 0, x: 100 }, undefined, rover(new App(file))]);
+  // 0.6 degrees for each pixel: 50 pixels to the right turn the model from 30 to 60 degrees. The kit's App draws the same model at 60.
+  const moved = send(down.state, pointer("move", 150));
+  const kit = new App(file);
+  kit.input("rover_model", 60);
+  expect([moved.state.rover.turn, moved.state.drag, moved.ui, moved.surfaces.rover_model.commands]).toEqual([60, { surface: "rover_model", pointer: 0, x: 150 }, undefined, rover(kit)]);
+  const up = send(moved.state, pointer("up", 150));
+  expect([up.state.rover.turn, up.state.drag]).toEqual([60, IDLE]);
+  // The up turns the model by its own way since the last move too, and a cancel ends the drag where it is.
+  const late = send(moved.state, pointer("up", 160));
+  expect([late.state.rover.turn, late.state.drag]).toEqual([66, IDLE]);
+  const cancel = send(moved.state, pointer("cancel", 200));
+  expect([cancel.state.rover.turn, cancel.state.drag]).toEqual([60, IDLE]);
+});
+
+test("run: a drag keeps the turn from 0 to 360, and a pointer that is not a drag of a model changes nothing", async () => {
+  const { definition, app } = await compiled(plan("model3d"));
+  const send = (state, event) => handle(request(state, event), app);
+  const drag = (state, from, to) => send(send(send(state, pointer("down", from)).state, pointer("move", to)).state, pointer("up", to)).state;
+  // From 30 degrees, 100 pixels to the left give -30, which is 330. Then 100 pixels to the right give 390, which is 30. A part of a pixel stays.
+  const left = drag(definition.initialState, 200, 100);
+  expect(left.rover.turn).toBe(330);
+  expect(drag(left, 0, 100).rover.turn).toBe(30);
+  expect(drag(definition.initialState, 100, 100.5).rover.turn).toBe(30.3);
+  const down = send(definition.initialState, pointer("down", 100)).state;
+  // An up or a move with no down, a place that is not a number, a second pointer, and a surface that the app does not have.
+  for (const [state, event] of [[definition.initialState, pointer("up", 150)], [definition.initialState, pointer("move", 150)], [down, pointer("move", Number.NaN)],
+    [definition.initialState, pointer("down", "100")], [down, pointer("move", 150, "rover_model", 1)], [down, pointer("up", 150, "rover_model", 1)], [down, pointer("move", 150, "nothing")]]) {
+    expect(send(state, event)).toEqual({ state });
+  }
+});
+
+test("run: the part buttons and the arrows give the values of the kit's App, and the arrows keep its turn past 0 and 360", async () => {
+  const twin = await clocked(plan("model3d"));
+  const camera = twin.send(0, press("rover_part_camera"));
+  sameStored(twin);
+  expect([camera.state.rover.selected, camera.surfaces.rover_model.commands]).toEqual(["camera", rover(twin.kit)]);
+  // The chip of the selected part is filled, and the faces of the other parts are dimmed: the commands change with the selection.
+  expect(nodes(camera.ui).filter((node) => node.type === "button" && node.action.startsWith("rover_part_")).map((node) => [node.text, node.variant]))
+    .toEqual([["Камера", "filled"], ["Панель", "tonal"], ["Колёса", "tonal"]]);
+  expect(camera.surfaces.rover_model.commands.filter((command) => command.color.length === 9).length).toBeGreaterThan(0);
+  for (const [id, turn] of [["rover_left", 0], ["rover_left", -30], ["rover_right", 0], ["rover_right", 30], ["rover_right", 60]]) {
+    const reply = twin.send(0, press(id));
+    sameStored(twin);
+    expect([id, reply.state.rover.turn, reply.surfaces.rover_model.commands]).toEqual([id, turn, rover(twin.kit)]);
+  }
+  // A second tap on the chip clears the selection.
+  expect(twin.send(0, press("rover_part_camera")).state.rover.selected).toBe("");
+  sameStored(twin);
+});
+
+test("run: the explode button changes its text through a new ui", async () => {
+  const twin = await clocked(plan("model3d")), together = twin.kit.find("rover_model").props.bodies;
+  const button = (ui) => nodes(ui).find((node) => node.action === "rover_explode");
+  const apart = twin.send(0, press("rover_explode"));
+  sameStored(twin);
+  expect([button(twin.definition.ui).text, button(apart.ui).text, apart.state.rover.exploded]).toEqual(["Разобрать", "Собрать", true]);
+  // The App's tree has the bodies taken apart, and the reply takes them apart once: the same faces as the bodies together, taken apart by polygonsOf.
+  expect(apart.surfaces.rover_model.commands).toEqual(rover(twin.kit));
+  expect(apart.surfaces.rover_model.commands).toEqual([STAGE, ...polygonsOf(together, 30, true, "", 320, 240, ACCENTS.teal)]);
+  const back = twin.send(0, press("rover_explode"));
+  expect([button(back.ui).text, back.surfaces.rover_model.commands]).toEqual(["Разобрать", rover(twin.kit)]);
+});
+
+test("run: a model beside a drawing keeps each reply inside Alphy's limits", async () => {
+  // model.plan is kit/test/model.plan: a toy model first, then a drawing of $/n lines. 500 lines pass the byte limit, so the reply cuts the lines.
+  const { file, definition, app } = await compiled(testPlan("model"));
+  const reply = handle(request(definition.initialState, press("n_field", 500)), app), kit = new App(file);
+  kit.input("n_field", 500);
+  const used = budgetOf(Object.entries(reply.surfaces).map(([id, surface]) => [id, surface.commands]));
+  console.log(`model.plan with 500 lines: ${JSON.stringify(used)}, toy_model ${reply.surfaces.toy_model.commands.length} commands, lines_view ${reply.surfaces.lines_view.commands.length} commands`);
+  expect(Object.keys(LIMITS).filter((unit) => used[unit] > LIMITS[unit])).toEqual([]);
+  const { bodies, value, selected } = kit.find("toy_model").props;
+  expect(reply.surfaces.toy_model.commands).toEqual([STAGE, ...polygonsOf(bodies, value, false, selected, 320, 240, ACCENTS.blue)]);
+  expect(reply.surfaces.lines_view.commands.length > 0 && reply.surfaces.lines_view.commands.length < 500).toBe(true);
+  // A pointer of the drawing changes nothing, and a drag of the model keeps the reply inside the limits too.
+  expect(handle(request(reply.state, pointer("down", 10, "lines_view")), app)).toEqual({ state: reply.state });
+  const down = handle(request(reply.state, pointer("down", 10, "toy_model")), app);
+  const moved = handle(request(down.state, pointer("move", 300, "toy_model")), app);
+  const after = budgetOf(Object.entries(moved.surfaces).map(([id, surface]) => [id, surface.commands]));
+  expect([moved.state.toy.turn, Object.keys(LIMITS).filter((unit) => after[unit] > LIMITS[unit])]).toEqual([204, []]);
 });
 
 test("run: a reorder event moves the row", async () => {

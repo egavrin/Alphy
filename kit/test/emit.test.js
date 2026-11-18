@@ -2,10 +2,14 @@
 
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { settings } from "../src/core.js";
+import { App, settings } from "../src/core.js";
+import { ACCENTS, LIMITS, budgetOf, polygonsOf } from "../src/draw.js";
 import { emit } from "../src/emit.js";
 import { handle, kitOf, screen } from "../src/run.js";
-import { allPlans, plan, planned } from "./helpers.js";
+import { allPlans, fixture, plan, planned } from "./helpers.js";
+
+/** The stage of a model: a light box under its faces, so the model reads on a light and on a dark theme. */
+const STAGE = { type: "rect", x: 0, y: 0, width: 320, height: 240, color: "#e8f1ef" };
 
 /** Alphy's rule for a state field and an action id (ToolValueSchema.name, ToolUiCatalog). */
 const SAFE = /^[A-Za-z][A-Za-z0-9_]{0,47}$/;
@@ -589,6 +593,67 @@ test('emit: a picture need is a fault "picture is not built yet"', async () => {
   expect(faults).toEqual(["need photo: picture is not built yet", "need source: link is not built yet"]);
 });
 
+test('emit: the rover of the dialogue mock with its sketch is a fault "picture is not built yet", and only that', async () => {
+  // dialogue-rover.plan is model3d.plan with the sketch of screen 4. The model is built: only the picture is a fault.
+  const { definition, faults } = emit(await planned(fixture("dialogue-rover")));
+  expect([definition, faults]).toEqual([null, ["need sketch: picture is not built yet"]]);
+});
+
+test("emit: model3d.plan gives a surface, a canvas, three part buttons, two arrows, and the explode button", async () => {
+  const { definition, faults } = emit(await planned(plan("model3d")));
+  expect(faults).toEqual([]);
+  valid(definition);
+  expect(definition.surfaces).toEqual([{ id: "rover_model", width: 320, height: 240 }]);
+  const card = nodes(definition.ui).find((node) => node.type === "card" && node.children[0].type === "canvas");
+  expect(card.children.map((node) => [node.type, ...(node.children ?? []).map((child) => [child.type, child.name ?? child.variant, child.text, child.action])])).toEqual([
+    ["canvas"], ["flowRow", ["button", "tonal", "Камера", "rover_part_camera"], ["button", "tonal", "Панель", "rover_part_panel"], ["button", "tonal", "Колёса", "rover_part_wheels"]],
+    ["flowRow", ["icon", "Back", "−30°", "rover_left"], ["icon", "Chevron", "+30°", "rover_right"], ["button", "filled", "Разобрать", "rover_explode"]]]);
+  expect(card.children[0]).toEqual({ type: "canvas", text: "Живая 3D-сцена", surfaces: ["rover_model"] });
+  // The record of the part is a field of plain values, and the drag of the model is a field of the run-time.
+  expect([definition.stateSchema.rover, definition.initialState.rover]).toEqual([{ type: "object", fields: { selected: "string", exploded: "boolean", turn: "number" } }, { selected: "", exploded: false, turn: 30 }]);
+  expect([definition.stateSchema.drag, definition.initialState.drag]).toEqual([{ type: "object", fields: { surface: "string", pointer: "number", x: "number" } }, { surface: "", pointer: 0, x: 0 }]);
+  // A model with no turn has no drag.
+  const still = emit(await planned('app("Still", lang="en")\nneed m = model3d("M", [box("a", 0, 0, 0, 1, 1, 1, "ink")], turn=false)'));
+  expect([still.faults, Object.keys(still.definition.stateSchema), still.definition.surfaces]).toEqual([[], ["m"], [{ id: "m_model", width: 320, height: 240 }]]);
+});
+
+test("emit: model3d.plan stays under the drawing limits", async () => {
+  // The rover at rest, taken apart, and with the camera selected. Then each whole turn from 0 to 359, together and apart, each with and without the camera selected.
+  const file = await planned(plan("model3d")), kit = new App(file), props = () => kit.find("rover_model").props;
+  const used = () => budgetOf([["rover_model", [STAGE, ...polygonsOf(props().bodies, props().value, false, props().selected, 320, 240, ACCENTS.teal)]]]);
+  const rest = used();
+  kit.press("rover_explode");
+  const apart = used();
+  kit.press("rover_explode");
+  kit.press("rover_part_camera");
+  const selected = used();
+  kit.press("rover_part_camera");
+  const most = { commands: 0, pairs: 0, chars: 0, bytes: 0 };
+  for (const id of [null, "rover_explode", "rover_part_camera", "rover_explode"]) {
+    if (id) kit.press(id);
+    for (let turn = 0; turn < 360; turn++) {
+      kit.input("rover_model", turn);
+      for (const [unit, value] of Object.entries(used())) most[unit] = Math.max(most[unit], value);
+    }
+  }
+  console.log(`model3d.plan rover_model: at rest ${JSON.stringify(rest)}, taken apart ${JSON.stringify(apart)}, camera selected ${JSON.stringify(selected)}, most at any whole turn ${JSON.stringify(most)}; limits ${JSON.stringify(LIMITS)}`);
+  for (const unit of Object.keys(LIMITS)) expect([unit, most[unit] <= LIMITS[unit]]).toEqual([unit, true]);
+  expect(emit(file).faults).toEqual([]);
+});
+
+test("emit: a model past a limit of one reply is a fault of its need line", async () => {
+  // 100 boxes in a row: about 3 faces each, and each face costs about 115 bytes.
+  const { faults } = emit(await planned('app("Big", lang="en")\nneed big = model3d("Big", [each(100, box("", $index, 0, 0, 0.5, 0.5, 0.5, "ink"))], turn=false, explode=false)'));
+  expect(faults).toHaveLength(1);
+  const [, bytes] = /^need big: with this drawing the app draws (\d+) bytes at the start, and Alphy draws at most 32768 bytes in one reply\. Draw fewer shapes$/.exec(faults[0]) ?? [];
+  expect(Number(bytes)).toBeGreaterThan(LIMITS.bytes);
+});
+
+test("emit: a record of an author's own state line is still a fault", async () => {
+  const { faults } = emit(await planned(['app("Rec", lang="en")', "$/r = {a: 1}", "root = Column([t])", "t = Text($/r/a)"].join("\n")));
+  expect(faults).toEqual(["$/r: $/r is a record, and that is not built yet"]);
+});
+
 test("emit: an author's root beside a tabs need shows each control of the held needs once", async () => {
   // The device test anAuthorsRootBesideATabsNeedPassesParseAndSmoke sends the same plan through ToolSpec.parse.
   const file = await planned(['app("Held", lang="en")', 'need a = counter("A")', 'need b = counter("B")', 'need pages = tabs(["One", "Two"], [[a], [b]])', 'note = Text("Hi")', "root = Column([note])"].join("\n"));
@@ -649,7 +714,7 @@ test("emit: the texts that are the name of a line, in each saved plan and fixtur
   // The list of now, so that a later task sees when it grows. The row controls with no label of their own are in it by a ruling.
   const PINNED = {
     "plans/calc.plan": [], "plans/list.plan": ["prodotti remove", "prodotti preso"], "plans/quiz.plan": [], "plans/section.plan": ["habits remove"],
-    "plans/tabs-chart.plan": ["gastos remove"], "plans/tea.plan": [], "plans/timer-rounds.plan": [], "plans/lesson.plan": [], "test/shapes.plan": [], "test/bytes.plan": [],
+    "plans/tabs-chart.plan": ["gastos remove"], "plans/tea.plan": [], "plans/timer-rounds.plan": [], "plans/lesson.plan": [], "plans/model3d.plan": [], "test/shapes.plan": [], "test/bytes.plan": [], "test/model.plan": [],
     "test/cards.plan": ["tasks remove"], "test/free.plan": [], "test/fixtures/habits.plan": ["habits remove", "habits done"], "test/fixtures/price-filter.plan": [],
     "test/fixtures/shopping.plan": ["items remove", "items done"], "test/fixtures/units-pl.plan": [], "test/fixtures/water-ko.plan": ["ml minus", "ml plus"],
     "test/lists.plan": ["acts remove", "acts close", "doses taken minus", "doses taken plus", "doses remove", "steps remove"],

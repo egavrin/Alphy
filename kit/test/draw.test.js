@@ -1,7 +1,7 @@
 // draw.js: the kit's shapes as Alphy's drawing commands (GraphicsContract.frame), the colors, and the limits of one reply.
 
 import { expect, test } from "bun:test";
-import { LIMITS, budgetOf, commandsOf, fit } from "../src/draw.js";
+import { ACCENTS, LIMITS, accentOf, budgetOf, commandsOf, fit, polygonsOf } from "../src/draw.js";
 
 const one = (shape) => commandsOf([shape]);
 /** The bytes of a value in JSON as the host counts them: org.json writes "/" as "\/". */
@@ -105,4 +105,70 @@ test("draw: fit keeps the first commands of a reply inside each limit, for all s
   expect(kept([["a", exact]])).toEqual([441]);
   // A reply inside each limit keeps each command.
   expect(fit([["a", dots(3)], ["b", []]])).toEqual({ a: { commands: dots(3) }, b: { commands: [] } });
+});
+
+// The bodies of a model as the kit's App gives them (App.drawn, tag "body").
+const box = (part, x, y, z, w, h, d, color = "ink") => ({ body: "box", part, x, y, z, w, h, d, color });
+const cylinder = (part, x, y, z, radius, length, axis, color = "ink") => ({ body: "cylinder", part, x, y, z, radius, length, axis, color });
+/** The center of a polygon on the surface. */
+const centerOf = ({ points }) => [0, 1].map((index) => points.reduce((sum, point) => sum + point[index], 0) / points.length);
+
+test("draw: a box at the origin gives three polygons at turn 30", () => {
+  // At turn 30 the person sees the top, the front, and the left side of the box. At turn 0 the sides are edge-on, and only the top and the front show.
+  const faces = polygonsOf([box("", 0, 0, 0, 2, 2, 2)], 30, false, "", 320, 240);
+  expect(faces.map((face) => [face.type, face.points.length])).toEqual([["polygon", 4], ["polygon", 4], ["polygon", 4]]);
+  expect(faces.every((face) => face.points.flat().every((value) => value >= 0 && value <= 320))).toBe(true);
+  expect(polygonsOf([box("", 0, 0, 0, 2, 2, 2)], 0, false, "", 320, 240)).toHaveLength(2);
+  // A cylinder is a prism of 12 sides. At turn 30 the person sees its near cap and 5 sides: with no perspective the side whose normal
+  // is at 225 degrees would look at the person too, but the eye at 5 times the reach of the model sees it from behind (n · eye 0.34 < n · p 0.97).
+  const wheel = polygonsOf([cylinder("", 0, 0, 0, 1, 0.5, "z")], 30, false, "", 320, 240);
+  expect(wheel.map((face) => face.points.length).sort((a, b) => b - a)).toEqual([12, 4, 4, 4, 4, 4]);
+});
+
+test("draw: a far face is before a near face", () => {
+  // A red box behind a blue box: the reply draws each face of the red box first, so the blue box covers it.
+  const faces = polygonsOf([box("", 0, 0, 3, 1, 1, 1, "#0000ff"), box("", 0, 0, -3, 1, 1, 1, "#ff0000")], 30, false, "", 320, 240);
+  expect(faces.map((face) => (face.color.endsWith("0000") ? "red" : "blue"))).toEqual(["red", "red", "red", "blue", "blue", "blue"]);
+});
+
+test("draw: explode moves a body of a named part away from the center by half of its distance", () => {
+  // The center of the three bodies is (0, 0, 0): top goes from y 2 to 3, legs from -2 to -3, and the body with no part stays.
+  const bodies = [box("", 0, 0, 0, 2, 1, 1), box("top", 0, 2, 0, 1, 1, 1), cylinder("legs", 0, -2, 0, 0.5, 1, "y")];
+  const apart = [bodies[0], { ...bodies[1], y: 3 }, { ...bodies[2], y: -3 }];
+  expect(polygonsOf(bodies, 30, true, "", 320, 240)).toEqual(polygonsOf(apart, 30, false, "", 320, 240));
+  expect(polygonsOf(bodies, 30, true, "", 320, 240)).not.toEqual(polygonsOf(bodies, 30, false, "", 320, 240));
+  // The bodies of the caller stay as they are.
+  expect(bodies.map((body) => body.y)).toEqual([0, 2, -2]);
+});
+
+test("draw: a selected part keeps its color and the others are dimmed", () => {
+  // Two boxes of one color at turn 0: a on the left and b on the right. With a selected, each face of b is at 40 % of its alpha.
+  const bodies = [box("a", -2, 0, 0, 1, 1, 1, "#336699"), box("b", 2, 0, 0, 1, 1, 1, "#336699")];
+  const plain = polygonsOf(bodies, 0, false, "", 320, 240), chosen = polygonsOf(bodies, 0, false, "a", 320, 240);
+  expect(chosen.map((face) => face.points)).toEqual(plain.map((face) => face.points));
+  expect(chosen.map((face) => [centerOf(face)[0] < 160 ? "a" : "b", face.color])).toEqual(plain.map((face) => centerOf(face)[0] < 160 ? ["a", face.color] : ["b", "#66" + face.color.slice(1)]));
+  // A face is shaded by the light from 70 % to 100 % of its color, and a color with its own alpha keeps it.
+  expect(plain.map((face) => face.color).every((color) => /^#[0-9a-f]{6}$/.test(color) && color !== "#336699")).toBe(true);
+  expect(polygonsOf([box("a", 0, 0, 0, 1, 1, 1, "#80ff0000")], 30, false, "b", 320, 240).map((face) => face.color.slice(0, 3))).toEqual(["#33", "#33", "#33"]);
+});
+
+test("draw: the color of a body is a color of the kit, the accent of the palette, or a hex, and each other text is ink", () => {
+  const top = (color, accent) => polygonsOf([box("", 0, 0, 0, 1, 1, 1, color)], 0, false, "", 320, 240, accent).map((face) => face.color)[1];
+  // The top face of a box at turn 0: the same light for each color.
+  const lit = (hex) => top(hex);
+  expect([top("sand"), top("accent", ACCENTS.teal), top("accent"), top("#006B5F"), top("nothing"), top("toString")])
+    .toEqual([lit("#e7d3a8"), lit("#006b5f"), lit(ACCENTS.graphite), lit("#006b5f"), lit("#0f172a"), lit("#0f172a")]);
+  // The accent is the palette of the app, else the palette of its preset as Alphy picks it, and graphite for a palette that Alphy does not have.
+  expect([accentOf("teal", "playful"), accentOf(undefined, "clean"), accentOf("", "soft"), accentOf(undefined, "playful"), accentOf("nothing", "clean"), accentOf("toString", "clean")])
+    .toEqual([ACCENTS.teal, ACCENTS.blue, ACCENTS.teal, ACCENTS.orange, ACCENTS.graphite, ACCENTS.graphite]);
+});
+
+test("draw: a model never throws: no bodies, a value that is not finite, a size below 0, and a turn that is not finite", () => {
+  expect(polygonsOf([], 30, false, "", 320, 240)).toEqual([]);
+  expect(polygonsOf([box("", Number.NaN, 0, 0, 1, 1, 1)], 30, false, "", 320, 240)).toEqual([]);
+  expect(polygonsOf([box("", 0, 0, 0, -2, -2, -2)], 30, false, "", 320, 240)).toEqual(polygonsOf([box("", 0, 0, 0, 2, 2, 2)], 30, false, "", 320, 240));
+  expect(polygonsOf([cylinder("", 0, 0, 0, -1, -0.5, "z")], 30, false, "", 320, 240)).toEqual(polygonsOf([cylinder("", 0, 0, 0, 1, 0.5, "z")], 30, false, "", 320, 240));
+  expect(polygonsOf([box("", 0, 0, 0, 2, 2, 2)], Number.NaN, false, "", 320, 240)).toEqual(polygonsOf([box("", 0, 0, 0, 2, 2, 2)], 0, false, "", 320, 240));
+  // A body of no size draws nothing that Alphy refuses.
+  expect(polygonsOf([box("", 0, 0, 0, 0, 0, 0)], 30, false, "", 320, 240).every((face) => face.points.flat().every(Number.isFinite))).toBe(true);
 });

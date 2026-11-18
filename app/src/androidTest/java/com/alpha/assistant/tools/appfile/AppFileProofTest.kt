@@ -476,4 +476,60 @@ class AppFileProofTest {
             assertEquals(31889 to 350,bytes(cut) to commands(cut,"lines_view").size)
         } finally {app.close()}
     }
+    private fun pointer(surfaceId: String,phase: String,x: Int)=JSONObject().put("type","pointer").put("surfaceId",surfaceId).put("x",x).put("y",60).put("phase",phase).put("pointer",0)
+    @Test fun model3dPassesParseAndSmoke(): Unit=runBlocking {
+        // model3d.plan is kit/plans/model3d.plan: the rover of screen 4, with no sketch. The kit tests of model3d.plan give the same values.
+        // The smoke sends each surface a down, a move, an up, a down, and a cancel for pointers 0 and 1.
+        val context=instrumentation.targetContext
+        val sandbox=SandboxClient(context)
+        val spec=parsedAndSmoked(sandbox,"model3d","ru")
+        assertEquals(listOf("rover_model"),spec.surfaces.keys.toList())
+        val app=Host(context,sandbox,spec,"appfile-model3d")
+        fun rover()=JSONObject(app.state).getJSONObject("rover").let {listOf(it.getString("selected"),it.getBoolean("exploded"),it.getDouble("turn"))}
+        // The faces of a part that is not selected keep 40 % of their alpha: a color of 9 characters.
+        fun faces(preview: ToolPreview)=commands(preview,"rover_model").let {it.size to it.count {command -> command.getString("color").length == 9}}
+        fun text(preview: ToolPreview,actionId: String)=nodes(JSONObject(preview.ui)).single {it.optString("action") == actionId}.getString("text")
+        try {
+            val rest=app.open()
+            assertEquals(listOf("",false,30.0) to (52 to 0),rover() to faces(rest))
+            // The camera chip dims the 41 faces of the other parts, and its second tap ends the selection.
+            assertEquals(listOf("camera",false,30.0) to (52 to 41),app.send(press("rover_part_camera")).let {rover() to faces(it)})
+            assertEquals(listOf("",false,30.0) to (52 to 0),app.send(press("rover_part_camera")).let {rover() to faces(it)})
+            // Taken apart: the same 52 faces at new places, and the button says "Собрать" through a new ui.
+            val apart=app.send(press("rover_explode"))
+            assertEquals(listOf("",true,30.0) to (52 to 0),rover() to faces(apart))
+            assertNotEquals(commands(rest,"rover_model").map {it.toString()},commands(apart,"rover_model").map {it.toString()})
+            assertEquals("Собрать",text(apart,"rover_explode"))
+            assertEquals("Разобрать",text(app.send(press("rover_explode")),"rover_explode"))
+            // A drag of 50 pixels to the right: 0.6 degrees for each pixel turn the rover from 30 to 60 degrees.
+            app.send(pointer("rover_model","down",100))
+            for(x in listOf(110,130,150)) app.send(pointer("rover_model","move",x))
+            assertEquals(listOf("",false,60.0) to 52,app.send(pointer("rover_model","up",150)).let {rover() to commands(it,"rover_model").size})
+            // Five moves of a drag through the host path: each one draws the rover again.
+            app.send(pointer("rover_model","down",100))
+            val median=medianHostMs(app,"model3d pointer",{pointer("rover_model","move",110+10*it)}) {assertTrue(commands(it,"rover_model").isNotEmpty())}
+            assertEquals(90.0,rover()[2])
+            assertTrue("median $median ms",median<50)
+        } finally {app.close()}
+    }
+    @Test fun aSmallModelBesideADrawingPassesParseAndSmoke(): Unit=runBlocking {
+        // model.plan is kit/test/model.plan: a box and a cylinder with a named part, then a drawing of n lines. The kit tests of model.plan give the same values.
+        val context=instrumentation.targetContext
+        val sandbox=SandboxClient(context)
+        val spec=parsedAndSmoked(sandbox,"model")
+        assertEquals(listOf("toy_model","lines_view"),spec.surfaces.keys.toList())
+        val app=Host(context,sandbox,spec,"appfile-model")
+        try {
+            assertEquals(11 to 1,app.open().let {commands(it,"toy_model").size to commands(it,"lines_view").size})
+            // 500 lines pass the byte limit: the reply keeps the whole model and the first lines that fit, and Alphy takes it.
+            val full=app.send(JSONObject().put("type","action").put("actionId","n_field").put("value",500))
+            val lines=commands(full,"lines_view").size
+            assertEquals(11,commands(full,"toy_model").size)
+            assertTrue("$lines lines",lines in 1 until 500)
+            assertTrue(checkNotNull(full.surfaces).toString().toByteArray(Charsets.UTF_8).size<=32768)
+            app.send(pointer("toy_model","down",10))
+            app.send(pointer("toy_model","move",300))
+            assertEquals(204.0,JSONObject(app.state).getJSONObject("toy").getDouble("turn"),0.0)
+        } finally {app.close()}
+    }
 }

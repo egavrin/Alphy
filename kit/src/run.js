@@ -5,7 +5,7 @@
 import { AppFile, parseExpression, show } from "./dsl.js";
 import { App, foreground, given, settings } from "./core.js";
 import { MAX_ROWS, cast, castRow, clockOf, namer, own, relative, rows, shownAs, wished } from "./rows.js";
-import { BAR_SURFACE, barOf, commandsOf, fit, sideOf } from "./draw.js";
+import { BAR_SURFACE, MODEL, STAGE, accentOf, barOf, commandsOf, fit, fixed, polygonsOf, sideOf } from "./draw.js";
 
 /** An object of Alphy holds at most 32 fields, so the shown values go into d, d2, d3, and the tests into v, v2. */
 export const PER_OBJECT = 32;
@@ -25,6 +25,8 @@ export const ALERT_CAPABILITIES = ["audio.tone", "vibration.play"];
 const MIN_TIMER_MS = 1000, MAX_TIMER_MS = 86400000, TICK_MS = 1000, ANIM_MS = 50;
 /** The change of a value that no animate moves now. */
 const STILL = { from: 0, to: 0, start: 0, end: 0, at: 0 };
+/** The drag of a model when no drag runs: the surface, the pointer, and the last x of a drag. */
+export const IDLE = { surface: "", pointer: 0, x: 0 };
 
 /** The values of the app line: app("Title", lang="en", kind="Lesson", preset="clean", palette="teal"). */
 export function header(kit) {
@@ -38,7 +40,7 @@ const STYLES = { eyebrow: { emphasis: "label", tone: "accent" }, muted: { tone: 
 /** The kit's icons that Alphy has under a different name (ToolUiCatalog.icons). ArrowDown has no glyph of its own there. */
 const ICON_NAMES = { ArrowUp: "Arrow", ArrowDown: "Sort", ArrowLeft: "Back", ArrowRight: "Chevron", Edit: "Pencil" };
 /** What a row template of Alphy cannot hold (ToolUiCatalog: no list, dialog, sheet, or canvas in a row), and what keeps one state field for all rows. */
-const NOT_IN_ROW = new Set(["List", "Dialog", "Chart", "Tabs", "Timer", "Drawing"]);
+const NOT_IN_ROW = new Set(["List", "Dialog", "Chart", "Tabs", "Timer", "Drawing", "Model3d"]);
 /** The components of a part that a later task builds: the fault names the kind of the need. */
 const LATER = { Picture: "picture", Link: "link" };
 /** The share of value in max in percent, from 0 to 100: 0 for a max of 0 or below and for a value that is not finite. */
@@ -84,7 +86,7 @@ const NODES = {
   // A banner is a container in Alphy's catalog, with 1 to 50 children, so its message is a child.
   Notice: (n, at) => ({ type: "banner", children: [{ type: "text", ...at.text("text") }] }),
   Button: (n, at) => ({ type: "button", text: at.caption(n.props.label), action: at.action(), variant: n.props.selected === undefined || n.props.selected ? "filled" : "tonal" }),
-  IconButton: (n, at) => ({ type: "icon", name: own(ICON_NAMES, n.props.icon) ?? n.props.icon, text: at.caption(), action: at.action() }),
+  IconButton: (n, at) => ({ type: "icon", name: own(ICON_NAMES, n.props.icon) ?? n.props.icon, text: at.caption(n.props.label), action: at.action() }),
   NumberField: ranged("numberInput", 0, 1000000),
   // Alphy gives a slider without bounds 0 to 100.
   Slider: ranged("slider", 0, 100),
@@ -122,6 +124,10 @@ const NODES = {
   Tabs: (n, at) => at.tabs(),
   // A canvas with one surface, which each reply draws again.
   Drawing: (n, at) => at.canvas(commandsOf(n.props.shapes), sideOf(n.props.width), sideOf(n.props.height)),
+  // A 3D model on a surface of its own: the stage and the faces of its bodies. The kit's tree has the bodies taken apart already.
+  // A model with a turn gets the pointer events of its surface: a drag turns it.
+  Model3d: (n, at) => at.canvas([STAGE, ...polygonsOf(n.props.bodies ?? [], n.props.value ?? 30, false, n.props.selected, MODEL.width, MODEL.height, at.accent)],
+    MODEL.width, MODEL.height, false, n.props.bind ? n : undefined),
 };
 
 /** The place and the value that make a visible test false: $/open, !$/closed, or $/pick != "". Other tests have none. */
@@ -140,7 +146,7 @@ const readsRow = (tree) => tree !== null && typeof tree === "object" && ((tree.k
 export function screen(kit, app, first = false) {
   // The names of the screen avoid the names of the stored fields and the timer id of animate. The emitter's walk and each event's walk start with the same taken names.
   // shortcut: a key that is new at run time could take a name that the emitter gave at its wish; no walk makes new keys now, add them to app.names when one does.
-  const name = namer(app.names, new Set([...Object.values(app.names), ...app.fields.flatMap(([, path]) => path.split(".")), ...(app.anim ? [app.anim.field] : [])]));
+  const name = namer(app.names, new Set([...Object.values(app.names), ...app.fields.flatMap(([, path]) => path.split(".")), ...(app.anim ? [app.anim.field] : []), ...(app.drag ? [app.drag] : [])]));
   const fields = new Map(app.fields), kinds = app.kinds ?? {}, lists = app.lists ?? {}, day = today(kit);
   // The first walk (the emitter's) fixes the type of each shown value with its first value. The compiled data keeps the numbers, and each other shown value is a text.
   const typeOf = (key, value) => (first ? (app.types[key] ??= typeof value === "number" ? "number" : "string") : app.types[key] ?? "string");
@@ -148,7 +154,7 @@ export function screen(kit, app, first = false) {
   const slots = { d: new Map(), v: new Map() }, values = {};
   // The bar of each timer need that the run-time moves, by the name of its line, and each surface that the walk draws.
   const timed = new Map(kit.file.of("need").filter((entry) => entry.tree.name === "timer" && !foreground(entry.tree)).map((entry) => [`${entry.key}_bar`, entry.key]));
-  const drawn = [];
+  const drawn = [], { kind, preset, palette } = header(kit);
   /**
    * A value that a node shows: the field of its state line (of its row in a row), or a field that the run-time computes. At the top
    * the field is in d (or in v for a test). In a row it is a field of the row, and the list becomes a view with that field.
@@ -263,12 +269,14 @@ export function screen(kit, app, first = false) {
         const need = !scope && timed.get(node.name);
         return need ? at.canvas(commandsOf(barOf(share, kit.state[need + "_resting"] ? "success" : "accent")), BAR_SURFACE.width, BAR_SURFACE.height, Boolean(kit.state[need + "_on"])) : null;
       },
-      // A canvas with one surface of its own, which the reply draws.
-      canvas: (commands, width, height, running = false) => {
+      // A canvas with one surface of its own, which the reply draws. model is the Model3d node whose turn a drag of the surface sets.
+      canvas: (commands, width, height, running = false, model = undefined) => {
         const id = name("surface:" + key, wished(key));
-        drawn.push({ id, width, height, running, commands, line });
+        drawn.push({ id, width, height, running, commands, line, model });
         return { type: "canvas", text: at.label(), surfaces: [id] };
       },
+      // The color of "accent" on a surface: the accent of the palette of the app.
+      accent: accentOf(palette, preset ?? "clean"),
       // The points of a chart are two arrays that the run-time writes: the labels and the values of the last 256 points.
       chart: () => {
         const kind = node.props.kind ?? "bar", text = at.label().slice(0, 100), points = (Array.isArray(node.props.points) ? node.props.points : []).slice(-MAX_POINTS);
@@ -317,7 +325,7 @@ export function screen(kit, app, first = false) {
   };
   // What the list mapping (rows.js) shares with the walk.
   const shared = { kit, name, walk, day, fields, lists, views, viewSchemas, viewOwners, listRoots };
-  const { kind, preset, palette } = header(kit), tree = kit.tree(), top = walk(tree, "root", "root", { scope: null, weighted: true });
+  const tree = kit.tree(), top = walk(tree, "root", "root", { scope: null, weighted: true });
   const children = [...(kind ? [{ type: "text", text: String(kind), style: STYLES.eyebrow }] : []), ...(tree.type === "Column" ? top?.children ?? [] : [top].filter(Boolean))];
   const ui = { type: "theme", preset: preset ?? "clean", ...(palette && { palette }), cornerRadius: 20, children: [{ type: "column", style: { gap: "medium" }, children }] };
   return { ui, values, views, viewSchemas, viewOwners, controls, bounds, faults, owners, listRoots, drawn };
@@ -342,6 +350,7 @@ export function stateOf(kit, app, shown) {
     const run = kit.state._run?.find((each) => each.path === root);
     return [key, run ? { from: run.from, to: run.to, start: run.start, end: run.end, at: run.at } : STILL];
   }));
+  if (app.drag) state[app.drag] = kit.state._drag ?? IDLE;
   return { ...state, ...shown.views, ...shown.values };
 }
 
@@ -360,8 +369,9 @@ export function load(kit, app, state) {
         last = Math.max(last, Number(/^r(\d+)$/.exec(row.id)?.[1] ?? 0));
         return { id: row.id, ...Object.fromEntries(app.lists[root].map(([kitField, safe, kind]) => [kitField, kind === "time" ? clockOf(row[safe]) : row[safe]])) };
       });
-    } else kit.state[root] = kinds[root] === "time" ? clockOf(value) : kinds[root] === "array" && Array.isArray(value) ? [...value] : value;
+    } else kit.state[root] = kinds[root] === "time" ? clockOf(value) : kinds[root] === "array" && Array.isArray(value) ? [...value] : kinds[root] === "record" ? { ...value } : value;
   }
+  if (app.drag) kit.state._drag = { ...IDLE, ...state[app.drag] };
   // Each event starts a new kit, so a new row gets an id after the highest id of the stored rows.
   kit.nextId = last + 1;
   // A change with an end runs: the kit's tick moves its value to the clock of the event.
@@ -383,12 +393,28 @@ export function kitOf(app, state) {
 }
 
 /**
+ * A pointer event of a surface: on the surface of a model with a turn, a down starts a drag at its x, a move or an up turns the model
+ * by 0.6 degrees for each pixel since the last event (the prototype's rule), and an up or a cancel ends the drag. The turn stays in 0 to 360. A pointer of another
+ * surface, a place that is not a number, and a move, an up, or a cancel of no drag of that surface and pointer change nothing (false).
+ */
+function dragged(kit, drawn, { surfaceId, x, phase, pointer }) {
+  const model = drawn.find((surface) => surface.id === surfaceId)?.model, drag = kit.state._drag ?? IDLE;
+  if (!model || !Number.isFinite(x)) return false;
+  if (phase === "down") { kit.state._drag = { surface: surfaceId, pointer, x }; return ""; }
+  if (!["move", "up", "cancel"].includes(phase) || drag.surface !== surfaceId || drag.pointer !== pointer) return false;
+  kit.state._drag = phase === "move" ? { ...drag, x } : IDLE;
+  const from = Number.isFinite(model.props.value) ? model.props.value : 0;
+  return phase === "cancel" ? "" : kit.change(model, fixed(((fixed(from + (x - drag.x) * 0.6) % 360) + 360) % 360));
+}
+
+/**
  * Answers one event of the sandbox request {artifactId, revision, state, event}. app is the compiled data of emit.js, and now
  * is the clock of the host. A read-only event, an action id that the app does not have, an action that changes nothing, and an
  * action that takes a list past its count of rows (app.caps) or an array past Alphy's limit give the state back as it is. A bound
  * number past its bounds comes back at its bound. The reply holds a new ui only when the screen differs from the screen of the state before the event.
- * An open and a timer event of a timer or a change that runs move each timer and each change to the clock of now. A timer event
- * of nothing that runs, also a late one after a pause or after the end of a change, and each other event of a surface give the state back as it is.
+ * An open and a timer event of a timer or a change that runs move each timer and each change to the clock of now. A pointer event
+ * of the surface of a model turns the model (dragged). A timer event of nothing that runs, also a late one after a pause or after
+ * the end of a change, and each other event of a surface give the state back as it is.
  */
 export function handle(input, app, now = Date.now()) {
   const { state, event } = input;
@@ -399,7 +425,7 @@ export function handle(input, app, now = Date.now()) {
     const kit = kitOf(app, state), kinds = app.kinds ?? {}, before = screen(kit, app);
     const timed = event.type === "open" || (event.type === "timer" && (event.timerId === app.anim?.field ? Boolean(kit.state._run)
       : before.drawn.some((surface) => surface.id === event.timerId && surface.running)));
-    const control = event.type === "action" ? before.controls.get(event.actionId) : timed ? () => kit.tick() : undefined;
+    const control = event.type === "action" ? before.controls.get(event.actionId) : timed ? () => kit.tick() : event.type === "pointer" ? () => dragged(kit, before.drawn, event) : undefined;
     if (!control || control(event.value) === false) return { state };
     for (const [root, kind] of Object.entries(kinds)) {
       if ((kind === "list" && kit.state[root]?.length > (own(app.caps, root) ?? MAX_ROWS)) || (kind === "array" && kit.state[root]?.length > MAX_ARRAY)) return { state };

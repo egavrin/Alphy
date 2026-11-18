@@ -5,7 +5,7 @@ import { App, foreground, given, shownFormulas } from "./core.js";
 import { show } from "./dsl.js";
 import { ALPHY, MAX_ROW_FIELDS, MAX_ROWS, namer, own } from "./rows.js";
 import { LIMITS, budgetOf, utf8 } from "./draw.js";
-import { ALERT_CAPABILITIES, MAX_ARRAY, MAX_POINTS, PER_OBJECT, TYPED, header, load, screen, stateOf } from "./run.js";
+import { ALERT_CAPABILITIES, IDLE, MAX_ARRAY, MAX_POINTS, PER_OBJECT, TYPED, header, load, screen, stateOf } from "./run.js";
 
 /** The text of the run-time. kit/build.js puts it into the bundle, and a test of the sources sets it from the sources. */
 export const runtime = { text: "" };
@@ -103,8 +103,12 @@ export function emit(file) {
   for (const entry of file.of("state")) {
     const root = entry.key.slice(2), value = kit.state[root], need = entry.origin === "part" ? partOf.get(entry.key) : undefined;
     const owner = need === undefined ? entry.key : `need ${need}`;
-    if (root.includes("/") || !(Array.isArray(value) || SCALARS.has(typeof value))) { faults.push(`${owner}: ${entry.key} is a ${root.includes("/") ? "path inside a value" : value !== null && typeof value === "object" ? "record" : "value of no known kind"}, and that is not built yet`); continue; }
-    const schema = Array.isArray(value) ? listed(root, value, owner, root === need ? declared.get(need) : undefined) : app.kinds[root] === "time" ? "number" : typeof value;
+    // The record of a part, such as {selected: "", exploded: false, turn: 30} of a model, is an object of plain values. A record of an author's line is not built yet.
+    const record = need !== undefined && value !== null && typeof value === "object" && !Array.isArray(value) && Object.values(value).every((inner) => SCALARS.has(typeof inner));
+    if (root.includes("/") || !(Array.isArray(value) || SCALARS.has(typeof value) || record)) { faults.push(`${owner}: ${entry.key} is a ${root.includes("/") ? "path inside a value" : value !== null && typeof value === "object" ? "record" : "value of no known kind"}, and that is not built yet`); continue; }
+    if (record) app.kinds[root] = "record";
+    const schema = record ? { type: "object", fields: Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, typeof inner])) }
+      : Array.isArray(value) ? listed(root, value, owner, root === need ? declared.get(need) : undefined) : app.kinds[root] === "time" ? "number" : typeof value;
     if (schema) place(root, need, owner, schema);
   }
   // The open flag of an add form that the run-time puts into a bottom sheet: a value of its need that only the run-time sets.
@@ -140,6 +144,13 @@ export function emit(file) {
     stateSchema[app.anim.field] = { type: "object", fields: Object.fromEntries(app.anim.keys.map(([, inner]) => [inner, RUN])) };
     owners.push(first);
     if (moved.size > PER_OBJECT) faults.push(`${first}: animate moves ${moved.size} values of the app, and an object of Alphy holds at most ${PER_OBJECT} fields. Animate fewer values`);
+  }
+  // A model with a turn gets the pointer events of its surface: the drag that runs (run.js IDLE) is one field of the state.
+  const turned = file.of("component").find((entry) => entry.tree.k === "call" && entry.tree.name === "Model3d" && given(entry.tree).bind);
+  if (turned) {
+    app.drag = name("drag", "drag");
+    stateSchema[app.drag] = { type: "object", fields: Object.fromEntries(Object.entries(IDLE).map(([key, value]) => [key, typeof value])) };
+    owners.push(label(turned.key));
   }
   for (const [field, need] of needObjects) {
     const count = Object.keys(stateSchema[field].fields).length;

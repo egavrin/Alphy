@@ -9,7 +9,8 @@ export const CATALOG = {
   Text: ["text"], Heading: ["text"], Metric: ["label", "value"], Emoji: ["value"], Badge: ["value"],
   // label is the caption of a progress, a ring, a chart, and tabs. The text of a ring is the text under it.
   Progress: ["value", "max", "label"], Ring: ["value", "max", "text", "label"], Divider: [], Notice: ["text"],
-  Button: ["label", "action"], IconButton: ["icon", "action"],
+  // label is the text of an icon button for a person who does not see the icon.
+  Button: ["label", "action"], IconButton: ["icon", "action", "label"],
   TextField: ["label", "bind"], NumberField: ["label", "bind"], Slider: ["label", "bind"],
   Toggle: ["label", "bind"], CheckBox: ["label", "bind"],
   Segmented: ["label", "bind", "options"], Select: ["label", "bind", "options"],
@@ -37,10 +38,10 @@ export const TONES = { ink: "#0f172a", muted: "#94a3b8", accent: null, surface: 
 const round = (x, n = 0) => { const f = 10 ** n; return Math.round((x + Number.EPSILON) * f) / f; };
 /** A deep copy of a value of the app. The sandbox has no structuredClone. NaN and Infinity stay, so the report can find them. */
 const clone = (value) => (Array.isArray(value) ? value.map(clone) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, clone(inner)])) : value);
-/** A model that is taken apart: each body of a named part moves away from the center of the model, by half of its distance from it. */
-function explode(bodies) {
+/** A model that is taken apart: each body of a named part moves away from the center of the model, by half of its distance from it. The bodies of the caller stay as they are. */
+export function explode(bodies) {
   const center = ["x", "y", "z"].map((axis) => bodies.reduce((sum, body) => sum + body[axis], 0) / (bodies.length || 1));
-  for (const body of bodies) if (body.part) ["x", "y", "z"].forEach((axis, index) => { body[axis] = round(body[axis] + (body[axis] - center[index]) / 2, 2); });
+  return bodies.map((body) => (body.part ? { ...body, ...Object.fromEntries(["x", "y", "z"].map((axis, index) => [axis, round(body[axis] + (body[axis] - center[index]) / 2, 2)])) } : body));
 }
 const PLAIN = {
   round, floor: Math.floor, ceil: Math.ceil, abs: Math.abs,
@@ -398,7 +399,7 @@ export class App {
           try { return this.drawn(key === "shapes" ? SHAPES : BODIES, key === "shapes" ? "shape" : "body", item, ctx); }
           catch (failure) { this.fault(name ?? tree.name, `${key}: ${failure.message}`); return []; }
         });
-        if (key === "bodies" && node.props.exploded) explode(node.props.bodies);
+        if (key === "bodies" && node.props.exploded) node.props.bodies = explode(node.props.bodies);
         if (key === "shapes" && !(node.props.width > 0 && node.props.height > 0)) this.fault(name ?? tree.name, "a drawing needs a width and a height above 0: drawing(label, 320, 240, [shapes])");
       }
       // The address comes from a model, so the host shows only a web address.
