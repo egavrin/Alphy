@@ -11,13 +11,19 @@
 //   # comment
 
 const OPS = { "||": 1, "&&": 2, "==": 3, "!=": 3, "<": 4, "<=": 4, ">": 4, ">=": 4, "+": 5, "-": 5, "*": 6, "/": 6, "%": 6 };
+/**
+ * True in the kit and in the compile step. The run-time ignores each fault and each error text, so kit/build.js makes this name
+ * false in the run-time text, and the minifier leaves out each message that only the compile step reads (MESSAGES ? text : "").
+ * Each module of the run-time has this line of its own: the build takes it out and defines the name.
+ */
+const MESSAGES = true;
 
 export class DslError extends Error {}
 
 function tokenize(text) {
   const tokens = [];
   let i = 0;
-  const fail = (message) => { throw new DslError(`${message} at column ${i + 1}`); };
+  const fail = (message) => { throw new DslError(MESSAGES ? `${message} at column ${i + 1}` : ""); };
   while (i < text.length) {
     const ch = text[i];
     if (/\s/.test(ch)) { i++; continue; }
@@ -27,14 +33,14 @@ function tokenize(text) {
         if (text[j] === "\\") { j++; value += { n: "\n", t: "\t" }[text[j]] ?? text[j]; } else value += text[j];
         j++;
       }
-      if (j >= text.length) fail("string without a closing quote");
+      if (j >= text.length) fail(MESSAGES ? "string without a closing quote" : "");
       tokens.push({ t: "str", v: value });
       i = j + 1;
       continue;
     }
     if (ch === "$") {
       const match = /^\$(\/?)([\p{L}_][\p{L}\p{N}_]*(?:\/[\p{L}_][\p{L}\p{N}_]*)*)/u.exec(text.slice(i));
-      if (!match) fail("path expected after $");
+      if (!match) fail(MESSAGES ? "path expected after $" : "");
       tokens.push({ t: "path", abs: match[1] === "/", segs: match[2].split("/") });
       i += match[0].length;
       continue;
@@ -46,7 +52,7 @@ function tokenize(text) {
     const two = text.slice(i, i + 2);
     if ([":=", "==", "!=", "<=", ">=", "&&", "||"].includes(two)) { tokens.push({ t: "op", v: two }); i += 2; continue; }
     if ("()[]{},:=+-*/%<>!?.".includes(ch)) { tokens.push({ t: "op", v: ch }); i++; continue; }
-    fail(`unexpected character ${ch}`);
+    fail(MESSAGES ? `unexpected character ${ch}` : "");
   }
   return tokens;
 }
@@ -55,10 +61,10 @@ function tokenize(text) {
 function parseTokens(tokens, start = 0) {
   let at = start;
   const peek = (v) => tokens[at] && tokens[at].t === "op" && tokens[at].v === v;
-  const eat = (v) => { if (!peek(v)) throw new DslError(`"${v}" expected`); at++; };
+  const eat = (v) => { if (!peek(v)) throw new DslError(MESSAGES ? `"${v}" expected` : ""); at++; };
   function primary() {
     const token = tokens[at];
-    if (!token) throw new DslError("value expected at the end of the line");
+    if (!token) throw new DslError(MESSAGES ? "value expected at the end of the line" : "");
     at++;
     if (token.t === "num") return { k: "lit", v: token.v };
     if (token.t === "str") return { k: "lit", v: token.v };
@@ -91,7 +97,7 @@ function parseTokens(tokens, start = 0) {
       const entries = [];
       while (!peek("}")) {
         const key = tokens[at++];
-        if (!key || (key.t !== "id" && key.t !== "str")) throw new DslError("field name expected in { }");
+        if (!key || (key.t !== "id" && key.t !== "str")) throw new DslError(MESSAGES ? "field name expected in { }" : "");
         eat(":");
         entries.push([key.v, ternary()]);
         if (!peek("}")) eat(",");
@@ -100,7 +106,7 @@ function parseTokens(tokens, start = 0) {
       return { k: "map", entries };
     }
     if (token.t === "op" && (token.v === "-" || token.v === "!")) return { k: "un", op: token.v, arg: postfix() };
-    throw new DslError(`unexpected "${token.v}"`);
+    throw new DslError(MESSAGES ? `unexpected "${token.v}"` : "");
   }
   function postfix() {
     let node = primary();
@@ -109,7 +115,7 @@ function parseTokens(tokens, start = 0) {
       if (peek(".")) {
         at++;
         const field = tokens[at++];
-        if (!field || field.t !== "id") throw new DslError("field name expected after .");
+        if (!field || field.t !== "id") throw new DslError(MESSAGES ? "field name expected after ." : "");
         node = { k: "field", of: node, name: field.v };
       } else if (peek("[")) {
         at++;
@@ -146,7 +152,7 @@ function parseTokens(tokens, start = 0) {
 export function parseExpression(text) {
   const tokens = tokenize(text);
   const { tree, used } = parseTokens(tokens);
-  if (used !== tokens.length) throw new DslError(`unexpected "${tokens[used].v ?? tokens[used].t}" after the expression`);
+  if (used !== tokens.length) throw new DslError(MESSAGES ? `unexpected "${tokens[used].v ?? tokens[used].t}" after the expression` : "");
   return tree;
 }
 
@@ -168,7 +174,7 @@ export function parseLine(raw) {
     return { kind: "check", key: "check:" + (tree.args[0]?.v ?? ""), tree, raw: line };
   }
   if ((match = /^([\p{L}_][\p{L}\p{N}_]*)\s*=(?!=)(.*)$/u.exec(line))) return entry("component", match[1], match[2]);
-  throw new DslError("line not understood");
+  throw new DslError(MESSAGES ? "line not understood" : "");
 }
 
 /** The app as ordered entries by key. Feed lines one at a time: this is also how a stream and a patch arrive. */
@@ -198,7 +204,7 @@ export class AppFile {
     if (!entry) return null;
     if (entry.kind === "delete") {
       const key = [...this.entries.keys()].find((k) => k === entry.key || k === "need:" + entry.key);
-      if (key) { this.entries.delete(key); this.removed.add(key); } else this.faults.push({ line: lineNumber, text: entry.raw, message: `nothing named ${entry.key}` });
+      if (key) { this.entries.delete(key); this.removed.add(key); } else this.faults.push({ line: lineNumber, text: entry.raw, message: MESSAGES ? `nothing named ${entry.key}` : "" });
       return entry;
     }
     const key = entry.kind === "need" ? "need:" + entry.key : entry.key;

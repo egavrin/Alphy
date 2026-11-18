@@ -780,6 +780,22 @@ test("source: the source of list.plan is under 60000 bytes and answers an add as
   expect(run(add).state.prodotti).toHaveLength(4);
 });
 
+test("source: the run-time text is at most 46500 bytes", () => {
+  // kit/build.js leaves out each text that only the compile step reads (KIT_RUNTIME), so each source has room to grow.
+  console.log(`run-time ${bytes(runtime.text)} bytes`);
+  expect(bytes(runtime.text)).toBeLessThanOrEqual(46500);
+});
+
+test("source: a refused add leaves the add sheet open in the run-time text, as handle does", async () => {
+  // The add button is not active while the task is empty, and only an add that the kit takes closes the sheet.
+  const { definition, app } = await compiled(['app("Tasks", lang="en")', 'need tasks = entries("Tasks", fields={task: "text", note: "text", due: "date"}, rows=[])'].join("\n"));
+  const run = sandboxed(definition.source, createContext());
+  const open = run(request(definition.initialState, { type: "action", actionId: "tasks_addRow_open", value: null })).state;
+  const add = request(open, { type: "action", actionId: "tasks_add", value: null });
+  expect(run(add)).toEqual(handle(add, app));
+  expect([run(add).state.tasks_s.adding, run(add).state.tasks]).toEqual([true, []]);
+});
+
 test("source: no source of a saved plan or fixture that compiles passes 60000 bytes", async () => {
   const sizes = [];
   for (const [path, text] of allPlans()) {

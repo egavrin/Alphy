@@ -35,6 +35,11 @@ The minifier of Bun makes the run-time text, so the bundle depends on the versio
 Bun 1.3.9 wrote the checked-in bundle, and the first line of the bundle names that version.
 With a different version, `--check` can fail with no change in `kit/src`.
 
+The run-time text leaves out each message that only the compile step reads, such as the text of a fault.
+Each module of the run-time puts such a text behind its line `const MESSAGES = true;`.
+The build of the run-time text takes that line out and defines `MESSAGES` as false, so the minifier drops the text.
+The kit tests and the compile step keep each text.
+
 ## Origin
 
 The kit comes from the isolated prototype of the app file design (`alphy-dsl-prototype`, outside this repository).

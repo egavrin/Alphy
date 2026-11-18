@@ -3,6 +3,9 @@
 
 import { DslError, show } from "./dsl.js";
 
+/** False in the run-time text of an app (dsl.js). */
+const MESSAGES = true;
+
 /** Positional arguments of each component of the prototype catalog. */
 export const CATALOG = {
   Column: ["children"], Row: ["children"], Card: ["children"], Section: ["title", "children"],
@@ -98,7 +101,7 @@ const ROWWISE = {
   sort: (rows, f, way) => [...rows].sort((a, b) => order(f(a), f(b)) * (way === "desc" ? -1 : 1)),
   // One row {key, value} for each different key, in the order of the first row of each key. value is the sum, or the count of rows when no value is given.
   groups: (rows, key, value) => {
-    if (!key) throw new DslError("groups needs a key, such as groups($/rows, $category, $amount)");
+    if (!key) throw new DslError(MESSAGES ? "groups needs a key, such as groups($/rows, $category, $amount)" : "");
     const sums = new Map();
     for (const row of rows) sums.set(key(row), (sums.get(key(row)) ?? 0) + Number(value ? value(row) : 1));
     return [...sums].map(([name, sum]) => ({ key: name, value: sum }));
@@ -170,14 +173,14 @@ export class App {
   place(node, ctx) {
     if (node.k === "path") {
       let holder = node.abs ? this.state : ctx.it;
-      if (holder == null) throw new DslError("a $field path needs a row");
-      if (typeof holder !== "object") throw new DslError("the row is a plain value with no fields to set");
+      if (holder == null) throw new DslError(MESSAGES ? "a $field path needs a row" : "");
+      if (typeof holder !== "object") throw new DslError(MESSAGES ? "the row is a plain value with no fields to set" : "");
       for (const seg of node.segs.slice(0, -1)) holder = holder[seg] ??= {};
       return [holder, node.segs.at(-1)];
     }
-    if (node.k !== "field" && node.k !== "index") throw new DslError("a place to set is a path, a field of a row, or an item of a list");
+    if (node.k !== "field" && node.k !== "index") throw new DslError(MESSAGES ? "a place to set is a path, a field of a row, or an item of a list" : "");
     const holder = this.value(node.of, ctx);
-    if (holder == null || typeof holder !== "object") throw new DslError(`${show(node.of)} has no value, so nothing in it can be set`);
+    if (holder == null || typeof holder !== "object") throw new DslError(MESSAGES ? `${show(node.of)} has no value, so nothing in it can be set` : "");
     return [holder, node.k === "field" ? node.name : this.value(node.at, ctx)];
   }
 
@@ -195,15 +198,15 @@ export class App {
         if (!node.abs && node.segs[0] === "it") return node.segs.slice(1).reduce((value, seg) => value?.[seg], ctx.it);
         // Inside each(list, shape), $index is the number of the row, from 0. A row field with that name wins.
         if (!node.abs && ctx.each !== undefined && node.segs.join() === "index" && !(ctx.it && typeof ctx.it === "object" && "index" in ctx.it)) return ctx.each;
-        if (!node.abs && ctx.it === undefined) throw new DslError(`$${node.segs.join("/")} is a field of a list row, and there is no row here. A value of the app is $/${node.segs.join("/")}`);
-        if (!node.abs && ctx.it !== undefined && (ctx.it === null || typeof ctx.it !== "object")) throw new DslError("the row is a plain value with no fields. $it reads the row itself");
+        if (!node.abs && ctx.it === undefined) throw new DslError(MESSAGES ? `$${node.segs.join("/")} is a field of a list row, and there is no row here. A value of the app is $/${node.segs.join("/")}` : "");
+        if (!node.abs && ctx.it !== undefined && (ctx.it === null || typeof ctx.it !== "object")) throw new DslError(MESSAGES ? "the row is a plain value with no fields. $it reads the row itself" : "");
         if (!node.abs && ctx.it && !(node.segs[0] in ctx.it)) {
           // A value that an entries need computes for each row, show={name: formula}, reads as a field of the row
           // in each other formula of a row (v1 sleep-en: a chart of $slept). busy stops a show formula that reads itself.
           const name = node.segs[0];
           this.shown ??= Object.fromEntries(shownFormulas(this.file));
           if (node.segs.length === 1 && this.shown[name] && !ctx.busy?.includes(name)) return this.value(this.shown[name], { ...ctx, busy: [...(ctx.busy ?? []), name] });
-          throw new DslError(`the row has no field ${name}`);
+          throw new DslError(MESSAGES ? `the row has no field ${name}` : "");
         }
         return this.read(node, ctx);
       case "list": return node.items.map((item) => this.value(item, ctx));
@@ -229,18 +232,18 @@ export class App {
         if (node.name === "if") return this.value(node.args[0], ctx) ? this.value(node.args[1], ctx) : this.value(node.args[2], ctx);
         if (ROWWISE[node.name]) {
           const rows = this.value(node.args[0], ctx);
-          if (!Array.isArray(rows)) throw new DslError(`${node.name} needs a list`);
+          if (!Array.isArray(rows)) throw new DslError(MESSAGES ? `${node.name} needs a list` : "");
           const perRow = (arg) => arg && ((row) => this.value(arg, { ...ctx, it: row }));
           // The third argument of groups is a formula of the row. The third argument of sort is the order.
           return ROWWISE[node.name](rows, perRow(node.args[1]), node.name === "groups" ? perRow(node.args[2]) : node.args[2] && this.value(node.args[2], ctx));
         }
         if (PLAIN[node.name]) return PLAIN[node.name](...node.args.map((arg) => this.value(arg, ctx)));
-        if (CATALOG[node.name]) throw new DslError(`${node.name} is a component. A component line has a plain name with no $/ before it`);
-        throw new DslError(`unknown function ${node.name}`);
+        if (CATALOG[node.name]) throw new DslError(MESSAGES ? `${node.name} is a component. A component line has a plain name with no $/ before it` : "");
+        throw new DslError(MESSAGES ? `unknown function ${node.name}` : "");
       }
-      case "ref": throw new DslError(`${node.name} is a component name, not a value`);
+      case "ref": throw new DslError(MESSAGES ? `${node.name} is a component name, not a value` : "");
     }
-    throw new DslError("expression not understood");
+    throw new DslError(MESSAGES ? "expression not understood" : "");
   }
 
   /**
@@ -252,26 +255,26 @@ export class App {
     const { name = "", args = [], named = {} } = tree.k === "call" ? tree : {};
     if (name === "each" && args.length === 2) {
       const given = this.value(args[0], ctx), rows = Array.isArray(given) ? given : Number.isInteger(given) && given >= 0 && given <= 500 ? Array.from({ length: given }, (_, index) => index) : null;
-      if (!rows) throw new DslError("each needs a list or a count: each($/rows, shape) or each(5, shape)");
+      if (!rows) throw new DslError(MESSAGES ? "each needs a list or a count: each($/rows, shape) or each(5, shape)" : "");
       return rows.flatMap((row, index) => this.drawn(kinds, tag, args[1], { ...ctx, it: row, each: index }));
     }
     const keys = Object.hasOwn(kinds, name) ? kinds[name] : null;
-    if (!keys) throw new DslError(`${show(tree).slice(0, 30)} is not one of ${Object.keys(kinds).join(", ")}, each`);
-    const last = LAST[name], takes = `${name} takes ${keys.join(", ")}, color${last ? `, ${last}` : ""}`;
-    if (args.length < keys.length || args.length > keys.length + (last ? 2 : 1)) throw new DslError(`${show(tree).slice(0, 60)} has ${args.length} values: ${takes}`);
+    if (!keys) throw new DslError(MESSAGES ? `${show(tree).slice(0, 30)} is not one of ${Object.keys(kinds).join(", ")}, each` : "");
+    const last = LAST[name], takes = MESSAGES ? `${name} takes ${keys.join(", ")}, color${last ? `, ${last}` : ""}` : "";
+    if (args.length < keys.length || args.length > keys.length + (last ? 2 : 1)) throw new DslError(MESSAGES ? `${show(tree).slice(0, 60)} has ${args.length} values: ${takes}` : "");
     if (named.visible && !this.value(named.visible, ctx)) return [];
-    const number = (value, key) => { if (value === null || value === "" || typeof value === "boolean" || !Number.isFinite(Number(value))) throw new DslError(`${key} of ${name} is not a number: ${takes}`); return round(Number(value), 2); };
+    const number = (value, key) => { if (value === null || value === "" || typeof value === "boolean" || !Number.isFinite(Number(value))) throw new DslError(MESSAGES ? `${key} of ${name} is not a number: ${takes}` : ""); return round(Number(value), 2); };
     const out = { [tag]: name };
     keys.forEach((key, index) => {
       const value = this.value(args[index], ctx);
       out[key] = TEXTS.has(key) ? String(value ?? "") : key === "points" ? [value].flat().map((item) => number(item, key)) : number(value, key);
     });
-    if (out.axis !== undefined && !["x", "y", "z"].includes(out.axis)) throw new DslError(`axis of ${name} is "x", "y", or "z"`);
+    if (out.axis !== undefined && !["x", "y", "z"].includes(out.axis)) throw new DslError(MESSAGES ? `axis of ${name} is "x", "y", or "z"` : "");
     out.color = String((args[keys.length] ? this.value(args[keys.length], ctx) : null) ?? "ink");
     if (args.length === keys.length + 2) out[last] = number(this.value(args[keys.length + 1], ctx), last);
     for (const [key, arg] of Object.entries(named)) {
       if (key === "visible") continue;
-      if (!EXTRAS.includes(key)) throw new DslError(`${name} has no argument ${key}`);
+      if (!EXTRAS.includes(key)) throw new DslError(MESSAGES ? `${name} has no argument ${key}` : "");
       const value = this.value(arg, ctx);
       if (key !== "stroke") out[key] = number(value, key); else if (value) out.stroke = true;
     }
@@ -291,11 +294,11 @@ export class App {
   /** Runs one action call or a list of them, then the formulas. ctx has the row and its list for a row control. */
   act(tree, ctx = {}) {
     for (const call of tree.k === "list" ? tree.items : [tree]) {
-      if (call.k !== "call" || !ACTIONS.has(call.name)) throw new DslError(`unknown action ${call.name ?? call.k}`);
+      if (call.k !== "call" || !ACTIONS.has(call.name)) throw new DslError(MESSAGES ? `unknown action ${call.name ?? call.k}` : "");
       const [first, second] = call.args;
       if (call !== (tree.k === "list" ? tree.items[0] : tree)) this.recompute();
-      const target = () => { if (!["path", "field", "index"].includes(first?.k)) throw new DslError(`${call.name} needs a place: a path, a field of a row, or an item of a list`); return first; };
-      const rowsOf = (node) => { const rows = this.value(node, ctx); if (!Array.isArray(rows)) throw new DslError(`${call.name} needs a list`); return rows; };
+      const target = () => { if (!["path", "field", "index"].includes(first?.k)) throw new DslError(MESSAGES ? `${call.name} needs a place: a path, a field of a row, or an item of a list` : ""); return first; };
+      const rowsOf = (node) => { const rows = this.value(node, ctx); if (!Array.isArray(rows)) throw new DslError(MESSAGES ? `${call.name} needs a list` : ""); return rows; };
       switch (call.name) {
         case "set": this.write(target(), clone(this.value(second, ctx)), ctx); break;
         case "toggle": this.write(target(), !this.value(target(), ctx), ctx); break;
@@ -307,7 +310,7 @@ export class App {
         case "move": {
           // In a list row: move(-1) moves that row one place up. Outside: move($/list, test, by) moves the first row that passes.
           const inRow = call.args.length === 1;
-          if (inRow && !ctx.list) throw new DslError("move(by) needs a row. Outside a list write move($/list, test, by)");
+          if (inRow && !ctx.list) throw new DslError(MESSAGES ? "move(by) needs a row. Outside a list write move($/list, test, by)" : "");
           const rows = inRow ? this.read(ctx.list, {}) : rowsOf(target());
           const from = inRow ? rows.indexOf(ctx.it) : rows.findIndex((row) => this.value(second, { ...ctx, it: row }));
           const to = from + this.value(inRow ? first : call.args[2], ctx);
@@ -318,9 +321,9 @@ export class App {
         // animate($/place, to, ms): the number goes to the value in a straight line over ms milliseconds of the host clock. tick() moves it.
         // The change keeps the times of its start and its end, so a kit that starts from a stored state, as each event of the run-time does, knows where the value is.
         case "animate": {
-          if (first?.k !== "path" || !first.abs) throw new DslError("animate needs a value of the app as its place, such as $/angle");
+          if (first?.k !== "path" || !first.abs) throw new DslError(MESSAGES ? "animate needs a value of the app as its place, such as $/angle" : "");
           const path = first.segs.join("/"), from = Number(this.value(first, ctx)) || 0, to = second ? Number(this.value(second, ctx)) : NaN, ms = call.args[2] ? Number(this.value(call.args[2], ctx)) : 0;
-          if (!Number.isFinite(to) || !Number.isFinite(ms)) throw new DslError("animate needs a number to go to and a time in milliseconds: animate($/angle, 360, 5000)");
+          if (!Number.isFinite(to) || !Number.isFinite(ms)) throw new DslError(MESSAGES ? "animate needs a number to go to and a time in milliseconds: animate($/angle, 360, 5000)" : "");
           const runs = (this.state._run ?? []).filter((run) => run.path !== path), now = settings.now();
           if (ms > 0 && to !== from) runs.push({ path, from, to, start: now, end: now + ms, at: from }); else this.write(first, to, ctx);
           if (runs.length) this.state._run = runs; else delete this.state._run;
@@ -334,7 +337,7 @@ export class App {
         }
         case "remove": {
           if (!first) {
-            if (!ctx.list) throw new DslError("remove() without a path needs a row");
+            if (!ctx.list) throw new DslError(MESSAGES ? "remove() without a path needs a row" : "");
             this.write(ctx.list, this.read(ctx.list, {}).filter((row) => row !== ctx.it), {});
           } else this.write(target(), rowsOf(target()).filter((row) => !this.value(second, { ...ctx, it: row })), ctx);
           break;
@@ -349,18 +352,18 @@ export class App {
     this.reached = new Set();
     let unnamed = 0;
     const visit = (tree, ctx, name, depth) => {
-      if (depth > 40) throw new DslError("components nest too deep or refer to each other");
+      if (depth > 40) throw new DslError(MESSAGES ? "components nest too deep or refer to each other" : "");
       if (tree.k === "ref") {
         const entry = this.file.get(tree.name);
         this.reached.add(tree.name);
         if (!entry || entry.kind !== "component") {
-          if (strict) this.fault(tree.name, "no component line with this name");
+          if (MESSAGES && strict) this.fault(tree.name, "no component line with this name");
           return { type: "Missing", name: tree.name, props: {}, children: [] };
         }
         return visit(entry.tree, ctx, tree.name, depth + 1);
       }
       if (tree.k !== "call" || !CATALOG[tree.name]) {
-        this.fault(name ?? "?", tree.k === "path" ? `a child is a component name, not the path ${show(tree)}` : `unknown component ${tree.name ?? tree.k}`);
+        this.fault(name ?? "?", MESSAGES ? (tree.k === "path" ? `a child is a component name, not the path ${show(tree)}` : `unknown component ${tree.name ?? tree.k}`) : "");
         return { type: "Missing", name, props: {}, children: [] };
       }
       // call is the expression of the component, so the emitter can tell a constant property from a computed one.
@@ -370,26 +373,26 @@ export class App {
       for (const [key, arg] of Object.entries(props)) {
         if (arg === undefined) continue;
         // A field takes an action too. It runs after each change of the field.
-        if (!CATALOG[tree.name].includes(key) && !NAMED.has(key) && !(key === "action" && props.bind)) { this.fault(name ?? tree.name, `${tree.name} has no property ${key}`); continue; }
+        if (!CATALOG[tree.name].includes(key) && !NAMED.has(key) && !(key === "action" && props.bind)) { this.fault(name ?? tree.name, MESSAGES ? `${tree.name} has no property ${key}` : ""); continue; }
         if ((tree.name === "Chart" && (key === "point" || key === "value")) || (tree.name === "List" && key === "group") || key === "shapes" || key === "bodies") continue;
         try {
           if (key === "children") node.children = (arg.k === "list" ? arg.items : [arg]).map((child) => visit(child, ctx, undefined, depth + 1));
           else if (key === "groups") groups = arg.k === "list" ? arg.items : [arg];
           else if (key === "action") node.props.action = arg;
           else if (key === "bind") {
-            if (!["path", "field", "index"].includes(arg.k)) throw new DslError("bind needs a place: a path, a field of a row, or an item of a list");
+            if (!["path", "field", "index"].includes(arg.k)) throw new DslError(MESSAGES ? "bind needs a place: a path, a field of a row, or an item of a list" : "");
             node.props.bind = arg;
             node.props.value = arg.k === "path" ? this.read(arg, ctx) : this.value(arg, ctx);
           } else if (key === "template") node.template = arg;
           else node.props[key] = this.value(arg, ctx);
-        } catch (failure) { this.fault(name ?? tree.name, `${key}: ${failure.message}`); }
+        } catch (failure) { this.fault(name ?? tree.name, MESSAGES ? `${key}: ${failure.message}` : ""); }
       }
       if (tree.name === "Chart") {
         // One point for each row. point (the label of the point) and value are formulas of the row.
         try {
           node.props.points = (Array.isArray(node.props.items) ? node.props.items : []).map((row) => ({
             label: props.point ? this.value(props.point, { ...ctx, it: row }) : "", value: Number(props.value ? this.value(props.value, { ...ctx, it: row }) : row) || 0 }));
-        } catch (failure) { this.fault(name ?? tree.name, `points: ${failure.message}`); }
+        } catch (failure) { this.fault(name ?? tree.name, MESSAGES ? `points: ${failure.message}` : ""); }
         delete node.props.items;
       }
       if (tree.name === "Drawing" || tree.name === "Model3d") {
@@ -397,14 +400,14 @@ export class App {
         // An item that fails, such as a shape whose x is not a number at run time, is a fault and is left out: the other items still draw.
         node.props[key] = (list.k === "list" ? list.items : [list]).flatMap((item) => {
           try { return this.drawn(key === "shapes" ? SHAPES : BODIES, key === "shapes" ? "shape" : "body", item, ctx); }
-          catch (failure) { this.fault(name ?? tree.name, `${key}: ${failure.message}`); return []; }
+          catch (failure) { this.fault(name ?? tree.name, MESSAGES ? `${key}: ${failure.message}` : ""); return []; }
         });
         if (key === "bodies" && node.props.exploded) node.props.bodies = explode(node.props.bodies);
-        if (key === "shapes" && !(node.props.width > 0 && node.props.height > 0)) this.fault(name ?? tree.name, "a drawing needs a width and a height above 0: drawing(label, 320, 240, [shapes])");
+        if (MESSAGES && key === "shapes" && !(node.props.width > 0 && node.props.height > 0)) this.fault(name ?? tree.name, "a drawing needs a width and a height above 0: drawing(label, 320, 240, [shapes])");
       }
       // The address comes from a model, so the host shows only a web address.
-      if (tree.name === "Link" && !/^https?:\/\/\S+$/.test(String(node.props.url ?? ""))) this.fault(name ?? tree.name, "a Link needs a web address that starts with https://");
-      if (tree.name === "Dialog" && !props.visible) this.fault(name ?? tree.name, "a Dialog needs visible=test and a button that makes the test false. Without them the window never closes");
+      if (MESSAGES && tree.name === "Link" && !/^https?:\/\/\S+$/.test(String(node.props.url ?? ""))) this.fault(name ?? tree.name, "a Link needs a web address that starts with https://");
+      if (MESSAGES && tree.name === "Dialog" && !props.visible) this.fault(name ?? tree.name, "a Dialog needs visible=test and a button that makes the test false. Without them the window never closes");
       if (tree.name === "Choices") {
         // One on-off button for each option. With max= the other options are disabled when that many are on.
         const on = Array.isArray(node.props.value) ? node.props.value : [], full = node.props.max !== undefined && on.length >= node.props.max;
@@ -440,7 +443,7 @@ export class App {
           const sorted = [...new Set(keys)].flatMap((key) => rows.map((row, index) => [row, key, index]).filter((item) => keys[item[2]] === key));
           rows = sorted.map((item) => item[0]);
           heads = sorted.map((item, index) => (index === 0 || sorted[index - 1][1] !== item[1] ? [{ type: "Heading", props: { text: String(item[1] ?? "") }, children: [] }] : []));
-        } catch (failure) { this.fault(name ?? tree.name, `group: ${failure.message}`); }
+        } catch (failure) { this.fault(name ?? tree.name, MESSAGES ? `group: ${failure.message}` : ""); }
         node.children = rows.flatMap((row, index) => [...(heads[index] ?? []), visit(node.template, { it: row, index, list }, undefined, depth + 1)]);
         // For the emitter: the stored list of the rows, and the row template drawn for a row that it gives, such as a blank row.
         node.source = list;

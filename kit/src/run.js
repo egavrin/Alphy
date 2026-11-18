@@ -7,6 +7,9 @@ import { App, foreground, given, settings } from "./core.js";
 import { MAX_ROWS, cast, castRow, clockOf, namer, own, relative, rows, shownAs, wished } from "./rows.js";
 import { BAR_SURFACE, MODEL, STAGE, accentOf, barOf, commandsOf, fit, fixed, polygonsOf, sideOf } from "./draw.js";
 
+/** False in the run-time text of an app (dsl.js): the run-time reads no fault of the screen. */
+const MESSAGES = true;
+
 /** An object of Alphy holds at most 32 fields, so the shown values go into d, d2, d3, and the tests into v, v2. */
 export const PER_OBJECT = 32;
 /** An array of Alphy holds at most 512 values (ToolValueSchema). */
@@ -58,7 +61,7 @@ const choice = (n, at) => {
  */
 const ranged = (type, low, high) => (n, at) => {
   const { min = low, max = high, step, value } = n.props;
-  if (![min, max].every(Number.isFinite) || !(min < max) || (!at.blank && !(Number.isFinite(value) && value >= min && value <= max)) || (step !== undefined && !(step > 0 && step <= max - min))) {
+  if (MESSAGES && (![min, max].every(Number.isFinite) || !(min < max) || (!at.blank && !(Number.isFinite(value) && value >= min && value <= max)) || (step !== undefined && !(step > 0 && step <= max - min)))) {
     at.fault(`a ${n.type} needs min below max, its value from min to max, and a step above 0 and at most max - min. Now min is ${min}, max is ${max}, the value is ${value}${step === undefined ? "" : `, and the step is ${step}`}`);
   }
   at.bounds(min, max);
@@ -113,7 +116,7 @@ const NODES = {
   // The host's own countdown (Alphy's foreground timer): the host keeps its time and sends its action to no source.
   Timer: (n, at) => {
     const ms = Math.round(Number(n.props.seconds) * 1000);
-    if (!(ms >= MIN_TIMER_MS && ms <= MAX_TIMER_MS)) at.fault(`a Timer runs from 1 second to 24 hours, and this one has ${n.props.seconds} seconds`);
+    if (MESSAGES && !(ms >= MIN_TIMER_MS && ms <= MAX_TIMER_MS)) at.fault(`a Timer runs from 1 second to 24 hours, and this one has ${n.props.seconds} seconds`);
     return { type: "timer", text: at.label(), mode: "countdown", action: at.action(() => false),
       foreground: { durationMs: Number.isFinite(ms) ? Math.min(MAX_TIMER_MS, Math.max(MIN_TIMER_MS, ms)) : MIN_TIMER_MS, ...ALERT } };
   },
@@ -160,7 +163,7 @@ export function screen(kit, app, first = false) {
    * the field is in d (or in v for a test). In a row it is a field of the row, and the list becomes a view with that field.
    */
   const slot = (kind, key, expr, value, at) => {
-    if (value !== null && typeof value === "object") at.fault(`it shows a ${Array.isArray(value) ? "list" : "record"}, and Alphy shows one text or number there. Show one field of it, or join(list)`);
+    if (MESSAGES && value !== null && typeof value === "object") at.fault(`it shows a ${Array.isArray(value) ? "list" : "record"}, and Alphy shows one text or number there. Show one field of it, or join(list)`);
     const scope = at.scope;
     if (scope) {
       const stored = scope.stored.get(relative(expr));
@@ -193,14 +196,14 @@ export function screen(kit, app, first = false) {
   const walk = (node, key, line, ctx) => {
     line = node.name ?? line;
     const scope = ctx.scope, map = own(NODES, node.type), fault = (text) => faults.push([line, text]);
-    if (!map) { fault(`${own(LATER, node.type) ?? node.type} is not built yet`); return null; }
-    if (scope && NOT_IN_ROW.has(node.type)) { fault(`a ${node.type} in a row of a list is not built yet`); return null; }
+    if (!map) { fault(MESSAGES ? `${own(LATER, node.type) ?? node.type} is not built yet` : ""); return null; }
+    if (scope && NOT_IN_ROW.has(node.type)) { fault(MESSAGES ? `a ${node.type} in a row of a list is not built yet` : ""); return null; }
     const expr = node.call ? given(node.call) : {};
     // The arrows of a row, move(-1) and move(1), become the reorder of its list.
     if (scope && expr.action?.k === "call" && expr.action.name === "move" && expr.action.args.length === 1) { scope.flags.moves = true; return null; }
     // Alphy draws one row template for all rows, and a button, a field, or a choice binds no text or options (ToolUiCatalog).
     // shortcut: each field of the row in these values is a fault, also one that gives all rows the same text, such as count($/x, $done); allow those when a plan needs them.
-    if (scope) for (const prop of ["label", "title", "icon", "options"]) {
+    if (MESSAGES && scope) for (const prop of ["label", "title", "icon", "options"]) {
       if (readsRow(expr[prop])) fault(`the ${prop} of a ${node.type} in a row ${prop === "options" ? "change" : "changes"} with the row, and Alphy draws one ${prop} for all rows. Show the value in a Text of the row`);
     }
     // A list in a Section announces the title of the Section: an entries need puts its list into a Section with the title of the need.
@@ -218,7 +221,7 @@ export function screen(kit, app, first = false) {
       // A text of the screen that is a list or a record is a fault, never "a,b" or "[object Object]".
       plain: (value) => {
         if (value === null || typeof value !== "object") return String(value ?? "");
-        fault(`it shows a ${Array.isArray(value) ? "list" : "record"} as a text, and Alphy shows one text there. Show one field of it, or join(list)`);
+        if (MESSAGES) fault(`it shows a ${Array.isArray(value) ? "list" : "record"} as a text, and Alphy shows one text there. Show one field of it, or join(list)`);
         return "";
       },
       value: (prop) => { const bind = bound(prop); return bind ? { bind } : { [prop]: node.props[prop] }; },
@@ -230,13 +233,13 @@ export function screen(kit, app, first = false) {
         let bind;
         if (scope) {
           const stored = scope.stored.get(relative(expr.bind));
-          if (!stored || (stored[1] === "time") !== (node.type === "TimeField") || (node.type === "DateField" && stored[1] !== "date")) {
+          if (MESSAGES && (!stored || (stored[1] === "time") !== (node.type === "TimeField") || (node.type === "DateField" && stored[1] !== "date"))) {
             fault(`a ${node.type} in a row binds a field of the row of its own kind, such as $name. ${expr.bind ? show(expr.bind) : "nothing"} is not built yet`);
           }
           bind = stored?.[0];
         } else {
           const root = expr.bind?.k === "path" && expr.bind.abs && expr.bind.segs.length === 1 ? expr.bind.segs[0] : null;
-          if (!fields.has(root) || (kinds[root] === "time") !== (node.type === "TimeField")) fault(`a binding to ${expr.bind ? show(expr.bind) : "nothing"} is not built yet: a field binds a value of a state line`);
+          if (MESSAGES && (!fields.has(root) || (kinds[root] === "time") !== (node.type === "TimeField"))) fault(`a binding to ${expr.bind ? show(expr.bind) : "nothing"} is not built yet: a field binds a value of a state line`);
           bind = fields.get(root);
         }
         return { text: at.caption(node.props.label), bind, action: at.action((value) => { const next = convert(value); return next === undefined ? false : kit.change(node, next); }) };
@@ -257,7 +260,7 @@ export function screen(kit, app, first = false) {
           { type: "bottomSheet", text, visibleBind: fields.get(flag), dismissAction: at.action(open(false), "_dismiss"), children: at.children(false, { ...ctx, sheet: { flag, add } }) }] };
       },
       modal: () => {
-        if (!expr.visible || expr.visible.k === "lit") fault("a Dialog shows while a test of the app is true, so it needs visible=test, such as visible=$/open");
+        if (MESSAGES && (!expr.visible || expr.visible.k === "lit")) fault("a Dialog shows while a test of the app is true, so it needs visible=test, such as visible=$/open");
         const target = falseOf(expr.visible), form = (child) => child.props.bind !== undefined || child.children.some(form);
         // The dismiss of Alphy (a tap outside, the back key) makes the test false, as the buttons of the dialog do.
         const dismiss = at.action(() => { if (!target) return false; kit.write(target[0], target[1], {}); kit.recompute(); return ""; }, "_dismiss");
@@ -280,7 +283,7 @@ export function screen(kit, app, first = false) {
       // The points of a chart are two arrays that the run-time writes: the labels and the values of the last 256 points.
       chart: () => {
         const kind = node.props.kind ?? "bar", text = at.label().slice(0, 100), points = (Array.isArray(node.props.points) ? node.props.points : []).slice(-MAX_POINTS);
-        if (kind !== "bar" && kind !== "line") fault(`a Chart of kind ${at.plain(kind)} is not built yet: give kind="bar" or kind="line"`);
+        if (MESSAGES && kind !== "bar" && kind !== "line") fault(`a Chart of kind ${at.plain(kind)} is not built yet: give kind="bar" or kind="line"`);
         const [categories, values] = [["labels", "string", "label"], ["values", "number", "value"]].map(([suffix, type, prop]) => {
           const field = name(`chart:${key}:${suffix}`, wished(`${key}_${suffix}`));
           views[field] = points.map((point) => shownAs(type, point[prop]));
@@ -299,7 +302,7 @@ export function screen(kit, app, first = false) {
             : empty >= 0 ? `group ${empty + 1} of this Tabs is empty, and Alphy draws no empty group. Put a component into it` : null;
         if (problem) { fault(problem); return null; }
         const valid = titles.length === groups.length && new Set(titles).size === titles.length && titles.every((title) => title.trim() && title.length <= 100);
-        if (!valid) fault(`a Tabs needs one title for each of its ${groups.length} groups: texts of 1 to 100 characters, each one different. Now they are ${JSON.stringify(titles)}`);
+        if (MESSAGES && !valid) fault(`a Tabs needs one title for each of its ${groups.length} groups: texts of 1 to 100 characters, each one different. Now they are ${JSON.stringify(titles)}`);
         // A change of computed titles can make them invalid after the start: the screen then numbers the tabs, so each reply still holds a tabs control.
         const shown = valid ? titles : groups.map((_, index) => String(index + 1));
         if (!shown.includes(kit.state[root])) kit.state[root] = shown[0];

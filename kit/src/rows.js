@@ -4,6 +4,9 @@
 
 import { dayNumber } from "./core.js";
 
+/** False in the run-time text of an app (dsl.js). */
+const MESSAGES = true;
+
 /** Alphy's rule for a state field and an action id (ToolValueSchema.name, ToolUiCatalog.registerAction). */
 const SAFE = /^[A-Za-z][A-Za-z0-9_]{0,47}$/;
 const REFUSED = new Set(["__proto__", "prototype", "constructor"]);
@@ -76,7 +79,7 @@ export const relative = (expr) => (expr?.k === "path" && !expr.abs && expr.segs.
 export function rows(screen, node, key, line, expr, at, title) {
   const { kit, name, walk, day, fields, lists, views, viewSchemas, viewOwners, listRoots } = screen;
   const source = node.source, root = source?.k === "path" && source.abs && source.segs.length === 1 && lists[source.segs[0]] ? source.segs[0] : null;
-  if (!root || !node.blank) { at.fault("a List shows the rows of a list of the app, such as $/rows, or sort or filter of it. Other rows are not built yet"); return null; }
+  if (!root || !node.blank) { at.fault(MESSAGES ? "a List shows the rows of a list of the app, such as $/rows, or sort or filter of it. Other rows are not built yet" : ""); return null; }
   const spec = lists[root], rowName = namer();
   rowName("$id", "id");
   spec.forEach(([field, safe]) => rowName("$" + field, safe));
@@ -90,7 +93,7 @@ export function rows(screen, node, key, line, expr, at, title) {
   // The rows in their stored order: the stored list, or a filter of it.
   const inOrder = (items) => (items?.k === "path" ? items.abs && items.segs.length === 1 && items.segs[0] === root : items?.k === "call" && items.name === "filter" && inOrder(items.args[0]));
   const reorder = scope.flags.moves;
-  if (reorder && (group || !inOrder(expr.items))) at.fault("the arrows of a row move it in the stored list, so the list shows its rows in their stored order: no sort and no group");
+  if (MESSAGES && reorder && (group || !inOrder(expr.items))) at.fault("the arrows of a row move it in the stored list, so the list shows its rows in their stored order: no sort and no group");
   const label = reorder ? rowName("~label", "label") : null;
   if (label) scope.computed.set(label, "string");
   const shown = node.children.filter((child) => child.row).map((child) => {
@@ -105,7 +108,7 @@ export function rows(screen, node, key, line, expr, at, title) {
   if (view) {
     const schema = { id: "string", ...Object.fromEntries(spec.map(([, safe, kind]) => [safe, own(ALPHY, kind) ?? kind])), ...Object.fromEntries(scope.computed) };
     const count = Object.keys(schema).length;
-    if (count > MAX_ROW_FIELDS) at.fault(`the rows of this list have ${count} fields with the id and the values that a row shows, and a row of Alphy has at most ${MAX_ROW_FIELDS}. Show fewer values in a row`);
+    if (MESSAGES && count > MAX_ROW_FIELDS) at.fault(`the rows of this list have ${count} fields with the id and the values that a row shows, and a row of Alphy has at most ${MAX_ROW_FIELDS}. Show fewer values in a row`);
     views[field] = shown;
     viewSchemas[field] = { type: "list", maxItems: MAX_ROWS, fields: schema };
     viewOwners.push(line);
