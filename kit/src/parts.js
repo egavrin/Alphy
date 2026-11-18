@@ -460,7 +460,7 @@ export async function expand(file, choose = rules) {
     (built.holds ?? []).forEach((other) => held.add(other));
     place.set(entry.key, built.top);
     if (file.expanded.get(entry.key) === entry.raw + (entry.key === hero)) continue;
-    if (!file.expanded.has(entry.key)) fresh.push(...built.top);
+    if (!file.expanded.has(entry.key)) fresh.push(entry.key);
     file.expanded.set(entry.key, entry.raw + (entry.key === hero));
     // A line that an author wrote or deleted belongs to the author. The part leaves it as it is.
     out.push(...built.lines.filter((line, index) => file.open(parsed[index].key)));
@@ -476,7 +476,8 @@ export async function expand(file, choose = rules) {
   else if (fresh.length && root) {
     // The author owns root. A new part still has to appear, so its view joins the end of the author's list.
     const list = root.tree.k === "call" && root.tree.args[0]?.k === "list" ? root.tree.args[0] : null;
-    const missing = fresh.filter((name) => !root.raw.includes(name));
+    // A need that a tabs or steps need holds is on the screen inside its holder, so only the holder joins.
+    const missing = fresh.filter((key) => !held.has(key)).flatMap((key) => place.get(key)).filter((name) => !root.raw.includes(name));
     // When root is not a plain list, the report says that the need is not on the screen.
     if (list && missing.length) {
       const joined = { ...root.tree, args: [{ k: "list", items: [...list.items, ...missing.map((name) => ({ k: "ref", name }))] }, ...root.tree.args.slice(1)] };

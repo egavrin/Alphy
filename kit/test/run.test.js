@@ -6,7 +6,7 @@ import { createContext, runInContext } from "node:vm";
 import { App } from "../src/core.js";
 import { parseLine } from "../src/dsl.js";
 import { emit, runtime } from "../src/emit.js";
-import { handle } from "../src/run.js";
+import { handle, kitOf } from "../src/run.js";
 import { allPlans, plan, planned } from "./helpers.js";
 
 const compiled = async (text) => { const file = await planned(text); return { file, ...emit(file) }; };
@@ -37,6 +37,18 @@ test("run: open of the initial state gives the initial state", async () => {
     opened.push(path);
   }
   expect(opened).toHaveLength(14);
+});
+
+test("run: the kit of an event computes its formulas on the stored state, with no fault", async () => {
+  // A kit that computes before it reads the state counts the rows of a list that is not there yet: "count needs a list".
+  const checked = [];
+  for (const [path, text] of allPlans()) {
+    const { definition, app } = await compiled(text);
+    if (!definition) continue;
+    expect([path, kitOf(app, definition.initialState).faults]).toEqual([path, []]);
+    checked.push(path);
+  }
+  expect(checked).toContain("plans/list.plan");
 });
 
 test("run: render and preview change no state", async () => {
@@ -449,6 +461,16 @@ test("source: the source of list.plan is under 60000 bytes and answers an add as
   const add = request(typed, { type: "action", actionId: "prodotti_add", value: null });
   expect(run(add)).toEqual(handle(add, app));
   expect(run(add).state.prodotti).toHaveLength(4);
+});
+
+test("source: no source of a saved plan or fixture that compiles passes 60000 bytes", async () => {
+  const sizes = [];
+  for (const [path, text] of allPlans()) {
+    const { definition, app } = await compiled(text);
+    if (definition) sizes.push([path, measured(path, definition, app)]);
+  }
+  expect(sizes.filter(([, size]) => size >= 60000)).toEqual([]);
+  expect(sizes.length).toBeGreaterThan(0);
 });
 
 /** The bytes that a field of the state may cost in the maps of the compiled data: its kit name and its Alphy name of at most 16 characters each, and its kind, in JSON. */

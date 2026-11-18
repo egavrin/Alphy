@@ -329,6 +329,19 @@ export function load(kit, app, state) {
 }
 
 /**
+ * The kit of one event: the lines of the compiled app with the stored state in it. The kit starts with no line, so its first
+ * compute (in load) sees the stored state, and a formula never runs on a state that is not there yet.
+ */
+export function kitOf(app, state) {
+  const kit = new App(new AppFile());
+  kit.file = new AppFile().feedText(app.lines);
+  kit.nextId = app.next;
+  if (app.shown) kit.shown = Object.fromEntries(parseExpression(app.shown).entries);
+  load(kit, app, state);
+  return kit;
+}
+
+/**
  * Answers one event of the sandbox request {artifactId, revision, state, event}. app is the compiled data of emit.js, and now
  * is the clock of the host. A read-only event, an action id that the app does not have, an action that changes nothing, and an
  * action that takes a list past its count of rows (app.caps) or an array past Alphy's limit give the state back as it is. A bound
@@ -340,10 +353,7 @@ export function handle(input, app, now = Date.now()) {
   const clock = settings.now;
   settings.now = () => now;
   try {
-    const kit = new App(new AppFile().feedText(app.lines)), kinds = app.kinds ?? {};
-    kit.nextId = app.next;
-    if (app.shown) kit.shown = Object.fromEntries(parseExpression(app.shown).entries);
-    load(kit, app, state);
+    const kit = kitOf(app, state), kinds = app.kinds ?? {};
     const before = screen(kit, app), control = event.type === "action" ? before.controls.get(event.actionId) : undefined;
     if (event.type !== "open" && !control) return { state };
     if (control && control(event.value) === false) return { state };

@@ -346,6 +346,9 @@ test("emit: a screen whose charts alone pass the render work limit is a fault of
   expect(definition).toBeNull();
   // 8 charts full at 256 points cost 2048, and the nodes of the screen come on top.
   expect(faults).toEqual([expect.stringMatching(/^app: .*render work.*2048/)]);
+  // A list beside them has no room at all: the fault of the app is the only fault, with no count of rows below 0.
+  const listed = emit(await planned(['app("Charts", lang="en")', "$/points = [1, 2, 3]", ...charts, 'need notes = entries("Notes", rows=[{name: "One"}])'].join("\n")));
+  expect(listed.faults).toEqual([expect.stringMatching(/^app: .*render work.*2048/)]);
 });
 
 test("emit: a list with room for fewer than 20 rows is a fault of its need", async () => {
@@ -556,6 +559,16 @@ test("emit: a timer need is a fault until the host moves its clock", async () =>
   const { definition, faults } = emit(await planned(['app("Tea", lang="en")', 'need tea = timer("Tea", 120)'].join("\n")));
   expect(definition).toBeNull();
   expect(faults).toEqual(["need tea: timer is not built yet"]);
+});
+
+test("emit: an author's root beside a tabs need shows each control of the held needs once", async () => {
+  // The device test anAuthorsRootBesideATabsNeedPassesParseAndSmoke sends the same plan through ToolSpec.parse.
+  const file = await planned(['app("Held", lang="en")', 'need a = counter("A")', 'need b = counter("B")', 'need pages = tabs(["One", "Two"], [[a], [b]])', 'note = Text("Hi")', "root = Column([note])"].join("\n"));
+  expect(file.get("root").raw).toBe("root = Column([note, pages_view])");
+  const { definition, faults } = emit(file);
+  expect(faults).toEqual([]);
+  const actions = every(definition.ui).map((node) => node.action).filter(Boolean);
+  expect(actions).toEqual(["pages_view", "a_minus", "a_plus", "b_minus", "b_plus"]);
 });
 
 test("emit: each card, chart, tab, lesson, and question of the cards fixture becomes its Alphy node", async () => {

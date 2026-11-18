@@ -238,6 +238,13 @@ class AppFileProofTest {
         val picks=parsedAndSmoked(sandbox,"picks",text="app(\"Picks\", lang=\"en\")\nneed picks = entries(\"Picks\", fields={day: [\"Sat\", \"Sun\"]}, sheet=true, rows=[])\n")
         assertTrue(picks.ui.toString(),"\"rowTemplate\":{\"type\":\"flowRow\"" in picks.ui.toString())
     }
+    @Test fun anAuthorsRootBesideATabsNeedPassesParseAndSmoke(): Unit=runBlocking {
+        // The tabs need holds the two counters, and the author's root gets only the tabs: each control is on the screen once.
+        // The kit test of the held needs has the same plan.
+        val text="app(\"Held\", lang=\"en\")\nneed a = counter(\"A\")\nneed b = counter(\"B\")\nneed pages = tabs([\"One\", \"Two\"], [[a], [b]])\nnote = Text(\"Hi\")\nroot = Column([note])\n"
+        val spec=parsedAndSmoked(SandboxClient(instrumentation.targetContext),"held",text=text)
+        assertEquals(listOf("pages_view","a_minus","a_plus","b_minus","b_plus"),nodes(spec.ui).mapNotNull {it.optString("action").ifEmpty {null}})
+    }
     @Test fun anActionOnAListOf100RowsTakesUnder250Ms(): Unit=runBlocking {
         val rows=(1..100).joinToString(", ") {"{name: \"Item $it\", done: false}"}
         // sort= gives the list a view that the run-time writes after each event: the heavier path.

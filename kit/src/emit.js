@@ -174,7 +174,8 @@ export function emit(file) {
   // One count for all lists of the app: the most rows for which the screen stays inside the limit when each list is full.
   const cost = [...perRow.values()].reduce((sum, each) => sum + each, 0);
   const rowCount = cost ? Math.min(MAX_ROWS, Math.floor((MAX_RENDER_WORK - fixed) / cost)) : MAX_ROWS, storedField = new Map(app.fields);
-  for (const node of shownLists) {
+  // A screen with no room left is the fault of the app alone: a count of rows below 0 says nothing more.
+  for (const node of fixed > MAX_RENDER_WORK ? [] : shownLists) {
     const root = shown.listRoots.get(node), where = label(shown.owners.get(node)), start = kit.state[root].length;
     app.caps[root] = rowCount;
     stateSchema[storedField.get(root)].maxItems = stateSchema[node.bind].maxItems = rowCount;
