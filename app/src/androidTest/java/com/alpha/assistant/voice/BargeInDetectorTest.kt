@@ -9,7 +9,7 @@ import kotlin.random.Random
 class BargeInDetectorTest {
     private val random = Random(7)
 
-    private fun block(rms: Double) = ShortArray(LIVE_BLOCK) { ((if (random.nextBoolean()) rms else -rms) * Short.MAX_VALUE).toInt().toShort() }
+    private fun block(rms: Double) = random.pcmBlock(rms)
 
     @Test fun silenceNeverFires() {
         val detector = BargeInDetector()

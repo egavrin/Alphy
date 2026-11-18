@@ -41,7 +41,7 @@ internal object LiveProtocol {
 Ты не видишь экран пользователя. Любой вопрос об экране передавай Alphy.
 Если Alphy сообщает, что готовит мини-приложение, скажи об этом один раз и не придумывай его содержание."""
 
-    private fun newId() = "event_" + UUID.randomUUID().toString().replace("-", "")
+    fun newId() = "event_" + UUID.randomUUID().toString().replace("-", "")
 
     fun start(history: List<Message>): String = JSONObject()
         .put("type", "session.start").put("event_id", newId())

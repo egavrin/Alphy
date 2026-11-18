@@ -40,6 +40,13 @@ class VoiceModeTurnsTest {
         assertEquals("Поставь таймер", t.request(3_200))
     }
 
+    @Test fun blankRequestKeepsTheHandOffMark() {
+        val t = LiveTranscript()
+        assertEquals("", t.request(3_000))
+        t.input("Поставь таймер", 1_000, 2_500, false)
+        assertEquals("Поставь таймер", t.request(3_000))
+    }
+
     @Test fun outputEndsAndReturnsTheOpenTurn() {
         val t = LiveTranscript()
         t.input("Привет", 0, 800, true)

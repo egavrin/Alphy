@@ -30,11 +30,15 @@ internal class LiveTranscript {
 
     fun endTurn(): UserTurn? = open.also { open = null }
 
-    /** The trimmed input after Alphy's latest spoken output and the previous hand-off, up to [offsetMs]. */
+    /**
+     * The trimmed input after Alphy's latest spoken output and the previous hand-off, up to [offsetMs]. A blank result does not
+     * count as a hand-off, so the session can ask again after it waits for late input deltas (spec 5.5.2).
+     */
     fun request(offsetMs: Long): String {
         val after = maxOf(lastHandOffMs, outputEnds.filter { it <= offsetMs }.maxOrNull() ?: -1L)
-        lastHandOffMs = offsetMs
-        return inputs.filter { it.startMs > after && it.startMs <= offsetMs }.joinToString("") { it.text }.trim()
+        val text = inputs.filter { it.startMs > after && it.startMs <= offsetMs }.joinToString("") { it.text }.trim()
+        if (text.isNotEmpty()) lastHandOffMs = offsetMs
+        return text
     }
 }
 
