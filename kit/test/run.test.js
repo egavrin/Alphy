@@ -6,6 +6,7 @@ import { createContext, runInContext } from "node:vm";
 import { ACTIONS, App, settings } from "../src/core.js";
 import { parseLine } from "../src/dsl.js";
 import { ACCENTS, LIMITS, STAGE, budgetOf, commandsOf, polygonsOf } from "../src/draw.js";
+import { IDLE } from "../src/drag.js";
 import { emit, runtime } from "../src/emit.js";
 import { handle, kitOf } from "../src/run.js";
 import { T0, allPlans, clocked, gateEach, plan, planned } from "./helpers.js";
@@ -420,7 +421,6 @@ test("run: a reply of exactly 32768 bytes keeps each command, and one byte more 
 /** The surface of the rover of model3d.plan as the kit's App gives it: the stage, and the faces of the App's bodies at the App's turn. The App takes the bodies apart itself. */
 const rover = (kit) => { const { bodies, value, selected } = kit.find("rover_model").props; return [STAGE, ...polygonsOf(bodies, value, false, selected, 320, 240, ACCENTS.teal)]; };
 const pointer = (phase, x, surfaceId = "rover_model", id = 0) => ({ type: "pointer", surfaceId, x, y: 120, phase, pointer: id });
-const IDLE = { surface: "", pointer: 0, x: 0 };
 
 test("run: a pointer drag of 50 pixels turns the model by 30 degrees", async () => {
   const { file, definition, app } = await compiled(plan("model3d"));
@@ -777,7 +777,7 @@ test("run: a shown value that becomes a list is never its text", async () => {
 const bytes = (text) => Buffer.byteLength(text, "utf8");
 /** Prints the bytes of the source of a plan and of its parts, and gives the bytes of the source. */
 const measured = (plan, definition, app) => {
-  console.log(`${plan} source: ${bytes(definition.source)} bytes (run-time ${bytes(runtime.text)}, compiled data ${bytes(JSON.stringify(app))}); definition ${bytes(JSON.stringify(definition))}; ui ${bytes(JSON.stringify(definition.ui))}; state ${bytes(JSON.stringify(definition.initialState))}`);
+  console.log(`${plan} source: ${bytes(definition.source)} bytes (compiled data ${bytes(JSON.stringify(app))}); definition ${bytes(JSON.stringify(definition))}; ui ${bytes(JSON.stringify(definition.ui))}; state ${bytes(JSON.stringify(definition.initialState))}`);
   return bytes(definition.source);
 };
 /** The source in the sandbox's own wrapper (SandboxClient.evaluationScript), in a context with only the language's globals. */
@@ -795,7 +795,6 @@ test("source: the source of list.plan is under 60000 bytes and answers an add as
 
 test("source: the run-time text is at most 46500 bytes", () => {
   // kit/build.js leaves out each text that only the compile step reads (dsl.js MESSAGES), so each source has room to grow.
-  console.log(`run-time ${bytes(runtime.text)} bytes`);
   expect(bytes(runtime.text)).toBeLessThanOrEqual(46500);
 });
 

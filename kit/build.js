@@ -42,6 +42,12 @@ export function script(modules) {
 /** The line of each module that keeps its messages (dsl.js MESSAGES). */
 const MESSAGES = /^const MESSAGES = true;$/m;
 
+/** The text of a module for the run-time: without its MESSAGES line. A module that names MESSAGES with no such line is an error of the build. */
+export function withoutMessages(name, text) {
+  if (/\bMESSAGES\b/.test(text) && !MESSAGES.test(text)) throw new Error(`kit/src/${name}.js: the build takes out only the line const MESSAGES = true;`);
+  return text.replace(MESSAGES, "");
+}
+
 /**
  * The text of the run-time that the emitter puts into the source of each app, before `return handle(input, <data>);`.
  * The source is a function body, so handle and __handle are locals of the app's function and the global object gets no name.
@@ -50,7 +56,7 @@ const MESSAGES = /^const MESSAGES = true;$/m;
  */
 export async function runtimeText() {
   const entry = "/kit-runtime-entry.js";
-  const modules = Object.fromEntries(MODULES.map((name) => [at(`src/${name}.js`), readFileSync(at(`src/${name}.js`), "utf8").replace(MESSAGES, "")]));
+  const modules = Object.fromEntries(MODULES.map((name) => [at(`src/${name}.js`), withoutMessages(name, readFileSync(at(`src/${name}.js`), "utf8"))]));
   const built = await Bun.build({ entrypoints: [entry], files: { [entry]: `import { handle } from ${JSON.stringify(at("src/run.js"))};\n__handle(handle);\n`, ...modules },
     minify: true, format: "iife", target: "browser", define: { MESSAGES: "false" } });
   if (!built.success) throw new AggregateError(built.logs, "kit/build.js: Bun.build of the run-time failed");

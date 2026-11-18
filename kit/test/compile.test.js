@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createContext, runInContext } from "node:vm";
 import { compileAppFile } from "../src/compile.js";
-import { bundle, planCopies, plansIn, script } from "../build.js";
+import { bundle, planCopies, plansIn, script, withoutMessages } from "../build.js";
 import { plan } from "./helpers.js";
 
 test("compileAppFile: calc.plan gives a definition and no fault", async () => {
@@ -49,6 +49,14 @@ test("bundle: an import that the build cannot keep is an error of the build", ()
 
 test("bundle: an export line with two names is an error of the build", () => {
   expect(() => script([["a", "export const x = 1, y = 2;"]])).toThrow("one name");
+});
+
+test("build: a module that names MESSAGES keeps its texts out of the run-time only with the line of the build", () => {
+  expect(withoutMessages("a", "const MESSAGES = true;\nif (MESSAGES) f();")).toBe("\nif (MESSAGES) f();");
+  expect(withoutMessages("a", "f();")).toBe("f();");
+  // A line in another form would ship each text of the module with no error.
+  expect(() => withoutMessages("a", "const MESSAGES=true;\nif (MESSAGES) f();")).toThrow("kit/src/a.js");
+  expect(() => withoutMessages("a", "let MESSAGES = true;")).toThrow("kit/src/a.js");
 });
 
 test("build: a copy of a plan whose source is gone is in the outputs with no text", () => {
