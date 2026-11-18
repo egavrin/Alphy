@@ -84,11 +84,14 @@ internal class LiveVoiceSession(
     private var dropping = false
     /** A barge-in emptied the playback, so the next user turn still started over Alphy's voice. */
     private var interrupted = false
-    /** The silent output chunks after the last voiced chunk of the open reply. They play only if a voiced chunk of the reply follows. */
+    /**
+     * The silent output chunks after the last voiced chunk of the open reply. They play only if a voiced chunk of the reply follows
+     * while the device still plays (ruling R26).
+     */
     private val held = ArrayList<ShortArray>()
     /** The samples of silent stream audio after the last voiced chunk of the open reply. */
     private var silentSamples = 0L
-    /** The uptime of the last capture block or output chunk that saw playback audio. */
+    /** The uptime of the last capture block or output chunk that saw audio in the device. The overlap rule (R11) uses the device flag. */
     private var playbackSeenMs = Long.MIN_VALUE
     private var waiting: LiveEvent.Delegation? = null
     /** The client event ids of the commentary and thinking appends of this session. */
@@ -228,9 +231,13 @@ internal class LiveVoiceSession(
         val device = live ?: return
         // Blocks that were on the way at a mute.
         if (captureMuted) return
-        val playing = device.playbackActive
+        val playing = speaking()
         // Barge-in: the user's voice over the playback stops it at once (spec 5.4.5).
-        if (detector.accept(block, playing) && playing) { flush(); interrupted = true }
+        if (detector.accept(block, playing) && playing) {
+            // A barge-in in a dry pause did not start over Alphy's voice, so only the device flag marks the next turn (R11).
+            if (device.playbackActive) interrupted = true
+            flush()
+        }
         if (detector.userSpeaking != userSpeaking) {
             userSpeaking = detector.userSpeaking
             if (userSpeaking) { firstSpeech = false; firstJob?.cancel() }
@@ -266,6 +273,7 @@ internal class LiveVoiceSession(
         if (!dropping) {
             // shortcut: ruling R26 writes the held pause only while the device still plays. A device that has run dry played the
             // pause as its underrun, so the pause is shorter by the backlog; measure the pause on a phone if replies sound rushed.
+            // The phase and the barge-in check follow the open reply (R34), so a dry device changes neither.
             val chunks = if (device.playbackActive) held + samples else listOf(samples)
             val epoch = playback
             player.launch { for (chunk in chunks) if (epoch == playback) device.play(chunk) }
@@ -288,7 +296,11 @@ internal class LiveVoiceSession(
         held.clear()
         host?.outputEnded(transcript.outputEndMs)
         countSilence()
+        refresh()
     }
+
+    /** Ruling R34: a reply is open (R27) or the device still plays. The barge-in check, the phase, and the silence count use it. */
+    private fun speaking() = replyJob?.isActive == true || live?.playbackActive == true
 
     private fun delegation(event: LiveEvent.Delegation) {
         waiting?.let { handOff(it, transcript.request(it.offsetMs)) }
@@ -332,27 +344,25 @@ internal class LiveVoiceSession(
     }
 
     /**
-     * Counts the 60 s without user speech again. At its end, a running hand-off or Alphy's own reply (voiced output audio or
-     * playback) restarts the count. The output end, a commentary, and a thinking text also restart it, because the user needs
+     * Counts the 60 s without user speech again. At its end, a running hand-off or Alphy's own reply (an open reply or playback,
+     * ruling R34) restarts the count. The output end, a commentary, and a thinking text also restart it, because the user needs
      * time to hear a result (spec 5.8, ruling R12).
      */
     private fun countSilence() {
         silenceJob?.cancel()
         if (!started || userSpeaking) return
         silenceJob = after(timing.silenceMs) {
-            val replying = replyJob?.isActive == true || live?.playbackActive == true
-            if (replying || host?.handOffRunning() == true) countSilence() else end(string(R.string.live_voice_no_speech))
+            if (speaking() || host?.handOffRunning() == true) countSilence() else end(string(R.string.live_voice_no_speech))
         }
     }
 
     private fun refresh() {
-        val playing = live?.playbackActive == true
-        if (playing) playbackSeenMs = SystemClock.uptimeMillis()
+        if (live?.playbackActive == true) playbackSeenMs = SystemClock.uptimeMillis()
         phase = when {
             !active -> LivePhase.IDLE
             !started -> LivePhase.CONNECTING
             captureMuted -> LivePhase.MUTED
-            playing -> LivePhase.SPEAKING
+            speaking() -> LivePhase.SPEAKING
             else -> LivePhase.LISTENING
         }
     }

@@ -453,6 +453,63 @@ class VoiceModeSessionTest {
         assertEquals(1, rig.outputEnds())
     }
 
+    /** Ruling R34: an open reply is playback for the barge-in check, also while the device runs dry in its pause. */
+    @Test fun bargeInInADryPauseFlushesTheReply() {
+        val rig = Rig(STREAM, realTime = true).started()
+        Stream(rig).use { stream ->
+            stream.voiced(1, 5, CHUNK); stream.silent(7); stream.voiced(2, 5, CHUNK)
+            // The device runs dry about 100 ms into the 700 ms pause, and the user starts to speak.
+            waitUntil("dry pause") { rig.markers().count { it == 1_000 } == 5 && !rig.audio.playbackActive }
+            stream.loud = true
+            waitUntil("barge-in", 1_500) { rig.audio.flushes.get() == 1 }
+            stream.loud = false
+            waitUntil("user stopped") { !rig.session.userSpeaking }
+            // The device was dry at the flush, so the turn did not start over Alphy's voice (R11 keeps the device flag).
+            rig.socket.emit(inputDelta("Стоп", 1_000, 1_100))
+            rig.socket.emit(outputDelta("Хорошо", 1_200, 1_400))
+            stream.drain()
+            waitUntil("turn") { rig.turns().isNotEmpty() }
+            assertEquals(listOf("turn:Стоп:1000:1100:false"), rig.turns())
+            assertTrue("The rest of the reply stays dropped: ${rig.markers()}", 2_000 !in rig.markers())
+        }
+    }
+
+    /** Ruling R34: a short device gap inside a reply restarts no echo grace, so the user's voice still flushes the reply. */
+    @Test fun bargeInSurvivesAShortDeviceGap() {
+        val rig = Rig(STREAM).started()
+        Stream(rig).use { stream ->
+            rig.audio.playbackActive = true
+            stream.voiced(1, 20, CHUNK)
+            waitUntil("reply") { 1_000 in rig.markers() }
+            // The detector learns the echo level in its 240 ms grace.
+            SystemClock.sleep(300)
+            stream.loud = true
+            SystemClock.sleep(60)
+            // A jitter gap of the device during the user's first words: about three capture blocks.
+            rig.audio.playbackActive = false
+            SystemClock.sleep(60)
+            rig.audio.playbackActive = true
+            waitUntil("barge-in", 1_500) { rig.audio.flushes.get() == 1 }
+            stream.loud = false
+        }
+    }
+
+    /** Ruling R34: the phase stays SPEAKING while the device runs dry in a pause of a reply, and returns to LISTENING at its end. */
+    @Test fun phaseStaysSpeakingInADryPause() {
+        val rig = Rig(STREAM, realTime = true).started()
+        Stream(rig).use { stream ->
+            stream.voiced(1, 3, CHUNK); stream.silent(7); stream.voiced(1, 1, CHUNK)
+            waitUntil("dry pause") { rig.markers().size == 3 && !rig.audio.playbackActive }
+            repeat(3) {
+                assertEquals(LivePhase.SPEAKING, main { rig.session.phase })
+                SystemClock.sleep(100)
+            }
+            stream.drain()
+            waitUntil("output end") { rig.outputEnds() == 1 }
+            waitUntil("listening") { rig.session.phase == LivePhase.LISTENING }
+        }
+    }
+
     @Test fun repliesPlayAfterABargeInAndAfterAway() {
         val rig = Rig(STREAM, realTime = true).started()
         Stream(rig).use { stream ->
