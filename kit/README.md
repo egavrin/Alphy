@@ -11,6 +11,7 @@ Then it runs the app (state, formulas, actions, and the component tree) and chec
 | `src/parts.js` | The parts: each one changes a need line into component, state, and formula lines. |
 | `src/core.js` | The evaluator: the `App` that holds the state and builds the component tree. It reads no `process` and no file. |
 | `src/check.js` | The report of the host, the check lines, and the smoke run that uses each control. Only the compile step uses it. |
+| `src/rows.js` | The list mapping of the run-time: `rows` maps a List to Alphy's list, and the value forms that the screen and the state share (Alphy names, times, dates, shown values). |
 | `src/run.js` | The run-time of a compiled app: `handle` answers each event, and `screen` maps each component to its Alphy node. |
 | `src/emit.js` | The emitter: an expanded app file as Alphy's app definition, whose `source` is the run-time and the compiled data of the app. It gives a fault for each limit of Alphy that the kit's own mapping can pass: state fields, the fields of a need's object, source bytes, and the nodes and depth of the screen. |
 | `src/compile.js` | The sandbox entry `compileAppFile`: an app file in; the faults and notes of the report and the definition out. |

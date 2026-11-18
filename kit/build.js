@@ -10,7 +10,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** The modules of the bundle in dependency order: each one imports only modules before it. */
-const MODULES = ["dsl", "core", "parts", "check", "run", "emit", "compile"];
+const MODULES = ["dsl", "core", "parts", "check", "rows", "run", "emit", "compile"];
 const at = (path) => fileURLToPath(new URL(path, import.meta.url));
 const source = (name) => [name, readFileSync(at(`src/${name}.js`), "utf8")];
 const scanner = new Bun.Transpiler({ loader: "js" });

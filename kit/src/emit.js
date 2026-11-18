@@ -2,7 +2,8 @@
 // run-time (run.js and the modules that it needs) and the compiled data of the app. The run-time answers each event.
 
 import { App, given } from "./core.js";
-import { ALPHY, MAX_ARRAY, MAX_ROW_FIELDS, MAX_ROWS, PER_OBJECT, TYPED, header, load, namer, screen, stateOf } from "./run.js";
+import { ALPHY, MAX_ROW_FIELDS, MAX_ROWS, namer, own } from "./rows.js";
+import { MAX_ARRAY, PER_OBJECT, TYPED, header, load, screen, stateOf } from "./run.js";
 
 /** The text of the run-time. kit/build.js puts it into the bundle, and a test of the sources sets it from the sources. */
 export const runtime = { text: "" };
@@ -18,7 +19,6 @@ const CHOICES = new Set(["select", "tabs", "singleChoice", "multiChoice", "segme
 const SCALARS = new Set(["number", "string", "boolean"]);
 /** The kind of each field kind of an entries need. A choice and a text are strings. */
 const FIELD_KINDS = { number: "number", money: "number", percent: "number", count: "number", check: "boolean", switch: "boolean", time: "time", date: "date" };
-const own = (map, key) => (Object.hasOwn(map, key) ? map[key] : undefined);
 
 /** The UTF-8 bytes of a text, as the host counts them. The sandbox has no TextEncoder that the kit can count on. */
 const bytes = (text) => {
