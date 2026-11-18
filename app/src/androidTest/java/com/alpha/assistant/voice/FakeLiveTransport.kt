@@ -48,4 +48,9 @@ internal class FakeLiveTransport : LiveTransport {
     fun fail(status: Int?) = checkNotNull(listener).onFailure(status,
         if (status != null) providerFailure(AiProvider.OPENAI, status, null, false).message else "Нет соединения с голосовым режимом.")
     fun closeRemote() = checkNotNull(listener).onClosed()
+    /** The user says [text] at [atMs] of the session timeline, and GPT-Live hands it to Alphy as [id]. */
+    fun say(text: String, id: String, atMs: Long) {
+        emit(inputDelta(text, atMs, atMs + 500))
+        emit(liveDelegation(id, atMs + 600))
+    }
 }

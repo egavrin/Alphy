@@ -61,39 +61,68 @@ import com.alpha.assistant.voice.speechSources
     assistantInvocation: String? = null,
     displayedCapture: AssistCapture? = null,
 ): () -> Unit {
+    val visibleCapture by rememberUpdatedState(displayedCapture)
+    return rememberMicrophoneStart(model, listOf(oneShot, destination, assistantInvocation), { model.composerContextKey(destination) },
+        start = { model.startComposerVoice(oneShot, destination, assistantInvocation, visibleCapture) },
+        denied = { model.denyVoicePermission(destination) })
+}
+
+/** The voice mode start (spec 5.1.5, 5.11.2). A refusal shows [MicrophonePermissionGuidance] of the chat composer. */
+@Composable internal fun rememberLiveVoiceStart(
+    model: ShellViewModel,
+    assistantInvocation: String? = null,
+    capture: AssistCapture? = null,
+    firstSpeech: Boolean = false,
+): () -> Unit {
+    val current by rememberUpdatedState(capture)
+    // The voice mode does not use the draft, so any draft keeps a pending start.
+    return rememberMicrophoneStart(model, listOf(assistantInvocation, firstSpeech), { "" },
+        start = { model.startLiveVoice(assistantInvocation, current, firstSpeech) },
+        denied = { model.denyVoicePermission(null) })
+}
+
+/**
+ * Asks for the microphone, then runs [start] when Alphy is resumed on an interactive, unlocked screen. A start or a refusal applies
+ * only while [origin] gives the same non-null value as at the tap. [keys] reset a pending start.
+ */
+@Composable private fun rememberMicrophoneStart(model: ShellViewModel, keys: List<Any?>, origin: () -> String?,
+    start: () -> Unit, denied: () -> Unit): () -> Unit {
     val context = LocalContext.current
     val owner = androidx.activity.compose.LocalActivity.current as? ComponentActivity
-    var origin by remember(destination, assistantInvocation) { mutableStateOf<String?>(null) }
-    var pending by remember(destination, assistantInvocation) { mutableStateOf(false) }
-    val visibleCapture by rememberUpdatedState(displayedCapture)
+    var tapped by remember(keys) { mutableStateOf<String?>(null) }
+    var pending by remember(keys) { mutableStateOf(false) }
+    val currentOrigin by rememberUpdatedState(origin)
+    val currentStart by rememberUpdatedState(start)
+    val currentDenied by rememberUpdatedState(denied)
     fun startIfVisible() {
         val power = context.getSystemService(PowerManager::class.java)
         val keyguard = context.getSystemService(KeyguardManager::class.java)
         if (pending && power.isInteractive && !keyguard.isDeviceLocked && owner?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true) {
             pending = false
-            if (origin != null && origin == model.composerContextKey(destination)) {
-                model.startComposerVoice(oneShot, destination, assistantInvocation, visibleCapture)
-            }
+            if (tapped != null && tapped == currentOrigin()) currentStart()
         }
     }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed ->
         if (allowed) { pending = true; startIfVisible() }
         else {
             pending = false
-            if (origin != null && origin == model.composerContextKey(destination)) model.denyVoicePermission(destination)
+            if (tapped != null && tapped == currentOrigin()) currentDenied()
         }
     }
-    DisposableEffect(owner, model, oneShot, destination, assistantInvocation) {
+    DisposableEffect(owner, model, keys) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) startIfVisible() }
         owner?.lifecycle?.addObserver(observer)
-        onDispose { pending = false; origin = null; owner?.lifecycle?.removeObserver(observer) }
+        onDispose { pending = false; tapped = null; owner?.lifecycle?.removeObserver(observer) }
     }
     return {
-        origin = model.composerContextKey(destination)
+        tapped = currentOrigin()
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             pending = true
             startIfVisible()
-        } else if (origin != null) permission.launch(Manifest.permission.RECORD_AUDIO)
+        } else if (tapped != null) {
+            model.expectAlphyScreen()
+            permission.launch(Manifest.permission.RECORD_AUDIO)
+        }
     }
 }
 

@@ -85,7 +85,8 @@ class ShellWorkflowTest {
             return false
         }
         assertFalse("No search checkbox", checkbox(diagnostics.freshRoot()))
-        waitFor("Добавить контекст"); waitFor("Голосовой запрос"); waitFor("Отправить сообщение")
+        // Spec 5.1.2: the home field is empty, so the OpenAI fixture shows the voice-mode button in place of the send button.
+        waitFor("Добавить контекст"); waitFor("Голосовой запрос"); waitFor(if (home) "Голосовой режим" else "Отправить сообщение")
         if (keyboardTop != null) {
             val send = Rect().also { waitFor("Отправить сообщение").getBoundsInScreen(it) }
             val maxGap = (32 * context.resources.displayMetrics.density).toInt()

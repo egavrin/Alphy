@@ -49,6 +49,7 @@ import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
+import com.alpha.assistant.cloud.Endpoints
 import com.alpha.assistant.data.Conversation
 import com.alpha.assistant.data.LegacyKeys
 import com.alpha.assistant.data.Message
@@ -56,6 +57,9 @@ import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.data.ShellStore
 import com.alpha.assistant.diagnostics.UiFailureDiagnostics
 import com.alpha.assistant.tools.agentReply
+import com.alpha.assistant.voice.FakeLiveAudio
+import com.alpha.assistant.voice.FakeLiveTransport
+import com.alpha.assistant.voice.LiveVoiceSession
 import com.alpha.assistant.voice.VoiceSession
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -175,6 +179,10 @@ internal class ShellFixture(prefix: String) {
     @Volatile var model: ShellViewModel? = null
     /** The key check of «Согласиться и сохранить». A device test never calls a real provider. */
     @Volatile var keyCheck: suspend (AiAccount) -> KeyCheck = { KeyCheck.ACCEPTED }
+
+    /** A voice mode with a scripted [socket] and [audio] on a loopback endpoint, so no test reaches OpenAI. */
+    fun liveVoice(socket: FakeLiveTransport, audio: FakeLiveAudio): LiveVoiceFactory =
+        { app, scope -> LiveVoiceSession(app, scope, socket, { audio }, { keys.account().getOrNull() }, Endpoints { "http://127.0.0.1:4000" }) }
 
     /** A loopback test passes a [chat] provider that reads [models]. */
     fun install(saveKey: Boolean = true, voice: VoiceFactory? = null, onboarding: Boolean = false, chat: ChatProvider = provider,

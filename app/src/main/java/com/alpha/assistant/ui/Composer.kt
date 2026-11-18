@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.roundToIntRect
 import androidx.compose.ui.unit.sp
 import com.alpha.assistant.R
+import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.surfaces.AssistCapture
 import com.alpha.assistant.data.Draft
 
@@ -79,7 +80,8 @@ internal class CourseComposerState(
 
 /** The message composer of the shell, the mini-app split, and the assistant half sheet.
  * [compact] puts the field and the round actions in one row and hides the other lines, while the keyboard takes most of a landscape window.
- * [settings] opens «Сервис ИИ». */
+ * [settings] opens «Сервис ИИ». [liveVoice]: the full chat offers the voice mode and shows its end status (spec 5.1.2, 5.8).
+ * [actions] replace the microphone and send buttons and get whether the draft can be sent. The voice mode screen passes its own. */
 @Composable internal fun Composer(
     model: ShellViewModel,
     context: () -> Unit,
@@ -93,6 +95,8 @@ internal class CourseComposerState(
     requiresQuestion: Boolean = false,
     displayedCapture: AssistCapture? = null,
     settings: () -> Unit,
+    liveVoice: Boolean = false,
+    actions: (@Composable (hasInput: Boolean) -> Unit)? = null,
 ) {
     val draft = model.composerDraft(destination)
     val searchFocus = androidx.compose.runtime.remember { androidx.compose.ui.focus.FocusRequester() }
@@ -115,6 +119,9 @@ internal class CourseComposerState(
     val hasInput = draft.text.isNotBlank() || !requiresQuestion && draft.attachments.isNotEmpty()
     val startVoice = rememberVoiceStart(model, oneShot = true, destination = destination, assistantInvocation = assistantInvocation,
         displayedCapture = displayedCapture)
+    val startLiveVoice = if (liveVoice) rememberLiveVoiceStart(model) else null
+    // The permission guidance retries the start that asked for the microphone.
+    var liveAsked by remember { mutableStateOf(false) }
     val ownsVoice = model.voiceBelongsTo(destination)
     val editable = destination == null || destination.active && !destination.busy
     Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
@@ -135,8 +142,12 @@ internal class CourseComposerState(
                         trailingIcon = { AlphaIcon(Glyph.Close) }, modifier = Modifier.semantics { contentDescription = remove })
                 }
             }
-            if (ownsVoice && model.voice.permissionRequired) MicrophonePermissionGuidance(model.voice, startVoice)
+            if (ownsVoice && model.voice.permissionRequired) MicrophonePermissionGuidance(model.voice, startLiveVoice?.takeIf { liveAsked } ?: startVoice)
             else if (ownsVoice && !model.voice.active && model.voice.hasAttempted) ProvideTextStyle(MaterialTheme.typography.bodySmall) { VoiceStatus(model.voice, settings) }
+            if (liveVoice && !model.liveVoice.active && model.liveVoice.status.isNotBlank()) ProvideTextStyle(MaterialTheme.typography.bodySmall) {
+                StatusLine(Glyph.Mic, MaterialTheme.colorScheme.onSurfaceVariant, model.liveVoice.status, PoliteLiveRegion)
+                if (model.liveVoice.settingsRequired) TextButton(onClick = settings, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.open_settings)) }
+            }
             if (model.attachmentBusy) ProvideTextStyle(MaterialTheme.typography.labelSmall) { StatusLine(Glyph.File, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.composer_image_check)) }
         }
         val colors = MaterialTheme.colorScheme
@@ -160,14 +171,20 @@ internal class CourseComposerState(
                             }
                         }
                         @Composable fun VoiceAndSend() {
+                            if (actions != null) { actions(hasInput); return }
                             if (cancel != null) {
                                 RoundAction(Glyph.Stop, stringResource(R.string.composer_stop), cancel, primary = destination != null || !hasInput)
                             } else {
-                                RoundAction(Glyph.Mic, stringResource(R.string.composer_voice), startVoice, enabled = editable && !busy && !model.attachmentBusy && !model.voice.active)
+                                RoundAction(Glyph.Mic, stringResource(R.string.composer_voice), { liveAsked = false; startVoice() },
+                                    enabled = editable && !busy && !model.attachmentBusy && !model.voice.active)
                             }
                             if (cancel == null || destination == null && hasInput) {
                                 Spacer(Modifier.width(5.dp))
-                                RoundAction(Glyph.Arrow, stringResource(R.string.composer_send), send, primary = true,
+                                // The disabled send button becomes the voice mode button (spec 5.1.2). A course composer has a destination.
+                                if (startLiveVoice != null && destination == null && !hasInput && model.accountProvider == AiProvider.OPENAI) {
+                                    RoundAction(Glyph.Voice, stringResource(R.string.live_voice), { liveAsked = true; startLiveVoice() }, primary = true,
+                                        enabled = editable && !model.attachmentBusy)
+                                } else RoundAction(Glyph.Arrow, stringResource(R.string.composer_send), send, primary = true,
                                     enabled = editable && !model.attachmentBusy && hasInput)
                             }
                         }

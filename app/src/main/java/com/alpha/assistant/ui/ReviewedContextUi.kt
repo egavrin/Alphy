@@ -86,6 +86,7 @@ import java.io.InputStreamReader
         if (pickerSource != null || !checkOrigin()) return
         error = null
         pickerSource = source
+        model.expectAlphyScreen()
         runCatching(launch).onFailure { pickerSource = null; error = R.string.context_picker_unavailable }
     }
     LaunchedEffect(pickedUri) {
@@ -149,6 +150,7 @@ import java.io.InputStreamReader
             val uri = AssistContext.cameraUri(context)
             cameraUri = uri.toString()
             cameraPending = true
+            model.expectAlphyScreen()
             camera.launch(uri)
         }.onFailure { cameraPending = false; discardCapture(); error = R.string.context_camera_open_failed }
     }
@@ -207,7 +209,7 @@ import java.io.InputStreamReader
                 }
                 when (page) {
                     "sources" -> Sources()
-                    "contact" -> ContactActions()
+                    "contact" -> ContactActions { model.expectAlphyScreen() }
                     "camera" -> {
                         AndroidPermissionControl(stringResource(R.string.context_camera), listOf(Manifest.permission.CAMERA), PackageManager.FEATURE_CAMERA_ANY)
                         if (cameraReady && cameraUri != null) {

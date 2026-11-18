@@ -44,7 +44,8 @@ private fun ContentResolver.contactNumbers(uri: Uri, limit: Int): List<ContactNu
         }
     }.orEmpty()
 
-@Composable internal fun ContactActions() {
+/** [expectScreen] runs before the contact picker opens, so the picker keeps the voice mode (spec 5.8.1). */
+@Composable internal fun ContactActions(expectScreen: () -> Unit) {
     val context = LocalContext.current
     val revision = platformAccessRevision()
     var permissionResult by remember { mutableIntStateOf(0) }
@@ -102,6 +103,7 @@ private fun ContentResolver.contactNumbers(uri: Uri, limit: Int): List<ContactNu
         searchOpen = false
         query = ""
         pickerPending = true
+        expectScreen()
         runCatching { picker.launch(Intent(Intent.ACTION_PICK).setType(Phone.CONTENT_TYPE)) }.onFailure {
             pickerPending = false
             error = R.string.contact_picker_error

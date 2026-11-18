@@ -19,7 +19,6 @@ import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
-import com.alpha.assistant.cloud.Endpoints
 import com.alpha.assistant.data.Conversation
 import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.Message
@@ -33,7 +32,6 @@ import com.alpha.assistant.voice.FakeLiveTransport
 import com.alpha.assistant.voice.FakeSpeechInput
 import com.alpha.assistant.voice.LIVE_STARTED
 import com.alpha.assistant.voice.LivePhase
-import com.alpha.assistant.voice.LiveVoiceSession
 import com.alpha.assistant.voice.inputDelta
 import com.alpha.assistant.voice.liveDelegation
 import com.alpha.assistant.voice.outputAudio
@@ -83,7 +81,7 @@ class ShellLiveVoiceWorkflowTest {
         install()
         live { scenario, model ->
             scenario.onActivity { model.editDraft(Draft("Черновик")) }
-            say("Какая погода", "d1", 100)
+            socket.say("Какая погода", "d1", 100)
             robot.waitUntil { commentary().isNotEmpty() }
             assertEquals("Какая погода", messages(model).first().text)
             assertEquals(messages(model).single { it.role == "assistant" }.id, model.liveVoiceCardId)
@@ -110,7 +108,7 @@ class ShellLiveVoiceWorkflowTest {
         fixture.provider.createApp = true
         install()
         live { _, model ->
-            say("Сделай счётчик", "d1", 100)
+            socket.say("Сделай счётчик", "d1", 100)
             robot.waitUntil(60_000) { commentary().size == 2 }
             assertEquals(listOf("d1" to "Alphy готовит мини-приложение, оно появится на экране.",
                 "d1" to "Мини-приложение готово. Ответ Alphy: Fixture response."), commentary())
@@ -122,7 +120,7 @@ class ShellLiveVoiceWorkflowTest {
         fixture.provider.failure = CloudFailure("x", "Сбой")
         install()
         live { _, model ->
-            say("Какая погода", "d1", 100)
+            socket.say("Какая погода", "d1", 100)
             robot.waitUntil { commentary().isNotEmpty() }
             assertEquals(listOf("d1" to "Alphy не смог выполнить запрос: Сбой"), commentary())
             assertEquals("error", messages(model).last().status)
@@ -139,8 +137,8 @@ class ShellLiveVoiceWorkflowTest {
             }
         })
         live { _, model ->
-            say("Первый", "d1", 100)
-            say("Второй", "d2", 1000)
+            socket.say("Первый", "d1", 100)
+            socket.say("Второй", "d2", 1000)
             robot.waitUntil { messages(model).count { it.role == "assistant" } == 2 }
             val (first, second) = messages(model).filter { it.role == "assistant" }
             assertEquals("queued", second.status)
@@ -217,7 +215,7 @@ class ShellLiveVoiceWorkflowTest {
                 else emit(CloudEvent.RoundComplete(chatDecision("refine", "Готово.", "Change the counter"), false))
         })
         live { scenario, model ->
-            say("Измени приложение", "d1", 100)
+            socket.say("Измени приложение", "d1", 100)
             robot.waitUntil { commentary().isNotEmpty() }
             test(scenario, model)
         }
@@ -293,7 +291,7 @@ class ShellLiveVoiceWorkflowTest {
     }
 
     @Test fun noDismissesThePlan() = reviewed { _, model, _ ->
-        say("нет", "d2", 6_000)
+        socket.say("нет", "d2", 6_000)
         robot.waitUntil { commentary().size == 2 }
         assertEquals(listOf("d1" to PROPOSAL_ADD, "d2" to CANCELLED), commentary())
         assertNull(model.agent.plan)
@@ -303,7 +301,7 @@ class ShellLiveVoiceWorkflowTest {
     /** Spec 5.5.10 rule 6: a longer turn is a normal hand-off, and the plan waits for its own approval. */
     @Test fun otherTurnBecomesAHandOffAndRunsNothing() = reviewed { _, model, review ->
         fixture.provider.devicePlanSteps = null
-        say("да, но на десять минут", "d2", 6_000)
+        socket.say("да, но на десять минут", "d2", 6_000)
         robot.waitUntil { commentary().size == 2 }
         assertEquals(listOf("d1" to PROPOSAL_ADD, "d2" to "Ответ Alphy: Fixture response."), commentary())
         assertEquals(listOf(PLAN_REQUEST, "да, но на десять минут"), messages(model).filter { it.role == "user" }.map { it.text })
@@ -345,7 +343,7 @@ class ShellLiveVoiceWorkflowTest {
 
     /** Spec 5.5.10 rule 7. */
     @Test fun approvalDelegationSubmitsNoMessage() = reviewed { _, model, _ ->
-        say("да", "d2", 6_000)
+        socket.say("да", "d2", 6_000)
         robot.waitUntil { commentary().size == 3 }
         assertEquals(listOf("d1" to PROPOSAL_ADD, "d2" to STARTED, "d1" to DONE), commentary())
         assertEquals(listOf(PLAN_REQUEST, robot.text(R.string.agent_plan_ready)), messages(model).map { it.text })
@@ -480,7 +478,7 @@ class ShellLiveVoiceWorkflowTest {
 
     /** Says [request] as the hand-off [id] at [atMs], and waits for the first commentary of its plan. */
     private fun proposed(model: ShellViewModel, request: String, id: String, atMs: Long): AgentPlan {
-        say(request, id, atMs)
+        socket.say(request, id, atMs)
         // The plan agent ranks the phone capabilities on the device.
         robot.waitUntil(60_000) { commentary().any { it.first == id } }
         return checkNotNull(model.agent.plan)
@@ -509,7 +507,7 @@ class ShellLiveVoiceWorkflowTest {
         fixture.provider.gate = CompletableDeferred()
         install()
         live { scenario, model ->
-            say("Какая погода", "d1", 100)
+            socket.say("Какая погода", "d1", 100)
             robot.waitUntil { fixture.provider.calls == 1 }
             end(scenario, model)
             robot.waitUntil { !model.liveVoice.active }
@@ -526,7 +524,7 @@ class ShellLiveVoiceWorkflowTest {
         setup()
         install()
         live { _, model ->
-            say(request, "d1", 100)
+            socket.say(request, "d1", 100)
             robot.waitUntil { !model.liveVoice.active }
             assertEquals(robot.text(R.string.live_voice_on_screen), model.liveVoice.status)
             assertTrue(opened(model))
@@ -535,7 +533,7 @@ class ShellLiveVoiceWorkflowTest {
     }
 
     private fun install(chat: ChatProvider = fixture.provider, voice: VoiceFactory? = null) = fixture.install(chat = chat, voice = voice,
-        liveVoice = { app, scope -> LiveVoiceSession(app, scope, socket, { audio }, { fixture.keys.account().getOrNull() }, LOOPBACK) })
+        liveVoice = fixture.liveVoice(socket, audio))
 
     /** Launches the shell, starts the voice mode, and answers `session.started`. */
     private fun live(voiceApproval: Boolean = false, test: (ActivityScenario<CloudTestActivity>, ShellViewModel) -> Unit) = fixture.launch().use { scenario ->
@@ -548,12 +546,6 @@ class ShellLiveVoiceWorkflowTest {
         test(scenario, model)
     }
 
-    /** The user says [text] at [atMs] of the session timeline, and GPT-Live hands it to Alphy as [id]. */
-    private fun say(text: String, id: String, atMs: Long) {
-        socket.emit(inputDelta(text, atMs, atMs + 500))
-        socket.emit(liveDelegation(id, atMs + 600))
-    }
-
     /** The sent commentary appends as (delegation id, text), in order. */
     private fun commentary() = socket.sent.map(::JSONObject).filter { it.getString("type") == "session.commentary.append" }
         .map { it.getString("delegation_id") to it.getString("content") }
@@ -561,7 +553,6 @@ class ShellLiveVoiceWorkflowTest {
     private fun messages(model: ShellViewModel) = model.snapshot.selected?.messages.orEmpty()
 
     private companion object {
-        val LOOPBACK = Endpoints { "http://127.0.0.1:4000" }
         const val PLAN_REQUEST = "Change my memory of my favorite color to green"
         const val ADD = """{"steps":[{"function":"memory.write","args":{"text":"Favorite color is green"}}]}"""
         const val EDIT = """{"steps":[{"function":"memory.write","args":{"match":"Favorite color","text":"Favorite color is green"}}]}"""

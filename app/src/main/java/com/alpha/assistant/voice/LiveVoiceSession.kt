@@ -60,7 +60,11 @@ internal class LiveVoiceSession(
     var level by mutableStateOf(0f); private set
     /** The end status. It is empty while the session runs. */
     var status by mutableStateOf(""); private set
+    /** The end status is a key error, so the chat offers «Сервис ИИ» (spec 5.8). */
+    var settingsRequired by mutableStateOf(false); private set
     var userSpeaking by mutableStateOf(false); private set
+    /** The microphone button state (spec 5.2.5). An away mute does not change it. */
+    var userMuted by mutableStateOf(false); private set
 
     private var generation = 0
     private var host: LiveVoiceHost? = null
@@ -70,7 +74,6 @@ internal class LiveVoiceSession(
     private var detector = BargeInDetector()
     private var started = false
     private var firstSpeech = false
-    private var userMuted = false
     private var awayMuted = false
     private var captureMuted = false
     /** After a barge-in or a flush, the rest of the current reply is dropped (spec 5.4.5). */
@@ -156,7 +159,7 @@ internal class LiveVoiceSession(
     private fun end(status: String, settingsRequired: Boolean = false, socketOpen: Boolean = true) {
         if (!active) return
         generation++
-        active = false; started = false; this.status = status; userSpeaking = false; level = 0f; waiting = null; appends.clear()
+        active = false; started = false; this.status = status; this.settingsRequired = settingsRequired; userSpeaking = false; level = 0f; waiting = null; appends.clear()
         playback++
         connection?.let { if (socketOpen) it.send(LiveProtocol.close()); it.close() }
         connection = null

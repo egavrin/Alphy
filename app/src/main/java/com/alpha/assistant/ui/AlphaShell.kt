@@ -70,6 +70,7 @@ import com.alpha.assistant.courses.CourseSnapshot
 import com.alpha.assistant.courses.CourseSourcedSlideGenerationHost
 import com.alpha.assistant.data.Attachment
 import com.alpha.assistant.data.Conversation
+import com.alpha.assistant.data.Message
 import com.alpha.assistant.memory.MemoryScreen
 import com.alpha.assistant.tools.ArtifactCard
 import com.alpha.assistant.tools.GeneratedToolPreview
@@ -286,6 +287,7 @@ private data class MiniAppOrigin(
     val systemInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
     var miniAppBackground by remember { mutableStateOf<Color?>(null) }
     VoiceVisibility(model.voice)
+    LiveVoiceLifecycle(model)
     WeatherLocationAccess(model)
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         if (model.loading) {
@@ -364,6 +366,8 @@ private data class MiniAppOrigin(
                         val voiceShown = chatVisible || pairedChat ||
                             (destination == ShellDestination.Settings && settingsSection == SettingsSection.Voice)
                         LaunchedEffect(voiceShown) { if (!voiceShown) model.voice.stop() }
+                        // The voice mode screen is over the chat. A screen of the shell that leaves the chat ends the mode without a status.
+                        LaunchedEffect(chatVisible) { if (!chatVisible) model.endLiveVoice() }
                         // Navigation 3 retains each entry by content key when the scene changes.
                         val currentLayout by rememberUpdatedState(paneLayout)
                         val currentSnapshot by rememberUpdatedState(snapshot)
@@ -404,7 +408,7 @@ private data class MiniAppOrigin(
                         val currentBackStack by rememberUpdatedState(backStack)
                         val liveEntries by rememberUpdatedState(backStack.takeLast(if (paneLayout.paired) 2 else 1))
                         val liveUncovered by rememberUpdatedState(deviceUnlocked && !drawerTargetsOpen && !drawerState.isOpen &&
-                            !contextSheet && model.requestError == null &&
+                            !contextSheet && model.requestError == null && !model.liveVoice.active &&
                             miniAppActions.request == null && miniAppActions.restore == null && model.chatAutomationSetup == null)
                         val desktopVisible by rememberUpdatedState(courseChatVisible && snapshot.selectedId == null &&
                             model.courseEntry == null && liveUncovered && shellState == Lifecycle.State.RESUMED)
@@ -508,10 +512,13 @@ private data class MiniAppOrigin(
                     if (chatVisible) Composer(model, { contextSheet = true },
                         Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp).fillMaxWidth().testTag("composer"),
                         compact = compact, onContextAnchorChanged = { contextAnchor = it },
-                        destination = model.courseSetup?.composer, settings = { openSettings(SettingsSection.Ai) })
+                        destination = model.courseSetup?.composer, settings = { openSettings(SettingsSection.Ai) }, liveVoice = true)
                 }
             }
         }
+        if (model.liveVoice.active) LiveVoiceLayer(model, snapshot.selected, compact = false,
+            openTool = { id -> model.tools.select(id); openMiniApp() }, openAutomation = ::openAutomation,
+            settings = { openSettings(SettingsSection.Ai) }, onEnd = { model.endLiveVoice() })
     }
     if (destination == null && chatCourseEntry != null) key(chatCourseEntry.request.requestId) {
         CourseLibraryScreen(model.courseStore, model.courseController,
@@ -620,12 +627,7 @@ private data class MiniAppOrigin(
     val scope = rememberCoroutineScope()
     var shareText by rememberSaveable { mutableStateOf<String?>(null) }
     var linkError by remember { mutableStateOf(false) }
-    if (linkError) AlertDialog(
-        onDismissRequest = { linkError = false },
-        title = { Text(stringResource(R.string.chat_link_error)) },
-        text = { Text(stringResource(R.string.chat_link_error_detail)) },
-        confirmButton = { TextButton(onClick = { linkError = false }) { Text(stringResource(R.string.understood)) } },
-    )
+    if (linkError) ChatLinkErrorDialog { linkError = false }
     Column(modifier.fillMaxHeight().widthIn(max = 620.dp).fillMaxWidth()) {
         AgentRunBar(model.agent)
         if (conversation != null) {
@@ -692,38 +694,8 @@ private data class MiniAppOrigin(
                         AgentPhotoCard(model.agent, chat.id, photo)
                     }
                     items(chat.messages.asReversed(), key = { it.id }) { message ->
-                        Column(Modifier.fillMaxWidth().padding(start = if (message.role == "user") 25.dp else 0.dp)) {
-                            val assistant = message.role == "assistant"
-                            val canRetry = assistant && message.status in setOf("error", "cancelled", "interrupted")
-                            val canCancelQueued = assistant && message.status == "queued"
-                            ChatMessageCard(
-                                message,
-                                fragment = if (message.status == "streaming") model.activeAnswer(message.id) else null,
-                                publicUpdate = if (message.status == "generating") model.activePublicGenerationUpdate(message.id) else null,
-                                weatherLocationBusy = model.weatherLocationBusy && model.activeConversationId == chat.id,
-                                retry = if (canRetry) ({ model.retry(message.id) }) else null,
-                                retryEnabled = model.snapshot.selectedId == chat.id,
-                                cancelQueued = if (canCancelQueued) ({ model.cancelRequest(message.id) }) else null,
-                                chooseRefinement = { toolId -> model.chooseRefinementTarget(message.id, toolId) },
-                                share = { shareText = message.text },
-                                settings = settings,
-                                linkError = { linkError = true },
-                            )
-                            if (message.toolId != null && message.toolRevision != null) {
-                                Spacer(Modifier.height(8.dp))
-                                ArtifactCard(model.tools, message.toolId, cardActions, openTool, openAutomation,
-                                    compact = !showLivePreviews || message.toolId == pairedToolId)
-                            } else if (message.status == "generating") {
-                                message.toolOperationId?.let { draftId ->
-                                    if (showLivePreviews && draftId != pairedDraftId) {
-                                        GeneratedToolPreview(model.tools.drafts.find { it.id == draftId }, model.tools.previewFor(draftId))
-                                    }
-                                }
-                            }
-                            if (message.status == "not_sent") Text(stringResource(R.string.chat_message_not_sent),
-                                Modifier.padding(start = 5.dp, top = 6.dp), style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+                        ChatMessageItem(model, chat, message, cardActions, openTool, openAutomation, showLivePreviews, pairedToolId,
+                            pairedDraftId, share = { shareText = it }, settings = settings, linkError = { linkError = true })
                     }
                     if (resumeCourse != null) items(courses.asReversed(), key = { "course-${it.id}" }) { course ->
                         ChatCourseCard(
@@ -746,6 +718,52 @@ private data class MiniAppOrigin(
     if (actions == null) MiniAppActionDialogs(model.tools, cardActions)
     shareText?.let { ShareTextToNotes(it) { shareText = null } }
 }
+
+/** One message of [chat] with its mini-app card or preview. The chat list and the voice mode card show it (spec 5.2.3). */
+@Composable internal fun ChatMessageItem(model: ShellViewModel, chat: Conversation, message: Message, cardActions: MiniAppActions,
+    openTool: (String) -> Unit, openAutomation: (String) -> Unit, showLivePreviews: Boolean, pairedToolId: String?,
+    pairedDraftId: String?, share: (String) -> Unit, settings: () -> Unit, linkError: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(start = if (message.role == "user") 25.dp else 0.dp)) {
+        val assistant = message.role == "assistant"
+        val canRetry = assistant && message.status in setOf("error", "cancelled", "interrupted")
+        val canCancelQueued = assistant && message.status == "queued"
+        ChatMessageCard(
+            message,
+            fragment = if (message.status == "streaming") model.activeAnswer(message.id) else null,
+            publicUpdate = if (message.status == "generating") model.activePublicGenerationUpdate(message.id) else null,
+            weatherLocationBusy = model.weatherLocationBusy && model.activeConversationId == chat.id,
+            retry = if (canRetry) ({ model.retry(message.id) }) else null,
+            retryEnabled = model.snapshot.selectedId == chat.id,
+            cancelQueued = if (canCancelQueued) ({ model.cancelRequest(message.id) }) else null,
+            chooseRefinement = { toolId -> model.chooseRefinementTarget(message.id, toolId) },
+            share = { share(message.text) },
+            settings = settings,
+            linkError = linkError,
+        )
+        if (message.toolId != null && message.toolRevision != null) {
+            Spacer(Modifier.height(8.dp))
+            ArtifactCard(model.tools, message.toolId, cardActions, openTool, openAutomation,
+                compact = !showLivePreviews || message.toolId == pairedToolId)
+        } else if (message.status == "generating") {
+            message.toolOperationId?.let { draftId ->
+                if (showLivePreviews && draftId != pairedDraftId) {
+                    GeneratedToolPreview(model.tools.drafts.find { it.id == draftId }, model.tools.previewFor(draftId))
+                }
+            }
+        }
+        if (message.status == "not_sent") Text(stringResource(R.string.chat_message_not_sent),
+            Modifier.padding(start = 5.dp, top = 6.dp), style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** A link of a chat message did not open. */
+@Composable internal fun ChatLinkErrorDialog(dismiss: () -> Unit) = AlertDialog(
+    onDismissRequest = dismiss,
+    title = { Text(stringResource(R.string.chat_link_error)) },
+    text = { Text(stringResource(R.string.chat_link_error_detail)) },
+    confirmButton = { TextButton(onClick = dismiss) { Text(stringResource(R.string.understood)) } },
+)
 
 @Composable private fun ChatCourseCard(
     course: CourseSnapshot,

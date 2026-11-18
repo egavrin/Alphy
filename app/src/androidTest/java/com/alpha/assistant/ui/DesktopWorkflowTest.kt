@@ -219,7 +219,8 @@ class DesktopWorkflowTest {
             fixture.seedChat("long", title, "Long chat message")
             fixture.launch().use { scenario ->
                 scenario.onActivity { assertEquals(2f, it.resources.configuration.fontScale) }
-                for (id in listOf(R.string.menu, R.string.composer_label, R.string.composer_send))
+                // Spec 5.1.2: the field is empty and the fixture key is OpenAI, so the send position shows the voice-mode button.
+                for (id in listOf(R.string.menu, R.string.composer_label, R.string.live_voice))
                     robot.assertTarget(robot.text(id))
                 assertNull(robot.find(robot.text(R.string.new_chat)))
                 robot.waitUntil { greetings(name).any { robot.find(it) != null } }

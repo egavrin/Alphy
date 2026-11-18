@@ -164,6 +164,8 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
     internal val liveVoiceCardId: String? get() = liveBridge?.cardId
     /** A hand-off or typed turn of the voice mode is queued or runs. */
     internal val liveVoiceWorking: Boolean get() = liveBridge?.working == true
+    /** The uptime until which a screen or an app that Alphy opens is expected in front (spec 5.8.1, [expectAlphyScreen]). */
+    internal var alphyScreenUntil = 0L
 
     internal fun composerDraft(destination: CourseComposerState?): Draft = destination?.draft ?: snapshot.draft
     internal fun voiceBelongsTo(destination: CourseComposerState?) = voiceDestination === destination
@@ -639,7 +641,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
     private val phoneAgent = lazy {
         val database = if (store.databaseName == "alpha.db") "alpha-agent.db" else "${store.databaseName}-agent.db"
         AgentConversation(application, viewModelScope, database, provider, memoryStore, ToolStore(application, toolsDatabase),
-            getKey = { keys.cloudKey(application) }, selectedChat = { snapshot.selectedId })
+            getKey = { keys.cloudKey(application) }, selectedChat = { snapshot.selectedId }, expectScreen = { expectAlphyScreen() })
     }
     internal val agent get() = phoneAgent.value
     internal data class ChatAutomationSetup(val conversationId: String, val definition: String)
