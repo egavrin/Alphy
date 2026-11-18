@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";
 import { ACTIONS, App, settings } from "../src/core.js";
 import { parseLine } from "../src/dsl.js";
-import { LIMITS, commandsOf } from "../src/draw.js";
+import { LIMITS, budgetOf, commandsOf } from "../src/draw.js";
 import { emit, runtime } from "../src/emit.js";
 import { handle, kitOf } from "../src/run.js";
 import { T0, allPlans, clocked, gateEach, plan, planned } from "./helpers.js";
@@ -45,7 +45,7 @@ test("run: open of the initial state gives the initial state", async () => {
     expect(reply).toEqual({ state: definition.initialState, ...(definition.surfaces && { surfaces: reply.surfaces, timers: [] }) });
     opened.push(path);
   }
-  expect(opened).toHaveLength(19);
+  expect(opened).toHaveLength(20);
   expect(opened).toEqual(expect.arrayContaining(["plans/tea.plan", "plans/timer-rounds.plan", "plans/lesson.plan", "test/shapes.plan"]));
 });
 
@@ -339,6 +339,38 @@ test("run: a value that the person sets ends its change, and two values move at 
   sameStored(both);
 });
 
+test("run: a clock that goes back during a timed change keeps the value at its start", async () => {
+  const { kit, send } = await clocked(plan("lesson"));
+  send(1000, press("lap_button"));
+  // The clock of the host goes back 1 s, to before the start of the change: the angle stays at its start value, and the change runs on.
+  const back = send(0, timer("anim"));
+  expect([back.state.angle, kit.state.angle, back.timers]).toEqual([0, 0, [{ id: "anim", intervalMs: 50 }]]);
+  expect(back.state.anim.angle).toEqual({ from: 0, to: 360, start: T0 + 1000, end: T0 + 6000, at: 0 });
+  const half = send(3500, timer("anim"));
+  expect([half.state.angle, kit.state.angle]).toEqual([180, 180]);
+});
+
+test("run: a preview and a render change no state while a timed change or a timer with rounds runs", async () => {
+  const lesson = await clocked(plan("lesson")), rounds = await clocked(plan("timer-rounds"));
+  const moving = lesson.send(0, press("lap_button")), running = rounds.send(0, press("timer_start"));
+  // Half of the change, and 5 s after the end of the first work phase: a timer event would move both.
+  for (const type of ["preview", "render"]) {
+    expect(handle(request(moving.state, { type }), lesson.app, T0 + 2500)).toEqual({ state: moving.state });
+    expect(handle(request(running.state, { type }), rounds.app, T0 + 45000)).toEqual({ state: running.state });
+  }
+});
+
+test("run: a timed change past the bounds of its field stops at the bound and ends at the next timer event, and the kit's App keeps moving", async () => {
+  // The shortcut of run.js at the clamp of a bound number: this test pins what happens.
+  const { kit, send } = await clocked(['app("Past", lang="en")', 'need angle = input("number", "Angle", 40, min=0, max=360)', 'need lap = button("Twice", animate($/angle, 720, 1000))',
+    'need dial = drawing("Dial", 64, 64, [circle(32, 32, 4, "ink")])'].join("\n"));
+  send(0, press("lap_button"));
+  const past = send(500, timer("anim"));
+  expect([past.state.angle, kit.state.angle, past.state.anim.angle.at, past.timers]).toEqual([360, 380, 380, [{ id: "anim", intervalMs: 50 }]]);
+  const ended = send(600, timer("anim"));
+  expect([ended.state.angle, kit.state.angle, ended.state.anim.angle, ended.timers]).toEqual([360, 448, { from: 0, to: 0, start: 0, end: 0, at: 0 }, []]);
+});
+
 test("run: the timer of a timer with rounds and the timer of animate are one list with distinct ids", async () => {
   // shapes.plan is kit/test/shapes.plan: each shape kind, each outline form, each over a list, each kind of color, a text, and animate beside a timer with rounds.
   const { kit, send } = await clocked(testPlan("shapes"));
@@ -371,6 +403,18 @@ test("run: a reply never goes over the command limit", async () => {
   const reply = handle(request(definition.initialState, press("csv_field", Array(600).fill("1").join(","))), app);
   expect(reply.surfaces.dots_view.commands).toHaveLength(LIMITS.commands);
   expect(reply.surfaces.dots_view.commands.at(-1)).toEqual({ type: "circle", x: 211, y: 1, radius: 1, color: "default" });
+});
+
+test("run: a reply of exactly 32768 bytes keeps each command, and one byte more cuts the last one", async () => {
+  // bytes.plan is kit/test/bytes.plan. The device test aReplyAtTheByteLimitPassesTheHostPath sends the same values, and Alphy counts the same bytes.
+  const { definition, app } = await compiled(testPlan("bytes"));
+  const lines = handle(request(definition.initialState, press("n_field", 350)), app).state;
+  const drawn = (pad) => handle(request(lines, press("pad_field", pad)), app).surfaces;
+  const exact = drawn("x".repeat(773)), cut = drawn("x".repeat(774));
+  expect([exact.lines_view.commands.length, budgetOf([["lines_view", exact.lines_view.commands]]).bytes]).toEqual([351, LIMITS.bytes]);
+  // The text of 774 characters would pass the limit by 1 byte, so the reply keeps the 350 lines before it.
+  expect(cut.lines_view.commands).toEqual(exact.lines_view.commands.slice(0, 350));
+  expect(budgetOf([["lines_view", cut.lines_view.commands]]).bytes).toBe(31889);
 });
 
 test("run: a reorder event moves the row", async () => {

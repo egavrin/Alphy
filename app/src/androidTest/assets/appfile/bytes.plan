@@ -1,0 +1,4 @@
+app("Bytes", lang="en")
+need n = input("number", "Lines", 1, min=0, max=500)
+need pad = input("text", "Pad", "x")
+need lines = drawing("Lines", 320, 64, [each($/n, line($index % 300 + 0.25, 1.25, $index % 300 + 0.75, 1.75, "#80ff0000", width=1.25)), text(160, 32, $/pad, "ink", 12)])

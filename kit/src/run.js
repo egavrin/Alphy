@@ -405,6 +405,7 @@ export function handle(input, app, now = Date.now()) {
       if ((kind === "list" && kit.state[root]?.length > (own(app.caps, root) ?? MAX_ROWS)) || (kind === "array" && kit.state[root]?.length > MAX_ARRAY)) return { state };
     }
     let after = screen(kit, app);
+    // shortcut: a timed change (animate) that passes the bounds of a field of its value stops at the bound and ends at the next timer event, while the kit's App moves on; make it a fault of the emitter when a plan animates past a bound.
     const outside = after.bounds.filter(([node, min, max]) => !(node.props.value >= min && node.props.value <= max));
     if (outside.length) {
       for (const [node, min, max] of outside) kit.write(node.props.bind, Number.isFinite(node.props.value) ? Math.min(max, Math.max(min, node.props.value)) : min, { it: node.row });

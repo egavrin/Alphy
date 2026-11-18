@@ -74,16 +74,22 @@ export const barOf = (share, color) => [
 /** What one command costs: a box, a circle, and a text 1 pair, a line 2, a polygon or a polyline 1 for each point (GraphicsContract.frame). */
 const pairsOf = (command) => command.points?.length ?? (command.type === "line" ? 2 : 1);
 const charsOf = (command) => command.text?.length ?? 0;
-/** What commands cost in one reply: commands, pairs, text characters, and the bytes of {commands} as the host writes it. */
-export const budgetOf = (commands) => ({ commands: commands.length, pairs: commands.reduce((sum, command) => sum + pairsOf(command), 0),
-  chars: commands.reduce((sum, command) => sum + charsOf(command), 0), bytes: hostBytes({ commands }) });
+/**
+ * What the surfaces of one reply cost, from [id, commands] in order: the commands, pairs, and text characters of all of them, and
+ * the bytes of {id: {commands}, ...} as the host writes it. The emitter checks the first reply with it, and fit starts from the reply with no commands.
+ */
+export const budgetOf = (surfaces) => {
+  const commands = surfaces.flatMap(([, list]) => list);
+  return { commands: commands.length, pairs: commands.reduce((sum, command) => sum + pairsOf(command), 0),
+    chars: commands.reduce((sum, command) => sum + charsOf(command), 0), bytes: hostBytes(Object.fromEntries(surfaces.map(([id, list]) => [id, { commands: list }]))) };
+};
 
 /**
  * The surfaces of one reply, {id: {commands}}, from [id, commands] in order. Alphy refuses a reply past a limit for all surfaces
  * together, so the reply keeps the first commands that fit, and none after the first one that does not.
  */
 export function fit(surfaces) {
-  const used = { commands: 0, pairs: 0, chars: 0, bytes: hostBytes(Object.fromEntries(surfaces.map(([id]) => [id, { commands: [] }]))) };
+  const used = budgetOf(surfaces.map(([id]) => [id, []]));
   let full = false;
   return Object.fromEntries(surfaces.map(([id, commands]) => [id, { commands: commands.filter((command, index) => {
     // A command costs its bytes, and a comma after the first command of its surface. The commands before it were kept, as none is kept after the first that does not fit.

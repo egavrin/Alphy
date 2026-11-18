@@ -649,7 +649,7 @@ test("emit: the texts that are the name of a line, in each saved plan and fixtur
   // The list of now, so that a later task sees when it grows. The row controls with no label of their own are in it by a ruling.
   const PINNED = {
     "plans/calc.plan": [], "plans/list.plan": ["prodotti remove", "prodotti preso"], "plans/quiz.plan": [], "plans/section.plan": ["habits remove"],
-    "plans/tabs-chart.plan": ["gastos remove"], "plans/tea.plan": [], "plans/timer-rounds.plan": [], "plans/lesson.plan": [], "test/shapes.plan": [],
+    "plans/tabs-chart.plan": ["gastos remove"], "plans/tea.plan": [], "plans/timer-rounds.plan": [], "plans/lesson.plan": [], "test/shapes.plan": [], "test/bytes.plan": [],
     "test/cards.plan": ["tasks remove"], "test/free.plan": [], "test/fixtures/habits.plan": ["habits remove", "habits done"], "test/fixtures/price-filter.plan": [],
     "test/fixtures/shopping.plan": ["items remove", "items done"], "test/fixtures/units-pl.plan": [], "test/fixtures/water-ko.plan": ["ml minus", "ml plus"],
     "test/lists.plan": ["acts remove", "acts close", "doses taken minus", "doses taken plus", "doses remove", "steps remove"],

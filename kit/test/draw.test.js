@@ -57,8 +57,10 @@ test("draw: budgetOf counts commands, pairs, and characters", () => {
     { type: "line", x: 0, y: 0, x2: 9, y2: 9, stroke: 2, color: "accent" }, { type: "text", x: 5, y: 5, size: 14, text: "1/2 Земля", align: "center", baseline: "middle", color: "#ffffff" },
     { type: "polygon", points: [[0, 0], [10, 0], [5, 8]], color: "success" }, { type: "polyline", points: [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]], stroke: 2, color: "warning" }];
   // A box, a circle, and a text count one pair, a line two, and a polygon or a polyline one for each point (GraphicsContract.frame).
-  expect(budgetOf(commands)).toEqual({ commands: 6, pairs: 13, chars: 9, bytes: hostBytes({ commands }) });
-  expect(budgetOf([])).toEqual({ commands: 0, pairs: 0, chars: 0, bytes: 15 });
+  // The bytes are those of the whole reply, {id: {commands}, ...}, for all its surfaces together.
+  expect(budgetOf([["a", commands]])).toEqual({ commands: 6, pairs: 13, chars: 9, bytes: hostBytes({ a: { commands } }) });
+  expect(budgetOf([["a", commands.slice(0, 2)], ["b", commands.slice(2)]])).toEqual({ commands: 6, pairs: 13, chars: 9, bytes: hostBytes({ a: { commands: commands.slice(0, 2) }, b: { commands: commands.slice(2) } }) });
+  expect([budgetOf([]), budgetOf([["a", []]])]).toEqual([{ commands: 0, pairs: 0, chars: 0, bytes: 2 }, { commands: 0, pairs: 0, chars: 0, bytes: 21 }]);
 });
 
 test("draw: a shape that Alphy cannot draw is left out, and a size past Alphy's bounds is clamped", () => {

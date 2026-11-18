@@ -218,17 +218,15 @@ export function emit(file) {
   // Each drawing and each timer that the run-time moves draws one surface. The emitter checks the drawings of the first state against
   // the limits of one reply, for all surfaces together. At run time a reply keeps its first commands that fit (draw.js fit).
   const surfaces = shown.drawn.map(({ id, width, height }) => ({ id, width, height }));
-  // The bytes of {"id":{"commands":[...]},...}: the first brace, then for each surface its id in quotes, a colon, and a comma or the last brace.
-  const used = { commands: 0, pairs: 0, chars: 0, bytes: 1 };
-  shown.drawn.forEach(({ id, commands, line }, index) => {
-    const where = label(line), cost = budgetOf(commands);
+  // The fault names the drawing whose surface takes the reply past a limit: the cost of the reply up to it, and up to the one before it.
+  let before = budgetOf([]);
+  shown.drawn.forEach(({ line }, index) => {
+    const where = label(line), used = budgetOf(shown.drawn.slice(0, index + 1).map(({ id, commands }) => [id, commands]));
     if (index === MAX_SURFACES) faults.push(`${where}: the app draws ${surfaces.length} surfaces, and Alphy draws at most ${MAX_SURFACES}: one for each drawing and each timer with rounds or with no alert. Use fewer`);
-    cost.bytes += id.length + 4;
     for (const [unit, limit] of Object.entries(LIMITS)) {
-      const before = used[unit];
-      used[unit] += cost[unit];
-      if (before <= limit && used[unit] > limit) faults.push(`${where}: with this drawing the app draws ${used[unit]} ${UNITS[unit]} at the start, and Alphy draws at most ${limit} ${UNITS[unit]} in one reply. Draw fewer shapes`);
+      if (before[unit] <= limit && used[unit] > limit) faults.push(`${where}: with this drawing the app draws ${used[unit]} ${UNITS[unit]} at the start, and Alphy draws at most ${limit} ${UNITS[unit]} in one reply. Draw fewer shapes`);
     }
+    before = used;
   });
   // Alphy sends a timer event only to an app with a surface, so a value that an animate moves needs one.
   if (moved.size && !surfaces.length) faults.push(`${moved.values().next().value}: animate moves a value with a timer, and Alphy sends timer events only to an app with a surface. Add a drawing that shows the value`);

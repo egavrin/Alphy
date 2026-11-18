@@ -459,4 +459,21 @@ class AppFileProofTest {
             assertEquals(mapOf("laps_bar" to 1000,"anim" to 50),app.send(press("grow_button")).timers)
         } finally {app.close()}
     }
+    @Test fun aReplyAtTheByteLimitPassesTheHostPath(): Unit=runBlocking {
+        // bytes.plan is kit/test/bytes.plan: 350 lines and a text of the pad on one surface. The kit test of the byte limit sends the same values:
+        // a pad of 773 characters gives a reply of exactly 32768 bytes, and one more character makes the run-time cut the text.
+        val context=instrumentation.targetContext
+        val sandbox=SandboxClient(context)
+        val app=Host(context,sandbox,parsedAndSmoked(sandbox,"bytes"),"appfile-bytes")
+        fun field(actionId: String,value: Any)=JSONObject().put("type","action").put("actionId",actionId).put("value",value)
+        fun bytes(preview: ToolPreview)=checkNotNull(preview.surfaces).toString().toByteArray(Charsets.UTF_8).size
+        try {
+            app.open()
+            app.send(field("n_field",350))
+            val exact=app.send(field("pad_field","x".repeat(773)))
+            assertEquals(32768 to 351,bytes(exact) to commands(exact,"lines_view").size)
+            val cut=app.send(field("pad_field","x".repeat(774)))
+            assertEquals(31889 to 350,bytes(cut) to commands(cut,"lines_view").size)
+        } finally {app.close()}
+    }
 }
