@@ -22,12 +22,37 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
+/** Each saved plan of kit/plans with the language of its app. */
+internal val SAVED_PLANS=mapOf("calc" to "en","list" to "it","quiz" to "ja","tabs-chart" to "es","timer-rounds" to "de","tea" to "tr","section" to "uk",
+    "lesson" to "ru","model3d" to "ru")
+/** A plan of the test assets that kit/build.js copies. */
+internal fun plan(name: String)=InstrumentationRegistry.getInstrumentation().context.assets.open("appfile/$name.plan").use {it.readBytes().decodeToString()}
+/** A saved plan through compile, ToolSpec.parse, and the smoke step as AppAgent.validate builds it. */
+internal suspend fun parsedAndSmoked(sandbox: SandboxClient,name: String,language: String="en",text: String=plan(name),observeReplay: ((List<String>)->Unit)?=null): ToolSpec {
+    val result=AppFileCompiler(InstrumentationRegistry.getInstrumentation().targetContext,sandbox).compile(text)
+    assertEquals(result.faults.toString(),"ok",result.status)
+    assertEquals(language,result.language)
+    val spec=ToolSpec.parse(checkNotNull(result.definition))
+    smoked(sandbox,spec,name,spec.initialState,observeReplay)
+    return spec
+}
+/** The smoke step as AppAgent.validate builds it, from a state. */
+internal suspend fun smoked(sandbox: SandboxClient,spec: ToolSpec,name: String,state: String,observeReplay: ((List<String>)->Unit)?) {
+    // The script provider is never asked: the smoke run makes no model call.
+    try {
+        ToolGenerationSmoke(sandbox,spec,"appfile-$name",1,state,checkActive={},
+            generation=ToolGenerationService(AgentScriptProvider(),sandbox),observeReplay=observeReplay).run()
+    } catch(failure: ToolSmokeFailure) {
+        // The failure itself has no message: the validator's text is the detail of its cause.
+        throw AssertionError("smoke ${failure.event} at ${failure.path}: ${(failure.cause as? GeneratedOutputDetail)?.detail ?: failure.cause} replay=${failure.replay}",failure)
+    }
+}
+
 /** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps and each node of the node table in Alphy's checks, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, and the time of each saved plan with its lists full. */
 @RunWith(AndroidJUnit4::class)
 class AppFileProofTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
     private val compiler get()=AppFileCompiler(instrumentation.targetContext,SandboxClient(instrumentation.targetContext))
-    private fun plan(name: String)=instrumentation.context.assets.open("appfile/$name.plan").use {it.readBytes().decodeToString()}
 
     @Test fun compilesAPlanInTheSandbox(): Unit=runBlocking {
         val result=compiler.compile(plan("calc"))
@@ -58,26 +83,6 @@ class AppFileProofTest {
         val median=times.sorted()[2]
         Log.i("AppFileProofTest","compile times ms=$times median=$median")
         assertTrue("median $median ms of $times",median<1000)
-    }
-    /** A saved plan through compile, ToolSpec.parse, and the smoke step as AppAgent.validate builds it. */
-    private suspend fun parsedAndSmoked(sandbox: SandboxClient,name: String,language: String="en",text: String=plan(name),observeReplay: ((List<String>)->Unit)?=null): ToolSpec {
-        val result=AppFileCompiler(instrumentation.targetContext,sandbox).compile(text)
-        assertEquals(result.faults.toString(),"ok",result.status)
-        assertEquals(language,result.language)
-        val spec=ToolSpec.parse(checkNotNull(result.definition))
-        smoked(sandbox,spec,name,spec.initialState,observeReplay)
-        return spec
-    }
-    /** The smoke step as AppAgent.validate builds it, from a state. */
-    private suspend fun smoked(sandbox: SandboxClient,spec: ToolSpec,name: String,state: String,observeReplay: ((List<String>)->Unit)?) {
-        // The script provider is never asked: the smoke run makes no model call.
-        try {
-            ToolGenerationSmoke(sandbox,spec,"appfile-$name",1,state,checkActive={},
-                generation=ToolGenerationService(AgentScriptProvider(),sandbox),observeReplay=observeReplay).run()
-        } catch(failure: ToolSmokeFailure) {
-            // The failure itself has no message: the validator's text is the detail of its cause.
-            throw AssertionError("smoke ${failure.event} at ${failure.path}: ${(failure.cause as? GeneratedOutputDetail)?.detail ?: failure.cause} replay=${failure.replay}",failure)
-        }
     }
     /** Each node of a ui, also the nodes of each row template. */
     private fun nodes(node: JSONObject): List<JSONObject> =listOf(node)+
@@ -570,8 +575,6 @@ class AppFileProofTest {
         // the retained session. Alphy's limit for one event is 500 ms.
         val context=instrumentation.targetContext
         val sandbox=SandboxClient(context)
-        val languages=mapOf("calc" to "en","list" to "it","quiz" to "ja","tabs-chart" to "es","timer-rounds" to "de","tea" to "tr","section" to "uk",
-            "lesson" to "ru","model3d" to "ru")
         // The draft steps and the add of each plan with an add. A list that starts empty gets its first row from the same steps:
         // the steps of tabs-chart are the add steps of tabsChartPassesParseAndSmoke.
         val adds=mapOf("list" to listOf("prodotti_new_nome" to "Burro","prodotti_new_corsia" to "Latticini","prodotti_add" to null),
@@ -585,7 +588,7 @@ class AppFileProofTest {
         val later=mapOf("timer-rounds" to ("timer_start" to listOf("timer_pause","timer_reset")),"lesson" to ("lesson_next" to listOf("lesson_back")))
         val open=JSONObject().put("type","open")
         val over=mutableListOf<String>()
-        for((name,language) in languages) {
+        for((name,language) in SAVED_PLANS) {
             val spec=parsedAndSmoked(sandbox,name,language)
             assertEquals(name,name in hosted,spec.surfaces.isNotEmpty())
             val steps=adds[name].orEmpty()

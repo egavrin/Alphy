@@ -1,0 +1,11 @@
+# Request: Przelicznik jednostek kuchennych: gramy, szklanki, łyżki i mililitry dla mąki, cukru i wody.
+# Expected values fixed by hand: 1 szklanka = 250 ml, 1 łyżka = 15 ml, mąka 0.5 g/ml, cukier 0.8 g/ml, woda 1 g/ml.
+app("Przelicznik kuchenny", lang="pl", preset="clean", palette="amber")
+need gramy = figure("number", "Gramy", $/ml * $/gestosc, example=[{produkt: "cukier", jednostka: "szklanki", ilosc: 2}, 400])
+need produkt = input("choice", "Produkt", "mąka", options=["mąka", "cukier", "woda"])
+need jednostka = input("choice", "Jednostka", "szklanki", options=["gramy", "szklanki", "łyżki", "ml"])
+need ilosc = input("number", "Ilość", 1, min=0, max=5000)
+need gestosc = figure("number", "Gęstość (g/ml)", $/produkt == "mąka" ? 0.5 : $/produkt == "cukier" ? 0.8 : 1, example=[{produkt: "cukier"}, 0.8])
+need ml = figure("number", "Mililitry", $/jednostka == "ml" ? $/ilosc : $/jednostka == "szklanki" ? $/ilosc * 250 : $/jednostka == "łyżki" ? $/ilosc * 15 : $/ilosc / $/gestosc, example=[{produkt: "mąka", jednostka: "szklanki", ilosc: 1}, 250])
+need szklanki = figure("number", "Szklanki", $/ml / 250, example=[{produkt: "mąka", jednostka: "gramy", ilosc: 250}, 2])
+need lyzki = figure("number", "Łyżki", $/ml / 15, example=[{produkt: "woda", jednostka: "ml", ilosc: 30}, 2])

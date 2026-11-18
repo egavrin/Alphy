@@ -238,3 +238,75 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3
 - Before the add, the test fills a list that the run-time writes as a view (`prodotti_list`, `streak_list`) with copies of its own rows.
   After the add, the view has `maxItems` rows, so the run-time wrote it again. The test does not compare the view with its list.
 - The times come from the emulator, not from a phone.
+
+## Look
+
+The device class `AppFileLookTest` shows each compiled plan as a saved app in the real shell (`ShellFixture`, `ShellRobot`, `ToolStore.saveTool`).
+It compiles each plan with `parsedAndSmoked` of `AppFileProofTest`. The shell makes no model call.
+
+- `picturesOfEachPlan` opens each of the nine saved plans and each of the five look fixtures of `kit/build.js` (`LOOK_FIXTURES`).
+  For each app, it waits for the title, the refine action, and the reply to the open event. Then it takes a screenshot of the first screen.
+  For a plan with a surface (`timer-rounds`, `lesson`, `model3d`), it waits until the inside of each canvas holds more than one color.
+  It takes the pictures in the light theme and in the dark theme, and it sets the night mode of the emulator back in a `finally` block.
+- `aTapOnARowControlChangesTheRow` taps the checkbox of the first row of `list.plan` through the accessibility node.
+  The stored state then has `preso` true only for the row `r2`, `daComprare_text` is "2", and the screen shows the first checkbox checked and "2".
+- `theLapButtonMovesTheHandInTheDrawnApp` presses "Один круг" (`lap_button`, the control with the `animate` action) of `lesson.plan`.
+  The stored `anim` change starts within 10 s. Within 10 s more, `angle` is 360 and `anim.angle.end` is 0. The test sends no timer event and calls no `execute`.
+
+The numbers of the table come from `score_app(definition, [])` of `tools/agent_corpus/visual_score.py` on the compiled definition:
+
+```text
+bun kit/look.js
+```
+
+The last column is what the pictures of the run `appfile-look-before-2` show. "Dark" marks a defect of the dark theme only.
+
+| Plan | Hero | Typed fields, first screen | Typed fields in rows | Seen in the picture |
+| --- | --- | --- | --- | --- |
+| `calc` | 1 | 2 | 0 | No defect. A large empty area under the content. |
+| `lesson` | 1 | 1 | 0 | The first text "Alphy Learn" is cut at its left edge. The eyebrow shows two times: "Исследуем · 1 / 3", then "Исследуем: 1 / 3" beside the dots. The orbit canvas has large empty bands above and under the orbit, so the lesson card starts at the bottom of the first screen. Dark: the orbit circle and the inactive dots have low contrast. |
+| `list` | 1 | 2 | 0 | The English host word "Add" in an Italian app. Each row checkbox shows the internal name "prodotti preso" as its label. The texts of a row are at its top, but the trash icon and the checkbox are at its vertical center. The aisle text "Latticini" is smaller than the other texts. The "Add" button is not aligned with the two text fields. |
+| `model3d` | 1 | 0 | 0 | The first text "Мастерская" is cut at its left edge. Two arrow icon buttons have no visible text. Dark: the light model stage is a bright panel in the dark card. |
+| `quiz` | 1 | 0 | 0 | Three filled buttons in one group ("答えを見る", "覚えた", "まだ"). A large empty area under the content. |
+| `section` | 0 | 1 | 0 | No hero. Each row is a card in a card, with low contrast in the dark theme. The trash icon is not aligned with the row title. The first screen shows only two rows. |
+| `tabs-chart` | 1 | 0 | 0 | The chart title "Gastos por categoría" shows two times. The Russian host text "Нет данных для графика" in a Spanish app. A large empty area under the content. |
+| `tea` | 0 | 0 | 0 | No hero. The first text "Çay türü" is cut at its left edge. The Russian host texts "По окончании телефон завибрирует" and "Запустить таймер" in a Turkish app. A large empty area under the content. |
+| `timer-rounds` | 1 | 0 | 0 | The ring heading "Runden geschafft" shows two times. The bar has an empty band above and under its track (see "Known look points"). The track has low contrast in both themes. |
+| `water-ko` | 1 | 0 | 0 | The ring heading "오늘 마신 물 (ml)" shows two times. The minus and the plus of the counter are small bare glyphs at the left. A large empty area under the content. |
+| `units-pl` | 1 | 1 | 0 | Four secondary metrics in a plain column, not in a grid. |
+| `shopping` | 1 | 2 | 0 | Each row checkbox shows the internal name "items done" as its label. The trash icon is at a different x in each row: 481, 449, and 490 px of 1080 px. The aisle texts are smaller than the other texts, and the texts of a row are at its top. The "Add" button is not aligned with the two text fields. |
+| `habits` | 1 | 1 | 0 | The ring heading "Done today" shows two times. Each row checkbox shows the internal name "habits done" as its label. The "Add" button is not aligned with the text field. |
+| `price-filter` | 1 | 2 | 0 | The raw option words "all", "asc", and "desc" show as the labels of the choices. |
+
+The shell action "Изменить" is Russian in each app. It is a text of the shell, not of the app.
+
+### Known look points
+
+| Point | Plan | Result |
+| --- | --- | --- |
+| The English defaults "Add" and "Nothing here yet" | `list` | "Add": seen. "Nothing here yet": not seen, because the list has three rows. The compiled ui has it as `emptyText`. |
+| The eyebrow beside the dots shows two times | `lesson` | Seen. |
+| The chart title shows a second time under its Section title | `tabs-chart` | Seen. |
+| The heading beside a ring shows two times | `timer-rounds`, `water-ko`, `habits` | Seen in each of the three plans. |
+| The size and the place of the timer bar | `timer-rounds` | The track spans x 95 to 984 px and y 1580 to 1625 px of the 1080 x 2400 px picture. The 5 to 1 canvas is about 890 x 178 px, so an empty band of about 65 px is above and under the track. The track color is (230, 212, 208) on (255, 233, 228) in the light theme and (60, 48, 45) on (43, 28, 24) in the dark theme. |
+| The number format of `Metric("覚えた", $/learned)` | `quiz` | `覚えた` and `まだ` compile to plain state fields (`bind` `learned` and `notYet`). Both show "0", so the picture does not show a difference between the two formats. |
+
+### Runs of Task 11a
+
+| Label | Revision | Observed | Test APK `lastUpdateTime` before and after |
+| --- | --- | --- | --- |
+| `appfile-look-assert` | `f1865a5+dirty` (the tree of `80b27ef`) | passed, 24 tests, 83.8 s: `AppFileProofTest` with the new assertions | `01:01:16`, `01:15:55` |
+| `appfile-look-1` | `80b27ef+dirty` | passed, `AppFileLookTest`, 3 tests, 54.9 s | `01:15:55`, `01:21:21` |
+| `appfile-look-before` | `80b27ef+dirty` | passed, 27 tests, 131.4 s. Not used: the light picture of `calc` shows the open in the middle of its change from the chat, with the busy row "Выполняем действие…". The open now waits for the reply to the open event, and each screenshot waits for three frames | `01:21:21`, `01:22:51` |
+| `appfile-look-before-2` | `80b27ef+dirty`: the tree of the commit "Show each compiled plan in the shell and take its pictures" | passed, 27 tests (`AppFileProofTest` and `AppFileLookTest`), 140.4 s | `01:22:51`, `01:26:22` |
+
+All times of the column are on 2026-11-19. The runner installed the test APK at each "after" time. No other session installed it during these runs.
+The pictures are in `evidence/alphy-ui/appfile-look-before-2/light/` and `evidence/alphy-ui/appfile-look-before-2/dark/`, one `<plan>.png` for each plan.
+The contact sheets are `evidence/alphy-ui/appfile-look-before-2/contact-light.png` and `evidence/alphy-ui/appfile-look-before-2/contact-dark.png`. Git does not keep these files.
+Before this task, `kit/build.js` did not copy the five look fixtures to the test assets. It now copies them.
+
+Command:
+
+```text
+JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3 tools/compose_acceptance/run.py suite --serial emulator-5592 --label appfile-look-before-2 com.alpha.assistant.tools.appfile.AppFileProofTest com.alpha.assistant.tools.appfile.AppFileLookTest
+```
