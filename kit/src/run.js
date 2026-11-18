@@ -132,16 +132,19 @@ const shownAs = (type, value) => (type === "number" ? (Number.isFinite(value) ? 
 const falseOf = (test) => (test?.k === "path" && test.abs ? [test, false] : test?.k === "un" && test.op === "!" && test.arg.k === "path" && test.arg.abs ? [test.arg, true]
   : test?.k === "bin" && test.op === "!=" && test.left.k === "path" && test.left.abs && test.right.k === "lit" ? [test.left, test.right.v] : null);
 const relative = (expr) => (expr?.k === "path" && !expr.abs && expr.segs.length === 1 ? expr.segs[0] : null);
+/** True when an expression reads a field of the row, such as $name. */
+const readsRow = (tree) => tree !== null && typeof tree === "object" && ((tree.k === "path" && !tree.abs) || Object.values(tree).some(readsRow));
 
 /**
  * The Alphy screen of the kit's tree in the state of now. app is the compiled data: the field of each state value, the kind of
  * each time, date, list, and array, the type of each shown value, and the names. Returns the ui, the shown values by object
  * (d, v, ...), the views of lists that the run-time writes (views, their schemas, and their lines), the controls by action id,
- * the bounds of each number control, the faults as [line, text], and the line of each node of the ui (owners) for the emitter.
+ * the bounds of each number control, the faults as [line, text], and for the emitter the line of each node of the ui (owners)
+ * and the stored list of each list node (listRoots).
  */
 export function screen(kit, app) {
   const name = namer(app.names), fields = new Map(app.fields), kinds = app.kinds ?? {}, lists = app.lists ?? {}, day = today(kit);
-  const faults = [], controls = new Map(), rowControls = new Map(), owners = new Map(), bounds = [], views = {}, viewSchemas = {}, viewOwners = [];
+  const faults = [], controls = new Map(), rowControls = new Map(), owners = new Map(), listRoots = new Map(), bounds = [], views = {}, viewSchemas = {}, viewOwners = [];
   const slots = { d: new Map(), v: new Map() }, values = {};
   /**
    * A value that a node shows: the field of its state line (of its row in a row), or a field that the run-time computes. At the top
@@ -186,11 +189,18 @@ export function screen(kit, app) {
     const expr = node.call ? given(node.call) : {};
     // The arrows of a row, move(-1) and move(1), become the reorder of its list.
     if (scope && expr.action?.k === "call" && expr.action.name === "move" && expr.action.args.length === 1) { scope.flags.moves = true; return null; }
+    // Alphy draws one row template for all rows, and a button, a field, or a choice binds no text or options (ToolUiCatalog).
+    // shortcut: each field of the row in these values is a fault, also one that gives all rows the same text, such as count($/x, $done); allow those when a plan needs them.
+    if (scope) for (const prop of ["label", "title", "icon", "options"]) {
+      if (readsRow(expr[prop])) fault(`the ${prop} of a ${node.type} in a row ${prop === "options" ? "change" : "changes"} with the row, and Alphy draws one ${prop} for all rows. Show the value in a Text of the row`);
+    }
+    // A list in a Section announces the title of the Section: an entries need puts its list into a Section with the title of the need.
+    const within = node.type === "Section" ? { ...ctx, title: node.props.title } : ctx;
     const bound = (prop) => (expr[prop] && expr[prop].k !== "lit" ? slot("d", `${key}.${prop}`, expr[prop], node.props[prop], at) : null);
     const at = {
       scope, fault,
       blank: Boolean(scope && !scope.out),
-      children: (weighted = false, inner = ctx) => node.children.map((child, index) => walk(child, child.name ?? `${key}_${index}`, line, { ...inner, weighted })).filter(Boolean),
+      children: (weighted = false, inner = within) => node.children.map((child, index) => walk(child, child.name ?? `${key}_${index}`, line, { ...inner, weighted })).filter(Boolean),
       // The text of a control: its label, else the kit's name of its line, which a person can read. Never a safe name such as f3.
       caption: (label) => at.plain(label) || (node.name ? node.name : `${line} ${node.props.icon ?? node.type}`).replace(/_/g, " "),
       text: (prop) => { const bind = bound(prop); return bind ? { text: "", bind } : { text: at.plain(node.props[prop]) }; },
@@ -239,7 +249,7 @@ export function screen(kit, app) {
         const dismiss = at.action(() => { if (!target) return false; kit.write(target[0], target[1], {}); kit.recompute(); return ""; }, "_dismiss");
         return { type: node.children.some(form) ? "bottomSheet" : "dialog", text: at.caption(node.props.title), dismissAction: dismiss, children: at.children() };
       },
-      list: () => rows(node, key, line, expr, at),
+      list: () => rows(node, key, line, expr, at, ctx.title),
     };
     const out = map(node, at);
     if (!out) return null;
@@ -258,7 +268,7 @@ export function screen(kit, app) {
    * other rows (sort, filter) or values that the run-time computes, it binds a view: a list field that the run-time writes,
    * with the rows in the kit's order. A row control of the view changes the stored row with the same id.
    */
-  const rows = (node, key, line, expr, at) => {
+  const rows = (node, key, line, expr, at, title) => {
     const source = node.source, root = source?.k === "path" && source.abs && source.segs.length === 1 && lists[source.segs[0]] ? source.segs[0] : null;
     if (!root || !node.blank) { at.fault("a List shows the rows of a list of the app, such as $/rows, or sort or filter of it. Other rows are not built yet"); return null; }
     const spec = lists[root], rowName = namer();
@@ -298,13 +308,15 @@ export function screen(kit, app) {
       const list = kit.read(source, {}), from = list.findIndex((row) => row.id === value?.sourceKey), to = list.findIndex((row) => row.id === value?.destinationKey);
       return from < 0 || to < 0 ? false : kit.fire({ props: { action: { k: "call", name: "move", args: [{ k: "lit", v: to - from }], named: {} } }, row: list[from], list: source });
     }, "_move");
-    return { type: groupBy ? "groupedList" : "list", text: at.caption(), bind: field, ...(groupBy && { groupBy }), ...(node.props.empty && { emptyText: at.plain(node.props.empty).slice(0, 300) }),
+    const out = { type: groupBy ? "groupedList" : "list", text: at.caption(title), bind: field, ...(groupBy && { groupBy }), ...(node.props.empty && { emptyText: at.plain(node.props.empty).slice(0, 300) }),
       ...(move && { reorder: { action: move, labelField: label } }), rowTemplate };
+    listRoots.set(out, root);
+    return out;
   };
   const { kind, preset, palette } = header(kit), tree = kit.tree(), top = walk(tree, "root", "root", { scope: null, weighted: true });
   const children = [...(kind ? [{ type: "text", text: String(kind), style: STYLES.eyebrow }] : []), ...(tree.type === "Column" ? top?.children ?? [] : [top].filter(Boolean))];
   const ui = { type: "theme", preset: preset ?? "clean", ...(palette && { palette }), cornerRadius: 20, children: [{ type: "column", style: { gap: "medium" }, children }] };
-  return { ui, values, views, viewSchemas, viewOwners, controls, bounds, faults, owners };
+  return { ui, values, views, viewSchemas, viewOwners, controls, bounds, faults, owners, listRoots };
 }
 
 /** The Alphy value of a stored value of the kit: a time as minutes, a date as a real date (today for a text that is not one), and each row cast. */
@@ -326,10 +338,32 @@ export function stateOf(kit, app, shown) {
 }
 
 /**
+ * Puts an Alphy state into the kit, as each event and the emitter's first screen read it: a time as "HH:MM", each row in the
+ * kit's form, and the formulas of the app computed from them.
+ */
+export function load(kit, app, state) {
+  const kinds = app.kinds ?? {};
+  let last = kit.nextId - 1;
+  for (const [root, path] of app.fields) {
+    const [field, inner] = path.split("."), value = inner ? state[field]?.[inner] : state[field];
+    if (value === undefined) continue;
+    if (kinds[root] === "list") {
+      kit.state[root] = (Array.isArray(value) ? value : []).map((row) => {
+        last = Math.max(last, Number(/^r(\d+)$/.exec(row.id)?.[1] ?? 0));
+        return { id: row.id, ...Object.fromEntries(app.lists[root].map(([kitField, safe, kind]) => [kitField, kind === "time" ? clockOf(row[safe]) : row[safe]])) };
+      });
+    } else kit.state[root] = kinds[root] === "time" ? clockOf(value) : kinds[root] === "array" && Array.isArray(value) ? [...value] : value;
+  }
+  // Each event starts a new kit, so a new row gets an id after the highest id of the stored rows.
+  kit.nextId = last + 1;
+  kit.recompute();
+}
+
+/**
  * Answers one event of the sandbox request {artifactId, revision, state, event}. app is the compiled data of emit.js, and now
  * is the clock of the host. A read-only event, an action id that the app does not have, an action that changes nothing, and an
- * action that takes a list past Alphy's limits give the state back as it is. A bound number past its bounds comes back at its bound.
- * The reply holds a new ui only when the screen differs from the screen of the state before the event.
+ * action that takes a list past its count of rows (app.caps) or an array past Alphy's limit give the state back as it is. A bound
+ * number past its bounds comes back at its bound. The reply holds a new ui only when the screen differs from the screen of the state before the event.
  */
 export function handle(input, app, now = Date.now()) {
   const { state, event } = input;
@@ -338,24 +372,13 @@ export function handle(input, app, now = Date.now()) {
   settings.now = () => now;
   try {
     const kit = new App(new AppFile().feedText(app.lines)), kinds = app.kinds ?? {};
-    let last = kit.nextId - 1;
-    for (const [root, path] of app.fields) {
-      const [field, inner] = path.split("."), value = inner ? state[field]?.[inner] : state[field];
-      if (value === undefined) continue;
-      if (kinds[root] === "list") {
-        kit.state[root] = (Array.isArray(value) ? value : []).map((row) => {
-          last = Math.max(last, Number(/^r(\d+)$/.exec(row.id)?.[1] ?? 0));
-          return { id: row.id, ...Object.fromEntries(app.lists[root].map(([kitField, safe, kind]) => [kitField, kind === "time" ? clockOf(row[safe]) : row[safe]])) };
-        });
-      } else kit.state[root] = kinds[root] === "time" ? clockOf(value) : kinds[root] === "array" && Array.isArray(value) ? [...value] : value;
-    }
-    // Each event starts a new kit, so a new row gets an id after the highest id of the stored rows.
-    kit.nextId = last + 1;
-    kit.recompute();
+    load(kit, app, state);
     const before = screen(kit, app), control = event.type === "action" ? before.controls.get(event.actionId) : undefined;
     if (event.type !== "open" && !control) return { state };
     if (control && control(event.value) === false) return { state };
-    for (const [root, kind] of Object.entries(kinds)) if ((kind === "list" && kit.state[root]?.length > MAX_ROWS) || (kind === "array" && kit.state[root]?.length > MAX_ARRAY)) return { state };
+    for (const [root, kind] of Object.entries(kinds)) {
+      if ((kind === "list" && kit.state[root]?.length > (own(app.caps, root) ?? MAX_ROWS)) || (kind === "array" && kit.state[root]?.length > MAX_ARRAY)) return { state };
+    }
     let after = control ? screen(kit, app) : before;
     const outside = after.bounds.filter(([node, min, max]) => !(node.props.value >= min && node.props.value <= max));
     if (outside.length) {

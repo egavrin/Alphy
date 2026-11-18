@@ -66,9 +66,9 @@ export function planCopies(plans, to) {
   return [...plans.map((path) => [join(to, basename(path)), readFileSync(path, "utf8")]), ...gone.map((name) => [join(to, name), null])];
 }
 
-/** Each file that the build writes, with its text. The device tests also read test/nodes.plan and test/lists.plan, the plans of the node table. */
+/** Each file that the build writes, with its text. The device tests also read the test plans of the node table, the lists, and the render work limit. */
 const outputs = async () => [[at("../app/src/main/assets/appfile/kit.js"), await bundle()],
-  ...planCopies([...plansIn(at("plans")), at("test/nodes.plan"), at("test/lists.plan")], at("../app/src/androidTest/assets/appfile"))];
+  ...planCopies([...plansIn(at("plans")), at("test/nodes.plan"), at("test/lists.plan"), at("test/rich.plan")], at("../app/src/androidTest/assets/appfile"))];
 
 if (import.meta.main) {
   const check = process.argv.includes("--check");

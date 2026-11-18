@@ -2,16 +2,19 @@
 // run-time (run.js and the modules that it needs) and the compiled data of the app. The run-time answers each event.
 
 import { App, given } from "./core.js";
-import { ALPHY, MAX_ARRAY, MAX_ROW_FIELDS, MAX_ROWS, PER_OBJECT, TYPED, header, namer, screen, stateOf } from "./run.js";
+import { ALPHY, MAX_ARRAY, MAX_ROW_FIELDS, MAX_ROWS, PER_OBJECT, TYPED, header, load, namer, screen, stateOf } from "./run.js";
 
 /** The text of the run-time. kit/build.js puts it into the bundle, and a test of the sources sets it from the sources. */
 export const runtime = { text: "" };
 /**
  * The limits of Alphy that come from the kit's own mapping, so the author of a plan cannot see them: top-level state fields
  * (ToolValueSchema.validateSchemas), source bytes (SandboxContract.MAX_SOURCE_BYTES), and the nodes, depth, and children of a ui
- * (ToolUiCatalog). ToolSpec.parse stays the check of the ui bytes and the state bytes.
+ * (ToolUiCatalog), and the render work of a screen (ToolUiCatalog.MAX_RENDER_WORK). ToolSpec.parse stays the check of the ui bytes
+ * and the state bytes. MIN_ROWS is the kit's own limit: a list with room for fewer rows is a fault.
  */
-const MAX_FIELDS = 40, MAX_SOURCE_BYTES = 65536, MAX_NODES = 512, MAX_DEPTH = 8, MAX_CHILDREN = 50;
+const MAX_FIELDS = 40, MAX_SOURCE_BYTES = 65536, MAX_NODES = 512, MAX_DEPTH = 8, MAX_CHILDREN = 50, MAX_RENDER_WORK = 2048, MIN_ROWS = 20;
+/** The nodes whose options cost render work (ToolUiCatalog.choiceTypes). */
+const CHOICES = new Set(["select", "tabs", "singleChoice", "multiChoice", "segmented", "navigationBar", "navigationRail", "menu"]);
 const SCALARS = new Set(["number", "string", "boolean"]);
 /** The kind of each field kind of an entries need. A choice and a text are strings. */
 const FIELD_KINDS = { number: "number", money: "number", percent: "number", count: "number", check: "boolean", switch: "boolean", time: "time", date: "date" };
@@ -27,12 +30,13 @@ const bytes = (text) => {
 /**
  * The definition of the app, its language beside it, and the faults of what the emitter cannot build. app is the compiled
  * data that the source gives the run-time: the lines of the app, the field of each state value, the kind of each time, date,
- * list, and array, the fields of each list, the type of each shown value, and the names in both directions. Faults give no definition.
+ * list, and array, the fields of each list, the count of rows of each shown list, the type of each shown value, and the names
+ * in both directions. Faults give no definition.
  */
 export function emit(file) {
   if (!runtime.text) throw new Error("emit.js has no run-time text: kit/build.js gives it");
   const kit = new App(file), { title, lang } = header(kit), faults = [], stateSchema = {}, owners = [], needObjects = new Map();
-  const app = { lines: [...file.entries.values()].filter((entry) => entry.kind !== "check").map((entry) => entry.raw).join("\n"), fields: [], types: {}, names: { safe: {}, kit: {} }, kinds: {}, lists: {} };
+  const app = { lines: [...file.entries.values()].filter((entry) => entry.kind !== "check").map((entry) => entry.raw).join("\n"), fields: [], types: {}, names: { safe: {}, kit: {} }, kinds: {}, lists: {}, caps: {} };
   const name = namer(app.names);
   if (typeof title !== "string" || title.length < 1 || title.length > 100) faults.push("app: the app line needs a title of 1 to 100 characters");
   // The need whose part wrote each line. A line that an author wrote belongs to no need, and a fault of it names the line.
@@ -77,9 +81,12 @@ export function emit(file) {
     app.kinds[root] = "list";
     return { type: "list", maxItems: MAX_ROWS, fields: { id: "string", ...Object.fromEntries(app.lists[root].map(([, safe, kind]) => [safe, own(ALPHY, kind) ?? kind])) } };
   };
-  /** A need keeps its value in one field and each other value of its part in one object NAME_s, so it costs at most two fields. */
+  /**
+   * A need keeps its value in one field and each other plain value of its part in one object NAME_s. A list or an array of the
+   * part is a field of its own, as the list of a need is: a List and a reply bind a top-level field.
+   */
   const place = (root, need, owner, schema, wish = root.slice(need?.length + 1)) => {
-    const inner = need !== undefined && root !== need && root.startsWith(need + "_");
+    const inner = typeof schema === "string" && need !== undefined && root !== need && root.startsWith(need + "_");
     const field = inner ? name("need:" + need, need + "_s") : name("$/" + root, root);
     if (!stateSchema[field]) owners.push(owner);
     if (!inner) { stateSchema[field] = schema; app.fields.push([root, field]); return; }
@@ -108,6 +115,8 @@ export function emit(file) {
     const count = Object.keys(stateSchema[field].fields).length;
     if (count > PER_OBJECT) faults.push(`need ${need}: its part keeps ${count} values in the object ${field}, and an object of Alphy holds at most ${PER_OBJECT} fields. Give the need fewer fields`);
   }
+  // The first screen comes from the start values as the run-time reads them: an empty date is today, and a text that is not a time is 00:00.
+  load(kit, app, stateOf(kit, app, { views: {}, values: {} }));
   const shown = screen(kit, app);
   for (const [line, text] of shown.faults) { const fault = `${label(line)}: ${text}`; if (!faults.includes(fault)) faults.push(fault); }
   Object.assign(stateSchema, shown.viewSchemas);
@@ -132,6 +141,30 @@ export function emit(file) {
   };
   measure(shown.ui, 0, "app");
   if (nodes > MAX_NODES) faults.push(`app: the screen has ${nodes} nodes, and Alphy keeps at most ${MAX_NODES}. Show fewer components`);
+  // The render work of the screen as ToolUiCatalog.validateRenderedWork counts it: each node costs 1 (a hidden node too), and a
+  // choice costs its options too. A list draws its row template once for each row, and its groupBy and its reorder cost 1 more for each row.
+  const work = (node) => 1 + (CHOICES.has(node.type) ? node.options.length : 0) + (node.children ?? []).reduce((sum, child) => sum + work(child), 0);
+  const perRow = new Map(), shownLists = [];
+  const collect = (node) => {
+    const root = shown.listRoots.get(node);
+    if (root !== undefined) {
+      perRow.set(root, (perRow.get(root) ?? 0) + work(node.rowTemplate) + (node.groupBy === undefined ? 0 : 1) + (node.reorder === undefined ? 0 : 1));
+      shownLists.push(node);
+    }
+    (node.children ?? []).forEach(collect);
+  };
+  collect(shown.ui);
+  // One count for all lists of the app: the most rows for which the screen stays inside the limit when each list is full.
+  const cost = [...perRow.values()].reduce((sum, each) => sum + each, 0);
+  const rowCount = cost ? Math.min(MAX_ROWS, Math.floor((MAX_RENDER_WORK - work(shown.ui)) / cost)) : MAX_ROWS, storedField = new Map(app.fields);
+  for (const node of shownLists) {
+    const root = shown.listRoots.get(node), where = label(shown.owners.get(node)), start = kit.state[root].length;
+    app.caps[root] = rowCount;
+    stateSchema[storedField.get(root)].maxItems = stateSchema[node.bind].maxItems = rowCount;
+    const few = `${where}: the row shows too much: with each list of the app full, the screen has room for ${rowCount} rows in each list, and a list needs room for ${MIN_ROWS}. Show fewer controls or options in a row, or fewer lists`;
+    const over = `${where}: $/${root} starts with ${start} rows, and the screen has room for ${rowCount} rows in each list. Give it fewer rows`;
+    for (const fault of [...(rowCount < MIN_ROWS ? [few] : []), ...(start > rowCount ? [over] : [])]) if (!faults.includes(fault)) faults.push(fault);
+  }
   const language = typeof lang === "string" ? lang : null;
   if (faults.length) return { definition: null, language, faults, app };
   const source = `${runtime.text}\nreturn handle(input, ${JSON.stringify(app)});`, size = bytes(source);

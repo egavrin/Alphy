@@ -18,7 +18,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps and each node of the node table in Alphy's checks, events on lists, and the time of an event. */
+/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps and each node of the node table in Alphy's checks, events on lists and on the quiz, lists full to the render work limit, and the time of an event. */
 @RunWith(AndroidJUnit4::class)
 class AppFileProofTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
@@ -47,8 +47,8 @@ class AppFileProofTest {
         val times=List(5) {
             val started=SystemClock.elapsedRealtime()
             val result=compiler.compile(text)
-            // The report of quiz.plan is clean. Its list of cards is a fault of the emitter until the kit maps lists (Task 4 of the plan).
-            assertTrue(result.toString(),result.status in setOf("faults","ok") && result.faults.all {"is not built yet" in it})
+            assertEquals(result.toString(),"ok",result.status)
+            assertEquals(emptyList<String>(),result.faults)
             SystemClock.elapsedRealtime()-started
         }
         val median=times.sorted()[2]
@@ -140,6 +140,32 @@ class AppFileProofTest {
         app.act("doses_addRow_open")
         app.act("doses_addRow_dismiss")
         assertEquals(510,app.act("wake_field",510).getInt("wake"))
+    }
+    @Test fun quizPassesParseAndSmoke(): Unit=runBlocking {
+        // The presses of the plan's own check: reveal, learned, and not yet two times.
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val app=Session(sandbox,parsedAndSmoked(sandbox,"quiz","ja"),"appfile-quiz")
+        assertTrue(app.act("revealButton").getBoolean("shown"))
+        val learned=app.act("learnedButton")
+        assertEquals(1,learned.getInt("learned"))
+        assertFalse(learned.getBoolean("shown"))
+        assertEquals("火",learned.getJSONObject("d").getString("card_kanji"))
+        app.act("notYetButton")
+        val notYet=app.act("notYetButton")
+        assertEquals(2,notYet.getInt("notYet"))
+        assertEquals("水",notYet.getJSONObject("d").getString("card_kanji"))
+    }
+    @Test fun twoRichListsFullToTheirCountPassParseAndSmoke(): Unit=runBlocking {
+        // rich.plan is kit/test/rich.plan: two lists with a choice of 6 options in each row. Its start rows fill each list to the count that the render work limit leaves.
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val spec=parsedAndSmoked(sandbox,"rich")
+        val state=JSONObject(spec.initialState)
+        for(list in listOf("shirts","shoes")) {
+            assertEquals(list,91,spec.schema.getJSONObject(list).getInt("maxItems"))
+            assertEquals(list,91,state.getJSONArray(list).length())
+        }
+        val checked=Session(sandbox,spec,"appfile-rich").act("shoes_done",row("r92",true))
+        assertTrue(checked.getJSONArray("shoes").getJSONObject(0).getBoolean("done"))
     }
     @Test fun anActionOnAListOf100RowsTakesUnder250Ms(): Unit=runBlocking {
         val rows=(1..100).joinToString(", ") {"{name: \"Item $it\", done: false}"}

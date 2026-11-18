@@ -122,19 +122,20 @@ const PARTS = {
       const kind = choice ? "choice" : ["number", "money", "percent"].includes(kindTree.v) ? "number" : ["check", "switch", "count", "date", "time", "picture"].includes(kindTree.v) ? kindTree.v : "text";
       // The field for a value that the person types or picks.
       const widget = { number: "NumberField", date: "DateField", time: "TimeField" }[kind] ?? "TextField";
-      const caption = q(labels[field] ?? label(field));
-      const pick = (bind) => `${choice && kindTree.items.length <= 4 ? "Segmented" : "Select"}(${bind.startsWith("$/") ? caption : '""'}, ${bind}, ${choice})`;
+      // The add form names each field. A control of a row takes the caption of labels= only: without one, the emitter names it by its line.
+      const caption = q(labels[field] ?? label(field)), cell = q(labels[field] ?? "");
+      const pick = (text, bind) => `${choice && kindTree.items.length <= 4 ? "Segmented" : "Select"}(${text}, ${bind}, ${choice})`;
       // The cell of the row: a check mark, a choice, a field that the person can change, or a plain value.
-      if (kind === "check") lines.push(`${name}_${field} = CheckBox(${q(labels[field] ?? "")}, $${field})`);
-      else if (kind === "switch") lines.push(`${name}_${field} = Toggle(${q(labels[field] ?? "")}, $${field})`);
+      if (kind === "check") lines.push(`${name}_${field} = CheckBox(${cell}, $${field})`);
+      else if (kind === "switch") lines.push(`${name}_${field} = Toggle(${cell}, $${field})`);
       else if (kind === "count") {
         // A count in the row: a minus and a plus button around the number, and the person can also type it
         // (route steps-chart: seven day rows with a count of steps, and no way to give 8000 but by taps). Not below 0.
-        lines.push(`${name}_${field}_minus = IconButton("Minus", action=set($${field}, max(0, $${field} - 1)))`, `${name}_${field} = NumberField("", $${field}, min=0, step=1)`, `${name}_${field}_plus = IconButton("Plus", action=inc($${field}))`);
+        lines.push(`${name}_${field}_minus = IconButton("Minus", action=set($${field}, max(0, $${field} - 1)))`, `${name}_${field} = NumberField(${cell}, $${field}, min=0, step=1)`, `${name}_${field}_plus = IconButton("Plus", action=inc($${field}))`);
         cells.push(`${name}_${field}_minus`);
       } else if (kind === "picture") lines.push(`${name}_${field} = Picture($${field})`);
-      else if (kind === "choice") lines.push(`${name}_${field} = ${pick("$" + field)}`);
-      else if (edit) lines.push(`${name}_${field} = ${widget}("", $${field}${kind === "text" ? ", weight=1" : ""})`);
+      else if (kind === "choice") lines.push(`${name}_${field} = ${pick(cell, "$" + field)}`);
+      else if (edit) lines.push(`${name}_${field} = ${widget}(${cell}, $${field}${kind === "text" ? ", weight=1" : ""})`);
       else if (kind !== "text") lines.push(`${name}_${field} = Badge($${field})`);
       else lines.push(`${name}_${field} = Text($${field}${firstText ? "" : ", weight=1"})`);
       if (kind === "text") firstText ??= field;
@@ -146,7 +147,7 @@ const PARTS = {
       // A count has a number field in the add form and its stepper in the row. final2: with the stepper only, three apps needed 30 taps for a count of 30.
       const empty = { number: "0", count: "0", date: "today()", time: '"08:00"' }[kind] ?? (kind === "choice" ? show(kindTree.items[0]) : '""');
       const typed = kind === "count" ? `NumberField(${caption}, $/${name}_new_${field}, min=0, step=1)` : `${widget}(${caption}, $/${name}_new_${field}${kind === "text" ? ", weight=1" : ""})`;
-      lines.push(`$/${name}_new_${field} = ${empty}`, `${name}_new_${field} = ${kind === "choice" ? pick(`$/${name}_new_${field}`) : typed}`);
+      lines.push(`$/${name}_new_${field} = ${empty}`, `${name}_new_${field} = ${kind === "choice" ? pick(caption, `$/${name}_new_${field}`) : typed}`);
       add.push(`${name}_new_${field}`);
       blank.push(`${field}: $/${name}_new_${field}`);
       if (["text", "number", "count"].includes(kind)) reset.push(`set($/${name}_new_${field}, ${empty})`);

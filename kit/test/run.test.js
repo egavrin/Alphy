@@ -9,6 +9,7 @@ import { handle } from "../src/run.js";
 import { plan, planned } from "./helpers.js";
 
 const compiled = async (text) => { const file = await planned(text); return { file, ...emit(file) }; };
+const testPlan = (name) => readFileSync(new URL(`./${name}.plan`, import.meta.url), "utf8");
 const request = (state, event) => ({ artifactId: "kit-test", revision: 1, state, event });
 const nodes = (node) => [node, ...(node.children ?? []).flatMap(nodes)];
 /** The values of the objects d, d2, v, and so on: the values that the run-time computes. */
@@ -26,8 +27,10 @@ test("run: an action sets the bound value and the figures follow", async () => {
 });
 
 test("run: open of the initial state gives the initial state", async () => {
-  const { definition, app } = await compiled(plan("calc"));
-  expect(handle(request(definition.initialState, { type: "open" }), app)).toEqual({ state: definition.initialState });
+  for (const text of [plan("calc"), plan("list"), testPlan("lists")]) {
+    const { definition, app } = await compiled(text);
+    expect(handle(request(definition.initialState, { type: "open" }), app)).toEqual({ state: definition.initialState });
+  }
 });
 
 test("run: render and preview change no state", async () => {
@@ -148,6 +151,19 @@ test("run: a list at its limits", async () => {
   expect(handle(request(full, { type: "action", actionId: "items_add", value: null }), app)).toEqual({ state: full });
   // A delete with a key that does not exist changes nothing.
   expect(handle(request(full, { type: "action", actionId: "items_remove", value: { key: "nothing", value: null } }), app)).toEqual({ state: full });
+  // Rows that cost more render work hold fewer rows: each list of rich.plan starts full to its count.
+  const rich = await compiled(testPlan("rich")), count = rich.definition.stateSchema.shirts.maxItems;
+  expect(count).toBeLessThan(100);
+  const wardrobe = session(rich.definition, rich.app);
+  wardrobe.act("shirts_remove", { key: "r1", value: null });
+  wardrobe.act("shirts_new_name", "Scarf");
+  wardrobe.act("shirts_add");
+  expect(wardrobe.state.shirts).toHaveLength(count);
+  expect(wardrobe.state.shirts.at(-1).name).toBe("Scarf");
+  // The add form is ready, so only the count refuses the next row.
+  wardrobe.act("shirts_new_name", "Tie");
+  const fullRich = wardrobe.state;
+  expect(handle(request(fullRich, { type: "action", actionId: "shirts_add", value: null }), rich.app)).toEqual({ state: fullRich });
 });
 
 test("run: a reorder event moves the row", async () => {
