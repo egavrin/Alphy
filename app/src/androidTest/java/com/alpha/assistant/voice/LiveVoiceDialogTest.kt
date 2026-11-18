@@ -26,7 +26,6 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
-import kotlin.math.sqrt
 
 /**
  * The live check of spec 6.3: one GPT-Live session with the real key runs a Russian request with a 25 s late commentary, a second
@@ -39,7 +38,7 @@ class LiveVoiceDialogTest {
 
     @Test fun dialogScriptPassesOnAScriptedServer() {
         val log = File(context.cacheDir, "live-dialog-rehearsal.log")
-        val outcome = LiveDialog(ScriptedLiveServer(), Endpoints { "http://127.0.0.1:4000" }, AiAccount(AiProvider.OPENAI, "alpha-test-only"), 200)
+        val outcome = LiveDialog(ScriptedLiveServer(), Endpoints { "http://127.0.0.1:4000" }, AiAccount(AiProvider.OPENAI, "alpha-test-only"), 4_000)
             .run(log)
         assertTrue(outcome.summary, outcome.failures.isEmpty())
         val text = log.readText()
@@ -66,19 +65,28 @@ private class Outcome(val failures: List<String>, val summary: String)
 private data class Seen(val at: Long, val type: String, val text: String = "", val startMs: Long? = null, val endMs: Long? = null,
     val id: String? = null)
 
+/** One output audio chunk as it arrived. */
+private class Chunk(val at: Long, val samples: Int, val voiced: Boolean)
+
+/** One reply on the output stream by the rule of rulings R24 and R27. Times are dialog ms of chunk arrivals. */
+private class StreamReply(val first: Long) { var lastVoiced = first; var voicedChunks = 0 }
+
 private const val INPUT = "session.input_transcript.delta"
 private const val OUTPUT = "session.output_transcript.delta"
 private const val DELEGATION = "session.delegation.created"
 private const val APPENDED = "session.commentary.appended"
-/** A 20 ms or longer chunk above this RMS is speech, not the silence of the output stream. */
-private const val VOICED_RMS = 0.01
 private const val QUIET_MS = 1_500L
+/**
+ * Two output transcript replies are apart by at least this stamp gap. The stamps step by 200 ms; the first live run had stamp gaps of
+ * at most 800 ms inside a reply and at least 1,200 ms between replies.
+ */
+private const val TRANSCRIPT_GAP_MS = 1_000L
 
 /**
- * The dialog of spec 6.3 through [LiveVoiceSession] with [FakeLiveAudio] as the capture. A feeder sends a 20 ms block every 20 ms
- * for the whole session: digital silence, or the queued fixture. Every step runs with a bounded wait, and the checks are judged at
- * the end, so one paid run observes every assumption. The log holds event types, ids, timeline values, and transcript text. It
- * never holds the raw text of an event, an error message, or the key.
+ * The dialog of spec 6.3 through [LiveVoiceSession] with a real-time [FakeLiveAudio]: a written chunk keeps the playback active until a
+ * speaker would have played it. A feeder sends a 20 ms capture block every 20 ms for the whole session: digital silence, or the queued
+ * fixture. Every step runs with a bounded wait, and the checks are judged at the end, so one paid run observes every assumption. The log
+ * holds event types, ids, timeline values, and transcript text. It never holds the raw text of an event, an error message, or the key.
  */
 private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account: AiAccount, private val commentaryDelayMs: Long) {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -89,15 +97,26 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
     private val sends = CopyOnWriteArrayList<Seen>()
     /** The arrival times of voiced output audio chunks. */
     private val voiced = CopyOnWriteArrayList<Long>()
-    private val audio = FakeLiveAudio()
+    private val chunks = CopyOnWriteArrayList<Chunk>()
+    private val timing = LiveTiming()
+    private val audio = FakeLiveAudio(realTime = true)
+    private val speaker = Speaker(audio)
     private val host = Host()
-    private val session = LiveVoiceSession(instrumentation.targetContext, scope, Recorder(transport), { audio }, { account }, endpoints)
+    private val session = LiveVoiceSession(instrumentation.targetContext, scope, Recorder(transport), { speaker }, { account }, endpoints, timing)
     private val blocks = LinkedBlockingQueue<ShortArray>()
     private val feeder = Thread(::feed, "live-dialog-capture")
     @Volatile private var feeding = true
     /** The blocks that the feeder has given to the session: session audio ms / 20. */
     @Volatile private var fed = 0L
     @Volatile private var feedStart = 0L
+    /** The dialog ms when the interrupting fixture was queued, or -1. */
+    @Volatile private var interruptAt = -1L
+    /** (dialog ms, voiced) of each chunk that the session wrote to the speaker. */
+    private val plays = CopyOnWriteArrayList<Pair<Long, Boolean>>()
+    private val flushes = CopyOnWriteArrayList<Long>()
+    /** The changes of `playbackActive` and of the phase, as the feeder sees them every 20 ms. */
+    private val activeChanges = CopyOnWriteArrayList<Pair<Long, Boolean>>()
+    private val phaseChanges = CopyOnWriteArrayList<Pair<Long, LivePhase>>()
     private val checks = ArrayList<String>()
     private val failures = ArrayList<String>()
     /** (fixture, session audio ms of its speech onset, dialog ms of the queue). */
@@ -105,10 +124,6 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
     private val audioLock = Any()
     private var audioRun: AudioRun? = null
     private var lastAudioAt = -1L
-    private var audioChunks = 0
-    private var audioSamples = 0L
-    private var maxAudioGap = 0L
-    private var audioGaps = 0
 
     private class AudioRun(val voiced: Boolean, val from: Long) { var to = from; var chunks = 0; var samples = 0L; var maxGap = 0L }
 
@@ -125,6 +140,12 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
         override fun appended(eventId: String) = note("host appended $eventId")
         override fun outputEnded(endMs: Long) { note("host outputEnded endMs=$endMs"); outputEnds += now() to endMs }
         override fun ended(status: String, settingsRequired: Boolean) { note("host ended «$status» settings=$settingsRequired"); ended = status }
+    }
+
+    /** Records what the session writes to the speaker and each local flush. */
+    private inner class Speaker(private val inner: FakeLiveAudio) : LiveAudio by inner {
+        override fun play(samples: ShortArray) { plays += now() to (rms(samples) > LIVE_VOICED_RMS); inner.play(samples) }
+        override fun flushPlayback() { flushes += now(); note("local flush"); inner.flushPlayback() }
     }
 
     /** Logs each event and send before the session gets it. */
@@ -150,6 +171,8 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
             failures += "The script stopped: ${failure.javaClass.simpleName}"
             note("script stopped: ${failure.javaClass.simpleName}")
         } finally {
+            val ended = host.ended
+            expect("core: no error ends the mode", ended == null, "end before the stop «$ended»; errors ${errors(0)}")
             main { session.stop() }
             waitFor("session.closed", 5_000, whileActive = false) { events.any { it.type == "session.closed" } }
             feeding = false
@@ -157,6 +180,7 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
             scope.cancel()
             synchronized(audioLock) { audioRun?.let(::logRun); audioRun = null }
         }
+        corePath()
         val summary = summary()
         log.writeText(synchronized(lines) { lines.sortedBy { it.first }.joinToString("\n") { "%7d %s".format(it.first, it.second) } } +
             "\n\n" + summary + "\n")
@@ -176,7 +200,7 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
         feeder.start()
         SystemClock.sleep(1_000)
 
-        // Step 1: the request, its delegation, and no claim before the commentary of 25 s later.
+        // Step 1: the request, its delegation, and no claim before the late commentary.
         val asked = now()
         say("russian")
         val first = host.delegations.poll(15, TimeUnit.SECONDS)
@@ -194,6 +218,9 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
         expect("no claim before the commentary (anti-goal 1)", CLAIMS.none { it in claims }, "output before it «$claims»")
         expect("a commentary ${commentaryDelayMs / 1000} s after its delegation is spoken (spec 5.5.6)", spoken(c1.first, "commentary 1"),
             "«${text(outputs(c1.first))}»")
+        val onScreen = text(outputs(c1.first)).lowercase()
+        info("on-screen confirmation (ruling R25)", "asks for «да» or «нет»: ${ASKS.any { it in onScreen }}; " +
+            "tells to tap the card: ${TAPS.any { it in onScreen }}; «$onScreen»")
 
         // Step 2: a second commentary for the same delegation.
         val c2 = comment(d1, DONE)
@@ -206,26 +233,28 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
         val thinking = sends.lastOrNull { it.type == "session.thinking.append" }?.id
         expect("thinking without a delegation gives no error (spec 5.7.2)", errors(thought).isEmpty() && host.ended == null,
             "event_id $thinking; errors ${errors(thought)}; output after it «${text(outputs(thought))}»")
+        waitFor("quiet after the thinking text", 30_000) { now() - lastOutput() >= QUIET_MS }
 
-        // Step 4: the user speaks over a long answer.
+        // Step 4: the user speaks over a long answer, once its voice plays and the barge-in grace has passed.
         val c3 = comment(d1, LONG_ANSWER)
-        val replying = waitFor("the long answer", 20_000) { outputs(c3.first).isNotEmpty() }
-        val interrupted = now()
+        val replying = waitFor("the voice of the long answer", 20_000) { voiced.any { it > c3.first } }
+        SystemClock.sleep(500)
+        interruptAt = now()
         val onset = say("russian")
         val second = host.delegations.poll(15, TimeUnit.SECONDS)
         val cut = second?.let { d -> events.firstOrNull { it.type == DELEGATION && it.id == d.first }?.at } ?: now()
-        waitFor("the interrupting turn", 3_000) { inputs(interrupted).isNotEmpty() }
+        waitFor("the interrupting turn", 3_000) { inputs(interruptAt).isNotEmpty() }
         val reply = outputs(c3.first, cut)
-        val turn = inputs(interrupted)
+        val turn = inputs(interruptAt)
         val userStart = turn.minOfOrNull { it.startMs ?: 0 }
         val userEnd = turn.maxOfOrNull { it.endMs ?: 0 }
         val speaking = userStart != null && reply.any { (it.endMs ?: 0) >= userStart }
         val stopped = userEnd != null && reply.all { (it.startMs ?: 0) <= userEnd + 1_000 }
-        val lastVoice = voiced.lastOrNull { it in interrupted..cut }
-        expect("the output transcript stops at an interruption (spec 5.4.5)", replying && speaking && stopped,
-            "reply «${text(reply)}» ends at ${reply.maxOfOrNull { it.endMs ?: 0 }}; user turn «${text(turn)}» $userStart..$userEnd " +
-                "(fixture onset at session audio $onset); voiced output until ${lastVoice?.minus(interrupted)} ms after the queue; " +
-                "second delegation ${second?.first} request «${second?.second}»")
+        expect("the session flushed its playback at the interruption (spec 5.4.5)", flushes.any { it in interruptAt..interruptAt + 4_000 },
+            "local flushes at ${flushes.joinToString()}; the long answer was ${if (replying) "playing" else "not heard"}")
+        info("GPT-Live at the interruption (server behavior)", "stopped its reply: ${speaking && stopped}; reply «${text(reply)}» ends at " +
+            "${reply.maxOfOrNull { it.endMs ?: 0 }}; user turn «${text(turn)}» $userStart..$userEnd (fixture onset at session audio $onset); " +
+            "delegation for the spoken request: ${second?.let { "${it.first} request «${it.second}»" } ?: "none"}")
 
         // Step 5: a proposal on the interruption's delegation, then «да».
         waitFor("quiet before the proposal", 30_000) { now() - lastOutput() >= QUIET_MS }
@@ -248,7 +277,8 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
             "proposal «${text(proposal)}» ends at $proposalEnd; «да» turn «${text(yes)}» starts at $yesStart")
         info("outputEnded after the proposal (Task 7 window)", host.outputEnds.filter { it.first > p.first }
             .joinToString { "endMs ${it.second} at ${it.first}" }.ifEmpty { "none" } + "; proposal appended " +
-            "${events.firstOrNull { it.type == APPENDED && it.id == p.second }?.let { "at ${it.at}, ${it.startMs}..${it.endMs}" } ?: "not seen"}")
+            "${events.firstOrNull { it.type == APPENDED && it.id == p.second }?.let { "at ${it.at}, ${it.startMs}..${it.endMs}" } ?: "not seen"}; " +
+            "proposal voice arrived until ${voiced.lastOrNull { it in p.first..asking }}")
         // Rule 7: GPT-Live can open a delegation for the approval turn. Alphy answers it with the rule-5 text.
         val third = host.delegations.poll(5, TimeUnit.SECONDS)
         info("delegation for the «да» turn (spec 5.5.10 rule 7)", third?.let { "${it.first} request «${it.second}»" } ?: "none")
@@ -256,6 +286,97 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
         val early2 = text(outputs(asking, started.first)).lowercase()
         info("claim after «да» before «Запускаю.» (spec 5.3.3)", "${STARTS.filter { it in early2 }.ifEmpty { "none" }} in «$early2»")
         spoken(started.first, "start confirmation")
+    }
+
+    /**
+     * The core path of rulings R24 to R30, judged on the whole recorded stream. A stream reply starts at a voiced chunk and ends after
+     * [LiveTiming.replyGapMs] of silent samples, or after that long without any chunk.
+     */
+    private fun corePath() {
+        val replies = streamReplies()
+        val transcriptReplies = transcriptReplies()
+        val ends = host.outputEnds.map { it.first }
+        val stop = phaseChanges.lastOrNull { it.second == LivePhase.IDLE }?.first ?: now()
+        val rows = replies.mapIndexed { i, r ->
+            val next = replies.getOrNull(i + 1)?.first ?: Long.MAX_VALUE
+            val played = plays.count { it.second && it.first in r.first..r.lastVoiced + 500 }
+            val endsHere = ends.filter { it >= r.lastVoiced && it < next }
+            val active = activeChanges.filter { it.first in r.first..r.lastVoiced + 200 }
+                .joinToString(" ") { "${it.first}:${if (it.second) "on" else "off"}" }
+            val listening = listening(r.lastVoiced, minOf(next, stop))
+            ReplyLine(i + 1, r, played, endsHere, listening, "reply ${i + 1}: voiced ${r.first}..${r.lastVoiced}, voiced chunks " +
+                "${r.voicedChunks}, played ${played}; outputEnded at ${endsHere.joinToString().ifEmpty { "none" }}; LISTENING after it: " +
+                "$listening; playbackActive ${active.ifEmpty { "no change" }}")
+        }
+        rows.forEach { info("stream", it.text) }
+        val unmatched = ends.count { e -> replies.indices.none { i -> e >= replies[i].lastVoiced && e < (replies.getOrNull(i + 1)?.first ?: Long.MAX_VALUE) } }
+        expect("core: one outputEnded for each reply", rows.isNotEmpty() && rows.all { it.ends.size == 1 } && unmatched == 0 &&
+            replies.size == transcriptReplies.size, "${replies.size} stream replies, ${transcriptReplies.size} transcript replies " +
+            "(${transcriptReplies.joinToString { "${it.first}..${it.second}" }}); ${ends.size} outputEnded calls, $unmatched outside a reply")
+        expect("core: the phase returns to LISTENING after each reply", rows.isNotEmpty() && rows.all { it.listening },
+            "replies without LISTENING after them: ${rows.filter { !it.listening }.map { it.index }}")
+        val cut = if (interruptAt < 0) -1 else replies.indexOfFirst { interruptAt in it.first..it.lastVoiced + timing.replyGapMs }
+        val after = when {
+            interruptAt < 0 -> emptyList()
+            cut < 0 -> rows.filter { it.reply.first > interruptAt }
+            else -> rows.drop(cut + 1)
+        }
+        expect("core: every reply after the interruption plays", after.isNotEmpty() && after.all { it.played > 0 },
+            after.joinToString { "reply ${it.index} played ${it.played} of ${it.reply.voicedChunks}" }.ifEmpty { "no reply after it" })
+        if (cut >= 0) {
+            val interrupted = rows[cut]
+            val next = rows.getOrNull(cut + 1)
+            val silent = chunks.filter { !it.voiced && it.at > interrupted.reply.lastVoiced && it.at < (next?.reply?.first ?: Long.MAX_VALUE) }
+                .sumOf { it.samples.toLong() } * 1000 / LIVE_RATE
+            info("interruption stream", "interrupted reply ${interrupted.index}: played ${interrupted.played} of ${interrupted.reply.voicedChunks} " +
+                "voiced chunks; local flushes at ${flushes.joinToString().ifEmpty { "none" }}; $silent ms of silent stream audio before the next " +
+                "voiced chunk; next reply ${next?.let { "${it.index} ${if (it.played > 0) "played" else "dropped"} (${it.played} of ${it.reply.voicedChunks})" } ?: "none"}")
+        } else info("interruption stream", "no stream reply was open at the interruption (queued at $interruptAt)")
+        val gaps = chunks.zipWithNext { a, b -> (b.at - a.at) to b.at }.sortedByDescending { it.first }
+        info("output chunk arrival gaps", "max ${gaps.firstOrNull()?.first} ms; largest ${gaps.take(3).joinToString { "${it.first} ms at ${it.second}" }}; " +
+            "${chunks.size} chunks, ${chunks.sumOf { it.samples.toLong() } * 1000 / LIVE_RATE} ms of audio")
+    }
+
+    private class ReplyLine(val index: Int, val reply: StreamReply, val played: Int, val ends: List<Long>, val listening: Boolean, val text: String)
+
+    /** The replies of the recorded stream, by the same rule as the session but computed apart from it. */
+    private fun streamReplies(): List<StreamReply> {
+        val replies = ArrayList<StreamReply>()
+        var open: StreamReply? = null
+        var silent = 0L
+        var last = -1L
+        for (chunk in chunks) {
+            if (open != null && chunk.at - last >= timing.replyGapMs) open = null
+            last = chunk.at
+            if (chunk.voiced) {
+                val reply = open ?: StreamReply(chunk.at).also { replies += it }
+                reply.lastVoiced = chunk.at; reply.voicedChunks++
+                open = reply; silent = 0
+            } else if (open != null) {
+                silent += chunk.samples
+                if (silent >= timing.replyGapMs * LIVE_RATE / 1000) open = null
+            }
+        }
+        return replies
+    }
+
+    /** (first start_ms, last end_ms) of each group of output transcript deltas apart by [TRANSCRIPT_GAP_MS] or more. */
+    private fun transcriptReplies(): List<Pair<Long, Long>> {
+        val groups = ArrayList<Pair<Long, Long>>()
+        for (delta in events.filter { it.type == OUTPUT }) {
+            val start = delta.startMs ?: continue
+            val end = delta.endMs ?: continue
+            val last = groups.lastOrNull()
+            if (last != null && start - last.second < TRANSCRIPT_GAP_MS) groups[groups.lastIndex] = last.first to maxOf(last.second, end)
+            else groups += start to end
+        }
+        return groups
+    }
+
+    /** Whether the phase was LISTENING at some time in [from, to). */
+    private fun listening(from: Long, to: Long): Boolean {
+        val before = phaseChanges.lastOrNull { it.first <= from }?.second
+        return before == LivePhase.LISTENING || phaseChanges.any { it.first in from until to && it.second == LivePhase.LISTENING }
     }
 
     private fun start(): Boolean {
@@ -276,15 +397,24 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
         return onset
     }
 
+    /** Sends the capture blocks and samples `playbackActive` and the phase after each block. */
     private fun feed() {
         val start = System.nanoTime()
         var i = 0L
+        var active: Boolean? = null
+        var phase: LivePhase? = null
         while (feeding) {
             audio.capture(blocks.poll() ?: ShortArray(LIVE_BLOCK))
             fed = ++i
+            val nowActive = audio.playbackActive
+            if (nowActive != active) { active = nowActive; activeChanges += now() to nowActive }
+            // A read of the snapshot state outside the main thread sees the last applied value.
+            val nowPhase = session.phase
+            if (nowPhase != phase) { phase = nowPhase; phaseChanges += now() to nowPhase; note("phase $nowPhase") }
             val wait = start + i * 20_000_000L - System.nanoTime()
             if (wait > 0) Thread.sleep(wait / 1_000_000, (wait % 1_000_000).toInt())
         }
+        phaseChanges += now() to LivePhase.IDLE
     }
 
     private fun comment(delegation: String, text: String): Pair<Long, String> {
@@ -350,22 +480,19 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
         })
     }
 
-    /** Collapses the output audio into runs of voiced or silent chunks, split at an arrival gap of 300 ms. */
+    /** Records each output chunk and logs the stream as runs of voiced or silent chunks, split at an arrival gap of 300 ms. */
     private fun audioChunk(at: Long, base64: String) = synchronized(audioLock) {
-        val buffer = ByteBuffer.wrap(Base64.decode(base64, Base64.DEFAULT)).order(ByteOrder.LITTLE_ENDIAN)
-        val count = buffer.remaining() / 2
-        var sum = 0.0
-        repeat(count) { val value = buffer.short / 32768.0; sum += value * value }
-        val loud = count > 0 && sqrt(sum / count) > VOICED_RMS
+        val buffer = ByteBuffer.wrap(Base64.decode(base64, Base64.DEFAULT)).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+        val samples = ShortArray(buffer.remaining()).also { buffer.get(it) }
+        val loud = rms(samples) > LIVE_VOICED_RMS
         if (loud) voiced += at
+        chunks += Chunk(at, samples.size, loud)
         val gap = if (lastAudioAt < 0) 0 else at - lastAudioAt
-        lastAudioAt = at; audioChunks++; audioSamples += count
-        maxAudioGap = maxOf(maxAudioGap, gap)
-        if (gap >= 300) audioGaps++
+        lastAudioAt = at
         val current = audioRun
         val run = if (current == null || current.voiced != loud || gap >= 300) { current?.let(::logRun); AudioRun(loud, at) } else current
         if (run !== current) audioRun = run else run.maxGap = maxOf(run.maxGap, gap)
-        run.to = at; run.chunks++; run.samples += count
+        run.to = at; run.chunks++; run.samples += samples.size
     }
 
     private fun logRun(run: AudioRun) = note(run.from, "<- session.output_audio.delta x${run.chunks}: ${run.samples * 1000 / LIVE_RATE} ms of " +
@@ -377,14 +504,11 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
         val comments = sends.filter { it.type == "session.commentary.append" }
         val echoed = comments.count { c -> events.any { it.type == APPENDED && it.id == c.id } }
         val types = events.groupingBy { it.type }.eachCount().entries.joinToString { "${it.key} x${it.value}" }
-        val audioText = synchronized(audioLock) {
-            "$audioChunks chunks, ${audioSamples * 1000 / LIVE_RATE} ms of audio, arrival max gap $maxAudioGap ms, arrival gaps of 300 ms or more: $audioGaps"
-        }
         return (checks + listOf(
             "timeline: first input start_ms minus the fixture onset on the audio clock: ${inputLag.joinToString()}",
             "timeline: output transcript arrival minus start_ms on the audio clock: ${leads.minOrNull()}..${leads.maxOrNull()} ms",
             "commentary appends acknowledged with their client event id: $echoed of ${comments.size}",
-            "event types: $types; output audio: $audioText; outputEnded calls: ${host.outputEnds.size}",
+            "event types: $types; output audio chunks: ${chunks.size}; outputEnded calls: ${host.outputEnds.size}",
             "session end: ${host.ended}",
         )).joinToString("\n")
     }
@@ -425,74 +549,98 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
         const val STARTED = "Запускаю."
         val CLAIMS = listOf("поставил", "поставлен", "запустил", "запускаю", "готово")
         val STARTS = listOf("запускаю", "запущен", "запустил", "выполняю", "выполнен", "готово", "одобрен", "поставил", "поставлен")
+        val ASKS = listOf("«да»", "«нет»", "скажите да", "скажите мне да", "да или нет")
+        val TAPS = listOf("нажм", "кнопк", "карточк")
     }
 }
 
 /**
- * A scripted GPT-Live server for the rehearsal. It hears speech by level on the audio clock, gives the next scripted transcript after
- * 300 ms of silence, opens a delegation for the two requests, answers each commentary word by word, and stops a reply at speech.
+ * A scripted GPT-Live server for the rehearsal, shaped like the first live run. From `session.started` it streams one 100 ms output
+ * chunk every 100 ms: voiced inside a reply, silent between replies and in the pauses of a reply (up to 600 ms). The output transcript
+ * comes 2 s ahead of its audio. It hears speech by level on the input audio clock, gives the next scripted transcript after 300 ms of
+ * silence, opens a delegation for the first request and for «да» but not for the interrupting request, says a filler line after each
+ * delegation, and keeps speaking over the user, as GPT-Live did.
  */
 private class ScriptedLiveServer : LiveTransport {
     // A daemon worker that is never shut down, so a late audio send after the close cannot throw.
     private val worker = Executors.newSingleThreadScheduledExecutor { Thread(it, "scripted-live").apply { isDaemon = true } }
     private lateinit var listener: LiveListener
-    private var position = 0L
+    private var stream: ScheduledFuture<*>? = null
+    private var input = 0L
+    private var ticks = 0L
     private var speechStart = -1L
     private var lastVoiced = -1L
     private var turns = 0
-    private var reply: ScheduledFuture<*>? = null
+    /** The planned chunks of the open replies: true is voiced. */
+    private val planned = ArrayDeque<Boolean>()
+    /** (tick to send at, delta, start_ms) of the planned transcript. */
+    private val transcript = ArrayDeque<Triple<Long, String, Long>>()
 
     override fun connect(url: String, key: String, listener: LiveListener): LiveConnection {
         this.listener = listener
         return object : LiveConnection {
             override fun send(text: String): Boolean { val e = JSONObject(text); worker.execute { receive(e) }; return true }
-            override fun close() { worker.execute { listener.onClosed() } }
+            override fun close() { worker.execute { stream?.cancel(false); listener.onClosed() } }
         }
     }
 
     private fun receive(e: JSONObject) {
         when (e.getString("type")) {
-            "session.start" -> emit(JSONObject().put("type", "session.started")
-                .put("session", JSONObject().put("id", "live_rehearsal").put("input", e.getJSONObject("session").getJSONArray("input"))))
+            "session.start" -> {
+                emit(JSONObject().put("type", "session.started")
+                    .put("session", JSONObject().put("id", "live_rehearsal").put("input", e.getJSONObject("session").getJSONArray("input"))))
+                stream = worker.scheduleAtFixedRate(::tick, 100, 100, TimeUnit.MILLISECONDS)
+            }
             "session.input_audio.append" -> heard(Base64.decode(e.getString("audio"), Base64.DEFAULT))
             "session.commentary.append" -> {
                 emit(JSONObject().put("type", APPENDED).put("client_event_id", e.getString("event_id")))
                 speak(e.getString("content"))
             }
-            "session.close" -> emit(JSONObject().put("type", "session.closed").put("reason", "close_requested"))
+            "session.thinking.append" -> {
+                emit(JSONObject().put("type", "session.thinking.appended").put("client_event_id", e.getString("event_id")))
+                speak("Четыре.")
+            }
+            "session.close" -> { stream?.cancel(false); emit(JSONObject().put("type", "session.closed").put("reason", "close_requested")) }
         }
     }
 
+    /** One chunk of the stream, and the transcript that is due. */
+    private fun tick() {
+        ticks++
+        while (transcript.isNotEmpty() && transcript.first().first <= ticks) {
+            val (_, delta, start) = transcript.removeFirst()
+            emit(JSONObject().put("type", OUTPUT).put("delta", delta).put("start_ms", start).put("end_ms", start + 200))
+        }
+        listener.onText(if (planned.removeFirstOrNull() == true) outputAudio(3, LIVE_RATE / 10) else silentAudio())
+    }
+
     private fun heard(bytes: ByteArray) {
-        val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-        var sum = 0.0
-        val count = bytes.size / 2
-        repeat(count) { val value = buffer.short / 32768.0; sum += value * value }
-        position += 20
-        if (sqrt(sum / count) > VOICED_RMS) {
-            if (speechStart < 0) { speechStart = position - 20; reply?.cancel(false) }
-            lastVoiced = position
-        } else if (speechStart >= 0 && position - lastVoiced >= 300) {
+        val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+        val samples = ShortArray(buffer.remaining()).also { buffer.get(it) }
+        input += 20
+        if (rms(samples) > LIVE_VOICED_RMS) {
+            if (speechStart < 0) speechStart = input - 20
+            lastVoiced = input
+        } else if (speechStart >= 0 && input - lastVoiced >= 300) {
             val text = TURNS.getOrElse(turns++) { "Ещё." }
             emit(JSONObject().put("type", INPUT).put("delta", text).put("start_ms", speechStart).put("end_ms", lastVoiced))
-            if (turns <= 2) emit(JSONObject().put("type", DELEGATION).put("offset_ms", lastVoiced + 100)
-                .put("delegation", JSONObject().put("id", "item_$turns")))
+            if (turns != 2) {
+                emit(JSONObject().put("type", DELEGATION).put("offset_ms", lastVoiced + 100).put("delegation", JSONObject().put("id", "item_$turns")))
+                speak(if (turns == 1) "Секундочку." else "Понял.")
+            }
             speechStart = -1
         }
     }
 
+    /** Plans a reply 500 ms after the planned audio: 200 ms of voice for each word, a 200 ms pause after a comma, 600 ms after a sentence. */
     private fun speak(content: String) {
-        reply?.cancel(false)
-        val words = ArrayDeque(content.split(' '))
-        val pcm = ByteBuffer.allocate(4800).order(ByteOrder.LITTLE_ENDIAN).apply { repeat(2400) { putShort(if (it % 2 == 0) 3000 else -3000) } }.array()
-        reply = worker.scheduleWithFixedDelay({
-            val word = words.removeFirstOrNull()
-            if (word == null) reply?.cancel(false)
-            else {
-                emit(JSONObject().put("type", "session.output_audio.delta").put("delta", Base64.encodeToString(pcm, Base64.NO_WRAP)))
-                emit(JSONObject().put("type", OUTPUT).put("delta", "$word ").put("start_ms", position).put("end_ms", position + 150))
-            }
-        }, 300, 150, TimeUnit.MILLISECONDS)
+        repeat(5) { planned += false }
+        for (word in content.split(' ')) {
+            val at = ticks + planned.size + 1
+            transcript += Triple(maxOf(ticks + 1, at - 20), "$word ", at * 100 - 2_000)
+            repeat(2) { planned += true }
+            repeat(when (word.last()) { '.', '!', '?' -> 6; ',' -> 2; else -> 0 }) { planned += false }
+        }
     }
 
     private fun emit(event: JSONObject) = listener.onText(event.toString())

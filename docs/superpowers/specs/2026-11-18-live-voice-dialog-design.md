@@ -167,7 +167,10 @@ The session omits `delegation`, so it runs in client mode (section 3). Alphy sen
 
 5.4.5 Interruption (barge-in). The server alone overlapped the user for about 2.4 s (section 3), so Alphy also stops its own playback locally. While playback has audio, a local voice detector on the echo-cancelled microphone signal watches for the user. When the user's voice is present for at least 200 ms, Alphy flushes the `AudioTrack` buffer. Alphy then drops reply audio while the local detector still hears the user, because the server can keep speaking until the user's phrase ends. After that, Alphy drops the rest of the current reply audio until the next reply starts. The detector uses an adaptive threshold above the residual echo level. Reuse the adaptive noise threshold of `PcmCapture` where it fits. Audio input continues during all of this, so GPT-Live hears the user.
 
-- Assumption: the output stream has no event that marks a new reply, so "the next reply" means the next output audio after at least 300 ms of output silence. Test: the loopback test and the live check.
+- Assumption (failed in live check run 1): the output stream has no event that marks a new reply, so "the next reply" means the next output audio after at least 300 ms of output silence. Test: the loopback test and the live check.
+  - Run 1 result: GPT-Live sends one continuous stream of 100 ms chunks, silence included, so the arrival of chunks never pauses between replies.
+  - Replacement (rulings R24 and R27): a chunk is voiced when its RMS level is above 0.01 (`LIVE_VOICED_RMS`). A reply ends after 800 ms of silent stream audio after its last voiced chunk (`replyGapMs`), counted in samples. A timer also ends the reply when no chunk arrives for 800 ms.
+  - Run 2 result: 8 replies, one reply end for each, the same count as the output transcript. Pauses inside a reply were at most 500 ms. Silence between replies was at least 1,000 ms, after the interrupted reply.
 - Assumption: platform echo cancellation on the loudspeaker removes enough of Alphy's voice that GPT-Live does not hear itself and the local detector does not fire on echo. Test: the device echo check (6.4). If it fails, the fallback is the decision of the user. Options are headset-only use or WebRTC audio processing (a new native dependency).
 
 5.4.6 Mute: 🎤 stops the capture and sends `session.input_audio.mute`. Unmute restarts the capture and sends `session.input_audio.unmute`. GPT-Live can finish its current speech while the microphone is muted.
@@ -328,10 +331,19 @@ GPT-Live costs $0.05 per minute, billed per second of open session, including si
 | Platform echo cancellation is sufficient on the loudspeaker | Standard Android communication audio path. Not tested in the spike. | 6.4 |
 | GPT-Live speaks more than one commentary per delegation | The delegation guide permits several commentary updates for one delegation (builder check, read through a summarizer). | 6.3 |
 | `session.thinking.append` works without an open delegation | The WebSocket reference permits `delegation_id: null` (builder check, read through a summarizer). | 6.3 |
-| The output stream gives no reply-start event, so 300 ms of output silence marks a new reply | Spike: no turn event among the received events. | 6.2, 6.3 |
+| The output stream gives no reply-start event, so 800 ms of silent stream audio after the last voiced chunk marks a reply end (R24, R27) | Spike: no turn event among the received events. Run 1 disproved the earlier 300 ms rule. Run 2: 8 replies and 8 reply ends, pauses inside a reply at most 500 ms. | 6.2, 6.3 |
 | Input and output transcripts share one session timeline (`start_ms`, `end_ms`) | Both carry the same fields. The spike did not compare them. | 6.3 |
 | Russian quality of voice `marin` is acceptable | Spike recordings. The user judges them. | user review |
 | A key on the user's device is acceptable to OpenAI | Alphy already sends the user's key from the phone for chat. The Live guide says to keep keys on a server, for keys of an app developer. | none in tests |
+
+Live check results (6.3): run 1 (`live-0ac2b42f003f`) and run 2 after rulings R24 to R30 (`live-2a3dd7bb5762`), both on 2026-11-18.
+
+- More than one commentary for one delegation: held in both runs. GPT-Live spoke a commentary that came 25 s after its delegation.
+- Thinking without a delegation: no error in both runs. GPT-Live spoke about the thinking text without a user turn, which 5.7.2 does not expect. In run 2 it said «Четыре.».
+- One session timeline: both transcripts use one clock. The output transcript times lead the received output audio by 1.7 to 2.4 s (run 1).
+- Interruption (5.4.5): in run 1, GPT-Live did not stop a commentary and opened no delegation for the request. In run 2, it stopped its reply after the first sentence and opened a delegation, and Alphy flushed its playback.
+- Request text (5.5.2): complete at `session.delegation.created` for a request spoken in silence. For a request that interrupted a reply, the rule dropped the words before the last `end_ms` of that reply. Run 2 got «пять минут» for «Поставь таймер на пять минут».
+- The instruction for «Нужно подтверждение на экране.» (ruling R25): in run 1, GPT-Live asked for «да» or «нет». In run 2, it said «Пожалуйста, подтвердите действие на экране.», with no «да», «нет», or tap.
 
 ## 8. Left to the builder
 

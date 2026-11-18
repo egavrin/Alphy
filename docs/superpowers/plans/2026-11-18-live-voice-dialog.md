@@ -231,14 +231,14 @@ Spec 5.3.2, 5.4.5, 5.4.6, 5.8 (table and timers), and 5.8.1.
 - Consumes: `LiveAudio`, `BargeInDetector` (Task 1); `LiveProtocol`, `LiveEvent` (Task 2); `LiveTranscript`, `UserTurn` (Task 3); `LiveTransport`, `liveUrl` (Task 4).
 - Produces:
   - `internal enum class LivePhase { IDLE, CONNECTING, LISTENING, SPEAKING, MUTED }`.
-  - `internal data class LiveTiming(val startedMs: Long = 10_000, val silenceMs: Long = 60_000, val firstSpeechMs: Long = 10_000, val requestWaitMs: Long = 500, val turnGapMs: Long = 1_200, val replyGapMs: Long = 300)`. `turnGapMs` is an Implementation choice: a user turn also ends after 1.2 s without input transcript deltas. The other values come from the spec.
+  - `internal data class LiveTiming(val startedMs: Long = 10_000, val silenceMs: Long = 60_000, val firstSpeechMs: Long = 10_000, val requestWaitMs: Long = 500, val turnGapMs: Long = 1_200, val replyGapMs: Long = 800)`. `turnGapMs` is an Implementation choice: a user turn also ends after 1.2 s without input transcript deltas. `replyGapMs` is the silent stream audio after the last voiced chunk of a reply, counted in samples (rulings R24 and R27). The first live check disproved the earlier 300 ms value. The other values come from the spec.
   - `internal interface LiveVoiceHost` with these members:
     - `fun history(): List<Message>`;
     - `fun delegation(id: String, request: String)`;
     - `fun turn(turn: UserTurn)`;
     - `fun handOffRunning(): Boolean`;
     - `fun appended(eventId: String)`, at `session.commentary.appended`;
-    - `fun outputEnded(endMs: Long)`, each time output audio has been silent for `replyGapMs`, with `LiveTranscript.outputEndMs`;
+    - `fun outputEnded(endMs: Long)`, each time a reply ends, with `LiveTranscript.outputEndMs`. A reply ends after `replyGapMs` of silent stream audio after its last voiced chunk, or after `replyGapMs` without any chunk (R24, R27);
     - `fun ended(status: String, settingsRequired: Boolean)`.
   - `internal class LiveVoiceSession(context: Context, scope: CoroutineScope, transport: LiveTransport, audio: () -> LiveAudio, account: suspend () -> AiAccount?, endpoints: Endpoints, timing: LiveTiming = LiveTiming())`. Its Compose state is `active`, `phase`, `level`, `status`, and `userSpeaking`.
   - Its methods are `start(host: LiveVoiceHost, firstSpeech: Boolean = false)`, `mute(muted: Boolean)`, `away(away: Boolean)` (spec 5.8.1), `commentary(delegationId: String, text: String): String` (it returns the client event id), `thinking(text: String)`, and `stop(status: String = "")`.
@@ -271,7 +271,7 @@ Spec 5.3.2, 5.4.5, 5.4.6, 5.8 (table and timers), and 5.8.1.
   - `startSendsSessionStartWithHistory`: the first sent text is `LiveProtocol.start(host.history())` on `ws://…/v1/live/sessions` with the account key.
   - `noAudioBeforeStarted` (Review Focus 4): capture blocks before `session.started` are not sent, and `status == live_voice_connecting`. After `Started`, each block is sent as `session.input_audio.append`.
   - `outputAudioPlaysAndSetsSpeaking`: `OutputAudio` reaches `FakeLiveAudio.played`, and `phase == SPEAKING` while `playbackActive`.
-  - `bargeInFlushesAndDropsUntilTheNextReply`: while playback is active, 200 ms of loud capture calls `flushPlayback()` once. Output audio is dropped while `userSpeaking`, then until 300 ms of output silence. The next output audio plays.
+  - `bargeInFlushesAndDropsUntilTheNextReply`: while playback is active, 200 ms of loud capture calls `flushPlayback()` once. Output audio is dropped while `userSpeaking`, then until the reply ends (`replyGapMs` of silent stream audio, R27). The next voiced output audio plays.
   - `muteSendsEventsAndStopsCapture`: `mute(true)` sends `session.input_audio.mute`, stops appends, and sets `phase == MUTED`. `mute(false)` reverses this.
   - `awayMutesAndFlushesAndReturnUnmutes`: `away(true)` mutes and flushes. `away(false)` unmutes.
   - `endsFollowTheSpecTable`: each case below ends with its status and closes audio and connection:
@@ -287,7 +287,7 @@ Spec 5.3.2, 5.4.5, 5.4.6, 5.8 (table and timers), and 5.8.1.
   - `firstSpeechTimerOnlyForButtonStart`: `start(host, firstSpeech = true)` without speech for `firstSpeechMs` ends with `live_voice_no_first_speech`.
   - `delegationWaitsForTheRequestText`: a `Delegation` with an empty transcript waits `requestWaitMs` for an input delta, then calls `host.delegation(id, text)`.
   - `turnsEndAtOutputDelegationOrGap`: `host.turn` gets one `UserTurn` per user phrase, with `overlappedPlayback` set when playback was active at its start. For a delegation, `host.turn` of its turn comes before `host.delegation`.
-  - `commentaryAckAndOutputEndReachTheHost`: `commentary(…)` returns an id. `Appended(id)` calls `host.appended(id)`. Output transcript deltas up to `end_ms` 5,000, then `replyGapMs` without output audio, call `host.outputEnded(5,000)` once.
+  - `commentaryAckAndOutputEndReachTheHost`: `commentary(…)` returns an id. `Appended(id)` calls `host.appended(id)`. Output transcript deltas up to `end_ms` 5,000, then `replyGapMs` of silent output audio, call `host.outputEnded(5,000)` once.
   - `sessionRunsOverTheRealTransport`: with `OkHttpLiveTransport` and a `MockWebServer` WebSocket that answers `session.started`, one capture block reaches the server as `session.input_audio.append`, and `stop()` sends `session.close`. This test covers the listener thread of OkHttp.
   - `stopSendsCloseAndReleasesAudio`: `stop()` sends `session.close`, closes the connection, and calls `FakeLiveAudio.close()` once.
 - [ ] **Step 3: Run** `run.py suite … --expect failed com.alpha.assistant.voice.VoiceModeSessionTest`. Expected: failure.

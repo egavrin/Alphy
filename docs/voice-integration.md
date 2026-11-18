@@ -188,7 +188,7 @@ python3 tools/compose_acceptance/run.py suite --serial emulator-5590 --label liv
 
 `AssistantLiveVoiceWorkflowTest#noPermissionNoSession` skips while the app has the microphone permission.
 
-The live check runs one GPT-Live session of about 80 s with the OpenAI key from `~/.env`. It costs about $0.07.
+The live check runs one GPT-Live session of about 65 s with the OpenAI key from `~/.env`. It costs about $0.05.
 Run `run.py suite` with `com.alpha.assistant.voice.LiveVoiceDialogTest` first, because `live-check` uses the installed build:
 
 ```sh
@@ -199,9 +199,9 @@ ALPHY_AI_PROVIDER=openai python3 tools/compose_acceptance/run.py live-check --se
 The check writes `events.log` next to `report.json`. The log holds the event types, the ids, the timeline values, and the transcripts, never the key.
 `LiveVoiceDialogTest#dialogScriptPassesOnAScriptedServer` runs the same script on a scripted server without cost.
 
-### Live check result of 2026-11-18
+### Live check results of 2026-11-18
 
-These results held:
+Run 1 (`live-0ac2b42f003f`) tested the first build. These results held:
 
 - GPT-Live accepted the history preload.
 - The input transcript of the request was complete when `session.delegation.created` arrived.
@@ -211,13 +211,28 @@ These results held:
 - The input and output transcripts use one session clock.
 - GPT-Live opened a delegation for the spoken «да».
 
-These results differ from the spec:
+These results of run 1 differ from the spec:
 
 - The output audio is one continuous stream of 100 ms chunks, silence included. The end of a reply is not a pause in the arrival of chunks.
 - The output transcript times lead the output audio. The received audio of a reply ends 1.7 to 2.4 s after its last `end_ms` on the input clock, before the playback delay of the phone.
 - GPT-Live did not stop a commentary when the user spoke over it. It opened no delegation for the request that interrupted it.
 - GPT-Live spoke the thinking text aloud.
 - GPT-Live changed «Нужно подтверждение на экране.» into a request to say «да» or «нет».
+
+After run 1, the session finds replies by the sample level (rulings R24 to R30).
+A chunk is voiced when its RMS level is above 0.01 (`LIVE_VOICED_RMS`).
+A reply ends after 800 ms of silent stream audio after its last voiced chunk (`replyGapMs`), or after 800 ms without any chunk.
+An instruction line tells GPT-Live to send the user to the button on the card for «Нужно подтверждение на экране.».
+
+Run 2 (`live-2a3dd7bb5762`) tested that build with a real-time playback fake:
+
+- The stream had 8 replies. Each reply had one reply end, and the output transcript had 8 reply groups.
+- The phase returned to listening after each reply, and no error ended the voice mode.
+- Pauses inside a reply were at most 500 ms. Silence between replies was at least 1,000 ms.
+- GPT-Live stopped the reply that the user interrupted after its first sentence, and it opened a delegation for the request. Alphy flushed its playback, and every later reply played.
+- The request text of that delegation was «пять минут», not «Поставь таймер на пять минут». The input deltas that start before the last `end_ms` of the interrupted reply are not part of the request (spec 5.5.2).
+- GPT-Live said «Пожалуйста, подтвердите действие на экране.». It did not ask for «да» or «нет», and it did not name the tap.
+- GPT-Live spoke the answer from the thinking text («Четыре.») without a user turn.
 
 ## Removed local speech
 
