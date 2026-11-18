@@ -92,6 +92,32 @@ test("look: the value inside a ring is a display text, and the progress part sho
   expect(every(definition.ui).filter((node) => node.text === "Done today").map((node) => node.type)).toEqual(["progressRing"]);
 });
 
+test("look: icon= gives a button, a metric, a badge, a notice, a card, and the fields their icon, in Alphy's names", async () => {
+  const [add, up, sum, badge, notice, card, nameField, countField, many, few, dayField, timeField] = await shown(
+    "$/n = 0", '$/name = ""', '$/when = "2026-11-20"', '$/at = "08:00"', '$/pick = "a"',
+    "root = Column([add, up, sum, badge, notice, card, nameField, countField, many, few, dayField, timeField])",
+    'add = Button("Add", inc($/n), variant="filled", icon="Plus")', 'up = Button("Up", inc($/n), icon="ArrowUp")', 'sum = Metric("Sum", $/n, icon="Drop")',
+    'badge = Badge("New", icon="Star")', 'notice = Notice("Saved", icon="Trophy")', 'card = Card([Text("Inside")], icon="Layers")',
+    'nameField = TextField("Name", $/name, icon="Cart")', 'countField = NumberField("Count", $/n, icon="Money")',
+    'many = Select("Many", $/pick, ["a", "b", "c", "d", "e", "f", "g"], icon="Tag")', 'few = Select("Few", $/pick, ["a", "b"], icon="Tag")',
+    'dayField = DateField("Day", $/when, icon="Calendar")', 'timeField = TimeField("At", $/at, icon="Clock")');
+  expect([add, up, sum, badge, notice, card, nameField, countField, many, dayField, timeField].map((node) => [node.type, node.icon])).toEqual([
+    ["button", "Plus"], ["button", "Arrow"], ["metric", "Drop"], ["badge", "Star"], ["banner", "Trophy"], ["card", "Layers"],
+    ["input", "Cart"], ["numberInput", "Money"], ["select", "Tag"], ["dateInput", "Calendar"], ["timeInput", "Clock"]]);
+  // A Select of six options or fewer is Alphy's segmented control, which shows no icon.
+  expect([few.type, few.icon]).toEqual(["segmented", undefined]);
+});
+
+test("look: an icon that Alphy does not have, and an icon of a component that takes none, are faults of the line", async () => {
+  const faults = await faultsOf("$/n = 0", "root = Column([a, b, c, d, e])", 'a = Button("x", inc($/n), icon="Rocketship")', 'b = IconButton("Bin", inc($/n), "Remove")',
+    'c = Text("x", icon="Plus")', 'd = IconButton("Edit", inc($/n), "Edit")', 'e = Metric("x", $/n, icon=$/n > 0 ? "Check" : "Clock")');
+  expect(faults).toEqual([
+    'a: the icon of a Button is the name of an icon of Alphy, such as Plus, Check, Trash, Pencil, Star, or Heart, and "Rocketship" is not one',
+    'b: the icon of an IconButton is the name of an icon of Alphy, such as Plus, Check, Trash, Pencil, Star, or Heart, and "Bin" is not one',
+    "c: Text has no property icon",
+  ]);
+});
+
 test("look: an unknown value of a look option, and an option that the component does not take, are faults of the line", async () => {
   const faults = await faultsOf("$/n = 0", "$/b = false", '$/t = "muted"', "root = Column([a, b, c, d, e, f, g, h, i, j, k, l])",
     'a = Text("x", emphasis="huge")', 'b = Text("x", size="large")', 'c = Emoji("🍵", size="tiny")', 'd = Button("x", inc($/n), variant="fab")',

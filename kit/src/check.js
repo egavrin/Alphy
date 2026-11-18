@@ -1,8 +1,9 @@
 // The checks of the host: the report of the faults of an app file, its check lines, and the smoke run that uses each control.
 // The agent loop reads the faults and the check results. An app that runs does not need this file.
 
+import { HOST_ICONS } from "./icons.js";
 import { show } from "./dsl.js";
-import { App, CATALOG, given, settings } from "./core.js";
+import { App, CATALOG, ICON_NAMES, given, settings } from "./core.js";
 
 /** Calls visit for each node of an expression tree. */
 function walk(node, visit) {
@@ -276,11 +277,14 @@ function gaps(file, reached) {
 }
 
 const SIZES = ["small", "medium", "large"], ALIGNS = ["start", "center", "end"], GAPS = ["none", "small", "medium", "large"], TONES = ["muted", "accent", "success", "warning", "error"];
+/** The names of IconButton and icon=: each icon of Alphy, and the kit's names that the run-time gives Alphy's name (ICON_NAMES). */
+const ICONS = [...HOST_ICONS, ...Object.keys(ICON_NAMES)];
 /**
  * The look options of the components, and the values of each one that the kit gives: values of Alphy's catalog (ToolUiCatalog).
  * The run-time puts each value into its node as it is, so only the compile step reads this table.
  */
 const LOOKS = {
+  icon: Object.fromEntries(["Button", "IconButton", "Metric", "Badge", "Notice", "Card", "TextField", "NumberField", "Select", "DateField", "TimeField"].map((type) => [type, ICONS])),
   variant: { Button: ["filled", "outlined", "text", "tonal"], Text: ["muted", "eyebrow"], Card: ["hero"], CheckBox: ["circle"], Progress: ["bar", "dots"] },
   size: { Emoji: SIZES },
   emphasis: { Text: ["body", "title", "headline", "label", "number", "display"], Metric: ["display", "number"] },
@@ -311,7 +315,10 @@ function looks(file) {
       const allowed = Object.hasOwn(byType, node.name) ? byType[node.name] : null, values = choices(props[key]), what = `the ${key} of ${/^[AEIOU]/.test(node.name) ? "an" : "a"} ${node.name}`;
       if (!allowed) out.push(`${entry.key}: ${node.name} has no property ${key}`);
       else if (!values) out.push(`${entry.key}: ${what} is a value in the line, or a choice of values such as $/on ? "a" : "b"`);
-      else for (const value of values) if (!allowed.includes(value)) out.push(`${entry.key}: ${what} is one of ${allowed.join(", ")}, and ${JSON.stringify(value)} is not one`);
+      else for (const value of values) {
+        const one = key === "icon" ? "the name of an icon of Alphy, such as Plus, Check, Trash, Pencil, Star, or Heart" : `one of ${allowed.join(", ")}`;
+        if (!allowed.includes(value)) out.push(`${entry.key}: ${what} is ${one}, and ${JSON.stringify(value)} is not one`);
+      }
     }
   });
   return out;

@@ -1104,13 +1104,17 @@ Paired device runs, today's loop against the plan step, same hour.
   templates have neither yet. Parts draw from fixed templates, and
   today's apps are designed by the model for each request. No look score
   exists for part-built apps.
-  A call of the author, for the user to check: a host template cannot
-  choose an emoji for the topic of a request, so the parts may get one
-  optional look argument (`icon=`, an emoji sign or the name of an icon)
-  on the header, a figure, a card, and the rows of a list. It is a change
-  of the prompt, so it goes into the same round of model checks as the
-  three lines above. Phase 1 decides by the look score of its saved plans
-  whether the templates need it.
+  Decided in phase 1 by pictures: the author of the plan gives the icons
+  and the emoji. On the same five requests, the apps of the current agent
+  loop looked better than the compiled apps. They use emoji, icons,
+  button variants, and a ring with its value inside, and a host template
+  cannot choose an emoji or an icon for the topic of a request (the
+  section "Look" of `docs/superpowers/plans/2026-11-18-app-file-kit-results.md`).
+  The components take `icon=` (the name of an icon of the host) and
+  `Emoji(sign, size=)`. The form for a part (`icon=` on a figure, a card,
+  and the rows of a list) belongs to Task 11b-2. It is a change of the
+  prompt, so it goes into the same round of model checks as the three
+  lines above.
 - Cost. A new app costs three plan calls in place of one, each much
   shorter than today's call.
 - Rounds and counts for timers (section 8).
@@ -1168,7 +1172,9 @@ gets built, so the user should check them:
   gets no lane A (section 3).
 - Before phase 5 a plan with a `picture` need takes today's steps
   (section 2).
-- The parts may get one optional look argument, `icon=` (open points).
+- The plan gives icons and emoji: the components take `icon=` and
+  `Emoji(sign, size=)`, and the parts get `icon=` in Task 11b-2 (open
+  points, decided in phase 1).
 - At the 20 s point the plan with no thinking is taken only when it is
   simple (section 3).
 - A later change of an app with stored data has no `write_app` fallback:

@@ -3,7 +3,7 @@
 // The emitter (emit.js) builds the first screen and the first state with the same screen and stateOf functions.
 
 import { AppFile, parseExpression, show } from "./dsl.js";
-import { App, foreground, given, settings } from "./core.js";
+import { App, ICON_NAMES, foreground, given, settings } from "./core.js";
 import { MAX_ROWS, cast, castRow, clockOf, namer, own, relative, rows, shownAs, wished } from "./rows.js";
 import { BAR_SURFACE, MODEL, STAGE, accentOf, barOf, commandsOf, fit, polygonsOf, sideOf } from "./draw.js";
 import { IDLE, dragged } from "./drag.js";
@@ -39,8 +39,6 @@ export function header(kit) {
 const today = (kit) => kit.value({ k: "call", name: "today", args: [] }, {});
 
 const STYLES = { eyebrow: { emphasis: "label", tone: "accent" }, muted: { tone: "muted" } };
-/** The kit's icons that Alphy has under a different name (ToolUiCatalog.icons). ArrowDown has no glyph of its own there. */
-const ICON_NAMES = { ArrowUp: "Arrow", ArrowDown: "Sort", ArrowLeft: "Back", ArrowRight: "Chevron", Edit: "Pencil" };
 /** What a row template of Alphy cannot hold (ToolUiCatalog: no list, dialog, sheet, or canvas in a row), and what keeps one state field for all rows. */
 const NOT_IN_ROW = new Set(["List", "Dialog", "Chart", "Tabs", "Timer", "Drawing", "Model3d"]);
 /** The components of a part that a later task builds: the fault names the kind of the need. */
@@ -54,9 +52,12 @@ const defined = (props, keys) => Object.fromEntries(keys.filter((key) => props[k
 const styled = (n, keys, base) => { const style = { ...base, ...defined(n.props, keys) }; return Object.keys(style).length ? { style } : {}; };
 /** A row of no wrap centers its children across its height, as each row of a list of Alphy's own apps does. align= sets it. */
 const rowStyle = (n, cross = n.props.align) => styled(n, ["gap"], cross && { crossAlign: cross });
+/** The icon of the plan in Alphy's name: a kit name that differs (ICON_NAMES) becomes Alphy's. check.js checks each name. */
+const iconOf = (n) => (n.props.icon === undefined ? {} : { icon: own(ICON_NAMES, n.props.icon) ?? n.props.icon });
+// A choice of six options or fewer is a segmented control, which takes no icon (ToolUiCatalog).
 const choice = (n, at) => {
-  const options = Array.isArray(n.props.options) ? n.props.options : [];
-  return { type: options.length <= 6 ? "segmented" : "select", ...at.field(), options: options.map((value) => ({ text: at.plain(value), value })) };
+  const options = Array.isArray(n.props.options) ? n.props.options : [], select = options.length > 6;
+  return { type: select ? "select" : "segmented", ...at.field(), ...(select && iconOf(n)), options: options.map((value) => ({ text: at.plain(value), value })) };
 };
 /**
  * A number field or a slider. Alphy wants min below max, the value from min to max, and a step above 0 that fits the range (ToolUiCatalog).
@@ -68,7 +69,7 @@ const ranged = (type, low, high) => (n, at) => {
     at.fault(`a ${n.type} needs min below max, its value from min to max, and a step above 0 and at most max - min. Now min is ${min}, max is ${max}, the value is ${value}${step === undefined ? "" : `, and the step is ${step}`}`);
   }
   at.bounds(min, max);
-  return { type, ...at.field(), min, max, ...defined(n.props, ["step"]) };
+  return { type, ...at.field(), min, max, ...defined(n.props, ["step"]), ...iconOf(n) };
 };
 
 /**
@@ -82,36 +83,36 @@ const NODES = {
   Row: (n, at) => at.form() ?? (n.children.some((child) => child.props.weight !== undefined) ? { type: "row", wrap: false, ...rowStyle(n, n.props.align ?? "center"), children: at.children(true) }
     : { type: "flowRow", ...rowStyle(n), children: at.children() }),
   Grid: (n, at) => ({ type: "grid", columns: n.props.columns ?? 2, children: at.children() }),
-  Card: (n, at) => ({ type: "card", ...(n.props.variant === "hero" && { variant: "hero" }), children: at.children() }),
+  Card: (n, at) => ({ type: "card", ...(n.props.variant === "hero" && { variant: "hero" }), ...iconOf(n), children: at.children() }),
   Section: (n, at) => ({ type: "section", text: at.plain(n.props.title), children: at.children() }),
   // A tone or an emphasis of the plan wins over the one of its variant.
   Text: (n, at) => ({ type: "text", ...at.text("text"), ...styled(n, ["emphasis", "align", "tone"], own(STYLES, n.props.variant)) }),
   Heading: (n, at) => ({ type: "text", ...at.text("text"), style: { emphasis: "title" } }),
-  Metric: (n, at) => ({ type: "metric", text: at.plain(n.props.label), bind: at.shown("value"), ...styled(n, ["emphasis", "tone"]) }),
-  Badge: (n, at) => ({ type: "badge", ...at.text("value"), ...styled(n, ["tone"]) }),
+  Metric: (n, at) => ({ type: "metric", text: at.plain(n.props.label), bind: at.shown("value"), ...iconOf(n), ...styled(n, ["emphasis", "tone"]) }),
+  Badge: (n, at) => ({ type: "badge", ...at.text("value"), ...iconOf(n), ...styled(n, ["tone"]) }),
   // Alphy wants a label on an emoji too: the emoji itself. One template draws each row of a list, so a blank row gives the kit's name of the line.
   Emoji: (n, at) => ({ type: "emoji", text: at.plain(n.props.value) || at.caption(), ...at.value("value"), ...defined(n.props, ["size"]) }),
   Divider: () => ({ type: "divider" }),
   // A banner is a container in Alphy's catalog, with 1 to 50 children, so its message is a child.
-  Notice: (n, at) => ({ type: "banner", ...styled(n, ["tone"]), children: [{ type: "text", ...at.text("text") }] }),
+  Notice: (n, at) => ({ type: "banner", ...iconOf(n), ...styled(n, ["tone"]), children: [{ type: "text", ...at.text("text") }] }),
   // With no variant the host decides: one button of a group is filled and its other buttons with no variant are outlined.
   // A selected button stays filled, also beside a second selected one, and a button that is not selected is tonal.
   Button: (n, at) => {
     const variant = n.props.variant ?? (n.props.selected === undefined ? undefined : n.props.selected ? "filled" : "tonal");
-    return { type: "button", text: at.caption(n.props.label), action: at.action(), ...(variant && { variant }) };
+    return { type: "button", text: at.caption(n.props.label), action: at.action(), ...(variant && { variant }), ...iconOf(n) };
   },
-  IconButton: (n, at) => ({ type: "icon", name: own(ICON_NAMES, n.props.icon) ?? n.props.icon, text: at.caption(n.props.label), action: at.action() }),
+  IconButton: (n, at) => ({ type: "icon", name: iconOf(n).icon, text: at.caption(n.props.label), action: at.action() }),
   NumberField: ranged("numberInput", 0, 1000000),
   // Alphy gives a slider without bounds 0 to 100.
   Slider: ranged("slider", 0, 100),
-  TextField: (n, at) => ({ type: "input", ...at.field(), inputMode: "apply" }),
+  TextField: (n, at) => ({ type: "input", ...at.field(), inputMode: "apply", ...iconOf(n) }),
   Toggle: (n, at) => ({ type: "toggle", ...at.field() }),
   CheckBox: (n, at) => ({ type: "checkbox", ...at.field(), ...defined(n.props, ["variant"]) }),
   Segmented: choice,
   Select: choice,
-  DateField: (n, at) => ({ type: "dateInput", ...at.field() }),
+  DateField: (n, at) => ({ type: "dateInput", ...at.field(), ...iconOf(n) }),
   // Alphy keeps a time as minutes, and the kit as "HH:MM".
-  TimeField: (n, at) => ({ type: "timeInput", ...at.field(clockOf) }),
+  TimeField: (n, at) => ({ type: "timeInput", ...at.field(clockOf), ...iconOf(n) }),
   // max= is the kit's own limit: a choice over it changes nothing.
   Choices: (n, at) => ({ type: "multiChoice", ...at.field((value) => (Array.isArray(value) && !(n.props.max !== undefined && value.length > n.props.max) ? value : undefined)),
     options: (Array.isArray(n.props.options) ? n.props.options : []).map((value) => ({ text: at.plain(value), value })) }),

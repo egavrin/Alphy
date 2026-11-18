@@ -1,5 +1,5 @@
 // Builds the sandbox bundle of the kit and copies the saved plans for the device tests.
-//   bun kit/build.js           writes app/src/main/assets/appfile/kit.js and app/src/androidTest/assets/appfile/*.plan
+//   bun kit/build.js           writes kit/src/icons.js, app/src/main/assets/appfile/kit.js, and app/src/androidTest/assets/appfile/*.plan
 //   bun kit/build.js --check   writes nothing, and exits 1 when a file that the build writes differs or a copied plan has no source
 // The sandbox evaluates plain script text, not modules, so the bundle is one script with no import and no export.
 // The bundle also holds the run-time as text: the emitter puts it into the source of each app. Bun's minifier makes that
@@ -10,9 +10,28 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** The modules of the bundle in dependency order: each one imports only modules before it. */
-const MODULES = ["dsl", "core", "parts", "check", "rows", "draw", "drag", "run", "emit", "compile"];
+const MODULES = ["icons", "dsl", "core", "parts", "check", "rows", "draw", "drag", "run", "emit", "compile"];
 const at = (path) => fileURLToPath(new URL(path, import.meta.url));
-const source = (name) => [name, readFileSync(at(`src/${name}.js`), "utf8")];
+/** The host's sources of its icon names (ToolUiCatalog.icons): the shell glyphs and the domain icons. */
+const HOST_SOURCES = ["ToolUiCatalog", "ToolIcons"].map((name) => at(`../app/src/main/java/com/alpha/assistant/tools/${name}.kt`));
+
+/**
+ * The text of src/icons.js: each icon name that the host's validator takes, in the host's order: shellIcons of ToolUiCatalog.kt,
+ * then the keys of paths of ToolIcons.kt. The build writes it, so the kit and the host cannot differ, and only check.js imports it.
+ */
+export function iconModule(catalog = readFileSync(HOST_SOURCES[0], "utf8"), icons = readFileSync(HOST_SOURCES[1], "utf8")) {
+  const shell = /\bshellIcons\s*=\s*setOf\(([^)]*)\)/.exec(catalog)?.[1], domain = [...icons.matchAll(/^\s*"(\w+)" to "/gm)].map((match) => match[1]);
+  if (!shell || !domain.length) throw new Error("kit/build.js: no icon names in ToolUiCatalog.kt shellIcons or in ToolIcons.kt paths");
+  const names = [...[...shell.matchAll(/"(\w+)"/g)].map((match) => match[1]), ...domain];
+  return `// Built by kit/build.js from ToolUiCatalog.kt shellIcons and the keys of ToolIcons.kt paths. Do not edit: run bun kit/build.js.
+
+/** Each icon name of Alphy (ToolUiCatalog.icons). Only the compile step reads it. */
+export const HOST_ICONS = ${JSON.stringify(names)};
+`;
+}
+
+/** A module of the kit as [name, text]. The icon names come from the host's sources, so the bundle never holds an old copy. */
+const source = (name) => [name, name === "icons" ? iconModule() : readFileSync(at(`src/${name}.js`), "utf8")];
 const scanner = new Bun.Transpiler({ loader: "js" });
 
 /**
@@ -56,7 +75,7 @@ export function withoutMessages(name, text) {
  */
 export async function runtimeText() {
   const entry = "/kit-runtime-entry.js";
-  const modules = Object.fromEntries(MODULES.map((name) => [at(`src/${name}.js`), withoutMessages(name, readFileSync(at(`src/${name}.js`), "utf8"))]));
+  const modules = Object.fromEntries(MODULES.map((name) => [at(`src/${name}.js`), withoutMessages(name, source(name)[1])]));
   const built = await Bun.build({ entrypoints: [entry], files: { [entry]: `import { handle } from ${JSON.stringify(at("src/run.js"))};\n__handle(handle);\n`, ...modules },
     minify: true, format: "iife", target: "browser", define: { MESSAGES: "false" } });
   if (!built.success) throw new AggregateError(built.logs, "kit/build.js: Bun.build of the run-time failed");
@@ -82,7 +101,7 @@ export function planCopies(plans, to) {
 export const LOOK_FIXTURES = ["water-ko", "units-pl", "shopping", "habits", "price-filter"].map((name) => at(`test/fixtures/${name}.plan`));
 
 /** Each file that the build writes, with its text. The device tests also read the test plans of the node table, the lists, the render work limit, the cards, the free forms, the shapes, the reply at the byte limit, and a model beside a drawing, and the look fixtures. */
-const outputs = async () => [[at("../app/src/main/assets/appfile/kit.js"), await bundle()],
+const outputs = async () => [[at("src/icons.js"), iconModule()], [at("../app/src/main/assets/appfile/kit.js"), await bundle()],
   ...planCopies([...plansIn(at("plans")), ...["nodes", "lists", "rich", "cards", "free", "shapes", "bytes", "model"].map((name) => at(`test/${name}.plan`)), ...LOOK_FIXTURES],
     at("../app/src/androidTest/assets/appfile"))];
 

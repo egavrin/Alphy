@@ -10,7 +10,8 @@ Then it runs the app (state, formulas, actions, and the component tree) and chec
 | `src/dsl.js` | Lines, expressions, and `AppFile`. |
 | `src/parts.js` | The parts: each one changes a need line into component, state, and formula lines. |
 | `src/core.js` | The evaluator: the `App` that holds the state and builds the component tree. It reads no `process` and no file. |
-| `src/check.js` | The report of the host, the check lines, and the smoke run that uses each control. Only the compile step uses it. |
+| `src/check.js` | The report of the host, the check lines, the smoke run that uses each control, and the check of each look option of a component. Only the compile step uses it. |
+| `src/icons.js` | Each icon name of Alphy. `build.js` writes it from `ToolUiCatalog.kt` (`shellIcons`) and `ToolIcons.kt` (the keys of `paths`). Only `check.js` reads it. |
 | `src/rows.js` | The list mapping of the run-time: `rows` maps a List to Alphy's list, and the value forms that the screen and the state share (Alphy names, times, dates, shown values). |
 | `src/draw.js` | The drawing of a surface for the run-time: `commandsOf` gives the kit's shapes (circle, rect, line, text, polygon, and their outlines) as Alphy's drawing commands with Alphy's colors, `barOf` is the bar of a timer, `budgetOf` counts what commands cost, and `fit` keeps a reply inside `LIMITS` of one reply. |
 | `src/drag.js` | The drag of a 3D model for the run-time: `dragged` turns a model by 0.6 degrees for each pixel that a pointer moves along x, and `IDLE` is the drag when no drag runs, also after each open. |
@@ -30,7 +31,7 @@ Run each command from the repository root.
 The kit has no dependencies and no install step.
 
 - `bun test kit` runs the tests. The summary of the output shows `0 fail`.
-- `bun kit/build.js` writes the sandbox bundle `app/src/main/assets/appfile/kit.js` and copies `plans/*.plan`, the test plans `nodes`, `lists`, `rich`, `cards`, `free`, `shapes`, `bytes`, and `model`, and the fixtures `water-ko`, `units-pl`, `shopping`, `habits`, and `price-filter` to `app/src/androidTest/assets/appfile/` for the device tests.
+- `bun kit/build.js` writes `src/icons.js` from the host's sources and the sandbox bundle `app/src/main/assets/appfile/kit.js`, and copies `plans/*.plan`, the test plans `nodes`, `lists`, `rich`, `cards`, `free`, `shapes`, `bytes`, and `model`, and the fixtures `water-ko`, `units-pl`, `shopping`, `habits`, and `price-filter` to `app/src/androidTest/assets/appfile/` for the device tests.
 - `bun kit/build.js --check` writes nothing. It exits 1 when one of these files differs from what the build writes, and it prints the version of Bun that ran.
 
 The minifier of Bun makes the run-time text, so the bundle depends on the version of Bun.

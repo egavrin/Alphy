@@ -1,12 +1,13 @@
 // The sandbox entry: compileAppFile from the sources, the built bundle in a context with only the language's globals, and the build's own rules.
 
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createContext, runInContext } from "node:vm";
 import { compileAppFile } from "../src/compile.js";
-import { bundle, planCopies, plansIn, script, withoutMessages } from "../build.js";
+import { bundle, iconModule, planCopies, plansIn, script, withoutMessages } from "../build.js";
+import { HOST_ICONS } from "../src/icons.js";
 import { plan } from "./helpers.js";
 
 test("compileAppFile: calc.plan gives a definition and no fault", async () => {
@@ -49,6 +50,17 @@ test("bundle: an import that the build cannot keep is an error of the build", ()
 
 test("bundle: an export line with two names is an error of the build", () => {
   expect(() => script([["a", "export const x = 1, y = 2;"]])).toThrow("one name");
+});
+
+test("build: src/icons.js holds the icon names of the host's sources, so the kit and the host cannot differ", () => {
+  // bun kit/build.js --check fails when the file differs from what iconModule makes of the host's sources.
+  expect(readFileSync(new URL("../src/icons.js", import.meta.url), "utf8")).toBe(iconModule());
+  const catalog = 'private val shellIcons=setOf("Menu","Plus",\n        "Trash")\n    val icons=shellIcons+ToolIcons.paths.keys';
+  const icons = 'val paths: Map<String, String> = mapOf(\n        "Coffee" to "M10 2v2",\n        "Star" to "M1 1",\n    )';
+  expect(iconModule(catalog, icons)).toContain('export const HOST_ICONS = ["Menu","Plus","Trash","Coffee","Star"];');
+  expect(() => iconModule("val icons=setOf()", icons)).toThrow("ToolUiCatalog.kt");
+  // A shell glyph and a domain icon of the host: the first and the last name of each source.
+  expect([HOST_ICONS[0], HOST_ICONS.includes("Refresh"), HOST_ICONS.includes("Coffee"), HOST_ICONS.at(-1)]).toEqual(["Menu", true, true, "Ruler"]);
 });
 
 test("build: a module that names MESSAGES keeps its texts out of the run-time only with the line of the build", () => {
