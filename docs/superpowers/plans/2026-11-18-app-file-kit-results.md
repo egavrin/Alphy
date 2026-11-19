@@ -562,3 +562,77 @@ Command:
 ```text
 JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3 tools/compose_acceptance/run.py suite --serial emulator-5592 --label appfile-live-final com.alpha.assistant.tools.appfile.AppFileProofTest com.alpha.assistant.tools.appfile.AppFileLookTest
 ```
+
+## Look of each plan
+
+Task 11b-2b gave the parts `timer`, `deck`, `steps`, `question`, `lesson`, `chart`, `card`, `drawing`, and `model3d` the look of the baseline apps.
+It also made the look rules kit tests (`kit/README.md`, sections "Parts" and "Look rules").
+The numbers come from `bun kit/look.js`, before at `c92230b` and after at `2705ed4`.
+The last column is what the pictures of the run `appfile-look-all` show in both themes, against the pictures of `appfile-live-final`.
+
+| Plan | Hero, before and after | Typed fields, first screen | Typed fields in rows | Seen in the pictures |
+| --- | --- | --- | --- | --- |
+| `calc` | 1, 1 | 2 | 0 | No change. |
+| `lesson` | 1, 1 | 1 | 0 | The orbit drawing is a hero card. The count shows one time, "Исследуем: 1 / 3" over the dots. Before, the eyebrow "Исследуем · 1 / 3" showed the count a second time. Dark: the thin orbit and the inactive dots have low contrast. |
+| `list` | 1, 1 | 2 | 0 | No change. |
+| `model3d` | 1, 1 | 0 | 0 | The model card is a hero card, and its stage has the muted tone of the theme. The chips "Камера", "Панель", "Колёса" and the button "Разобрать" are outlined. Before, the stage was a bright panel in the dark theme, the chips were tonal, and "Разобрать" was filled. Dark: the outline of a chip has low contrast on the hero card, and its text reads well. |
+| `quiz` | 1, 1 | 0 | 0 | No change. The plan writes its own component lines, so the template of `deck` does not apply. |
+| `section` | 0, 1 | 1 | 0 | A hero card "Звичок у трекері" with the count 3 is first. The three rows of habits follow, and the section of the streaks is under the first screen. |
+| `tabs-chart` | 1, 1 | 0 | 0 | The title "Gastos por categoría" shows one time, as the label of the chart. Before, it showed two times. The host text "Нет данных для графика" stays (section "Look"). |
+| `tea` | 0, 1 | 0 | 0 | The timer card with the host's countdown "00:05:00" is a hero card. |
+| `timer-rounds` | 1, 1 | 0 | 0 | Two hero cards: the ring of the rounds, then the timer. The timer has the muted phase text "Belastung 1 / 8", a bar over the full width of the card with a muted track and a stop dot, a filled "Start" with a play icon, and the text button "Zurücksetzen". Before, the bar was a short track with low contrast, and "Start" had no icon. |
+| `water-ko` | 1, 1 | 0 | 0 | No change. |
+| `units-pl` | 1, 1 | 1 | 0 | No change. |
+| `shopping` | 1, 1 | 2 | 0 | No change. |
+| `habits` | 1, 1 | 1 | 0 | No change. |
+| `price-filter` | 1, 1 | 2 | 0 | No change. |
+| `look-water-ko` | 1, 1 | 0 | 0 | No change. |
+| `look-shopping-it` | 1, 1 | 1 | 0 | No change. |
+| `mock-water-ko` | 1, 1 | 0 | 0 | No change. |
+| `mock-units-pl` | 1, 1 | 1 | 0 | Each of the three rows has its icon of Alphy at the left of its title: a drop, a glass, and a fork and knife. |
+| `mock-shopping-it` | 1, 1 | 1 | 0 | The field "Prodotto" has a cart icon, and the choice "Corsia" has a tag icon. `mock-shopping-it-added.png` shows the same icons and the two rows. |
+| `mock-habits-uk` | 1, 1 | 0 | 0 | The streak badge of each row has the accent tone. |
+| `mock-price-filter` | 1, 1 | 0 | 0 | The hero shows "12 of 12". |
+
+A script compared each picture with the same picture of `appfile-live-final`, pixel by pixel under the status bar.
+Only the pictures of the 10 plans with a note in the last column changed, and `mock-shopping-it-added.png`, in both themes. Each other picture is the same, also each picture of a baseline app.
+No picture shows cut text, an overlap, an empty first screen, a control with no label, or a text that shows two times.
+A text at the bottom edge of a picture continues under the first screen.
+The captions of the two counts of `quiz` are the texts of its two buttons, because each count is the number of presses of its button.
+
+The 4 items of "Where the plans with parts are still worse than the baseline" (section "Look with parts") that had a missing option now use it: the icons of `mock-shopping-it`, the tone of `mock-habits-uk`, the total of `mock-price-filter`, and the icons of the rows of `mock-units-pl`.
+These differences stay:
+
+- `mock-units-pl`: the rows have no tint and no heading "Przeliczenia".
+- `mock-habits-uk`: the ring shows "3 / 21", and the baseline shows "3 з 21".
+- The choices of the plans in that table.
+
+Host limits that the pictures show (no change of the host in this task):
+
+- Dark: the inactive dots of a `progress` with `variant="dots"` have low contrast (`NativeToolUi.kt` 369 to 370, 1337).
+- A shape of the muted role has the alpha 64 (`SurfaceDrawing.kt`, `MUTED_SHAPE_ALPHA`), so a thin muted stroke, such as the orbit of `lesson`, is faint.
+- The faces of a model keep their hex colors, because the shading of a face needs a hex color.
+
+| Measure | Before (`c92230b`) | After (`2705ed4`) |
+| --- | --- | --- |
+| Run-time text | 46580 bytes | 46662 bytes (bar 48500) |
+| Largest source | `test/cards.plan`, 53628 bytes | `test/cards.plan`, 53591 bytes (bar 60000) |
+| Kit tests | 289 pass | 314 pass |
+
+### Runs of Task 11b-2b
+
+| Label | Revision | Observed | Test APK `lastUpdateTime` before and after |
+| --- | --- | --- | --- |
+| `appfile-look-spike-a8` | `62ea185+dirty` (the changes of `79170cf` and of `3c1b757` before the stop dot) | failed: the inset of 16 dp in `AppFileLookTest.drawn` was larger than the timer canvas, and the bar at the share 0 had one color | `06:41:12`, `07:32:55` |
+| `appfile-look-spike-a8b` | `62ea185+dirty` | passed. The inset is now at most a third of the canvas height, and the stop dot gives the bar a second color | `07:32:55`, `07:35:30` |
+| `appfile-look-pre` | `2705ed4` | passed (`picturesOfEachPlan`), 66.1 s | `07:35:30`, `07:41:21` |
+| `appfile-look-all` | `2705ed4+dirty` (the two documents) | passed, 37 tests (`AppFileProofTest` and `AppFileLookTest`), 182.0 s. The pictures of this section. Under the status bar, each picture is the same as in `appfile-look-pre` | `07:41:21`, `07:44:37` |
+
+All times are on 2026-11-19. Each "before" time is the "after" time of the run before it, so no other session installed the test APK during these runs.
+The pictures are in `evidence/alphy-ui/appfile-look-all/light/` and `dark/`, with the contact sheets `contact-light.png` and `contact-dark.png` and the pair sheet `pairs-light.png`. Git does not keep these files.
+
+Command:
+
+```text
+JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3 tools/compose_acceptance/run.py suite --serial emulator-5592 --label appfile-look-all com.alpha.assistant.tools.appfile.AppFileProofTest com.alpha.assistant.tools.appfile.AppFileLookTest
+```

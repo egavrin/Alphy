@@ -60,7 +60,7 @@ The `number` and `display` emphases of a `Text` are display sizes of the host (`
 ## Parts
 
 A part changes one need line into component, state, and formula lines (`src/parts.js`).
-The parts of a list app use the look of the baseline apps: a hero card first, rows with an emoji and a muted second line, and one filled button in each group.
+The parts use the look of the baseline apps: a hero card first, rows with an emoji and a muted second line, and at most one filled button in each group.
 
 The captions that a part writes by itself are in the language of `lang=` of the app line (`src/words.js`): "Add", "Remove", "Less", "More", "Reset", and the others of its table.
 A language outside the table gets the English words and one note of the report that names each option of the need that took an English caption.
@@ -72,10 +72,11 @@ A text that a format function printed is for a person: do not read it back as a 
 
 | Part | Look options | Example |
 | --- | --- | --- |
-| `entries` | `icon` (an emoji for each row, or `$field`), `countText` (the caption of the hero count), `edit` (a choice of a row is a control, not a label) | `need items = entries("Prodotti", fields={nome: "text", corsia: ["Frutta", "Forno"], preso: "check"}, icon=$segno, show={segno: $corsia == "Forno" ? "🥖" : "🍎"}, countText="Da comprare")` |
+| `entries` | `icon` (an emoji for each row, or `$field`), `countText` (the caption of the hero count), `edit` (a choice of a row is a control, not a label), `icons` (the icon of a field of the add form), `tones` (the tone of a value of `show=`), `total` (the word between the shown rows and all rows of the hero count) | `need items = entries("Prodotti", fields={nome: "text", corsia: ["Frutta", "Forno"], preso: "check"}, icon=$segno, show={segno: $corsia == "Forno" ? "🥖" : "🍎"}, countText="Da comprare", icons={nome: "Cart"})` |
 | `input` | `icon` (the icon of the field), a map in `options=`, and the kind `range` | `need price = input("range", "Price", [100, 1500], min=0, max=2000, step=50)` |
-| `figure` | `icon` (an emoji, a formula that gives one, or a host icon), `unit` (a word after the number), `note` (a muted text), `goal` (a bar to the goal), `goalText` (the caption of the bar) | `need today = figure("number", "Today", $/ml, icon="💧", unit="ml", goal=2000, goalText="Of the goal", note="250 ml for each cup")` |
+| `figure` | `icon` (an emoji, a formula that gives one, or a host icon), `unit` (a word after the number), `note` (a muted text), `goal` (a bar to the goal), `goalText` (the caption of the bar), `decimals` (the decimals of a number, money, or percent figure) | `need today = figure("number", "Today", $/ml, icon="💧", unit="ml", goal=2000, goalText="Of the goal", note="250 ml for each cup")` |
 | `counter` | `lessText`, `moreText`, `addText` (one button that adds the step), `icon` (the icon of that button), `resetText` | `need ml = counter("Water (ml)", 0, step=250, addText="Add a cup", icon="Cup")` |
+| `card` | `eyebrow` (a small text over the title), `icon` (the icon of the card) | `need legend = card("Legend", "Teal is the Moon", icon="Layers")` |
 
 - `entries`:
   - The row is the emoji, the first text field as the title with each further text field as a muted line under it, the value cells as small labels, the check marks, and the remove button.
@@ -88,6 +89,9 @@ A text that a format function printed is for a person: do not read it back as a 
     To add a row, a person types, finishes the edit (the action key of the keyboard or the host's finish button under the field), and then presses the add button.
     The host refuses a press before the finish and shows a notice, and the baseline apps of the agent loop have the same steps. No step adds a row with one press after the typing.
   - A plan with a list and no figure, progress, drawing, timer, or model starts with a hero card of the count of the shown rows of its first list. `countText=` is its caption, else the title of the list. `icon=` with a sign is its large emoji.
+    `total="of"` shows all rows too, such as "5 of 12". `total=` on a list with no hero count is a fault.
+  - `icons={nome: "Cart"}` gives a field of the add form its icon. A text, number, count, date, or time field shows an icon, and a choice of more than six options does too. Each other field, and a name that is not a field, is a fault.
+  - `tones={streak: "accent"}` gives the badge of a value of `show=` its tone. A name that `show=` does not give is a fault.
 - `input`: `options={value: "Label"}` keeps the value in the state and shows the label. `icon=` goes to a text, number, date, or time field and to a choice of more than six options.
   The host draws a choice of six options or fewer as a segmented control, which shows no icon. Each kind of input uses only its own options: `icon=` on a segmented control, a multi-choice, or a toggle is a fault, and so is `min=` on a text field.
   The kind `range` writes `RangeSlider(label, $/x, min=, max=, step=)`: one state value of two numbers in order, the low and the high (`$/price[0]`, `$/price[1]`).
@@ -97,13 +101,36 @@ A text that a format function printed is for a person: do not read it back as a 
   The caption of the bar is `goalText=`, else the title of the figure. `unit=` follows the shown number ("2,000 ml"), and the value of the figure stays a number.
   The other figures of one place are a set. A place is one group of a `steps` or `tabs` need, or the screen for the needs that no such need groups. A figure never leaves its place, and a figure that two groups name is a metric in each of them.
   - Two figures of a set that stand one after the other are a grid of two metrics, each with its `icon=`. Two figures with another need between them stay two metrics.
-  - Three figures or more of a set are rows of one size: the title at the left and the value at the right. A row shows no `icon=`.
+  - Three figures or more of a set are rows of one size: the title at the left and the value at the right. `icon=` is a small sign at the left of the title: an emoji, or an icon of Alphy with no action.
   - One figure of a set is a metric.
-  `note=`, `goal=`, and `goalText=` show only on the main figure. `goalText=` with no `goal=` is a fault, and so is `icon=` on a row.
+  `note=`, `goal=`, and `goalText=` show only on the main figure. `goalText=` with no `goal=` is a fault.
+  `decimals=` is the number of decimals of a `number`, `money`, or `percent` figure. A `text` figure shows its value as it is, so `decimals=` on it is a fault.
 - `counter`: a section with the title of the counter. It holds an outlined less button, the value with the display emphasis, and a filled more button.
   With `addText=`, the counter is one filled button that adds the step and a text button that resets the value. The plan shows the value elsewhere, such as in a figure.
   `lessText=` and `moreText=` with `addText=` are a fault, and so are `icon=` and `resetText=` without it.
+- `timer`: the card of a timer is a hero card, also the host's own countdown. A timer with rounds has a filled Start with a play icon, an outlined Pause, a Reset text button, and a muted phase text.
+  Its bar is a surface of 1024 x 64 that the bar fills: a track in the muted tone of the theme, a stop dot near its end, and the share of the phase that passed.
+- `deck`: the front of a card is a centered text with the display emphasis, and the back has the headline emphasis. Yes is filled with a check, No is outlined, and the two counts are a grid of two.
+  A deck of pages (no `back=`) keeps a heading for its front, because a page can be a long text.
+- `steps`: the note at the end has the success tone. `question`: its notice has the success tone for a right answer and the warning tone for a wrong one.
+- `lesson`: a lesson of at most 12 steps shows its count only in its dots, where the host writes "Step: 1 / 3". A longer lesson has a bar and a count line over it.
+- `chart`: the title shows once, as the label of the chart, with no section around it.
+- `card`: `icon=` is the icon of the card, and the body text is muted.
+- `drawing` and `model3d`: a plan with no figure or progress has its first drawing or model as the main element, unless the author wrote `root`. The main drawing is in a hero card, and the main model card is a hero card.
+  The stage of a model is the muted tone of the theme. A part chip of a model is outlined, and filled while it is the selected part. The explode button is outlined.
 - The value of an option has its type. `sheet=`, `edit=`, `add=`, `remove=`, `hidden=`, and `reorder=` are `true` or `false` in the line, because a part reads them once when it builds the screen. `step=` and `decimals=` are numbers or formulas. A value of another type is a fault of the need.
+
+## Look rules
+
+Kit tests check the look rules over the nine saved plans and the look fixtures (`LOOK_FIXTURES` of `build.js`).
+`bun kit/look.js` prints the numbers of the first three rules with `score_app` of `tools/agent_corpus/visual_score.py`.
+
+1. `look: each saved plan has its main element in the first two nodes` (`test/lookrules.test.js`): a hero card, a large ring, dots, a canvas, a large emoji, or a display text.
+2. `look: no saved plan has more than two typed fields on the first screen` (`test/lookrules.test.js`).
+3. `look: no saved plan has a typed field in a row template` (`test/lookrules.test.js`).
+4. A plan with only a list gets a hero card with its count: `entries: a list that a steps or tabs need groups gets no hero count at the root, and the first list that no holder groups gets it` (`test/entries.test.js`).
+5. The figures of one place (`test/figures.test.js`): `figures: two figures after the main one are a grid of two metrics with their icons, and three or more are rows of one size`, `figures: the figures of one group of steps or tabs are a set of their own, and a figure never leaves its group`, and `figures: one figure beside the main one, or two that do not stand one after the other, stay metrics`.
+6. `look: a group of buttons has one filled button, on the first screen and after the press of the main action` (`test/lookrules.test.js`): at most one, by the rule of the host (`NativeToolUi.kt` `secondaryButtons`). After Start of a timer, its group has no filled button.
 
 ## Commands
 
