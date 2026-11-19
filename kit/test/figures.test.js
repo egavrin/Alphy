@@ -95,4 +95,8 @@ test("figures: a new figure writes the figures before it again in their new plac
     expect(report(await planned(`app("T")\nneed a = figure("number", "A", 1)\n${line}`)).faults)
       .toContain(`line: need b: note=, goal=, and goalText= show only on the main figure, and b is not it: ${line}`);
   }
+  // A row shows no icon (fix round 1, G.4): the part said no word when it dropped icon= of a row.
+  const line = 'need c = figure("number", "C", 3, icon="Drop")';
+  expect(report(await planned(['app("T")', 'need h = figure("number", "H", 0)', 'need a = figure("number", "A", 1)', 'need b = figure("number", "B", 2)', line].join("\n"))).faults)
+    .toContain(`line: need c: c is a row, because three figures or more in one place are rows of one size, and a row shows no icon. Remove icon=: ${line}`);
 });

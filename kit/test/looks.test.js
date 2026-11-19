@@ -224,6 +224,36 @@ test("look: a fault of a line that a part wrote names the need, and an option th
     'line: need cups: counter has no option stepp. Its options are step, min, max, lessText, moreText, addText, icon, resetText: need cups = counter("Cups", 0, stepp=2)']);
 });
 
+test("look: a value of the wrong type, and an option that the form of a part does not use, are faults of the need (G.4)", async () => {
+  // Fix round 1: each of these lines compiled with no option fault, and the part dropped the option with no word.
+  const CASES = [
+    ['need tasks = entries("Tasks", fields={task: "text"}, sheet="yes")', 'need tasks: sheet= needs true or false, and "yes" is neither'],
+    ['need total = figure("number", "Total", 2, decimals="x")', 'need total: decimals= needs a number, and "x" is not one'],
+    ['need cups = counter("Cups", 0, step="x")', 'need cups: step= needs a number, and "x" is not one'],
+    ['need kind = input("choice", "Kind", "a", options=["a", "b"], icon="Pin")', "need kind: a choice of 2 options is a segmented control, which shows no icon. Remove icon="],
+    ['need cups = counter("Cups", 0, icon="Cup")', "need cups: a counter with no addText= has a less and a more button, and it does not use icon=. Remove icon=, or give addText="],
+    ['need ml = counter("Water", 0, addText="+1", lessText="x")', "need ml: a counter with addText= has one add button and a reset button, and it does not use lessText=. Remove lessText="],
+    ['need today = figure("number", "Today", 1, goalText="Of the goal")', "need today: goalText= is the caption of the bar to goal=, and today has no goal=. Give goal=, or remove goalText="],
+    // The other flags, and a flag as a formula: the part reads it once when it builds the screen.
+    ['need list = entries("L", fields={task: "text"}, edit=1, add="no", remove=[false], hidden="false")', ...["edit=: 1", 'add=: "no"', "remove=: [false]", 'hidden=: "false"']
+      .map((pair) => `need list: ${pair.split(": ")[0]} needs true or false, and ${pair.split(": ")[1]} is neither`)],
+    ['need rows = entries("R", fields={task: "text"}, reorder=$/on)', "need rows: reorder= needs true or false, and $/on is a formula. The part reads it once when it builds the screen"],
+    ['need n = input("number", "N", 1, step="x")', 'need n: step= needs a number, and "x" is not one'],
+    // An input of each kind uses its own options.
+    ['need name = input("text", "Name", "", min=1)', "need name: an input of kind text does not use min=. It uses icon="],
+    ['need on = input("toggle", "On", true, icon="Pin")', "need on: an input of kind toggle does not use icon=. It uses no option"],
+  ];
+  const missing = [];
+  for (const [line, ...messages] of CASES) {
+    const faults = await faultsOf("$/on = true", line);
+    missing.push(...messages.map((message) => `line: ${message}: ${line}`).filter((fault) => !faults.includes(fault)));
+  }
+  expect(missing).toEqual([]);
+  // A number as a formula, and a choice of more than six options with an icon, are not faults.
+  expect(await faultsOf("$/s = 2", 'need cups = counter("Cups", 0, step=$/s)', 'need total = figure("number", "Total", $/cups, decimals=1, example=[{cups: 1}, 1])',
+    'need kind = input("choice", "Kind", "a", options=["a", "b", "c", "d", "e", "f", "g"], icon="Pin")')).toEqual([]);
+});
+
 test("look: the button back of the pages of a deck, of the steps, and of a lesson is outlined, and each button forward is filled", async () => {
   const variants = (ui, ...actions) => actions.map((action) => every(ui).find((node) => node.action === action)?.variant);
   const { definition, faults } = emit(await planned(['app("Parts", lang="en")',

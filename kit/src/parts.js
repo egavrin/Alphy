@@ -74,9 +74,14 @@ const PARTS = {
   async input(name, need, { choose }) {
     const [kind, title, value] = need.args, extras = need.named;
     const k = kind?.v;
+    // Each kind of input uses its own options, and any other one is a fault (G.4).
+    const uses = INPUT_USES[k] ?? ["min", "max", "step", "icon"], unused = Object.keys(extras).filter((key) => !uses.includes(key));
+    if (unused.length) throw new DslError(`an input of kind ${k} does not use ${unused.map((key) => key + "=").join(", ")}. ${uses.length ? `It uses ${uses.map((key) => key + "=").join(", ")}` : "It uses no option"}`);
     const named = Object.entries(extras).filter(([key]) => key !== "options").map(([key, tree]) => `, ${key}=${show(tree)}`).join("");
-    // The options are a list of values or a map of a value to its label. A segmented control takes no icon.
-    const icon = extras.icon ? `, icon=${show(extras.icon)}` : "", options = show(extras.options ?? { k: "list", items: [] }), few = ((extras.options?.items ?? extras.options?.entries)?.length ?? 9) <= 4;
+    // The options are a list of values or a map of a value to its label. The host draws a choice of six options or fewer as a segmented control, which shows no icon (run.js).
+    const count = (extras.options?.items ?? extras.options?.entries)?.length;
+    if (k === "choice" && extras.icon && count <= 6) throw new DslError(`a choice of ${count} options is a segmented control, which shows no icon. Remove icon=`);
+    const icon = extras.icon ? `, icon=${show(extras.icon)}` : "", options = show(extras.options ?? { k: "list", items: [] }), few = (count ?? 9) <= 4;
     let widget;
     if (k === "choice") widget = `${few ? "Segmented" : "Select"}(${show(title)}, $/${name}, ${options}${few ? "" : icon})`;
     else if (k === "toggle") widget = `Toggle(${show(title)}, $/${name})`;
@@ -98,6 +103,8 @@ const PARTS = {
   async figure(name, need, { hero, role }) {
     const [format, title, formula] = need.args, f = format?.v, { icon, note, goal, goalText, unit } = need.named, main = hero === name;
     if ((note || goal || goalText) && !main) throw new DslError(`note=, goal=, and goalText= show only on the main figure, and ${name} is not it`);
+    if (goalText && !goal) throw new DslError(`goalText= is the caption of the bar to goal=, and ${name} has no goal=. Give goal=, or remove goalText=`);
+    if (icon && role === "row") throw new DslError(`${name} is a row, because three figures or more in one place are rows of one size, and a row shows no icon. Remove icon=`);
     const text = { money: `money($/${name})`, percent: `percent($/${name})`, text: `text($/${name})` }[f] ?? `amount($/${name}, ${need.named.decimals ? show(need.named.decimals) : f === "count" ? 0 : 2})`;
     // unit="ml" follows the shown number ("2,000 ml"), and the value stays a number for a bar, a check, or an example.
     const lines = [`$/${name} := ${show(formula)}`, `$/${name}_text := ${text}${unit ? ` + " " + ${show(unit)}` : ""}`];
@@ -327,6 +334,9 @@ const PARTS = {
     const down = opt.min ? `set($/${name}, max(${show(opt.min)}, $/${name} - ${step}))` : `dec($/${name}, ${step})`;
     const up = opt.max ? `set($/${name}, min(${show(opt.max)}, $/${name} + ${step}))` : `inc($/${name}, ${step})`;
     const lines = [`$/${name} = ${start}`];
+    // Each form of the counter uses its own captions and icon (G.4).
+    const unused = (opt.addText ? ["lessText", "moreText"] : ["icon", "resetText"]).filter((key) => opt[key]).map((key) => key + "=");
+    if (unused.length) throw new DslError(`a counter with ${opt.addText ? "addText= has one add button and a reset button" : "no addText= has a less and a more button"}, and it does not use ${unused.join(" or ")}. Remove ${unused.join(" and ")}${opt.addText ? "" : ", or give addText="}`);
     if (opt.addText) {
       lines.push(`${name}_plus = Button(${show(opt.addText)}, action=${up}, icon=${opt.icon ? show(opt.icon) : q("Plus")}, variant="filled")`,
         `${name}_reset = Button(${caption("resetText", "Reset")}, action=set($/${name}, ${start}), icon="Refresh", variant="text")`, `${name}_view = Row([${name}_plus, ${name}_reset])`);
@@ -482,6 +492,19 @@ const OPTIONS = {
   model3d: ["turn", "parts", "explode", "joinText", "explodeText"], card: ["eyebrow"], link: ["note"], lesson: ["next", "back", "stepText"],
   question: ["options", "right", "rightText", "wrongText"], content: [], hole: [],
 };
+/** The options that each kind of input uses. A kind that is not here is a number field or a slider. */
+const INPUT_USES = { choice: ["options", "icon"], choices: ["options", "max"], toggle: [], text: ["icon"], date: ["icon"], time: ["icon"] };
+/**
+ * The type of the value of an option (G.4). A part reads a flag once when it builds the screen, so a flag is true or false in the line.
+ * A number can be a formula, which the kit cannot check here.
+ */
+const FLAGS = new Set(["sheet", "edit", "add", "remove", "hidden", "reorder"]), NUMBERS = new Set(["step", "decimals"]);
+const literal = (tree) => tree.k === "lit" || tree.k === "list" || tree.k === "map";
+function typeFault(key, tree) {
+  if (FLAGS.has(key) && !(tree.k === "lit" && typeof tree.v === "boolean")) return `${key}= needs true or false, and ${show(tree)} ${literal(tree) ? "is neither" : "is a formula. The part reads it once when it builds the screen"}`;
+  if (NUMBERS.has(key) && literal(tree) && typeof tree.v !== "number") return `${key}= needs a number, and ${show(tree)} is not one`;
+  return null;
+}
 /** The need whose part wrote each line, by the name of the line. */
 export const needsOf = (file) => new Map([...(file.partLines ?? [])].flatMap(([need, keys]) => keys.map((key) => [key, need])));
 /** The name of a line in a fault: "need NAME" for a line that a part wrote, so that each fault names a line that the author wrote. */
@@ -533,6 +556,10 @@ export async function expand(file, choose = rules) {
     const options = Object.hasOwn(OPTIONS, entry.tree.name) ? OPTIONS[entry.tree.name] : null;
     for (const key of options ? Object.keys(entry.tree.named).filter((key) => !options.includes(key)) : []) {
       file.partFaults.push({ line: null, text: entry.raw, message: `need ${entry.key}: ${entry.tree.name} has no option ${key}. ${options.length ? `Its options are ${options.join(", ")}` : "It takes no option"}` });
+    }
+    for (const [key, tree] of options ? Object.entries(entry.tree.named).filter(([key]) => options.includes(key)) : []) {
+      const fault = typeFault(key, tree);
+      if (fault) file.partFaults.push({ line: null, text: entry.raw, message: `need ${entry.key}: ${fault}` });
     }
     let built, parsed;
     try {

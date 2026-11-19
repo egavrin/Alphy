@@ -85,7 +85,8 @@ A figure prints its number with `amount(x, n)`: at most `n` decimals, no zeros a
   - The add form is a column of its fields and a filled add button with a plus. A press with an empty first text field adds nothing.
   - A text field of the form is an apply input of the host (`inputMode: "apply"`): a typed text goes into the state when the person presses the apply button of the field, and then the add button adds the row.
   - A plan with a list and no figure, progress, drawing, timer, or model starts with a hero card of the count of the shown rows of its first list. `countText=` is its caption, else the title of the list. `icon=` with a sign is its large emoji.
-- `input`: `options={value: "Label"}` keeps the value in the state and shows the label. `icon=` goes to a text, number, date, or time field and to a select. A segmented control and a multi-choice take no icon.
+- `input`: `options={value: "Label"}` keeps the value in the state and shows the label. `icon=` goes to a text, number, date, or time field and to a choice of more than six options.
+  The host draws a choice of six options or fewer as a segmented control, which shows no icon. Each kind of input uses only its own options: `icon=` on a segmented control, a multi-choice, or a toggle is a fault, and so is `min=` on a text field.
   The kind `range` writes `RangeSlider(label, $/x, min=, max=, step=)`: one state value of two numbers in order, the low and the high (`$/price[0]`, `$/price[1]`).
 - `figure`: the main figure is a hero card of the emoji, the metric with the display emphasis, the bar of `goal=`, and the muted `note=`.
   The caption of the bar is `goalText=`, else the title of the figure. `unit=` follows the shown number ("2,000 ml"), and the value of the figure stays a number.
@@ -93,9 +94,11 @@ A figure prints its number with `amount(x, n)`: at most `n` decimals, no zeros a
   - Two figures of a set that stand one after the other are a grid of two metrics, each with its `icon=`. Two figures with another need between them stay two metrics.
   - Three figures or more of a set are rows of one size: the title at the left and the value at the right. A row shows no `icon=`.
   - One figure of a set is a metric.
-  `note=`, `goal=`, and `goalText=` show only on the main figure.
+  `note=`, `goal=`, and `goalText=` show only on the main figure. `goalText=` with no `goal=` is a fault, and so is `icon=` on a row.
 - `counter`: a section with the title of the counter. It holds an outlined less button, the value with the display emphasis, and a filled more button.
   With `addText=`, the counter is one filled button that adds the step and a text button that resets the value. The plan shows the value elsewhere, such as in a figure.
+  `lessText=` and `moreText=` with `addText=` are a fault, and so are `icon=` and `resetText=` without it.
+- The value of an option has its type. `sheet=`, `edit=`, `add=`, `remove=`, `hidden=`, and `reorder=` are `true` or `false` in the line, because a part reads them once when it builds the screen. `step=` and `decimals=` are numbers or formulas. A value of another type is a fault of the need.
 
 ## Commands
 
