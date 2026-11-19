@@ -76,7 +76,8 @@ data class AssistCapture(
 object AssistantCapture {
     var current by mutableStateOf<AssistCapture?>(null)
         private set
-    private var owner: Pair<String, () -> Unit>? = null
+    // State, so the voice mode of a press ends when the system session of its invocation ends (spec 5.11.7).
+    private var owner by mutableStateOf<Pair<String, () -> Unit>?>(null)
     private var pageRead: Job? = null
     private val scope = CoroutineScope(Dispatchers.Main.immediate)
 
@@ -85,6 +86,9 @@ object AssistantCapture {
         owner = id to onClose
         current = AssistCapture(id)
     }
+
+    /** The system session of [id] is open: no release, close, or later begin has come. */
+    fun isOpen(id: String): Boolean = owner?.first == id
 
     fun updateScreen(id: String, screen: ScreenContext) {
         val capture = current?.takeIf { it.id == id } ?: return

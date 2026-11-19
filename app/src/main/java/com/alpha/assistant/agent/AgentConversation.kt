@@ -48,7 +48,9 @@ import java.time.ZonedDateTime
 /** Shares one foreground run between chat and the Android assistant. */
 internal class AgentConversation(private val app: Application, private val scope: CoroutineScope, name: String,
     private val provider: ChatProvider, private val memory: MemoryStore, private val tools: ToolStore,
-    private val getKey: suspend () -> String, private val selectedChat: () -> String?) {
+    private val getKey: suspend () -> String, private val selectedChat: () -> String?,
+    // A screen that the run or the plan card opens keeps the voice mode (spec 5.8.1).
+    val expectScreen: () -> Unit) {
     private val runtime = AgentRuntime(app, name, memory, tools)
     private val hosts = linkedMapOf<ComponentActivity, LifecycleEventObserver>()
     private val dismissed = mutableSetOf<String>()
@@ -300,6 +302,7 @@ internal class AgentConversation(private val app: Application, private val scope
                             val activity = foreground()?.takeIf { selectedChat() == approved.conversationId }
                                 ?: throw SecurityException("Foreground approval expired")
                             if (approved.timerThenPhoto() && !continuing) clockReturn = ClockReturn(approved.id, approved.revision, activity)
+                            expectScreen()
                             try { activity.startActivity(intent) }
                             catch (failure: Exception) { clockReturn = null; throw failure }
                         }
@@ -325,6 +328,8 @@ internal class AgentConversation(private val app: Application, private val scope
             if (step == null || alarms.stopping || selectedChat() != expected.conversationId || foreground() !== alarms.activity) {
                 throw SecurityException("Foreground alarm approval expired")
             }
+            // Clock comes to the front for each alarm, so it keeps the voice mode (spec 5.8.1, ruling R18).
+            expectScreen()
             check(alarms.dispatch(intent, step) && awaitForeground(expected.conversationId, alarms))
         } finally {
             // Clock can return while Stop is still being recorded on IO.

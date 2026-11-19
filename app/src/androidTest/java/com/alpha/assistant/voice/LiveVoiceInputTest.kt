@@ -11,8 +11,6 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 /**
  * The live voice input check of spec 12A.10: `voice/russian.wav` goes once to the provider of the received account.
@@ -22,25 +20,7 @@ import java.nio.ByteOrder
 class LiveVoiceInputTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
 
-    /** The 16 kHz mono 16-bit samples of the fixture. The chunks are walked, because the file has a chunk before `data`. */
-    private fun fixtureSamples(): ShortArray {
-        val file = instrumentation.context.assets.open("voice/russian.wav").use { it.readBytes() }
-        val bytes = ByteBuffer.wrap(file).order(ByteOrder.LITTLE_ENDIAN)
-        fun id(offset: Int) = String(file, offset, 4, Charsets.US_ASCII)
-        check(id(0) == "RIFF" && id(8) == "WAVE")
-        var offset = 12
-        while (offset + 8 <= file.size) {
-            val size = bytes.getInt(offset + 4)
-            if (id(offset) == "fmt ") check(bytes.getShort(offset + 8).toInt() == 1 && bytes.getShort(offset + 10).toInt() == 1 &&
-                bytes.getInt(offset + 12) == SAMPLE_RATE && bytes.getShort(offset + 22).toInt() == 16) { "The fixture is not 16 kHz mono PCM16." }
-            if (id(offset) == "data") {
-                bytes.position(offset + 8)
-                return ShortArray(size / 2).also { bytes.asShortBuffer().get(it) }
-            }
-            offset += 8 + size + (size and 1)
-        }
-        error("The fixture has no data chunk.")
-    }
+    private fun fixtureSamples() = wavSamples(instrumentation.context.assets.open("voice/russian.wav").use { it.readBytes() })
 
     /** The fixture samples, then digital silence without end, so the end-of-speech detector ends the utterance. */
     private fun fixture(samples: ShortArray) = PcmSource {

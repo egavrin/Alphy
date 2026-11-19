@@ -76,7 +76,7 @@ internal fun AgentPlanCard(agent: AgentConversation, plan: AgentPlan) {
                     else -> if (plan.steps.any { it.command.function == PHOTO_CAPTURE })
                         R.string.agent_permission_photo else R.string.agent_permission_flashlight
                 } }.distinct().forEach { Text(stringResource(it)) }
-                Button(onClick = { permissionPlan = plan; launcher.launch(plan.permissions.toTypedArray()) },
+                Button(onClick = { permissionPlan = plan; agent.expectScreen(); launcher.launch(plan.permissions.toTypedArray()) },
                     enabled = !agent.busy && permissionPlan == null) { Text(stringResource(R.string.agent_permission_allow)) }
             } else plan.steps.forEachIndexed { index, step ->
                 AgentStepCard(agent, plan, index, step)
@@ -174,8 +174,7 @@ private fun AgentStepCard(agent: AgentConversation, plan: AgentPlan, index: Int,
     Text("${index + 1}. ${target.label}", style = MaterialTheme.typography.titleSmall)
     if (target.before.isNotEmpty()) Text(stringResource(R.string.agent_before, target.before))
     if (target.after.isNotEmpty()) Text(stringResource(R.string.agent_after, target.after))
-    if (step.command.function !in setOf("calendar.read", "calendar.readOwned", "calendar.select", "memory.read", PHOTO_CAPTURE))
-        Text(stringResource(R.string.agent_non_reversible), style = MaterialTheme.typography.bodySmall)
+    if (step.irreversible) Text(stringResource(R.string.agent_non_reversible), style = MaterialTheme.typography.bodySmall)
     val result = plan.results.getOrNull(index)
     when {
         result != null -> Text(result)

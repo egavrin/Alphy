@@ -45,6 +45,7 @@ import androidx.lifecycle.LifecycleEventObserver
         val id = model.weatherPermissionId
         if(id != null && launchedId == null && grantedId == null) {
             launchedId = id
+            model.expectAlphyScreen()
             permission.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
         }
     }

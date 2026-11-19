@@ -11,9 +11,12 @@ import android.app.Application
 import android.app.Instrumentation
 import android.app.UiAutomation
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
@@ -34,6 +37,7 @@ import androidx.compose.ui.semantics.getAllSemanticsNodes
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.navigationevent.NavigationEvent
 import androidx.navigationevent.NavigationEventDispatcherOwner
@@ -49,13 +53,22 @@ import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
+import com.alpha.assistant.cloud.Endpoints
 import com.alpha.assistant.data.Conversation
 import com.alpha.assistant.data.LegacyKeys
 import com.alpha.assistant.data.Message
+import com.alpha.assistant.data.ScreenContext
 import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.data.ShellStore
 import com.alpha.assistant.diagnostics.UiFailureDiagnostics
+import com.alpha.assistant.surfaces.ASSIST_INVOCATION
+import com.alpha.assistant.surfaces.AlphaTileService
+import com.alpha.assistant.surfaces.AssistantCapture
 import com.alpha.assistant.tools.agentReply
+import com.alpha.assistant.voice.FakeLiveAudio
+import com.alpha.assistant.voice.FakeLiveTransport
+import com.alpha.assistant.voice.LiveTiming
+import com.alpha.assistant.voice.LiveVoiceSession
 import com.alpha.assistant.voice.VoiceSession
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -70,6 +83,13 @@ import kotlin.math.roundToInt
 
 internal typealias VoiceFactory = (Application, CoroutineScope, (String) -> Unit) -> VoiceSession
 
+/** A chat decision of the agent without search. */
+internal fun chatDecision(kind: String, text: String, brief: String = "") =
+    JSONObject().put("kind", kind).put("text", text).put("brief", brief).put("search", "none").toString()
+
+/** The mini-app that [FixtureProvider] generates. */
+internal const val FIXTURE_APP = """{"formatVersion":3,"title":"Fixture","description":"","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"text","text":"Count","bind":"count"},"source":"return {state:input.state};"}"""
+
 internal class FixtureProvider(private val reply: String = "Fixture response") : ChatProvider {
     @Volatile var calls = 0
     @Volatile var lastRequest: CloudRequest? = null
@@ -79,10 +99,17 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
     var agentProposal: String? = null
     @Volatile var failure: Exception? = null              // thrown after the count
     @Volatile var gate: CompletableDeferred<Unit>? = null // awaited before the answer
+    @Volatile var courseTopic: String? = null
+    /** The chat decision creates the fixture app, so the request goes through the mini-app generation. */
+    @Volatile var createApp = false
     override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
         synchronized(this) { calls++; lastRequest = request }
         failure?.let { throw it }
         gate?.await()
+        courseTopic?.takeIf { request.chatDecision }?.let {
+            emit(CloudEvent.RoundComplete("", false, com.alpha.assistant.data.MessageProvenance.CLEAN, courseTopic = it))
+            return
+        }
         automationDraft?.let { arguments ->
             val definition = com.alpha.assistant.automations.AutomationDraftTool.bind(arguments, checkNotNull(request.automationDraftChatId))
             emit(CloudEvent.RoundComplete("", false, com.alpha.assistant.data.MessageProvenance.CLEAN, automationDraft = definition.json))
@@ -100,16 +127,16 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
             emit(CloudEvent.RoundComplete(it, false))
             return
         }
-        val app = """{"formatVersion":3,"title":"Fixture","description":"","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"text","text":"Count","bind":"count"},"source":"return {state:input.state};"}"""
         if (request.generationStage == CloudGenerationStage.AGENT) {
-            emit(CloudEvent.Text(request.agentReply(app)))
+            emit(CloudEvent.Text(request.agentReply(FIXTURE_APP)))
             return
         }
         if (request.generationStage != null) {
-            emit(CloudEvent.Text(app))
+            emit(CloudEvent.Text(FIXTURE_APP))
             return
         }
-        emit(CloudEvent.RoundComplete("""{"kind":"answer","text":${JSONObject.quote(reply)},"brief":"","search":"none"}""", false))
+        val decision = if (createApp) chatDecision("create", reply, "Make a counter") else chatDecision("answer", reply)
+        emit(CloudEvent.RoundComplete(decision, false))
     }
 }
 
@@ -135,6 +162,21 @@ internal fun isolatedModels(context: Context): AiModels = AiModels(context, "tes
 
 /** A fake DeepSeek key ("sk-" and 32 hex digits). It is built at run time, so no source line holds a key-shaped literal that secret scanning blocks. */
 internal fun fakeDeepSeekKey(half: String = "0123456789abcdef"): String = "sk-$half$half"
+
+/** A capture as `AlphaVoiceSession` begins it, with a 32 px screenshot when [withImage]. A null [screen] is a capture before `onHandleAssist`. */
+internal fun beginCapture(screen: ScreenContext?, withImage: Boolean = true): String {
+    lateinit var id: String
+    InstrumentationRegistry.getInstrumentation().runOnMainSync {
+        id = AssistantCapture.begin()
+        screen?.let { AssistantCapture.updateScreen(id, it) }
+        if (withImage) AssistantCapture.updateScreenshot(id, Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.MAGENTA) })
+    }
+    return id
+}
+
+/** The assistant sheet of [invocation], as `AlphaVoiceSession` opens it. A test starts it from the app context, so in a new task. */
+internal fun assistIntent(context: Context, invocation: String?): Intent =
+    AlphaTileService.entryIntent(context).putExtra(ASSIST_INVOCATION, invocation)
 
 /** An image settings file that the app never uses, for a test model outside [ShellFixture]. */
 internal const val ISOLATED_IMAGES = "test-images"
@@ -162,11 +204,16 @@ internal class ShellFixture(prefix: String) {
     /** The key check of «Согласиться и сохранить». A device test never calls a real provider. */
     @Volatile var keyCheck: suspend (AiAccount) -> KeyCheck = { KeyCheck.ACCEPTED }
 
+    /** A voice mode with a scripted [socket] and [audio] on a loopback endpoint, so no test reaches OpenAI. */
+    fun liveVoice(socket: FakeLiveTransport, audio: FakeLiveAudio, timing: LiveTiming = LiveTiming()): LiveVoiceFactory =
+        { app, scope -> LiveVoiceSession(app, scope, socket, { audio }, { keys.account().getOrNull() }, Endpoints { "http://127.0.0.1:4000" }, timing) }
+
     /** A loopback test passes a [chat] provider that reads [models]. */
-    fun install(saveKey: Boolean = true, voice: VoiceFactory? = null, onboarding: Boolean = false, chat: ChatProvider = provider) {
+    fun install(saveKey: Boolean = true, voice: VoiceFactory? = null, onboarding: Boolean = false, chat: ChatProvider = provider,
+        liveVoice: LiveVoiceFactory? = null) {
         if (saveKey) check(keys.save("alpha-test-only", AiProvider.OPENAI).isSuccess)
         CloudTestActivity.factory = { app ->
-            ShellViewModel(app, chat, store, keys, voiceFactory = voice, offerOnboarding = onboarding, keyCheck = { keyCheck(it) }, legacy = legacy, models = models, imageStore = imageStore, voiceStore = voiceStore)
+            ShellViewModel(app, chat, store, keys, voiceFactory = voice, liveVoiceFactory = liveVoice, offerOnboarding = onboarding, keyCheck = { keyCheck(it) }, legacy = legacy, models = models, imageStore = imageStore, voiceStore = voiceStore)
                 .openSeededChat(store).also { model = it }
         }
     }
@@ -346,6 +393,32 @@ internal class ShellRobot(fixture: String) {
             }
         }
         return top
+    }
+    /**
+     * In landscape, [focus] raises the keyboard. Then each of [labels] must be a full target that ends at or above the keyboard top.
+     * The keyboard and the portrait orientation are restored after the check.
+     */
+    fun assertAboveLandscapeKeyboard(scenario: ActivityScenario<*>, labels: List<String>, focus: () -> Unit) {
+        try {
+            rotate(scenario, landscape = true)
+            focus()
+            // The keyboard inset animates, so the check waits until the keyboard top and the bounds stay the same for 500 ms.
+            var last = ""
+            var since = SystemClock.uptimeMillis()
+            waitUntil {
+                val sample = "${keyboardTop(scenario)} " + labels.map { label -> find(label)?.let { node -> Rect().also { node.getBoundsInScreen(it) } } }
+                if (sample != last) { last = sample; since = SystemClock.uptimeMillis() }
+                keyboardTop(scenario) != null && SystemClock.uptimeMillis() - since >= 500
+            }
+            val keyboardTop = checkNotNull(keyboardTop(scenario))
+            for (label in labels) {
+                val bounds = assertTarget(label)
+                assertTrue("$label $bounds ends at or above the keyboard top $keyboardTop", bounds.bottom <= keyboardTop)
+            }
+        } finally {
+            scenario.onActivity { WindowCompat.getInsetsController(it.window, it.window.decorView).hide(WindowInsetsCompat.Type.ime()) }
+            rotate(scenario, landscape = false)
+        }
     }
     /** Returns the screen bounds of the checked clickable node. */
     fun assertTarget(label: String): Rect {
@@ -571,7 +644,7 @@ internal class ShellRobot(fixture: String) {
         scenario.onActivity { label = it.getString(androidx.compose.ui.R.string.close_drawer) }
         return label
     }
-    private fun composedNode(scenario: ActivityScenario<*>, match: (SemanticsConfiguration) -> Boolean): Boolean {
+    fun composedNode(scenario: ActivityScenario<*>, match: (SemanticsConfiguration) -> Boolean): Boolean {
         var composed = false
         scenario.onActivity { activity -> composed = nodes(activity).any { match(it.config) } }
         return composed

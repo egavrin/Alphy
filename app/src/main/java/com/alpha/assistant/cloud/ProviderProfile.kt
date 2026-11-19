@@ -31,6 +31,10 @@ private fun thinking(type: String) = JSONObject().put("thinking", JSONObject().p
 
 private fun outputEffort(level: String) = JSONObject().put("output_config", JSONObject().put("effort", level))
 
+/** The pinned GPT-Live model and voice (spec 5.3.5). */
+internal const val OPENAI_LIVE_MODEL = "gpt-live-1"
+internal const val OPENAI_LIVE_VOICE = "marin"
+
 internal val OpenAiProfile = ProviderProfile(
     baseUrl = "https://api.openai.com",
     chatPath = "/v1/responses",

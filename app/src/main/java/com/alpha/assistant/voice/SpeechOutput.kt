@@ -256,7 +256,7 @@ internal fun speakableText(markdown: String, parse: (String) -> Node = markdownP
 }
 
 private val spaces = Regex("""\s+""")
-private val sentenceEnd = Regex("""(?<=[.!?…])\s+""")
+internal val sentenceEnd =Regex("""(?<=[.!?…])\s+""")
 
 /** Splits [text] into chunks of at most [max] characters: at sentence ends, and at spaces in a longer sentence. */
 internal fun speechChunks(text: String, max: Int): List<String> {

@@ -1,0 +1,21 @@
+<resources>
+    <string name="live_voice">Голосовой режим</string>
+    <string name="live_voice_mute">Выключить микрофон</string>
+    <string name="live_voice_unmute">Включить микрофон</string>
+    <string name="live_voice_end">Завершить голосовой режим</string>
+    <string name="live_voice_connecting">Подключение к OpenAI</string>
+    <string name="live_voice_listening">Слушаю</string>
+    <string name="live_voice_speaking">Alphy говорит</string>
+    <string name="live_voice_working">Alphy выполняет запрос</string>
+    <string name="live_voice_muted">Микрофон выключен</string>
+    <string name="live_voice_no_speech">Голосовой режим завершён: нет речи 60 с</string>
+    <string name="live_voice_no_first_speech">Голосовой режим завершён: нет речи</string>
+    <string name="live_voice_focus_lost">Голосовой режим прерван другим звуком</string>
+    <string name="live_voice_openai_only">Голосовой режим доступен только с ключом OpenAI</string>
+    <string name="live_voice_expired">Сеанс голосового режима истёк. Начните заново.</string>
+    <string name="live_voice_content">OpenAI прервал голосовой режим по правилам содержания</string>
+    <string name="live_voice_connection">Связь с OpenAI прервалась</string>
+    <string name="live_voice_on_screen">Продолжите на экране</string>
+    <!-- A fixed text: the server message of an error event can echo part of the key (spec 5.3.6). -->
+    <string name="live_voice_failed">OpenAI: ошибка голосового режима. Начните заново.</string>
+</resources>
