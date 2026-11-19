@@ -16,7 +16,10 @@ import com.alpha.assistant.tools.agent.GenerationSettings
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
 import com.alpha.assistant.chat.MAX_CHAT_INPUT
+import com.alpha.assistant.cloud.AiAccount
+import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.ChatProvider
+import com.alpha.assistant.cloud.ChatToolReply
 import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
@@ -35,11 +38,16 @@ import com.alpha.assistant.weather.WeatherLocator
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeNotNull
 import org.junit.Test
 import java.io.File
 import java.security.KeyStore
 import java.security.MessageDigest
+import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.FutureTask
 import java.util.concurrent.atomic.AtomicInteger
@@ -144,7 +152,81 @@ class ComparisonChatCaptureTest {
     fun captureFrozenSlot() {
         val encoded = InstrumentationRegistry.getArguments().getString("comparisonEnvelope")
         assumeNotNull(encoded)
-        val input = JSONObject(String(Base64.decode(checkNotNull(encoded), Base64.URL_SAFE), Charsets.UTF_8))
+        capture(JSONObject(String(Base64.decode(checkNotNull(encoded), Base64.URL_SAFE), Charsets.UTF_8)))
+    }
+
+    /** Failure case: one process measured one cold request, so no number showed a warm request (ruling OD-8). */
+    @Test
+    fun aRepeatedCaptureReportsEachRequestApart() {
+        val prompt = "Build a local counter that adds one."
+        val counter = JSONObject("""{"title":"Counter","description":"Adds one","capabilities":[],"stateSchema":{"count":"number"},
+            "initialState":{"count":0},"ui":{"type":"column","children":[{"type":"metric","text":"Count","bind":"count"},
+            {"type":"button","text":"Add","action":"add"}]},
+            "source":"const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='add')s.count++;return {state:s};"}""")
+        val settings = GenerationSettings(app)
+        val switchBefore = settings.planStep(AiProvider.OPENAI)
+        val switchAtCalls = CopyOnWriteArrayList<Boolean>()
+        val scripted = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                switchAtCalls += settings.planStep(AiProvider.OPENAI)
+                val reply = if (request.chatDecision) JSONObject().put("kind", "create").put("text", "Ready.")
+                    .put("brief", "Create a counter that adds one").put("search", "none").toString()
+                else request.agentReply(counter.toString())
+                // The live provider reports each accepted decision. The capture reads the decision kind from that report.
+                if (request.chatDecision) request.validateOperation?.invoke(ChatToolReply.decode(reply))
+                emit(CloudEvent.Text(reply))
+                emit(CloudEvent.RoundComplete(reply, false))
+            }
+        }
+        val runId = UUID.randomUUID().toString().replace("-", "")
+        val input = JSONObject().put("run_id", runId).put("slot_id", "fixture:repeat:candidate:1").put("request", prompt)
+            .put("review_seconds", 5).put("chat_seconds", 60).put("plan_step", false).put("repeat", 2)
+            .put("request_sha256", sha256(prompt)).put("revision", "0".repeat(40))
+        for (field in listOf("plan_sha256", "execution_sha256", "source_sha256", "build_sha256")) input.put(field, "0".repeat(64))
+        val directory = File(checkNotNull(app.getExternalFilesDir(null)), "comparison-capture/$runId")
+        try {
+            // The capture sets the envelope value and restores the earlier one, so the earlier one is the opposite here.
+            settings.setPlanStep(AiProvider.OPENAI, true)
+            try {
+                capture(input, scripted)
+            } catch (failure: IllegalStateException) {
+                val report = File(directory, "report.json").takeIf { it.exists() }?.let { JSONObject(it.readText()) }
+                throw AssertionError(listOf("failure_stage", "failure_type", "failure_frame").joinToString { report?.opt(it).toString() }, failure)
+            }
+            assertTrue(switchAtCalls.isNotEmpty() && switchAtCalls.none { it })
+            assertTrue(settings.planStep(AiProvider.OPENAI))
+            val first = JSONObject(File(directory, "report.json").readText())
+            assertEquals(2, first.getInt("repeat"))
+            assertFalse(first.getBoolean("plan_step"))
+            val second = first.getJSONObject("second")
+            for (report in listOf(first, second)) {
+                assertEquals("artifact-committed", report.getString("chat_outcome"))
+                assertEquals("create", report.getString("chat_decision"))
+                assertEquals(JSONArray(listOf("CHAT_DECISION", "AGENT", "AGENT")).toString(), report.getJSONArray("provider_invocations").toString())
+                val measurements = report.getJSONObject("measurements")
+                for (field in listOf("first_ui_ms", "completed_ui_ms", "terminal_chat_ms")) assertFalse(field, measurements.isNull(field))
+                val trace = report.getJSONObject("operation_trace")
+                assertEquals(3, measurements.getInt("provider_http_calls"))
+                assertEquals(3, trace.getJSONArray("http_dispatches").length())
+                val events = trace.getJSONArray("generation").let { array -> List(array.length()) { array.getJSONObject(it) } }
+                val phases = events.filter { it.getString("kind") == "phase" }
+                assertEquals(listOf("draft_start", "draft_end", "capability_guidance_start", "capability_guidance_end", "agent_call_start"),
+                    phases.map { it.getString("name") })
+                assertEquals(setOf("operation_id", "attempt", "at_ns", "kind", "name", "detail", "ms"), phases.first().keys().asSequence().toSet())
+                assertEquals(setOf(report.getString("operation_id")), events.map { it.getString("operation_id") }.toSet())
+            }
+            assertNotEquals(first.getString("operation_id"), second.getString("operation_id"))
+            assertNotEquals(first.getString("fresh_conversation"), second.getString("fresh_conversation"))
+            val firstEnd = first.getJSONObject("operation_trace").getJSONArray("generation").let { it.getJSONObject(it.length() - 1).getLong("at_ns") }
+            assertTrue(firstEnd < second.getLong("send_action_elapsed_ns"))
+        } finally {
+            settings.setPlanStep(AiProvider.OPENAI, switchBefore)
+            directory.deleteRecursively()
+        }
+    }
+
+    /** [scripted] replaces the account and the live provider, so a device test can run the capture with no model call. */
+    private fun capture(input: JSONObject, scripted: ChatProvider? = null) {
         val runId = input.getString("run_id")
         val slotId = input.getString("slot_id")
         val request = input.getString("request")
@@ -156,8 +238,13 @@ class ComparisonChatCaptureTest {
         // Opt-in pictures and screenshot review for a showcase run. The cleanup restores both settings.
         val pictures = input.optBoolean("images")
         val screenshotReview = input.optBoolean("screenshot_review")
+        // The switch of the plan step for the provider of the account. The cleanup restores the earlier value.
+        val planStep = input.optBoolean("plan_step")
+        // 2 sends the request once more in a new conversation of the same process, after the first one is done.
+        val repeat = input.optInt("repeat", 1)
         require(!savedEdit || verifyWorkflow && caseId in setOf("extra:reference-points-ledger", "extra:russian-grid-game"))
         val verifyTip = input.optBoolean("verify_tip") || verifyWorkflow && caseId == "bench:tip"
+        require(repeat == 1 || repeat == 2 && !verifyWorkflow && !verifyTip)
         require(runId.matches(Regex("[a-f0-9]{32}")) && slotId.matches(Regex("[A-Za-z0-9:_-]{1,168}:candidate:[1-3]")))
         require(request.isNotBlank() && request.trim() == request && request.length <= MAX_CHAT_INPUT && '\u0000' !in request)
         require(reviewSeconds in 5..180)
@@ -191,12 +278,11 @@ class ComparisonChatCaptureTest {
         report.put("measurements", JSONObject().put("first_ui_ms", JSONObject.NULL)
             .put("completed_ui_ms", JSONObject.NULL).put("provider_http_calls", JSONObject.NULL)
             .put("correction_lineage", JSONObject.NULL).put("runtime_usability", JSONObject.NULL))
-        val providerInvocations = CopyOnWriteArrayList<String>()
-        val httpDispatches = CopyOnWriteArrayList<JSONObject>()
-        val decisionRejections = CopyOnWriteArrayList<JSONObject>()
-        val acceptedOperations = CopyOnWriteArrayList<JSONObject>()
-        val generationEvents = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
+        report.put("repeat", repeat)
+        // The evidence of the request that runs now is the last one.
+        val requests = CopyOnWriteArrayList(listOf(RequestEvidence()))
         val providerHttpCalls = AtomicInteger()
+        var planStepBefore: Pair<AiProvider, Boolean>? = null
         val name = "comparison-$runId"
         val database = "$name.db"
         val databases = listOf(database, "$database-tools.db", "$database-tools.db-automations.db",
@@ -217,18 +303,23 @@ class ComparisonChatCaptureTest {
             check(initial.conversations.isEmpty() && initial.selected == null && initial.newDraft.text.isEmpty())
             report.put("fresh_store", database)
             failureAt = "credential"
-            val account = OneUseCredential.receive(runId) { save("credentialReady") }
+            val account = if (scripted != null) AiAccount(AiProvider.OPENAI, "scripted")
+                else OneUseCredential.receive(runId) { save("credentialReady") }
             val chatModel = account.liveChatModel()
             report.put("provider", account.provider.id).put("model", chatModel)
-            GenerationSettings(app).screenshotReview = screenshotReview
-            report.put("pictures", pictures).put("screenshot_review", screenshotReview)
+            val settings = GenerationSettings(app)
+            settings.screenshotReview = screenshotReview
+            planStepBefore = account.provider to settings.planStep(account.provider)
+            settings.setPlanStep(account.provider, planStep)
+            report.put("pictures", pictures).put("screenshot_review", screenshotReview).put("plan_step", planStep)
             val provider = object : ChatProvider {
                 override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                     check(key == marker)
                     val stage = request.generationStage?.name ?: if (request.chatDecision) "CHAT_DECISION" else "CHAT"
-                    providerInvocations.add(stage)
+                    val evidence = requests.last()
+                    evidence.invocations.add(stage)
                     session.decisionRejectionObserver = { event ->
-                        decisionRejections += JSONObject().put("stage",event.stage).put("attempt",event.attempt)
+                        evidence.decisionRejections += JSONObject().put("stage",event.stage).put("attempt",event.attempt)
                             .put("rule",event.shape.rule).put("path",event.shape.path)
                             .put("observed_type",event.shape.observedType).put("correcting",event.correcting)
                             .put("at_ns",SystemClock.elapsedRealtimeNanos())
@@ -239,14 +330,17 @@ class ComparisonChatCaptureTest {
                                 }
                             }
                     }
-                    val live = CloudChatProvider({ account }, Endpoints.PRODUCTION, chatModel = { chatModel }, onHttpCall = {
+                    fun dispatched() {
                         providerHttpCalls.incrementAndGet()
-                        httpDispatches += JSONObject().put("stage", stage)
+                        evidence.httpDispatches += JSONObject().put("stage", stage)
                             .put("at_ns", SystemClock.elapsedRealtimeNanos())
-                    }) {}
+                    }
+                    // A scripted model makes no HTTP call, so each of its replies counts as one dispatch.
+                    val live = if (scripted != null) scripted.also { dispatched() }
+                        else CloudChatProvider({ account }, Endpoints.PRODUCTION, chatModel = { chatModel }, onHttpCall = ::dispatched) {}
                     val tracedRequest = if (request.chatDecision) request.copy(validateOperation = { decision ->
                         request.validateOperation?.invoke(decision)
-                        acceptedOperations += JSONObject().put("kind", decision.kind).put("search", decision.search)
+                        evidence.acceptedOperations += JSONObject().put("kind", decision.kind).put("search", decision.search)
                             .put("at_ns", SystemClock.elapsedRealtimeNanos())
                     }) else request
                     live.respond(account.key, tracedRequest, session, emit)
@@ -290,7 +384,7 @@ class ComparisonChatCaptureTest {
             await(15_000) { onMain { !vm.loading && !vm.tools.busy } }
             check(onMain { !vm.loadFailed && vm.snapshot.conversations.isEmpty() &&
                 vm.tools.tools.map { it.id } == listOfNotNull(savedId) && vm.tools.drafts.isEmpty() })
-            onMain { vm.tools.generationTraceObserver = { generationEvents += it } }
+            onMain { vm.tools.generationTraceObserver = { requests.last().generation += it } }
             val robot = ShellRobot(name)
             fun visible(id: Int): AccessibilityNodeInfo? {
                 if (robot.diagnostics.freshRoot()?.packageName?.toString() != app.packageName) return null
@@ -334,91 +428,100 @@ class ComparisonChatCaptureTest {
                 terminal = "complete"
                 return
             }
-            failureAt = "send"
-            robot.edit(robot.text(R.string.composer_label), request)
-            val draft = onMain {
-                check(!vm.tools.busy && vm.activeConversationId == null)
-                vm.snapshot.draft
-            }
-            check(draft.text == request && draft.attachments.isEmpty())
-            report.put("fresh_draft", draft.id)
-            val send = checkNotNull(visible(R.string.composer_send))
-            report.put("send_action_uptime_ms", SystemClock.uptimeMillis())
-            report.put("send_action_elapsed_ns", SystemClock.elapsedRealtimeNanos())
-            check(click(send)) { "The composer Send action did not run." }
-            save("sent")
-            failureAt = "chat-terminal"
-            var previewObserved = false
-            // The app card's Open action marks the first usable app. It is read before any test step after the chat settles.
-            var openVisibleAt: Long? = null
-            val settled = waitFor(chatSeconds * 1_000L) {
-                if (!previewObserved && visible(R.string.tool_preview_provisional) != null) {
-                    previewObserved = true
-                    report.put("provisional_visible_elapsed_ns", SystemClock.elapsedRealtimeNanos())
-                    report.put("provisional_label_observed", true)
-                    report.put("provisional_screen", screenshot("provisional"))
+            /**
+             * Sends the request from the composer of the new chat and measures it into [into]: the report, or its object
+             * "second". [stage] prefixes the failure stages and the screenshots. Null when the chat did not settle in time.
+             */
+            fun measuredRequest(into: JSONObject, stage: String): Message? {
+                failureAt = stage + "send"
+                robot.edit(robot.text(R.string.composer_label), request)
+                val draft = onMain {
+                    check(!vm.tools.busy && vm.activeConversationId == null)
+                    vm.snapshot.draft
                 }
-                if (openVisibleAt == null && visible(R.string.tool_open) != null) openVisibleAt = SystemClock.elapsedRealtimeNanos()
-                onMain {
-                    val assistant = vm.snapshot.selected?.messages?.lastOrNull()?.takeIf { it.role == "assistant" }
-                    !vm.tools.busy && vm.activeConversationId == null && assistant?.status in terminalChatStatuses
-                }
-            }
-            if (!settled) {
-                val deadline = onMain {
-                    captureChatState(vm).apply {
-                        val at = getLong("at_ns")
-                        val last = generationEvents.lastOrNull { it.atNanos <= at }
-                        put("generation_last", last?.let(::traceEvent) ?: JSONObject.NULL)
-                        put("provider_http_calls", providerHttpCalls.get())
+                check(draft.text == request && draft.attachments.isEmpty())
+                into.put("fresh_draft", draft.id)
+                val send = checkNotNull(visible(R.string.composer_send))
+                into.put("send_action_uptime_ms", SystemClock.uptimeMillis())
+                into.put("send_action_elapsed_ns", SystemClock.elapsedRealtimeNanos())
+                check(click(send)) { "The composer Send action did not run." }
+                save(stage + "sent")
+                failureAt = stage + "chat-terminal"
+                var previewObserved = false
+                // The app card's Open action marks the first usable app. It is read before any test step after the chat settles.
+                var openVisibleAt: Long? = null
+                val settled = waitFor(chatSeconds * 1_000L) {
+                    if (!previewObserved && visible(R.string.tool_preview_provisional) != null) {
+                        previewObserved = true
+                        into.put("provisional_visible_elapsed_ns", SystemClock.elapsedRealtimeNanos())
+                        into.put("provisional_label_observed", true)
+                        into.put("provisional_screen", screenshot(stage + "provisional"))
+                    }
+                    if (openVisibleAt == null && visible(R.string.tool_open) != null) openVisibleAt = SystemClock.elapsedRealtimeNanos()
+                    onMain {
+                        val assistant = vm.snapshot.selected?.messages?.lastOrNull()?.takeIf { it.role == "assistant" }
+                        !vm.tools.busy && vm.activeConversationId == null && assistant?.status in terminalChatStatuses
                     }
                 }
-                report.put("capture_deadline", deadline)
-                if (!deadline.getBoolean("terminal") || !deadline.getBoolean("idle")) {
-                    terminal = "unresolved"
-                    report.put("failure_stage", failureAt)
-                    report.put("deadline_screen", screenshot("deadline"))
-                    return
+                val evidence = requests.last()
+                if (!settled) {
+                    val deadline = onMain {
+                        captureChatState(vm).apply {
+                            val at = getLong("at_ns")
+                            val last = evidence.generation.lastOrNull { it.atNanos <= at }
+                            put("generation_last", last?.let(::traceEvent) ?: JSONObject.NULL)
+                            put("provider_http_calls", evidence.httpDispatches.size)
+                        }
+                    }
+                    into.put("capture_deadline", deadline)
+                    if (!deadline.getBoolean("terminal") || !deadline.getBoolean("idle")) {
+                        terminal = "unresolved"
+                        report.put("failure_stage", failureAt)
+                        report.put("deadline_screen", screenshot(stage + "deadline"))
+                        return null
+                    }
                 }
-            }
-            val chat = onMain { checkNotNull(vm.snapshot.selected) }
-            val user = chat.messages.first()
-            val assistant = chat.messages.last()
-            check(user.role == "user" && assistant.replyTo == user.id && sha256(user.text) == input.getString("request_sha256"))
-            report.put("fresh_conversation", chat.id).put("assistant_message", assistant.id)
-                .put("assistant_status", assistant.status).put("operation_id", assistant.toolOperationId ?: JSONObject.NULL)
-                .put("provisional_label_observed", previewObserved)
-            val decision = acceptedOperations.lastOrNull()?.optString("kind")
-            decision?.let { report.put("chat_decision", it) }
-            report.put("assistant_text", assistant.text)
-            val sentAt = report.getLong("send_action_elapsed_ns")
-            report.getJSONObject("measurements").put("terminal_chat_ms",
-                (SystemClock.elapsedRealtimeNanos() - sentAt) / 1_000_000)
-            if (openVisibleAt == null && assistant.toolId != null) waitFor(5_000) {
-                (visible(R.string.tool_open) != null).also { if (it) openVisibleAt = SystemClock.elapsedRealtimeNanos() }
-            }
-            val provisionalAt = report.optLong("provisional_visible_elapsed_ns", 0L).takeIf { it > 0 }
-            listOfNotNull(provisionalAt, openVisibleAt).minOrNull()?.let {
-                report.getJSONObject("measurements").put("first_ui_ms", (it - sentAt) / 1_000_000)
-            }
-            openVisibleAt?.let { report.getJSONObject("measurements").put("completed_ui_ms", (it - sentAt) / 1_000_000) }
-            if (decision == "device_plan") {
-                onMain { vm.agent.plan?.takeIf { it.conversationId == chat.id } }?.let { plan ->
-                    report.put("phone_plan", JSONObject().put("phase", plan.phase.name)
-                        .put("steps", JSONArray(plan.steps.map { it.command.json() }))
-                        .put("results", JSONArray(plan.results)))
+                val chat = onMain { checkNotNull(vm.snapshot.selected) }
+                val user = chat.messages.first()
+                val assistant = chat.messages.last()
+                check(user.role == "user" && assistant.replyTo == user.id && sha256(user.text) == input.getString("request_sha256"))
+                into.put("fresh_conversation", chat.id).put("assistant_message", assistant.id)
+                    .put("assistant_status", assistant.status).put("operation_id", assistant.toolOperationId ?: JSONObject.NULL)
+                    .put("provisional_label_observed", previewObserved)
+                val decision = evidence.acceptedOperations.lastOrNull()?.optString("kind")
+                decision?.let { into.put("chat_decision", it) }
+                into.put("assistant_text", assistant.text)
+                val sentAt = into.getLong("send_action_elapsed_ns")
+                into.getJSONObject("measurements").put("terminal_chat_ms",
+                    (SystemClock.elapsedRealtimeNanos() - sentAt) / 1_000_000)
+                if (openVisibleAt == null && assistant.toolId != null) waitFor(5_000) {
+                    (visible(R.string.tool_open) != null).also { if (it) openVisibleAt = SystemClock.elapsedRealtimeNanos() }
                 }
+                val provisionalAt = into.optLong("provisional_visible_elapsed_ns", 0L).takeIf { it > 0 }
+                listOfNotNull(provisionalAt, openVisibleAt).minOrNull()?.let {
+                    into.getJSONObject("measurements").put("first_ui_ms", (it - sentAt) / 1_000_000)
+                }
+                openVisibleAt?.let { into.getJSONObject("measurements").put("completed_ui_ms", (it - sentAt) / 1_000_000) }
+                if (decision == "device_plan") {
+                    onMain { vm.agent.plan?.takeIf { it.conversationId == chat.id } }?.let { plan ->
+                        into.put("phone_plan", JSONObject().put("phase", plan.phase.name)
+                            .put("steps", JSONArray(plan.steps.map { it.command.json() }))
+                            .put("results", JSONArray(plan.results)))
+                    }
+                }
+                into.put("chat_outcome", when {
+                    assistant.status != "complete" -> "request-failed"
+                    assistant.toolId != null && assistant.toolRevision != null -> "artifact-committed"
+                    else -> "complete-without-artifact"
+                })
+                if (assistant.status != "complete") {
+                    into.put("failure_code", safeGenerationCode(assistant.errorCode))
+                    if (canvasWorkflow) into.put("scene_diagnostic", assistant.error?.take(400))
+                }
+                return assistant
             }
+            val assistant = measuredRequest(report, "") ?: return
             val artifact = assistant.toolId
-            report.put("chat_outcome", when {
-                assistant.status != "complete" -> "request-failed"
-                artifact != null && assistant.toolRevision != null -> "artifact-committed"
-                else -> "complete-without-artifact"
-            })
-            if (assistant.status != "complete") {
-                report.put("failure_code", safeGenerationCode(assistant.errorCode))
-                if (canvasWorkflow) report.put("scene_diagnostic", assistant.error?.take(400))
-            }
             if (artifact != null) {
                 report.put("artifact_id", artifact).put("artifact_revision", assistant.toolRevision)
                 fun saved() = onMain { vm.tools.tools.singleOrNull { it.id == artifact } }
@@ -520,6 +623,18 @@ class ComparisonChatCaptureTest {
             save("review")
             SystemClock.sleep(reviewSeconds * 1_000L)
             report.put("review_screen", screenshot("review"))
+            if (repeat == 2) {
+                // The warm request: the same request in a new conversation of this process. The top level keeps the first one.
+                onMain {
+                    vm.openSurface(null)
+                    vm.select(null)
+                }
+                val second = JSONObject().put("measurements", JSONObject().put("first_ui_ms", JSONObject.NULL)
+                    .put("completed_ui_ms", JSONObject.NULL).put("provider_http_calls", JSONObject.NULL))
+                report.put("second", second)
+                requests += RequestEvidence()
+                measuredRequest(second, "second-") ?: return
+            }
             terminal = "complete"
         } catch (failure: Exception) {
             report.put("failure_stage", failureAt).put("failure_type", failure.javaClass.simpleName)
@@ -540,6 +655,7 @@ class ComparisonChatCaptureTest {
                     vm.memoryStore.close()
                 }
                 GenerationSettings(app).screenshotReview = false
+                planStepBefore?.let { (provider, on) -> GenerationSettings(app).setPlanStep(provider, on) }
                 if (pictures) imageSettings.setEnabled(false).getOrThrow()
                 if (ownsStore) {
                     store.close()
@@ -554,13 +670,8 @@ class ComparisonChatCaptureTest {
                 report.put("cleanup_failure_type", failure.javaClass.simpleName)
             } finally {
                 CloudTestActivity.factory = null
-                report.put("provider_invocations", JSONArray(providerInvocations.toList()))
-                report.getJSONObject("measurements").put("provider_http_calls", providerHttpCalls.get())
-                report.put("operation_trace", JSONObject().put("clock", "elapsed-realtime-ns")
-                    .put("http_dispatches", JSONArray(httpDispatches.toList()))
-                    .put("decision_rejections", JSONArray(decisionRejections.toList()))
-                    .put("accepted_operations", JSONArray(acceptedOperations.toList()))
-                    .put("generation", JSONArray(generationEvents.map(::traceEvent))))
+                putEvidence(report, requests.first())
+                if (requests.size == 2) putEvidence(report.getJSONObject("second"), requests.last())
                 save(terminal)
                 if (savedEdit) check(terminal == "complete") { "Saved edit capture failed. Inspect its sanitized report." }
             }
@@ -794,6 +905,26 @@ class ComparisonChatCaptureTest {
         proof.put("status", "passed").put("step", "complete")
     }
 
+    /** The provider calls and the generation trace of one request. A repeated capture keeps one for each request. */
+    private class RequestEvidence {
+        val invocations = CopyOnWriteArrayList<String>()
+        val httpDispatches = CopyOnWriteArrayList<JSONObject>()
+        val decisionRejections = CopyOnWriteArrayList<JSONObject>()
+        val acceptedOperations = CopyOnWriteArrayList<JSONObject>()
+        val generation = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
+    }
+
+    /** Writes the calls and the trace of one request into [into]: the report, or its object "second". */
+    private fun putEvidence(into: JSONObject, evidence: RequestEvidence) {
+        into.put("provider_invocations", JSONArray(evidence.invocations.toList()))
+        into.getJSONObject("measurements").put("provider_http_calls", evidence.httpDispatches.size)
+        into.put("operation_trace", JSONObject().put("clock", "elapsed-realtime-ns")
+            .put("http_dispatches", JSONArray(evidence.httpDispatches.toList()))
+            .put("decision_rejections", JSONArray(evidence.decisionRejections.toList()))
+            .put("accepted_operations", JSONArray(evidence.acceptedOperations.toList()))
+            .put("generation", JSONArray(evidence.generation.map(::traceEvent))))
+    }
+
     private fun traceEvent(event: ToolGenerationTraceEvent): JSONObject = JSONObject()
         .put("operation_id", event.operationId.toString()).put("attempt", event.attempt).put("at_ns", event.atNanos)
         .apply {
@@ -814,6 +945,10 @@ class ComparisonChatCaptureTest {
                 }
                 is ToolGenerationTraceEvent.Finished -> {
                     put("kind", "finished").put("outcome", event.outcome.name).put("failure_code", event.failureCode)
+                }
+                is ToolGenerationTraceEvent.Phase -> {
+                    put("kind", "phase").put("name", event.name).put("detail", event.detail ?: JSONObject.NULL)
+                        .put("ms", event.ms ?: JSONObject.NULL)
                 }
             }
         }

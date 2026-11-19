@@ -49,6 +49,16 @@ internal sealed interface ToolGenerationTraceEvent {
         val outcome: ToolGenerationTraceOutcome,
         val failureCode: String,
     ) : ToolGenerationTraceEvent
+
+    /** One named point of the time before the first screen: a listed name, a listed detail value (safePhaseDetail), and times. */
+    data class Phase(
+        override val operationId: UUID,
+        override val attempt: Int,
+        override val atNanos: Long,
+        val name: String,
+        val detail: String?,
+        val ms: Long?,
+    ) : ToolGenerationTraceEvent
 }
 
 /** The opt-in host owns collection and retention. The generation path retains no events. */
@@ -61,9 +71,19 @@ internal class ToolGenerationTrace(
         try { onEvent(event(clockNanos())) } catch (_: Throwable) {}
     }
 
+    /** A phase outside a generation run, such as the draft: attempt 0. */
+    fun phase(name: String, detail: String? = null, ms: Long? = null) = emitPhase(0, name, detail, ms)
+
+    /** A name of no list is dropped. A detail leaves the device only as a listed value (safePhaseDetail). */
+    private fun emitPhase(attempt: Int, name: String, detail: String?, ms: Long?) {
+        if (name in phaseNames) emit { ToolGenerationTraceEvent.Phase(operationId, attempt, it, name, safePhaseDetail(name, detail), ms) }
+    }
+
     inner class Run {
         private var lastAttempt = 1
         private val completions = mutableListOf<ModelCompletionTiming>()
+
+        fun phase(name: String, detail: String? = null, ms: Long? = null) = emitPhase(lastAttempt, name, detail, ms)
 
         /** The next agent step takes the completions made before it. */
         fun completion(timing: ModelCompletionTiming) { completions += timing }
@@ -93,6 +113,35 @@ internal class ToolGenerationTrace(
             emit { ToolGenerationTraceEvent.Finished(operationId, lastAttempt, it, outcome, code) }
         }
     }
+}
+
+private val phaseNames = setOf("draft_start", "draft_end", "capability_guidance_start", "capability_guidance_end",
+    "agent_call_start", "plan_call_start", "plan_first_text", "plan_reply_end", "compile", "repair_call_start",
+    "change_call_start", "plan_outcome")
+
+private val planFallbacks = setOf("call_failed", "first_text_timeout", "total_timeout", "hole", "faults", "host_check",
+    "data_blocks", "outside", "empty")
+
+/** "ok", "faults", or a sandbox status such as TIMEOUT or BUSY (AppFileCompiler). */
+private val compileStatus = Regex("ok|faults|[A-Z_]{1,32}")
+
+/** The word of outside("word"). The prompt has words such as 3d. */
+private val outsideWord = Regex("[a-z0-9]{1,16}")
+
+/**
+ * Only listed values leave the device: the status of a compile, and the outcome of a plan step. The word of an outside
+ * reply is model text, so only a short plain word passes. Any other value becomes "other". The other phases have no detail.
+ */
+internal fun safePhaseDetail(name: String, detail: String?): String? = when {
+    detail == null -> null
+    name == "compile" -> detail.takeIf { it.matches(compileStatus) } ?: "other"
+    name != "plan_outcome" -> null
+    detail == "accepted" -> detail
+    detail.startsWith("outside:") -> "outside:" + (detail.removePrefix("outside:").takeIf { it.matches(outsideWord) } ?: "other")
+    detail.startsWith("fallback:") -> detail.removePrefix("fallback:").let { reason ->
+        "fallback:" + (reason.takeIf { it in planFallbacks || it.startsWith("compile_") && it.removePrefix("compile_").matches(compileStatus) } ?: "other")
+    }
+    else -> "other"
 }
 
 /** Only known failure codes leave the device. Any other code becomes "unknown". */

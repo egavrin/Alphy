@@ -214,7 +214,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             }
             return generateWithAgent(key, prompt, base, images, session, artifactId, privateState, progress, onPublicUpdate,
                 onStep = run?.let { { step, tool, reply, result, nanos -> it.agentStep(step, tool, reply, result, nanos) } },
-                onCompletion = run?.let { it::completion }, imageMaker = imageMaker, sceneAssets = sceneAssets)
+                onCompletion = run?.let { it::completion }, onPhase = run?.let { it::phase }, imageMaker = imageMaker, sceneAssets = sceneAssets)
                 .preview.also { checkOwner(); run?.finish() }
         } catch (failure: Throwable) {
             run?.finish(failure)
@@ -228,7 +228,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         artifactId: String, privateState: Boolean, progress: ((ToolGenerationProgress) -> Unit)?,
         onPublicUpdate: (suspend (String) -> Unit)?, extraInstructions: String = "",
         onStep: ((Int, String, String, String, Long) -> Unit)? = null, onCompletion: ((ModelCompletionTiming) -> Unit)? = null,
-        imageMaker: AppImageMaker? = null,
+        onPhase: ((String, String?, Long?) -> Unit)? = null, imageMaker: AppImageMaker? = null,
         sceneAssets: List<ThreeSceneAssetRef> = emptyList(), lesson: AppLessonTarget? = null,
         lessonIllustration: Boolean = false): AppAgentResult {
         val screenshot: (suspend (ToolPreview) -> String)? = if (!GenerationSettings(sandbox.context).screenshotReview) null else { preview ->
@@ -237,7 +237,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         }
         return appAgent(key, session, onCompletion).run(AppAgentRequest(prompt, base, images, artifactId, privateState, extraInstructions,
             onPublicUpdate, progress, onStep, imageMaker = imageMaker, sceneAssets = sceneAssets, screenshot = screenshot, lesson = lesson,
-            lessonIllustration = lessonIllustration), session)
+            lessonIllustration = lessonIllustration, onPhase = onPhase), session)
     }
 
     /** Accepts scalar schema objects from model output. Stored artifacts keep the strict canonical contract. */

@@ -304,7 +304,10 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         val assetLease = if (sceneAttachments.any { it.mime == ThreeSceneAssets.ATTACHMENT_MIME })
             ThreeSceneAssetCleanup(app).lease() else null
         try {
+            // The trace starts before the draft, so the time between the routing decision and the first model call has marks.
+            val trace = traceFor(operationId)
             prepared()
+            trace?.phase("draft_start")
             withContext(Dispatchers.IO) {
                 store.draft(operationId)?.let {
                     check(it.conversationId == conversationId && it.acceptedRevision == null)
@@ -313,8 +316,9 @@ class ToolController(private val app: Application, private val scope: CoroutineS
                 engine.createDraft(prompt,target?.id,conversationId,operationId,target)
                 created = true
             }
+            trace?.phase("draft_end")
             withContext(Dispatchers.IO) {
-                generateWithPreview(operationId, key, images, call,
+                generateWithPreview(operationId, key, images, call, trace,
                     ThreeSceneAssets.attachmentRefs(sceneAttachments), onPublicUpdate = { note ->
                         withContext(Dispatchers.Main.immediate) { onPublicUpdate(note) }
                     }, checkOwner = {
@@ -416,14 +420,17 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     }
     internal var generationTraceObserver: ((ToolGenerationTraceEvent) -> Unit)? = null
 
+    /** Null when no observer is set, so the normal path builds no trace. */
+    private fun traceFor(id: String) = generationTraceObserver?.let { ToolGenerationTrace(UUID.fromString(id), it) }
+
     private suspend fun generateWithPreview(id: String,key: String,images: List<String>,call: CloudSession,
+        trace: ToolGenerationTrace? = traceFor(id),
         sceneAssets: List<ThreeSceneAssetRef> = emptyList(), onPublicUpdate: (suspend (String) -> Unit)? = null,
         checkOwner: suspend () -> Unit = {}) {
         check(!closing) {"The tool controller is closed."}
         val requestId=UUID.randomUUID().toString()
         val observer=previews.begin(id,requestId)
         try {
-            val trace = generationTraceObserver?.let { ToolGenerationTrace(UUID.fromString(id), it) }
             val completed = engine.generate(id, key, images, call, previewObserver = observer,
                 trace = trace, sceneAssets = sceneAssets, onPublicUpdate = onPublicUpdate,
                 checkOwner = checkOwner)

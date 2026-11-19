@@ -156,6 +156,27 @@ class AutomaticToolWorkflowTest {
         }
     }
 
+    // Failure case: the trace started after the draft, so the time between the routing decision and the first agent call had no mark.
+    @Test fun theTraceShowsTheDraftBeforeTheGeneration() {
+        val provider = object : SingleRoundProvider() {
+            override suspend fun answer(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) =
+                emit(CloudEvent.Text(if (request.generationStage != null) request.agentReply(spec()) else decision()))
+        }
+        Fixture(provider).use { f ->
+            val trace = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
+            main { f.model.tools.generationTraceObserver = { trace += it } }
+            f.send("Create a counter"); f.idle()
+            assertEquals("complete", f.last.status)
+            val phases = trace.filterIsInstance<ToolGenerationTraceEvent.Phase>()
+            assertEquals(listOf("draft_start", "draft_end", "capability_guidance_start", "capability_guidance_end", "agent_call_start"),
+                phases.map { it.name })
+            assertEquals(phases.take(2), trace.take(2))
+            assertEquals(listOf(0, 0), phases.take(2).map { it.attempt })
+            assertEquals(setOf(f.last.toolOperationId), trace.map { it.operationId.toString() }.toSet())
+            assertTrue(phases.zipWithNext().all { (before, after) -> before.atNanos <= after.atNanos })
+        }
+    }
+
     @Test fun generationCorrectsItalianLabelsFromAnItalianBriefAndPreview() {
         val completions = CopyOnWriteArrayList<CloudRequest>()
         val provider = object : SingleRoundProvider() {

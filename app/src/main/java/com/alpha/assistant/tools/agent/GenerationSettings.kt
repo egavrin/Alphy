@@ -1,6 +1,7 @@
 package com.alpha.assistant.tools.agent
 
 import android.content.Context
+import com.alpha.assistant.cloud.AiProvider
 
 /** User choices for app generation. */
 internal class GenerationSettings(context: Context) {
@@ -11,4 +12,9 @@ internal class GenerationSettings(context: Context) {
         get() = prefs.getBoolean("screenshot_review", false)
         // commit, not apply: a process that stops right after the change must not keep the old value.
         set(value) { check(prefs.edit().putBoolean("screenshot_review", value).commit()) }
+
+    /** The plan step before the agent loop. Off by default for each provider until paired runs on the phone (decision 6). */
+    fun planStep(provider: AiProvider): Boolean = prefs.getBoolean("plan_step_${provider.id}", false)
+
+    fun setPlanStep(provider: AiProvider, on: Boolean) = check(prefs.edit().putBoolean("plan_step_${provider.id}", on).commit())
 }

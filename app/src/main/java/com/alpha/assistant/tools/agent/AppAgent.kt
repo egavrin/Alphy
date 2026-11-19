@@ -65,7 +65,13 @@ internal class AppAgentRequest(
     val lesson: AppLessonTarget? = null,
     /** A lesson finish can request one illustration. True only when pictures are on. */
     val lessonIllustration: Boolean = false,
-)
+    /** Marks a named phase in the generation trace (ToolGenerationTrace.Run.phase). Null when no trace observer is set. */
+    val onPhase: ((name: String, detail: String?, ms: Long?) -> Unit)? = null,
+) {
+    fun phase(name: String, detail: String? = null, ms: Long? = null) {
+        onPhase?.let { runCatching { it(name, detail, ms) } }
+    }
+}
 
 /** Each call submits one new image operation. The host checks consent before each submission. */
 internal fun interface AppImageMaker {
@@ -109,7 +115,11 @@ internal class AppAgent(
         val lesson = request.lesson
         // The course player has no 3D renderer, and course slides have no capabilities.
         val threeD = lesson == null && ThreeSceneWebView.available()
-        val instructions = AppAgentGuide.system(if (lesson != null) "" else capabilityGuidance(request.prompt),
+        val guidance = if (lesson != null) "" else {
+            request.phase("capability_guidance_start")
+            capabilityGuidance(request.prompt).also { request.phase("capability_guidance_end") }
+        }
+        val instructions = AppAgentGuide.system(guidance,
             listOfNotNull(request.extraInstructions.ifBlank { null }, lesson?.let { lessonGuide(it, request.lessonIllustration) })
                 .joinToString("\n\n"),
             pictures = request.imageMaker != null, threeD = threeD)
@@ -394,6 +404,7 @@ internal class AppAgent(
                     add(last.copy(text = last.text + "\n\nCurrent app definition:\n" + modelView(checkNotNull(draft), privateApp)))
                 }
             }
+            if (step == 1) request.phase("agent_call_start")
             val started = System.nanoTime()
             val reply = completeWithRetry(turns, instructions, session)
             history += CloudTurn("assistant", reply)

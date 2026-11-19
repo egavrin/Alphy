@@ -22,6 +22,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 
 /** The agent loop sees host results for each step. The host alone decides acceptance. */
 @RunWith(AndroidJUnit4::class)
@@ -75,6 +77,44 @@ class AgentGenerationWorkflowTest {
     }
 
     private fun withFinish(reply: JSONObject) = reply.put("checks", splitCheck).put("summary", "The bill split is ready.")
+
+    // Failure case: 4.8 s passed between the routing decision and the first agent call with no mark inside them.
+    @Test fun theTraceShowsTheGuidanceAndTheFirstAgentCall(): Unit = runBlocking {
+        val events = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
+        val provider = AgentScriptProvider(withFinish(JSONObject(writeAppReply(tipApp()))).toString())
+        ToolGenerationService(provider, SandboxClient(context)).generate("fixture", "Split a restaurant bill with a 15% tip",
+            null, emptyList(), CloudSession(), "agent-workflow", privateState = false,
+            trace = ToolGenerationTrace(UUID.randomUUID(), { events += it }))
+        val firstStep = events.indexOfFirst { it is ToolGenerationTraceEvent.AgentStep }
+        val phases = events.filterIsInstance<ToolGenerationTraceEvent.Phase>()
+        assertEquals(listOf("capability_guidance_start", "capability_guidance_end", "agent_call_start"), phases.map { it.name })
+        assertEquals(phases, events.take(firstStep))
+        assertTrue(phases.zipWithNext().all { (before, after) -> before.atNanos <= after.atNanos })
+        assertTrue(phases.all { it.detail == null && it.ms == null && it.attempt == 1 })
+    }
+
+    // Failure case: a plan outcome could carry the word of a model reply, or any other text, off the device.
+    @Test fun aPhaseKeepsOnlyListedNamesAndDetails() {
+        val events = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
+        val trace = ToolGenerationTrace(UUID.randomUUID(), { events += it })
+        val run = trace.Run()
+        val outcomes = listOf("accepted", "outside:3d", "outside:Космос", "outside:a game", "outside:averyveryverylongword",
+            "fallback:hole", "fallback:compile_BUSY", "fallback:compile_a status", "fallback:the model wrote this", "what")
+        outcomes.forEach { run.phase("plan_outcome", it) }
+        run.phase("compile", "ok", 17)
+        run.phase("compile", "TIMEOUT", 3000)
+        run.phase("compile", "a person's text", 1)
+        run.phase("agent_call_start", "a person's text")
+        run.phase("a name of no list")
+        trace.phase("draft_end")
+        assertEquals(listOf("accepted", "outside:3d", "outside:other", "outside:other", "outside:other", "fallback:hole",
+            "fallback:compile_BUSY", "fallback:other", "fallback:other", "other", "ok", "TIMEOUT", "other", null, null),
+            events.map { (it as ToolGenerationTraceEvent.Phase).detail })
+        assertEquals(List(outcomes.size) { "plan_outcome" } + List(3) { "compile" } + listOf("agent_call_start", "draft_end"),
+            events.map { (it as ToolGenerationTraceEvent.Phase).name })
+        assertEquals(listOf(17L, 3000L, 1L), events.mapNotNull { (it as ToolGenerationTraceEvent.Phase).ms })
+        assertEquals(List(events.size - 1) { 1 } + 0, events.map { it.attempt })
+    }
 
     /** Generates with [replies] and asserts that the app with [title] is accepted after the last reply. */
     private suspend fun assertFinishes(title: String, vararg replies: String) {
