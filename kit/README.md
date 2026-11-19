@@ -71,6 +71,13 @@ The rules keep each stored value of the person, and they never move a value to a
    A root that Alphy does not take as a name, such as `yaş` or the open tab `pages:tab` of a Tabs line, gets the hash name, so two roots never share a name.
 3. A root of a line that stays with the same kind keeps its value. A list keeps its rows by id.
    A new column gets the value that the first `append` of the list gives a new row, such as the start value of the add form.
+   - 3b. A value that still equals its start value of the previous plan is no data of the person yet: it takes the start value of the change.
+     For a list, this means the same rows with the same ids and the same values, and the kit checks it before the column rules.
+     So a list that still holds its start rows takes the start rows of the change whole, also when the change removes or retypes a column.
+   - A list with other rows keeps them. When the change has other start rows, the note `need NAME: the list keeps its N saved rows, and the start rows of the change are not used` comes with the result.
+   - Start rows get the ids `r1`, `r2`, and so on by their place: one count over all lists in the order of their lines.
+     So a start row that a change puts in the middle of a list moves the ids of the rows after it, and of the rows of each later list.
+     Only a list that takes the start rows of the change gets the moved ids, and a list with saved rows keeps its ids.
 4. These changes are faults that start with `need NAME: the saved data blocks this change: ` (`BLOCKS`), and the kit names what blocks it:
    - A value of another kind, such as a number that becomes a text, or a time that becomes a number. An empty list can change its kind.
    - A column that the change removes or retypes in a list with at least one row.
@@ -85,7 +92,10 @@ The rules keep each stored value of the person, and they never move a value to a
    So a timer that runs goes on to the same end of its phase when its line stays, and it stands at the start of round 1 when its line changes.
    The count of the work phases that ended is a value of its own, so it stays.
 
-`test/change.test.js` holds a test for each rule, and a test of each plan of `test/fixtures/model/`: a stored state that differs from its start in each value comes back after the same plan, and after the plan with a need more at the first line or at the last line.
+`test/change.test.js` holds a test for each rule, and two tests of each plan of `test/fixtures/model/`:
+
+- A stored state that differs from its start in each value comes back after the same plan, and after the plan with a need more at the first line or at the last line.
+- The start state of the plan takes the start values of a change with one more start row or another start value (rule 3b).
 
 The compile step and the run-time have budgets, so a plan cannot use all the memory or time of the sandbox:
 

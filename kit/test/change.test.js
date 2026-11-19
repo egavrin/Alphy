@@ -10,6 +10,7 @@ import { handle } from "../src/run.js";
 import { plansIn } from "../build.js";
 import { T0, fixture, gateEach, plan, valueAt } from "./helpers.js";
 import { settings } from "../src/core.js";
+import { AppFile, show } from "../src/dsl.js";
 
 // After each test the real clock comes back, also after a failure.
 gateEach("smoke");
@@ -292,6 +293,62 @@ test("change: more than 40 values with the kept ones is a fault of the first nee
   expect(result.faults).toEqual([`need b1: ${BLOCKS}: the app would keep more than 40 values`]);
 });
 
+// ---- Rule 3b: a value that still equals its start value of the previous plan takes the start value of the change. ----
+
+const KANJI = fixture("model/showcase-lang-kanji-ja");
+const MORE_KANJI = ["日", "月", "火", "水", "木"].map((kanji) => `{kanji: "${kanji}", reading: "よみ", meaning: "いみ"}`).join(", ");
+const TIP = lines('app("Tip", lang="en")', 'need tip = input("percent", "Tip", 10, min=0, max=30)');
+const startOf = async (text) => (await compileAppFile(text)).definition.initialState;
+/** The tip after a change of its start value from 10 to 15, for the tip app stored after the events. */
+async function tipAfter(events) {
+  const result = await compileAppFile(TIP.replace("10, min", "15, min"), await stored(TIP, events));
+  expect(result.faults).toEqual([]);
+  return result.state.tip;
+}
+
+test("change (rule 3b): a list that the plan fills and the person does not edit takes the start rows of the change", async () => {
+  const ten = KANJI.replace('meaning: "広く塩水をたたえた場所"}]', `meaning: "広く塩水をたたえた場所"}, ${MORE_KANJI}]`);
+  const result = await compileAppFile(ten, await stored(KANJI));
+  expect(result.faults).toEqual([]);
+  expect(result.state.words).toHaveLength(10);
+  expect(result.state.words).toEqual((await startOf(ten)).words);
+  expect(result.notes).toEqual([]);
+});
+
+test("change (rule 3b): a start value that the person did not change takes the start value of the change", async () => {
+  expect(await tipAfter([])).toBe(15);
+});
+
+test("change (rule 3b): a start value that the person changed stays", async () => {
+  // The tip is a slider, so the host sends a live input.
+  expect(await tipAfter([{ type: "liveInput", actionId: "tip_field", value: 12 }])).toBe(12);
+});
+
+test("change (rule 3b): a list with one changed check mark keeps its rows when the change has five more start rows, and a note says so", async () => {
+  const previous = await stored(SHOPPING, [action("items_done", { key: "r1", value: true })]);
+  const more = ITEMS_LINE.replace('done: false}])', `done: false}, ${["Eggs", "Rice", "Tea", "Salt", "Oil"].map((name) => `{name: "${name}", aisle: "Pantry", done: false}`).join(", ")}])`);
+  const result = await compileAppFile(withItems(more), previous);
+  expect(result.faults).toEqual([]);
+  expect(result.state.items).toEqual(previous.state.items);
+  expect(result.notes).toContain("need items: the list keeps its 3 saved rows, and the start rows of the change are not used");
+});
+
+test("change (rule 3b): a deck that marks its start rows keeps the rows after one mark by the person", async () => {
+  const text = fixture("model/e-capitals-it"), previous = await stored(text, [action("mazzo_show"), action("mazzo_yesButton")]);
+  expect(previous.state.carte.filter((row) => row.saputa)).toHaveLength(1);
+  const result = await compileAppFile(text.replace('{paese: "Italia", capitale: "Roma", saputa: false}', '{paese: "Italia", capitale: "Roma", saputa: false}, {paese: "Malta", capitale: "La Valletta", saputa: false}'), previous);
+  expect(result.faults).toEqual([]);
+  expect(result.state.carte).toEqual(previous.state.carte);
+  expect(result.notes).toContain(`need carte: the list keeps its ${previous.state.carte.length} saved rows, and the start rows of the change are not used`);
+});
+
+test("change (rule 3b): a list that still holds its start rows takes the start rows of the change, also when the change removes a column", async () => {
+  const older = withItems('need items = entries("Items", fields={name: "text", done: "check"}, rows=[{name: "Milk", done: false}])');
+  const result = await compileAppFile(older, await stored(SHOPPING));
+  expect(result.faults).toEqual([]);
+  expect(result.state.items).toEqual([{ id: "r1", name: "Milk", done: false }]);
+});
+
 // ---- Each model plan: a stored state that differs from the start in each value of the person comes back. ----
 
 const nodesOf = (node) => [node, ...(node.children ?? []).flatMap(nodesOf)];
@@ -371,4 +428,48 @@ for (const path of plansIn(models)) test(`change: ${basename(path)} gives each s
     expect(result.faults).toEqual([]);
     expect(values(result.state)).toEqual(values(previous.state));
   }
+});
+
+/** A value of each kind of a field of entries: a word, 1, a check mark, a switch that is on, a date, a time, or the first option of a choice. */
+const SAMPLES = { number: 1, money: 1, count: 1, check: true, switch: true, date: "2026-03-04", time: "09:15" };
+const sampleOf = (kind) => (kind.k === "list" ? kind.items[0].v : SAMPLES[kind.v] ?? "x");
+/**
+ * The plan with one start row more in its first list of entries (a copy of its first start row at the end, or a row of a sample value of each
+ * field), else with another start value of its first input or counter: a step more inside the bounds of a number, another option, a flag
+ * turned, another date or time, or more letters of a text. null for a plan with neither.
+ */
+function mirrorOf(text) {
+  const needs = new AppFile().feedText(text).of("need"), line = (entry, tree) => text.replace(entry.raw, `need ${entry.key} = ${show(tree)}`);
+  const listed = needs.find((entry) => entry.tree.name === "entries");
+  if (listed) {
+    const { rows = { k: "list", items: [] }, fields } = listed.tree.named;
+    const row = rows.items[0] ?? { k: "map", entries: fields.entries.map(([key, kind]) => [key, { k: "lit", v: sampleOf(kind) }]) };
+    return line(listed, { ...listed.tree, named: { ...listed.tree.named, rows: { ...rows, items: [...rows.items, row] } } });
+  }
+  for (const entry of needs) {
+    const tree = entry.tree, at = { input: 2, counter: 1 }[tree.name], start = tree.args?.[at], value = start?.v;
+    if (at === undefined) continue;
+    // The options of a choice are a list, or a map from each value to its text.
+    const given = tree.named.options, options = given?.items?.map((item) => item.v) ?? given?.entries?.map(([key]) => key);
+    const step = tree.named.step?.v ?? 1, max = tree.named.max?.v ?? Infinity, kind = tree.args[0]?.v;
+    const other = start.k === "list" ? { k: "list", items: start.items.length ? [] : [{ k: "lit", v: options[0] }] }
+      : { k: "lit", v: options ? options.find((option) => option !== value) : typeof value === "number" ? (value + step <= max ? value + step : value - step)
+        : typeof value === "boolean" ? !value : kind === "date" ? (value === SAMPLES.date ? "2026-03-05" : SAMPLES.date) : kind === "time" ? (value === SAMPLES.time ? "09:16" : SAMPLES.time) : `${value} 2` };
+    return line(entry, { ...tree, args: tree.args.map((arg, index) => (index === at ? other : arg)) });
+  }
+  return null;
+}
+
+for (const path of plansIn(models)) test(`change (rule 3b): ${basename(path)} with its start state takes the start values of a change with another start value or one more start row`, async () => {
+  const text = readFileSync(path, "utf8"), more = mirrorOf(text);
+  // A plan with no list of start rows, no input, and no counter has no start value that a change of its content moves.
+  if (more === null) { expect(text).not.toMatch(/rows=\[|= (input|counter)\(/); return; }
+  const { definition } = await compileAppFile(text), changedStart = await compileAppFile(more);
+  expect(changedStart.faults).toEqual([]);
+  const own = ownFields(appOf(changedStart.definition)), values = (state) => Object.fromEntries(own.map((field) => [field, state[field]]));
+  // The change moves at least one start value of the person.
+  expect(values(changedStart.definition.initialState)).not.toEqual(values(definition.initialState));
+  const result = await compileAppFile(more, { appFile: text, stateSchema: definition.stateSchema, state: definition.initialState });
+  expect(result.faults).toEqual([]);
+  expect(values(result.state)).toEqual(values(changedStart.definition.initialState));
 });

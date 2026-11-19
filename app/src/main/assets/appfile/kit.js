@@ -3564,7 +3564,9 @@ async function compileAppFile(text, previous) {
   const { file, emitted, ...result } = build(text);
   if (!previous || !result.definition) return { ...result, state: null };
   try {
-    return { ...result, ...nextState(file, emitted, previous) };
+    // A change adds its own notes to the notes of the report.
+    const { notes = [], ...change } = nextState(file, emitted, previous);
+    return { ...result, ...change, notes: [...result.notes, ...notes] };
   } catch (failure) {
     return { ...result, faults: [`kit: ${failure?.message ?? failure}`], definition: null, state: null };
   }
@@ -3574,8 +3576,10 @@ async function compileAppFile(text, previous) {
 const WORDS = { number: "number", string: "text", boolean: "true or false value", time: "time", date: "date", list: "list of rows", record: "record",
   "array:number": "list of numbers", "array:string": "list of texts", "array:boolean": "list of true or false values" };
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+/** A value as a text that does not depend on the order of the keys of its records. */
+const canonical = (value) => JSON.stringify(value, (key, inner) => (isRecord(inner) ? Object.fromEntries(Object.keys(inner).sort().map((name) => [name, inner[name]])) : inner));
 /** A schema as a text that does not depend on the order of its fields, or on maxItems, which the room of the screen sets. */
-const shape = (schema) => JSON.stringify(isRecord(schema) ? { ...schema, maxItems: undefined, fields: schema.fields && Object.fromEntries(Object.entries(schema.fields).sort()) } : schema);
+const shape = (schema) => canonical(isRecord(schema) ? { ...schema, maxItems: undefined } : schema);
 /** The kind of a stored value: the kit's kind of its root (time, date, list, array, record), else the type of its schema. An array names the type of its values. */
 const kindOf = (kind, schema) => {
   kind ??= isRecord(schema) ? (schema.type === "object" ? "record" : schema.type) : schema;
@@ -3591,6 +3595,8 @@ const lineOf = (file, need) => file.of("need").find((entry) => entry.key === nee
  * 2. The names of the values of the person are stable (rows.js stable), so a line before a value cannot change its name.
  * 3. A root of a line that stays with the same kind keeps its value. A list keeps its rows by id, and a new column gets the value that the
  *    first append of the list gives a new row, such as the start value of the add form. A root that a change before kept comes back by its name.
+ * 3b. A root whose stored value still equals its start value of the previous plan takes the start value of the change, before the column rules.
+ *    A list with other rows keeps them, and a note says so when the change has other start rows.
  * 4. A value of another kind, a column that the change removes or retypes in a list with rows, a saved value that the screen would change, and a
  *    new value with the name of a saved one are faults with BLOCKS, as are more than 40 fields, a state of more than 49152 bytes, and a list past its room.
  * 5. Each stored field that the change does not name stays with its schema and its value (app.keep). A list or an array that the app computed stays empty.
@@ -3609,7 +3615,7 @@ function nextState(file, { app, definition, owners, objects }, previous) {
   const older = new Set(Object.keys(schemas).filter((field) => !Object.hasOwn(oldSchemas, field)));
   const person = new Set([...oldTops.values(), ...was.emitted.objects.keys(), ...older]);
   if ([...oldTops.values(), ...was.emitted.objects.keys()].some((field) => !Object.hasOwn(schemas, field) || shape(schemas[field]) !== shape(oldSchemas[field]))) return mismatch;
-  const faults = [], start = definition.initialState, next = { ...start }, used = new Set();
+  const faults = [], notes = [], start = definition.initialState, oldStart = was.definition.initialState, next = { ...start }, used = new Set();
   // The row that the first append of each list adds, as the start values give it, and the day of a date that it does not give.
   const appends = new Map();
   const scan = (tree) => {
@@ -3637,7 +3643,10 @@ function nextState(file, { app, definition, owners, objects }, previous) {
       faults.push(`${owner}: ${BLOCKS}: it holds a saved ${WORDS[was]}, and the change makes it a ${was === now ? "record of other fields" : WORDS[now]}. Keep its kind, or give the new need another name`);
       continue;
     }
+    // Rule 3b: a value that still equals its start value of the previous plan is no data of the person yet, so it takes the start value of the change.
+    if (!back && canonical(value) === canonical(oldStart[from])) continue;
     if (kind !== "list") { next[field] = value; continue; }
+    if (!back && canonical(start[field]) !== canonical(oldStart[from])) notes.push(`${owner}: the list keeps its ${value.length} saved rows, and the start rows of the change are not used`);
     // The columns match by their key, and the columns of a kept list by their stored name and Alphy type.
     const columns = back ? Object.entries(schemas[from].fields).filter(([name]) => name !== "id").map(([safe, type]) => [safe, safe, type]) : old.lists[root];
     const target = app.lists[root].map(([key, safe, type]) => [back ? safe : key, safe, back ? own(ALPHY, type) ?? type : type, key, type]);
@@ -3707,7 +3716,7 @@ function nextState(file, { app, definition, owners, objects }, previous) {
   if (hostBytes(state) > MAX_STATE_BYTES) faults.push(`app: ${BLOCKS}: the app would keep more than ${MAX_STATE_BYTES} bytes`);
   if (utf8(source) > MAX_SOURCE_BYTES) faults.push(`app: ${BLOCKS}: the fields that the app keeps make its source more than ${MAX_SOURCE_BYTES} bytes`);
   if (faults.length) return { faults, definition: null, state: null };
-  return { faults: [], definition: keep.length ? { ...definition, stateSchema: schema, initialState: { ...start, ...kept }, source } : definition, state };
+  return { faults: [], notes, definition: keep.length ? { ...definition, stateSchema: schema, initialState: { ...start, ...kept }, source } : definition, state };
 }
 
 /** The lines of a reply: an empty line and a markdown fence line go. Each other text stays, and the kit reports it. */
