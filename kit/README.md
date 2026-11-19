@@ -61,6 +61,7 @@ The `number` and `display` emphases of a `Text` are display sizes of the host (`
 
 A part changes one need line into component, state, and formula lines (`src/parts.js`).
 The parts use the look of the baseline apps: a hero card first, rows with an emoji and a muted second line, and at most one filled button in each group.
+A hero card holds the main element and at most a filled button or a text button. A field and an outlined or tonal control stand under the card, because their outline shows no contrast on a hero card in the dark theme.
 
 The captions that a part writes by itself are in the language of `lang=` of the app line (`src/words.js`): "Add", "Remove", "Less", "More", "Reset", and the others of its table.
 A language outside the table gets the English words and one note of the report that names each option of the need that took an English caption.
@@ -108,16 +109,19 @@ A text that a format function printed is for a person: do not read it back as a 
 - `counter`: a section with the title of the counter. It holds an outlined less button, the value with the display emphasis, and a filled more button.
   With `addText=`, the counter is one filled button that adds the step and a text button that resets the value. The plan shows the value elsewhere, such as in a figure.
   `lessText=` and `moreText=` with `addText=` are a fault, and so are `icon=` and `resetText=` without it.
-- `timer`: the card of a timer is a hero card, also the host's own countdown. A timer with rounds has a filled Start with a play icon, an outlined Pause, a Reset text button, and a muted phase text.
+- `timer`: the card of a timer is a hero card, also the host's own countdown. A timer with rounds has a filled Start with a play icon, a filled Pause with a pause icon while it runs, a Reset text button, and a muted phase text.
   Its bar is a surface of 1024 x 64 that the bar fills: a track in the muted tone of the theme, a stop dot near its end, and the share of the phase that passed.
 - `deck`: the front of a card is a centered text with the display emphasis, and the back has the headline emphasis. Yes is filled with a check, No is outlined, and the two counts are a grid of two.
-  A deck of pages (no `back=`) keeps a heading for its front, because a page can be a long text.
+  The hero card holds the card and its Show button. The row of Yes and No stands under the card.
+  With `answer=`, the field, the check button, the notice, and the next button stand under the card.
+  A deck of pages (no `back=`) keeps a heading for its front, because a page can be a long text. Its Back and Next row stands under the card.
 - `steps`: the note at the end has the success tone. `question`: its notice has the success tone for a right answer and the warning tone for a wrong one.
 - `lesson`: a lesson of at most 12 steps shows its count only in its dots, where the host writes "Step: 1 / 3". A longer lesson has a bar and a count line over it.
 - `chart`: the title shows once, as the label of the chart, with no section around it.
 - `card`: `icon=` is the icon of the card, and the body text is muted.
-- `drawing` and `model3d`: a plan with no figure or progress has its first drawing or model as the main element, unless the author wrote `root`. The main drawing is in a hero card, and the main model card is a hero card.
-  The stage of a model is the muted tone of the theme. A part chip of a model is outlined, and filled while it is the selected part. The explode button is outlined.
+- `drawing` and `model3d`: a plan with no figure or progress has its first drawing or model as the main element, unless the author wrote `root`. The main drawing is in a hero card, and the main model card is a hero card that holds only the model.
+  The part chips, the turn buttons, and the explode button of the main model stand under its card, in this order.
+  The stage of a model is the muted tone of the theme. A part chip of a model is tonal, and filled while it is the selected part. The explode button is outlined.
 - The value of an option has its type. `sheet=`, `edit=`, `add=`, `remove=`, `hidden=`, and `reorder=` are `true` or `false` in the line, because a part reads them once when it builds the screen. `step=` and `decimals=` are numbers or formulas. A value of another type is a fault of the need.
 
 ## Look rules
@@ -130,8 +134,11 @@ Kit tests check the look rules over the nine saved plans and the look fixtures (
 3. `look: no saved plan has a typed field in a row template` (`test/lookrules.test.js`).
 4. A plan with only a list gets a hero card with its count: `entries: a list that a steps or tabs need groups gets no hero count at the root, and the first list that no holder groups gets it` (`test/entries.test.js`).
 5. The figures of one place (`test/figures.test.js`): `figures: two figures after the main one are a grid of two metrics with their icons, and three or more are rows of one size`, `figures: the figures of one group of steps or tabs are a set of their own, and a figure never leaves its group`, and `figures: one figure beside the main one, or two that do not stand one after the other, stay metrics`.
-6. `look: a group of buttons has one filled button, on the first screen and after the press of the main action` (`test/lookrules.test.js`): at most one, by the rule of the host (`NativeToolUi.kt` `secondaryButtons`). After Start of a timer, its group has no filled button.
+6. `look: the group of the main action has exactly one filled button and each other group at most one, on the first screen and after the press of the main action` (`test/lookrules.test.js`): by the rule of the host (`NativeToolUi.kt` `secondaryButtons`).
+   While a timer runs, its filled Pause is the one filled button of the group of Start. After Show of a deck, its hero card shows no button, and the filled Yes is in the row under the card.
+   A timer whose time is up shows only its Reset text button, so its group has no filled button. One event does not reach that state.
 7. `look: no line of a saved plan has the muted role, because Alphy draws a muted shape at the alpha 64` (`test/lookrules.test.js`): a line or a stroked shape uses the role `ink` (`SurfaceDrawing.kt` `MUTED_SHAPE_ALPHA`). A filled shape, such as a stage or a track, can be muted.
+8. `look: a hero card holds no outlined or tonal button` (`test/lookrules.test.js`): on the first screen and after the press of the main action. A field, a segmented control, a select, a multi-choice, and an outlined, tonal, or elevated button stand under the card.
 
 ## Commands
 

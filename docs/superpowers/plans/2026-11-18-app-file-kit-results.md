@@ -567,15 +567,20 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3
 
 Task 11b-2b gave the parts `timer`, `deck`, `steps`, `question`, `lesson`, `chart`, `card`, `drawing`, and `model3d` the look of the baseline apps.
 It also made the look rules kit tests (`kit/README.md`, sections "Parts" and "Look rules").
-The numbers come from `bun kit/look.js`, before at `c92230b` and after at `6715b30`.
-The last column is what the pictures of the run `appfile-look-all-2` show in both themes, against the pictures of `appfile-live-final`.
+The numbers come from `bun kit/look.js`, before at `c92230b` and after at `f614e9f`.
+The last column is what the pictures of the run `appfile-look-all-3` show in both themes, against the pictures of `appfile-live-final`.
+
+The round before the review added a hero card rule: a hero card holds the main element and at most a filled button or a text button.
+A field and an outlined or tonal control stand under the card, because their outline shows no contrast on a hero card in the dark theme.
+The rule moved the controls of `model3d` and of the three forms of `deck` under their hero card, and a running timer now has a filled Pause.
+The round also added two Spanish look fixtures: `look-deck-es` (a deck with a back, a mark, and the two counts) and `look-guide-es` (steps of cards with icons, and a question).
 
 | Plan | Hero, before and after | Typed fields, first screen | Typed fields in rows | Seen in the pictures |
 | --- | --- | --- | --- | --- |
 | `calc` | 1, 1 | 2 | 0 | No change. |
 | `lesson` | 1, 1 | 1 | 0 | The orbit drawing is a hero card. The orbit line has the role `ink`: 13.3 to 1 (light) and 7.3 to 1 (dark). Before, it was muted: 1.5 to 1 and 1.6 to 1. The count shows one time, "Исследуем: 1 / 3" over the dots. Before, the eyebrow "Исследуем · 1 / 3" showed the count a second time. Dark: the inactive dots have low contrast. |
 | `list` | 1, 1 | 2 | 0 | No change. |
-| `model3d` | 1, 1 | 0 | 0 | The model card is a hero card, and its stage has the muted tone of the theme. The chips "Камера", "Панель", "Колёса" and the button "Разобрать" are outlined. Before, the stage was a bright panel in the dark theme, the chips were tonal, and "Разобрать" was filled. Dark: the outline of a chip and of "Разобрать" is not visible on the hero card (1.0 to 1), and their texts read well. |
+| `model3d` | 1, 1 | 0 | 0 | The model card is a hero card that holds only the model, and its stage has the muted tone of the theme. Under the card are the tonal chips "Камера", "Панель", "Колёса", then the two turn buttons and the outlined "Разобрать". Before, the stage was a bright panel in the dark theme, the chips were on the card, and "Разобрать" was filled. In `appfile-look-all-2`, the chips and "Разобрать" were outlined on the hero card, and their outline was not visible in the dark theme (1.0 to 1). Now, against the dark screen, a chip container has the contrast 2.0 to 1 and the outline of "Разобрать" 2.0 to 1 (light: 1.2 and 1.6). These are the colors of the host for these controls on each screen, and the texts read well. The two turn buttons show a back arrow and a chevron, because the host has no left and right arrow pair. |
 | `quiz` | 1, 1 | 0 | 0 | No change. The plan writes its own component lines, so the template of `deck` does not apply. |
 | `section` | 0, 1 | 1 | 0 | A hero card "Звичок у трекері" with the count 3 is first. The three rows of habits follow, and the section of the streaks is under the first screen. |
 | `tabs-chart` | 1, 1 | 0 | 0 | The title "Gastos por categoría" shows one time, as the label of the chart. Before, it showed two times. The host text "Нет данных для графика" stays (section "Look"). |
@@ -593,9 +598,12 @@ The last column is what the pictures of the run `appfile-look-all-2` show in bot
 | `mock-shopping-it` | 1, 1 | 1 | 0 | The field "Prodotto" has a cart icon, and the choice "Corsia" has a tag icon. `mock-shopping-it-added.png` shows the same icons and the two rows. |
 | `mock-habits-uk` | 1, 1 | 0 | 0 | The streak badge of each row has the accent tone. |
 | `mock-price-filter` | 1, 1 | 0 | 0 | The hero shows "12 of 12". |
+| `look-deck-es` | new, 1 | 0 | 0 | The hero card holds the front "la manzana" (centered, display emphasis) and the filled "Ver traducción". The counts "La sabía" and "Todavía no" are a grid of two under it. `look-deck-es-shown.png`: the back "the apple" (headline emphasis) is on the card, and the row of the filled "La sabía" with a check and the outlined "Todavía no" is under the card. The back is at the start of the card, not centered under the front. |
+| `look-guide-es` | new, 1 | 1 | 0 | The hero card "Café molido" shows "30 g", a large coffee emoji, and the muted note. The field "Tazas" with its two step buttons follows, then the step title "1. Moler", the card "Muele el café" with its coffee icon and muted body, the disabled outlined "Atrás" and the filled "Siguiente", and the card of the question with three tonal answers. "Atrás" is faint because the host draws a disabled button so. `look-guide-es-answered.png`: the chosen "92–96 °C" is filled, and the success notice "¡Correcto! Así el café no se quema." shows under the answers. |
 
 A script compared each picture with the same picture of `appfile-live-final`, pixel by pixel under the status bar.
 Only the pictures of the 10 plans with a note in the last column changed, and `mock-shopping-it-added.png`, in both themes. Each other picture is the same, also each picture of a baseline app.
+Against `appfile-look-all-2`, only `model3d` changed in the run `appfile-look-all-3` (22.9 % of the pixels in both themes). The four pictures of the two new fixtures are new.
 No picture shows cut text, an overlap, an empty first screen, a control with no label, or a text that shows two times.
 A text at the bottom edge of a picture continues under the first screen.
 The captions of the two counts of `quiz` are the texts of its two buttons, because each count is the number of presses of its button.
@@ -612,14 +620,15 @@ Host limits that the pictures show (no change of the host in this task):
 - Dark: the inactive dots of a `progress` with `variant="dots"` have low contrast (`NativeToolUi.kt` 369 to 370, 1337).
 - Dark: on a hero card, a button with no fill shows no container. The outline of an outlined button has the contrast 1.0 to 1 with the hero card, and a tonal button has the color of the hero card. The text of the button reads well.
   The host gives a progress track on a hero card the surface color (`NativeToolUi.kt` 368 to 370), but it does not change the border of a button.
+  The kit keeps each outlined and tonal control off a hero card (look rule 8 of `kit/README.md`), so no saved plan or look fixture shows this limit now.
 - A shape of the muted role has the alpha 64 (`SurfaceDrawing.kt`, `MUTED_SHAPE_ALPHA`). The orbit of `lesson` was a muted line with the contrast 1.5 to 1 (light) and 1.6 to 1 (dark). It now has the role `ink`, and a look rule of the kit keeps lines out of the muted role.
 - The faces of a model keep their hex colors, because the shading of a face needs a hex color.
 
-| Measure | Before (`c92230b`) | After (`6715b30`) |
-| --- | --- | --- |
-| Run-time text | 46580 bytes | 46662 bytes (bar 48500) |
-| Largest source | `test/cards.plan`, 53628 bytes | `test/cards.plan`, 53591 bytes (bar 60000) |
-| Kit tests | 289 pass | 315 pass |
+| Measure | Before (`c92230b`) | After (`6715b30`) | After the round before the review (`f614e9f`) |
+| --- | --- | --- | --- |
+| Run-time text | 46580 bytes | 46662 bytes (bar 48500) | 46662 bytes |
+| Largest source | `test/cards.plan`, 53628 bytes | `test/cards.plan`, 53591 bytes (bar 60000) | `test/cards.plan`, 53650 bytes. The new fixtures: 49705 and 48598 bytes |
+| Kit tests | 289 pass | 315 pass | 319 pass |
 
 ### Runs of Task 11b-2b
 
@@ -629,13 +638,15 @@ Host limits that the pictures show (no change of the host in this task):
 | `appfile-look-spike-a8b` | `62ea185+dirty` | passed. The inset is now at most a third of the canvas height, and the stop dot gives the bar a second color | `07:32:55`, `07:35:30` |
 | `appfile-look-pre` | `2705ed4` | passed (`picturesOfEachPlan`), 66.1 s | `07:35:30`, `07:41:21` |
 | `appfile-look-all` | `2705ed4+dirty` (the two documents) | passed, 37 tests (`AppFileProofTest` and `AppFileLookTest`), 182.0 s. Under the status bar, each picture is the same as in `appfile-look-pre` | `07:41:21`, `07:44:37` |
-| `appfile-look-all-2` | `6715b30` (the orbit in the role `ink`) | passed, 37 tests, 184.6 s. The final run and the pictures of this section. Against `appfile-look-all`, only the orbit of `lesson` changed | `07:44:37`, `07:56:12` |
+| `appfile-look-all-2` | `6715b30` (the orbit in the role `ink`) | passed, 37 tests, 184.6 s. Against `appfile-look-all`, only the orbit of `lesson` changed | `07:44:37`, `07:56:12` |
+| `appfile-look-r2-pre` | `f614e9f` (the hero card rule and the two new fixtures) | failed (`picturesOfEachPlan`). The light pass took each picture, also the four new ones. In the dark pass, the press of "Aggiungi" after the finish button of `mock-shopping-it` showed the host error "Не удалось выполнить действие инструмента" and added no row (`AppFileLookTest.kt` 153). The log has no cause. The same step passed in the light pass and in each earlier run, and the round changed no line of that plan or of the run-time | `07:56:12`, `08:17:03` |
+| `appfile-look-all-3` | `f614e9f+dirty` (the two documents) | passed, 37 tests, 182.0 s. The final run and the pictures of this section | `08:17:03`, `08:20:34` |
 
 All times are on 2026-11-19. Each "before" time is the "after" time of the run before it, so no other session installed the test APK during these runs.
-The pictures are in `evidence/alphy-ui/appfile-look-all-2/light/` and `dark/`, with the contact sheets `contact-light.png` and `contact-dark.png` and the pair sheet `pairs-light.png`. Git does not keep these files.
+The pictures are in `evidence/alphy-ui/appfile-look-all-3/light/` and `dark/`, with the contact sheets `contact-light.png` and `contact-dark.png` and the pair sheet `pairs-light.png`. Git does not keep these files.
 
 Command:
 
 ```text
-JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3 tools/compose_acceptance/run.py suite --serial emulator-5592 --label appfile-look-all-2 com.alpha.assistant.tools.appfile.AppFileProofTest com.alpha.assistant.tools.appfile.AppFileLookTest
+JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3 tools/compose_acceptance/run.py suite --serial emulator-5592 --label appfile-look-all-3 com.alpha.assistant.tools.appfile.AppFileProofTest com.alpha.assistant.tools.appfile.AppFileLookTest
 ```
