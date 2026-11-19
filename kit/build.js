@@ -82,9 +82,9 @@ export async function runtimeText() {
   return `let handle;const __handle=(f)=>{handle=f};\n${(await built.outputs[0].text()).trim()}`;
 }
 
-/** The bundle defines globalThis.compileAppFile and no other global. */
+/** The bundle defines globalThis.compileAppFile and globalThis.patchAppFile (the plan after a repair reply), and no other global. */
 export async function bundle() {
-  return `// Built by kit/build.js from kit/src with Bun ${Bun.version}. Do not edit: run bun kit/build.js.\n(() => {\n"use strict";\n${script(MODULES.map(source))}runtime.text = ${JSON.stringify(await runtimeText())};\nglobalThis.compileAppFile = compileAppFile;\n})();\n`;
+  return `// Built by kit/build.js from kit/src with Bun ${Bun.version}. Do not edit: run bun kit/build.js.\n(() => {\n"use strict";\n${script(MODULES.map(source))}runtime.text = ${JSON.stringify(await runtimeText())};\nglobalThis.compileAppFile = compileAppFile;\nglobalThis.patchAppFile = patchAppFile;\n})();\n`;
 }
 
 /** The plan files of a directory. */

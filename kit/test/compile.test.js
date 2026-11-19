@@ -5,7 +5,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createContext, runInContext } from "node:vm";
-import { compileAppFile } from "../src/compile.js";
+import { compileAppFile, patchAppFile } from "../src/compile.js";
+import { AppFile } from "../src/dsl.js";
+import { expand } from "../src/parts.js";
 import { bundle, iconModule, planCopies, plansIn, script, withoutMessages } from "../build.js";
 import { HOST_ICONS } from "../src/icons.js";
 import { emit } from "../src/emit.js";
@@ -66,14 +68,62 @@ test("compileAppFile: a field of a list with the name of a line of the list part
   expect(await faultsOf('need shop = entries("Shop", fields={name: "text", rowing: "text"})', "root = Column([shop_view])")).toEqual([]);
 });
 
-test("bundle: it defines only compileAppFile, and the sandbox expression compiles calc.plan through it", async () => {
+/** The saved replies of the model check that the tests replay (fixtures/replies.json): each reply of a record, by the label of its run and its request. */
+const REPLIES = JSON.parse(readFileSync(new URL("./fixtures/replies.json", import.meta.url), "utf8"));
+/** The plan of each step of a record: the first reply, then each repair reply patched into the plan before it, as the model check does. */
+const stepsOf = (replies) => replies.reduce((plans, reply) => [...plans, plans.length ? patchAppFile(plans.at(-1), reply) : reply], []);
+const NEED = /^need\s+([\p{L}_][\p{L}\p{N}_]*)\s*=/u;
+const needsIn = (text) => text.split("\n").map((line) => NEED.exec(line)?.[1]).filter(Boolean);
+
+test("patchAppFile (A0-K1): a repair reply that deletes a name and writes it again gives the plan that a person gets by hand", async () => {
+  const plan = 'app("T", lang="en")\n$/days = []\nneed note = content("a")\nneed old = content("b")\n';
+  const reply = 'delete $/days\nneed days = entries("Days", fields={day: "date"}, rows=[])\nneed note = content("c")\ndelete old\ndelete nothing\n';
+  // Each delete removes its line, a line with the name of an earlier line replaces it in place, and each new line goes at the end.
+  // A delete of a name that no line has goes too: a person cannot apply it.
+  const patched = patchAppFile(plan, reply);
+  expect(patched).toBe('app("T", lang="en")\nneed note = content("c")\nneed days = entries("Days", fields={day: "date"}, rows=[])\n');
+  // The name that the delete freed is free for the part of the later need, so the part writes $/days.
+  expect((await compileAppFile(patched)).faults).toEqual([]);
+  // Prose and markdown fences of the reply go. A reply line that the kit cannot read stays at the end, so that the compile names it.
+  expect(patchAppFile(plan, `Here is the fix:\n\`\`\`\nneed note = content("c")\nneed broken = figure(\n\`\`\``))
+    .toBe('app("T", lang="en")\n$/days = []\nneed note = content("c")\nneed old = content("b")\nneed broken = figure(\n');
+});
+
+test("patchAppFile (A0-K1): the saved repairs of pomodoro-zh (final-terra-low) and alarm (r0-sol-medium) delete a line and write it again, and are clean after the second repair", async () => {
+  for (const key of ["final-terra-low/showcase-lang-pomodoro-zh", "r0-sol-medium/showcase-ui-alarm"]) {
+    const plans = stepsOf(REPLIES[key].slice(0, 3));
+    expect({ key, faults: (await compileAppFile(plans[2])).faults }).toEqual({ key, faults: [] });
+  }
+});
+
+test("patchAppFile (A0-K1): each of the 41 saved repairs that writes a need of its plan again keeps one line of that need, and its part writes each of its lines", async () => {
+  let hits = 0;
+  for (const [key, replies] of Object.entries(REPLIES)) {
+    const plans = stepsOf(replies);
+    for (let step = 1; step < plans.length; step++) {
+      // The needs of the plan before, as the kit reads it: a line that the kit could not read is no need.
+      const before = new AppFile().feedText(plans[step - 1]).of("need").map((entry) => entry.key), file = new AppFile().feedText(plans[step]);
+      expand(file);
+      for (const name of new Set(needsIn(replies[step]).filter((name) => before.includes(name)))) {
+        hits++;
+        const lines = plans[step].split("\n").filter((line) => NEED.exec(line)?.[1] === name), written = replies[step].split("\n").findLast((line) => NEED.exec(line)?.[1] === name).trim();
+        expect({ key, step, name, lines, lost: (file.partLines.get(name) ?? []).filter((line) => !file.get(line)) }).toEqual({ key, step, name, lines: [written], lost: [] });
+      }
+    }
+  }
+  expect(hits).toBe(41);
+});
+
+test("bundle: it defines only compileAppFile and patchAppFile, and the sandbox expression compiles calc.plan and patches a plan through them", async () => {
   // The sandbox has no structuredClone and no host API: a fresh context of the language is closer to it than Bun's own.
   const context = createContext();
   const names = () => [...runInContext("Object.getOwnPropertyNames(globalThis)", context)];
   const before = names();
   const text = await runInContext(`${await bundle()}\ncompileAppFile(${JSON.stringify(plan("calc"))}).then(JSON.stringify)`, context);
-  expect(names().filter((name) => !before.includes(name))).toEqual(["compileAppFile"]);
+  expect(names().filter((name) => !before.includes(name))).toEqual(["compileAppFile", "patchAppFile"]);
   expect(JSON.parse(text)).toEqual(JSON.parse(JSON.stringify(await compileAppFile(plan("calc")))));
+  const reply = 'need tip = input("percent", "Tip", 20)\ndelete people';
+  expect(runInContext(`patchAppFile(${JSON.stringify(plan("calc"))}, ${JSON.stringify(reply)})`, context)).toBe(patchAppFile(plan("calc"), reply));
 });
 
 test("bundle: an import that the build cannot keep is an error of the build", () => {

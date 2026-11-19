@@ -45,12 +45,11 @@ test("modelcheck: a reply is outside, a plan, or other", () => {
   expect(kindOf("I cannot do that.")).toEqual({ kind: "other" });
 });
 
-test("modelcheck: a repair replaces a line by its name in place, deletes a line, drops prose, and drops a plan line that the kit could not read", () => {
+test("modelcheck: a repair is patchAppFile of the kit: it replaces a line by its name in place, deletes a line, drops prose, and drops a plan line that the kit could not read", () => {
   const plan = PLAN + "need broken = figure(\n";
   const { text, dropped } = merge(plan, 'Here is the fix:\n```\nneed bill = input("money", "Bill", 50, min=0, max=500)\ndelete tip\nneed share = content("x")\n```');
   expect(dropped).toBe(1);
-  expect(text).toBe('app("Tip", lang="en")\nneed bill = input("money", "Bill", 80, min=0, max=500)\nneed tip = figure("money", "Tip", $/bill * 0.1, example=[{bill: 100}, 10])\n'
-    + 'need bill = input("money", "Bill", 50, min=0, max=500)\ndelete tip\nneed share = content("x")\n');
+  expect(text).toBe('app("Tip", lang="en")\nneed bill = input("money", "Bill", 50, min=0, max=500)\nneed share = content("x")\n');
   expect(repairText({ task: "TASK", plan: text, faults: ["f1", "f2"] })).toBe(`TASK\n\nYour plan:\n${text.trimEnd()}\n\nFaults of the kit:\n- f1\n- f2\n\n${PROMPT.Repair}`);
 });
 

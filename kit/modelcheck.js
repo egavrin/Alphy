@@ -9,8 +9,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { AppFile } from "./src/dsl.js";
-import { compileAppFile } from "./src/compile.js";
+import { LINE, compileAppFile, patchAppFile } from "./src/compile.js";
 import { runtime } from "./src/emit.js";
 import { runtimeText } from "./build.js";
 
@@ -87,16 +86,9 @@ export function kindOf(text) {
   if (word) return { kind: "outside", word };
   return { kind: lines.some((line) => /^\s*(app\s*\(|need\s)/.test(line)) ? "plan" : "other" };
 }
-/** A line of an app file: a need, a state or formula, the header, a check, a delete, or a component. A repair keeps only these. */
-const LINE = /^\s*(need\s+[\p{L}_][\p{L}\p{N}_]*\s*=|\$\/[\p{L}\p{N}_/]+\s*:?=|app\s*\(|check\s*\(|delete\s+\S|[\p{L}_][\p{L}\p{N}_]*\s*=)/u;
-/**
- * The plan after a repair: the lines that the kit took from the plan, in their order, then each line of the repair reply.
- * A line of the reply replaces the line with its name in place, and a delete line removes one, as the kit feeds lines.
- * A line of the plan that the kit could not read goes, as in the prototype loop: its fault was in the report, and the reply sends it again.
- */
+/** The plan after a repair: patchAppFile of the kit, as the loop of the app calls it. dropped counts the prose lines of the reply. */
 export function merge(plan, reply) {
-  const lines = linesOf(reply), kept = lines.filter((line) => LINE.test(line));
-  return { text: new AppFile().feedText(plan).text() + kept.join("\n") + "\n", dropped: lines.length - kept.length };
+  return { text: patchAppFile(plan, reply), dropped: linesOf(reply).filter((line) => !LINE.test(line)).length };
 }
 
 /** The faults that the device bars add to a plan that the kit calls clean (BARS), and the forms that the host refuses with no fault of the kit. */
