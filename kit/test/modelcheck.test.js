@@ -40,6 +40,8 @@ test("modelcheck: the body is the body of OpenAiResponsesWire with no JSON mode"
 
 test("modelcheck: a reply is outside, a plan, or other", () => {
   expect(kindOf('```\noutside("game")\n```')).toEqual({ kind: "outside", word: "game" });
+  // The sixth word of the prompt (K1 fix 4): a request whose main thing no kind gives.
+  expect(kindOf('outside("other")')).toEqual({ kind: "outside", word: "other" });
   expect(kindOf(PLAN)).toEqual({ kind: "plan" });
   expect(kindOf('outside("3d")\nneed x = content("x")')).toEqual({ kind: "plan" });
   expect(kindOf("I cannot do that.")).toEqual({ kind: "other" });

@@ -29,7 +29,13 @@ test("prompt: the section System names no hole and no rule that only kept a look
   // A look option that cannot apply is a note of the kit now (A0-K4).
   expect(SYSTEM).not.toContain("which takes no icon");
   expect(SYSTEM).not.toContain("never with add=false");
-  expect(SYSTEM.split("\n").find((line) => line.includes('outside("game")'))).toContain("a main thing that no kind below gives");
+  expect(SYSTEM.split("\n").find((line) => line.includes('outside("other")'))).toContain("a main thing that no kind below gives");
+});
+
+test("prompt (K1 fix 4): outside has a sixth word, other, for a main thing that no kind gives, and the section Repair names no component line", () => {
+  expect([...SYSTEM.matchAll(/outside\("(\w+)"\)/g)].map(([, word]) => word)).toEqual(["game", "drawing", "3d", "picture", "device", "other"]);
+  expect(SECTIONS.Repair).toContain("delete NAME removes a need line, and delete $/NAME removes a state line");
+  expect(SECTIONS.Repair).not.toContain("component");
 });
 
 test("prompt: each kind that the prompt names is a part of the kit", async () => {
