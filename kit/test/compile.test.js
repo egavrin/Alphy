@@ -11,7 +11,7 @@ import { HOST_ICONS } from "../src/icons.js";
 import { emit } from "../src/emit.js";
 import { handle } from "../src/run.js";
 import { STEPS } from "../src/core.js";
-import { plan, planned } from "./helpers.js";
+import { faultsOf, plan, planned } from "./helpers.js";
 
 test("compileAppFile: calc.plan gives a definition and no fault", async () => {
   const result = await compileAppFile(plan("calc"));
@@ -26,10 +26,41 @@ test("compileAppFile: a need with no part gives one fault that names its line", 
 });
 
 test("compileAppFile: a throw inside the kit is the one fault kit: <message>", async () => {
-  // A check line that is not a call makes parseLine throw a TypeError, which AppFile.feed does not catch.
-  const { faults } = await compileAppFile('check("a") + 1');
+  // The host gives a text. Each line of a text gets a fault of its line (final review 12), so only a value that is no text makes the kit throw.
+  const { faults } = await compileAppFile(null);
   expect(faults).toHaveLength(1);
   expect(faults[0]).toStartWith("kit: ");
+});
+
+test("compileAppFile: a fault of a line that a part wrote names its need, and no line gives a fault kit: (final review 12)", async () => {
+  const cases = [
+    // The smoke run names a control of a part line by its caption in its need.
+    [['need n = counter("N", 0, min=0, max=0)'], ['smoke run: the Button "Less" of need n never changes a value', 'smoke run: the Button "More" of need n never changes a value']],
+    // A path that no line sets, read by a need and by the formula of its part.
+    [['need c = figure("number", "C", $/k * 2)'], ["need c reads $/k, and no line sets it", "need c: $/c is not a finite number at the start"]],
+    // A line that does not have the form of its kind.
+    [['check("a") + 1'], ['line 2: a check line is one call of check, such as check("name", [steps]): check("a") + 1']],
+    [["need x = entries"], ['line 2: a need line is one call of a part, such as need x = entries("Items"): need x = entries']],
+  ];
+  for (const [lines, parts] of cases) {
+    const faults = await faultsOf(...lines), text = faults.join(" | ");
+    const lost = parts.filter((part) => !faults.some((fault) => fault.includes(part)));
+    // A name that a part wrote, such as n_minus, c_text, or $/c alone, and a throw of the kit.
+    const stray = faults.filter((fault) => /\b(n_minus|n_plus)\b|^kit: |^c reads|^\$\/c /.test(fault));
+    expect({ lines, lost, stray }, text).toEqual({ lines, lost: [], stray: [] });
+  }
+});
+
+test("compileAppFile: a field of a list with the name of a line of the list part is a fault of the need (final review 13)", async () => {
+  // fields= and show= of an entries need name the lines NAME_FIELD of its part, so a field must not have the name of another line of the part.
+  for (const field of ["row", "list", "view", "main", "add", "remove", "hero", "emoji", "up", "down", "open", "addRow", "confirm", "yes", "no"]) {
+    for (const need of [`fields={name: "text", ${field}: "text"}`, `fields={name: "text"}, show={${field}: $name}`]) {
+      const faults = await faultsOf(`need shop = entries("Shop", ${need}, icon="🛒", confirm="Sure?", reorder=true)`);
+      const found = faults.some((fault) => fault.includes(`need shop: a field named ${field} has the name of the line shop_${field} of the list part`));
+      expect({ field, need, found }, faults.join(" | ")).toEqual({ field, need, found: true });
+    }
+  }
+  expect(await faultsOf('need shop = entries("Shop", fields={name: "text", rowing: "text"})', "root = Column([shop_view])")).toEqual([]);
 });
 
 test("bundle: it defines only compileAppFile, and the sandbox expression compiles calc.plan through it", async () => {

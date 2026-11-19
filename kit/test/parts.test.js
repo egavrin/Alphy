@@ -187,7 +187,7 @@ test("a row field written as a value of the app in a row formula of a part", asy
   // f0 kanji-ja-2: front=$/kanji reads the whole list. The host cannot correct that, so it changes nothing, and the faults stay for a repair step.
   const wholeList = await planned('app("T", lang="ja")\nneed cards = deck("練習カード", $/kanji, front=$/kanji, back=$/yomi + " — " + $/imi, mark=$oboe, show="答えを見る", yes="覚えた", no="まだ", again="最初から", done="完了")\nneed kanji = entries("漢字", fields={ji: "text", yomi: "text", imi: "text", oboe: "check"}, rows=[{ji: "日", yomi: "ひ・にち", imi: "sun, day", oboe: false}], labels={ji: "漢字", yomi: "読み方", imi: "意味", oboe: "覚えた"}, addText="追加", emptyText="まだカードがありません")');
   const wl = report(wholeList);
-  assert(wl.faults.includes("cards reads $/yomi, and no line sets it") && !wl.notes.some((note) => note.startsWith("need cards")) && wholeList.get("need:cards").raw.includes("back=$/yomi"), `a deck that reads its whole list keeps its faults: ${JSON.stringify(wl)}`);
+  assert(wl.faults.includes("need cards reads $/yomi, and no line sets it") && !wl.notes.some((note) => note.startsWith("need cards")) && wholeList.get("need:cards").raw.includes("back=$/yomi"), `a deck that reads its whole list keeps its faults: ${JSON.stringify(wl)}`);
   // The same reading in a chart and in the row formulas of entries. An input need named max sets $/max, so $/max stays a value of the app.
   const rowwise = await planned('app("T")\nneed max = input("number", "Max", 4, min=0, max=10)\nneed days = entries("Days", fields={day: "text", steps: "number"}, rows=[{day: "Tu", steps: 5}, {day: "Mo", steps: 3}, {day: "We", steps: 9}], show={twice: $/steps * 2}, filter=$/steps > $/max, sort=$/day, group=$/day)\nneed bars = chart("Steps", $/days, $/day, $/steps)');
   const rw = new App(rowwise), rwReport = report(rowwise);
@@ -337,7 +337,7 @@ test("button and a timed change: animate moves a value over its time", async () 
   // The smoke run moves its own clock to the end of the change. So the button that starts it shows its effect, and a button that changes nothing is still a fault.
   const spun = smoke(spin);
   assert(spun.trace.some((line) => line.startsWith("tap lap_button: angle 40 -> 360")), "the smoke run sees the end of the timed change: " + spun.trace.join(" | "));
-  same([spun.faults, smoke(stuck).faults, settings.now], [[], ["smoke run: stay_button never changes a value: its action does nothing"], realClock], "the button with a timed change is not dead, and the one that changes nothing is");
+  same([spun.faults, smoke(stuck).faults, settings.now], [[], ['smoke run: the Button "Stay" of need stay never changes a value: its action does nothing'], realClock], "the button with a timed change is not dead, and the one that changes nothing is");
   await partFault('need b = button("B")', "button needs an action");
 });
 

@@ -21,6 +21,8 @@ function rebase(tree, name) {
   return Object.fromEntries(Object.entries(tree).map(([key, inner]) => [key, rebase(inner, name)]));
 }
 const label = (id) => id.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+/** The lines NAME_X of an entries part that are not a field: the rows, the list, the add form, the remove dialog, the arrows, the emoji, and the hero. */
+const ENTRIES_LINES = new Set(["row", "list", "view", "main", "add", "addRow", "open", "remove", "confirm", "yes", "no", "up", "down", "emoji", "hero"]);
 
 // The arguments of a part that are formulas of a row of its list.
 const ROW_FORMULAS = { deck: { named: ["front", "back", "mark", "answer", "picture"] }, chart: { args: [2, 3] }, entries: { named: ["show", "filter", "sort", "group"] } };
@@ -141,6 +143,9 @@ const PARTS = {
     const title = need.args[0], opt = need.named, fields = opt.fields?.entries ?? [["name", { k: "lit", v: "text" }]];
     // Alphy keys each row by its id: not blank and of no other row (ToolValueSchema). A field that a person types must not be that key.
     if ([...fields, ...(opt.show?.entries ?? [])].some(([field]) => field === "id")) throw new DslError("a field named id is the key of each row, which the host gives. Give the field a different name");
+    // The part names a line NAME_FIELD for each field, so a field must not have the name of one of its other lines.
+    const taken = [...fields, ...(opt.show?.entries ?? [])].find(([field]) => ENTRIES_LINES.has(field));
+    if (taken) throw new DslError(`a field named ${taken[0]} has the name of the line ${name}_${taken[0]} of the list part. Give the field a different name`);
     // A Map, so that a field named "constructor" does not read a property of Object.
     const labels = new Map((opt.labels?.entries ?? []).map(([key, tree]) => [key, tree.v])), text = caption;
     const lines = [`$/${name} = ${show(opt.rows ?? { k: "list", items: [] })}`];

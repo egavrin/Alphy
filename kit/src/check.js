@@ -29,6 +29,12 @@ export function smoke(file, limit = 60) {
 }
 function smokeRun(file, limit, clock) {
   const app = new App(file), faults = [], notes = [], trace = [], done = new Set(), reached = new Set(), idle = new Map();
+  // A fault of a line that a part wrote names its need (faultName): a text of the kit that starts with that line, and a control as its caption in its need.
+  const named = faultName(file), head = (text) => text.replace(/^[^ :]+/, (line) => named(line));
+  const titleOf = (node) => {
+    const caption = `the ${node.type} "${node.props.label ?? node.props.icon ?? ""}"`, line = node.name && named(node.name);
+    return !node.name ? caption : line === node.name ? line : `${caption} of ${line}`;
+  };
   const wait = () => { clock.now += 30 * 864e5; };
   // A state of the run is the text of the app's state and the time of the clock at it. A timer keeps the end of its phase in the state,
   // so the run comes back to a state at its own time: a later time would end the phases of a timer that runs at the next press.
@@ -101,9 +107,9 @@ function smokeRun(file, limit, clock) {
         if (!found) continue;
         // The tab that is open does nothing when a person taps it. That is the rule of the host, not a fault of the app.
         if (found.node.tab && found.node.props.selected) continue;
-        const { node, parent } = found, p = node.props, title = node.name ?? `the ${node.type} "${p.label ?? p.icon ?? ""}"`;
+        const { node, parent } = found, p = node.props, title = titleOf(node), faultOf = (fault) => `${named(fault.where)}: ${fault.message}`;
         let seen = look(screen());
-        const own = look({ ...node, children: [] }), known = new Set(app.faults.map((fault) => `${fault.where}: ${fault.message}`));
+        const own = look({ ...node, children: [] }), known = new Set(app.faults.map(faultOf));
         let error;
         if (p.bind) {
           const now = Number(p.value) || 0, by = p.step ?? 1;
@@ -117,7 +123,7 @@ function smokeRun(file, limit, clock) {
           if (sample === undefined || node.type === "Choices") continue;
           error = app.change(node, sample);
         } else error = app.fire(node);
-        if (error) { faults.push("smoke run: " + error); continue; }
+        if (error) { faults.push("smoke run: " + head(error)); continue; }
         // A button whose action needs a typed value, such as the add button of a form, gets a second press after the run types into each
         // empty text field that its action reads. It passes only when that press changes a value of the typed state, so a dead button beside a field stays a fault.
         // The typed text shows in its field, so the run looks at the screen again before that press.
@@ -126,11 +132,11 @@ function smokeRun(file, limit, clock) {
           const filled = JSON.stringify(app.state);
           error = app.fire(controls().find((control) => control.key === key)?.node ?? node);
           if (error || JSON.stringify(app.state) === filled) reset();
-          if (error) { faults.push("smoke run: " + error); continue; }
+          if (error) { faults.push("smoke run: " + head(error)); continue; }
         }
         // A timed change shows only when time passes. The run moves its clock to the end of each one before it looks at the screen.
         if (app.state._run) { wait(); app.tick(); }
-        const after = controls(), late = [...new Set(app.faults.map((fault) => `${fault.where}: ${fault.message}`))].filter((text) => !known.has(text));
+        const after = controls(), late = [...new Set(app.faults.map(faultOf))].filter((text) => !known.has(text));
         if (late.length) { faults.push(`smoke run: after ${title}, ${late.join("; ")}`); continue; }
         const broken = Object.keys(app.state).filter((name) => !finite(app.state[name]));
         if (broken.length) { faults.push(`smoke run: after ${title}, ${broken.map((name) => "$/" + name).join(", ")} is not a finite number`); continue; }
@@ -147,13 +153,13 @@ function smokeRun(file, limit, clock) {
         }
         // For the judge: what each control did to the values of the app.
         const was = JSON.parse(base.text);
-        trace.push(`${p.bind ? "set" : "tap"} ${title}: ` + Object.keys({ ...was, ...app.state }).filter((name) => JSON.stringify(was[name]) !== JSON.stringify(app.state[name]))
+        trace.push(`${p.bind ? "set" : "tap"} ${node.name ?? title}: ` + Object.keys({ ...was, ...app.state }).filter((name) => JSON.stringify(was[name]) !== JSON.stringify(app.state[name]))
           .map((name) => `${name} ${short(was[name])} -> ${short(app.state[name])}`).join(", "));
-        if (look(screen()) === seen) faults.push(`smoke run: ${title} changes a value, and no part of the screen shows it`);
+        if (look(screen()) === seen) faults.push([title, "changes a value, and no part of the screen shows it"]);
         else if (onOff(node) && look({ ...(after.find((control) => control.key === key)?.node ?? {}), children: [] }) === own) {
           // One on-off button can show its effect in a different part of the screen. A group of them cannot: the person must see which ones are on.
-          const text = `${title} turns a value on and off, and looks the same in both states. Give it selected=test`;
-          if ((parent?.children ?? []).filter(onOff).length > 1) faults.push("smoke run: " + text); else notes.push(text);
+          const finding = [title, "turns a value on and off, and looks the same in both states. Give it selected=test"];
+          ((parent?.children ?? []).filter(onOff).length > 1 ? faults : notes).push(finding);
         }
         const later = retryIdle(after);
         // A control that brings new controls to the screen: the run goes on from that state.
@@ -211,22 +217,25 @@ function smokeRun(file, limit, clock) {
   [start, ...tabStates].forEach(walkFrom);
   drain();
   // Work past the budget stops the run: each later step stops at once, so the findings after it would be wrong.
-  if (app.tripped) return { faults: faults.some((fault) => fault.includes(`more than ${STEPS} steps`)) ? faults : [...faults, `smoke run: ${app.told}`], notes, trace };
+  if (app.tripped) {
+    const found = grouped(faults, "smoke run: ");
+    return { faults: found.some((fault) => fault.includes(`more than ${STEPS} steps`)) ? found : [...found, `smoke run: ${head(app.told)}`], notes: grouped(notes, ""), trace };
+  }
   // A control that changed nothing in each state that the run tried. A field is not in this list: the run cannot know a value that it accepts.
   for (const title of idle.values()) faults.push(`smoke run: ${title} never changes a value: its action does nothing`);
-  const never = all.filter((key) => !reached.has(key) && !/^0(\.\d+)*$/.test(key));
+  const never = [...new Set(all.filter((key) => !reached.has(key) && !/^0(\.\d+)*$/.test(key)).map((key) => named(key)))];
   if (never.length) faults.push(`smoke run: ${never.slice(0, 3).join(", ")}${never.length > 3 ? ` and ${never.length - 3} more` : ""} never comes to the screen: it is in a part that stays hidden, or it stays disabled. A control that the person can reach must show it`);
-  // Many controls with the same finding become one line.
-  const grouped = (lines) => {
-    const byText = new Map();
-    for (const line of lines) {
-      const match = /^(smoke run: )?(\S+) (.*)$/.exec(line), text = match && !line.includes(": ", 11) && !line.includes(" never comes ") ? match[3] : null;
-      if (!text) { byText.set(line, null); continue; }
-      byText.set(text, [...(byText.get(text) ?? []), [match[1] ?? "", match[2]]]);
-    }
-    return [...byText].map(([text, names]) => (names ? `${names[0][0]}${names.slice(0, 3).map((name) => name[1]).join(", ")}${names.length > 3 ? ` and ${names.length - 3} more` : ""} ${text}` : text));
-  };
-  return { faults: grouped(faults), notes: grouped(notes), trace };
+  return { faults: grouped(faults, "smoke run: "), notes: grouped(notes, ""), trace };
+}
+
+/** Many controls with the same finding become one line, after prefix. A finding of a control is [title, text], and each other finding is a line. */
+function grouped(findings, prefix) {
+  const byText = new Map();
+  for (const finding of findings) {
+    const [title, text] = Array.isArray(finding) ? finding : [null, finding];
+    byText.set(text, title === null ? null : [...(byText.get(text) ?? []), title]);
+  }
+  return [...byText].map(([text, titles]) => (titles ? `${prefix}${titles.slice(0, 3).join(", ")}${titles.length > 3 ? ` and ${titles.length - 3} more` : ""} ${text}` : text));
 }
 
 /** The two sides that an expectation compares: a comparison, or near(a, b). Null for each other expression. */
@@ -277,7 +286,7 @@ export function runChecks(file) {
  * each hole has a view from an author, each need is on the screen, and a check uses each piece of logic that a model wrote.
  * Logic inside a part belongs to the host, so it needs no check.
  */
-function gaps(file, reached) {
+function gaps(file, reached, named) {
   const out = [], paths = [], used = new Set();
   for (const check of file.of("check")) walk(check.tree, (node) => {
     if (node.k === "path" && node.abs) paths.push("$/" + node.segs.join("/"));
@@ -299,14 +308,14 @@ function gaps(file, reached) {
     const lost = (file.made?.get(need.key) ?? []).filter((key) => !linked.has(key));
     if (lost.length) out.push(`need ${need.key}: the part made ${lost.slice(0, 3).join(", ")}${lost.length > 3 ? ` and ${lost.length - 3} more` : ""}, and the screen no longer shows it. To change a part, write the need line again with other arguments`);
   }
-  // A path that no state line or formula line sets is a fault of the line that reads it.
+  // A path that no state line or formula line sets is a fault of the line that reads it: of its need for a need line or a line of a part.
   const roots = new Set([...file.of("state"), ...file.of("formula")].map((entry) => entry.key.split("/")[1]));
   for (const entry of file.entries.values()) {
     // The groups of a tabs or steps need name needs, also as $/NAME (memberName in parts.js). They read no value.
-    const names = new Set();
+    const names = new Set(), line = entry.kind === "need" ? `need ${entry.key}` : named(entry.key);
     if (entry.kind === "need" && ["tabs", "steps"].includes(entry.tree.name) && entry.tree.args?.[1]) walk(entry.tree.args[1], (node) => names.add(node));
     walk(entry.tree, (node) => {
-      if (node.k === "path" && node.abs && !names.has(node) && !roots.has(node.segs[0])) out.push(`${entry.key} reads $/${node.segs[0]}, and no line sets it`);
+      if (node.k === "path" && node.abs && !names.has(node) && !roots.has(node.segs[0])) out.push(`${line} reads $/${node.segs[0]}, and no line sets it`);
     });
   }
   for (const entry of file.entries.values()) {
@@ -425,7 +434,11 @@ function circles(file, named) {
 export function report(file) {
   const app = new App(file);
   app.tree(true);
-  const broken = Object.keys(app.state).filter((name) => !finite(app.state[name])).map((name) => `$/${name} is not a finite number at the start`), named = faultName(file);
+  const named = faultName(file), broken = Object.keys(app.state).filter((name) => !finite(app.state[name])).map((name) => {
+    // A formula of a part names its need.
+    const line = named("$/" + name);
+    return `${line === "$/" + name ? "" : line + ": "}$/${name} is not a finite number at the start`;
+  });
   const faults = [
     // A line of many thousand characters, such as one with too many levels, gives its start only.
     ...[...file.faults, ...file.partFaults].map((f) => `${f.line == null ? "line" : "line " + f.line}: ${f.message}: ${f.text.length > 200 ? f.text.slice(0, 200) + "..." : f.text}`),
@@ -433,7 +446,7 @@ export function report(file) {
     ...circles(file, named),
     ...broken,
     ...(file.get("root") ? [] : ["no root line"]),
-    ...gaps(file, app.reached),
+    ...gaps(file, app.reached, named),
     ...looks(file, named),
   ];
   // The smoke run needs a screen that builds. So it runs only when nothing else is wrong.

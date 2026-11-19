@@ -174,7 +174,11 @@ export function parseExpression(text) {
 export function parseLine(raw) {
   const line = raw.trim();
   if (!line || line.startsWith("#")) return null;
-  const entry = (kind, key, text) => ({ kind, key, tree: parseExpression(text), raw: line });
+  const entry = (kind, key, text) => {
+    const tree = parseExpression(text);
+    if (kind === "need" && tree.k !== "call") throw new DslError(MESSAGES ? 'a need line is one call of a part, such as need x = entries("Items")' : "");
+    return { kind, key, tree, raw: line };
+  };
   let match;
   if ((match = /^delete\s+check\s*\(\s*"(.*)"\s*\)$/.exec(line))) return { kind: "delete", key: "check:" + match[1], tree: null, raw: line };
   // "delete need NAME" is the same as "delete NAME": a model writes the word need as the need line has it (f0 trip-dates).
@@ -185,6 +189,7 @@ export function parseLine(raw) {
   if (/^app\s*\(/.test(line)) return entry("app", "app", line);
   if (/^check\s*\(/.test(line)) {
     const tree = parseExpression(line);
+    if (tree.k !== "call" || tree.name !== "check") throw new DslError(MESSAGES ? 'a check line is one call of check, such as check("name", [steps])' : "");
     return { kind: "check", key: "check:" + (tree.args[0]?.v ?? ""), tree, raw: line };
   }
   if ((match = /^([\p{L}_][\p{L}\p{N}_]*)\s*=(?!=)(.*)$/u.exec(line))) return entry("component", match[1], match[2]);

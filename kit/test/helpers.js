@@ -10,6 +10,7 @@ import { App, settings } from "../src/core.js";
 import { report } from "../src/check.js";
 import { emit, runtime } from "../src/emit.js";
 import { handle } from "../src/run.js";
+import { compileAppFile } from "../src/compile.js";
 import { plansIn, runtimeText } from "../build.js";
 
 // The bundle gives emit.js the text of the run-time (kit/build.js). A test of the sources gives it the same text from the sources of now.
@@ -35,6 +36,8 @@ export const live = event("liveInput");
 /** The value at a path of an Alphy state, such as "prodotti_s.new_nome" or "d.size_text". */
 export const valueAt = (state, path) => path.split(".").reduce((value, key) => value?.[key], state);
 export const planned = async (text) => { const file = new AppFile().feedText(text); await expand(file); return file; };
+/** The faults of the compile step for the lines of a plan, after its header. */
+export const faultsOf = async (...lines) => (await compileAppFile(['app("T", lang="en")', ...lines].join("\n"))).faults;
 /** The definition and the compiled app of the plan of these lines, which the emitter builds with no fault. */
 export const built = async (...lines) => {
   const result = emit(await planned(lines.join("\n")));

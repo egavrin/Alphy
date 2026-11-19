@@ -6,7 +6,7 @@ import { App, settings } from "../src/core.js";
 import { ACCENTS, LIMITS, STAGE, budgetOf, polygonsOf } from "../src/draw.js";
 import { emit } from "../src/emit.js";
 import { handle, kitOf, screen } from "../src/run.js";
-import { allPlans, every, fixture, plan, planned, press, valueAt } from "./helpers.js";
+import { allPlans, every, faultsOf, fixture, plan, planned, press, valueAt } from "./helpers.js";
 import { compileAppFile } from "../src/compile.js";
 
 /** Alphy's rule for a state field and an action id (ToolValueSchema.name, ToolUiCatalog). */
@@ -902,9 +902,6 @@ test("emit: the inner names of the state of a need do not depend on the needs be
   expect(alone).toContain("on");
   expect(await inner(['need t1 = timer("A", 5, rounds=2)', 'need t2 = timer("B", 5, rounds=2)'])).toEqual(alone);
 });
-
-/** The faults of the compile step for the lines of a plan, after its header. */
-const faultsOf = async (...lines) => (await compileAppFile(['app("T", lang="en")', ...lines].join("\n"))).faults;
 
 test("emit: a literal text of more than 300 characters is bound, so Alphy shows it in full (final review 11)", async () => {
   // Alphy takes a literal text of 1 to 300 characters, and a bound text up to 2048 in its value (ToolUiCatalog, ToolValueSchema).
