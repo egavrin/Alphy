@@ -10,6 +10,8 @@ object GraphicsContract {
     const val FRAME_BYTES=32768
     /** Asynchronous submission-to-result watchdog, not script CPU time or a frame-rate guarantee. */
     const val EVALUATION_MS=100L
+    /** The color role of a drawing that follows the theme. NativeToolUi.drawingRoles gives its color. */
+    internal const val SURFACE_ROLE="surface"
     class Budget {
         internal var commands=0
         internal var pairs=0
@@ -93,7 +95,7 @@ object GraphicsContract {
      * drawing (NativeToolUi.drawingRoles) passes too. The text of a fault leaves it out, so a prompt does not change (L1 item 6).
      */
     private fun color(value: Any,path: String,orGradient: Boolean) {
-        if(value is String && (value in ToolUiCatalog.tones || value == "surface" || value.matches(hexColor))) return
+        if(value is String && (value in ToolUiCatalog.tones || value == SURFACE_ROLE || value.matches(hexColor))) return
         val expected=ToolUiCatalog.tones.joinToString(", ")+", #RRGGBB, "+if(orGradient) "#AARRGGBB, or a gradient object" else "or #AARRGGBB"
         throw ToolValidationFailure(ToolValidationCategory.DRAWING,ToolValidationDetails("drawing.color",path,expected,"\"${value.toString().take(40)}\""))
     }

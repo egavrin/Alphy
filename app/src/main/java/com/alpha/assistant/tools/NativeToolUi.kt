@@ -367,7 +367,7 @@ internal fun ColorScheme.toolInk(name: String, background: Color): Color {
  * text in surface reads on a shape in an ink (L1 item 6).
  */
 internal fun ColorScheme.drawingRoles(background: Color): Map<String, Int> =
-    ToolUiCatalog.tones.associateWith { toolInk(it, background).toArgb() } + ("surface" to surfaceContainerLowest.toArgb())
+    ToolUiCatalog.tones.associateWith { toolInk(it, background).toArgb() } + (GraphicsContract.SURFACE_ROLE to surfaceContainerLowest.toArgb())
 
 @Composable private fun toolInk(name: String?): Color = when (name) {
     null, "", "default" -> LocalContentColor.current
