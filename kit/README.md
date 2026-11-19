@@ -88,7 +88,7 @@ In a row of a list, a look value must not read a field of the row, such as `$don
 
 | Option | Components | Values |
 | --- | --- | --- |
-| `icon` | `Button`, `IconButton` (first argument), `Metric`, `Badge`, `Notice`, `Card`, `TextField`, `NumberField`, `Select`, `DateField`, `TimeField` | Each icon of Alphy (`src/icons.js`), and the kit names `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`, and `Edit`. A `Select` of six options or fewer is a segmented control or a group of cells (see `input` under Parts), which shows no icon. |
+| `icon` | `Button`, `IconButton` (first argument), `Metric`, `Badge`, `Notice`, `Card`, `TextField`, `NumberField`, `Select`, `DateField`, `TimeField` | Each icon of Alphy (`src/icons.js`), and the kit names `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`, and `Edit`. A `Select` of six options or fewer is a segmented control, which shows no icon. |
 | `variant` | `Button` | `filled`, `outlined`, `text`, `tonal`. With no variant, the host decides. `selected=` gives `filled` or `tonal`. |
 | `variant` | `Text`, `Card`, `CheckBox`, `Progress` | `muted` and `eyebrow`, `hero`, `circle`, `bar` and `dots`. |
 | `size` | `Emoji` | `small`, `medium`, `large`. |
@@ -152,11 +152,10 @@ A text that a format function printed is for a person: do not read it back as a 
   - An editable row (`edit=true`) is one line that wraps (L1 item 1). A text field there is as wide as the host lets it be (up to 300 dp), so on a phone it has a line of its own. The first text field shares its line only with the emoji, and each other control keeps the width of its content.
     A count of a row is one group of a minus button, a number field with no stepper of its own, and a plus button, on a line of its own.
 - `input`: `options={value: "Label"}` keeps the value in the state and shows the label. `icon=` goes to a text, number, date, or time field and to a choice of more than six options.
-  A single choice of more than six options is a select. A choice of six options or fewer is a segmented control when its labels fit a segmented row on the phone, else a group of cells that wraps, with one cell selected (L1 item 4, `run.js` `choice`).
-  The labels fit when the number of options times the width of the widest label is 345 dp or less, and 300 dp in a row of a list. The width of a label is 29 dp and, for each letter, 4 dp for a narrow letter, 11 dp for a wide one, 13 dp for a letter of a wide script such as CJK, and 8 dp for another letter.
-  The estimate is fitted to the Roboto and Noto CJK fonts of the phone, within about 1.5 dp. The rule uses the width of the phone also on a wide screen.
-  The host draws no title over the group of cells, so a text with the label of the choice stands over it. In a row of a list the group has no such text, and the host names it to a screen reader.
-  The host draws a segmented control with no icon. Each kind of input takes `icon=`: on a segmented control, a group of cells, a slider, a range slider, a multi-choice, or a toggle it is a note, and the kit leaves it out.
+  A single choice of more than six options is a select, and a choice of six options or fewer is a segmented control.
+  Alphy measures the labels at the width that the control gets (`NativeToolUi.kt` `NativeChoices`, L1 item 4). When the widest label and the check of a selected option do not fit the share of one option, the options are cells that wrap.
+  Each cell shows its label whole on one line, and the selected cell has the colors of a selected segment. The title of the choice stands over the cells, as over a segmented row. So one plan can show cells on a phone and a segmented row on a wide screen.
+  The host draws a segmented control with no icon. Each kind of input takes `icon=`: on a segmented control, a slider, a range slider, a multi-choice, or a toggle it is a note, and the kit leaves it out.
   Each other option of an input is only for its own kinds: `min=` on a text field is a fault.
   The kinds are `number`, `money`, `percent`, `count`, `range`, `choice`, `choices`, `toggle`, `text`, `date`, and `time`. Each other kind, such as `slider`, is a fault of the need.
   The kind `range` writes `RangeSlider(label, $/x, min=, max=, step=)`: one state value of two numbers in order, the low and the high (`$/price[0]`, `$/price[1]`).
@@ -167,6 +166,7 @@ A text that a format function printed is for a person: do not read it back as a 
   The other figures of one place are a set. A place is one group of a `steps` or `tabs` need, or the screen for the needs that no such need groups. A figure never leaves its place, and a figure that two groups name is a metric in each of them.
   - Two figures of a set that stand one after the other are a grid of two metrics, each with its `icon=`. Two figures with another need between them stay two metrics.
   - Three figures or more of a set are rows of one size: the title at the left and the value at the right. `icon=` is a small sign at the left of the title: an emoji, or an icon of Alphy with no action.
+    A row of a figure is at most 360 dp wide (`Row(..., max=360)`), as a counter is, so on a wide screen its value stays near its title (L1 item 8). The content of a phone is about 346 dp wide, so there the row fills the line.
   - On a figure that is not the main one, an emoji where a metric needs an icon of Alphy and a name that Alphy does not have are notes, and the kit leaves the icon out.
   - One figure of a set is a metric.
   `note=`, `goal=`, and `goalText=` show only on the main figure: on another figure they are a note, and the kit leaves them out. `goalText=` with no `goal=` is a note too.
