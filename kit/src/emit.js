@@ -3,6 +3,7 @@
 
 import { App, foreground, given, shownFormulas } from "./core.js";
 import { show } from "./dsl.js";
+import { faultName, needsOf } from "./parts.js";
 import { ALPHY, MAX_ROW_FIELDS, MAX_ROWS, namer, own } from "./rows.js";
 import { LIMITS, budgetOf, utf8 } from "./draw.js";
 import { IDLE } from "./drag.js";
@@ -46,8 +47,7 @@ export function emit(file) {
   const name = namer();
   if (typeof title !== "string" || title.length < 1 || title.length > 100) faults.push("app: the app line needs a title of 1 to 100 characters");
   // The need whose part wrote each line. A line that an author wrote belongs to no need, and a fault of it names the line.
-  const partOf = new Map([...(file.partLines ?? [])].flatMap(([need, keys]) => keys.map((key) => [key, need])));
-  const label = (line) => (file.get(line)?.origin === "part" && partOf.has(line) ? `need ${partOf.get(line)}` : line);
+  const partOf = needsOf(file), label = faultName(file, partOf);
   // The value that each TimeField, DateField, and Choices binds: Alphy keeps a time as minutes, a date as a real date, and choices as an array.
   const bound = new Map();
   const scan = (tree) => {

@@ -4,6 +4,7 @@
 import { HOST_ICONS } from "./icons.js";
 import { show } from "./dsl.js";
 import { App, CATALOG, ICON_NAMES, given, settings } from "./core.js";
+import { faultName } from "./parts.js";
 
 /** Calls visit for each node of an expression tree. */
 function walk(node, visit) {
@@ -304,27 +305,37 @@ const choices = (tree) => {
 /**
  * The faults of the look options of each component line: an option that the component does not take, and a value that Alphy does not
  * take. Each value of a choice is checked, also in a row of a list and in a part of the screen that is hidden, so Alphy never refuses one later.
+ * named gives the name of a line in a fault (parts.js faultName).
  */
-function looks(file) {
+function looks(file, named) {
   const out = [];
+  // What draws a row of a list: the template of each List, inline or a line, and each line that it names. A line outside them has no row,
+  // and the evaluator says so when one of its values reads a field of a row.
+  const rowLines = new Set(), inline = new Set();
+  for (const entry of file.of("component")) walk(entry.tree, (node) => {
+    const template = node.k === "call" && node.name === "List" ? given(node).template : null;
+    if (template?.k === "ref") rowLines.add(template.name);
+    else if (template) walk(template, (inner) => { inline.add(inner); if (inner.k === "ref") rowLines.add(inner.name); });
+  });
+  for (const key of rowLines) walk(file.get(key)?.tree, (node) => { if (node.k === "ref") rowLines.add(node.name); });
   for (const entry of file.of("component")) walk(entry.tree, (node) => {
     if (node.k !== "call" || !Object.hasOwn(CATALOG, node.name)) return;
-    const props = given(node);
+    const props = given(node), line = named(entry.key), inRow = rowLines.has(entry.key) || inline.has(node);
     // JavaScript puts the keys of an object that are numbers first, in the order of the numbers.
     const number = props.options?.k === "map" ? props.options.entries.find(([key]) => /^\d+$/.test(key)) : null;
-    if (number) out.push(`${entry.key}: a map of options keeps the order of the plan only with keys that are not numbers, and ${JSON.stringify(number[0])} is a number. Give options of numbers as a list`);
+    if (number) out.push(`${line}: a map of options keeps the order of the plan only with keys that are not numbers, and ${JSON.stringify(number[0])} is a number. Give options of numbers as a list`);
     for (const [key, byType] of Object.entries(LOOKS)) {
       if (!props[key]) continue;
       const allowed = Object.hasOwn(byType, node.name) ? byType[node.name] : null, values = choices(props[key]), what = `the ${key} of ${/^[AEIOU]/.test(node.name) ? "an" : "a"} ${node.name}`;
       let field = null;
       walk(props[key], (inner) => { if (!field && inner.k === "path" && !inner.abs) field = show(inner); });
-      if (!allowed) out.push(`${entry.key}: ${node.name} has no property ${key}`);
-      else if (!values) out.push(`${entry.key}: ${what} is a value in the line, or a choice of values such as $/on ? "a" : "b"`);
+      if (!allowed) out.push(`${line}: ${node.name} has no property ${key}`);
+      else if (!values) out.push(`${line}: ${what} is a value in the line, or a choice of values such as $/on ? "a" : "b"`);
       // Alphy has no style of one row: the run-time computes the template once, from a blank row.
-      else if (field) out.push(`${entry.key}: ${what} reads ${field}, a field of a row. One template draws each row of a list, so a look value in a row must not read a field of the row. Use a value of the app, such as $/on ? "a" : "b"`);
-      else for (const value of values) {
+      else if (field && inRow) out.push(`${line}: ${what} reads ${field}, a field of a row. One template draws each row of a list, so a look value in a row must not read a field of the row. Use a value of the app, such as $/on ? "a" : "b"`);
+      else if (!field) for (const value of values) {
         const one = key === "icon" ? "the name of an icon of Alphy, such as Plus, Check, Trash, Pencil, Star, or Heart" : `one of ${allowed.join(", ")}`;
-        if (!allowed.includes(value)) out.push(`${entry.key}: ${what} is ${one}, and ${JSON.stringify(value)} is not one`);
+        if (!allowed.includes(value)) out.push(`${line}: ${what} is ${one}, and ${JSON.stringify(value)} is not one`);
       }
     }
   });
@@ -335,14 +346,14 @@ function looks(file) {
 export function report(file) {
   const app = new App(file);
   app.tree(true);
-  const broken = Object.keys(app.state).filter((name) => !finite(app.state[name])).map((name) => `$/${name} is not a finite number at the start`);
+  const broken = Object.keys(app.state).filter((name) => !finite(app.state[name])).map((name) => `$/${name} is not a finite number at the start`), named = faultName(file);
   const faults = [
     ...[...file.faults, ...file.partFaults].map((f) => `${f.line == null ? "line" : "line " + f.line}: ${f.message}: ${f.text}`),
-    ...app.faults.map((f) => `${f.where}: ${f.message}`),
+    ...app.faults.map((f) => `${named(f.where)}: ${f.message}`),
     ...broken,
     ...(file.get("root") ? [] : ["no root line"]),
     ...gaps(file, app.reached),
-    ...looks(file),
+    ...looks(file, named),
   ];
   // The smoke run needs a screen that builds. So it runs only when nothing else is wrong.
   const run = settings.gate === "smoke" && !faults.length ? smoke(file) : { faults: [], notes: [] };

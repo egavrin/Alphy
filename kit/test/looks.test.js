@@ -7,7 +7,7 @@ import { compileAppFile } from "../src/compile.js";
 import { App } from "../src/core.js";
 import { emit } from "../src/emit.js";
 import { handle } from "../src/run.js";
-import { every, fixture, plan, planned } from "./helpers.js";
+import { every, fixture, planned } from "./helpers.js";
 
 /** The children of the app's column of a plan that the emitter builds with no fault. */
 const shown = async (...lines) => {
@@ -200,6 +200,30 @@ test("look: a look value in a row of a list must not read a field of the row, an
   expect(list.bind).toBe("items");
 });
 
+test("look: a look value that reads a row field is a fault in each place of a row template, and only there", async () => {
+  const faultsOf = async (...lines) => report(await planned(['app("Look", lang="en")', '$/items = [{name: "A", done: true}]', ...lines].join("\n"))).faults;
+  const rowFault = (line) => `${line}: the tone of a Text reads $done, a field of a row. One template draws each row of a list, so a look value in a row must not read a field of the row. Use a value of the app, such as $/on ? "a" : "b"`;
+  // if() as the choice, and the Text inside a Column of the row.
+  expect(await faultsOf("root = Column([items])", "items = List($/items, item)", 'item = Row([Column([Text($name, tone=if($done, "success", "error"))], weight=1)])'))
+    .toEqual([rowFault("item")]);
+  // A line that the template names, and a template inline in the List line.
+  expect(await faultsOf("root = Column([items, inline])", "items = List($/items, item)", "item = Row([cell])", 'cell = Text($name, tone=$done ? "success" : "error")',
+    'inline = List($/items, Row([Text($name, tone=$done ? "success" : "error")]))')).toEqual([rowFault("cell"), rowFault("inline")]);
+  // A line outside each list has no row: the fault of the evaluator says so, and no fault speaks of a row.
+  expect(await faultsOf("root = Column([alone])", 'alone = Text("x", tone=$done ? "success" : "error")'))
+    .toEqual(["alone: tone: $done is a field of a list row, and there is no row here. A value of the app is $/done"]);
+});
+
+test("look: a fault of a line that a part wrote names the need, and an option that a part does not take is a fault of the need", async () => {
+  expect(await faultsOf("$/n = 0", 'need b = button("Go", inc($/n), variant="fab")')).toEqual([
+    'need b: the variant of a Button is one of filled, outlined, text, tonal, and "fab" is not one']);
+  expect(await faultsOf("$/n = 0", 'need b = button("Go", inc($/n), varient="filled")')).toEqual(["need b: Button has no property varient"]);
+  const faults = await faultsOf('need tasks = entries("Tasks", fields={task: "text"}, colour="red")', 'need cups = counter("Cups", 0, stepp=2)');
+  expect(faults).toEqual([
+    'line: need tasks: entries has no option colour. Its options are fields, labels, rows, hidden, add, edit, remove, confirm, yes, no, emptyText, addText, show, reorder, filter, sort, order, group, sheet: need tasks = entries("Tasks", fields={task: "text"}, colour="red")',
+    'line: need cups: counter has no option stepp. Its options are step, min, max: need cups = counter("Cups", 0, stepp=2)']);
+});
+
 test("look: the button back of the pages of a deck, of the steps, and of a lesson is outlined, and each button forward is filled", async () => {
   const variants = (ui, ...actions) => actions.map((action) => every(ui).find((node) => node.action === action)?.variant);
   const { definition, faults } = emit(await planned(['app("Parts", lang="en")',
@@ -210,10 +234,14 @@ test("look: the button back of the pages of a deck, of the steps, and of a lesso
   // Alphy fills the first available button with no variant. A disabled forward button on the last step would make Back the filled one.
   expect(variants(definition.ui, "book_prev", "book_next", "wiz_back", "wiz_next", "wiz_finish", "les_back", "les_next"))
     .toEqual(["outlined", "filled", "outlined", "filled", "filled", "outlined", "filled"]);
-  // The saved lesson after one step forward: Back is enabled and stays outlined, and Next stays filled.
-  const lesson = emit(await planned(plan("lesson")));
-  const reply = handle({ artifactId: "kit-test", revision: 1, state: lesson.definition.initialState, event: { type: "action", actionId: "lesson_next" } }, lesson.app);
-  expect([reply.state.lesson, variants(reply.ui ?? lesson.definition.ui, "lesson_back", "lesson_next")]).toEqual([2, ["outlined", "filled"]]);
+  // A lesson after one step forward: Back is enabled and stays outlined, and Next stays filled. The bound texts of a lesson keep its screen
+  // the same, and a reply holds a ui only when the screen changes, so a Text with a look of the step makes the reply hold one.
+  const lesson = emit(await planned(['app("Lesson", lang="en")', 'need les = lesson([{title: "A", text: "a"}, {title: "B", text: "b"}, {title: "C", text: "c"}])',
+    'hint = Text("Step", tone=$/les > 1 ? "accent" : "muted")', "root = Column([les_view, hint])"].join("\n")));
+  expect(lesson.faults).toEqual([]);
+  const reply = handle({ artifactId: "kit-test", revision: 1, state: lesson.definition.initialState, event: { type: "action", actionId: "les_next" } }, lesson.app);
+  expect(reply.ui).toBeDefined();
+  expect([reply.state.les, reply.state.v.les_back_enabled, variants(reply.ui, "les_back", "les_next")]).toEqual([2, true, ["outlined", "filled"]]);
 });
 
 test("look: looks.plan holds each look option and a Grid, and compiles with no fault", async () => {

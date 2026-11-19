@@ -420,6 +420,23 @@ const PARTS = {
 };
 
 export const PART_KINDS = Object.keys(PARTS);
+/**
+ * The named options of each part. An option that is not here is a fault of the need, never an option that the part drops with no word.
+ * button gives each option to its Button, whose own check names each one that a Button does not take.
+ */
+const OPTIONS = {
+  input: ["options", "min", "max", "step"], figure: ["decimals", "example"],
+  entries: ["fields", "labels", "rows", "hidden", "add", "edit", "remove", "confirm", "yes", "no", "emptyText", "addText", "show", "reorder", "filter", "sort", "order", "group", "sheet"],
+  chart: ["kind"], deck: ["front", "back", "mark", "answer", "picture", "field", "check", "right", "wrong", "next", "again", "done", "points", "prev", "show", "yes", "no"],
+  steps: ["back", "next", "finish", "done"], tabs: ["title"], progress: [], counter: ["step", "min", "max"],
+  timer: ["alert", "rounds", "rest", "start", "pause", "reset", "done", "workText", "restText"], picture: ["found", "caption", "credit", "tag"], drawing: [],
+  model3d: ["turn", "parts", "explode", "joinText", "explodeText"], card: ["eyebrow"], link: ["note"], lesson: ["next", "back", "stepText"],
+  question: ["options", "right", "rightText", "wrongText"], content: [], hole: [],
+};
+/** The need whose part wrote each line, by the name of the line. */
+export const needsOf = (file) => new Map([...(file.partLines ?? [])].flatMap(([need, keys]) => keys.map((key) => [key, need])));
+/** The name of a line in a fault: "need NAME" for a line that a part wrote, so that each fault names a line that the author wrote. */
+export const faultName = (file, partOf = needsOf(file)) => (line) => (file.get(line)?.origin === "part" && partOf.has(line) ? `need ${partOf.get(line)}` : line);
 
 /**
  * Expands every need of the file that is new or changed. Returns the new lines and feeds them into the file.
@@ -446,6 +463,10 @@ export async function expand(file, choose = rules) {
   for (const entry of [...needs.filter((entry) => !holder(entry)), ...needs.filter(holder)]) {
     const part = entry.tree.k === "call" && Object.hasOwn(PARTS, entry.tree.name) ? PARTS[entry.tree.name] : null;
     if (!part) { file.partFaults.push({ line: null, text: entry.raw, message: `no part for need kind ${entry.tree.name ?? "?"}` }); continue; }
+    const options = Object.hasOwn(OPTIONS, entry.tree.name) ? OPTIONS[entry.tree.name] : null;
+    for (const key of options ? Object.keys(entry.tree.named).filter((key) => !options.includes(key)) : []) {
+      file.partFaults.push({ line: null, text: entry.raw, message: `need ${entry.key}: ${entry.tree.name} has no option ${key}. ${options.length ? `Its options are ${options.join(", ")}` : "It takes no option"}` });
+    }
     let built, parsed;
     try {
       built = await part(entry.key, entry.tree, { choose, hero, tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });

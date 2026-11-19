@@ -827,7 +827,7 @@ const settings = { gate: "smoke", now: () => Date.now() };
 return { CATALOG, ICON_NAMES, ACTIONS, TONES, explode, dayNumber, FUNCTIONS, phased, foreground, shownFormulas, given, App, settings };
 })();
 // parts.js
-const { rules, PART_KINDS, expand } = (() => {
+const { rules, PART_KINDS, needsOf, faultName, expand } = (() => {
 // Generic parts. A part turns one need line into ordinary app lines: state, formulas, components, and checks.
 // After that the lines are plain lines. The loop can patch each one by its name.
 // A part is a kind of need, never a named app.
@@ -1250,6 +1250,23 @@ const PARTS = {
 };
 
 const PART_KINDS = Object.keys(PARTS);
+/**
+ * The named options of each part. An option that is not here is a fault of the need, never an option that the part drops with no word.
+ * button gives each option to its Button, whose own check names each one that a Button does not take.
+ */
+const OPTIONS = {
+  input: ["options", "min", "max", "step"], figure: ["decimals", "example"],
+  entries: ["fields", "labels", "rows", "hidden", "add", "edit", "remove", "confirm", "yes", "no", "emptyText", "addText", "show", "reorder", "filter", "sort", "order", "group", "sheet"],
+  chart: ["kind"], deck: ["front", "back", "mark", "answer", "picture", "field", "check", "right", "wrong", "next", "again", "done", "points", "prev", "show", "yes", "no"],
+  steps: ["back", "next", "finish", "done"], tabs: ["title"], progress: [], counter: ["step", "min", "max"],
+  timer: ["alert", "rounds", "rest", "start", "pause", "reset", "done", "workText", "restText"], picture: ["found", "caption", "credit", "tag"], drawing: [],
+  model3d: ["turn", "parts", "explode", "joinText", "explodeText"], card: ["eyebrow"], link: ["note"], lesson: ["next", "back", "stepText"],
+  question: ["options", "right", "rightText", "wrongText"], content: [], hole: [],
+};
+/** The need whose part wrote each line, by the name of the line. */
+const needsOf = (file) => new Map([...(file.partLines ?? [])].flatMap(([need, keys]) => keys.map((key) => [key, need])));
+/** The name of a line in a fault: "need NAME" for a line that a part wrote, so that each fault names a line that the author wrote. */
+const faultName = (file, partOf = needsOf(file)) => (line) => (file.get(line)?.origin === "part" && partOf.has(line) ? `need ${partOf.get(line)}` : line);
 
 /**
  * Expands every need of the file that is new or changed. Returns the new lines and feeds them into the file.
@@ -1276,6 +1293,10 @@ async function expand(file, choose = rules) {
   for (const entry of [...needs.filter((entry) => !holder(entry)), ...needs.filter(holder)]) {
     const part = entry.tree.k === "call" && Object.hasOwn(PARTS, entry.tree.name) ? PARTS[entry.tree.name] : null;
     if (!part) { file.partFaults.push({ line: null, text: entry.raw, message: `no part for need kind ${entry.tree.name ?? "?"}` }); continue; }
+    const options = Object.hasOwn(OPTIONS, entry.tree.name) ? OPTIONS[entry.tree.name] : null;
+    for (const key of options ? Object.keys(entry.tree.named).filter((key) => !options.includes(key)) : []) {
+      file.partFaults.push({ line: null, text: entry.raw, message: `need ${entry.key}: ${entry.tree.name} has no option ${key}. ${options.length ? `Its options are ${options.join(", ")}` : "It takes no option"}` });
+    }
     let built, parsed;
     try {
       built = await part(entry.key, entry.tree, { choose, hero, tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
@@ -1328,12 +1349,13 @@ async function expand(file, choose = rules) {
   return out;
 }
 
-return { rules, PART_KINDS, expand };
+return { rules, PART_KINDS, needsOf, faultName, expand };
 })();
 // check.js
 const { smoke, runChecks, report } = (() => {
 // The checks of the host: the report of the faults of an app file, its check lines, and the smoke run that uses each control.
 // The agent loop reads the faults and the check results. An app that runs does not need this file.
+
 
 
 
@@ -1638,27 +1660,37 @@ const choices = (tree) => {
 /**
  * The faults of the look options of each component line: an option that the component does not take, and a value that Alphy does not
  * take. Each value of a choice is checked, also in a row of a list and in a part of the screen that is hidden, so Alphy never refuses one later.
+ * named gives the name of a line in a fault (parts.js faultName).
  */
-function looks(file) {
+function looks(file, named) {
   const out = [];
+  // What draws a row of a list: the template of each List, inline or a line, and each line that it names. A line outside them has no row,
+  // and the evaluator says so when one of its values reads a field of a row.
+  const rowLines = new Set(), inline = new Set();
+  for (const entry of file.of("component")) walk(entry.tree, (node) => {
+    const template = node.k === "call" && node.name === "List" ? given(node).template : null;
+    if (template?.k === "ref") rowLines.add(template.name);
+    else if (template) walk(template, (inner) => { inline.add(inner); if (inner.k === "ref") rowLines.add(inner.name); });
+  });
+  for (const key of rowLines) walk(file.get(key)?.tree, (node) => { if (node.k === "ref") rowLines.add(node.name); });
   for (const entry of file.of("component")) walk(entry.tree, (node) => {
     if (node.k !== "call" || !Object.hasOwn(CATALOG, node.name)) return;
-    const props = given(node);
+    const props = given(node), line = named(entry.key), inRow = rowLines.has(entry.key) || inline.has(node);
     // JavaScript puts the keys of an object that are numbers first, in the order of the numbers.
     const number = props.options?.k === "map" ? props.options.entries.find(([key]) => /^\d+$/.test(key)) : null;
-    if (number) out.push(`${entry.key}: a map of options keeps the order of the plan only with keys that are not numbers, and ${JSON.stringify(number[0])} is a number. Give options of numbers as a list`);
+    if (number) out.push(`${line}: a map of options keeps the order of the plan only with keys that are not numbers, and ${JSON.stringify(number[0])} is a number. Give options of numbers as a list`);
     for (const [key, byType] of Object.entries(LOOKS)) {
       if (!props[key]) continue;
       const allowed = Object.hasOwn(byType, node.name) ? byType[node.name] : null, values = choices(props[key]), what = `the ${key} of ${/^[AEIOU]/.test(node.name) ? "an" : "a"} ${node.name}`;
       let field = null;
       walk(props[key], (inner) => { if (!field && inner.k === "path" && !inner.abs) field = show(inner); });
-      if (!allowed) out.push(`${entry.key}: ${node.name} has no property ${key}`);
-      else if (!values) out.push(`${entry.key}: ${what} is a value in the line, or a choice of values such as $/on ? "a" : "b"`);
+      if (!allowed) out.push(`${line}: ${node.name} has no property ${key}`);
+      else if (!values) out.push(`${line}: ${what} is a value in the line, or a choice of values such as $/on ? "a" : "b"`);
       // Alphy has no style of one row: the run-time computes the template once, from a blank row.
-      else if (field) out.push(`${entry.key}: ${what} reads ${field}, a field of a row. One template draws each row of a list, so a look value in a row must not read a field of the row. Use a value of the app, such as $/on ? "a" : "b"`);
-      else for (const value of values) {
+      else if (field && inRow) out.push(`${line}: ${what} reads ${field}, a field of a row. One template draws each row of a list, so a look value in a row must not read a field of the row. Use a value of the app, such as $/on ? "a" : "b"`);
+      else if (!field) for (const value of values) {
         const one = key === "icon" ? "the name of an icon of Alphy, such as Plus, Check, Trash, Pencil, Star, or Heart" : `one of ${allowed.join(", ")}`;
-        if (!allowed.includes(value)) out.push(`${entry.key}: ${what} is ${one}, and ${JSON.stringify(value)} is not one`);
+        if (!allowed.includes(value)) out.push(`${line}: ${what} is ${one}, and ${JSON.stringify(value)} is not one`);
       }
     }
   });
@@ -1669,14 +1701,14 @@ function looks(file) {
 function report(file) {
   const app = new App(file);
   app.tree(true);
-  const broken = Object.keys(app.state).filter((name) => !finite(app.state[name])).map((name) => `$/${name} is not a finite number at the start`);
+  const broken = Object.keys(app.state).filter((name) => !finite(app.state[name])).map((name) => `$/${name} is not a finite number at the start`), named = faultName(file);
   const faults = [
     ...[...file.faults, ...file.partFaults].map((f) => `${f.line == null ? "line" : "line " + f.line}: ${f.message}: ${f.text}`),
-    ...app.faults.map((f) => `${f.where}: ${f.message}`),
+    ...app.faults.map((f) => `${named(f.where)}: ${f.message}`),
     ...broken,
     ...(file.get("root") ? [] : ["no root line"]),
     ...gaps(file, app.reached),
-    ...looks(file),
+    ...looks(file, named),
   ];
   // The smoke run needs a screen that builds. So it runs only when nothing else is wrong.
   const run = settings.gate === "smoke" && !faults.length ? smoke(file) : { faults: [], notes: [] };
@@ -2508,6 +2540,7 @@ const { runtime, emit } = (() => {
 
 
 
+
 /** The text of the run-time. kit/build.js puts it into the bundle, and a test of the sources sets it from the sources. */
 const runtime = { text: "" };
 /**
@@ -2546,8 +2579,7 @@ function emit(file) {
   const name = namer();
   if (typeof title !== "string" || title.length < 1 || title.length > 100) faults.push("app: the app line needs a title of 1 to 100 characters");
   // The need whose part wrote each line. A line that an author wrote belongs to no need, and a fault of it names the line.
-  const partOf = new Map([...(file.partLines ?? [])].flatMap(([need, keys]) => keys.map((key) => [key, need])));
-  const label = (line) => (file.get(line)?.origin === "part" && partOf.has(line) ? `need ${partOf.get(line)}` : line);
+  const partOf = needsOf(file), label = faultName(file, partOf);
   // The value that each TimeField, DateField, and Choices binds: Alphy keeps a time as minutes, a date as a real date, and choices as an array.
   const bound = new Map();
   const scan = (tree) => {
