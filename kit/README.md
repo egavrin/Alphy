@@ -205,6 +205,8 @@ The kit has no dependencies and no install step.
 The minifier of Bun makes the run-time text, so the bundle depends on the version of Bun.
 Bun 1.3.9 wrote the checked-in bundle, and the first line of the bundle names that version.
 With a different version, `--check` can fail with no change in `kit/src`.
+The directory of the checkout does not change the bundle: the build gives each module to the minifier at a fixed path, such as `/kit/src/run.js`, because Bun 1.3.9 gives other short names for other paths.
+The kit test `build (K1 fix 1)` builds the outputs from a copy of the sources at another path and compares them.
 
 The run-time text leaves out each message that only the compile step reads, such as the text of a fault.
 Each module of the run-time puts such a text behind its line `const MESSAGES = true;`.

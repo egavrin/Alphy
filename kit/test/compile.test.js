@@ -1,14 +1,15 @@
 // The sandbox entry: compileAppFile from the sources, the built bundle in a context with only the language's globals, and the build's own rules.
 
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createContext, runInContext } from "node:vm";
 import { compileAppFile, patchAppFile } from "../src/compile.js";
 import { AppFile } from "../src/dsl.js";
 import { expand } from "../src/parts.js";
-import { bundle, iconModule, planCopies, plansIn, script, withoutMessages } from "../build.js";
+import { bundle, iconModule, outputs, planCopies, plansIn, script, withoutMessages } from "../build.js";
 import { HOST_ICONS } from "../src/icons.js";
 import { emit } from "../src/emit.js";
 import { handle } from "../src/run.js";
@@ -182,6 +183,22 @@ test("build: a copy of a plan whose source is gone is in the outputs with no tex
     writeFileSync(join(root, "copies", "gone.plan"), "gone\n");
     expect(planCopies(plansIn(join(root, "plans")), join(root, "copies"))).toEqual([[join(root, "copies", "kept.plan"), "kept\n"], [join(root, "copies", "gone.plan"), null]]);
   } finally { rmSync(root, { recursive: true }); }
+});
+
+test("build (K1 fix 1): a copy of the sources at a different path gives the same outputs, so the bundle does not depend on the directory of the checkout", async () => {
+  // A merge puts the kit into a checkout at another path: there the check failed, and a build wrote other short names into the run-time.
+  const root = fileURLToPath(new URL("../..", import.meta.url)), copy = join(realpathSync(mkdtempSync(join(tmpdir(), "kit-checkout-"))), "a", "deeper", "checkout");
+  try {
+    cpSync(join(root, "kit"), join(copy, "kit"), { recursive: true });
+    for (const name of ["ToolUiCatalog", "ToolIcons"]) {
+      const path = `app/src/main/java/com/alpha/assistant/tools/${name}.kt`;
+      mkdirSync(dirname(join(copy, path)), { recursive: true });
+      copyFileSync(join(root, path), join(copy, path));
+    }
+    const ours = new Map((await outputs()).map(([path, text]) => [relative(root, path), text]));
+    const theirs = (await (await import(join(copy, "kit", "build.js"))).outputs()).map(([path, text]) => [relative(copy, path), text]);
+    expect([theirs.length, theirs.filter(([path, text]) => ours.get(path) !== text).map(([path]) => path)]).toEqual([ours.size, []]);
+  } finally { rmSync(dirname(dirname(dirname(copy))), { recursive: true }); }
 });
 
 const APP = 'app("T", lang="en")', WORK = `: the app needs more than ${STEPS} steps of work`;

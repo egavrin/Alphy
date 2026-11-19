@@ -72,11 +72,13 @@ export function withoutMessages(name, text) {
  * The source is a function body, so handle and __handle are locals of the app's function and the global object gets no name.
  * Each module comes without its MESSAGES line, and define makes the name false, so the minifier leaves out each message that only
  * the compile step reads. Bun 1.3.9 folds a constant of a module with an import into no other line, so a false const is not enough.
+ * Each module goes to Bun.build at a fixed path, never at its path in the checkout: Bun 1.3.9 gives other short names for other
+ * paths (K1 fix 1: a checkout at another path wrote another bundle), so the text depends on the sources only.
  */
 export async function runtimeText() {
   const entry = "/kit-runtime-entry.js";
-  const modules = Object.fromEntries(MODULES.map((name) => [at(`src/${name}.js`), withoutMessages(name, source(name)[1])]));
-  const built = await Bun.build({ entrypoints: [entry], files: { [entry]: `import { handle } from ${JSON.stringify(at("src/run.js"))};\n__handle(handle);\n`, ...modules },
+  const modules = Object.fromEntries(MODULES.map((name) => [`/kit/src/${name}.js`, withoutMessages(name, source(name)[1])]));
+  const built = await Bun.build({ entrypoints: [entry], files: { [entry]: 'import { handle } from "/kit/src/run.js";\n__handle(handle);\n', ...modules },
     minify: true, format: "iife", target: "browser", define: { MESSAGES: "false" } });
   if (!built.success) throw new AggregateError(built.logs, "kit/build.js: Bun.build of the run-time failed");
   return `let handle;const __handle=(f)=>{handle=f};\n${(await built.outputs[0].text()).trim()}`;
@@ -104,7 +106,7 @@ export const LOOK_FIXTURES = ["water-ko", "units-pl", "shopping", "habits", "pri
  * Each file that the build writes, with its text. The device tests also read the test plans of the node table, the lists, the render work limit, the cards, the free forms, the shapes, the reply at the byte limit, and a model beside a drawing, and the look fixtures.
  * The plans that a model wrote (test/fixtures/model) go to a directory of their own, appfile/model, with their index: the device test reads the request of each plan.
  */
-const outputs = async () => [[at("src/icons.js"), iconModule()], [at("../app/src/main/assets/appfile/kit.js"), await bundle()],
+export const outputs = async () => [[at("src/icons.js"), iconModule()], [at("../app/src/main/assets/appfile/kit.js"), await bundle()],
   ...planCopies([...plansIn(at("plans")), ...["nodes", "looks", "lists", "rich", "cards", "free", "shapes", "bytes", "model"].map((name) => at(`test/${name}.plan`)), ...LOOK_FIXTURES],
     at("../app/src/androidTest/assets/appfile")),
   ...planCopies(plansIn(at("test/fixtures/model")), at("../app/src/androidTest/assets/appfile/model")),
