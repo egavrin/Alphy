@@ -73,7 +73,7 @@ internal val PICK="app(\"Pick\", lang=\"en\")\nneed people = entries(\"People\",
     "pick = Select(\"Who\", \$/who, map(\$/people, \$name))\nneed k = input(\"choice\", \"K\", \"b\", options=[\"a\", \"b\"])\nreset = Button(\"Reset\", set(\$/k, \"\"))\n" +
     "root = Column([pick, people_view, k_field, reset])\n"
 
-/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps, each node of the node table, and each look option in Alphy's checks, the numbers of a figure in pl and de, a range, a map of options, and an icon of a field, a hero figure with an emoji, a bar, and a note, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, the time of each saved plan with its lists full, and the behavior scenarios of the plans that a model wrote. */
+/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps, each node of the node table, and each look option in Alphy's checks, the numbers of a figure in pl and de, a range, a map of options, and an icon of a field, a hero figure with an emoji, a bar, and a note, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, the time of each saved plan with its lists full, the behavior scenarios of the plans that a model wrote, and the calls of the plan step and the change step: a reply read, merged, and compiled with a stored app, and the prompt texts. */
 @RunWith(AndroidJUnit4::class)
 class AppFileProofTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
@@ -91,8 +91,9 @@ class AppFileProofTest {
     }
     @Test fun aCallThatOverlapsIsBusyNotAHang(): Unit=runBlocking {
         val text=plan("calc")
+        // A compile and a read of a reply (loop plan, task 5) at one time.
         val results=withTimeout(2*APP_FILE_COMPILE_MS+4_000) {
-            List(2) {async(Dispatchers.Default) {compiler.compile(text)}}.awaitAll()
+            listOf(async(Dispatchers.Default) {compiler.compile(text)},async(Dispatchers.Default) {planOf(compiler.compileReply("```\n$text```")).compilation}).awaitAll()
         }
         results.forEach {assertTrue(it.status,it.status in setOf("faults","ok","BUSY"))}
     }
@@ -842,6 +843,14 @@ class AppFileProofTest {
         assertEquals("faults" to listOf("the plan has 65537 characters, and Alphy reads at most 65536. Use shorter texts and fewer lines"),cap.status to cap.faults)
         val kit=compiler.compile(text(65536))
         assertTrue(kit.faults.toString(),kit.status == "faults" && kit.faults.isNotEmpty() && kit.faults.none {"reads at most 65536" in it})
+        // The calls of a reply keep the cap (loop plan, task 5): a reply past it, and a merge of two shorter texts whose plan passes it.
+        assertEquals(AppFileRead.Plan(text(65537),cap),compiler.compileReply(text(65537)))
+        val merged=planOf(compiler.patch(text(40000),"note = Text(\"${"y".repeat(30000)}\")"))
+        assertEquals(listOf("faults",listOf("the plan has ${merged.text.length} characters, and Alphy reads at most 65536. Use shorter texts and fewer lines")),
+            listOf(merged.compilation.status,merged.compilation.faults))
+        assertTrue("${merged.text.length}",merged.text.length>65536)
+        // A stored state past 49152 bytes never goes to the sandbox, and it is a status, so no repair call sends it to a model.
+        assertEquals("INVALID_REQUEST",compiler.compile(plan("calc"),AppFilePrevious(plan("calc"),"{}","x".repeat(49153))).status)
     }
     /**
      * The behavior scenarios of the plans that a model wrote (appfile/model-scenarios.json): the steps of each scenario, written from its request,
@@ -895,5 +904,117 @@ class AppFileProofTest {
             listOf(name,result.status,result.faults.isNotEmpty(),took<APP_FILE_COMPILE_MS,after.status)
         }
         assertEquals(hostile.keys.map {listOf(it,"faults",true,true,"ok")},seen)
+    }
+
+    // The calls of the plan step and the change step (loop plan, task 5): each one is one evaluation of the sandbox.
+    /** A call five times: the log prints its times and their median with the label, and the result of the last call comes back. */
+    private suspend fun <T> timed(label: String,call: suspend ()->T): T {
+        val runs=List(5) {val started=SystemClock.elapsedRealtime();call() to SystemClock.elapsedRealtime()-started}
+        val times=runs.map {it.second}
+        Log.i("AppFileProofTest","$label times ms=$times median=${times.sorted()[2]}")
+        return runs.last().first
+    }
+    private fun planOf(read: AppFileRead)=read as AppFileRead.Plan
+    /** The stored app of a plan after the events, in the forms of the host: the app file, the schema of its spec, and the state of the last reply. */
+    private suspend fun stored(sandbox: SandboxClient,name: String,language: String="en",text: String=plan(name),events: suspend Session.()->Unit): AppFilePrevious {
+        val spec=parsedAndSmoked(sandbox,name,language,text)
+        val app=Session(sandbox,spec,"appfile-$name")
+        app.events()
+        return AppFilePrevious(text,spec.schema.toString(),app.state)
+    }
+    @Test fun aFencedOutsideReplyIsRead(): Unit=runBlocking {
+        assertEquals(AppFileRead.Outside("game"),compiler.compileReply("```\noutside(\"game\")\n```"))
+    }
+    @Test fun aFencedPlanCompilesClean(): Unit=runBlocking {
+        val read=planOf(timed("compileReply calc") {compiler.compileReply("```\n${plan("calc")}```")})
+        assertEquals(read.compilation.faults.toString(),"ok",read.compilation.status)
+        // The fence lines go, and the text is the plan that the kit compiled.
+        assertEquals(plan("calc"),read.text)
+    }
+    @Test fun aRepairReplyMergesAndCompiles(): Unit=runBlocking {
+        val line="need perPerson = figure(\"money\", \"Per person\", \$/bill * (1 + \$/tip / 100) / \$/people, example=[{bill: 80, tip: 15, people: 4}, 23])"
+        val broken=plan("calc").replace("/ \$/people, example","/ , example")
+        assertNotEquals(plan("calc"),broken)
+        assertEquals("faults",compiler.compile(broken).status)
+        val read=planOf(timed("patch calc repair") {compiler.patch(broken,"Here is the fix:\n```\n$line\n```")})
+        assertEquals(read.compilation.faults.toString(),"ok",read.compilation.status)
+        // The line of the reply takes the place of the broken line, and the prose and the fences of the reply go.
+        assertEquals(plan("calc"),read.text)
+    }
+    @Test fun aChangeKeepsTheRowsOfAList(): Unit=runBlocking {
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        // Milk (r1) is bought and Bread (r2) is gone: two stored rows. The kit test of a figure added beside a list has the same steps.
+        val previous=stored(sandbox,"shopping") {act("items_remove",row("r2",null));act("items_done",row("r1",true))}
+        val figure="need bought = figure(\"count\", \"Bought\", count(\$/items, \$done), example=[{items: [{done: true}]}, 1])"
+        val read=planOf(timed("patch shopping change") {compiler.patch(previous.appFile,figure,previous)})
+        assertEquals(read.compilation.faults.toString(),"ok",read.compilation.status)
+        assertEquals(previous.appFile+figure+"\n",read.text)
+        val state=JSONObject(checkNotNull(read.compilation.state))
+        val items=state.getJSONArray("items")
+        assertEquals(listOf("r1","r3") to listOf(true,false),ids(items) to List(items.length()) {items.getJSONObject(it).getBoolean("done")})
+        assertEquals("1",state.getJSONObject("d").getString("bought_text"))
+    }
+    @Test fun aChangeThatTheSavedDataBlocksSaysSo(): Unit=runBlocking {
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val text="app(\"Sizes\", lang=\"en\")\nneed size = input(\"number\", \"Size\", 3, min=0, max=10)\n"
+        val previous=stored(sandbox,"sizes",text=text) {control("size_field",5)}
+        assertEquals(5,JSONObject(previous.state).getInt("size"))
+        // The saved number of the size blocks a change that makes it a text.
+        val blocked=planOf(compiler.patch(text,"need size = input(\"text\", \"Size\", \"3\")",previous)).compilation
+        assertEquals(blocked.faults.toString(),listOf("faults",true,false,null),listOf(blocked.status,blocked.blockedBySavedData,blocked.savedDataMismatch,blocked.state))
+        // A stored state that its app file does not give is the one fault of the kit.
+        val mismatch=compiler.compile(text,previous.copy(appFile="need x = nothing(1)"))
+        assertEquals(mismatch.faults.toString(),listOf("faults",false,true),listOf(mismatch.status,mismatch.blockedBySavedData,mismatch.savedDataMismatch))
+    }
+    @Test fun aHostileTextStaysData(): Unit=runBlocking {
+        // Quotes, backslashes, a line separator, the end of a script tag, and a text that gives each compile an empty app if it runs as code.
+        val hostile="\" ' \\ \\\"   </script> \"))});globalThis.compileAppFile=async()=>({faults:[],notes:[],definition:{},language:\"en\",hole:false,state:null});//"
+        val read=planOf(compiler.compileReply("```\n$hostile\n```"))
+        // The reply comes back whole, and the kit reports its line: the text did not replace the compile.
+        assertEquals("$hostile\n",read.text)
+        assertEquals("faults",read.compilation.status)
+        // The same text in a plan and in a stored row: the change compiles, and the row keeps the text.
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val previous=stored(sandbox,"shopping") {act("items_done",row("r1",true))}
+        val state=JSONObject(previous.state).apply {getJSONArray("items").getJSONObject(0).put("name",hostile)}
+        val figure="need bought = figure(\"count\", \"Bought\", count(\$/items, \$done), example=[{items: [{done: true}]}, 1])"
+        val changed=planOf(compiler.patch("# $hostile\n${previous.appFile}",figure,previous.copy(state=state.toString()))).compilation
+        assertEquals(changed.faults.toString(),"ok",changed.status)
+        assertEquals(hostile,JSONObject(checkNotNull(changed.state)).getJSONArray("items").getJSONObject(0).getString("name"))
+    }
+    @Test fun aStoredStateAtTheLimitGoesThroughWithAPlan(): Unit=runBlocking {
+        // The rows of anEventPastTheStateLimitKeepsTheState: names of 300 characters until an add would take the state past 49152 bytes.
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val previous=stored(sandbox,"list","it") {
+            var rows=3
+            while(true) {
+                live("prodotti_new_nome","N".repeat(297)+"%03d".format(rows))
+                live("prodotti_new_corsia","Latticini")
+                val added=act("prodotti_add").getJSONArray("prodotti").length()
+                if(added == rows) break
+                rows=added
+            }
+        }
+        val bytes=previous.state.toByteArray().size
+        val rows=ids(JSONObject(previous.state).getJSONArray("prodotti"))
+        Log.i("AppFileProofTest","stored state bytes=$bytes rows=${rows.size} schema bytes=${previous.stateSchema.toByteArray().size}")
+        assertTrue("$bytes bytes",bytes>48_000)
+        val same=timed("compile list at the state limit") {compiler.compile(previous.appFile,previous)}
+        assertEquals(same.faults.toString(),"ok",same.status)
+        assertEquals(rows,ids(JSONObject(checkNotNull(same.state)).getJSONArray("prodotti")))
+        // A reply that writes a line again, merged and compiled with the same stored app.
+        val line=previous.appFile.lines().single {it.startsWith("need daComprare")}
+        val patched=planOf(timed("patch list at the state limit") {compiler.patch(previous.appFile,line,previous)}).compilation
+        assertEquals(patched.faults.toString(),"ok",patched.status)
+        assertEquals(rows,ids(JSONObject(checkNotNull(patched.state)).getJSONArray("prodotti")))
+    }
+    @Test fun thePromptAssetFillsItsTemplates() {
+        val prompt=AppFilePrompt.load(instrumentation.targetContext)
+        val repair=prompt.repairText("T","P",listOf("a","b"))
+        assertTrue(repair,repair.startsWith("T\n\n") && "\nP\n" in repair && "\n- a\n- b\n" in repair && repair.endsWith(prompt.repair))
+        // One pass: a placeholder text of the request stays, the plan keeps $/x, and the plan has no blank line at its end.
+        val change=prompt.changeText("Add {{plan}} and {{faults}}","need a = counter(\"A\")\n\$/x = 1\n\n")
+        assertTrue(change,change.startsWith("Add {{plan}} and {{faults}}\n\n") && change.endsWith("\$/x = 1\n\n${prompt.change}"))
+        assertTrue(listOf(prompt.system,prompt.dialogue).all {it.isNotBlank()})
     }
 }
