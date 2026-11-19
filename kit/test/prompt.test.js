@@ -68,6 +68,15 @@ test("prompt (K2): the timer paragraph keeps the rest between two rounds and nam
   expect(optionsIn(timer)).toContain("cycle");
 });
 
+test("prompt (P3): the entries paragraph names the count of check fields that puts each label over its mark, and its sort by a choice compiles", async () => {
+  const entries = KINDS.find(([kind]) => kind === "entries")[1], sortBy = 'sort=$/by == "aisle" ? $aisle : $name';
+  expect([entries.includes("more than two check fields"), entries.includes(sortBy)]).toEqual([true, true]);
+  const { compileAppFile } = await import("../src/compile.js");
+  const circles = async (count) => JSON.stringify((await compileAppFile(['app("T", lang="en")', `need days = entries("Days", fields={name: "text", ${["a", "b", "c"].slice(0, count).map((field) => `${field}: "check"`).join(", ")}})`].join("\n"))).definition).includes('"variant":"circle"');
+  expect([await circles(2), await circles(3)]).toEqual([false, true]);
+  expect(await faultsOf('need by = input("choice", "Order by", "aisle", options=["aisle", "name"])', `need items = entries("Items", fields={name: "text", aisle: "text"}, ${sortBy})`)).toEqual([]);
+});
+
 test("prompt: each kind that the prompt names is a part of the kit", async () => {
   for (const [kind] of KINDS) expect((await faultsOf(`need x = ${kind}()`)).filter((fault) => fault.includes("no part for need kind"))).toEqual([]);
 });
