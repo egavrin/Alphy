@@ -30,6 +30,7 @@
     <string name="foreground_timer_suppressed_en">Czas minął. Osiągnięto limit alertów.</string>
     <string name="foreground_timer_failed_en">Nie udało się zapisać stanu minutnika.</string>
     <string name="tool_records_empty_en">Brak wpisów</string>
+    <string name="tool_chart_empty_en">Brak danych do wykresu</string>
     <string name="tool_generated_dialog_close_en">Zamknij: %1$s</string>
     <string name="tool_route_back_en">Powrót do miniaplikacji</string>
     <string name="tool_page_en">Strona %1$d z %2$d</string>

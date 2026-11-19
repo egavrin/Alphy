@@ -30,6 +30,7 @@
     <string name="foreground_timer_suppressed_en">O tempo acabou. O limite de avisos foi atingido.</string>
     <string name="foreground_timer_failed_en">Não foi possível salvar o estado do temporizador.</string>
     <string name="tool_records_empty_en">Ainda não há registros</string>
+    <string name="tool_chart_empty_en">Sem dados para o gráfico</string>
     <string name="tool_generated_dialog_close_en">Fechar: %1$s</string>
     <string name="tool_route_back_en">Voltar ao miniapp</string>
     <string name="tool_page_en">Página %1$d de %2$d</string>

@@ -30,6 +30,7 @@
     <string name="foreground_timer_suppressed_en">时间到。已达到提醒上限。</string>
     <string name="foreground_timer_failed_en">无法保存计时器状态。</string>
     <string name="tool_records_empty_en">暂无记录</string>
+    <string name="tool_chart_empty_en">暂无图表数据</string>
     <string name="tool_generated_dialog_close_en">关闭：%1$s</string>
     <string name="tool_route_back_en">返回小应用</string>
     <string name="tool_page_en">第 %1$d 页，共 %2$d 页</string>

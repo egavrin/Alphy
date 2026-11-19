@@ -42,27 +42,35 @@ class MiniAppHostLanguageWorkflowTest {
         } finally { fixture.remove() }
     }
 
-    private fun hostText(language: String, steps: String, empty: String, next: String) {
+    // Failure case (L1 item 7): the empty chart of a Spanish budget app said "Нет данных для графика".
+    @Test fun anEmptyChartSaysSoInTheAppLanguage() {
+        val ui = """{"type":"chart","kind":"bar","text":"Gastos","categories":"days","series":[{"text":"Total","bind":"totals"}]}"""
+        val state = JSONObject().put("days", org.json.JSONArray()).put("totals", org.json.JSONArray())
+        for ((language, empty) in listOf("es" to "No hay datos para el gráfico", "en" to "No data for the chart", "ko" to "차트에 표시할 데이터가 없습니다"))
+            hostText(language, ui, state, empty)
+    }
+
+    private fun hostText(language: String, steps: String, empty: String, next: String) = hostText(language, """{"type":"column","children":[
+        {"type":"list","text":"Notes","bind":"notes","columns":[{"text":"Title","field":"title"}]},
+        {"type":"pager","text":"$steps","bind":"page","action":"page","children":[
+            {"type":"text","text":"1"},{"type":"text","text":"2"}]}]}""", JSONObject().put("notes", org.json.JSONArray()).put("page", 0), empty, next)
+
+    /** Shows the app in this language, waits for each text, and finds no Russian host text. */
+    private fun hostText(language: String, ui: String, state: JSONObject, vararg texts: String) {
         val fixture = ShellFixture("host-language")
         try {
             fixture.install()
             fixture.launch().use { scenario ->
-                val ui = JSONObject("""{"type":"column","children":[
-                    {"type":"list","text":"Notes","bind":"notes","columns":[{"text":"Title","field":"title"}]},
-                    {"type":"pager","text":"$steps","bind":"page","action":"page","children":[
-                        {"type":"text","text":"1"},{"type":"text","text":"2"}]}]}""")
-                val state = JSONObject().put("notes", org.json.JSONArray()).put("page", 0)
                 scenario.onActivity { activity ->
                     activity.setContent {
                         AlphaTheme {
                             Column(Modifier.safeDrawingPadding()) {
-                                ToolContent(ui.toString(), state.toString(), enabled = true, appLanguage = language) { _, _ -> }
+                                ToolContent(ui, state.toString(), enabled = true, appLanguage = language) { _, _ -> }
                             }
                         }
                     }
                 }
-                robot.waitFor(empty)
-                robot.waitFor(next)
+                texts.forEach { robot.waitFor(it) }
                 assertFalse(robot.texts().toString(), robot.texts().any { Regex("\\p{IsCyrillic}").containsMatchIn(it) })
             }
         } finally { fixture.remove() }

@@ -30,6 +30,7 @@
     <string name="foreground_timer_suppressed_en">시간이 종료되었습니다. 알림 한도에 도달했습니다.</string>
     <string name="foreground_timer_failed_en">타이머 상태를 저장하지 못했습니다.</string>
     <string name="tool_records_empty_en">아직 기록이 없습니다</string>
+    <string name="tool_chart_empty_en">차트에 표시할 데이터가 없습니다</string>
     <string name="tool_generated_dialog_close_en">닫기: %1$s</string>
     <string name="tool_route_back_en">미니앱으로 돌아가기</string>
     <string name="tool_page_en">%1$d / %2$d 페이지</string>

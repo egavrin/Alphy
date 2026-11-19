@@ -458,6 +458,7 @@ private val miniAppOtherLanguage = mapOf(
     R.string.foreground_timer_suppressed to R.string.foreground_timer_suppressed_en,
     R.string.foreground_timer_failed to R.string.foreground_timer_failed_en,
     R.string.tool_records_empty to R.string.tool_records_empty_en,
+    R.string.tool_chart_empty to R.string.tool_chart_empty_en,
     R.string.tool_generated_dialog_close to R.string.tool_generated_dialog_close_en,
     R.string.tool_route_back to R.string.tool_route_back_en,
     R.string.tool_page to R.string.tool_page_en,
@@ -1852,7 +1853,7 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
     Column(modifier,verticalArrangement=Arrangement.spacedBy(8.dp)) {
         if(showsToolHeading(node.getString("text"), heading)) Text(node.getString("text"),style=MaterialTheme.typography.titleMedium)
         if (categories.length() == 0 || pie && pieTotal == 0.0) {
-            val empty = stringResource(R.string.tool_chart_empty)
+            val empty = miniAppString(R.string.tool_chart_empty)
             Text(empty, if (categories.length() == 0) Modifier else Modifier.semantics { contentDescription = "$empty. $description" })
         } else if (pie) {
             Canvas(Modifier.fillMaxWidth().height(180.dp).semantics { contentDescription = description }) {
