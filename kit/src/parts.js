@@ -149,7 +149,7 @@ const PARTS = {
     else if (goalText && !goal) notes.push(`need ${name}: goalText= is the caption of the bar to goal=, and ${name} has no goal=, so the kit left it out`);
     const decimals = need.named.decimals && f !== "text" && show(need.named.decimals);
     if (need.named.decimals && f === "text") notes.push(`need ${name}: a figure of the format text shows its value as it is, so the kit left out decimals=`);
-    // An own key, so that a format such as "constructor" is a number and never a property of Object. money() always prints 2 decimals, so decimals= of money is fixed().
+    // An own key, so that a format such as "constructor" is a number and never a property of Object. money() prints 2 decimals, and none in ja and ko, so decimals= of money is fixed().
     const formats = { money: decimals ? `fixed($/${name}, ${decimals})` : `money($/${name})`, percent: `percent($/${name}${decimals ? `, ${decimals}` : ""})`, text: `text($/${name})` };
     const text = Object.hasOwn(formats, f) ? formats[f] : `amount($/${name}, ${decimals || (f === "count" ? 0 : 2)})`;
     // unit="ml" follows the shown number ("2,000 ml"), and the value stays a number for a bar, a check, or an example.

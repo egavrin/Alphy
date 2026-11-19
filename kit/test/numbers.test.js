@@ -40,6 +40,17 @@ test("numbers: money(), percent(), and fixed() keep their decimals and print the
   expect([printed("de", "amount(1 / 0, 2)"), printed("de", "money(0 / 0)")]).toEqual(["Infinity", "NaN"]);
 });
 
+test("numbers (L1 item 5): money() in ja and ko prints no decimals, as won and yen have no minor unit, and decimals= of a money figure keeps its decimals", async () => {
+  expect(NUMBERS.map((x) => printed("ko", `money(${x}, "₩")`))).toEqual(["₩1,235", "₩2,000", "₩20,000", "₩1", "₩-1,235"]);
+  expect([printed("ja", "money(4000)"), printed("ja", "money(4000.4)"), printed("zh", "money(4000)"), printed("tr", "money(4000)"), printed("uk", "money(4000)")])
+    .toEqual(["4,000", "4,000", "4,000.00", "4.000,00", `4${NB}000,00`]);
+  // e-cafe-ko showed "4,000.00 원" (L1 item 5).
+  const { definition } = emit(await planned(fixture("model/e-cafe-ko")));
+  expect(every(definition.ui).filter((node) => node.type === "metric").map((node) => definition.initialState.d[node.bind.slice(2)])).toEqual(["4,000 원"]);
+  const kept = emit(await planned(fixture("model/e-cafe-ko").replace('unit="원")', 'unit="원", decimals=2)'))).definition;
+  expect(every(kept.ui).filter((node) => node.type === "metric").map((node) => kept.initialState.d[node.bind.slice(2)])).toEqual(["4,000.00 원"]);
+});
+
 test("numbers: a plain number that a text or a metric shows does not change", () => {
   // B.1: a year must stay "2019".
   expect([printed("de", "text(2019)"), printed("en", "text(1234.5)"), printed("pl", "text(20000)")]).toEqual(["2019", "1234.5", "20000"]);

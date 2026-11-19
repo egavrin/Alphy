@@ -71,9 +71,12 @@ function print(lang, x, n, trim) {
   const [, whole, decimals] = parts, shown = trim ? decimals.replace(/0+$/, "") : decimals;
   return (Number(fixed) < 0 ? "-" : "") + (whole.length < 5 && /^(es|pl|pt)$/.test(lang) ? whole : whole.replace(/\B(?=(\d{3})+$)/g, group)) + (shown ? point + shown : "");
 }
-/** The format functions that print a number for a person. Each one takes the language of the app first. */
+/**
+ * The format functions that print a number for a person. Each one takes the language of the app first. Money has 2 decimals, and none in ja
+ * and ko: the won and the yen have no minor unit (L1 item 5).
+ */
 const PRINT = {
-  fixed: (lang, x, n = 2) => print(lang, x, n), money: (lang, x, sign = "") => sign + print(lang, x, 2), percent: (lang, x, n = 0) => print(lang, x, n) + "%",
+  fixed: (lang, x, n = 2) => print(lang, x, n), money: (lang, x, sign = "") => sign + print(lang, x, /^(ja|ko)$/.test(lang) ? 0 : 2), percent: (lang, x, n = 0) => print(lang, x, n) + "%",
   // The number of a figure: rounded to at most n decimals, with no zeros at the end.
   amount: (lang, x, n = 0) => print(lang, round(Number(x), n), n, true),
 };
