@@ -604,9 +604,10 @@ The round also added two Spanish look fixtures: `look-deck-es` (a deck with a ba
 A script compared each picture with the same picture of `appfile-live-final`, pixel by pixel under the status bar.
 Only the pictures of the 10 plans with a note in the last column changed, and `mock-shopping-it-added.png`, in both themes. Each other picture is the same, also each picture of a baseline app.
 Against `appfile-look-all-2`, only `model3d` changed in the run `appfile-look-all-3` (22.9 % of the pixels in both themes). The four pictures of the two new fixtures are new.
-No picture shows cut text, an overlap, an empty first screen, a control with no label, or a text that shows two times.
+No picture shows cut text, an overlap, an empty first screen, or a control with no label.
 A text at the bottom edge of a picture continues under the first screen.
-The captions of the two counts of `quiz` are the texts of its two buttons, because each count is the number of presses of its button.
+The captions of the two counts of `quiz` and of the deck of `look-deck-es` are the texts of their two buttons, because each count is the number of presses of its button.
+So in `look-deck-es-shown.png`, "La sabía" and "Todavía no" show two times: on the buttons and over the counts. The template of `deck` has no option for a different caption of a count.
 
 The 4 items of "Where the plans with parts are still worse than the baseline" (section "Look with parts") that had a missing option now use it: the icons of `mock-shopping-it`, the tone of `mock-habits-uk`, the total of `mock-price-filter`, and the icons of the rows of `mock-units-pl`.
 These differences stay:
@@ -639,8 +640,9 @@ Host limits that the pictures show (no change of the host in this task):
 | `appfile-look-pre` | `2705ed4` | passed (`picturesOfEachPlan`), 66.1 s | `07:35:30`, `07:41:21` |
 | `appfile-look-all` | `2705ed4+dirty` (the two documents) | passed, 37 tests (`AppFileProofTest` and `AppFileLookTest`), 182.0 s. Under the status bar, each picture is the same as in `appfile-look-pre` | `07:41:21`, `07:44:37` |
 | `appfile-look-all-2` | `6715b30` (the orbit in the role `ink`) | passed, 37 tests, 184.6 s. Against `appfile-look-all`, only the orbit of `lesson` changed | `07:44:37`, `07:56:12` |
-| `appfile-look-r2-pre` | `f614e9f` (the hero card rule and the two new fixtures) | failed (`picturesOfEachPlan`). The light pass took each picture, also the four new ones. In the dark pass, the press of "Aggiungi" after the finish button of `mock-shopping-it` showed the host error "Не удалось выполнить действие инструмента" and added no row (`AppFileLookTest.kt` 153). The log has no cause. The same step passed in the light pass and in each earlier run, and the round changed no line of that plan or of the run-time | `07:56:12`, `08:17:03` |
+| `appfile-look-r2-pre` | `f614e9f` (the hero card rule and the two new fixtures) | failed (`picturesOfEachPlan`). The light pass took each picture, also the four new ones. In the dark pass, the press of "Aggiungi" after the finish button of `mock-shopping-it` showed the host error "Не удалось выполнить действие инструмента" and added no row (`AppFileLookTest.kt` 153). The log has no cause, because the host keeps the exception only as the error text (`ToolController.kt` `run`). The same step passed in the light pass of this run, in `appfile-look-all-3`, and in `appfile-look-r2-solo`. The round changed no line of that plan or of the run-time | `07:56:12`, `08:17:03` |
 | `appfile-look-all-3` | `f614e9f+dirty` (the two documents) | passed, 37 tests, 182.0 s. The final run and the pictures of this section | `08:17:03`, `08:20:34` |
+| `appfile-look-r2-solo` | `d0cdf9f+dirty` (only `kit/test/lookrules.test.js`, which is not in the APK) | passed (`picturesOfEachPlan` alone), 65.9 s. A second check of the step that failed in `appfile-look-r2-pre` | `08:20:34`, `08:30:17` |
 
 All times are on 2026-11-19. Each "before" time is the "after" time of the run before it, so no other session installed the test APK during these runs.
 The pictures are in `evidence/alphy-ui/appfile-look-all-3/light/` and `dark/`, with the contact sheets `contact-light.png` and `contact-dark.png` and the pair sheet `pairs-light.png`. Git does not keep these files.

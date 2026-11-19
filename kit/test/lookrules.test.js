@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { LOOK_FIXTURES, plansIn } from "../build.js";
 import { emit } from "../src/emit.js";
 import { handle } from "../src/run.js";
-import { every, planned, press, valueAt } from "./helpers.js";
+import { built, every, planned, press, valueAt } from "./helpers.js";
 
 const PATHS = [...plansIn(fileURLToPath(new URL("../plans", import.meta.url))).sort(), ...LOOK_FIXTURES];
 /** Each saved plan and look fixture by its name, compiled: its definition and its run-time. */
@@ -108,10 +108,21 @@ const OUTLINED = new Set([...FIELD_TYPES, "segmented", "select", "multiChoice"])
  * Each control of a hero card that Alphy draws outlined or tonal, shown or not: on a hero card such a control shows no container in the dark theme
  * (model3d.png of appfile-look-all-2: 1.0 to 1). A button with no variant beside another button can be outlined (secondaryButtons).
  */
-const outlinedIn = (hero) => every(hero).slice(1).flatMap((node) => {
+const outlinedIn = (hero) => every(hero).flatMap((node) => {
   if (OUTLINED.has(node.type)) return [node.text ?? node.type];
   const buttons = kids(node).filter((child) => child.type === "button");
   return buttons.filter((button) => ["outlined", "tonal", "elevated"].includes(button.variant) || (!button.variant && buttons.length > 1)).map((button) => button.text);
+});
+
+test("look: the hero rule finds an outlined button and two buttons with no variant that stand directly in a hero card", async () => {
+  const heroOf = async (...buttons) => {
+    const { definition } = await built('app("T", lang="en")', "$/n = 0", "root = Column([hero])", `hero = Card([Metric("Count", $/n), ${buttons.join(", ")}], variant="hero")`);
+    return every(definition.ui).find((node) => node.type === "card");
+  };
+  expect(outlinedIn(await heroOf('Button("Less", action=set($/n, 0), variant="outlined")'))).toEqual(["Less"]);
+  expect(outlinedIn(await heroOf('Button("One", action=set($/n, 1))', 'Button("Two", action=set($/n, 2))'))).toEqual(["One", "Two"]);
+  // A lone button with no variant is filled, so it can stand on a hero card.
+  expect(outlinedIn(await heroOf('Button("One", action=set($/n, 1))'))).toEqual([]);
 });
 
 test("look: a hero card holds no outlined or tonal button", () => {
