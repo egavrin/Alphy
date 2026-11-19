@@ -161,8 +161,8 @@ The first full path: `calc.plan` becomes a definition that passes `ToolSpec.pars
 | `Button(label, action)` | `button`, `variant: "filled"`, `action` = the safe name of the component. `selected=test` → `variant: "tonal"` while the test is false and `"filled"` while it is true. |
 | `IconButton(icon, action)` | `icon` with `name` (the kit's icon names exist in Alphy's list: check `ToolUiCatalog.shellIcons`, and map `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`, `Edit`, `Close` to the nearest name there) and a `text` for accessibility from the action. |
 | `NumberField` | `numberInput` with `bind`, `action`, `min`, `max`, `step`. Without a `min` or `max` in the line: 0 and 1000000. |
-| `Slider` | `slider` with `min`, `max`, `step`. |
-| `TextField` | `input` with `inputMode: "apply"`. |
+| `Slider` | `slider` with `min`, `max`, `step`, and `inputMode: "live"` (Task 11c). |
+| `TextField` | `input` with `inputMode: "live"` (Task 11c: it was `"apply"` before). |
 | `Toggle`, `CheckBox` | `toggle`, `checkbox`. |
 | `Segmented`, `Select` | `segmented` up to 6 options, else `select`. Options are `[{text, value}]`. |
 

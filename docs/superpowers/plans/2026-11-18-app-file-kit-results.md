@@ -239,6 +239,37 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3
   After the add, the view has `maxItems` rows, so the run-time wrote it again. The test does not compare the view with its list.
 - The times come from the emulator, not from a phone.
 
+### Time of a live input (Task 11c)
+
+Task 11c makes the run-time text 46580 bytes (46227 before, bar 48500). The largest source is `test/cards.plan` with 53628 bytes (bar 60000).
+The only change of a compiled definition is `inputMode: "live"` on each `input` and `slider` node, in 14 of the 34 compiled plans.
+
+The host answers a `liveInput` event on one of two paths:
+
+- A plan with no surface: a fresh sandbox for each event (`SandboxClient.execute`), with the host limit of 500 ms. The bar of the kit is 100 ms.
+- A plan with a surface: its retained session (`GraphicsSession.dispatch`), with the host limit of 100 ms. The bar of the kit is 50 ms.
+
+`eachPlanAnswersInTime` times each live control of each saved plan five times on the full state, with the 100 ms bar. It also asserts that no saved plan has a live control beside a surface.
+No saved plan and no look fixture has a live control beside a surface. The test `aLiveInputBesideASurfaceTimerKeepsTheTimer` holds the 50 ms bar on a text field beside a surface timer.
+The medians of the run `appfile-live-final`:
+
+| Plan | Path | Live control: median of each timed value (ms) |
+| --- | --- | --- |
+| `calc` | fresh | `tip_field` 9, 10, 9 |
+| `list` | fresh | `prodotti_new_nome` 18, 18; `prodotti_new_corsia` 18, 18 |
+| `tabs-chart` | fresh | `gastos_new_concepto` 17, 17 |
+| `section` | fresh | `habits_new_name` 32, 31 |
+| a text field beside a surface timer | retained | `note_field` 2 |
+| `test/bytes.plan` (logged, no bar) | retained | `pad_field` 118 |
+
+The slowest live input of a saved plan takes 32 ms (`section`, with 100 habits). It is under the 100 ms bar.
+The plans with no text field and no slider (`quiz`, `tea`, `timer-rounds`, `lesson`, `model3d`) have no live control.
+
+A reply at the byte limit of a drawing (32768 bytes, `test/bytes.plan` with 350 lines) costs about 120 ms of host time for each event, an action or a live input.
+The kit's dispatch takes 2 to 5 ms of it. About 90 ms follows the count of commands, and about 30 ms follows the length of the text (about 770 characters).
+This is a fact about the host for the later drawing work, not a defect of the kit. The test logs the time of that fixture and has no time bar for it.
+The split comes from a probe of the run `appfile-live-times` that timed `GraphicsSession.dispatch` alone. The probe is not in the tree.
+
 ## Look
 
 The device class `AppFileLookTest` shows each compiled plan as a saved app in the real shell (`ShellFixture`, `ShellRobot`, `ToolStore.saveTool`).
@@ -424,6 +455,7 @@ The side of the large emoji now depends only on the tree of the card:
 - `price-filter`: the baseline card has `align: "center"`, so its emoji is above the texts. The plan puts it at the end.
 
 The shopping list starts empty, as in the baseline. The test also types "Latte", presses the apply button of the field and "Aggiungi", and takes the picture `mock-shopping-it-added.png` with the new row.
+Since Task 11c, the field "Prodotto" is a live input, as in the baseline, and the add of `mock-shopping-it` needs no apply step. The test adds "Latte" and "Pane" with the steps of the baseline (section "Live inputs"), and the picture shows two rows.
 
 ### Runs of Task 11b-2a
 
@@ -460,7 +492,6 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3
 | --- | --- | --- |
 | `mock-units-pl` | The baseline shows each conversion as a large value on a tinted row under the heading "Przeliczenia". The plan shows three plain rows of one size, each with the title at the left and the value at the right, with no tint and no heading. | Missing option: a row of a figure has no tone, and the figures of one place have no heading. The layout rule of the figures (Task 11b-2a, E.2, fix round 1) makes three figures or more in one place rows. Each value keeps `number` (36 sp), the size of the baseline rows. |
 | `mock-shopping-it` | The fields of the add form have no icon, and the form has no heading "Aggiungi prodotto". | Missing option: the add form of `entries` gives its fields no icon. The heading: choice of the plan. |
-| `mock-shopping-it` | A typed product goes into the state only after the apply button of the field ("Applica: Prodotto"). The baseline field is a live input, so its add button works at once. | The design of the kit: a `TextField` is an apply input of the host (`docs/superpowers/plans/2026-11-18-app-file-kit.md`, the node table). |
 | `mock-shopping-it` | No filter "Mostra", no order "Ordina per", and no button "Svuota comprati". | Choice of the plan: the list sorts by aisle with `sort=$corsia`. |
 | `mock-habits-uk` | "Пити воду" breaks into two lines, and "Прогулянка 30 хв" has a smaller text. In the baseline both are wider. | Host limit: each text cell of a row without a weight shares the free width with the title (`NativeToolUi.kt` 946 to 947). The two `show=` values are badges with their own padding, and the baseline has one plain text and one badge. |
 | `mock-habits-uk` | The streak badge is grey, and the baseline badge has the accent tone. The ring shows "3 / 21", and the baseline shows "3 з 21". The plan has no button "Редагувати назви". | Missing options: a `show=` value has no tone, and the `progress` part writes "/" in each language. The button: choice of the plan (`add=false`). |
@@ -468,3 +499,65 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3
 | `mock-water-ko` | The baseline has a section "기록 관리" with a manual entry and a reset. The plan has the reset beside the cup button and no manual entry. | Choice of the plan: the request asks for the cup button and the progress only. |
 
 A long detail line of a bike ("2017 · One size · Fair") breaks into two lines in the plan and in the baseline, for the same host limit.
+
+## Live inputs
+
+Since Task 11c, each `TextField` and each `Slider` of the kit is a live input of the host (`inputMode: "live"`), also in a list row and in a bottom sheet.
+The inputs of the baseline apps are live too (14 of the 14 `input` nodes of the 15 baseline apps).
+The host sends each value as a `liveInput` event while the person types or drags. The run-time takes only that event for a live control, and its reply holds only `state`, `ui`, and `surfaces`.
+A `RangeSlider`, a `NumberField`, and each other control send an `action` as before.
+
+### How a person adds a row
+
+1. Type the text into the field.
+2. Finish the edit with the action key of the keyboard, or with the host's finish button under the field.
+3. Press the add button.
+
+The host refuses a press of a different control before the finish (`NativeLiveEdits.allowAction`). It shows a notice in the language of the app ("Termina la modifica e attendi il salvataggio delle modifiche") and the finish button ("Termina modifica: Prodotto").
+The baseline app has the same steps. The device tests `theBaselineListNeedsAFinishStepBetweenTheTypingAndTheRow` (the baseline `showcase-lang-shopping-it`) and `theKitListTakesTheStepsOfTheBaselineList` (`mock-shopping-it`) run the same helper on the two apps:
+
+| Step | Baseline: draft, rows | `mock-shopping-it`: draft, rows |
+| --- | --- | --- |
+| 1. Type "Latte", press "Aggiungi" at once: the notice shows | "Latte", 0 | "Latte", 0 |
+| 2. Press the finish button, wait until it goes away | "Latte", 0 | "Latte", 0 |
+| 3. Press "Aggiungi": the row and its check mark "Preso" show, and the field is empty | "", 1 | "", 1 |
+| 4. Tap the field, type "Pane", press the action key, wait until the finish button goes away | "Pane", 1 | "Pane", 1 |
+| 5. Press "Aggiungi" | "", 2 | "", 2 |
+
+Open point: no step adds a row with one press after the typing. The host has no such step for a text field, and a `form` node is only a container.
+
+A list with `edit=true` and `sort=` on a text field of the row sorts the view again at each delivered value, so the row moves while the person types.
+
+### The slider and a second field
+
+- `theTipSliderOfCalcChangesTheTotalWithNoStepByHand`: the accessibility action that sets the progress of "Tip %" sets the tip to 22.5, and the total changes. A drag to the left end sets it to 0, and the total changes again. No apply button and no finish button show. The slider finishes its edit when the drag ends, so the next press of a different control goes through.
+- `aTypedTextShowsASecondLiveFieldThatTakesItsText`: a text in the first field shows a second field (`visible=len($/first) > 0`), and the second field takes its text.
+
+### The first screen
+
+A live text field shows no apply button. The run `appfile-live-final` took the pictures of each plan in both themes. A script compared each one with the run `appfile-look-parts-fix2` of Task 11b-2a, pixel by pixel:
+
+- Each first screen is the same, except for the status bar at the top (the clock and the signal icon). This includes each plan with a text field or a slider: `calc`, `habits`, `lesson`, `list`, `look-shopping-it`, `mock-shopping-it`, `section`, `shopping`, and `tabs-chart`.
+- `mock-shopping-it-added.png` shows two rows ("Latte" and "Pane") and the count 2. Before, it showed one row and the count 1. The field "Prodotto" is empty, and no apply button shows.
+
+### Runs of Task 11c
+
+| Label | Revision | Observed | Test APK `lastUpdateTime` before and after |
+| --- | --- | --- | --- |
+| `appfile-step-zero` | `a74c20f` + the step zero test | passed: the baseline needs a finish step | `05:31:24`, `05:51:51` |
+| `appfile-step-zero-classes` | the tree of `86810bd` | passed, 33 tests, 162.7 s | `05:51:51`, `05:52:27` |
+| `appfile-live-ui` | `f53ef3b+dirty` | 3 of the 4 new tests passed. The slider test failed | `05:52:27`, `06:24:04` |
+| `appfile-live-slider` to `appfile-live-slider-3` | `f53ef3b+dirty` | failed: the test read a node with no range, set a value that is not a fraction, read the total during the drag, and ended the swipe right of the low end | `06:24:04`, `06:26:51` |
+| `appfile-live-slider-4` | `f53ef3b+dirty` | passed | `06:26:51`, `06:27:28` |
+| `appfile-live-classes` | `7400405+dirty` | 36 of 37 tests passed. The time bar of `test/bytes.plan` failed (121 ms) | `06:27:28`, `06:28:10` |
+| `appfile-live-times` | `7400405+dirty` and a probe | the probe that split the 120 ms of `test/bytes.plan` | `06:28:10`, `06:32:20` |
+| `appfile-live-final` | the tree of `b2a7141` | passed, 37 tests, 173.3 s. The times and the pictures of this section | `06:32:20`, `06:41:12` |
+
+All times are on 2026-11-19. Each "before" time is the "after" time of the run before it, so no other session installed the test APK during these runs.
+The time lines are in `evidence/alphy-ui/<label>/logcat.txt`, and the pictures and the step files of `appfile-live-final` are in its folder. Git does not keep these files.
+
+Command:
+
+```text
+JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3 tools/compose_acceptance/run.py suite --serial emulator-5592 --label appfile-live-final com.alpha.assistant.tools.appfile.AppFileProofTest com.alpha.assistant.tools.appfile.AppFileLookTest
+```
