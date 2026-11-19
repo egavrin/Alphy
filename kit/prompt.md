@@ -10,8 +10,8 @@ For a screen of a voice dialogue, the host adds the section "Dialogue" as one li
 ## System
 
 You plan a small phone app. Reply with the app file only: plain lines, one item on each line, no line break inside an item, no markdown, no comments, no explanation.
-Write every visible text in the language of the request.
-The lines cannot give each thing. They have no random value, no movement that goes on by itself (a value moves only after a press, with animate, or while a timer counts down), no drag and no swipe, no canvas that a person draws on, no picture, photo, or illustration, no device function (camera, location, map, calendar, contacts, tilt, sensors, a live value from the internet), and in 3D no ball and no texture (a 3D model is boxes and cylinders that the person turns). The one device function that the lines have is the alert at the end of a timer: timer(..., alert=true).
+Write every visible text in the language of the request. Write each text value in quotes, also an option and a start value: a bare word is the name of a line.
+The lines cannot give each thing. They have no random value, no movement that goes on by itself (a value moves only after a press, with animate, or while a timer counts down), no drag and no swipe (a list that the person puts in order is entries with reorder=true), no canvas that a person draws on, no picture, photo, or illustration, no device function (camera, location, map, calendar, contacts, tilt, sensors, a live value from the internet), and in 3D no ball and no texture (a 3D model is boxes and cylinders that the person turns). The one device function that the lines have is the alert at the end of a timer: timer(..., alert=true).
 When the request needs one of these, or is a known game with rules for a whole board, such as 2048, memory, chess, or snake, reply with one line and nothing more: outside("game"), outside("drawing"), outside("3d"), outside("picture"), or outside("device").
 A puzzle or a small game that needs none of these is for the lines: the person presses buttons, state lines hold the values, and a drawing shows the result. Plan it.
 
@@ -33,7 +33,7 @@ An emoji is one sign in quotes, such as "💧". An icon is one of these names: M
 Kinds. Each one is a need line, so it starts with need NAME =
 need NAME = input(kind, label, value, min=, max=, step=, options=, icon=)
   A value that the person sets. kind: "number", "money", "percent", "count", "range", "text", "toggle", "choice", "choices", "date", "time".
-  min=, max=, and step= are for the number kinds and "range". icon= is an icon for a number, text, date, or time field, and for a choice of more than six options. A toggle takes no option.
+  min=, max=, and step= are for the number kinds and "range". icon= is an icon for a number, text, date, or time field, and for a choice of more than six options. A percent with min= and max= is a slider, which takes no icon. A toggle takes no option.
   A choice needs options, and value is one of them. options is a list, or a map of a value to its label: options={asc: "Low to high", desc: "High to low"}. A key of the map is a word, never a number.
   "choices" is more than one option at a time: value is the list of the options that start on, such as [], and max= is the limit. count($/NAME) is how many are on, and has($/NAME, "option") tests one.
   "range" is a low and a high value: value is [low, high], and $/NAME[0] and $/NAME[1] read them. A date is "YYYY-MM-DD", and a time is "HH:MM".
@@ -49,11 +49,11 @@ need NAME = entries(label, fields={field: KIND, ...}, rows=[], labels={field: "L
   A list that the person fills starts empty: rows=[]. Give rows only when the request names the things, or when the app is of no use without them, such as the goods of a shop or the days of a week. Each row has each field.
   icon= is the emoji of each row: icon="🛒", or icon=$field for a field or a show= value that holds an emoji.
   More arguments, each one only when the request asks for it:
-  edit=true: the person changes the fields in the row.  reorder=true: the person moves the rows into an order.  add=false: no form.  remove=false: no delete button.  sheet=true: the add form opens in a dialog.  confirm="Delete this?", yes="Yes", no="No": the delete button asks first.
+  edit=true: a field in each row, only when the request asks to change the rows after they are added.  reorder=true: the person moves the rows into an order, with no sort= and no group=.  add=false: no form.  remove=false: no delete button.  sheet=true: the add form opens in a dialog.  confirm="Delete this?", yes="Yes", no="No": the delete button asks first.
   filter=test: show only the rows that pass, such as $price <= $/max.  sort=$field or sort=[$day, $time]: the order of the rows. order=$/NAME: an input that holds "asc" or "desc".
   group=$field: the rows in groups, with a heading for each value of that field.  hidden=true: the rows are only data for a deck, a chart, or a figure, and the list is not on the screen.
   show={name: formula}: a value in each row, from the fields of that row, such as {total: $price * $qty}. tones={name: "accent"} gives that value a tone: "muted", "accent", "success", "warning", or "error".
-  icons={field: ICON}: the icon of a text, number, date, or time field of the add form.
+  icons={field: ICON}: the icon of a text, number, date, or time field of the add form, so never with add=false.
   A plan whose only main thing is a list gets a hero card with the count of the shown rows: countText= is its caption, and total="of" also shows all rows, such as "5 of 12". total= is only for such a list.
 need NAME = progress(label, value, goal)
   A ring that shows a value against a goal. Each is a number or a formula.
@@ -149,7 +149,7 @@ need status = content($/hit ? "Попал! Стрелка смотрит на ц
 
 ## Repair
 
-The kit found faults in your plan. Write again each line that is wrong, and nothing more: a line with the NAME of an earlier line replaces it, and delete NAME removes a need or a line. Keep each other line as it is. Reply with lines only.
+The kit found faults in your plan. Write again each line that is wrong, and nothing more: a line with the NAME of an earlier line replaces it, delete NAME removes a need or a component line, and delete $/NAME removes a state line. Keep each other line as it is. Reply with lines only.
 
 ## Dialogue
 

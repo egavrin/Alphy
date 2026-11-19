@@ -27,6 +27,8 @@ export const BARS = { compileMs: 2300, stateBytes: 49152 };
 /** The text under each level-2 heading of kit/prompt.md, by the heading. */
 export const PROMPT = Object.fromEntries(readFileSync(new URL("./prompt.md", import.meta.url), "utf8").split(/^## /m).slice(1)
   .map((part) => [part.slice(0, part.indexOf("\n")), part.slice(part.indexOf("\n") + 1).trim()]));
+/** The first 12 hex digits of the SHA-256 of the sections of the prompt, so that each record names the prompt that made it. */
+const PROMPT_HASH = new Bun.CryptoHasher("sha256").update(JSON.stringify(PROMPT)).digest("hex").slice(0, 12);
 
 /** The cases that the kit cannot serve (the code map, section 8): 5 need a picture, 15 are games, a drawing canvas, or 3D. Their expected reply is outside(...). */
 export const OUTSIDE_CASES = new Set(["showcase-image-recipe", "showcase-image-flashcards", "showcase-image-plant", "showcase-image-story", "showcase-image-menu",
@@ -124,7 +126,7 @@ export async function checkOne(item, { ask, model, effort, repairs = 2 }) {
     return call;
   };
   const first = await send(0, effort, task), kind = first.status === "completed" ? kindOf(first.text) : { kind: first.status };
-  const record = { id: item.id, set: item.set, expect: item.expect, model, effort, task, calls, steps, first: kind, clean: null, plan: null };
+  const record = { id: item.id, set: item.set, expect: item.expect, model, effort, prompt: PROMPT_HASH, task, calls, steps, first: kind, clean: null, plan: null };
   if (kind.kind !== "plan" && kind.kind !== "other") return finish(record);
   let plan = linesOf(first.text).join("\n") + "\n";
   for (let step = 0; ; step++) {
@@ -251,6 +253,25 @@ export function numbers(records) {
   return rows;
 }
 
+/** A fault with its names, texts, and numbers taken out, so that one kind of fault is one key. */
+const faultKind = (fault) => fault.replace(/"(?:[^"\\]|\\.)*"/g, '"…"').replace(/: (need \S+ =|\$\/\S+ :?=|app\(|[\p{L}_][\p{L}\p{N}_]* =) .*$/u, "").replace(/(need|hole) [\p{L}_][\p{L}\p{N}_]*/gu, "$1 X")
+  .replace(/\$\/[\p{L}\p{N}_/]+/gu, "$/X").replace(/\b\d+(\.\d+)?\b/g, "N").slice(0, 160);
+/** Each kind of fault: how often a report had it, and how often the next report of the same request no longer had it. */
+export function faultTable(records) {
+  const kinds = new Map();
+  for (const record of records) record.steps.forEach((step, index) => {
+    const next = record.steps[index + 1]?.faults.map(faultKind);
+    for (const fault of new Set(step.faults.map(faultKind))) {
+      const row = kinds.get(fault) ?? { count: 0, repaired: 0, kept: 0, last: 0, ids: [] };
+      row.count++;
+      if (!next) row.last++; else if (next.includes(fault)) row.kept++; else row.repaired++;
+      row.ids.push(`${record.id}.${index}`);
+      kinds.set(fault, row);
+    }
+  });
+  return [...kinds].sort(([, a], [, b]) => b.count - a.count);
+}
+
 // ---- The command line.
 
 async function pool(items, size, work) {
@@ -288,10 +309,21 @@ if (import.meta.main) {
     });
     console.log(`spent ${spent().calls}`);
   } else if (phase === "table") {
-    for (const label of rest) {
+    const detail = rest.includes("--detail"), labels = rest.filter((label) => label !== "--detail");
+    for (const label of labels) {
       const records = recordsOf(label);
       console.log(`## ${label} (${records[0]?.model} ${records[0]?.effort}, ${records.length} records)`);
       for (const row of numbers(records)) console.log("- " + row);
+      if (!detail) continue;
+      console.log("faults (count, repaired in the next report, kept, in the last report; the record.step of each):");
+      for (const [fault, row] of faultTable(records)) console.log(`  ${row.count} ${row.repaired} ${row.kept} ${row.last} | ${fault} | ${row.ids.join(" ")}`);
+      console.log("each request that expects a plan and is not clean, and each clean plan that a device bar or a host form refuses:");
+      for (const record of records.filter((record) => record.expect === "plan" && (record.clean === null || record.bars.length))) console.log(`  ${record.id} ${record.outcome} ${record.first.word ?? ""} ${(record.bars ?? []).join("; ")}`);
+      // The look of each clean plan of set C beside the look of its baseline app.
+      const clean = records.filter((record) => record.set === "C" && record.expect === "plan" && record.look), cases = new Map(corpus().map((item) => [item.id, item]));
+      const baseline = looksOf(Object.fromEntries(clean.filter((record) => cases.get(record.id).baseline).map((record) => [record.id, JSON.parse(readFileSync(cases.get(record.id).baseline, "utf8")).spec])));
+      console.log("look (hero, fields on the first screen, fields in rows): plan | baseline");
+      for (const record of clean) console.log(`  ${record.id} ${record.look.hero} ${record.look.fields} ${record.look.rowFields} | ${baseline[record.id] ? `${baseline[record.id].hero} ${baseline[record.id].fields} ${baseline[record.id].rowFields}` : "none"}`);
     }
   } else console.log("phase? probe, run, or table");
 }

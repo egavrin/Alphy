@@ -2,7 +2,7 @@
 // the merge of a repair, and the record of a request. No test calls the API.
 
 import { expect, test } from "bun:test";
-import { BARS, PROMPT, barFaults, bodyOf, checkOne, kindOf, merge, numbers, repairText, taskText } from "../modelcheck.js";
+import { BARS, PROMPT, barFaults, bodyOf, checkOne, faultTable, kindOf, merge, numbers, repairText, taskText } from "../modelcheck.js";
 import "./helpers.js";
 
 const PLAN = 'app("Tip", lang="en")\nneed bill = input("money", "Bill", 80, min=0, max=500)\nneed tip = figure("money", "Tip", $/bill * 0.1, example=[{bill: 100}, 10])\n';
@@ -83,4 +83,12 @@ test("modelcheck: the numbers count the clean steps, the routing, and the calls"
   expect(rows[0]).toStartWith("set C: clean first 1/2, after 1 repair 0/2, after 2 0/2, not clean 1/2 (outside 1); clean under the device bars 1/2");
   expect(rows[1]).toBe("routing: 0/1 not servable got outside; x outside(3d) went outside wrongly; device misses: holdout-tilt-ru");
   expect(rows[2]).toStartWith("calls 3,");
+});
+
+test("modelcheck: the fault table groups one kind of fault over names and numbers, and says whether the next report still had it", () => {
+  const steps = (...faults) => faults.map((list) => ({ faults: list }));
+  const records = [{ id: "a", steps: steps(["need x: figure has no option bogus. Its options are decimals: need x = figure(bogus=1)"], []) },
+    { id: "b", steps: steps(["need y: figure has no option size. Its options are decimals: need y = figure(size=2)"], ["need y: figure has no option size. Its options are decimals: need y = figure(size=3)"]) }];
+  expect(faultTable(records)).toEqual([["need X: figure has no option size. Its options are decimals", { count: 2, repaired: 0, kept: 1, last: 1, ids: ["b.0", "b.1"] }],
+    ["need X: figure has no option bogus. Its options are decimals", { count: 1, repaired: 1, kept: 0, last: 0, ids: ["a.0"] }]]);
 });
