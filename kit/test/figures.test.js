@@ -88,15 +88,14 @@ test("figures: unit= follows the number of each figure, and goalText= is the cap
   expect(definition.initialState.d[hero.children[1].bind.slice(2)]).toBe(25);
 });
 
-test("figures: a new figure writes the figures before it again in their new place, and note= or goal= on a figure that is not the main one is a fault", async () => {
+test("figures: a new figure writes the figures before it again in their new place, and note= or goal= on a figure that is not the main one is a note (K1 fix 3)", async () => {
   const file = await planned(['app("T", lang="en")', 'need a = figure("number", "A", 1, example=[{}, 1])', 'need b = figure("number", "B", 2, example=[{}, 2])'].join("\n"));
   file.feed('need c = figure("number", "C", 3, example=[{}, 3])');
   await expand(file);
   expect(tops(emit(file).definition).map(shape)).toEqual([["card", ["metric"]], ["grid", ["metric", "metric"]]]);
   for (const option of ['note="x"', "goal=10", 'goalText="x"']) {
-    const line = `need b = figure("number", "B", 2, ${option})`;
-    expect(report(await planned(`app("T")\nneed a = figure("number", "A", 1)\n${line}`)).faults)
-      .toContain(`line: need b: note=, goal=, and goalText= show only on the main figure, and b is not it: ${line}`);
+    const { faults, notes } = report(await planned(`app("T")\nneed a = figure("number", "A", 1, example=[{}, 1])\nneed b = figure("number", "B", 2, ${option}, example=[{}, 2])`));
+    expect([option, faults, notes]).toEqual([option, [], [`need b: note=, goal=, and goalText= show only on the main figure, and b is not it, so the kit left out ${option.split("=")[0]}=`]]);
   }
 });
 
@@ -120,10 +119,10 @@ test("figures: a figure that is a row shows its icon= as a small sign at the lef
   expect(rows[1].children[0].action).toBeUndefined();
 });
 
-test("figures: decimals= is the number of decimals of a money and a percent figure, and a fault for a text figure", async () => {
+test("figures: decimals= is the number of decimals of a money and a percent figure, and a note for a text figure (K1 fix 3)", async () => {
   const { definition } = await built('app("T", lang="en")', 'need a = figure("money", "A", 1234.567, decimals=0)', 'need b = figure("percent", "B", 12.345, decimals=1)',
     'need c = figure("money", "C", 5)', 'need d = figure("percent", "D", 12.345)');
   expect(["a", "b", "c", "d"].map((key) => definition.initialState.d[`${key}_text`])).toEqual(["1,235", "12.3%", "5.00", "12%"]);
-  const line = 'need t = figure("text", "T", "Mon", decimals=1)';
-  expect(report(await planned(`app("T")\n${line}`)).faults).toContain(`line: need t: a figure of the format text shows its value as it is, so it takes no decimals=. Remove decimals=, or give the format number: ${line}`);
+  const { faults, notes } = report(await planned('app("T")\nneed t = figure("text", "T", "Mon", decimals=1, example=[{}, "Mon"])'));
+  expect([faults, notes]).toEqual([[], ["need t: a figure of the format text shows its value as it is, so the kit left out decimals="]]);
 });

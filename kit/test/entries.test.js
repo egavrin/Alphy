@@ -175,15 +175,15 @@ test("entries: icons= gives a field of the add form its icon, tones= gives a val
   expect([count.style, valueAt(definition.initialState, count.bind)]).toEqual([{ emphasis: "display" }, "1 di 2"]);
 });
 
-test("entries: icons= of a field with no icon in the add form is a note (A0-K4), and tones= of no value of show= and total= with no hero count are faults of the need", async () => {
+test("entries: icons= of a field with no icon in the add form (A0-K4), tones= of no value of show=, and total= with no hero count (K1 fix 3) are notes of the need", async () => {
   const lines = (options, more = []) => ['app("T")', ...more, `need items = entries("Items", fields={name: "text", kind: ["a", "b"], done: "check"}${options})`].join("\n");
-  const faults = async (options, more) => report(await planned(lines(options, more))).faults;
   for (const key of ["done", "kind", "size"]) {
     const result = await compileAppFile(lines(`, icons={${key}: "Tag"}`));
     expect([key, result.faults, result.notes]).toEqual([key, [], [`need items: icons= names ${key}, whose field of the add form shows no icon, so the kit left it out. A text, number, date, or time field shows one, and a choice of more than six options does too`]]);
   }
-  expect(await faults(', show={n: 1}, tones={m: "accent"}')).toContainEqual(expect.stringContaining("need items: tones= names m, and show= has no value of that name"));
-  expect(await faults(', total="of"', ['need f = figure("number", "F", 1)'])).toContainEqual(expect.stringContaining("need items: total= joins the shown rows and all rows of the hero count, and this list has no hero count"));
+  // The look case of each is in looks.test.js (K1 fix 3). A sign of the row shows no badge, so tones= of it is a note too.
+  const sign = await compileAppFile(lines(', show={mark: "⭐"}, icon=$mark, tones={mark: "accent"}'));
+  expect([sign.faults, sign.notes]).toEqual([[], ["need items: tones= names mark, and show= has no value of that name, so the kit left it out"]]);
 });
 
 test("entries: a list that a steps or tabs need groups gets no hero count at the root, and the first list that no holder groups gets it", async () => {

@@ -40,6 +40,8 @@ A field of `entries` is a word, and it must not have the name of a line of the p
 A fault is for a thing that changes what the app does. A look option of a need that cannot apply changes only the look, so it is a note:
 the kit leaves the option out, and the note names the need and the option, such as `need tip: the part draws a Slider, which shows no icon, so the kit left out icon="Percent"`.
 A plan with only notes is clean. A look option of a line that the author wrote is still a fault of that line (section "Look options").
+The same holds for a look option of a need that the form of its part has no place for, such as `icon=` of a counter with no `addText=` (section "Parts").
+A value of the wrong type, an option that a part does not have, and a formula that reads nothing stay faults.
 
 ## Repair replies
 
@@ -138,9 +140,9 @@ A text that a format function printed is for a person: do not read it back as a 
     To add a row, a person types, finishes the edit (the action key of the keyboard or the host's finish button under the field), and then presses the add button.
     The host refuses a press before the finish and shows a notice, and the baseline apps of the agent loop have the same steps. No step adds a row with one press after the typing.
   - A plan with a list and no figure, progress, drawing, timer, or model starts with a hero card of the count of the shown rows of its first list. `countText=` is its caption, else the title of the list. `icon=` with a sign is its large emoji.
-    `total="of"` shows all rows too, such as "5 of 12". `total=` on a list with no hero count is a fault.
+    `total="of"` shows all rows too, such as "5 of 12". `total=` on a list with no hero count is a note, and the kit leaves it out.
   - `icons={nome: "Cart"}` gives a field of the add form its icon. A text, number, count, date, or time field shows an icon, and a choice of more than six options does too. Each other field, a name that is not a field, and each name with `add=false` are notes, and the kit leaves the icon out.
-  - `tones={streak: "accent"}` gives the badge of a value of `show=` its tone. A name that `show=` does not give is a fault.
+  - `tones={streak: "accent"}` gives the badge of a value of `show=` its tone. A name that `show=` does not give, or the sign of the row, is a note, and the kit leaves it out.
 - `input`: `options={value: "Label"}` keeps the value in the state and shows the label. `icon=` goes to a text, number, date, or time field and to a choice of more than six options.
   The host draws a choice of six options or fewer as a segmented control, which shows no icon. Each kind of input takes `icon=`: on a segmented control, a slider, a range slider, a multi-choice, or a toggle it is a note, and the kit leaves it out.
   Each other option of an input is only for its own kinds: `min=` on a text field is a fault.
@@ -155,11 +157,11 @@ A text that a format function printed is for a person: do not read it back as a 
   - Three figures or more of a set are rows of one size: the title at the left and the value at the right. `icon=` is a small sign at the left of the title: an emoji, or an icon of Alphy with no action.
   - On a figure that is not the main one, an emoji where a metric needs an icon of Alphy and a name that Alphy does not have are notes, and the kit leaves the icon out.
   - One figure of a set is a metric.
-  `note=`, `goal=`, and `goalText=` show only on the main figure. `goalText=` with no `goal=` is a fault.
-  `decimals=` is the number of decimals of a `number`, `money`, or `percent` figure. A `text` figure shows its value as it is, so `decimals=` on it is a fault.
+  `note=`, `goal=`, and `goalText=` show only on the main figure: on another figure they are a note, and the kit leaves them out. `goalText=` with no `goal=` is a note too.
+  `decimals=` is the number of decimals of a `number`, `money`, or `percent` figure. A `text` figure shows its value as it is, so `decimals=` on it is a note.
 - `counter`: a section with the title of the counter. It holds an outlined less button, the value with the display emphasis, and a filled more button.
   With `addText=`, the counter is one filled button that adds the step and a text button that resets the value. The plan shows the value elsewhere, such as in a figure.
-  `lessText=` and `moreText=` with `addText=` are a fault, and so are `icon=` and `resetText=` without it.
+  `lessText=` and `moreText=` with `addText=` are a note, and so are `icon=` and `resetText=` without it: the kit leaves them out.
 - `timer`: the card of a timer is a hero card, also the host's own countdown. A timer with rounds has a filled Start with a play icon, a filled Pause with a pause icon while it runs, a Reset text button, and a muted phase text.
   Its bar is a surface of 1024 x 64 that the bar fills: a track in the muted tone of the theme, a stop dot near its end, and the share of the phase that passed.
   A rest phase is between two rounds: after the work phase of the last round the timer is over. 5 rounds of 45 s with 15 s of rest take 5 x 45 + 4 x 15 = 285 s (`core.js` `tick`).

@@ -143,10 +143,12 @@ const PARTS = {
   // icon="Drop" (a name of a host icon) is the icon of the metric. role (expand): the place of a figure that is not the main one.
   figure(name, need, { hero, role }) {
     const [format, title, formula] = need.args, f = format?.v, { icon, note, goal, goalText, unit } = need.named, main = hero === name;
-    if ((note || goal || goalText) && !main) throw new DslError(`note=, goal=, and goalText= show only on the main figure, and ${name} is not it`);
-    if (goalText && !goal) throw new DslError(`goalText= is the caption of the bar to goal=, and ${name} has no goal=. Give goal=, or remove goalText=`);
-    const decimals = need.named.decimals && show(need.named.decimals);
-    if (decimals && f === "text") throw new DslError(`a figure of the format text shows its value as it is, so it takes no decimals=. Remove decimals=, or give the format number`);
+    // A look option that the form of the figure has no place for goes, with a note (K1 fix 3). Only the main figure draws them.
+    const notes = [], away = ["note", "goal", "goalText"].filter((key) => need.named[key]).map((key) => key + "=");
+    if (away.length && !main) notes.push(`need ${name}: note=, goal=, and goalText= show only on the main figure, and ${name} is not it, so the kit left out ${away.join(", ")}`);
+    else if (goalText && !goal) notes.push(`need ${name}: goalText= is the caption of the bar to goal=, and ${name} has no goal=, so the kit left it out`);
+    const decimals = need.named.decimals && f !== "text" && show(need.named.decimals);
+    if (need.named.decimals && f === "text") notes.push(`need ${name}: a figure of the format text shows its value as it is, so the kit left out decimals=`);
     // An own key, so that a format such as "constructor" is a number and never a property of Object. money() always prints 2 decimals, so decimals= of money is fixed().
     const formats = { money: decimals ? `fixed($/${name}, ${decimals})` : `money($/${name})`, percent: `percent($/${name}${decimals ? `, ${decimals}` : ""})`, text: `text($/${name})` };
     const text = Object.hasOwn(formats, f) ? formats[f] : `amount($/${name}, ${decimals || (f === "count" ? 0 : 2)})`;
@@ -173,7 +175,7 @@ const PARTS = {
       // An example with no given value, example=[{}, 0], has no put step (f0 words-ko-3 threw "unexpected ','" here).
       lines.push(`check(${[q(name + " example"), ...puts, `expect(${test})`].join(", ")})`);
     }
-    return { lines, top: role === "held" ? [] : [pair ? `${name}_grid` : `${name}_view`] };
+    return { lines, top: role === "held" ? [] : [pair ? `${name}_grid` : `${name}_view`], note: notes };
   },
 
   // need tasks = entries("Tasks", fields={task: "text", level: ["high", "low"], done: "check"}, rows=[], edit=true, reorder=true, filter=$done, sort=$task, order=$/order, show={double: $n * 2})
@@ -199,7 +201,7 @@ const PARTS = {
     const icon = iconWord ? undefined : opt.icon, sign = icon?.k === "path" && !icon.abs ? icon.segs[0] : null, shown = opt.show?.entries ?? [];
     // icons= gives a field of the add form its icon, and tones= gives a value of show= its tone (C.8). Maps, as labels= is.
     const icons = new Map(opt.icons?.entries ?? []), tones = new Map(opt.tones?.entries ?? []);
-    for (const key of tones.keys()) if (!shown.some(([value]) => value === key && value !== sign)) throw new DslError(`tones= names ${key}, and show= has no value of that name`);
+    for (const key of tones.keys()) if (!shown.some(([value]) => value === key && value !== sign)) notes.push(`need ${name}: tones= names ${key}, and show= has no value of that name, so the kit left it out`);
     if (icon?.k === "path" && ![...fields, ...shown].some(([key]) => key === sign)) throw new DslError(`icon=${show(icon)} reads no field of the rows. Use a field of fields= or a name of show=`);
     // More than 2 check marks are circles of one weight in a second row (C.3).
     const many = fields.filter(([, kindTree]) => kindTree.v === "check").length > 2;
@@ -292,7 +294,7 @@ const PARTS = {
       parts.push(...(sheet ? [`${name}_open`] : []), `${name}_addRow`);
     }
     lines.push(`${name}_view = Section(${show(title)}, [${parts.join(", ")}])`);
-    if (opt.total && !count) throw new DslError(`total= joins the shown rows and all rows of the hero count, and this list has no hero count. A list has one when it is the only main element of the app. Remove total=`);
+    if (opt.total && !count) notes.push(`need ${name}: total= joins the shown rows and all rows of the hero count, and this list has no hero count, so the kit left it out. A list has one when it is the only main element of the app`);
     if (!count) return { lines, top: [`${name}_view`], note: notes };
     // The only main element of the app is this list (C.6): a hero card with the count of its shown rows comes first. A sign of each row gives no emoji there.
     // total="of" shows all rows too: "12 of 12".
@@ -406,9 +408,9 @@ const PARTS = {
     const down = opt.min ? `set($/${name}, max(${show(opt.min)}, $/${name} - ${step}))` : `dec($/${name}, ${step})`;
     const up = opt.max ? `set($/${name}, min(${show(opt.max)}, $/${name} + ${step}))` : `inc($/${name}, ${step})`;
     const lines = [`$/${name} = ${start}`];
-    // Each form of the counter uses its own captions and icon (G.4).
+    // Each form of the counter uses its own captions and icon (G.4). The other form's ones have no place, so they go with a note (K1 fix 3).
     const unused = (opt.addText ? ["lessText", "moreText"] : ["icon", "resetText"]).filter((key) => opt[key]).map((key) => key + "=");
-    if (unused.length) throw new DslError(`a counter with ${opt.addText ? "addText= has one add button and a reset button" : "no addText= has a less and a more button"}, and it does not use ${unused.join(" or ")}. Remove ${unused.join(" and ")}${opt.addText ? "" : ", or give addText="}`);
+    const note = unused.length ? `need ${name}: a counter with ${opt.addText ? "addText= has one add button and a reset button" : "no addText= has a less and a more button"}, and it does not use ${unused.join(" or ")}, so the kit left ${unused.length > 1 ? "them" : "it"} out` : null;
     if (opt.addText) {
       lines.push(`${name}_plus = Button(${show(opt.addText)}, action=${up}, icon=${opt.icon ? show(opt.icon) : q("Plus")}, variant="filled")`,
         `${name}_reset = Button(${caption("resetText", "Reset")}, action=set($/${name}, ${start}), icon="Refresh", variant="text")`, `${name}_view = Row([${name}_plus, ${name}_reset])`);
@@ -417,7 +419,7 @@ const PARTS = {
         `${name}_value = Text($/${name}, emphasis="display", align="center", weight=1)`, `${name}_plus = Button(${caption("moreText", "More")}, action=${up}, icon="Plus", variant="filled")`,
         `${name}_view = Section(${show(title)}, [Row([${name}_minus, ${name}_value, ${name}_plus])])`);
     }
-    return { lines, top: [`${name}_view`] };
+    return { lines, top: [`${name}_view`], note };
   },
 
   // need tea = timer("Tea", $/kind == "green" ? 120 : 180, alert=true): one phase with an alert is the host's own countdown, a Timer line.

@@ -153,6 +153,25 @@ test("a look option that cannot apply becomes a note (A0-K4): each look-option f
   }
 });
 
+test("a look option that the form of a part has no place for becomes a note (K1 fix 3): a counter, a figure, and a list compile clean with a note that names the need and the option", async () => {
+  const CASES = [
+    [['need cups = counter("Cups", 0, icon="Cup")'], ["need cups: a counter with no addText= has a less and a more button, and it does not use icon=, so the kit left it out"]],
+    [['need cups = counter("Cups", 0, icon="Cup", resetText="Again")'], ["need cups: a counter with no addText= has a less and a more button, and it does not use icon= or resetText=, so the kit left them out"]],
+    [['need ml = counter("Water", 0, addText="+1", lessText="x")', 'need total = figure("count", "Water", $/ml, example=[{ml: 2}, 2])'], ["need ml: a counter with addText= has one add button and a reset button, and it does not use lessText=, so the kit left it out"]],
+    [['need a = figure("number", "A", 1, example=[{}, 1])', 'need b = figure("number", "B", 2, note="x", goal=10, example=[{}, 2])'],
+      ["need b: note=, goal=, and goalText= show only on the main figure, and b is not it, so the kit left out note=, goal="]],
+    [['need today = figure("number", "Today", 1, goalText="Of the goal", example=[{}, 1])'], ["need today: goalText= is the caption of the bar to goal=, and today has no goal=, so the kit left it out"]],
+    [['need t = figure("text", "T", "Mon", decimals=1, example=[{}, "Mon"])'], ["need t: a figure of the format text shows its value as it is, so the kit left out decimals="]],
+    [['need items = entries("Items", fields={name: "text"}, show={n: 1}, tones={m: "accent"})'], ["need items: tones= names m, and show= has no value of that name, so the kit left it out"]],
+    [['need f = figure("number", "F", 1, example=[{}, 1])', 'need items = entries("Items", fields={name: "text"}, total="of")'],
+      ["need items: total= joins the shown rows and all rows of the hero count, and this list has no hero count, so the kit left it out. A list has one when it is the only main element of the app"]],
+  ];
+  for (const [lines, notes] of CASES) {
+    const result = await compileAppFile(['app("Look", lang="en")', ...lines].join("\n"));
+    expect({ lines, faults: result.faults, notes: result.notes }).toEqual({ lines, faults: [], notes });
+  }
+});
+
 test("a look option that cannot apply becomes a note (A0-K4): a look option of a line that the author wrote stays a fault, and so does an option that is not a look option", async () => {
   expect(await faultsOf("$/n = 0", "root = Column([s])", 's = Slider("S", $/n, icon="Percent")')).toEqual(["s: Slider has no property icon"]);
   expect(await faultsOf('need name = input("text", "Name", "", min=1)')).toEqual(['line: need name: an input of kind text does not use min=. It uses icon=: need name = input("text", "Name", "", min=1)']);
@@ -263,9 +282,6 @@ test("look: a value of the wrong type, and an option that the form of a part doe
     ['need tasks = entries("Tasks", fields={task: "text"}, sheet="yes")', 'need tasks: sheet= needs true or false, and "yes" is neither'],
     ['need total = figure("number", "Total", 2, decimals="x")', 'need total: decimals= needs a number, and "x" is not one'],
     ['need cups = counter("Cups", 0, step="x")', 'need cups: step= needs a number, and "x" is not one'],
-    ['need cups = counter("Cups", 0, icon="Cup")', "need cups: a counter with no addText= has a less and a more button, and it does not use icon=. Remove icon=, or give addText="],
-    ['need ml = counter("Water", 0, addText="+1", lessText="x")', "need ml: a counter with addText= has one add button and a reset button, and it does not use lessText=. Remove lessText="],
-    ['need today = figure("number", "Today", 1, goalText="Of the goal")', "need today: goalText= is the caption of the bar to goal=, and today has no goal=. Give goal=, or remove goalText="],
     // The other flags, and a flag as a formula: the part reads it once when it builds the screen.
     ['need list = entries("L", fields={task: "text"}, edit=1, add="no", remove=[false], hidden="false")', ...["edit=: 1", 'add=: "no"', "remove=: [false]", 'hidden=: "false"']
       .map((pair) => `need list: ${pair.split(": ")[0]} needs true or false, and ${pair.split(": ")[1]} is neither`)],
