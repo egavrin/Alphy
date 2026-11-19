@@ -620,14 +620,14 @@ test("emit: model3d.plan gives a surface, a canvas, three part buttons, two arro
   expect(faults).toEqual([]);
   valid(definition);
   expect(definition.surfaces).toEqual([{ id: "rover_model", width: 320, height: 240 }]);
-  const card = nodes(definition.ui).find((node) => node.type === "card" && node.children[0].type === "canvas");
   // The model is the main element of the plan, so its card is the hero, and the explode button is outlined (Task 11b-2b, A.8).
-  // A chip that is not selected is outlined: a tonal one showed no container on the hero card (appfile-look-spike-a8b, model3d.png).
-  expect(card.variant).toBe("hero");
-  expect(card.children.map((node) => [node.type, ...(node.children ?? []).map((child) => [child.type, child.name ?? child.variant, child.text, child.action])])).toEqual([
-    ["canvas"], ["flowRow", ["button", "outlined", "Камера", "rover_part_camera"], ["button", "outlined", "Панель", "rover_part_panel"], ["button", "outlined", "Колёса", "rover_part_wheels"]],
+  // The hero card holds the model only. The tonal chips and the buttons stand under it (round before the review: model3d.png of appfile-look-all-2).
+  const screen = definition.ui.children[0].children, at = screen.findIndex((node) => node.type === "card" && node.children[0].type === "canvas");
+  const [card, ...under] = screen.slice(at, at + 3);
+  expect([card.variant, card.children]).toEqual(["hero", [{ type: "canvas", text: "Живая 3D-сцена", surfaces: ["rover_model"] }]]);
+  expect(under.map((node) => [node.type, ...node.children.map((child) => [child.type, child.name ?? child.variant, child.text, child.action])])).toEqual([
+    ["flowRow", ["button", "tonal", "Камера", "rover_part_camera"], ["button", "tonal", "Панель", "rover_part_panel"], ["button", "tonal", "Колёса", "rover_part_wheels"]],
     ["flowRow", ["icon", "Back", "−30°", "rover_left"], ["icon", "Chevron", "+30°", "rover_right"], ["button", "outlined", "Разобрать", "rover_explode"]]]);
-  expect(card.children[0]).toEqual({ type: "canvas", text: "Живая 3D-сцена", surfaces: ["rover_model"] });
   // The record of the part is a field of plain values, and the drag of the model is a field of the run-time.
   expect([definition.stateSchema.rover, definition.initialState.rover]).toEqual([{ type: "object", fields: { selected: "string", exploded: "boolean", turn: "number" } }, { selected: "", exploded: false, turn: 30 }]);
   expect([definition.stateSchema.drag, definition.initialState.drag]).toEqual([{ type: "object", fields: { surface: "string", pointer: "number", x: "number" } }, { surface: "", pointer: 0, x: 0 }]);

@@ -11,11 +11,12 @@ const named = (definition, type, text) => every(definition.ui).find((node) => no
 /** A button as its text, variant, and icon. */
 const look = (node) => [node.text, node.variant, node.icon];
 
-test("template: a timer with rounds is a hero card, Start is filled with Play, Pause is outlined, Reset is a text button, and the phase text is muted", async () => {
+test("template: a timer with rounds is a hero card, Start and Pause are filled with their icons, Reset is a text button, and the phase text is muted", async () => {
   const { definition } = await built('app("T", lang="en")', 'need t = timer("Workout", 40, rounds=2, rest=20)');
   const card = every(definition.ui).find((node) => node.type === "card");
   expect(card.variant).toBe("hero");
-  expect(["Start", "Pause", "Reset"].map((text) => look(named(definition, "button", text)))).toEqual([["Start", "filled", "Play"], ["Pause", "outlined", "Pause"], ["Reset", "text", "Refresh"]]);
+  // While the timer runs, Pause is the main action (round before the review): an outlined button on a hero card shows no container in the dark theme.
+  expect(["Start", "Pause", "Reset"].map((text) => look(named(definition, "button", text)))).toEqual([["Start", "filled", "Play"], ["Pause", "filled", "Pause"], ["Reset", "text", "Refresh"]]);
   const phase = every(card).find((node) => node.type === "text" && String(node.bind).includes("phaseText"));
   expect([phase.style, definition.initialState.d[phase.bind.slice(2)]]).toEqual([{ tone: "muted" }, "Work 1 / 2"]);
   // The host's own countdown is a hero card too.
@@ -35,6 +36,20 @@ test("template: the front of a card deck is a centered display text, the back a 
   // A deck with answer= shows its front in the same way. A deck of pages (no back=) keeps a heading, because a page can be a long text.
   const typed = await built('app("T", lang="en")', WORDS, 'need cards = deck("Words", $/words, front=$word, answer=$meaning)');
   expect(every(typed.definition.ui).find((node) => node.type === "text" && String(node.bind).includes("cards_front")).style).toEqual({ emphasis: "display", align: "center" });
+});
+
+test("template: the hero card of a deck holds the card and at most its filled button, and the other controls stand under it", async () => {
+  // Round before the review: an outlined button or a field on a hero card shows no container in the dark theme.
+  const kinds = (definition) => {
+    const section = every(definition.ui).find((node) => node.type === "section");
+    return section.children.map((node) => [node.type, node.variant, every(node).slice(1).map((child) => (child.type === "button" ? child.text : child.type))]);
+  };
+  const back = await built('app("T", lang="en")', WORDS, 'need cards = deck("Words", $/words, front=$word, back=$meaning)');
+  expect(kinds(back.definition).slice(0, 2)).toEqual([["card", "hero", ["text", "text", "Show"]], ["flowRow", undefined, ["Yes", "No"]]]);
+  const pages = await built('app("T", lang="en")', WORDS, 'need cards = deck("Words", $/words, front=$word)');
+  expect(kinds(pages.definition).slice(0, 2)).toEqual([["card", "hero", ["text"]], ["flowRow", undefined, ["Back", "Next"]]]);
+  const typed = await built('app("T", lang="en")', WORDS, 'need cards = deck("Words", $/words, front=$word, answer=$meaning)');
+  expect(kinds(typed.definition).slice(0, 2)).toEqual([["card", "hero", ["text"]], ["column", undefined, ["input", "Check", "banner", "text", "Next"]]]);
 });
 
 test("template: the note at the end of steps is a success notice, and the notice of a question is success for a right answer and warning for a wrong one", async () => {
@@ -64,20 +79,23 @@ test("template: icon= gives a card its icon, and the body text of a card is mute
   expect([card.icon, card.children.map((node) => [node.text, node.style])]).toEqual(["Layers", [["Legend", { emphasis: "title" }], ["Teal is the Moon", { tone: "muted" }]]]);
 });
 
-test("template: a drawing or a 3D model that is the main element is a hero card, and the button that takes a model apart is outlined", async () => {
+test("template: a drawing or a 3D model that is the main element is a hero card, and the controls of a model stand under the card", async () => {
   const shape = 'need art = drawing("Art", 320, 200, [circle(160, 100, 40, "accent")])';
   const drawn = await built('app("T", lang="en")', 'need n = input("number", "N", 1)', shape);
   const [first] = drawn.definition.ui.children[0].children;
   expect([first.type, first.variant, first.children.map((node) => node.type)]).toEqual(["card", "hero", ["canvas"]]);
   const { definition, app } = await built('app("T", lang="en")', 'need toy = model3d("Toy", [box("", 0, 0, 0, 2, 1, 1, "sand"), box("top", 0, 1, 0, 1, 1, 1, "accent")], parts={top: "Top"})');
-  const card = definition.ui.children[0].children[0];
-  expect([card.type, card.variant, look(named(definition, "button", "Take apart"))]).toEqual(["card", "hero", ["Take apart", "outlined", undefined]]);
+  // Round before the review: the hero card holds the model only. The chips, the turn buttons, and the outlined button that takes the model apart follow it.
+  const [card, chips, tools] = definition.ui.children[0].children;
+  expect([card.type, card.variant, card.children.map((node) => node.type)]).toEqual(["card", "hero", ["canvas"]]);
+  expect([chips.children.map((node) => node.text), tools.children.map((node) => node.text ?? node.name)]).toEqual([["Top"], ["−30°", "+30°", "Take apart"]]);
+  expect(look(named(definition, "button", "Take apart"))).toEqual(["Take apart", "outlined", undefined]);
   // The stage under the faces is the muted tone of the theme, not a light hex: Alphy draws it as a mid tint on a light and on a dark card.
   const opened = handle({ artifactId: "kit-test", revision: 1, state: definition.initialState, event: { type: "open" } }, app);
   expect(opened.surfaces.toy_model.commands[0]).toEqual({ type: "rect", x: 0, y: 0, width: 320, height: 240, color: "muted" });
-  // A part chip is outlined, and filled while it is the selected part.
+  // A part chip under the card is tonal, and filled while it is the selected part.
   const chosen = press(definition.initialState, app, "toy_part_top");
-  expect([named(definition, "button", "Top").variant, named(chosen, "button", "Top").variant]).toEqual(["outlined", "filled"]);
+  expect([named(definition, "button", "Top").variant, named(chosen, "button", "Top").variant]).toEqual(["tonal", "filled"]);
   // A figure is the main element before a drawing: the drawing stays a plain canvas.
   const counted = await built('app("T", lang="en")', 'need f = figure("number", "F", 1)', shape);
   expect(counted.definition.ui.children[0].children.map((node) => [node.type, node.variant])).toEqual([["card", "hero"], ["canvas", undefined]]);

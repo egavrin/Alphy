@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { LOOK_FIXTURES, plansIn } from "../build.js";
 import { emit } from "../src/emit.js";
 import { handle } from "../src/run.js";
-import { planned, press, valueAt } from "./helpers.js";
+import { every, planned, press, valueAt } from "./helpers.js";
 
 const PATHS = [...plansIn(fileURLToPath(new URL("../plans", import.meta.url))).sort(), ...LOOK_FIXTURES];
 /** Each saved plan and look fixture by its name, compiled: its definition and its run-time. */
@@ -79,19 +79,44 @@ const filledIn = (group, state) => {
   const primary = buttons.some((button) => FILLED.has(button.variant) && enabled(button)) ? null : buttons.find((button) => !button.variant && enabled(button));
   return buttons.filter((button) => FILLED.has(button.variant) || button === primary);
 };
-/** Each group of the first screen with more than one filled button, by its type and the texts of those buttons. */
-const crowded = (ui, state) => firstScreen(ui, state).filter((node) => ["section", "card", "column", "form", "row", "flowRow"].includes(node.type))
-  .map((group) => filledIn(group, state)).filter((filled) => filled.length > 1).map((filled) => filled.map((button) => button.text));
+const GROUPS = ["section", "card", "column", "form", "row", "flowRow"];
+/** The screens that a test reaches with at most one event: the first screen, and the screen after the press of the main action (the first filled button). */
+const screens = ({ definition, app }) => {
+  const main = firstScreen(definition.ui, definition.initialState).flatMap((node) => filledIn(node, definition.initialState)).find((button) => button.action);
+  const first = { when: "first screen", ui: definition.ui, state: definition.initialState, main };
+  if (!main) return [first];
+  const reply = press(definition.initialState, app, main.action);
+  return [first, { when: `after ${main.text}`, ui: reply.ui ?? definition.ui, state: reply.state, main }];
+};
 
-test("look: a group of buttons has one filled button, on the first screen and after the press of the main action", () => {
-  // At most one: after Start of a timer, Pause is outlined and Reset is a text button (A.1), so that group has no filled button.
-  const found = APPS.flatMap(({ name, definition, app }) => {
-    const first = crowded(definition.ui, definition.initialState).map((texts) => [name, "first screen", texts]);
-    // The main action: the first filled button of the first screen.
-    const main = firstScreen(definition.ui, definition.initialState).flatMap((node) => filledIn(node, definition.initialState)).find((button) => button.action);
-    if (!main) return first;
-    const reply = press(definition.initialState, app, main.action), ui = reply.ui ?? definition.ui;
-    return [...first, ...crowded(ui, reply.state).map((texts) => [name, `after ${main.text}`, texts])];
-  });
+test("look: the group of the main action has exactly one filled button and each other group at most one, on the first screen and after the press of the main action", () => {
+  const found = APPS.flatMap((compiled) => screens(compiled).flatMap(({ when, ui, state, main }) => {
+    const groups = firstScreen(ui, state).filter((node) => GROUPS.includes(node.type));
+    const crowded = groups.map((group) => filledIn(group, state)).filter((filled) => filled.length > 1).map((filled) => [compiled.name, when, filled.map((button) => button.text)]);
+    // The group of the main action, while it shows a button: Pause of a timer is filled while it runs (round before the review).
+    const home = main && groups.find((group) => kids(group).some((child) => child.action === main.action));
+    const shown = home && kids(home).some((child) => child.type === "button" && shows(child, state));
+    const count = shown ? filledIn(home, state).length : 1;
+    return [...crowded, ...(count === 1 ? [] : [[compiled.name, when, `${count} filled buttons in the group of ${main.text}`]])];
+  }));
+  expect(found).toEqual([]);
+});
+
+/** The controls that Alphy draws with an outline: the typed fields, a segmented control, a select, and a multi-choice. */
+const OUTLINED = new Set([...FIELD_TYPES, "segmented", "select", "multiChoice"]);
+/**
+ * Each control of a hero card that Alphy draws outlined or tonal, shown or not: on a hero card such a control shows no container in the dark theme
+ * (model3d.png of appfile-look-all-2: 1.0 to 1). A button with no variant beside another button can be outlined (secondaryButtons).
+ */
+const outlinedIn = (hero) => every(hero).slice(1).flatMap((node) => {
+  if (OUTLINED.has(node.type)) return [node.text ?? node.type];
+  const buttons = kids(node).filter((child) => child.type === "button");
+  return buttons.filter((button) => ["outlined", "tonal", "elevated"].includes(button.variant) || (!button.variant && buttons.length > 1)).map((button) => button.text);
+});
+
+test("look: a hero card holds no outlined or tonal button", () => {
+  // Round before the review: a hero card holds the main element and at most a filled button or a text button. Each other control stands under the card.
+  const found = APPS.flatMap((compiled) => screens(compiled).flatMap(({ when, ui }) => every(ui).filter((node) => node.type === "card" && node.variant === "hero")
+    .flatMap(outlinedIn).map((text) => [compiled.name, when, text])));
   expect(found).toEqual([]);
 });

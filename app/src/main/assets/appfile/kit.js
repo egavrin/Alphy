@@ -1202,6 +1202,7 @@ const PARTS = {
     const picture = opt.picture ? [`${name}_picture = Picture(text(${now(opt.picture)}))`] : [], inCard = opt.picture ? `${name}_picture, ` : "";
     // The front of a card that the person must know is a large centered text, as in the baseline flashcards (Task 11b-2b, A.2).
     const front = `${name}_front = Text(text(${now(opt.front)}), emphasis="display", align="center")`;
+    // The hero card holds the card and at most its filled button. A field or an outlined button stands under it: on a hero card its outline shows no contrast in the dark theme.
     // With answer= the person types the answer. The check button says right or wrong, and a right answer counts one point. The check button goes away after its tap, so a point counts once.
     if (opt.answer) return {
       lines: [`$/${name}_i = 0`, `$/${name}_typed = ""`, `$/${name}_checked = false`, `$/${name}_points = 0`,
@@ -1212,11 +1213,12 @@ const PARTS = {
         `${name}_check = Button(${text("check", "Check")}, action=[when($/${name}_right, inc($/${name}_points)), set($/${name}_checked, true)], visible=!$/${name}_checked)`,
         `${name}_result = Notice($/${name}_right ? ${text("right", "Right")} : ${text("wrong", "Wrong")} + ": " + text(${now(opt.answer)}), visible=$/${name}_checked)`,
         `${name}_next = Button(${text("next", "Next")}, action=[inc($/${name}_i), set($/${name}_typed, ""), set($/${name}_checked, false)], visible=$/${name}_checked)`,
-        `${name}_card = Card([${inCard}${name}_front, ${name}_field, ${name}_check, ${name}_result, ${name}_next], variant="hero", visible=!$/${name}_end)`,
+        `${name}_card = Card([${inCard}${name}_front], variant="hero", visible=!$/${name}_end)`,
+        `${name}_reply = Column([${name}_field, ${name}_check, ${name}_result, ${name}_next], visible=!$/${name}_end)`,
         `${name}_again = Button(${text("again", "Again")}, action=[set($/${name}_i, 0), set($/${name}_points, 0), set($/${name}_typed, ""), set($/${name}_checked, false)])`,
         `${name}_endCard = Card([Heading(${text("done", "Done")}), ${name}_again], visible=$/${name}_end)`,
         `${name}_score = Metric(${text("points", "Points")}, $/${name}_points)`,
-        `${name}_view = Section(${show(title)}, [${name}_card, ${name}_endCard, ${name}_score])`],
+        `${name}_view = Section(${show(title)}, [${name}_card, ${name}_reply, ${name}_endCard, ${name}_score])`],
       top: [`${name}_view`],
     };
     // Without back= the deck is pages: no hidden side and no count. A next and a back button, and an end after the last row.
@@ -1225,10 +1227,11 @@ const PARTS = {
       lines: [`$/${name}_i = 0`, `$/${name}_now := at(${show(list)}, $/${name}_i)`, `$/${name}_end := $/${name}_i >= len(${show(list)})`,
         ...picture, `${name}_front = Heading(text(${now(opt.front)}))`,
         `${name}_prev = Button(${text("prev", "Back")}, action=dec($/${name}_i), enabled=$/${name}_i > 0, variant="outlined")`, `${name}_next = Button(${text("next", "Next")}, action=inc($/${name}_i), variant="filled")`,
-        `${name}_card = Card([${inCard}${name}_front, Row([${name}_prev, ${name}_next])], variant="hero", visible=!$/${name}_end)`,
+        `${name}_card = Card([${inCard}${name}_front], variant="hero", visible=!$/${name}_end)`,
+        `${name}_turn = Row([${name}_prev, ${name}_next], visible=!$/${name}_end)`,
         `${name}_again = Button(${text("again", "Again")}, action=set($/${name}_i, 0))`,
         `${name}_endCard = Card([Heading(${text("done", "Done")}), ${name}_again], visible=$/${name}_end)`,
-        `${name}_view = Section(${show(title)}, [${name}_card, ${name}_endCard])`],
+        `${name}_view = Section(${show(title)}, [${name}_card, ${name}_turn, ${name}_endCard])`],
       top: [`${name}_view`],
     };
     const next = `inc($/${name}_i), set($/${name}_open, false)`;
@@ -1239,11 +1242,12 @@ const PARTS = {
         `${name}_show = Button(${text("show", "Show")}, action=set($/${name}_open, true), visible=!$/${name}_open)`,
         `${name}_yesButton = Button(${text("yes", "Yes")}, action=[inc($/${name}_yes), ${opt.mark ? `set(${now(opt.mark)}, true), ` : ""}${next}], visible=$/${name}_open, icon="Check", variant="filled")`,
         `${name}_noButton = Button(${text("no", "No")}, action=[inc($/${name}_no), ${next}], visible=$/${name}_open, variant="outlined")`,
-        `${name}_card = Card([${inCard}${name}_front, ${name}_back, ${name}_show, Row([${name}_yesButton, ${name}_noButton])], variant="hero", visible=!$/${name}_end)`,
+        `${name}_card = Card([${inCard}${name}_front, ${name}_back, ${name}_show], variant="hero", visible=!$/${name}_end)`,
+        `${name}_mark = Row([${name}_yesButton, ${name}_noButton], visible=$/${name}_open)`,
         `${name}_again = Button(${text("again", "Again")}, action=[set($/${name}_i, 0), set($/${name}_yes, 0), set($/${name}_no, 0), set($/${name}_open, false)])`,
         `${name}_endCard = Card([Heading(${text("done", "Done")}), ${name}_again], visible=$/${name}_end)`,
         `${name}_counts = Grid([Metric(${text("yes", "Yes")}, $/${name}_yes), Metric(${text("no", "No")}, $/${name}_no)], columns=2)`,
-        `${name}_view = Section(${show(title)}, [${name}_card, ${name}_endCard, ${name}_counts])`],
+        `${name}_view = Section(${show(title)}, [${name}_card, ${name}_mark, ${name}_endCard, ${name}_counts])`],
       top: [`${name}_view`],
     };
   },
@@ -1324,7 +1328,8 @@ const PARTS = {
       ...(many ? [`${name}_phaseText = Text((${at("resting")} ? ${text("restText", "Rest")} : ${text("workText", "Work")}) + " " + text(${at("round")}) + " / " + text(${opt.rounds ? show(opt.rounds) : 1}), tone="muted")`] : []),
       `${name}_bar = Progress(${at("spent")}, ${at("phase")}, label=${show(title)})`,
       `${name}_start = Button(${text("start", "Start")}, action=set(${at("on")}, true), visible=!${at("on")} && !${at("over")}, icon="Play", variant="filled")`,
-      `${name}_pause = Button(${text("pause", "Pause")}, action=set(${at("on")}, false), visible=${at("on")}, icon="Pause", variant="outlined")`,
+      // While the timer runs, Pause is its main action. A hero card holds no outlined button: its outline shows no contrast in the dark theme.
+      `${name}_pause = Button(${text("pause", "Pause")}, action=set(${at("on")}, false), visible=${at("on")}, icon="Pause", variant="filled")`,
       `${name}_reset = Button(${text("reset", "Reset")}, action=[set(${at("on")}, false), set(${at("spent")}, 0), set(${at("round")}, 1), set(${at("resting")}, false), set(${at("over")}, false)], enabled=${at("on")} || ${at("spent")} > 0 || ${at("round")} > 1 || ${at("resting")} || ${at("over")}, icon="Refresh", variant="text")`,
       `${name}_doneNote = Notice(${text("done", "Time is up")}, visible=${at("over")})`];
     const parts = [`${name}_time`, ...(many ? [`${name}_phaseText`] : []), `${name}_bar`, `Row([${name}_start, ${name}_pause, ${name}_reset])`, `${name}_doneNote`];
@@ -1371,13 +1376,13 @@ const PARTS = {
     const turn = opt.turn?.v !== false, chips = (opt.parts?.entries ?? []).map(([id, caption]) => [`${name}_part_${id}`, q(id), show(caption)]), tools = [];
     const lines = [`$/${name} = {selected: "", exploded: false, turn: 30}`,
       `${name}_model = Model3d(${show(title)}, ${show(bodies)}${turn ? `, ${at("turn")}` : ""}, exploded=${at("exploded")}, selected=${at("selected")})`,
-      // A chip that is not selected is outlined: a tonal button has the color of a hero card, so on the hero card it showed no container.
-      ...chips.map(([key, id, caption]) => `${key} = Button(${caption}, action=set(${at("selected")}, ${at("selected")} == ${id} ? "" : ${id}), selected=${at("selected")} == ${id}, variant=${at("selected")} == ${id} ? "filled" : "outlined")`)];
+      ...chips.map(([key, id, caption]) => `${key} = Button(${caption}, action=set(${at("selected")}, ${at("selected")} == ${id} ? "" : ${id}), selected=${at("selected")} == ${id}, variant=${at("selected")} == ${id} ? "filled" : "tonal")`)];
     if (turn) { lines.push(`${name}_left = IconButton("ArrowLeft", action=dec(${at("turn")}, 30), label="−30°")`, `${name}_right = IconButton("ArrowRight", action=inc(${at("turn")}, 30), label="+30°")`); tools.push(`${name}_left`, `${name}_right`); }
     if (opt.explode?.v !== false) { lines.push(`${name}_explode = Button(${at("exploded")} ? ${text("joinText", "Put together")} : ${text("explodeText", "Take apart")}, action=toggle(${at("exploded")}), variant="outlined")`); tools.push(`${name}_explode`); }
-    const rows = [chips.map(([key]) => key), tools].filter((row) => row.length).map((row) => `Row([${row.join(", ")}])`);
-    // The model that is the main element is in a hero card (Task 11b-2b, A.8).
-    return { lines: [...lines, `${name}_view = Card([${[`${name}_model`, ...rows].join(", ")}]${hero === name ? ', variant="hero"' : ""})`], top: [`${name}_view`] };
+    const rows = [[`${name}_chips`, chips.map(([key]) => key)], [`${name}_tools`, tools]].filter(([, row]) => row.length).map(([key, row]) => [key, `Row([${row.join(", ")}])`]);
+    if (hero !== name) return { lines: [...lines, `${name}_view = Card([${[`${name}_model`, ...rows.map(([, row]) => row)].join(", ")}])`], top: [`${name}_view`] };
+    // The model that is the main element is in a hero card (A.8), and its chips and buttons stand under the card: a tonal or an outlined button on a hero card shows no container in the dark theme.
+    return { lines: [...lines, `${name}_view = Card([${name}_model], variant="hero")`, ...rows.map(([key, row]) => `${key} = ${row}`)], top: [`${name}_view`, ...rows.map(([key]) => key)] };
   },
 
   // need focus = card("Title", $/rover/selected == "camera" ? "The camera" : "The rover", eyebrow="In focus", icon="Layers"): a card of text with a muted body.
