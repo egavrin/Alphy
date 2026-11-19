@@ -1,0 +1,5 @@
+app("Stromkosten", lang="de", preset="clean", palette="amber", kind="Rechner")
+need kosten = figure("money", "Stromkosten", max(0, $/neu - $/alt) * $/preis, example=[{alt: 1000, neu: 1200, preis: 0.3}, 60], decimals=2, icon="⚡", note="Der neue Zählerstand muss mindestens dem alten entsprechen.")
+need alt = input("number", "Alter Zählerstand in kWh", 0, min=0, icon="Bolt")
+need neu = input("number", "Neuer Zählerstand in kWh", 0, min=0, icon="Bolt")
+need preis = input("money", "Preis pro kWh", 0.3, min=0, step=0.01, icon="Coins")

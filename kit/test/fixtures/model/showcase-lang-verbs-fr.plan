@@ -1,0 +1,3 @@
+app("Quiz de conjugaison", lang="fr", preset="playful", palette="blue", kind="Quiz")
+need verbes = entries("Conjugaisons", fields={q: "text", a: "text"}, rows=[{q: "parler — je", a: "parle"}, {q: "finir — tu", a: "finis"}, {q: "être — il", a: "est"}, {q: "avoir — nous", a: "avons"}, {q: "aller — vous", a: "allez"}, {q: "faire — elles", a: "font"}, {q: "prendre — je", a: "prends"}, {q: "venir — nous", a: "venons"}], labels={q: "Verbe et pronom", a: "Réponse"}, add=false, remove=false, hidden=true, icon="📚")
+need quiz = deck("Conjuguez au présent", $/verbes, front=$q, answer=$a, field="Votre réponse", check="Vérifier", right="Bonne réponse", wrong="Incorrect", next="Suivant", points="Points", done="Terminé", again="Recommencer")

@@ -1,0 +1,5 @@
+app("Gastos del mes", lang="es", preset="clean", palette="teal", kind="Control de gastos")
+need total = figure("money", "Total del mes", sum(filter($/gastos, month($fecha) == month(today()) && year($fecha) == year(today())), $importe), example=[{gastos: [{fecha: today(), categoria: "Comida", importe: 100}, {fecha: today(), categoria: "Transporte", importe: 50}]}, 150], icon="💸")
+need grafico = chart("Gastos por categoría", groups(filter($/gastos, month($fecha) == month(today()) && year($fecha) == year(today())), $categoria, $importe), $key, $value, kind="bar")
+need gastos = entries("Gastos", fields={fecha: "date", categoria: "text", importe: "money"}, rows=[], labels={fecha: "Fecha", categoria: "Categoría", importe: "Importe"}, addText="Añadir gasto", emptyText="Aún no hay gastos", icon="🧾", icons={fecha: "Calendar", categoria: "Tag", importe: "Wallet"})
+need pestanas = tabs(["Resumen", "Añadir gastos"], [[total, grafico], [gastos]])

@@ -1,0 +1,5 @@
+app("Intervalltimer", lang="de", preset="clean", palette="orange", kind="Training")
+need fortschritt = progress("Abgeschlossene Runden", $/training, 8)
+need runden = figure("count", "Abgeschlossene Runden", $/training, example=[{training: 4}, 4], icon="🔄", unit="von 8")
+need training = timer("Training", 40, rounds=8, rest=20, start="Start", pause="Pause", reset="Zurücksetzen", done="Training abgeschlossen", workText="Belastung", restText="Pause")
+need runden = figure("count", "Abgeschlossene Runden", $/training, example=[{training: 4}, 4], icon="Repeat", unit="von 8")

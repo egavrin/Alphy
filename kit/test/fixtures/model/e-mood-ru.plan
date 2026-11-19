@@ -1,0 +1,3 @@
+app("Дневник настроения", lang="ru", preset="soft", palette="purple", kind="Дневник")
+need moods = entries("Записи", fields={day: "date", score: ["1", "2", "3", "4", "5"], note: "text"}, rows=[], labels={day: "Дата", score: "Оценка настроения", note: "Короткая заметка"}, icon="😊", icons={day: "Calendar", note: "Pencil"}, addText="Добавить запись", emptyText="Записей пока нет")
+need week = chart("Настроение за неделю", sort(filter($/moods, $day >= addDays(today(), -6) && $day <= today()), $day, "asc"), $day, number($score), kind="line")

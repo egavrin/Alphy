@@ -1,0 +1,6 @@
+app("카페 주문 계산기", lang="ko", preset="soft", palette="brown", kind="계산기")
+need price = figure("money", "주문 가격", ($/drink == "아메리카노" ? 4000 : $/drink == "카페라테" ? 4500 : 5000) + ($/size == "큰 사이즈" ? 1000 : 0) + ($/shot ? 500 : 0), example=[{drink: "카페라테", size: "큰 사이즈", shot: true}, 6000], icon="☕", unit="원")
+need drink = input("choice", "음료 종류", "아메리카노", options=["아메리카노", "카페라테", "카푸치노"])
+need size = input("choice", "사이즈", "보통 사이즈", options=["보통 사이즈", "큰 사이즈"])
+need shot = input("toggle", "샷 추가 (+500원)", false)
+need prices = content("기본 가격: 아메리카노 4,000원, 카페라테 4,500원, 카푸치노 5,000원. 큰 사이즈는 1,000원 추가.")

@@ -1,0 +1,6 @@
+app("Miary kuchenne", lang="pl", preset="soft", palette="amber", kind="Przelicznik")
+need wynik = figure("number", "Wynik", $/ilosc * ($/z == "Gramy" ? 250 / ($/skladnik == "Mąka" ? 120 : $/skladnik == "Cukier" ? 200 : 250) : $/z == "Szklanki" ? 250 : $/z == "Łyżki" ? 15 : 1) / ($/na == "Gramy" ? 250 / ($/skladnik == "Mąka" ? 120 : $/skladnik == "Cukier" ? 200 : 250) : $/na == "Szklanki" ? 250 : $/na == "Łyżki" ? 15 : 1), example=[{ilosc: 120, skladnik: "Mąka", z: "Gramy", na: "Szklanki"}, 1], decimals=2, icon="🥣", note="Szklanka: 250 ml, łyżka: 15 ml. Szklanka mąki: 120 g, cukru: 200 g, wody: 250 g.")
+need skladnik = input("choice", "Składnik", "Mąka", options=["Mąka", "Cukier", "Woda"])
+need ilosc = input("number", "Ilość", 1, min=0, icon="Calculator")
+need z = input("choice", "Z jednostki", "Szklanki", options=["Gramy", "Szklanki", "Łyżki", "Mililitry"])
+need na = input("choice", "Na jednostkę", "Gramy", options=["Gramy", "Szklanki", "Łyżki", "Mililitry"])

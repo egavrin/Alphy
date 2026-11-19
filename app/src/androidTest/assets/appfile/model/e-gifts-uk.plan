@@ -1,0 +1,3 @@
+app("Новорічні подарунки", lang="uk", preset="soft", palette="green")
+need remaining = figure("money", "Ще треба витратити", sum(filter($/gifts, !$bought), $price), example=[{gifts: [{price: 100, bought: false}, {price: 300, bought: true}]}, 100], icon="🎁")
+need gifts = entries("Подарунки", fields={person: "text", gift: "text", price: "money", bought: "check"}, rows=[], labels={person: "Кому", gift: "Що подарувати", price: "Ціна", bought: "Куплено"}, icon="🎁", icons={person: "Person", gift: "Gift", price: "Wallet"}, addText="Додати подарунок", emptyText="Подарунків поки немає")

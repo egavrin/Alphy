@@ -1,0 +1,2 @@
+app("Haftalık ders programı", lang="tr", preset="clean", palette="blue", kind="Program")
+need dersler = entries("Dersler", fields={gun: ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"], saat: "time", ders: "text"}, rows=[], labels={gun: "Gün", saat: "Saat", ders: "Ders adı"}, group=$gun, icon="📚", icons={saat: "Clock", ders: "Book"}, addText="Ders ekle", emptyText="Henüz ders eklenmedi", countText="Dersler")

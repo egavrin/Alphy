@@ -1,0 +1,17 @@
+app("记分牌", lang="zh", preset="clean", palette="blue", kind="记分")
+$/teamA = 0
+$/teamB = 0
+need scoreboard = hole("显示两支队伍的分数，各有加分和减分按钮，并可一键重置两个分数。")
+scoreboard_view = Column([teams, reset])
+teams = Row([teamAcard, teamBcard])
+teamAcard = Card([teamAmetric, teamAbuttons])
+teamBcard = Card([teamBmetric, teamBbuttons])
+teamAmetric = Metric("队伍一", $/teamA, icon="People")
+teamBmetric = Metric("队伍二", $/teamB, icon="People")
+teamAbuttons = Row([teamAless, teamAmore])
+teamBbuttons = Row([teamBless, teamBmore])
+teamAless = Button("减分", dec($/teamA, 1), icon="Minus")
+teamAmore = Button("加分", inc($/teamA, 1), icon="Plus")
+teamBless = Button("减分", dec($/teamB, 1), icon="Minus")
+teamBmore = Button("加分", inc($/teamB, 1), icon="Plus")
+reset = Button("重置", [set($/teamA, 0), set($/teamB, 0)], icon="Refresh")

@@ -1,0 +1,3 @@
+app("영어 단어장", lang="ko", preset="soft", palette="blue", kind="학습")
+need words = entries("단어장", fields={word: "text", meaning: "text"}, rows=[], labels={word: "영어 단어", meaning: "뜻"}, addText="단어 추가", emptyText="아직 단어가 없어요", icon="📚", icons={word: "Language", meaning: "Pencil"})
+need quiz = deck("단어 퀴즈", $/words, front=$word, answer=$meaning, field="뜻을 입력하세요", check="확인", right="정답이에요", wrong="틀렸어요", next="다음", points="점수", again="다시 시작", done="완료")

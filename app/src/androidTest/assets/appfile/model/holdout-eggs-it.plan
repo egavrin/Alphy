@@ -1,0 +1,3 @@
+app("Timer per uova", lang="it", preset="soft", palette="amber", kind="Timer")
+need cottura = input("choice", "Cottura", "Alla coque", options=["Alla coque", "Morbide", "Sode"])
+need timer = timer("Tempo di cottura", $/cottura == "Alla coque" ? 180 : $/cottura == "Morbide" ? 360 : 540, alert=true, start="Avvia", pause="Pausa", reset="Azzera", done="Uova pronte!")

@@ -1,0 +1,2 @@
+app("Lista de lectura", lang="es", preset="soft", palette="purple")
+need libros = entries("Libros", fields={titulo: "text", estado: ["Por leer", "Leyendo", "Terminados"], paginas: "count"}, rows=[], labels={titulo: "Título", estado: "Estado", paginas: "Páginas leídas"}, group=$estado, edit=true, icon="📚", icons={titulo: "Book"}, addText="Añadir libro", emptyText="Aún no hay libros", countText="Libros")

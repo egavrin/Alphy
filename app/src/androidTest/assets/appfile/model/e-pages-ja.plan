@@ -1,0 +1,4 @@
+app("今月の読書", lang="ja", preset="soft", palette="indigo", kind="読書目標")
+need progress = progress("今月の進み具合", sum(filter($/reading, month($date) == month(today()) && year($date) == year(today())), $pages), $/goal)
+need goal = input("number", "今月読みたいページ数", 300, min=1, step=1, icon="Book")
+need reading = entries("読んだページ", fields={date: "date", pages: "number"}, rows=[], labels={date: "読んだ日", pages: "ページ数"}, addText="記録を追加", emptyText="まだ記録がありません", icon="📖", icons={date: "Calendar", pages: "Book"})

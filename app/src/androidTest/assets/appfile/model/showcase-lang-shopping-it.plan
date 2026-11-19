@@ -1,0 +1,2 @@
+app("Lista della spesa", lang="it", preset="clean", palette="green")
+need prodotti = entries("Prodotti", fields={nome: "text", corsia: "text", comprato: "check"}, rows=[], labels={nome: "Prodotto", corsia: "Corsia", comprato: "Comprato"}, addText="Aggiungi prodotto", emptyText="La lista è vuota", icon="🛒", icons={nome: "Cart", corsia: "Pin"}, reorder=true, countText="Prodotti")

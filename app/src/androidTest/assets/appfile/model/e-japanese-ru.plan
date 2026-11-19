@@ -1,0 +1,6 @@
+app("Считаем по-японски", lang="ru", preset="playful", palette="indigo", kind="Урок")
+need visual = drawing("Число по-японски", 240, 150, [text(120, 38, $/digit, "muted", 24), text(120, 98, at(split("一,二,三,四,五,六,七,八,九,十", ","), number($/digit) - 1), "accent", 60)])
+need digit = input("choice", "Выбери число", "1", options=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"], icon="Calculator")
+need reading = card("Произношение", "Это число читается «" + at(split("ити,ни,сан,ён,го,року,нана,хати,кю,дзю", ","), number($/digit) - 1) + "». Повтори его вслух.", icon="Volume")
+need lesson = lesson([{title: "От одного до трёх", text: "一 — ити, 二 — ни, 三 — сан."}, {title: "От четырёх до шести", text: "四 — ён, 五 — го, 六 — року."}, {title: "От семи до десяти", text: "七 — нана, 八 — хати, 九 — кю, 十 — дзю."}], next="Далее", back="Назад", stepText="Шаг")
+need check = question("Как по-японски будет «пять»?", options=["сан", "го", "дзю"], right="го", rightText="Верно!", wrongText="Попробуй ещё раз")

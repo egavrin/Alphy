@@ -1,0 +1,6 @@
+app("Calculadora de préstamo", lang="es", preset="clean", palette="blue", kind="Calculadora")
+need cuota = figure("money", "Cuota mensual", $/interes == 0 ? $/importe / ($/anos * 12) : $/importe * ($/interes / 1200) / (1 - pow(1 + $/interes / 1200, -$/anos * 12)), example=[{importe: 12000, interes: 0, anos: 2}, 500], decimals=2, icon="💰")
+need total = figure("money", "Total pagado", $/cuota * $/anos * 12, example=[{importe: 12000, interes: 0, anos: 2}, 12000], decimals=2, icon="Wallet")
+need importe = input("money", "Importe del préstamo", 12000, min=0, icon="Money")
+need interes = input("percent", "Interés anual", 5, min=0, max=100)
+need anos = input("number", "Años", 2, min=1, max=50, step=1, icon="Calendar")

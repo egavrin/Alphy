@@ -1,0 +1,3 @@
+app("Calories du jour", lang="fr", preset="clean", palette="green", kind="Suivi")
+need total = figure("number", "Calories consommées", sum(filter($/repas, $jour == today()), $calories), example=[{repas: [{jour: today(), calories: 100}, {jour: today(), calories: 300}]}, 400], icon="🍽️", unit="kcal", goal=2000, goalText="Objectif : 2000 kcal")
+need repas = entries("Repas du jour", fields={nom: "text", calories: "number", jour: "date"}, rows=[], labels={nom: "Repas", calories: "Calories (kcal)", jour: "Date"}, filter=$jour == today(), icon="🍽️", icons={nom: "Utensils", calories: "Flame", jour: "Calendar"}, addText="Ajouter un repas", emptyText="Aucun repas aujourd’hui")

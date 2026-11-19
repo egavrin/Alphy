@@ -1,0 +1,3 @@
+app("Vacation countdown", lang="en", preset="soft", palette="blue")
+need remaining = figure("count", "Days until vacation", max(0, days(today(), $/vacation)), example=[{vacation: today()}, 0], icon="🏖️", unit="days")
+need vacation = input("date", "Vacation date", today(), icon="Calendar")

@@ -1,0 +1,4 @@
+app("Дроби", lang="ru", preset="playful", palette="purple", kind="Исследование")
+need visual = drawing("Доля целого", 320, 100, [each(10, rect(10 + $index * 30, 20, 26, 35, $index < $/part / 10 ? "accent" : "surface", 3)), text(160, 80, text($/part / 10) + " / 10", "ink", 22)])
+need part = input("percent", "Закрашенная часть", 30, min=0, max=100, step=10)
+need explanation = card("Части целого", "Знаменатель показывает, на сколько равных частей разделено целое. Числитель показывает, сколько частей закрашено.", icon="Puzzle")

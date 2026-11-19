@@ -1,0 +1,5 @@
+app("Configura la pizza", lang="it", preset="playful", palette="orange", kind="Configuratore")
+need totale = figure("money", "Prezzo totale", ($/base == "Margherita" ? 6 : 5) + ($/dimensione == "Grande" ? 3 : $/dimensione == "Media" ? 1 : 0) + count($/ingredienti), example=[{base: "Margherita", dimensione: "Grande", ingredienti: ["Funghi", "Olive"]}, 11], decimals=2, icon="🍕")
+need base = input("choice", "Base", "Margherita", options={Margherita: "Margherita · 6 €", Rossa: "Rossa · 5 €"})
+need dimensione = input("choice", "Dimensione", "Media", options={Piccola: "Piccola · +0 €", Media: "Media · +1 €", Grande: "Grande · +3 €"})
+need ingredienti = input("choices", "Ingredienti · 1 € ciascuno, fino a 5", [], options=["Funghi", "Olive", "Prosciutto", "Salame", "Peperoni", "Cipolla", "Rucola", "Tonno"], max=5)

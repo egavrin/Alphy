@@ -1,0 +1,3 @@
+app("勉強時間", lang="ja", preset="clean", palette="blue", kind="トラッカー")
+need weekly = figure("number", "今週の合計", sum(filter($/records, $day >= addDays(today(), 1 - weekday(today())) && $day <= today()), $minutes), example=[{records: [{subject: "数学", minutes: 30, day: today()}, {subject: "英語", minutes: 20, day: today()}]}, 50], icon="📚", unit="分")
+need records = entries("勉強の記録", fields={subject: "text", minutes: "number", day: "date"}, rows=[], labels={subject: "科目", minutes: "勉強時間（分）", day: "日付"}, icon="📖", icons={subject: "Book", minutes: "Clock", day: "Calendar"}, addText="記録を追加", emptyText="まだ記録がありません")

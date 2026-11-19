@@ -1,0 +1,2 @@
+app("Medication schedule", lang="en", preset="clean", palette="teal")
+need doses = entries("Daily doses", fields={name: "text", time: "time", enabled: "switch"}, rows=[{name: "Dose 1", time: "08:00", enabled: true}, {name: "Dose 2", time: "14:00", enabled: true}, {name: "Dose 3", time: "20:00", enabled: true}], labels={name: "Dose", time: "Time", enabled: "Enabled"}, edit=true, confirm="Delete this dose?", yes="Delete", no="Cancel", icon="💊", icons={name: "Pill", time: "Clock"}, addText="Add dose", emptyText="No doses scheduled", countText="Daily doses")

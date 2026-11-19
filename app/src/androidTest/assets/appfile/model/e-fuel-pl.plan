@@ -1,0 +1,6 @@
+app("Zużycie paliwa", lang="pl", preset="clean", palette="blue", kind="Kalkulator")
+need spalanie = figure("number", "Spalanie na 100 km", $/litry / $/dystans * 100, example=[{litry: 15, dystans: 250}, 6], decimals=1, icon="⛽", unit="l/100 km")
+need koszt = figure("money", "Koszt przejazdu", $/litry * $/cena, example=[{litry: 15, cena: 6}, 90], decimals=2, icon="Wallet", unit="zł")
+need dystans = input("number", "Dystans w km", 250, min=1, icon="Car")
+need litry = input("number", "Spalone litry", 15, min=0, icon="Drop")
+need cena = input("money", "Cena za litr w zł", 6, min=0, icon="Coins")

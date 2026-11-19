@@ -100,10 +100,14 @@ export function planCopies(plans, to) {
 /** The fixtures that share a name with a case of the corpus: the pictures of AppFileLookTest and kit/look.js show them beside the saved plans. */
 export const LOOK_FIXTURES = ["water-ko", "units-pl", "shopping", "habits", "price-filter", "look-water-ko", "look-shopping-it", "mock-water-ko", "mock-units-pl", "mock-shopping-it", "mock-habits-uk", "mock-price-filter", "look-deck-es", "look-guide-es"].map((name) => at(`test/fixtures/${name}.plan`));
 
-/** Each file that the build writes, with its text. The device tests also read the test plans of the node table, the lists, the render work limit, the cards, the free forms, the shapes, the reply at the byte limit, and a model beside a drawing, and the look fixtures. */
+/**
+ * Each file that the build writes, with its text. The device tests also read the test plans of the node table, the lists, the render work limit, the cards, the free forms, the shapes, the reply at the byte limit, and a model beside a drawing, and the look fixtures.
+ * The plans that a model wrote (test/fixtures/model) go to a directory of their own, appfile/model.
+ */
 const outputs = async () => [[at("src/icons.js"), iconModule()], [at("../app/src/main/assets/appfile/kit.js"), await bundle()],
   ...planCopies([...plansIn(at("plans")), ...["nodes", "looks", "lists", "rich", "cards", "free", "shapes", "bytes", "model"].map((name) => at(`test/${name}.plan`)), ...LOOK_FIXTURES],
-    at("../app/src/androidTest/assets/appfile"))];
+    at("../app/src/androidTest/assets/appfile")),
+  ...planCopies(plansIn(at("test/fixtures/model")), at("../app/src/androidTest/assets/appfile/model"))];
 
 if (import.meta.main) {
   const check = process.argv.includes("--check");

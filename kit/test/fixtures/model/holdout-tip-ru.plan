@@ -1,0 +1,5 @@
+app("Калькулятор чаевых", lang="ru", preset="clean", palette="teal", kind="Калькулятор")
+need perperson = figure("money", "На человека", $/bill * (1 + $/tip / 100) / $/people, example=[{bill: 1000, tip: 10, people: 2}, 550], decimals=2, icon="🧾")
+need bill = input("money", "Сумма счёта", 1000, min=0, icon="Receipt")
+need tip = input("percent", "Чаевые", 10, min=0, max=100)
+need people = input("count", "Количество человек", 2, min=1, max=100, icon="People")

@@ -1,0 +1,2 @@
+app("Planche", lang="fr", preset="clean", palette="blue", kind="Entraînement")
+need planche = timer("Planche", 45, rounds=5, rest=15, start="Démarrer", pause="Pause", reset="Réinitialiser", done="Terminé", workText="Planche", restText="Repos")

@@ -1,0 +1,2 @@
+app("Дыхание", lang="ru", preset="soft", palette="teal", kind="Практика")
+need breath = timer("Дыхательное упражнение", 4, rounds=1, rest=6, start="Начать", pause="Пауза", reset="Заново", done="Готово", workText="Вдох", restText="Выдох")

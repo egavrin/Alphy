@@ -1,0 +1,6 @@
+app("Проценты", lang="ru", preset="soft", palette="blue", kind="Объяснение")
+need visual = drawing("Проценты из ста", 240, 240, [each(100, rect(20 + ($index % 10) * 20, 20 + floor($index / 10) * 20, 17, 17, $index < $/percent ? "accent" : "surface", 3))])
+need percent = input("number", "Процентов", 25, min=0, max=100, step=1, icon="Percent")
+need explanation = card("Часть из ста", "Процент — это одна сотая целого. Например, 25% — это 25 из 100 клеток.", icon="Grid")
+need lesson = lesson([{title: "Целое", text: "Все 100 клеток вместе — это 100%."}, {title: "Часть", text: "Число процентов показывает, сколько клеток из ста выделено."}], next="Далее", back="Назад", stepText="Шаг")
+need question = question("Сколько клеток из 100 составляют 25%?", options=["25", "50", "100"], right="25", rightText="Верно!", wrongText="Попробуй ещё раз")

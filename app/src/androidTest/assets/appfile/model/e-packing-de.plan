@@ -1,0 +1,2 @@
+app("Urlaubs-Packliste", lang="de", preset="soft", palette="teal", kind="Packliste")
+need packliste = entries("Packliste", fields={name: "text", kategorie: ["Kleidung", "Hygiene", "Dokumente", "Technik", "Sonstiges"], eingepackt: "check"}, rows=[], labels={name: "Gegenstand", kategorie: "Kategorie", eingepackt: "Im Koffer"}, group=$kategorie, icon="🧳", icons={name: "Luggage"}, addText="Hinzufügen", emptyText="Noch keine Gegenstände", countText="Gegenstände")

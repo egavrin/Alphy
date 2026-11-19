@@ -1,0 +1,3 @@
+app("漢字練習カード", lang="ja", preset="soft", palette="indigo", kind="学習")
+need words = entries("漢字", fields={kanji: "text", reading: "text", meaning: "text"}, rows=[{kanji: "山", reading: "やま", meaning: "高く盛り上がった地形"}, {kanji: "川", reading: "かわ", meaning: "水が流れる自然の道"}, {kanji: "光", reading: "ひかり", meaning: "ものを明るく照らすもの"}, {kanji: "森", reading: "もり", meaning: "木がたくさん生えている場所"}, {kanji: "海", reading: "うみ", meaning: "広く塩水をたたえた場所"}], labels={kanji: "漢字", reading: "読み方", meaning: "意味"}, hidden=true, add=false, remove=false)
+need cards = deck("漢字練習", $/words, front=$kanji, back="読み方：" + $reading + "　意味：" + $meaning, show="答えを見る", yes="覚えた", no="まだ", again="もう一度", done="終了")

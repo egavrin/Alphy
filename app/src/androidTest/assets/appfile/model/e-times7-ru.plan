@@ -1,0 +1,3 @@
+app("Таблица на семь", lang="ru", preset="playful", palette="purple", kind="Тренировка")
+need practice = deck("Умножай на 7", $/tasks, front=$q, answer=$a, field="Ответ", check="Проверить", right="Верно", wrong="Попробуй ещё", next="Дальше", points="Баллы", again="Заново", done="Готово")
+need tasks = entries("Примеры", fields={q: "text", a: "text"}, rows=[{q: "7 × 1", a: "7"}, {q: "7 × 2", a: "14"}, {q: "7 × 3", a: "21"}, {q: "7 × 4", a: "28"}, {q: "7 × 5", a: "35"}, {q: "7 × 6", a: "42"}, {q: "7 × 7", a: "49"}, {q: "7 × 8", a: "56"}, {q: "7 × 9", a: "63"}, {q: "7 × 10", a: "70"}], hidden=true, add=false, remove=false)

@@ -1,0 +1,5 @@
+app("Reading goal", lang="en", preset="soft", palette="indigo", kind="Setup")
+need genres = input("choices", "Choose genres", [], options=["Fiction", "Mystery", "Fantasy", "Science fiction", "Romance", "Nonfiction", "Biography", "History"])
+need pages = input("number", "Pages per day", 20, min=1, max=1000, icon="Book")
+need summary = card("Your reading goal", "Genres: " + (count($/genres) == 0 ? "None selected" : join($/genres, ", ")) + "\nPages per day: " + text($/pages), icon="Book")
+need wizard = steps(["Genres", "Pages per day", "Summary"], [[genres], [pages], [summary]], next="Next", back="Back", finish="Start", done="Done")

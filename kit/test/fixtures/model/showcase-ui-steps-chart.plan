@@ -1,0 +1,4 @@
+app("Schrittzähler-Tagebuch", lang="de", preset="clean", palette="green", kind="Tagebuch")
+need durchschnitt = figure("number", "Durchschnitt pro Tag", avg($/tage, $schritte), example=[{tage: [{schritte: 1000}, {schritte: 3000}]}, 2000], decimals=0, icon="👟", unit="Schritte")
+need tage = entries("Woche", fields={tag: "text", schritte: "count"}, rows=[{tag: "Montag", schritte: 0}, {tag: "Dienstag", schritte: 0}, {tag: "Mittwoch", schritte: 0}, {tag: "Donnerstag", schritte: 0}, {tag: "Freitag", schritte: 0}, {tag: "Samstag", schritte: 0}, {tag: "Sonntag", schritte: 0}], labels={tag: "Tag", schritte: "Schritte"}, add=false, remove=false, edit=true, icon="👟")
+need diagramm = chart("Schritte pro Tag", $/tage, $tag, $schritte, kind="line")
