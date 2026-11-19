@@ -7,7 +7,7 @@ import { compileAppFile } from "../src/compile.js";
 import { App } from "../src/core.js";
 import { emit } from "../src/emit.js";
 import { handle } from "../src/run.js";
-import { every, fixture, planned } from "./helpers.js";
+import { every, fixture, plan, planned } from "./helpers.js";
 
 /** The children of the app's column of a plan that the emitter builds with no fault. */
 const shown = async (...lines) => {
@@ -183,6 +183,37 @@ test("look: the row of a list holds an emoji, a column of two texts, a number, a
   expect(trash).toMatchObject({ type: "icon", name: "Trash", text: "Rimuovi" });
   // The render work of one row is its 8 nodes, so the screen of 3 nodes has room for min(100, floor((2048 - 3) / 8)) = 100 rows.
   expect(definition.stateSchema.items.maxItems).toBe(100);
+});
+
+test("look: a look value in a row of a list must not read a field of the row, and a choice on a value of the app is computed again for each event", async () => {
+  const lines = (tone) => ['app("Look", lang="en")', '$/items = [{name: "A", done: true}, {name: "B", done: false}]', "$/strict = false", "root = Column([items, strict])",
+    "items = List($/items, item)", `item = Row([Text($name, weight=1, tone=${tone}), CheckBox("Done", $done)])`, 'strict = Toggle("Strict", $/strict)'].join("\n");
+  // One template draws each row, and Alphy has no style of one row: the value of a blank row would be the value of each row.
+  expect(report(await planned(lines('$done ? "success" : "error"'))).faults).toEqual([
+    'item: the tone of a Text reads $done, a field of a row. One template draws each row of a list, so a look value in a row must not read a field of the row. Use a value of the app, such as $/on ? "a" : "b"']);
+  const { definition, faults, app } = emit(await planned(lines('$/strict ? "error" : "muted"')));
+  expect(faults).toEqual([]);
+  const [list, toggle] = definition.ui.children[0].children, tone = (ui) => ui.children[0].children[0].rowTemplate.children[0].style;
+  expect(tone(definition.ui)).toEqual({ tone: "muted" });
+  const reply = handle({ artifactId: "kit-test", revision: 1, state: definition.initialState, event: { type: "action", actionId: toggle.action, value: true } }, app);
+  expect([reply.state.strict, tone(reply.ui)]).toEqual([true, { tone: "error" }]);
+  expect(list.bind).toBe("items");
+});
+
+test("look: the button back of the pages of a deck, of the steps, and of a lesson is outlined, and each button forward is filled", async () => {
+  const variants = (ui, ...actions) => actions.map((action) => every(ui).find((node) => node.action === action)?.variant);
+  const { definition, faults } = emit(await planned(['app("Parts", lang="en")',
+    'need pages = entries("Pages", fields={line: "text"}, hidden=true, rows=[{line: "One"}, {line: "Two"}])', 'need book = deck("Story", $/pages, front=$line)',
+    'need n = input("count", "Pages", 20, min=1, max=100)', 'need week = figure("number", "Week", $/n * 7, example=[{n: 10}, 70])',
+    'need wiz = steps(["Pages", "Summary"], [[n], [week]], finish="Start")', 'need les = lesson([{title: "A", text: "a"}, {title: "B", text: "b"}])'].join("\n")));
+  expect(faults).toEqual([]);
+  // Alphy fills the first available button with no variant. A disabled forward button on the last step would make Back the filled one.
+  expect(variants(definition.ui, "book_prev", "book_next", "wiz_back", "wiz_next", "wiz_finish", "les_back", "les_next"))
+    .toEqual(["outlined", "filled", "outlined", "filled", "filled", "outlined", "filled"]);
+  // The saved lesson after one step forward: Back is enabled and stays outlined, and Next stays filled.
+  const lesson = emit(await planned(plan("lesson")));
+  const reply = handle({ artifactId: "kit-test", revision: 1, state: lesson.definition.initialState, event: { type: "action", actionId: "lesson_next" } }, lesson.app);
+  expect([reply.state.lesson, variants(reply.ui ?? lesson.definition.ui, "lesson_back", "lesson_next")]).toEqual([2, ["outlined", "filled"]]);
 });
 
 test("look: looks.plan holds each look option and a Grid, and compiles with no fault", async () => {

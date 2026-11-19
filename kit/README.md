@@ -32,6 +32,7 @@ The run-time puts each value into the Alphy node as it is.
 The compile step checks each value against the table below (`check.js` `looks`).
 An unknown value, a look option of a component that does not take it, and a value that is not in the line are faults of the line.
 A value in the line is a literal, or a choice of literals, such as `tone=$/late ? "error" : "muted"`.
+In a row of a list, a look value must not read a field of the row, such as `$done`, because one template draws each row: a choice on a value of the app is permitted.
 
 | Option | Components | Values |
 | --- | --- | --- |

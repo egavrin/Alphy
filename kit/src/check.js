@@ -316,8 +316,12 @@ function looks(file) {
     for (const [key, byType] of Object.entries(LOOKS)) {
       if (!props[key]) continue;
       const allowed = Object.hasOwn(byType, node.name) ? byType[node.name] : null, values = choices(props[key]), what = `the ${key} of ${/^[AEIOU]/.test(node.name) ? "an" : "a"} ${node.name}`;
+      let field = null;
+      walk(props[key], (inner) => { if (!field && inner.k === "path" && !inner.abs) field = show(inner); });
       if (!allowed) out.push(`${entry.key}: ${node.name} has no property ${key}`);
       else if (!values) out.push(`${entry.key}: ${what} is a value in the line, or a choice of values such as $/on ? "a" : "b"`);
+      // Alphy has no style of one row: the run-time computes the template once, from a blank row.
+      else if (field) out.push(`${entry.key}: ${what} reads ${field}, a field of a row. One template draws each row of a list, so a look value in a row must not read a field of the row. Use a value of the app, such as $/on ? "a" : "b"`);
       else for (const value of values) {
         const one = key === "icon" ? "the name of an icon of Alphy, such as Plus, Check, Trash, Pencil, Star, or Heart" : `one of ${allowed.join(", ")}`;
         if (!allowed.includes(value)) out.push(`${entry.key}: ${what} is ${one}, and ${JSON.stringify(value)} is not one`);
