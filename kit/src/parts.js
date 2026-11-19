@@ -437,7 +437,8 @@ const PARTS = {
     } else {
       lines.push(`${name}_minus = Button(${caption("lessText", "Less")}, action=${down}, icon="Minus", variant="outlined")`,
         `${name}_value = Text($/${name}, emphasis="display", align="center", weight=1)`, `${name}_plus = Button(${caption("moreText", "More")}, action=${up}, icon="Plus", variant="filled")`,
-        `${name}_view = Section(${show(title)}, [Row([${name}_minus, ${name}_value, ${name}_plus])])`);
+        // One group of at most 360 dp: on a wide screen the buttons stay beside the value. The content of a phone is about 346 dp wide, so there nothing moves (L1 item 8).
+        `${name}_view = Section(${show(title)}, [Row([${name}_minus, ${name}_value, ${name}_plus], max=360)])`);
     }
     return { lines, top: [`${name}_view`], note };
   },

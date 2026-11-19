@@ -123,8 +123,9 @@ const NODES = {
   // An add form with more than two typed fields is a column of a button and the bottom sheet that the button opens, also when an author wrote it as a Row.
   Column: (n, at) => at.form() ?? { type: "column", ...styled(n, ["gap"]), children: at.children(true) },
   // A weighted child needs a row that does not wrap. Alphy draws a row with no wrap=false as a flow row, so that row is a flowRow.
-  Row: (n, at) => at.form() ?? (n.children.some((child) => child.props.weight !== undefined) ? { type: "row", wrap: false, ...rowStyle(n, n.props.align ?? "center"), children: at.children(true) }
-    : { type: "flowRow", ...rowStyle(n), children: at.children() }),
+  // max= is the largest width of the row in dp, such as the one group of a counter on a wide screen (L1 item 8).
+  Row: (n, at) => at.form() ?? { ...(n.children.some((child) => child.props.weight !== undefined) ? { type: "row", wrap: false, ...rowStyle(n, n.props.align ?? "center"), children: at.children(true) }
+    : { type: "flowRow", ...rowStyle(n), children: at.children() }), ...(n.props.max && { layout: { maxWidth: n.props.max } }) },
   Grid: (n, at) => ({ type: "grid", columns: n.props.columns ?? 2, children: at.children() }),
   Card: (n, at) => ({ type: "card", ...(n.props.variant === "hero" && { variant: "hero" }), ...iconOf(n), children: at.children() }),
   // A Section of no title is a fault of its line, and Alphy takes a section with no text (ToolUiCatalog).
@@ -423,7 +424,7 @@ export function screen(kit, app, first = false) {
       else if (!node.props[flag]) out[flag] = false;
     }
     // Alphy takes a weight only in a column or a row.
-    if (node.props.weight !== undefined && ctx.weighted) out.layout = { weight: node.props.weight };
+    if (node.props.weight !== undefined && ctx.weighted) out.layout = { ...out.layout, weight: node.props.weight };
     return out;
   };
   // What the list mapping (rows.js) shares with the walk.
