@@ -3,6 +3,7 @@ package com.alpha.assistant.tools
 import com.alpha.assistant.images.GeneratedImage
 import com.alpha.assistant.images.ImageIntent
 import com.alpha.assistant.sandbox.SandboxContract
+import com.alpha.assistant.tools.appfile.APP_FILE_MAX_CHARS
 import com.alpha.assistant.tools.three.ThreeSceneAssetRef
 import com.alpha.assistant.tools.three.ThreeSceneAssets
 import org.json.JSONArray
@@ -48,7 +49,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     internal val hostControls: ArtifactHostControls,
     internal val appLanguage: String?, internal val iconId: String?,
     internal val threeScene: Boolean, internal val sceneAssets: List<ThreeSceneAssetRef>,
-    internal val generatedImages: List<GeneratedImage>, internal val lessonImageIntent: ImageIntent?) {
+    internal val generatedImages: List<GeneratedImage>, internal val lessonImageIntent: ImageIntent?, internal val appFile: String?) {
     internal val canQueueLocalButtons: Boolean get() = !threeScene && capabilities.isEmpty() && collections.length() == 0 && surfaces.isEmpty()
 
     fun validateState(value: String): JSONObject {
@@ -86,9 +87,10 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     fun action(ui: JSONObject, id: String): JSONObject? = ToolUiCatalog.action(ui,id)
 
     internal fun providerDefinition(): String {
-        if (appLanguage == null && iconId == null && !threeScene && generatedImages.isEmpty() && lessonImageIntent == null) return json
+        if (appLanguage == null && iconId == null && appFile == null && !threeScene && generatedImages.isEmpty() && lessonImageIntent == null) return json
         val definition = JSONObject(json)
         definition.remove(APP_LANGUAGE_FIELD)
+        definition.remove(APP_FILE_FIELD)
         definition.remove(ICON_ID_FIELD)
         definition.remove("sceneAssets")
         definition.remove("threeLibrary")
@@ -123,12 +125,23 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     internal fun withAppLanguage(tag: String?): ToolSpec {
         if (tag == null || tag == appLanguage) return this
         require(validAppLanguageTag(tag))
-        val encoded = JSONObject(json).put(APP_LANGUAGE_FIELD, tag).toString()
+        return copy(json = encodedWithMetadata(JSONObject(json).put(APP_LANGUAGE_FIELD, tag)), appLanguage = tag)
+    }
+
+    /** The plan that the kit compiled into this definition. Null removes it. */
+    internal fun withAppFile(text: String?): ToolSpec {
+        if (text == appFile) return this
+        require(text == null || text.length in 1..APP_FILE_MAX_CHARS)
+        val definition = JSONObject(json)
+        if (text == null) definition.remove(APP_FILE_FIELD) else definition.put(APP_FILE_FIELD, text)
+        return copy(json = encodedWithMetadata(definition), appFile = text)
+    }
+
+    private fun encodedWithMetadata(definition: JSONObject): String = definition.toString().also { encoded ->
         validateTool(ToolValidationCategory.JSON, ToolValidationDetails("definition_size", "$",
             "at most $MAX_DEFINITION_BYTES bytes including metadata", "oversized definition")) {
             require(encoded.toByteArray(Charsets.UTF_8).size <= MAX_DEFINITION_BYTES)
         }
-        return copy(json = encoded, appLanguage = tag)
     }
 
     internal fun withIcon(id: String?): ToolSpec {
@@ -144,6 +157,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
 
         private const val ICON_ID_FIELD = "iconId"
         private const val APP_LANGUAGE_FIELD = "appLanguage"
+        private const val APP_FILE_FIELD = "appFile"
 
         fun available(raw: String): ToolSpec? = try {parse(raw)} catch(_: IllegalArgumentException) {null} catch(_: IllegalStateException) {null} catch(_: org.json.JSONException) {null}
         internal fun availablePersisted(raw: String): ToolSpec? = try {parsePersisted(raw)} catch(_: IllegalArgumentException) {null} catch(_: IllegalStateException) {null} catch(_: org.json.JSONException) {null}
@@ -157,8 +171,18 @@ data class ToolSpec private constructor(val json: String, val title: String, val
             null
         }
         fun storedTitle(raw: String): String = runCatching {JSONObject(raw).optString("title").take(100).ifBlank {"Unavailable mini-app"}}.getOrDefault("Unavailable mini-app")
-        /** Refinements may add fields, but cannot remove, retype, or reset stored values. */
-        fun stateForRevision(previous: ToolSpec, next: ToolSpec, raw: String): String {
+        /**
+         * Refinements may add fields, but cannot remove, retype, or reset stored values.
+         * Between two app files the kit computes the next state (migrated): it may retype a field, but no field disappears.
+         */
+        fun stateForRevision(previous: ToolSpec, next: ToolSpec, raw: String, migrated: String? = null): String {
+            if (previous.appFile != null && next.appFile != null) {
+                requireNotNull(migrated) { "A revision of an app file needs the state that the kit computed." }
+                previous.schema.keys().forEach { key ->
+                    require(next.schema.has(key)) { "Несовместимая схема данных: $key. Сохранённые данные не изменены." }
+                }
+                return next.validateState(migrated).toString()
+            }
             val state = previous.validateState(raw)
             previous.schema.keys().forEach { key ->
                 require(next.schema.has(key) && ToolValueSchema.same(previous.schema.get(key),next.schema.get(key))) { "Несовместимая схема данных: $key. Сохранённые данные не изменены." }
@@ -194,7 +218,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
             validateTool(ToolValidationCategory.FIELDS) {
                 val fields = j.keys().asSequence().toSet()
                 val optional = optionalGeneratedFields +
-                    (if (persisted) setOf(APP_LANGUAGE_FIELD,ICON_ID_FIELD,"sceneAssets","threeLibrary",GeneratedImage.FIELD,"lessonImageIntent") else emptySet())
+                    (if (persisted) setOf(APP_LANGUAGE_FIELD,ICON_ID_FIELD,"sceneAssets","threeLibrary",GeneratedImage.FIELD,"lessonImageIntent",APP_FILE_FIELD) else emptySet())
                 require(fields.containsAll(requiredGeneratedFields) && fields.all { it in requiredGeneratedFields || it in optional })
                 require(!j.has("capabilityResults") || j.get("capabilityResults") is Boolean) { "Неверные поля инструмента" }
             }
@@ -287,12 +311,15 @@ data class ToolSpec private constructor(val json: String, val title: String, val
             val lessonImageIntent = validateTool(ToolValidationCategory.FIELDS) {
                 if (j.has("lessonImageIntent")) ImageIntent.read(j.getJSONObject("lessonImageIntent")) else null
             }
+            val appFile = validateTool(ToolValidationCategory.FIELDS) {
+                if (j.has(APP_FILE_FIELD)) requireNotNull(j.get(APP_FILE_FIELD) as? String).also { require(it.length in 1..APP_FILE_MAX_CHARS) } else null
+            }
             val encoded = j.toString()
             validateTool(ToolValidationCategory.JSON) {
                 require(encoded.toByteArray(Charsets.UTF_8).size <= MAX_DEFINITION_BYTES)
             }
             return ToolSpec(encoded, j.getString("title"), j.getString("description"), source, schema,
-                initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surfaces,presentation,hostControls,appLanguage,iconId,threeScene,sceneAssets,generatedImages,lessonImageIntent).also {
+                initialState, ui, capabilities, j.optBoolean("capabilityResults",false),j.optJSONObject("collections") ?: JSONObject(),surfaces,presentation,hostControls,appLanguage,iconId,threeScene,sceneAssets,generatedImages,lessonImageIntent,appFile).also {
                 validateTool(ToolValidationCategory.INITIAL_STATE) { it.validateState(it.initialState) }
                 it.validateUi(it.ui,JSONObject(it.initialState),ToolUiValidationStage.DEFINITION,observer)
             }
