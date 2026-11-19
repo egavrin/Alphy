@@ -79,10 +79,10 @@ const ranged = (type, low, high) => (n, at) => {
  * that it changes, and its action. A component that is not here is a fault "is not built yet".
  */
 const NODES = {
-  Column: (n, at) => ({ type: "column", ...styled(n, ["gap"]), children: at.children(true) }),
-  // An add form with more than two typed fields is a column of a button and the bottom sheet that the button opens. A weighted
-  // child needs a row that does not wrap. Alphy draws a row with no wrap=false as a flow row, so that row is a flowRow.
-  Row: (n, at) => at.form() ?? (n.children.some((child) => child.props.weight !== undefined) ? { type: "row", wrap: false, ...rowStyle(n, n.props.align ?? "center"), children: at.children(true) }
+  // An add form with more than two typed fields is a column of a button and the bottom sheet that the button opens.
+  Column: (n, at) => at.form() ?? { type: "column", ...styled(n, ["gap"]), children: at.children(true) },
+  // A weighted child needs a row that does not wrap. Alphy draws a row with no wrap=false as a flow row, so that row is a flowRow.
+  Row: (n, at) => (n.children.some((child) => child.props.weight !== undefined) ? { type: "row", wrap: false, ...rowStyle(n, n.props.align ?? "center"), children: at.children(true) }
     : { type: "flowRow", ...rowStyle(n), children: at.children() }),
   Grid: (n, at) => ({ type: "grid", columns: n.props.columns ?? 2, children: at.children() }),
   Card: (n, at) => ({ type: "card", ...(n.props.variant === "hero" && { variant: "hero" }), ...iconOf(n), children: at.children() }),
@@ -92,8 +92,8 @@ const NODES = {
   Heading: (n, at) => ({ type: "text", ...at.text("text"), style: { emphasis: "title" } }),
   Metric: (n, at) => ({ type: "metric", text: at.plain(n.props.label), bind: at.shown("value"), ...iconOf(n), ...styled(n, ["emphasis", "tone"]) }),
   Badge: (n, at) => ({ type: "badge", ...at.text("value"), ...iconOf(n), ...styled(n, ["tone"]) }),
-  // Alphy wants a label on an emoji too: the emoji itself. One template draws each row of a list, so a blank row gives the kit's name of the line.
-  Emoji: (n, at) => ({ type: "emoji", text: at.plain(n.props.value) || at.caption(), ...at.value("value"), ...defined(n.props, ["size"]) }),
+  // Alphy wants a label on an emoji too: label=, else the emoji itself. One template draws each row of a list, so a blank row gives the kit's name of the line.
+  Emoji: (n, at) => ({ type: "emoji", text: at.plain(n.props.label) || at.plain(n.props.value) || at.caption(), ...at.value("value"), ...defined(n.props, ["size"]) }),
   Divider: () => ({ type: "divider" }),
   // A banner is a container in Alphy's catalog, with 1 to 50 children, so its message is a child.
   Notice: (n, at) => ({ type: "banner", ...iconOf(n), ...styled(n, ["tone"]), children: [{ type: "text", ...at.text("text") }] }),
@@ -258,8 +258,8 @@ export function screen(kit, app, first = false) {
         }
         return { text: at.caption(node.props.label), bind, action: at.action((value) => { const next = convert(value); return next === undefined ? false : kit.change(node, next); }) };
       },
-      // An action returns "" or the kit's error text, or false for an event that changes nothing. A press of the add button of an add sheet that the kit takes closes the sheet.
-      action: (run = () => { const done = kit.fire(node); if (done === "" && ctx.sheet?.add === node) kit.state[ctx.sheet.flag] = false; return done; }, suffix = "") => {
+      // An action returns "" or the kit's error text, or false for an event that changes nothing. A press of the add button of an add sheet that adds a row closes the sheet.
+      action: (run = () => { const was = ctx.sheet?.add === node && JSON.stringify(kit.state), done = kit.fire(node); if (done === "" && was && was !== JSON.stringify(kit.state)) kit.state[ctx.sheet.flag] = false; return done; }, suffix = "") => {
         const id = name("@" + key + suffix, wished(key + suffix));
         register(scope, id, run);
         return id;

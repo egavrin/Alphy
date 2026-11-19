@@ -27,6 +27,8 @@ export const fixture = (name) => readFileSync(new URL(`./fixtures/${name}.plan`,
 export const allPlans = () => ["plans", "test", "test/fixtures"].flatMap((dir) => plansIn(fileURLToPath(new URL(`../${dir}`, import.meta.url)))
   .map((path) => [`${dir}/${basename(path)}`, readFileSync(path, "utf8")]));
 
+/** One event of Alphy on a state: a field value, or a press when the value is null. */
+export const press = (state, app, actionId, value = null) => handle({ artifactId: "kit-test", revision: 1, state, event: { type: "action", actionId, value } }, app);
 export const planned = async (text) => { const file = new AppFile().feedText(text); await expand(file); return file; };
 /** Each node of a ui, also the nodes of each row template. */
 export const every = (node) => [node, ...(node.children ?? []).flatMap(every), ...(node.rowTemplate ? every(node.rowTemplate) : [])];

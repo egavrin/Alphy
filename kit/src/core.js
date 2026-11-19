@@ -9,7 +9,7 @@ const MESSAGES = true;
 /** Positional arguments of each component of the prototype catalog. */
 export const CATALOG = {
   Column: ["children"], Row: ["children"], Card: ["children"], Section: ["title", "children"],
-  Text: ["text"], Heading: ["text"], Metric: ["label", "value"], Emoji: ["value"], Badge: ["value"], Grid: ["children"],
+  Text: ["text"], Heading: ["text"], Metric: ["label", "value"], Emoji: ["value", "label"], Badge: ["value"], Grid: ["children"],
   // label is the caption of a progress, a ring, a chart, and tabs. The text of a ring is the large text inside it.
   Progress: ["value", "max", "label"], Ring: ["value", "max", "text", "label"], Divider: [], Notice: ["text"],
   // label is the text of an icon button for a person who does not see the icon.

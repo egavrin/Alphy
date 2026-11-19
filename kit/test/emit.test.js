@@ -6,7 +6,7 @@ import { App, settings } from "../src/core.js";
 import { ACCENTS, LIMITS, STAGE, budgetOf, polygonsOf } from "../src/draw.js";
 import { emit } from "../src/emit.js";
 import { handle, kitOf, screen } from "../src/run.js";
-import { allPlans, every, fixture, plan, planned } from "./helpers.js";
+import { allPlans, every, fixture, plan, planned, press } from "./helpers.js";
 
 /** Alphy's rule for a state field and an action id (ToolValueSchema.name, ToolUiCatalog). */
 const SAFE = /^[A-Za-z][A-Za-z0-9_]{0,47}$/;
@@ -18,7 +18,6 @@ const texts = (node) => [node.text, ...(node.series ?? []).map((series) => serie
 const captions = (ui) => every(ui).filter((node) => ["progress", "progressRing", "chart", "tabs"].includes(node.type)).map((node) => [node.type, ...texts(node)]);
 const testPlan = (name) => readFileSync(new URL(`./${name}.plan`, import.meta.url), "utf8");
 const open = (state, app, now) => handle({ artifactId: "kit-test", revision: 1, state, event: { type: "open" } }, app, now);
-const press = (state, app, actionId, value = null) => handle({ artifactId: "kit-test", revision: 1, state, event: { type: "action", actionId, value } }, app);
 /** Each id of a ui in its order: the action of each control, each dismiss and reorder action, and each surface. */
 const ids = (ui) => every(ui).flatMap((node) => [node.action, node.dismissAction, node.reorder?.action, ...(node.surfaces ?? [])]).filter(Boolean);
 /**
@@ -181,24 +180,23 @@ test("emit: list.plan gives a list with a row template and an add form", async (
   // The stored list, the object of the other values of the need, the sorted view that the run-time writes, and the shown values.
   expect(definition.stateSchema).toEqual({
     prodotti: rows, prodotti_s: { type: "object", fields: { new_nome: "string", new_corsia: "string" } }, prodotti_list: rows,
-    d: { type: "object", fields: { daComprare_text: "string" } }, v: { type: "object", fields: { prodotti_add_enabled: "boolean" } },
+    d: { type: "object", fields: { daComprare_text: "string" } },
   });
   const latte = { id: "r1", nome: "Latte", corsia: "Latticini", preso: false }, pane = { id: "r2", nome: "Pane", corsia: "Forno", preso: false }, mele = { id: "r3", nome: "Mele", corsia: "Frutta", preso: false };
   expect(definition.initialState).toEqual({
     prodotti: [latte, pane, mele], prodotti_s: { new_nome: "", new_corsia: "" }, prodotti_list: [pane, mele, latte],
-    d: { daComprare_text: "3" }, v: { prodotti_add_enabled: false },
+    d: { daComprare_text: "3" },
   });
   expect(definition.ui.children[0].children[1]).toEqual({ type: "section", text: "Prodotti", children: [
     { type: "list", text: "Prodotti", bind: "prodotti_list", rowTemplate: { type: "row", wrap: false, style: { crossAlign: "center" }, children: [
-      { type: "text", text: "", bind: "nome", layout: { weight: 1 } },
-      { type: "text", text: "", bind: "corsia" },
-      { type: "icon", name: "Trash", text: "Rimuovi", action: "prodotti_remove" },
+      { type: "column", style: { gap: "none" }, layout: { weight: 1 }, children: [{ type: "text", text: "", bind: "nome" }, { type: "text", text: "", bind: "corsia", style: { tone: "muted" } }] },
       { type: "checkbox", text: "Preso", bind: "preso", action: "prodotti_preso" },
+      { type: "icon", name: "Trash", text: "Rimuovi", action: "prodotti_remove" },
     ] } },
-    { type: "row", wrap: false, style: { crossAlign: "center" }, children: [
-      { type: "input", text: "Prodotto", bind: "prodotti_s.new_nome", action: "prodotti_new_nome", inputMode: "apply", layout: { weight: 1 } },
-      { type: "input", text: "Corsia", bind: "prodotti_s.new_corsia", action: "prodotti_new_corsia", inputMode: "apply", layout: { weight: 1 } },
-      { type: "button", text: "Aggiungi", action: "prodotti_add", enabledBind: "v.prodotti_add_enabled" },
+    { type: "column", children: [
+      { type: "input", text: "Prodotto", bind: "prodotti_s.new_nome", action: "prodotti_new_nome", inputMode: "apply" },
+      { type: "input", text: "Corsia", bind: "prodotti_s.new_corsia", action: "prodotti_new_corsia", inputMode: "apply" },
+      { type: "button", text: "Aggiungi", action: "prodotti_add", icon: "Plus" },
     ] },
   ] });
 });
@@ -210,30 +208,31 @@ test("emit: an add form with more than two typed fields is a bottom sheet", asyn
     { type: "input", text: "Note", bind: "tasks_s.new_note", action: "tasks_new_note", inputMode: "apply" },
     { type: "dateInput", text: "Due", bind: "tasks_s.new_due", action: "tasks_new_due" },
   ];
-  const add = { type: "button", text: "Add", action: "tasks_add", enabledBind: "v.tasks_add_enabled" };
+  const add = { type: "button", text: "Add", action: "tasks_add", icon: "Plus" };
   const { definition, faults } = emit(await planned(['app("Tasks", lang="en")', `${need})`].join("\n")));
   expect(faults).toEqual([]);
   // The open flag is a value of the need that the run-time owns. A field in a sheet has no weight: its parent is not a row.
   expect(definition.stateSchema.tasks_s.fields.adding).toBe("boolean");
   expect(definition.initialState.tasks_s.adding).toBe(false);
   expect(definition.initialState.tasks_s.new_due).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-  expect(definition.ui.children[0].children[0].children[1]).toEqual({ type: "column", children: [
+  // The first node is the hero card of the list (C.6), and the section of the list comes next.
+  expect(definition.ui.children[0].children[1].children[1]).toEqual({ type: "column", children: [
     { type: "button", text: "Add", action: "tasks_addRow_open", variant: "filled", icon: "Plus" },
     { type: "bottomSheet", text: "Add", visibleBind: "tasks_s.adding", dismissAction: "tasks_addRow_dismiss", children: [...fields, add] },
   ] });
   // sheet=true: the part writes the flag, the button that opens the form, and a dialog. A dialog that holds a typed field is a bottom sheet.
   const sheet = emit(await planned(['app("Tasks", lang="en")', `${need}, sheet=true)`].join("\n")));
   expect(sheet.faults).toEqual([]);
-  expect(sheet.definition.ui.children[0].children[0].children.slice(1)).toEqual([
-    { type: "button", text: "Add", action: "tasks_open" },
+  expect(sheet.definition.ui.children[0].children[1].children.slice(1)).toEqual([
+    { type: "button", text: "Add", action: "tasks_open", icon: "Plus" },
     { type: "bottomSheet", text: "Add", visibleBind: "tasks_s.adding", dismissAction: "tasks_addRow_dismiss", children: [...fields, add] },
   ]);
   // sheet=true with no typed field: a dialog that holds a field of the form is a bottom sheet too.
   const picks = emit(await planned(['app("Picks", lang="en")', 'need picks = entries("Picks", fields={day: ["Sat", "Sun"]}, sheet=true, rows=[])'].join("\n")));
   expect(picks.faults).toEqual([]);
-  expect(picks.definition.ui.children[0].children[0].children.map((node) => node.type)).toEqual(["list", "button", "bottomSheet"]);
+  expect(picks.definition.ui.children[0].children[1].children.map((node) => node.type)).toEqual(["list", "button", "bottomSheet"]);
   // A row with no weighted child is a flowRow in a row template too. The device test eachCardChartAndTabPassesParseAndSmoke sends this plan through Alphy's validators.
-  expect(picks.definition.ui.children[0].children[0].children[0].rowTemplate.type).toBe("flowRow");
+  expect(picks.definition.ui.children[0].children[1].children[0].rowTemplate.type).toBe("flowRow");
 });
 
 test("emit: a row with more than 12 fields is a fault of its need line", async () => {
@@ -252,7 +251,9 @@ test("emit: each list, modal, and new input of the lists fixture becomes its Alp
   // The device test eachListAndModalPassesParseAndSmoke sends the same plan through Alphy's validators.
   const { definition, faults } = emit(await planned(testPlan("lists")));
   expect(faults).toEqual([]);
-  const [trip, wake, gear, acts, doses, steps] = definition.ui.children[0].children;
+  const [hero, trip, wake, gear, acts, doses, steps] = definition.ui.children[0].children;
+  // The plan has no figure, so its first list that shows gets a hero card with the count of its rows (C.6).
+  expect(hero).toMatchObject({ type: "card", variant: "hero", children: [{ type: "metric", text: "Plan", style: { emphasis: "display" } }] });
   expect([trip, wake, gear]).toEqual([
     { type: "dateInput", text: "Trip starts", bind: "trip", action: "trip_field" },
     { type: "timeInput", text: "Wake up", bind: "wake", action: "wake_field" },
@@ -266,12 +267,13 @@ test("emit: each list, modal, and new input of the lists fixture becomes its Alp
   // A list and a row control announce the captions of their need: its title and its labels=. An icon button announces a word of the kit.
   expect(acts.children[0]).toEqual({ type: "groupedList", text: "Plan", bind: "acts_list", groupBy: "day", rowTemplate: { type: "row", wrap: false, style: { crossAlign: "center" }, children: [
     { type: "text", text: "", bind: "what", layout: { weight: 1 } },
-    { type: "segmented", text: "Day", bind: "day", action: "acts_day", options: [{ text: "Sat", value: "Sat" }, { text: "Sun", value: "Sun" }] },
-    { type: "badge", text: "", bind: "acts_at_value" },
+    // A choice that the row does not change (no edit=true) and a time are small labels after the title (C.1).
+    { type: "text", text: "", bind: "day", style: { emphasis: "label" } },
+    { type: "text", text: "", bind: "acts_at_text", style: { emphasis: "label" } },
     { type: "icon", name: "Trash", text: "Remove", action: "acts_remove" },
   ] } });
   // The rows of a group come together, in the order of the first row of each group.
-  expect(definition.initialState.acts_list.map((row) => [row.what, row.acts_at_value])).toEqual([["Hike", "09:00"], ["Dinner", "19:00"], ["Museum", "10:00"]]);
+  expect(definition.initialState.acts_list.map((row) => [row.what, row.acts_at_text])).toEqual([["Hike", "09:00"], ["Dinner", "19:00"], ["Museum", "10:00"]]);
   expect(acts.children.slice(1).map((node) => [node.type, node.visibleBind, node.dismissAction])).toEqual([["button", undefined, undefined], ["bottomSheet", "acts_s.adding", "acts_addRow_dismiss"]]);
   // Each kind of row field with a control of its own, bound to the stored list.
   const [list, confirm, form] = doses.children;
@@ -287,7 +289,7 @@ test("emit: each list, modal, and new input of the lists fixture becomes its Alp
   expect(form.children[1].children.map((node) => node.type)).toEqual(["input", "numberInput", "dateInput", "timeInput", "segmented", "button"]);
   // The arrows of a row become the reorder of the list. Its label is a text that the run-time computes and that is never blank.
   expect(steps.children[0]).toMatchObject({ type: "list", text: "Steps", bind: "steps_list", reorder: { action: "steps_list_move", labelField: "label" } });
-  expect(steps.children[0].rowTemplate.children.map((node) => [node.type, node.text])).toEqual([["text", ""], ["icon", "Remove"], ["checkbox", "Done"]]);
+  expect(steps.children[0].rowTemplate.children.map((node) => [node.type, node.text])).toEqual([["text", ""], ["checkbox", "Done"], ["icon", "Remove"]]);
   expect(definition.initialState.steps_list.map((row) => row.label)).toEqual(["Pack", "Drive", "Hike"]);
 });
 
@@ -368,7 +370,7 @@ test("emit: each list holds the most rows that keep the full screen inside the r
     counts.push(count);
   }
   // rich.plan starts with each list full to its count, and one start row more is a fault of its need.
-  expect(counts).toEqual([100, 80, 91, 100, 100]);
+  expect(counts).toEqual([100, 87, 91, 100, 100]);
   const over = emit(await planned(rich.replace("rows=[", 'rows=[{name: "Extra", size: "M", done: false}, ')));
   expect(over.definition).toBeNull();
   expect(over.faults).toEqual([expect.stringMatching(/^need shirts: \$\/shirts starts with 92 rows, .*91/)]);
@@ -390,7 +392,8 @@ test("emit: a screen whose charts alone pass the render work limit is a fault of
 
 test("emit: a list with room for fewer than 20 rows is a fault of its need", async () => {
   const choices = Array.from({ length: 8 }, (_, index) => `c${index + 1}: ["a", "b", "c", "d", "e", "f"]`).join(", ");
-  const { definition, faults } = emit(await planned(['app("Wide", lang="en")', `need one = entries("One", fields={name: "text", ${choices}})`, `need two = entries("Two", fields={name: "text", ${choices}})`].join("\n")));
+  // edit=true: each choice is a control of the row, so each row costs more render work.
+  const { definition, faults } = emit(await planned(['app("Wide", lang="en")', `need one = entries("One", fields={name: "text", ${choices}}, edit=true)`, `need two = entries("Two", fields={name: "text", ${choices}}, edit=true)`].join("\n")));
   expect(definition).toBeNull();
   expect(faults).toEqual([expect.stringMatching(/^need one: the row shows too much: .* 16 rows/), expect.stringMatching(/^need two: the row shows too much: .* 16 rows/)]);
 });

@@ -608,7 +608,7 @@ test("run: the add sheet opens, adds a row, and closes", async () => {
   expect(run.state.tasks_s.adding).toBe(false);
   // A second button of the form, such as a clear button, leaves the sheet open: only the add button of the form closes it.
   const custom = await compiled(['app("Tasks", lang="en")', 'need tasks = entries("Tasks", fields={task: "text", note: "text", due: "date"}, rows=[])',
-    "tasks_addRow = Row([tasks_new_task, tasks_new_note, tasks_new_due, tasks_clear, tasks_add])", 'tasks_clear = Button("Clear", action=[set($/tasks_new_task, ""), set($/tasks_new_note, "")])'].join("\n"));
+    "tasks_addRow = Column([tasks_new_task, tasks_new_note, tasks_new_due, tasks_clear, tasks_add])", 'tasks_clear = Button("Clear", action=[set($/tasks_new_task, ""), set($/tasks_new_note, "")])'].join("\n"));
   // The button that opens the sheet has the caption of the add button.
   expect(nodes(custom.definition.ui).find((node) => node.action === "tasks_addRow_open").text).toBe("Add");
   const cleared = session(custom.definition, custom.app);

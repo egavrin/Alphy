@@ -43,7 +43,7 @@ test("real requests of the Alphy corpus are clean, and the hand-written list lin
   await expand(bikes);
   const shop2 = new App(bikes);
   shop2.input("order_field", "desc");
-  same(shop2.find("bikes_list").children.slice(0, 2).map((row) => row.children[2].props.value), [1490, 1340], "the hand-written list line sorts by price, and the part left it alone");
+  same(shop2.find("bikes_list").children.slice(0, 2).map((row) => row.children[1].props.text), [1490, 1340], "the hand-written list line sorts by price, and the part left it alone");
 });
 
 test("a fault belongs to the step that made it, and the next step starts clean", async () => {

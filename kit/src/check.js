@@ -52,6 +52,8 @@ function smokeRun(file, limit, clock) {
     return out;
   };
   const start = save(), all = controls(false).map((control) => control.key);
+  /** Types "Test" into each empty text field of the screen. True when it typed into one. */
+  const typeInto = () => controls().filter((control) => control.node.type === "TextField" && control.node.props.value === "").map((control) => app.change(control.node, "Test")).length > 0;
   /** A control that did nothing so far gets a new try in the state of now. Returns that state. */
   const retryIdle = (list) => {
     const later = save();
@@ -91,6 +93,13 @@ function smokeRun(file, limit, clock) {
           error = app.change(node, sample);
         } else error = app.fire(node);
         if (error) { faults.push("smoke run: " + error); continue; }
+        // A button whose action needs a typed value, such as the add button of a form, gets a second press after the run types into each
+        // empty text field. It passes only when that press changes a value of the typed state, so a dead button beside a field stays a fault.
+        if (!p.bind && JSON.stringify(app.state) === base.text && typeInto()) {
+          const filled = JSON.stringify(app.state);
+          app.fire(controls().find((control) => control.key === key)?.node ?? node);
+          if (JSON.stringify(app.state) === filled) reset();
+        }
         // A timed change shows only when time passes. The run moves its clock to the end of each one before it looks at the screen.
         if (app.state._run) { wait(); app.tick(); }
         const after = controls(), late = [...new Set(app.faults.map((fault) => `${fault.where}: ${fault.message}`))].filter((text) => !known.has(text));

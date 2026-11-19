@@ -20,7 +20,7 @@ test("row actions on a sorted view act on the stored list", async () => {
   const shop = new AppFile().feedText(fixture("shopping"));
   await expand(shop);
   const live = new App(shop);
-  same(live.tree().children[1].children[0].children.map((row) => row.children[1].props.text), ["Bakery", "Dairy", "Produce"], "list drawn in aisle order");
+  same(live.tree().children[1].children[0].children.map((row) => row.children[0].children[1].props.text), ["Bakery", "Dairy", "Produce"], "list drawn in aisle order");
   same(live.press("items_remove", 2), "", "remove third drawn row");
   same(live.state.items.map((row) => row.name), ["Milk", "Bread"], "the stored list lost Apples");
   same(runChecks(shop).map((check) => check.pass), [true], "shopping check");

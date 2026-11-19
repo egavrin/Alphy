@@ -115,7 +115,7 @@ export function emit(file) {
   // The open flag of an add form that the run-time puts into a bottom sheet: a value of its need that only the run-time sets.
   for (const need of declared.keys()) {
     const form = file.get(`${need}_addRow`);
-    const typed = form?.tree.name === "Row" ? (given(form.tree).children?.items ?? []).filter((item) => item.k === "ref" && TYPED.has(file.get(item.name)?.tree.name)).length : 0;
+    const typed = form?.tree.name === "Column" ? (given(form.tree).children?.items ?? []).filter((item) => item.k === "ref" && TYPED.has(file.get(item.name)?.tree.name)).length : 0;
     if (typed <= 2) continue;
     const root = `${need}_addRow:open`;
     kit.state[root] = false;

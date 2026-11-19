@@ -111,14 +111,20 @@ const PARTS = {
 
   // need tasks = entries("Tasks", fields={task: "text", level: ["high", "low"], done: "check"}, rows=[], edit=true, reorder=true, filter=$done, sort=$task, order=$/order, show={double: $n * 2})
   // More: field kinds "date", "time", "switch", "count". confirm="Delete?", sheet=true, group=$field, sort=[$day, $time], hidden=true.
-  async entries(name, need, { caption, word }) {
+  async entries(name, need, { caption, word, count }) {
     const title = need.args[0], opt = need.named, fields = opt.fields?.entries ?? [["name", { k: "lit", v: "text" }]];
     // A Map, so that a field named "constructor" does not read a property of Object.
     const labels = new Map((opt.labels?.entries ?? []).map(([key, tree]) => [key, tree.v])), text = caption;
     const lines = [`$/${name} = ${show(opt.rows ?? { k: "list", items: [] })}`];
     // The rows are data for a deck, a chart, or a figure, and the list is not on the screen.
     if (opt.hidden?.v === true) return { lines, top: [] };
-    const cells = [], marks = [], add = [], blank = [], reset = [], canAdd = opt.add?.v !== false, edit = opt.edit?.v === true;
+    const cells = [], marks = [], texts = [], tail = [], add = [], blank = [], reset = [], canAdd = opt.add?.v !== false, edit = opt.edit?.v === true;
+    // icon=: one sign for each row, or a value of the row (C.2). A field that is the sign of the row is not a text of the row too.
+    const icon = opt.icon, sign = icon?.k === "path" && !icon.abs ? icon.segs[0] : null, shown = opt.show?.entries ?? [];
+    if (icon?.k === "path" && ![...fields, ...shown].some(([key]) => key === sign)) throw new DslError(`icon=${show(icon)} reads no field of the rows. Use a field of fields= or a name of show=`);
+    if (icon?.k === "lit" && /^[A-Za-z]+$/.test(icon.v)) throw new DslError(`icon= of a list is an emoji, such as icon="🛒", and ${q(icon.v)} is not one`);
+    // More than 2 check marks are circles of one weight in a second row (C.3).
+    const many = fields.filter(([, kindTree]) => kindTree.v === "check").length > 2;
     let firstText = null;
     for (const [field, kindTree] of fields) {
       const choice = kindTree.k === "list" ? show(kindTree) : null;
@@ -128,8 +134,9 @@ const PARTS = {
       // The add form and each control of a row name the field by labels=, else by the readable form of the field name.
       const named = q(labels.get(field) ?? label(field));
       const pick = (text, bind) => `${choice && kindTree.items.length <= 4 ? "Segmented" : "Select"}(${text}, ${bind}, ${choice})`;
-      // The cell of the row: a check mark, a choice, a field that the person can change, or a plain value.
-      if (kind === "check") lines.push(`${name}_${field} = CheckBox(${named}, $${field})`);
+      // The cell of the row: a check mark, a choice, a field that the person can change, a text of the title column, or a small label of a value.
+      if (field === sign) /* the emoji of the row */;
+      else if (kind === "check") lines.push(`${name}_${field} = CheckBox(${named}, $${field}${many ? ', variant="circle", weight=1' : ""})`);
       else if (kind === "switch") lines.push(`${name}_${field} = Toggle(${named}, $${field})`);
       else if (kind === "count") {
         // A count in the row: a minus and a plus button around the number, and the person can also type it
@@ -138,38 +145,45 @@ const PARTS = {
           `${name}_${field}_plus = IconButton("Plus", action=inc($${field}), label=${q(word("More"))})`);
         cells.push(`${name}_${field}_minus`);
       } else if (kind === "picture") lines.push(`${name}_${field} = Picture($${field})`);
-      else if (kind === "choice") lines.push(`${name}_${field} = ${pick(named, "$" + field)}`);
-      else if (edit) lines.push(`${name}_${field} = ${widget}(${named}, $${field}${kind === "text" ? ", weight=1" : ""})`);
-      else if (kind !== "text") lines.push(`${name}_${field} = Badge($${field})`);
-      else lines.push(`${name}_${field} = Text($${field}${firstText ? "" : ", weight=1"})`);
-      if (kind === "text") firstText ??= field;
-      (kind === "check" ? marks : cells).push(`${name}_${field}`);
+      else if (kind === "choice" && edit) lines.push(`${name}_${field} = ${pick(named, "$" + field)}`);
+      else if (edit && kind !== "choice") lines.push(`${name}_${field} = ${widget}(${named}, $${field}${kind === "text" ? ", weight=1" : ""})`);
+      // The host's number and display emphasis are too large for a row (Task 11b-1: "1 kg" in two lines).
+      else if (kind !== "text") lines.push(`${name}_${field} = Text($${field}, emphasis="label")`);
+      else texts.push(field);
+      if (kind === "text" && field !== sign) firstText ??= field;
+      if (field !== sign && !(kind === "text" && !edit)) (kind === "check" ? marks : cells).push(`${name}_${field}`);
       if (kind === "count") cells.push(`${name}_${field}_plus`);
       if (!canAdd) continue;
       // A new row starts with no check mark, with its switch on, and with no picture.
       if (["check", "switch", "picture"].includes(kind)) { blank.push(`${field}: ${{ check: "false", switch: "true", picture: '""' }[kind]}`); continue; }
       // A count has a number field in the add form and its stepper in the row. final2: with the stepper only, three apps needed 30 taps for a count of 30.
       const empty = { number: "0", count: "0", date: "today()", time: '"08:00"' }[kind] ?? (kind === "choice" ? show(kindTree.items[0]) : '""');
-      const typed = kind === "count" ? `NumberField(${named}, $/${name}_new_${field}, min=0, step=1)` : `${widget}(${named}, $/${name}_new_${field}${kind === "text" ? ", weight=1" : ""})`;
+      const typed = kind === "count" ? `NumberField(${named}, $/${name}_new_${field}, min=0, step=1)` : `${widget}(${named}, $/${name}_new_${field})`;
       lines.push(`$/${name}_new_${field} = ${empty}`, `${name}_new_${field} = ${kind === "choice" ? pick(named, `$/${name}_new_${field}`) : typed}`);
       add.push(`${name}_new_${field}`);
       blank.push(`${field}: $/${name}_new_${field}`);
       if (["text", "number", "count"].includes(kind)) reset.push(`set($/${name}_new_${field}, ${empty})`);
     }
     // A value for each row, from the fields of that row.
-    for (const [key, formula] of opt.show?.entries ?? []) { lines.push(`${name}_${key} = Badge(${show(formula)})`); cells.push(`${name}_${key}`); }
+    for (const [key, formula] of shown) if (key !== sign) { lines.push(`${name}_${key} = Badge(${show(formula)})`); cells.push(`${name}_${key}`); }
     // The arrows become the reorder of the list, which Alphy draws with its own words (NativeRecordReorder.kt), so they need no caption.
-    if (opt.reorder?.v === true) { lines.push(`${name}_up = IconButton("ArrowUp", action=move(-1))`, `${name}_down = IconButton("ArrowDown", action=move(1))`); cells.push(`${name}_up`, `${name}_down`); }
+    if (opt.reorder?.v === true) { lines.push(`${name}_up = IconButton("ArrowUp", action=move(-1))`, `${name}_down = IconButton("ArrowDown", action=move(1))`); tail.push(`${name}_up`, `${name}_down`); }
     if (opt.remove?.v !== false) {
       // With confirm= the delete button asks first. The row that waits for the answer is known by its id.
       if (opt.confirm) lines.push(`$/${name}_drop = ""`, `${name}_remove = IconButton("Trash", action=set($/${name}_drop, $id), label=${q(word("Remove"))})`,
         `${name}_yes = Button(${text("yes", "Yes")}, action=[remove($/${name}, $id == $/${name}_drop), set($/${name}_drop, "")])`, `${name}_no = Button(${text("no", "No")}, action=set($/${name}_drop, ""))`,
         `${name}_confirm = Dialog(${show(opt.confirm)}, [Row([${name}_yes, ${name}_no])], visible=$/${name}_drop != "")`);
       else lines.push(`${name}_remove = IconButton("Trash", action=remove(), label=${q(word("Remove"))})`);
-      cells.push(`${name}_remove`);
+      tail.push(`${name}_remove`);
     }
-    // Many check marks get a line of their own under the other cells.
-    lines.push(marks.length > 2 ? `${name}_row = Card([Row([${cells.join(", ")}]), Row([${marks.join(", ")}])])` : `${name}_row = Row([${[...cells.slice(0, firstText ? 1 : 0), ...cells.slice(firstText ? 1 : 0), ...marks].join(", ")}])`);
+    // The row (C.1): the emoji, the title with a muted line under it for each further text, the value cells, the check marks, and the remove button.
+    // The emoji is named by the title of the list for a person who does not see it.
+    if (icon) lines.push(`${name}_emoji = Emoji(${show(icon)}, size="small", label=${show(title)})`);
+    lines.push(...texts.map((field, index) => `${name}_${field} = Text($${field}${texts.length === 1 ? ", weight=1" : index ? ', tone="muted"' : ""})`));
+    if (texts.length > 1) lines.push(`${name}_main = Column([${texts.map((field) => `${name}_${field}`).join(", ")}], weight=1, gap="none")`);
+    const head = [...(icon ? [`${name}_emoji`] : []), ...(texts.length > 1 ? [`${name}_main`] : texts.map((field) => `${name}_${field}`)), ...cells];
+    // Many check marks get a row of their own under the other cells, and the row of a list is a card.
+    lines.push(many ? `${name}_row = Card([Row([${[...head, ...tail].join(", ")}]), Row([${marks.join(", ")}], gap="none")])` : `${name}_row = Row([${[...head, ...marks, ...tail].join(", ")}])`);
     let source = `$/${name}`;
     if (opt.filter) source = `filter(${source}, ${show(opt.filter)})`;
     if (opt.sort) source = `sort(${source}, ${show(opt.sort)}${opt.order ? ", " + show(opt.order) : ""})`;
@@ -178,17 +192,23 @@ const PARTS = {
     const parts = [`${name}_list`];
     if (opt.remove?.v !== false && opt.confirm) parts.push(`${name}_confirm`);
     if (canAdd) {
-      const ready = firstText ? `, enabled=len(trim($/${name}_new_${firstText})) > 0` : "", sheet = opt.sheet?.v === true;
-      lines.push(`${name}_add = Button(${text("addText", "Add")}, action=[${[`append($/${name}, {${blank.join(", ")}})`, ...reset, ...(sheet ? [`set($/${name}_adding, false)`] : [])].join(", ")}]${ready})`);
+      const sheet = opt.sheet?.v === true, adds = `[${[`append($/${name}, {${blank.join(", ")}})`, ...reset, ...(sheet ? [`set($/${name}_adding, false)`] : [])].join(", ")}]`;
+      // The add button is enabled at the start (C.4). A press with an empty first text field changes nothing, and a sheet stays open.
+      lines.push(`${name}_add = Button(${text("addText", "Add")}, action=${firstText ? `when(len(trim($/${name}_new_${firstText})) > 0, ${adds})` : adds}, icon="Plus")`);
       // With sheet=true the add form is a dialog that a button opens. The add button closes it, and so does the close button that Alphy
       // draws in each sheet with its own word (NativeToolUi.kt, bottomSheet), so the part writes no close button of its own.
-      if (sheet) lines.push(`$/${name}_adding = false`, `${name}_open = Button(${text("addText", "Add")}, action=set($/${name}_adding, true))`,
+      if (sheet) lines.push(`$/${name}_adding = false`, `${name}_open = Button(${text("addText", "Add")}, action=set($/${name}_adding, true), icon="Plus")`,
         `${name}_addRow = Dialog(${text("addText", "Add")}, [${[...add, `${name}_add`].join(", ")}], visible=$/${name}_adding)`);
-      else lines.push(`${name}_addRow = Row([${[...add, `${name}_add`].join(", ")}])`);
+      // The fields stand one below the other, and the add button is on its own line under them.
+      else lines.push(`${name}_addRow = Column([${[...add, `${name}_add`].join(", ")}])`);
       parts.push(...(sheet ? [`${name}_open`] : []), `${name}_addRow`);
     }
     lines.push(`${name}_view = Section(${show(title)}, [${parts.join(", ")}])`);
-    return { lines, top: [`${name}_view`] };
+    if (!count) return { lines, top: [`${name}_view`] };
+    // The only main element of the app is this list (C.6): a hero card with the count of its shown rows comes first. A sign of each row gives no emoji there.
+    const counted = opt.countText ? show(opt.countText) : show(title);
+    lines.push(`${name}_hero = Card([${icon?.k === "lit" ? `Emoji(${show(icon)}, size="large", label=${counted}), ` : ""}Metric(${counted}, len(${source}), emphasis="display")], variant="hero")`);
+    return { lines, top: [`${name}_view`], lead: [`${name}_hero`] };
   },
 
   // need line = chart("Steps", $/days, $day, $steps, kind="line"): one bar or point for each row of a list.
@@ -432,7 +452,7 @@ export const PART_KINDS = Object.keys(PARTS);
  */
 const OPTIONS = {
   input: ["options", "min", "max", "step"], figure: ["decimals", "example"],
-  entries: ["fields", "labels", "rows", "hidden", "add", "edit", "remove", "confirm", "yes", "no", "emptyText", "addText", "show", "reorder", "filter", "sort", "order", "group", "sheet"],
+  entries: ["fields", "labels", "rows", "hidden", "add", "edit", "remove", "confirm", "yes", "no", "emptyText", "addText", "show", "reorder", "filter", "sort", "order", "group", "sheet", "icon", "countText"],
   chart: ["kind"], deck: ["front", "back", "mark", "answer", "picture", "field", "check", "right", "wrong", "next", "again", "done", "points", "prev", "show", "yes", "no"],
   steps: ["back", "next", "finish", "done"], tabs: ["title"], progress: [], counter: ["step", "min", "max"],
   timer: ["alert", "rounds", "rest", "start", "pause", "reset", "done", "workText", "restText"], picture: ["found", "caption", "credit", "tag"], drawing: [],
@@ -462,7 +482,10 @@ export async function expand(file, choose = rules) {
   }
   const candidates = needs.filter((entry) => ["figure", "progress"].includes(entry.tree.name)).map((entry) => entry.key);
   const hero = candidates.length ? await choose("main element", candidates, candidates[0]) : null;
-  const out = [], top = [], fresh = [], held = new Set();
+  // A plan with no figure, progress, drawing, timer, or model: the first list that shows gets a hero card with its count (C.6). An author's root gets none.
+  const listHero = !needs.some((entry) => ["figure", "progress", "drawing", "timer", "model3d"].includes(entry.tree.name)) && file.open("root")
+    ? needs.find((entry) => entry.tree.name === "entries" && entry.tree.named.hidden?.v !== true)?.key : undefined;
+  const out = [], top = [], fresh = [], held = new Set(), heads = [];
   // A part that holds other needs, such as steps, is built after them. Its place on the screen stays the place of its line.
   const holder = (entry) => ["steps", "tabs"].includes(entry.tree.name);
   const place = new Map();
@@ -483,7 +506,7 @@ export async function expand(file, choose = rules) {
         return wordOf(lang, text);
       };
       const caption = (option, text) => (entry.tree.named[option] ? show(entry.tree.named[option]) : q(word(text, option)));
-      built = await part(entry.key, entry.tree, { choose, hero, word, caption, tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
+      built = await part(entry.key, entry.tree, { choose, hero, word, caption, count: entry.key === listHero, tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
       // A part line that the host cannot read is a fault of this need, never an exception. The other needs still expand.
       parsed = built.lines.map((line) => parseLine(line));
       if (parsed.includes(null)) throw new DslError("the part made an empty line");
@@ -503,9 +526,10 @@ export async function expand(file, choose = rules) {
     drop((file.partLines.get(entry.key) ?? []).filter((line) => !keys.includes(line)));
     file.partLines.set(entry.key, keys);
     (built.holds ?? []).forEach((other) => held.add(other));
+    heads.push(...(built.lead ?? []));
     place.set(entry.key, built.top);
     // A change of the language of the app writes the part again, in the words of the new language.
-    const made = `${entry.raw}${entry.key === hero}${lang}`;
+    const made = `${entry.raw}${entry.key === hero || entry.key === listHero}${lang}`;
     if (file.expanded.get(entry.key) === made) continue;
     if (!file.expanded.has(entry.key)) fresh.push(entry.key);
     file.expanded.set(entry.key, made);
@@ -518,6 +542,7 @@ export async function expand(file, choose = rules) {
   }
   // The screen: the main element first, then each need in the order of its line. A need that a step holds is not there twice.
   for (const entry of needs) if (place.has(entry.key) && !held.has(entry.key)) (entry.key === hero ? top.unshift.bind(top) : top.push.bind(top))(...place.get(entry.key));
+  top.unshift(...heads);
   // A picture that is the first need stays on top, above the main element (menu: "a picture of the cafe on top").
   const lead = needs[0]?.tree.name === "picture" && !held.has(needs[0].key) ? place.get(needs[0].key) ?? [] : [];
   if (lead.length) top.unshift(...top.splice(top.indexOf(lead[0]), lead.length));
