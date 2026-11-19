@@ -29,12 +29,21 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 
 internal const val MAX_TOOL_PROMPT_LENGTH = 64_000
 
@@ -147,7 +156,8 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
 
     internal suspend fun response(key: String, turns: List<CloudTurn>, session: CloudSession, stage: CloudGenerationStage?,
         instructions: String = "", expandedWriterOutput: Boolean = false,
-        onCompletion: ((ModelCompletionTiming) -> Unit)? = null): String {
+        onCompletion: ((ModelCompletionTiming) -> Unit)? = null, jsonObject: Boolean = true,
+        onFirstText: (() -> Unit)? = null): String {
         val maxBytes = if (expandedWriterOutput) ToolSpec.MAX_DEFINITION_BYTES else SandboxContract.MAX_BYTES
         val output = StringBuilder()
         fun tooLarge() = CloudFailure("widget_response_size", "The generator response exceeds the allowed size. Request a smaller tool.")
@@ -156,11 +166,14 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         var firstText: Long? = null
         var completed = false
         try {
-            provider.respond(key, CloudRequest(turns, false, systemInstructions = instructions, jsonObject = true,
+            provider.respond(key, CloudRequest(turns, false, systemInstructions = instructions, jsonObject = jsonObject,
                 generationStage = stage, expandedWriterOutput = expandedWriterOutput), session) { event ->
                 if (event is CloudEvent.Text) {
                     if (event.value.length > maxBytes - output.length) throw tooLarge()
-                    if (firstText == null && event.value.isNotBlank()) firstText = System.nanoTime() - started
+                    if (firstText == null && event.value.isNotBlank()) {
+                        firstText = System.nanoTime() - started
+                        onFirstText?.invoke()
+                    }
                     output.append(event.value)
                 }
             }
@@ -321,6 +334,51 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             val output=ArtifactProtocol.output(spec,json)
             ToolPreview(spec,if (readOnly) state else next.toString(),ui,effects,records,output.surfaces,output.frames,output.timers,output.playback)
         }
+}
+
+/** The outcome of one app-file call. [Failed.reason] is `call_failed`, `first_text_timeout`, or `total_timeout`. */
+internal sealed interface AppFileReply {
+    data class Text(val text: String) : AppFileReply
+    data class Failed(val reason: String) : AppFileReply
+}
+
+/** The time limits of one app-file call, from its start. */
+internal class AppFileLimits(val firstTextMs: Long = 20_000, val totalMs: Long = 45_000) {
+    // The model check of changes sets the final values of the change call.
+    companion object { val CHANGE = AppFileLimits(60_000, 120_000) }
+}
+
+/**
+ * Sends one app-file call with no JSON mode. A slow call ends at its limit and leaves [session] open for the loop.
+ * A cancel of the person or of the caller goes up unchanged.
+ */
+internal suspend fun ToolGenerationService.appFileCall(key: String, session: CloudSession, stage: CloudGenerationStage,
+    instructions: String, input: String, limits: AppFileLimits, onTiming: (ModelCompletionTiming) -> Unit): AppFileReply {
+    val textStarted = CompletableDeferred<Unit>()
+    val reason = AtomicReference<String?>()
+    return try {
+        coroutineScope {
+            val call = async {
+                response(key, listOf(CloudTurn("user", input)), session, stage, instructions, onCompletion = onTiming,
+                    jsonObject = false, onFirstText = { textStarted.complete(Unit) })
+            }
+            // A blocked HTTP read holds the thread of the call, so the watcher runs on a different thread.
+            val watcher = launch(Dispatchers.Default) {
+                reason.set(withTimeoutOrNull(limits.totalMs) {
+                    if (withTimeoutOrNull(limits.firstTextMs) { textStarted.await() } == null) "first_text_timeout" else awaitCancellation()
+                } ?: "total_timeout")
+                // The cancel comes first: a call that attaches its connection after the abort then stops at its next check.
+                call.cancel()
+                session.abortCall()
+            }
+            AppFileReply.Text(call.await()).also { watcher.cancel() }
+        }
+    } catch (failure: Exception) {
+        if (failure is CloudFailure && failure.code == "cancelled" || !currentCoroutineContext().isActive) throw failure
+        session.check()
+        reason.get()?.let { return AppFileReply.Failed(it) }
+        if (failure is java.io.IOException) AppFileReply.Failed("call_failed") else throw failure
+    }
 }
 
 /** Revision and state tokens reject commands from old cards and drafts. */

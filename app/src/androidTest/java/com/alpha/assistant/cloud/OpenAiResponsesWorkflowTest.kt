@@ -43,7 +43,7 @@ private fun OutputStream.responsesCompleted() =
 private fun textDelta(delta: String) = JSONObject().put("output_index", 0).put("content_index", 0).put("delta", delta)
 
 /** An unfinished Responses stream: one assistant message with the text [deltas]. */
-private fun OutputStream.responsesStart(vararg deltas: String) {
+internal fun OutputStream.responsesStart(vararg deltas: String) {
     responsesHeaders()
     responsesMessage(JSONObject().put("type", "output_text").put("text", ""))
     for (delta in deltas) responsesEvent("response.output_text.delta", textDelta(delta))
@@ -53,6 +53,17 @@ private fun OutputStream.responsesStart(vararg deltas: String) {
 internal fun OutputStream.responsesText(vararg deltas: String) {
     responsesStart(*deltas)
     responsesCompleted()
+}
+
+/** A Responses server that stalls the first request after [start] until [release]. Each later request gets the text [later]. */
+internal fun stallingResponses(release: CountDownLatch, later: String, start: OutputStream.() -> Unit): LoopbackServer {
+    val calls = AtomicInteger()
+    return LoopbackServer { _, output ->
+        if (calls.getAndIncrement() == 0) {
+            output.start()
+            release.await(15, TimeUnit.SECONDS)
+        } else output.responsesText(later)
+    }
 }
 
 /** A finished Responses stream with the [reasoning] items, then one function call with streamed arguments. */
@@ -120,7 +131,8 @@ class OpenAiResponsesWorkflowTest {
     private class Exchange(val requests: List<Request>, val events: List<CloudEvent>, val failure: CloudFailure?)
 
     /** Sends [request] through an OpenAI account. [reply] answers each HTTP call with its index and body. */
-    private fun exchange(request: CloudRequest, reply: (Int, JSONObject, OutputStream) -> Unit = { _, body, output -> answer(body, output) }): Exchange {
+    private fun exchange(request: CloudRequest, session: CloudSession = CloudSession(),
+        reply: (Int, JSONObject, OutputStream) -> Unit = { _, body, output -> answer(body, output) }): Exchange {
         val calls = AtomicInteger()
         val events = CopyOnWriteArrayList<CloudEvent>()
         return LoopbackServer { raw, output ->
@@ -129,7 +141,7 @@ class OpenAiResponsesWorkflowTest {
         }.use { server ->
             val provider = CloudChatProvider({ AiAccount(AiProvider.OPENAI, key) }, Endpoints { server.url }, recordEmptyCompletion = {})
             val failure = try {
-                runBlocking { provider.respond(key, request, CloudSession()) { events += it } }
+                runBlocking { provider.respond(key, request, session) { events += it } }
                 null
             } catch (failure: CloudFailure) { failure }
             assertTrue(server.failures.toString(), server.failures.isEmpty())
@@ -358,4 +370,57 @@ class OpenAiResponsesWorkflowTest {
     }
 
     @Test fun cancelClosesResponsesStream() = assertCancelClosesStream(AiProvider.OPENAI, 5_000) { responsesStart("Hel") }
+
+    @Test fun appFileStageSendsTheInstructionsAloneAtEffortLow() {
+        val request = firstRequest(appFileRequest(CloudGenerationStage.APP_FILE))
+        assertEquals("PLAN SYSTEM", request.json.getString("instructions"))
+        assertEquals("low", request.json.getJSONObject("reasoning").getString("effort"))
+        assertEquals(4096, request.json.getInt("max_output_tokens"))
+        assertFalse(request.json.optJSONObject("text")?.has("format") == true)
+        assertTrue(request.input.none { it.optString("role") == "developer" })
+    }
+
+    @Test fun appFileChangeStageReasonsAtMedium() {
+        val json = firstRequest(appFileRequest(CloudGenerationStage.APP_FILE_CHANGE)).json
+        assertEquals("PLAN SYSTEM", json.getString("instructions"))
+        assertEquals("medium", json.getJSONObject("reasoning").getString("effort"))
+        assertFalse(json.has("max_output_tokens"))
+    }
+
+    @Test fun appFileStageMakesNoTransportRetry() {
+        val session = CloudSession()
+        // The server closes each connection before the response headers.
+        val exchange = exchange(appFileRequest(CloudGenerationStage.APP_FILE), session) { _, _, _ -> }
+        assertEquals("pre_headers_io", exchange.failure?.code)
+        assertEquals(1, exchange.requests.size)
+        assertTrue("The plan call used the transport retry of the loop.", session.claimGenerationTransportRetry())
+    }
+
+    @Test fun abortCallEndsTheStreamAndKeepsTheSession() {
+        val streaming = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        stallingResponses(release, "Done") { responsesStart("Hel") }.use { server ->
+            val provider = CloudChatProvider({ AiAccount(AiProvider.OPENAI, key) }, Endpoints { server.url }, recordEmptyCompletion = {})
+            val session = CloudSession()
+            val request = appFileRequest(CloudGenerationStage.APP_FILE)
+            try {
+                runBlocking {
+                    val first = async(Dispatchers.IO) {
+                        try { provider.respond(key, request, session) { if (it is CloudEvent.Text) streaming.countDown() }; null }
+                        catch (failure: CloudFailure) { failure }
+                    }
+                    assertTrue(streaming.await(10, TimeUnit.SECONDS))
+                    Thread.sleep(200) // The client returns from the text callback to its read.
+                    session.abortCall()
+                    val failure = withTimeout(5_000) { first.await() }
+                    assertTrue("$failure ${failure?.code}", failure != null && failure.code != "cancelled")
+                    val text = StringBuilder()
+                    provider.respond(key, request, session) { if (it is CloudEvent.Text) text.append(it.value) }
+                    assertEquals("Done", text.toString())
+                }
+            } finally { release.countDown() }
+            assertEquals(2, server.requests.size)
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+        }
+    }
 }

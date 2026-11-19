@@ -260,6 +260,18 @@ class AnthropicWorkflowTest {
         assertEquals(AGENT_SCREENSHOT.substringAfter(","), image.getJSONObject("source").getString("data"))
     }
 
+    @Test fun appFileStageUsesOutputEffortLow() {
+        val json = firstRequest(appFileRequest(CloudGenerationStage.APP_FILE)).json
+        assertEquals("PLAN SYSTEM", json.getString("system"))
+        assertEquals("low", json.getJSONObject("output_config").getString("effort"))
+        assertFalse(json.getJSONObject("output_config").has("format"))
+        assertEquals(4096, json.getInt("max_tokens"))
+        // The change stage reasons, as the agent stage does.
+        val change = firstRequest(appFileRequest(CloudGenerationStage.APP_FILE_CHANGE)).json
+        assertEquals("PLAN SYSTEM", change.getString("system"))
+        assertEquals("high", change.getJSONObject("output_config").getString("effort"))
+    }
+
     @Test fun imagesBecomeBase64Blocks() {
         val content = firstRequest(textRequest("Describe.", listOf("data:image/png;base64,iVBORw0KGgo="))).messages.single()
             .getJSONArray("content")

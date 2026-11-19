@@ -32,6 +32,10 @@ internal fun agentStepRequest() = CloudRequest(listOf(CloudTurn("user", "Build a
     CloudTurn("assistant", "{\"tool\":\"write_app\"}"), CloudTurn("user", "write_app: OK.", listOf(AGENT_SCREENSHOT))),
     false, "Agent rules.", jsonObject = true, generationStage = CloudGenerationStage.AGENT, expandedWriterOutput = true)
 
+/** One call of an app-file stage as ToolGenerationService.appFileCall sends it: plain text, no JSON mode. */
+internal fun appFileRequest(stage: CloudGenerationStage) =
+    CloudRequest(listOf(CloudTurn("user", "A tip calculator.")), false, "PLAN SYSTEM", generationStage = stage)
+
 /** Each test checks one difference between the OpenRouter and DeepSeek profiles of the OpenAI-compatible wire. */
 @RunWith(AndroidJUnit4::class)
 class OpenAiCompatibleProfileTest {
@@ -139,5 +143,22 @@ class OpenAiCompatibleProfileTest {
             assertFalse(body.has("tools"))
             assertHas(reasoning, body)
         }
+    }
+
+    @Test fun appFileStageTurnsThinkingOff() {
+        fun body(provider: AiProvider, stage: CloudGenerationStage) =
+            JSONObject(respond(provider, appFileRequest(stage)) { _, output -> json(output) }.single().body)
+        val deepSeek = body(AiProvider.DEEPSEEK, CloudGenerationStage.APP_FILE)
+        assertEquals("disabled", deepSeek.getJSONObject("thinking").getString("type"))
+        val openRouter = body(AiProvider.OPENROUTER, CloudGenerationStage.APP_FILE)
+        assertEquals("low", openRouter.getJSONObject("reasoning").getString("effort"))
+        for (sent in listOf(deepSeek, openRouter)) {
+            assertEquals("PLAN SYSTEM", sent.getJSONArray("messages").getJSONObject(0).getString("content"))
+            assertEquals(4096, sent.getInt("max_tokens"))
+            assertFalse(sent.has("response_format"))
+        }
+        // The change stage reasons, as the agent stage does.
+        assertHas(DeepSeekProfile.reasoningOn, body(AiProvider.DEEPSEEK, CloudGenerationStage.APP_FILE_CHANGE))
+        assertHas(OpenRouterProfile.reasoningOn, body(AiProvider.OPENROUTER, CloudGenerationStage.APP_FILE_CHANGE))
     }
 }
