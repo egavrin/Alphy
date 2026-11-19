@@ -545,6 +545,18 @@ The draft is `plan-a-draft.md` (anchors at `fc17a24`). The controller read all o
 - **A voice hand-off of a create request** goes through the same generation path. With the switch on it also gets the plan step in the first push. Task 7 gets one more test: a voice hand-off of a create request (`FakeLiveTransport.say` with a scripted provider) gets one `APP_FILE` call and shows its card.
 - **Two pushes** (the owner, 2026-11-19). This plan, the wide-screen checks, and the switch for OpenAI on terra are the first push. The voice screens and the course slides are the second.
 
+### As built
+
+The code at `6d4b349` differs from the tasks below in these points (task U-K, item 14). The code wins.
+
+- The comparison of the stored state with the start state uses the helper `sameToolJson` that the app has. There is no new `sameValue`.
+- A test-and-fix reply with no line gives `UNVERIFIED`, not `PASSED`. The detail is the string resource `tool_test_fix_no_line`. The test is `aTestFixWithNoLineIsUnverified`.
+- The failure texts of a change come from string resources (`tool_generation_state`, `tool_generation_connection`, `tool_generation_unchanged`), not from English texts in Kotlin.
+- The word of `outside` leaves the device only when it matches `[a-z0-9]{1,16}` (`ToolGenerationDiagnostic.kt`), so `3d` stays.
+- A fault that the saved data blocks, and the mismatch fault, give `fallback:data_blocks` with no repair call (`AppFileSteps.outcome`).
+- Test and fix by lines never goes to the loop. When the kit cannot apply its reply, the request fails and the app, its data, and its revision stay.
+- The change call uses the low effort of a plan call and the limits of a plan call (`AppFileLimits()`: 20 s to the first text and 45 s in all).
+
 ## Decisions of the controller
 
 
