@@ -10,7 +10,8 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { BLOCKS, LINE, MISMATCH, compileAppFile, linesOf, patchAppFile, readPlanReply } from "./src/compile.js";
+import { BLOCKS, MISMATCH } from "./src/change.js";
+import { LINE, compileAppFile, linesOf, patchAppFile, readPlanReply } from "./src/compile.js";
 import { runtime } from "./src/emit.js";
 import { handle } from "./src/run.js";
 import { runtimeText } from "./build.js";
@@ -103,7 +104,7 @@ export function barFaults({ compileMs, stateBytes, plan, definition }) {
 const HEAD = "\nreturn handle(input, ";
 /** The compiled data of a definition: the JSON that its source gives the run-time. */
 const dataOf = (definition) => JSON.parse(definition.source.slice(definition.source.lastIndexOf(HEAD) + HEAD.length, -2));
-/** The fields of the person in compiled data: the value of each line, and each object of the inner values of a need (compile.js nextState). */
+/** The fields of the person in compiled data: the value of each line, and each object of the inner values of a need (change.js nextState). */
 const ownOf = (data) => [...new Set(data.fields.filter(([root]) => root !== "app:empty").map(([, path]) => path.split(".")[0]))];
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -134,7 +135,7 @@ export async function storedOf({ plan, events }) {
 /**
  * Each stored value of the person that the next state does not hold unchanged, by the names of the previous definition. A list compares each stored
  * row by its id and each stored column by its name, so a new column is no difference, and a row that only the next state has is one. A record
- * compares each key whose stored value differs from its start (rule 3b of compile.js: a start value is no data of the person).
+ * compares each key whose stored value differs from its start (rule 3b of change.js: a start value is no data of the person).
  * lost holds the values of lines, and restarted the inner values of a need, which rules 7 and 3c start again by design.
  * hidden names each compared field that no line of the next app owns, so only app.keep holds it and the screen does not show it.
  */

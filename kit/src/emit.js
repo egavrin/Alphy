@@ -47,7 +47,7 @@ const UNITS = { commands: "commands", pairs: "coordinate pairs", chars: "text ch
  * list, the count of rows of each shown list, each shown value that is a number, the names of the screen that differ from their wish,
  * the next row id, the values that an entries need shows for each row, and the field of the changes of animate with the key of each value (anim).
  * Faults give no definition. With a definition, owners gives the need or the line of each field in the order of the fields, and objects
- * gives the need of each object of inner values: compile.js reads both for the next state of a change.
+ * gives the need of each object of inner values: change.js reads both for the next state of a change.
  */
 export function emit(file) {
   if (!runtime.text) throw new Error("emit.js has no run-time text: kit/build.js gives it");

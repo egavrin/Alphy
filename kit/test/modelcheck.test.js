@@ -4,7 +4,7 @@
 import { expect, test } from "bun:test";
 import { BARS, SET_E, SET_F, barFaults, bodyOf, changeNumbers, checkOne, faultTable, keptOf, kindOf, merge, numbers, repairsOf, storedOf, worstCase } from "../modelcheck.js";
 import { PROMPT, changeText, repairText, taskText } from "../prompt.js";
-import { BLOCKS } from "../src/compile.js";
+import { BLOCKS } from "../src/change.js";
 import "./helpers.js";
 
 const PLAN = 'app("Tip", lang="en")\nneed bill = input("money", "Bill", 80, min=0, max=500)\nneed tip = figure("money", "Tip", $/bill * 0.1, example=[{bill: 100}, 10])\n';
