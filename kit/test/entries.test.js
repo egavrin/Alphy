@@ -114,6 +114,12 @@ test("entries (L1 item 2): in a row with values of show=, the title and the cell
   // A row with no value of show= keeps its title, with the rest of the line, beside its cells.
   const plain = rowOf((await built('app("T", lang="pt")', 'need bikes = entries("Bikes", fields={name: "text", price: "number"})')).definition);
   expect(plain.children.map((node) => [node.type, node.layout?.weight])).toEqual([["text", 1], ["text", undefined], ["icon", undefined]]);
+  // mock-price-filter: the price wrapped under a title of two lines that had room beside it, because in a column each text of Alphy fills the width.
+  // Its texts keep the width of their content, and with no value the column and its texts fill the line as before.
+  const two = async (show) => rowOf((await built('app("T", lang="en")', `need bikes = entries("Bikes", fields={name: "text", detail: "text"}${show}, add=false)`)).definition);
+  const [title] = (await two(', show={cost: "$" + text($price)}')).children[0].children;
+  expect([title.type, title.layout, title.children.map((node) => node.layout)]).toEqual(["column", undefined, [{ fillWidth: false }, { fillWidth: false }]]);
+  expect((await two("")).children[0].children.map((node) => node.layout)).toEqual([undefined, undefined]);
 });
 
 test("entries: the row is a title with a muted second line, then the value cells, the check marks, and the remove button", async () => {

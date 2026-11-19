@@ -100,6 +100,7 @@ In a row of a list, a look value must not read a field of the row, such as `$don
 | `columns` | `Grid` | 1, 2, 3, 4. The default is 2. |
 
 `Row(children, max=360)` gives the row a largest width in dp, the `maxWidth` of its Alphy layout. A row that is narrower than its column stands at its start.
+`fit=true` keeps a node at the width of its content in a column, where Alphy makes it fill the width (`fillWidth: false` of its Alphy layout).
 `Emoji(sign, size=)` takes a sign, a state value, or a field of a list row.
 `label=` is its text for a screen reader. Without it, the text in a list row is the kit caption of its line, such as "item Emoji", because one template draws all rows. The `entries` part gives it the title of the list.
 `Segmented`, `Select`, and `Choices` take `options` as a list or as a map of a text value to its label, such as `{asc: "Low to high", desc: "High to low"}`.
@@ -147,6 +148,7 @@ A text that a format function printed is for a person: do not read it back as a 
   - `tones={streak: "accent"}` gives the badge of a value of `show=` its tone. A name that `show=` does not give, or the sign of the row, is a note, and the kit leaves it out.
   - A value of `show=` prints with `amount(x, 2)`: a number in the language of the app with at most 2 decimals, and a text as it is, such as one that `fixed()` or `money()` of the plan printed. A name of `labels=` stands before the value, such as "Серія днів: 0" (L1 item 2).
   - In a row with values of `show=`, the title and the value cells are one group that wraps: a cell that does not fit beside the title goes under it, with the width of its content. The emoji, the check marks, and the remove button stay at the ends of the line. A row with no value of `show=` keeps its title with the rest of the line.
+    The texts of a title of two lines there have `fit=true`, so the title is as wide as its text, and a value that fits stands beside it.
   - An editable row (`edit=true`) is one line that wraps (L1 item 1). A text field there is as wide as the host lets it be (up to 300 dp), so on a phone it has a line of its own. The first text field shares its line only with the emoji, and each other control keeps the width of its content.
     A count of a row is one group of a minus button, a number field with no stepper of its own, and a plus button, on a line of its own.
 - `input`: `options={value: "Label"}` keeps the value in the state and shows the label. `icon=` goes to a text, number, date, or time field and to a choice of more than six options.

@@ -425,6 +425,8 @@ export function screen(kit, app, first = false) {
     }
     // Alphy takes a weight only in a column or a row.
     if (node.props.weight !== undefined && ctx.weighted) out.layout = { ...out.layout, weight: node.props.weight };
+    // fit=true keeps a node at the width of its content in a column, where Alphy fills the width (L1 item 2).
+    if (node.props.fit) out.layout = { ...out.layout, fillWidth: false };
     return out;
   };
   // What the list mapping (rows.js) shares with the walk.

@@ -276,8 +276,9 @@ const PARTS = {
     if (icon) lines.push(`${name}_emoji = Emoji(${show(icon)}, size="small", label=${show(title)})`);
     if (under) texts.push(under);
     // In a row with values of show=, the title keeps the width of its text: the group of the title and the cells takes the rest of the line.
-    const grow = valued.length ? "" : ", weight=1";
-    lines.push(...texts.map((field, index) => `${name}_${field} = Text($${field}${texts.length === 1 ? grow : index ? ', tone="muted"' : ""})`));
+    // In a column Alphy makes each text fill the width, so the texts of a title of two lines there have fit=true (L1 item 2).
+    const grow = valued.length ? "" : ", weight=1", fit = valued.length ? ", fit=true" : "";
+    lines.push(...texts.map((field, index) => `${name}_${field} = Text($${field}${texts.length === 1 ? grow : (index ? ', tone="muted"' : "") + fit})`));
     if (texts.length > 1) lines.push(`${name}_main = Column([${texts.map((field) => `${name}_${field}`).join(", ")}]${grow}, gap="none")`);
     const emoji = icon ? [`${name}_emoji`] : [], [first, ...more] = typedTexts, shut = many ? [] : marks, line = (items, look = "") => (items.length ? [`Row([${items.join(", ")}]${look})`] : []);
     // An editable row (L1 item 1) is one line that wraps. The host gives a text field there up to 300 dp, so on a phone it has a line of its own,
