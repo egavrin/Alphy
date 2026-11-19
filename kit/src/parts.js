@@ -93,17 +93,18 @@ const PARTS = {
   },
 
   // need perPerson = figure("money", "Per person", $/bill / $/people, example=[{bill: 100, people: 4}, 25])
-  // need today = figure("number", "Today", $/ml, icon="💧", goal=2000, note="Goal 2000 ml"): the main figure is a hero card with a large emoji, a bar to its goal, and a muted note.
+  // need today = figure("number", "Today", $/ml, icon="💧", unit="ml", goal=2000, goalText="Of the goal", note="250 ml for each cup"): the main figure is a hero card with a large emoji, a bar to its goal, and a muted note.
   // icon="Drop" (a name of a host icon) is the icon of the metric. role (expand): the place of a figure that is not the main one.
   async figure(name, need, { hero, role }) {
-    const [format, title, formula] = need.args, f = format?.v, { icon, note, goal } = need.named, main = hero === name;
-    if ((note || goal) && !main) throw new DslError(`note= and goal= show only on the main figure, and ${name} is not it`);
+    const [format, title, formula] = need.args, f = format?.v, { icon, note, goal, goalText, unit } = need.named, main = hero === name;
+    if ((note || goal || goalText) && !main) throw new DslError(`note=, goal=, and goalText= show only on the main figure, and ${name} is not it`);
     const text = { money: `money($/${name})`, percent: `percent($/${name})`, text: `text($/${name})` }[f] ?? `amount($/${name}, ${need.named.decimals ? show(need.named.decimals) : f === "count" ? 0 : 2})`;
-    const lines = [`$/${name} := ${show(formula)}`, `$/${name}_text := ${text}`];
+    // unit="ml" follows the shown number ("2,000 ml"), and the value stays a number for a bar, a check, or an example.
+    const lines = [`$/${name} := ${show(formula)}`, `$/${name}_text := ${text}${unit ? ` + " " + ${show(unit)}` : ""}`];
     // An emoji, or a formula that gives one, is the sign of the main figure. A word of letters is the name of a host icon.
     const sign = main && icon && !(icon.k === "lit" && /^[A-Za-z]+$/.test(icon.v)), metric = (look) => `Metric(${show(title)}, $/${name}_text${look}${icon && !sign ? `, icon=${show(icon)}` : ""})`;
     if (main) {
-      const parts = [sign && `Emoji(${show(icon)}, size="large", label=${show(title)})`, metric(', emphasis="display"'), goal && `Progress($/${name}, ${show(goal)}, label=${show(title)})`, note && `Text(${show(note)}, tone="muted")`];
+      const parts = [sign && `Emoji(${show(icon)}, size="large", label=${show(title)})`, metric(', emphasis="display"'), goal && `Progress($/${name}, ${show(goal)}, label=${show(goalText ?? title)})`, note && `Text(${show(note)}, tone="muted")`];
       lines.push(`${name}_view = Card([${parts.filter(Boolean).join(", ")}], variant="hero")`);
     } else lines.push(`${name}_view = ${role === "row" ? `Row([Text(${show(title)}, weight=1), Text($/${name}_text, emphasis="number")])` : metric("")}`);
     // The first of two figures in a grid holds the second one, whose own place stays empty.
@@ -473,7 +474,7 @@ export const PART_KINDS = Object.keys(PARTS);
  * button gives each option to its Button, whose own check names each one that a Button does not take.
  */
 const OPTIONS = {
-  input: ["options", "min", "max", "step", "icon"], figure: ["decimals", "example", "icon", "note", "goal"],
+  input: ["options", "min", "max", "step", "icon"], figure: ["decimals", "example", "icon", "note", "goal", "goalText", "unit"],
   entries: ["fields", "labels", "rows", "hidden", "add", "edit", "remove", "confirm", "yes", "no", "emptyText", "addText", "show", "reorder", "filter", "sort", "order", "group", "sheet", "icon", "countText"],
   chart: ["kind"], deck: ["front", "back", "mark", "answer", "picture", "field", "check", "right", "wrong", "next", "again", "done", "points", "prev", "show", "yes", "no"],
   steps: ["back", "next", "finish", "done"], tabs: ["title"], progress: [], counter: ["step", "min", "max", "lessText", "moreText", "addText", "icon", "resetText"],

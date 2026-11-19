@@ -3,7 +3,7 @@ app("Przelicznik kuchenny", lang="pl", preset="clean", palette="amber")
 $/gestosc := $/produkt == "maka" ? 0.55 : $/produkt == "cukier" ? 0.8 : 1
 need gramy = figure("number", "Gramy", $/ml * $/gestosc, decimals=1, icon=$/produkt == "maka" ? "🌾" : $/produkt == "cukier" ? "🍬" : "💧", note="1 szklanka = 250 ml, 1 łyżka = 15 ml")
 need produkt = input("choice", "Składnik", "maka", options={maka: "Mąka", cukier: "Cukier", woda: "Woda"})
-need ilosc = input("number", "Ilość", 1, min=0, max=5000)
+need ilosc = input("number", "Ilość", 1, min=0, max=5000, step=1)
 need jednostka = input("choice", "Jednostka", "szklanki", options={gramy: "Gramy", szklanki: "Szklanki", lyzki: "Łyżki", ml: "Mililitry"})
 need ml = figure("number", "Mililitry", $/jednostka == "ml" ? $/ilosc : $/jednostka == "szklanki" ? $/ilosc * 250 : $/jednostka == "lyzki" ? $/ilosc * 15 : $/ilosc / $/gestosc, decimals=1, icon="Drop")
 need szklanki = figure("number", "Szklanki", $/ml / 250, decimals=1, icon="Cup")

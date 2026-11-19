@@ -55,14 +55,26 @@ test("figures: one figure beside the main one, or two that do not stand one afte
   expect(tops(apart.definition).map(shape)).toEqual([["card", ["metric"]], "metric", "numberInput", "metric"]);
 });
 
+test("figures: unit= follows the number of each figure, and goalText= is the caption of the bar of the main figure", async () => {
+  // Task 11b-2a pictures: the baseline shows "0 ml" and "달성률: 0%", and the plan showed "0" and the title of the figure again beside the bar.
+  const { definition } = await built('app("물", lang="ko")', 'need ml = input("number", "물", 500)',
+    'need today = figure("number", "오늘 마신 양", $/ml, unit="ml", goal=2000, goalText="달성률", example=[{ml: 750}, 750])',
+    'need left = figure("number", "남은 양", 2000 - $/ml, unit="ml", example=[{ml: 500}, 1500])');
+  const [hero] = tops(definition), left = tops(definition).find((node) => node.type === "metric");
+  expect(hero.children.map((node) => [node.type, node.text])).toEqual([["metric", "오늘 마신 양"], ["progress", "달성률"]]);
+  expect([hero.children[0], left].map((node) => definition.initialState.d[node.bind.slice(2)])).toEqual(["500 ml", "1,500 ml"]);
+  // The value of the figure stays a number: the bar and the example read it.
+  expect(definition.initialState.d[hero.children[1].bind.slice(2)]).toBe(25);
+});
+
 test("figures: a new figure writes the figures before it again in their new place, and note= or goal= on a figure that is not the main one is a fault", async () => {
   const file = await planned(['app("T", lang="en")', 'need a = figure("number", "A", 1, example=[{}, 1])', 'need b = figure("number", "B", 2, example=[{}, 2])'].join("\n"));
   file.feed('need c = figure("number", "C", 3, example=[{}, 3])');
   await expand(file);
   expect(tops(emit(file).definition).map(shape)).toEqual([["card", ["metric"]], ["grid", ["metric", "metric"]]]);
-  for (const option of ['note="x"', "goal=10"]) {
+  for (const option of ['note="x"', "goal=10", 'goalText="x"']) {
     const line = `need b = figure("number", "B", 2, ${option})`;
     expect(report(await planned(`app("T")\nneed a = figure("number", "A", 1)\n${line}`)).faults)
-      .toContain(`line: need b: note= and goal= show only on the main figure, and b is not it: ${line}`);
+      .toContain(`line: need b: note=, goal=, and goalText= show only on the main figure, and b is not it: ${line}`);
   }
 });
