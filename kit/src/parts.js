@@ -254,8 +254,13 @@ const PARTS = {
     // Each name of icons= that is left has no field of the add form that shows an icon.
     for (const key of icons.keys()) notes.push(canAdd ? `need ${name}: icons= names ${key}, whose field of the add form shows no icon, so the kit left it out. A text, number, date, or time field shows one, and a choice of more than six options does too`
       : `need ${name}: icons= names ${key}, and with add=false the list has no add form, so the kit left it out`);
-    // A value for each row, from the fields of that row.
-    for (const [key, formula] of shown) if (key !== sign) { lines.push(`${name}_${key} = Badge(${show(formula)}${tones.has(key) ? `, tone=${show(tones.get(key))}` : ""})`); cells.push(`${name}_${key}`); }
+    // A value for each row, from the fields of that row. A number prints in the language of the app with at most 2 decimals, and a text, such
+    // as one that a format function of the plan printed, stays as it is. A name of labels= stands before the value (L1 item 2).
+    const valued = shown.filter(([key]) => key !== sign);
+    for (const [key, formula] of valued) {
+      lines.push(`${name}_${key} = Badge(${labels.has(key) ? `${q(`${labels.get(key)}: `)} + ` : ""}amount(${show(formula)}, 2)${tones.has(key) ? `, tone=${show(tones.get(key))}` : ""})`);
+      cells.push(`${name}_${key}`);
+    }
     // The arrows become the reorder of the list, which Alphy draws with its own words (NativeRecordReorder.kt), so they need no caption.
     if (opt.reorder?.v === true) { lines.push(`${name}_up = IconButton("ArrowUp", action=move(-1))`, `${name}_down = IconButton("ArrowDown", action=move(1))`); tail.push(`${name}_up`, `${name}_down`); }
     if (opt.remove?.v !== false) {
@@ -270,13 +275,18 @@ const PARTS = {
     // The emoji is named by the title of the list for a person who does not see it.
     if (icon) lines.push(`${name}_emoji = Emoji(${show(icon)}, size="small", label=${show(title)})`);
     if (under) texts.push(under);
-    lines.push(...texts.map((field, index) => `${name}_${field} = Text($${field}${texts.length === 1 ? ", weight=1" : index ? ', tone="muted"' : ""})`));
-    if (texts.length > 1) lines.push(`${name}_main = Column([${texts.map((field) => `${name}_${field}`).join(", ")}], weight=1, gap="none")`);
+    // In a row with values of show=, the title keeps the width of its text: the group of the title and the cells takes the rest of the line.
+    const grow = valued.length ? "" : ", weight=1";
+    lines.push(...texts.map((field, index) => `${name}_${field} = Text($${field}${texts.length === 1 ? grow : index ? ', tone="muted"' : ""})`));
+    if (texts.length > 1) lines.push(`${name}_main = Column([${texts.map((field) => `${name}_${field}`).join(", ")}]${grow}, gap="none")`);
     const emoji = icon ? [`${name}_emoji`] : [], [first, ...more] = typedTexts, shut = many ? [] : marks, line = (items, look = "") => (items.length ? [`Row([${items.join(", ")}]${look})`] : []);
     // An editable row (L1 item 1) is one line that wraps. The host gives a text field there up to 300 dp, so on a phone it has a line of its own,
     // each other control keeps the width of its content, and a count group fills a line. The first text field shares its line only with the emoji.
+    // A row with values of show= (L1 item 2) has the title and the cells in one group that wraps, so a cell that does not fit beside the title goes
+    // under it with the width of its content. The emoji, the check marks, and the remove button stay at the ends of the line.
+    const titled = [...(texts.length > 1 ? [`${name}_main`] : texts.map((field) => `${name}_${field}`)), ...cells];
     const top = edit ? line([...(first && emoji.length ? [`Row([${name}_emoji, ${first}])`, ...more] : [...emoji, ...typedTexts]), ...cells, ...shut, ...tail, ...counts], ', align="center"')
-      : [...line([...emoji, ...(texts.length > 1 ? [`${name}_main`] : texts.map((field) => `${name}_${field}`)), ...cells, ...shut, ...tail]), ...counts];
+      : [...line([...emoji, ...(valued.length ? line(titled, ', align="center", weight=1') : titled), ...shut, ...tail]), ...counts];
     // A count group, and many check marks, get lines of their own under the other cells. The host draws each row of a list on its own card, so the template has no card.
     const rowLines = [...top, ...(many ? [`Row([${marks.join(", ")}], gap="none")`] : [])];
     lines.push(`${name}_row = ${rowLines.length > 1 ? `Column([${rowLines.join(", ")}])` : rowLines[0]}`);

@@ -77,8 +77,9 @@ function print(lang, x, n, trim) {
  */
 const PRINT = {
   fixed: (lang, x, n = 2) => print(lang, x, n), money: (lang, x, sign = "") => sign + print(lang, x, /^(ja|ko)$/.test(lang) ? 0 : 2), percent: (lang, x, n = 0) => print(lang, x, n) + "%",
-  // The number of a figure: rounded to at most n decimals, with no zeros at the end.
-  amount: (lang, x, n = 0) => print(lang, round(Number(x), n), n, true),
+  // The number of a figure: rounded to at most n decimals, with no zeros at the end. A value that is not a number, such as a text that a
+  // format function printed, stays as it is, so a value of show= of a list can take amount() for each type (L1 item 2).
+  amount: (lang, x, n = 0) => (typeof x == "number" ? print(lang, round(x, n), n, true) : x),
 };
 const PLAIN = {
   round, floor: Math.floor, ceil: Math.ceil, abs: Math.abs,

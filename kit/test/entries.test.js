@@ -5,6 +5,7 @@ import { AppFile } from "../src/dsl.js";
 import { report, smoke } from "../src/check.js";
 import { compileAppFile } from "../src/compile.js";
 import { emit } from "../src/emit.js";
+import { handle } from "../src/run.js";
 import { built, every, live, planned, press, valueAt } from "./helpers.js";
 
 
@@ -91,6 +92,30 @@ test("entries: the smoke run types only into the fields that the button reads, l
 const rowOf = (definition) => every(definition.ui).find((node) => node.rowTemplate).rowTemplate;
 const muted = { tone: "muted" }, cell = { emphasis: "label" };
 
+// L1 item 2 (e-bbq-pt, showcase-lang-habits-uk): a computed value showed as "28.333333333333332" with no name, in a cell one digit wide.
+test("entries (L1 item 2): a value of show= prints as a number of the language of the app, with at most 2 decimals, and with its name of labels=", async () => {
+  const { definition, app } = emit(await planned('app("T", lang="pt")\nneed people = entries("Pessoas", fields={name: "text", paid: "number"}, labels={share: "Parte"}, '
+    + 'show={share: sum($/people, $paid) / count($/people), owes: max(0, sum($/people, $paid) / count($/people) - $paid), sign: $paid > 50 ? "💰" : "-", kept: fixed($paid, 3)}, '
+    + 'rows=[{name: "Ana", paid: 60}, {name: "Rui", paid: 25}, {name: "Eva", paid: 1000}])'));
+  // The values that the run-time shows in each row. A text, and a value that the plan prints with its own format, stay as they are.
+  const binds = every(rowOf(definition)).filter((node) => node.type === "badge").map((node) => node.bind);
+  const { state } = handle({ artifactId: "t", revision: 1, state: definition.initialState, event: { type: "open" } }, app);
+  expect(binds).toEqual(["people_share_value", "people_owes_value", "people_sign_value", "people_kept_value"]);
+  expect(state.people_list.map((row) => binds.map((bind) => row[bind])))
+    .toEqual([["Parte: 361,67", "301,67", "💰", "60,000"], ["Parte: 361,67", "336,67", "-", "25,000"], ["Parte: 361,67", "0", "💰", "1000,000"]]);
+});
+
+test("entries (L1 item 2): in a row with values of show=, the title and the cells are one group that wraps, so a cell that does not fit goes to a line under the title", async () => {
+  const { definition } = await built('app("T", lang="pt")', 'need people = entries("Pessoas", fields={name: "text", paid: "number"}, show={share: $paid / 3}, icon="🍖")');
+  const row = rowOf(definition);
+  // The emoji and the remove button stay at the ends of the line. The group takes the rest of it, and each cell in it keeps the width of its content.
+  expect(row.children.map((node) => [node.type, node.layout?.weight])).toEqual([["emoji", undefined], ["flowRow", 1], ["icon", undefined]]);
+  expect(row.children[1].children.map((node) => [node.type, node.layout?.weight])).toEqual([["text", undefined], ["text", undefined], ["badge", undefined]]);
+  // A row with no value of show= keeps its title, with the rest of the line, beside its cells.
+  const plain = rowOf((await built('app("T", lang="pt")', 'need bikes = entries("Bikes", fields={name: "text", price: "number"})')).definition);
+  expect(plain.children.map((node) => [node.type, node.layout?.weight])).toEqual([["text", 1], ["text", undefined], ["icon", undefined]]);
+});
+
 test("entries: the row is a title with a muted second line, then the value cells, the check marks, and the remove button", async () => {
   const { definition } = await built('app("Spesa", lang="it")',
     'need items = entries("Prodotti", fields={name: "text", qty: "text", price: "money", aisle: ["Frutta", "Forno"], done: "check"}, labels={done: "Preso"})');
@@ -140,7 +165,8 @@ test("entries: more than two check marks are circles of one weight in a second r
   const [top, marks] = rowOf(definition).children;
   // The host draws each row of a list on a card of its own, so a card in the template is a card in a card (Task 11b-2a pictures).
   expect(rowOf(definition).type).toBe("column");
-  expect(top.children.map((node) => node.type)).toEqual(["text", "badge", "icon"]);
+  // The title and the value of show= are one group that wraps (L1 item 2).
+  expect([top.children.map((node) => node.type), top.children[0].children.map((node) => node.type)]).toEqual([["flowRow", "icon"], ["text", "badge"]]);
   expect(marks).toEqual({ type: "row", wrap: false, style: { gap: "none", crossAlign: "center" }, children: [["Пн", "mon"], ["Вт", "tue"], ["Wed", "wed"]].map(([text, bind]) => (
     { type: "checkbox", text, bind, action: `habits_${bind}`, variant: "circle", layout: { weight: 1 } })) });
 });

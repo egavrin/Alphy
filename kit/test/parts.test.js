@@ -55,7 +55,7 @@ test("entries: a choice field, fields that change in place, rows that move, and 
   const ranked = await planned('app("T")\nneed tasks = entries("Tasks", fields={task: "text", level: ["high", "medium", "low"], hours: "number"}, edit=true, reorder=true, add=false, remove=false, show={double: $hours * 2}, rows=[{task: "a", level: "high", hours: 1}, {task: "b", level: "low", hours: 2}])');
   const rk = new App(ranked);
   same(report(ranked).faults, [], "entries with a choice field, edit, reorder, show");
-  same([rk.find("tasks_level", 1).type, rk.find("tasks_level", 1).props.options, rk.find("tasks_hours", 0).type, rk.find("tasks_task", 0).type, rk.find("tasks_double", 1).props.value], ["Segmented", ["high", "medium", "low"], "NumberField", "TextField", 4], "the row has a choice, fields that change, and a value");
+  same([rk.find("tasks_level", 1).type, rk.find("tasks_level", 1).props.options, rk.find("tasks_hours", 0).type, rk.find("tasks_task", 0).type, rk.find("tasks_double", 1).props.value], ["Segmented", ["high", "medium", "low"], "NumberField", "TextField", "4"], "the row has a choice, fields that change, and a value, which prints as a number of the language of the app (L1 item 2)");
   same([rk.press("tasks_down", 0), rk.state.tasks.map((row) => row.task), rk.input("tasks_level", "medium", 0), rk.state.tasks[0].level], ["", ["b", "a"], "", "medium"], "a row moves, and a choice changes that row");
 });
 
@@ -226,7 +226,7 @@ test("a row field written as a value of the app in a row formula of a part", asy
   const rowwise = await planned('app("T")\nneed max = input("number", "Max", 4, min=0, max=10)\nneed days = entries("Days", fields={day: "text", steps: "number"}, rows=[{day: "Tu", steps: 5}, {day: "Mo", steps: 3}, {day: "We", steps: 9}], show={twice: $/steps * 2}, filter=$/steps > $/max, sort=$/day, group=$/day)\nneed bars = chart("Steps", $/days, $/day, $/steps)');
   const rw = new App(rowwise), rwReport = report(rowwise);
   same([rwReport.faults, rwReport.notes.filter((note) => note.includes("wrote the need line again")).length, rw.find("bars_chart").props.points.map((point) => `${point.label} ${point.value}`), rw.find("days_twice", 0).props.value, rw.find("days_twice", 1).props.value],
-    [[], 2, ["Tu 5", "Mo 3", "We 9"], 10, 18], "a chart and the show, filter, sort, and group of entries read the row fields");
+    [[], 2, ["Tu 5", "Mo 3", "We 9"], "10", "18"], "a chart and the show, filter, sort, and group of entries read the row fields. A value of show= is a printed number (L1 item 2)");
   // A component line of a model is not a part: its fault stays.
   const written = new AppFile().feedText('$/days = [{day: "Mo"}]\nroot = Column([list])\nlist = List($/days, row)\nrow = Row([Text($/day)])');
   await expand(written);
