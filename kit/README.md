@@ -21,7 +21,7 @@ Then it runs the app (state, formulas, actions, and the component tree) and chec
 | `build.js` | The bundle of the modules as one plain script for the sandbox, the run-time text in it (minified by `Bun.build`), and the copies of the plans for the device tests. |
 | `look.js` | The look numbers of each saved plan and each look fixture of `build.js`: `score_app` of `tools/agent_corpus/visual_score.py` on the compiled definition, as one table row for each plan. |
 | `plans/` | The saved plans. |
-| `test/` | The Bun tests. `test/fixtures/` holds example plans of the prototype that only the tests read. `test/nodes.plan` holds each component of the emitter's node table: the kit test and the device test `eachNodeOfTheTablePassesParseAndSmoke` read it. `test/lists.plan`, `test/rich.plan`, and `test/cards.plan` hold the lists and modals, the lists full to the render work limit, and the cards, charts, tabs, lessons, and questions: each has a kit test and a device test. `test/free.plan` holds the free forms that no other plan holds (an inline Row as a List template, a row Button with `enabled=`, `flip`, `move` with a test, and a line whose name is the name of an inline child): the kit tests and the device test `eachFreeFormPassesParseAndSmoke` read it. `test/shapes.plan` holds each shape kind, each outline form, `each` over a list, each kind of color, a text, and `animate` beside a timer with rounds: the kit tests and the device test `eachShapeAndColorPassesParseAndSmoke` read it. `test/draw.test.js` holds the commands, colors, and limits of `src/draw.js`. `test/budget.test.js` measures each compiled plan against each limit of Alphy and prints one table row for each plan. `test/timers.test.js` holds the timers of `plans/tea.plan` and `plans/timer-rounds.plan`, and the short plan of the device test `timerRoundsPassesParseAndSmoke`. `test/looks.plan` holds each look option and a `Grid`: `test/looks.test.js` and the device test `eachLookOptionPassesParseAndSmoke` read it. `test/fixtures/look-water-ko.plan` and `test/fixtures/look-shopping-it.plan` are two requests of the corpus with components only, in the tree of their baseline apps. |
+| `test/` | The Bun tests. `test/fixtures/` holds example plans of the prototype that only the tests read. `test/nodes.plan` holds each component of the emitter's node table: the kit test and the device test `eachNodeOfTheTablePassesParseAndSmoke` read it. `test/lists.plan`, `test/rich.plan`, and `test/cards.plan` hold the lists and modals, the lists full to the render work limit, and the cards, charts, tabs, lessons, and questions: each has a kit test and a device test. `test/free.plan` holds the free forms that no other plan holds (an inline Row as a List template, a row Button with `enabled=`, `flip`, `move` with a test, and a line whose name is the name of an inline child): the kit tests and the device test `eachFreeFormPassesParseAndSmoke` read it. `test/shapes.plan` holds each shape kind, each outline form, `each` over a list, each kind of color, a text, and `animate` beside a timer with rounds: the kit tests and the device test `eachShapeAndColorPassesParseAndSmoke` read it. `test/draw.test.js` holds the commands, colors, and limits of `src/draw.js`. `test/budget.test.js` measures each compiled plan against each limit of Alphy and prints one table row for each plan. `test/timers.test.js` holds the timers of `plans/tea.plan` and `plans/timer-rounds.plan`, and the short plan of the device test `timerRoundsPassesParseAndSmoke`. `test/looks.plan` holds each look option and a `Grid`: `test/looks.test.js` and the device test `eachLookOptionPassesParseAndSmoke` read it. `test/fixtures/look-water-ko.plan` and `test/fixtures/look-shopping-it.plan` are two requests of the corpus with components only, in the tree of their baseline apps. `test/fixtures/mock-water-ko.plan`, `mock-units-pl.plan`, `mock-shopping-it.plan`, `mock-habits-uk.plan`, and `mock-price-filter.plan` are five requests of the corpus with parts: the device test `picturesOfEachPlan` shows each one beside the spec of its baseline app (`app/src/androidTest/assets/appfile/baseline/`). `test/entries.test.js`, `test/inputs.test.js`, `test/figures.test.js`, and `test/counter.test.js` hold the parts of a list app (section "Parts"). |
 
 The gate of the kit is `"smoke"`: an app file of this design has no check lines.
 A need takes only the named options of its part (`parts.js` `OPTIONS`): each other option is a fault of the need.
@@ -50,12 +50,49 @@ In a row of a list, a look value must not read a field of the row, such as `$don
 | `columns` | `Grid` | 1, 2, 3, 4. The default is 2. |
 
 `Emoji(sign, size=)` takes a sign, a state value, or a field of a list row.
-In a list row, its label for a screen reader is the kit caption of its line, such as "item Emoji", because one template draws all rows.
+`label=` is its text for a screen reader. Without it, the text in a list row is the kit caption of its line, such as "item Emoji", because one template draws all rows. The `entries` part gives it the title of the list.
 `Segmented`, `Select`, and `Choices` take `options` as a list or as a map of a text value to its label, such as `{asc: "Low to high", desc: "High to low"}`.
 The state keeps the value, and the control shows the label in the order of the plan.
 A map key that is a number is a fault, because JavaScript puts such keys in number order.
 The value text inside a `Ring` has the `display` emphasis.
 The `number` and `display` emphases of a `Text` are display sizes of the host (`NativeToolUi.kt` `textStyle`), so a short value in a list row takes `label` or `title`.
+
+## Parts
+
+A part changes one need line into component, state, and formula lines (`src/parts.js`).
+The parts of a list app use the look of the baseline apps: a hero card first, rows with an emoji and a muted second line, and one filled button in each group.
+
+The captions that a part writes by itself are in the language of `lang=` of the app line (`src/words.js`): "Add", "Remove", "Less", "More", "Reset", and the others of its table.
+A language outside the table gets the English words and one note of the report that names each option of the need that took an English caption.
+The host draws its own words where it has them: the empty text of a list, the close button of a sheet, and the move menu of a reordered list.
+
+A figure prints its number with `amount(x, n)`: at most `n` decimals, no zeros at the end, and the digit groups and the decimal sign of the language of the app ("1.234,5" in `de`, "1,234.5" in `en`, "12 345,5" in `pl` with a no-break space). In `es`, `pl`, and `pt` a number of four digits has no group ("1234,5").
+`fixed`, `money`, and `percent` use the same signs. A plain `text(x)` and a `Metric` of a state value print the number as it is, so a year belongs in `text()`.
+
+| Part | Look options | Example |
+| --- | --- | --- |
+| `entries` | `icon` (an emoji for each row, or `$field`), `countText` (the caption of the hero count), `edit` (a choice of a row is a control, not a label) | `need items = entries("Prodotti", fields={nome: "text", corsia: ["Frutta", "Forno"], preso: "check"}, icon=$segno, show={segno: $corsia == "Forno" ? "🥖" : "🍎"}, countText="Da comprare")` |
+| `input` | `icon` (the icon of the field), a map in `options=`, and the kind `range` | `need price = input("range", "Price", [100, 1500], min=0, max=2000, step=50)` |
+| `figure` | `icon` (an emoji, a formula that gives one, or a host icon), `unit` (a word after the number), `note` (a muted text), `goal` (a bar to the goal), `goalText` (the caption of the bar) | `need today = figure("number", "Today", $/ml, icon="💧", unit="ml", goal=2000, goalText="Of the goal", note="250 ml for each cup")` |
+| `counter` | `lessText`, `moreText`, `addText` (one button that adds the step), `icon` (the icon of that button), `resetText` | `need ml = counter("Water (ml)", 0, step=250, addText="Add a cup", icon="Cup")` |
+
+- `entries`:
+  - The row is the emoji, the first text field as the title with each further text field as a muted line under it, the value cells as small labels, the check marks, and the remove button.
+  - In a row with one text field, a choice that the row does not change is the muted line under the title.
+  - More than two check marks are circles in a second row under the other cells, each named by `labels=` or its field. The host draws each row of a list on a card of its own, so the row has no card of the part.
+  - `icon="🛒"` gives each row the same sign. `icon=$x` reads `x` from a field of `fields=` or a name of `show=`. A row that the add form makes gets its sign the same way: `show=` computes it from the new row, or the person types the field.
+  - The text of the emoji for a screen reader is the title of the list.
+  - The add form is a column of its fields and a filled add button with a plus. A press with an empty first text field adds nothing.
+  - A text field of the form is an apply input of the host (`inputMode: "apply"`): a typed text goes into the state when the person presses the apply button of the field, and then the add button adds the row.
+  - A plan with a list and no figure, progress, drawing, timer, or model starts with a hero card of the count of the shown rows of its first list. `countText=` is its caption, else the title of the list. `icon=` with a sign is its large emoji.
+- `input`: `options={value: "Label"}` keeps the value in the state and shows the label. `icon=` goes to a text, number, date, or time field and to a select. A segmented control and a multi-choice take no icon.
+  The kind `range` writes `RangeSlider(label, $/x, min=, max=, step=)`: one state value of two numbers in order, the low and the high (`$/price[0]`, `$/price[1]`).
+- `figure`: the main figure is a hero card of the emoji, the metric with the display emphasis, the bar of `goal=`, and the muted `note=`.
+  The caption of the bar is `goalText=`, else the title of the figure. `unit=` follows the shown number ("2,000 ml"), and the value of the figure stays a number.
+  The next two figures that stand one after the other are a grid of two metrics, each with its `icon=`. Each figure after them is a row of its title and its value. Without such a pair, each figure is a metric.
+  `note=`, `goal=`, and `goalText=` show only on the main figure.
+- `counter`: a section with the title of the counter. It holds an outlined less button, the value with the display emphasis, and a filled more button.
+  With `addText=`, the counter is one filled button that adds the step and a text button that resets the value. The plan shows the value elsewhere, such as in a figure.
 
 ## Commands
 
@@ -63,7 +100,7 @@ Run each command from the repository root.
 The kit has no dependencies and no install step.
 
 - `bun test kit` runs the tests. The summary of the output shows `0 fail`.
-- `bun kit/build.js` writes `src/icons.js` from the host's sources and the sandbox bundle `app/src/main/assets/appfile/kit.js`, and copies `plans/*.plan`, the test plans `nodes`, `looks`, `lists`, `rich`, `cards`, `free`, `shapes`, `bytes`, and `model`, and the fixtures `water-ko`, `units-pl`, `shopping`, `habits`, `price-filter`, `look-water-ko`, and `look-shopping-it` to `app/src/androidTest/assets/appfile/` for the device tests.
+- `bun kit/build.js` writes `src/icons.js` from the host's sources and the sandbox bundle `app/src/main/assets/appfile/kit.js`, and copies `plans/*.plan`, the test plans `nodes`, `looks`, `lists`, `rich`, `cards`, `free`, `shapes`, `bytes`, and `model`, and the fixtures `water-ko`, `units-pl`, `shopping`, `habits`, `price-filter`, `look-water-ko`, `look-shopping-it`, and the five `mock-*` plans to `app/src/androidTest/assets/appfile/` for the device tests.
 - `bun kit/build.js --check` writes nothing. It exits 1 when one of these files differs from what the build writes, and it prints the version of Bun that ran.
 
 The minifier of Bun makes the run-time text, so the bundle depends on the version of Bun.

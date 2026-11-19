@@ -380,7 +380,90 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17 python3 tools/compose_acceptance/run.py s
 | `look-water-ko` | The success banner has no title "목표 달성". | Missing option: `Notice` takes one text. |
 | `look-water-ko` | The grid "Plain" and "Computed" is not in the baseline. | Choice of the plan: D.3 requires it. |
 | `look-shopping-it` | The button "Aggiungi" is grey on the first screen. | Choice of the plan: `enabled=` keeps the smoke step from a control that changes nothing (the pattern of the entries part). |
-| `look-shopping-it` | The list has no caption "Prodotti". | Missing option: `List` has no caption, and the host hides a section title that repeats the screen. |
+| `look-shopping-it` | The list has no caption "Prodotti". | Host rule, corrected in Task 11b-2a: the only list under a shown section title takes its name from that title and draws no caption of its own (`namedByTitle`, `NativeToolUi.kt` 830 to 836). |
 | `look-shopping-it` | The list starts with three rows, so the empty text does not show. The hero shows "2" and "3 prodotti in lista". | Choice of the plan: each check then runs the row of a list. |
 | `look-shopping-it` | "Frutta e verdura" breaks into three lines in a row. | Host limit: the weighted column gets the width that the quantity, the label "Preso", and the trash leave. The host does not shorten the text. |
 | `look-shopping-it` | A row has the trash, the baseline row has a pencil and an edit sheet. | Choice of the plan: the row of B.11. An edit sheet of a row needs a selected-row value. |
+
+## Look with parts
+
+Task 11b-2a gave the parts `entries`, `input`, `figure`, and `counter` the look of the baseline apps (`kit/README.md`, section "Parts").
+The captions of the parts are in the language of the app, and a figure prints its numbers with the signs of that language.
+
+An agent with the kit guide wrote the five plans below for the five requests of the corpus (`tools/agent_corpus/showcase.json`).
+The model of the app did not write them. They show what the kit can show. The next phase measures the plans that a model writes.
+
+| Plan | Request | Lines | Bytes | Hero | Typed fields, first screen | Typed fields in rows | Baseline (same metric) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `mock-water-ko` | `showcase-lang-water-ko` | 6 | 816 | 1 | 0 | 0 | 1, 0, 0 |
+| `mock-units-pl` | `showcase-lang-units-pl` | 10 | 1354 | 1 | 1 | 0 | 1, 1, 0 |
+| `mock-shopping-it` | `showcase-lang-shopping-it` | 4 | 1062 | 1 | 1 | 0 | 1, 1, 0 |
+| `mock-habits-uk` | `showcase-lang-habits-uk` | 4 | 1363 | 1 | 0 | 0 | 1, 0, 0 |
+| `mock-price-filter` | `showcase-ui-price-filter` | 6 | 2085 | 1 | 0 | 0 | 1, 0, 0 |
+
+A line is a line of the plan that is not a comment or empty. The byte count is the whole file.
+The numbers of a plan come from `bun kit/look.js`. The numbers of a baseline come from `score_app` on its spec.
+
+| Measure | Before (`733bc91`) | After (`e8af9d2`) |
+| --- | --- | --- |
+| Run-time text | 45417 bytes | 46227 bytes (bar 48500) |
+| Largest source | `test/cards.plan`, 52296 bytes | `test/cards.plan`, 53275 bytes (bar 60000) |
+| Kit tests | 242 pass | 274 pass |
+
+### The baseline on the same host
+
+`AppFileLookTest` now shows the spec of each of the five baseline apps (`app/src/androidTest/assets/appfile/baseline/<case>.json`, from `final-30d43aa`) as a saved app of the same host.
+It takes their pictures with the same steps as for a compiled plan, in both themes. A baseline spec keeps the host field `appLanguage`, so the test reads it with `ToolSpec.parsePersisted`.
+
+On the same host, the hero card of each plan has the color of the hero card of its baseline.
+The assumption of Task 11b-1 is true: the old pictures `review.png` came from the host at `30d43aa`, and the difference of the color came from that revision.
+The side of the large emoji now depends only on the tree of the card:
+
+- `water-ko` and `units-pl`: the emoji is first in the card in both apps, and the host puts it at the end of the texts (`NativeToolUi.kt` `heroEmojiSide`).
+- `shopping-it`: the baseline card holds a `Row` of the emoji and a column, so its emoji is at the start. The plan puts it at the end.
+- `price-filter`: the baseline card has `align: "center"`, so its emoji is above the texts. The plan puts it at the end.
+
+The shopping list starts empty, as in the baseline. The test also types "Latte", presses the apply button of the field and "Aggiungi", and takes the picture `mock-shopping-it-added.png` with the new row.
+
+### Runs of Task 11b-2a
+
+| Label | Revision | Observed | Test APK `lastUpdateTime` before and after |
+| --- | --- | --- | --- |
+| `appfile-look-parts-try1` | `de20585+dirty` (the plans and the baselines) | failed: `ToolSpec.parse` refused the field `appLanguage` of a baseline spec | `04:22:14`, `04:27:20` |
+| `appfile-look-parts-try2` | `de20585+dirty` | failed: the IME action of "Prodotto" did not apply the typed text, so the test now presses the apply button | `04:27:20`, `04:30:53` |
+| `appfile-look-parts-try3` | `9f435e9` tree | passed, 32 tests (`AppFileProofTest` and `AppFileLookTest`), 159.0 s. The pictures of the first round | `04:30:53`, `04:35:18` |
+| `appfile-look-parts-try4` | `c022bdb+dirty` (the tree of `e8af9d2`) | passed, 32 tests, 156.7 s. The pictures of the second round | `04:35:18`, `04:46:51` |
+| `appfile-look-parts` | `e8af9d2` | passed, 32 tests, 161.2 s. The pictures of this section | `04:46:51`, `04:50:49` |
+
+All times are on 2026-11-19. The runner installed the test APK at each "after" time. No other session installed it during these runs.
+The runs of the single items of the task (`appfile-numbers`, `appfile-entries`, `appfile-inputs`, `appfile-figures`, `appfile-counter`, and their red runs) passed or failed as expected before these runs.
+The pictures are in `evidence/alphy-ui/appfile-look-parts/light/` and `dark/`, with the contact sheets `contact-light.png` and `contact-dark.png`.
+The pair sheet `pairs-light.png` in the same folder shows each baseline app at the left and its plan at the right. Git does not keep these files.
+
+The first round of pictures changed the parts and the plans:
+
+- A row with many check marks was a card in the card that the host draws for each row of a list. The row is now a column, and "Читати 20 сторінок" is two lines, not three.
+- In a row with one text field, a choice that the row does not change is now the muted line under the title, not a label beside it.
+- `figure` takes `unit=` ("0 ml", "2,000 ml") and `goalText=`, the caption of the bar ("달성률: 0%").
+- `mock-units-pl` has step buttons on its quantity, and `mock-price-filter` shows the price as a badge "$260".
+
+Command:
+
+```text
+JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3 tools/compose_acceptance/run.py suite --serial emulator-5592 --label appfile-look-parts com.alpha.assistant.tools.appfile.AppFileProofTest com.alpha.assistant.tools.appfile.AppFileLookTest
+```
+
+### Where the plans with parts are still worse than the baseline
+
+| Plan | Difference | Cause |
+| --- | --- | --- |
+| `mock-units-pl` | The baseline shows each conversion as a large value on a tinted row under the heading "Przeliczenia". The plan shows two plain metrics in a grid, with smaller values, and one row with a large value. | The layout rule of the figures (Task 11b-2a, E.2) and the size of a plain `Metric` of the host. The large value of a row is an implementation choice that follows the baseline rows. |
+| `mock-shopping-it` | The fields of the add form have no icon, and the form has no heading "Aggiungi prodotto". | Missing option: the add form of `entries` gives its fields no icon. The heading: choice of the plan. |
+| `mock-shopping-it` | A typed product goes into the state only after the apply button of the field ("Applica: Prodotto"). The baseline field is a live input, so its add button works at once. | The design of the kit: a `TextField` is an apply input of the host (`docs/superpowers/plans/2026-11-18-app-file-kit.md`, the node table). |
+| `mock-shopping-it` | No filter "Mostra", no order "Ordina per", and no button "Svuota comprati". | Choice of the plan: the list sorts by aisle with `sort=$corsia`. |
+| `mock-habits-uk` | "Пити воду" breaks into two lines, and "Прогулянка 30 хв" has a smaller text. In the baseline both are wider. | Host limit: each text cell of a row without a weight shares the free width with the title (`NativeToolUi.kt` 946 to 947). The two `show=` values are badges with their own padding, and the baseline has one plain text and one badge. |
+| `mock-habits-uk` | The streak badge is grey, and the baseline badge has the accent tone. The ring shows "3 / 21", and the baseline shows "3 з 21". The plan has no button "Редагувати назви". | Missing options: a `show=` value has no tone, and the `progress` part writes "/" in each language. The button: choice of the plan (`add=false`). |
+| `mock-price-filter` | The hero shows "12", and the baseline shows "12 of 12". The inputs have no heading "Filters", and the plan has no button "Reset filters". | Missing option: the hero count of `entries` has no total. The heading and the button: choices of the plan. |
+| `mock-water-ko` | The baseline has a section "기록 관리" with a manual entry and a reset. The plan has the reset beside the cup button and no manual entry. | Choice of the plan: the request asks for the cup button and the progress only. |
+
+A long detail line of a bike ("2017 · One size · Fair") breaks into two lines in the plan and in the baseline, for the same host limit.
