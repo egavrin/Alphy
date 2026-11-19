@@ -2,8 +2,9 @@
 // the merge of a repair, and the record of a request. No test calls the API.
 
 import { expect, test } from "bun:test";
-import { BARS, SET_E, barFaults, bodyOf, checkOne, faultTable, kindOf, merge, numbers, repairsOf, worstCase } from "../modelcheck.js";
-import { PROMPT, repairText, taskText } from "../prompt.js";
+import { BARS, SET_E, SET_F, barFaults, bodyOf, changeNumbers, checkOne, faultTable, keptOf, kindOf, merge, numbers, repairsOf, storedOf, worstCase } from "../modelcheck.js";
+import { PROMPT, changeText, repairText, taskText } from "../prompt.js";
+import { BLOCKS } from "../src/compile.js";
 import "./helpers.js";
 
 const PLAN = 'app("Tip", lang="en")\nneed bill = input("money", "Bill", 80, min=0, max=500)\nneed tip = figure("money", "Tip", $/bill * 0.1, example=[{bill: 100}, 10])\n';
@@ -125,4 +126,70 @@ test("modelcheck: the fault table groups one kind of fault over names and number
     { id: "b", steps: steps(["need y: figure has no option size. Its options are decimals: need y = figure(size=2)"], ["need y: figure has no option size. Its options are decimals: need y = figure(size=3)"]) }];
   expect(faultTable(records)).toEqual([["need X: figure has no option size. Its options are decimals", { count: 2, repaired: 0, kept: 1, last: 1, ids: ["b.0", "b.1"] }],
     ["need X: figure has no option bogus. Its options are decimals", { count: 1, repaired: 1, kept: 0, last: 0, ids: ["a.0"] }]]);
+});
+
+// ---- Task 2b: change cases (set F).
+
+const caseOf = (id) => SET_F.find((entry) => entry.id === id);
+
+test("modelcheck (2b): set F is 16 change requests on 8 model plans, and the unchanged plan keeps each stored value of the person whole", async () => {
+  expect(SET_F.length).toBe(16);
+  expect(new Set(SET_F.map((entry) => entry.id)).size).toBe(16);
+  expect(SET_F.filter((entry) => entry.expect === "outside").map((entry) => entry.id)).toEqual(["e-fuel-pl-b"]);
+  expect(worstCase(SET_F, 2)).toBe(31);
+  for (const entry of SET_F.filter((each) => each.id.endsWith("-a"))) {
+    // storedOf throws when an event changes nothing or the events leave each value of the person at its start.
+    const stored = await storedOf(entry);
+    expect(stored.fields.length).toBeGreaterThan(0);
+    // A reply that only repeats a line of the plan leaves the app file as it was: no MISMATCH, the same state, and nothing lost.
+    const record = await checkOne(entry, { ...fake(entry.plan.trimEnd().split("\n").at(-1)), model: "m", effort: "low" });
+    expect([record.outcome, record.steps[0].faults, record.repeated, record.compared]).toEqual(["unchanged", [], 1, stored.fields]);
+    expect(record.state).toEqual(stored.previous.state);
+    expect([record.lost, record.restarted, record.hidden, record.gone]).toEqual([[], [], [], []]);
+  }
+  await expect(storedOf({ ...caseOf("e-fuel-pl-a"), events: [{ type: "action", actionId: "nothing", value: 1 }] })).rejects.toThrow("changes nothing");
+});
+
+test("modelcheck (2b): a change reply goes into the app file, compiles against the stored state, and keeps the tip of the person", async () => {
+  const entry = caseOf("holdout-tip-ru-b"), { ask, bodies } = fake('need tip = input("percent", "Чаевые", 15, min=0, max=100)');
+  const record = await checkOne(entry, { ask, model: "m", effort: "medium" });
+  expect([bodies[0].instructions, bodies[0].reasoning.effort, bodies[0].input[0].content[0].text]).toEqual([PROMPT.System, "medium", changeText(entry)]);
+  expect([record.outcome, record.first, record.repairs, record.replyLines, record.planLines, record.repeated]).toEqual(["clean0", { kind: "lines" }, 1, 1, 5, 0]);
+  // The person set 12, so the start value 15 of the change does not replace it (rule 3).
+  expect([record.state.tip, record.lost, record.plan.includes('"Чаевые", 15')]).toEqual([12, [], true]);
+});
+
+test("modelcheck (2b): a reply that removes a column with saved rows gets BLOCKS and one repair call at the effort low", async () => {
+  const entry = caseOf("showcase-lang-shopping-it-b"), line = entry.plan.split("\n")[1];
+  const removed = line.replace(', corsia: "text"', "").replace(', corsia: "Corsia"', "").replace(', corsia: "Pin"', "");
+  const { ask, bodies } = fake(removed, line.replace('countText="Prodotti"', 'countText="Articoli"'));
+  const record = await checkOne(entry, { ask, model: "m", effort: "medium", repairs: 2 });
+  expect([record.outcome, record.steps.map((step) => [step.blocks, step.mismatch]), record.calls.map((call) => call.effort)]).toEqual(["clean1", [[1, 0], [0, 0]], ["medium", "low"]]);
+  expect(record.steps[0].faults[0]).toContain(BLOCKS);
+  const merged = merge(entry.plan, removed).text;
+  expect(bodies[1].input[0].content[0].text).toBe(repairText({ task: changeText(entry), plan: merged, faults: record.steps[0].faults }));
+  expect([record.lost, record.gone]).toEqual([[], []]);
+  // One repair only, also when the run asks for more.
+  const failed = await checkOne(entry, { ...fake(removed, removed, removed), model: "m", effort: "low", repairs: 2 });
+  expect([failed.outcome, failed.calls.length, failed.state]).toEqual(["not", 2, undefined]);
+});
+
+test("modelcheck (2b): a rename keeps the value only in app.keep, a prose reply changes nothing, and an outside reply gets no compile", async () => {
+  const rename = await checkOne(caseOf("e-fuel-pl-a"), { ...fake(['delete cena', 'need price = input("money", "Cena za litr w zł", 6, min=0, icon="Coins")',
+    'need koszt = figure("money", "Koszt przejazdu", $/litry * $/price, example=[{litry: 15, price: 6}, 90], decimals=2, icon="Wallet", unit="zł")'].join("\n")), model: "m", effort: "low" });
+  expect([rename.outcome, rename.lost, rename.hidden, rename.gone, rename.state.cena]).toEqual(["clean0", [], ["cena"], ["cena"], 6.5]);
+  const prose = await checkOne(caseOf("e-fuel-pl-a"), { ...fake("I would add a field for the people."), model: "m", effort: "low" });
+  expect([prose.outcome, prose.first, prose.replyLines, prose.repeated]).toEqual(["unchanged", { kind: "lines" }, 1, 0]);
+  const outside = await checkOne(caseOf("e-fuel-pl-b"), { ...fake('outside("game")'), model: "m", effort: "low" });
+  expect([outside.outcome, outside.first.word, outside.steps.length, outside.replyLines, outside.gone]).toEqual(["outside", "game", 0, 1, []]);
+  expect(changeNumbers([rename, prose, outside])[0]).toBe("clean at the first try 1/3, after the repair 0/3, not clean 0/3 (none), unchanged 1/3 (e-fuel-pl-a), outside 1/3 (e-fuel-pl-b game)");
+});
+
+test("modelcheck (2b): the comparison finds a lost row, a moved value, a new row, and a restarted inner value, and a new column is no difference", () => {
+  const state = { list: [{ id: "r1", name: "a" }, { id: "r2", name: "b" }], n: 3, deck_s: { i: 2, open: false } }, start = { list: [], n: 0, deck_s: { i: 0, open: false } };
+  const stored = { previous: { state }, start, fields: ["list", "n", "deck_s"], inner: ["deck_s"] }, data = { fields: [["list", "list"], ["n", "n"], ["deck_i", "deck_s.i"]] };
+  expect(keptOf(stored, { list: [{ id: "r1", name: "a", qty: 1 }, { id: "r2", name: "b", qty: 1 }], n: 3, deck_s: { i: 2, open: true } }, data)).toEqual({ lost: [], restarted: [], hidden: [] });
+  expect(keptOf(stored, { list: [{ id: "r1", name: "x" }, { id: "r3", name: "c" }], n: 4, deck_s: { i: 0, open: false } }, { fields: [["n", "n"]] })).toEqual({
+    lost: [{ at: "list/r1/name", was: "a", now: "x" }, { at: "list/r2", was: { id: "r2", name: "b" } }, { at: "list/r3", now: { id: "r3", name: "c" } }, { at: "n", was: 3, now: 4 }],
+    restarted: [{ at: "deck_s/i", was: 2, now: 0 }], hidden: ["list", "deck_s"] });
 });

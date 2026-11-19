@@ -1,0 +1,102 @@
+[
+  {
+    "fixture": "holdout-tip-ru",
+    "events": [
+      { "type": "action", "actionId": "bill_field", "value": 2400 },
+      { "type": "liveInput", "actionId": "tip_field", "value": 12 },
+      { "type": "action", "actionId": "people_field", "value": 3 }
+    ],
+    "requests": [
+      { "id": "a", "request": "Добавь поле для скидки в процентах, которая уменьшает счёт до чаевых.", "expect": "plan" },
+      { "id": "b", "request": "Сделай чаевые по умолчанию 15 процентов.", "expect": "plan" }
+    ]
+  },
+  {
+    "fixture": "showcase-lang-shopping-it",
+    "events": [
+      { "type": "liveInput", "actionId": "prodotti_new_nome", "value": "Latte" },
+      { "type": "liveInput", "actionId": "prodotti_new_corsia", "value": "Latticini" },
+      { "type": "action", "actionId": "prodotti_add", "value": null },
+      { "type": "action", "actionId": "prodotti_comprato", "value": { "key": "r1", "value": true } }
+    ],
+    "requests": [
+      { "id": "a", "request": "Aggiungi la quantità per ogni prodotto.", "expect": "plan" },
+      { "id": "b", "request": "Togli la corsia: non mi serve più.", "expect": "plan" }
+    ]
+  },
+  {
+    "fixture": "showcase-lang-habits-uk",
+    "events": [
+      { "type": "action", "actionId": "habits_mon", "value": { "key": "r1", "value": true } },
+      { "type": "action", "actionId": "habits_tue", "value": { "key": "r1", "value": true } },
+      { "type": "action", "actionId": "habits_mon", "value": { "key": "r2", "value": true } },
+      { "type": "liveInput", "actionId": "habits_habit", "value": { "key": "r3", "value": "Читати 20 хвилин" } }
+    ],
+    "requests": [
+      { "id": "a", "request": "Покажи вгорі, скільки відміток зроблено за тиждень.", "expect": "plan" },
+      { "id": "b", "request": "Додай можливість додавати нові звички.", "expect": "plan" }
+    ]
+  },
+  {
+    "fixture": "showcase-lang-tea-tr",
+    "events": [
+      { "type": "action", "actionId": "tea_field", "value": "Bitki çayı" },
+      { "type": "action", "actionId": "tea_field", "value": "Yeşil çay" }
+    ],
+    "requests": [
+      { "id": "a", "request": "Oolong çayını da ekle, demleme süresi 4 dakika.", "expect": "plan" },
+      { "id": "b", "request": "Zamanlayıcının altında demleme sıcaklığını da göster.", "expect": "plan" }
+    ]
+  },
+  {
+    "fixture": "showcase-lang-kanji-ja",
+    "events": [
+      { "type": "action", "actionId": "cards_show", "value": null },
+      { "type": "action", "actionId": "cards_yesButton", "value": null },
+      { "type": "action", "actionId": "cards_show", "value": null },
+      { "type": "action", "actionId": "cards_noButton", "value": null }
+    ],
+    "requests": [
+      { "id": "a", "request": "カードを10枚に増やして。", "expect": "plan" },
+      { "id": "b", "request": "カードごとに例文も見せて。", "expect": "plan" }
+    ]
+  },
+  {
+    "fixture": "showcase-lang-budget-es",
+    "events": [
+      { "type": "action", "actionId": "pestanas_view", "value": "Añadir gastos" },
+      { "type": "action", "actionId": "gastos_addRow_open", "value": null },
+      { "type": "liveInput", "actionId": "gastos_new_categoria", "value": "Comida" },
+      { "type": "action", "actionId": "gastos_new_importe", "value": 25.5 },
+      { "type": "action", "actionId": "gastos_add", "value": null }
+    ],
+    "requests": [
+      { "id": "a", "request": "Añade un presupuesto mensual y muestra cuánto me queda.", "expect": "plan" },
+      { "id": "b", "request": "Quita el gráfico.", "expect": "plan" }
+    ]
+  },
+  {
+    "fixture": "e-fuel-pl",
+    "events": [
+      { "type": "action", "actionId": "dystans_field", "value": 420 },
+      { "type": "action", "actionId": "litry_field", "value": 31 },
+      { "type": "action", "actionId": "cena_field", "value": 6.5 }
+    ],
+    "requests": [
+      { "id": "a", "request": "Dodaj liczbę osób i pokaż koszt na osobę.", "expect": "plan" },
+      { "id": "b", "request": "Zamień to w grę w węża.", "expect": "outside" }
+    ]
+  },
+  {
+    "fixture": "d-pythagoras",
+    "events": [
+      { "type": "action", "actionId": "scale_field", "value": 3 },
+      { "type": "action", "actionId": "lesson_next", "value": null },
+      { "type": "action", "actionId": "quiz_opt0", "value": null }
+    ],
+    "requests": [
+      { "id": "a", "request": "Добавь ещё один вопрос для проверки.", "expect": "plan" },
+      { "id": "b", "request": "Покажи квадраты на сторонах треугольника.", "expect": "plan" }
+    ]
+  }
+]
