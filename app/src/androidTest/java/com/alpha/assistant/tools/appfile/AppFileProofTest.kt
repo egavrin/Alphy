@@ -23,6 +23,7 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 
 /** Each saved plan of kit/plans with the language of its app. */
 internal val SAVED_PLANS=mapOf("calc" to "en","list" to "it","quiz" to "ja","tabs-chart" to "es","timer-rounds" to "de","tea" to "tr","section" to "uk",
@@ -72,7 +73,7 @@ internal val PICK="app(\"Pick\", lang=\"en\")\nneed people = entries(\"People\",
     "pick = Select(\"Who\", \$/who, map(\$/people, \$name))\nneed k = input(\"choice\", \"K\", \"b\", options=[\"a\", \"b\"])\nreset = Button(\"Reset\", set(\$/k, \"\"))\n" +
     "root = Column([pick, people_view, k_field, reset])\n"
 
-/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps, each node of the node table, and each look option in Alphy's checks, the numbers of a figure in pl and de, a range, a map of options, and an icon of a field, a hero figure with an emoji, a bar, and a note, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, and the time of each saved plan with its lists full. */
+/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps, each node of the node table, and each look option in Alphy's checks, the numbers of a figure in pl and de, a range, a map of options, and an icon of a field, a hero figure with an emoji, a bar, and a note, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, the time of each saved plan with its lists full, and the behavior scenarios of the plans that a model wrote. */
 @RunWith(AndroidJUnit4::class)
 class AppFileProofTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
@@ -840,6 +841,35 @@ class AppFileProofTest {
         assertEquals("faults" to listOf("the plan has 65537 characters, and Alphy reads at most 65536. Use shorter texts and fewer lines"),cap.status to cap.faults)
         val kit=compiler.compile(text(65536))
         assertTrue(kit.faults.toString(),kit.status == "faults" && kit.faults.isNotEmpty() && kit.faults.none {"reads at most 65536" in it})
+    }
+    /**
+     * The behavior scenarios of the plans that a model wrote (appfile/model-scenarios.json): the steps of each scenario, written from its request,
+     * through the agent step checker on a disposable copy of the plan that the sandbox compiled. A step presses or types through the action id of a
+     * real control of the screen, in the sandbox, not on the screen. Each scenario runs, and the test asserts at the end that none failed.
+     * The folder appfile-model-scenarios of the external files gets the result of each scenario and the screen text after its last step.
+     */
+    @Test fun eachScenarioOfAModelPlanPasses(): Unit=runBlocking {
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val scenarios=JSONArray(instrumentation.context.assets.open("appfile/model-scenarios.json").use {it.readBytes().decodeToString()})
+        val results=List(scenarios.length()) {index ->
+            val scenario=scenarios.getJSONObject(index)
+            val id=scenario.getString("id")
+            val result=JSONObject().put("id",id).put("kind",scenario.getString("kind")).put("name",scenario.getString("name"))
+            runCatching {
+                val compiled=compiler.compile(plan("model/$id"))
+                val spec=ToolSpec.parse(checkNotNull(compiled.definition) {"${compiled.status} ${compiled.faults}"}).withAppLanguage(compiled.language)
+                checked(sandbox,spec,"appfile-model-$id",scenario.getJSONArray("steps")).first
+            }.onSuccess {outcome ->
+                result.put("passed",outcome.failure == null).put("expectations",outcome.expectations).put("failure",outcome.failure ?: JSONObject.NULL)
+                    .put("screen",outcome.final?.text ?: JSONObject.NULL)
+            }.onFailure {result.put("passed",false).put("failure","${it.javaClass.simpleName}: ${it.message}")}
+            Log.i("AppFileProofTest","scenario $id passed=${result.getBoolean("passed")} ${result.opt("failure")}")
+            result
+        }
+        val folder=File(checkNotNull(instrumentation.targetContext.getExternalFilesDir(null)),"appfile-model-scenarios")
+        check(folder.isDirectory || folder.mkdirs())
+        File(folder,"results.json").writeText(JSONArray(results).toString(2))
+        assertEquals(emptyList<String>(),results.filterNot {it.getBoolean("passed")}.map {"${it.getString("id")}: ${it.get("failure")}"})
     }
     @Test fun aHostilePlanGivesAFaultAndTheSandboxStaysUsable(): Unit=runBlocking {
         // Item 14: the hostile plans of item 9 of the final review. Each one gives a fault in the time of a compile, and calc compiles directly after it in the same sandbox.

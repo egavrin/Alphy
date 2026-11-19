@@ -1,0 +1,145 @@
+[
+  {
+    "id": "holdout-tip-ru",
+    "kind": "scenario",
+    "name": "A bill of 800 with a tip of 15 % for 4 people is 230,00 for each person (800 x 1.15 / 4); the start values give 550,00 (1000 x 1.10 / 2)",
+    "steps": [
+      {"expect": "value", "target": "d.perperson_text", "equals": "550,00"},
+      {"set": "bill_field", "value": 800},
+      {"set": "tip_field", "value": 15},
+      {"set": "people_field", "value": 4},
+      {"expect": "value", "target": "d.perperson_text", "equals": "230,00"},
+      {"expect": "text", "contains": "230,00"}
+    ]
+  },
+  {
+    "id": "showcase-lang-shopping-it",
+    "kind": "scenario",
+    "name": "Two products added through the add form give two rows and a count of 2",
+    "steps": [
+      {"set": "prodotti_new_nome", "value": "Latte"},
+      {"set": "prodotti_new_corsia", "value": "Latticini"},
+      {"tap": "prodotti_add"},
+      {"set": "prodotti_new_nome", "value": "Pane"},
+      {"set": "prodotti_new_corsia", "value": "Forno"},
+      {"tap": "prodotti_add"},
+      {"expect": "value", "target": "d.prodotti_hero_1_value", "equals": 2},
+      {"expect": "text", "contains": "Pane"}
+    ]
+  },
+  {
+    "id": "showcase-lang-habits-uk",
+    "kind": "scenario",
+    "name": "Three habits get their names, and one mark on Monday gives a streak of 1 on each day of the week (the list of each row holds Monday and the days up to today)",
+    "steps": [
+      {"set": "habits_habit", "row": 0, "value": "Біг"},
+      {"set": "habits_habit", "row": 1, "value": "Читання"},
+      {"set": "habits_habit", "row": 2, "value": "Вода"},
+      {"expect": "absent", "contains": "1"},
+      {"set": "habits_mon", "row": 0, "value": true},
+      {"expect": "text", "contains": "Біг"},
+      {"expect": "text", "contains": "1"},
+      {"expect": "value", "target": "d.habits_hero_1_value", "equals": 3}
+    ]
+  },
+  {
+    "id": "showcase-lang-tea-tr",
+    "kind": "scenario",
+    "name": "Each tea gives its own countdown and the alert vibrates; the plan gives black 300 s, green 180 s, and herbal 420 s; the checker cannot press the host Start",
+    "steps": [
+      {"expect": "text", "contains": "5:00"},
+      {"set": "tea_field", "value": "Yeşil çay"},
+      {"expect": "absent", "contains": "5:00"},
+      {"expect": "text", "contains": "3:00"},
+      {"set": "tea_field", "value": "Bitki çayı"},
+      {"expect": "text", "contains": "7:00"},
+      {"expect": "text", "contains": "vibration"}
+    ]
+  },
+  {
+    "id": "showcase-lang-kanji-ja",
+    "kind": "scenario",
+    "name": "A tap shows the reading of the first kanji, and each of the two buttons counts 1",
+    "steps": [
+      {"expect": "absent", "contains": "やま"},
+      {"tap": "cards_show"},
+      {"expect": "text", "contains": "やま"},
+      {"tap": "cards_yesButton"},
+      {"expect": "value", "target": "cards_s.yes", "equals": 1},
+      {"tap": "cards_show"},
+      {"tap": "cards_noButton"},
+      {"expect": "value", "target": "cards_s.no", "equals": 1}
+    ]
+  },
+  {
+    "id": "showcase-lang-budget-es",
+    "kind": "scenario",
+    "name": "An expense of 12.50 added on the tab to add expenses gives a total of 12,50 on the summary tab",
+    "steps": [
+      {"set": "pestanas_view", "value": "Añadir gastos"},
+      {"tap": "gastos_addRow_open"},
+      {"set": "gastos_new_categoria", "value": "Comida"},
+      {"set": "gastos_new_importe", "value": 12.5},
+      {"tap": "gastos_add"},
+      {"set": "pestanas_view", "value": "Resumen"},
+      {"expect": "value", "target": "d.total_text", "equals": "12,50"}
+    ]
+  },
+  {
+    "id": "d-pythagoras",
+    "kind": "scenario",
+    "name": "A scale of 3 draws the sides 9, 12, and 15; the next step shows the formula; the answer 10 (the root of 36 + 64) is right",
+    "steps": [
+      {"expect": "text", "contains": "Стороны"},
+      {"set": "scale_field", "value": 3},
+      {"expect": "text", "contains": "15"},
+      {"tap": "lesson_next"},
+      {"expect": "text", "contains": "Формула"},
+      {"expect": "absent", "contains": "Верно"},
+      {"tap": "quiz_opt0"},
+      {"expect": "text", "contains": "Верно"}
+    ]
+  },
+  {
+    "id": "d-moon",
+    "kind": "scenario",
+    "name": "The angle field takes 90; the next step explains the turn of the Moon; the answer two is wrong and the answer one is right",
+    "steps": [
+      {"set": "angle_field", "value": 90},
+      {"expect": "value", "target": "angle", "equals": 90},
+      {"tap": "lesson_next"},
+      {"expect": "text", "contains": "Вращение Луны"},
+      {"tap": "quiz_opt2"},
+      {"expect": "text", "contains": "Попробуйте ещё раз"},
+      {"tap": "quiz_opt0"},
+      {"expect": "text", "contains": "Верно"}
+    ]
+  },
+  {
+    "id": "e-plank-fr",
+    "kind": "known item",
+    "name": "5 rounds of 45 s with 15 s of rest between them: at 50 s the first rest runs, and at 290 s the timer is over (5 x 45 + 4 x 15 = 285 s)",
+    "steps": [
+      {"tap": "planche_start"},
+      {"wait": 50000},
+      {"expect": "text", "contains": "Repos"},
+      {"wait": 240000},
+      {"expect": "text", "contains": "Terminé"}
+    ]
+  },
+  {
+    "id": "e-score-zh",
+    "kind": "known item",
+    "name": "The buttons of the hole: two adds and one subtraction give team one 1, one add gives team two 1, and the reset gives 0",
+    "steps": [
+      {"tap": "teamAmore"},
+      {"tap": "teamAmore"},
+      {"tap": "teamAless"},
+      {"tap": "teamBmore"},
+      {"expect": "value", "target": "teamA", "equals": 1},
+      {"expect": "value", "target": "teamB", "equals": 1},
+      {"tap": "reset"},
+      {"expect": "value", "target": "teamA", "equals": 0}
+    ]
+  }
+]
