@@ -272,6 +272,18 @@ test("compileAppFile: a list field that is not a word, an input of an unknown ki
   }
 });
 
+test("a deck over an empty list inside tabs (A0-K3): the saved plan of words-ko (r0-terra-low, step 0) compiles clean", async () => {
+  expect((await compileAppFile(REPLIES["r0-terra-low/holdout-words-ko"][0])).faults).toEqual([]);
+});
+
+test("a deck over an empty list inside tabs (A0-K3): a deck with a back or an answer over a list that starts empty compiles clean in tabs and in steps, as with no holder", async () => {
+  const list = 'need words = entries("Words", fields={word: "text", meaning: "text"}, rows=[])';
+  for (const deck of ["back=$meaning", "answer=$meaning"]) for (const holder of ["", 'need pages = tabs(["Words", "Quiz"], [[words], [quiz]])', 'need pages = steps(["Words", "Quiz"], [[words], [quiz]])']) {
+    const faults = await faultsOf(list, `need quiz = deck("Quiz", $/words, front=$word, ${deck})`, holder);
+    expect({ deck, holder, faults }).toEqual({ deck, holder, faults: [] });
+  }
+});
+
 test("smoke: the run starts at the clock of the compile step, so a control that shows only after a date comes to its screen (final review, Minor)", async () => {
   expect(await faultsOf("$/n = 0", 'b = Button("go", inc($/n), visible=year(today()) > 2000)', "root = Column([Text(text($/n)), b])")).toEqual([]);
 });

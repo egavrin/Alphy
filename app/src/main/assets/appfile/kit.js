@@ -1826,7 +1826,15 @@ function smokeRun(file, limit, clock) {
       const base = queue.shift();
       const reset = () => restore(base);
       reset();
-      const here = controls().map((control) => control.key);
+      const here = controls().map((control) => control.key), used = here.filter((key) => done.has(key));
+      // A control that the run used in an earlier state can bring a control that it did not use yet to the screen in this state: a tab or
+      // the next step opens over a list that has rows now (A0-K3). The run goes on from that state too. A field gives no new place.
+      for (const key of used) {
+        reset();
+        const found = controls().find((control) => control.key === key);
+        if (!found || found.node.props.bind || app.fire(found.node)) continue;
+        if (controls().some((control) => !done.has(control.key) && !here.includes(control.key))) queue.push(save());
+      }
       for (const key of here) {
         if (app.tripped) break;
         if (done.has(key) || done.size >= limit) continue;
