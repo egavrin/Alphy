@@ -849,9 +849,9 @@ test("emit: lesson.plan gives a surface, a canvas, and commands in the open repl
   // The object anim keeps the change of each value that an animate moves: all 0 while the value stands.
   const run = { type: "object", fields: { from: "number", to: "number", start: "number", end: "number", at: "number" } };
   expect([definition.stateSchema.anim, definition.initialState.anim]).toEqual([{ type: "object", fields: { angle: run } }, { angle: { from: 0, to: 0, start: 0, end: 0, at: 0 } }]);
-  // The orbit, the Earth, its name, the Moon at 40 degrees, and the mark of its side. The guide line shows from step 2 of the lesson.
+  // The orbit (the ink role: a muted line is faint), the Earth, its name, the Moon at 40 degrees, and the mark of its side. The guide line shows from step 2 of the lesson.
   expect(open(definition.initialState, app)).toEqual({ state: definition.initialState, timers: [], surfaces: { orbit_view: { commands: [
-    { type: "arc", x: 50, y: 50, width: 220, height: 220, start: 0, sweep: 360, stroke: 2, color: "muted" },
+    { type: "arc", x: 50, y: 50, width: 220, height: 220, start: 0, sweep: 360, stroke: 2, color: "default" },
     { type: "circle", x: 160, y: 160, radius: 34, color: "#38bdf8" },
     { type: "text", x: 160, y: 160, size: 12, text: "Земля", align: "center", baseline: "middle", color: "#ffffff" },
     { type: "circle", x: 244.26, y: 89.29, radius: 18, color: "#e7d3a8" },

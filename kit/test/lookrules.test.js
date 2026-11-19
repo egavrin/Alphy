@@ -9,6 +9,7 @@ import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LOOK_FIXTURES, plansIn } from "../build.js";
 import { emit } from "../src/emit.js";
+import { handle } from "../src/run.js";
 import { planned, press, valueAt } from "./helpers.js";
 
 const PATHS = [...plansIn(fileURLToPath(new URL("../plans", import.meta.url))).sort(), ...LOOK_FIXTURES];
@@ -52,6 +53,13 @@ test("look: each saved plan has its main element in the first two nodes", () => 
 test("look: no saved plan has more than two typed fields on the first screen", () => {
   const over = APPS.map(({ name, definition }) => [name, firstScreen(definition.ui, definition.initialState).filter((node) => FIELD_TYPES.has(node.type)).length]).filter(([, count]) => count > 2);
   expect(over).toEqual([]);
+});
+
+test("look: no line of a saved plan has the muted role, because Alphy draws a muted shape at the alpha 64", () => {
+  // SurfaceDrawing.kt 185 (MUTED_SHAPE_ALPHA): a thin muted stroke, such as the orbit of lesson, was faint (1.6 to 1 in the dark theme).
+  const faint = APPS.flatMap(({ name, definition, app }) => Object.values(handle({ artifactId: "kit-test", revision: 1, state: definition.initialState, event: { type: "open" } }, app).surfaces ?? {})
+    .flatMap(({ commands }) => commands).filter((command) => command.stroke && command.color === "muted").map((command) => [name, command.type]));
+  expect(faint).toEqual([]);
 });
 
 test("look: no saved plan has a typed field in a row template", () => {
