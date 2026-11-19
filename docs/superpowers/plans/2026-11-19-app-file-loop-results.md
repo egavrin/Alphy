@@ -465,14 +465,14 @@ Raw replies and records are in `evidence/modelcheck/v3-terra-low/`, which Git do
 
 28 of 28 requests that expect `outside(...)` got it. Each got the same word as in its earlier run.
 
-| Word | Count | Requests |
+| Word | Count of the 28 | Requests |
 | --- | --- | --- |
 | `game` | 11 | `holdout-bricks-en`, `holdout-dodge-es`, `holdout-jump3d-de`, `holdout-moles-zh`, `showcase-3d-dice`, `showcase-game-2048`, `showcase-game-memory`, `showcase-game-snake`, `e-tictactoe-en`, `e-dice-ja`, `e-tetris-fr` |
 | `picture` | 6 | `showcase-image-flashcards`, `showcase-image-menu`, `showcase-image-plant`, `showcase-image-recipe`, `showcase-image-story`, `e-catphoto-ru` |
 | `3d` | 5 | `showcase-3d-dna`, `showcase-3d-globe`, `showcase-3d-maze`, `showcase-3d-molecule`, `showcase-3d-solar` |
 | `device` | 4 | `holdout-tilt-ru`, `e-whereami-de`, `e-compass-en`, `e-weather-en` |
 | `drawing` | 2 | `showcase-game-drawing`, `e-sketch-es` |
-| `other` | 0 | |
+| `other` | 0 (the 1 reply with `other` is a plan request, below) | |
 
 1 of 53 requests that expect a plan got `outside(...)`: `showcase-lang-pomodoro-zh`, with `outside("other")`. No request with a device function got a plan.
 
@@ -539,20 +539,54 @@ These 11 plans are new in kind: their need kinds differ from the fixture of thei
 10. `e-cafe-ko`: yes. Drink, size, extra shots, and the price with `decimals=0` and the unit 원. The earlier text line of the prices is gone, so a person sees a price only for the chosen drink.
 11. `e-score-zh`: yes (see the hole table).
 
-The other 41 plans have the same need kinds as their fixtures. This task compared only their need kinds:
+The other 41 plans have the same need kinds as their fixtures. A scratch count compared each one with its fixture: the option keys of each need, the fields, the rows, and the values of `show=` of each list, and the count of state lines.
+"Same shape" below means that each of these is equal. A plan that differs got a full read, and so did each plan with a known item. The earlier verdict is the one of A0 or H1 for the fixture, where one exists.
 
-- Set C (20): `holdout-power-de`, `showcase-lang-water-ko`, `showcase-ui-priorities`, `showcase-lang-kanji-ja`, `showcase-ui-pizza`, `showcase-lang-tea-tr`, `showcase-ui-alarm`, `holdout-tip-ru`, `showcase-lang-verbs-fr`, `showcase-ui-steps-chart`, `showcase-ui-price-filter`, `holdout-calories-fr`, `showcase-lang-shopping-it`, `holdout-reading-es`, `holdout-sleep-en`, `showcase-lang-budget-es`, `holdout-words-ko`, `holdout-study-ja`, `showcase-lang-habits-uk`, `holdout-eggs-it`.
-- Set D (5): `d-pythagoras`, `d-interest`, `d-moon`, `d-rainbow`, `d-fractions`.
-- Set E apps (12): `e-loan-es`, `e-packing-de`, `e-vacation-en`, `e-timetable-tr`, `e-fuel-pl`, `e-pages-ja`, `e-mood-ru`, `e-bbq-pt`, `e-plank-fr`, `e-capitals-it`, `e-bmi-en`, `e-gifts-uk`.
-- Set E dialogue (4): `e-times7-ru`, `e-percent-ru`, `e-seasons-ru`, `e-atom-ru`.
+| Plan | One line |
+| --- | --- |
+| `holdout-power-de` | Same shape. Not read in full. |
+| `showcase-lang-water-ko` | Same shape. Not read in full. |
+| `showcase-ui-priorities` | Same shape, plus `countText=` on the list. Not read in full. |
+| `showcase-lang-kanji-ja` | Same shape: the hidden list no longer writes `add=false` and `remove=false`, and the deck is the same. A0: yes. |
+| `showcase-ui-pizza` | Same shape, plus `note=` on the main figure. A0: yes. |
+| `showcase-lang-tea-tr` | Same shape. A0: yes. |
+| `showcase-ui-alarm` | Read: yes. Three doses with editable times, a switch for each, and a confirmation before a delete. The rows have no name field now, which the request does not ask for, so the name field that M1 F1 showed one letter wide is gone. |
+| `holdout-tip-ru` | Same shape, except `icon=` on the tip slider, which is a note now. A0: yes. |
+| `showcase-lang-verbs-fr` | Same shape: the hidden list no longer writes `add=false` and `remove=false`, and the deck no longer writes `again=`. Not read in full. |
+| `showcase-ui-steps-chart` | Same shape. Not read in full. |
+| `showcase-ui-price-filter` | Same shape. Not read in full. |
+| `holdout-calories-fr` | Same shape. Not read in full. |
+| `showcase-lang-shopping-it` | Same shape. Not read in full. |
+| `holdout-reading-es` | Same shape. Not read in full. |
+| `holdout-sleep-en` | Same shape, with a name on its value of `show=`, as before. A0: yes. |
+| `showcase-lang-budget-es` | Same shape, without `kind="bar"` on the chart (bars are the default). A0: yes. |
+| `holdout-words-ko` | Same shape. Not read in full. |
+| `holdout-study-ja` | Same shape. Not read in full. |
+| `showcase-lang-habits-uk` | Read: yes. Three habits, a check for each day, and "Серія днів поспіль" for each habit: the longest run of checked days of the week (`streak` of `kit/src/core.js` line 105). The fixture cut the week at today, and this plan does not, so a checked day after today counts too. Its first call wrote 437 output tokens against 845. |
+| `holdout-eggs-it` | Same shape. Not read in full. |
+| `d-pythagoras` | Same shape. Not read in full. |
+| `d-interest` | Same shape. Not read in full. |
+| `d-moon` | Same shape. Not read in full. |
+| `d-rainbow` | Same shape. Not read in full. |
+| `d-fractions` | Same shape. Not read in full. |
+| `e-loan-es` | Read: yes. The monthly payment of an annuity, with a separate formula for 0% interest, and the total paid. A state line now holds the payment, and both figures read it. `icon=` on the percent slider is a note. |
+| `e-packing-de` | Same shape. H1: yes. |
+| `e-vacation-en` | Same shape. H1: yes. |
+| `e-timetable-tr` | Read: yes. `sort=$saat` now orders the lessons of each day by time, which H1 named as a gap. |
+| `e-fuel-pl` | Same shape, plus `max=` on the three inputs. H1: yes. |
+| `e-pages-ja` | Same shape. H1: yes. |
+| `e-mood-ru` | Same shape. H1: yes. |
+| `e-bbq-pt` | Read: yes now (H1: partly). `labels=` names the value of `show=` ("Acerto"), which was the target of the other new sentence. With three people who paid 100, 20, and 0, the rows show "Acerto: Recebe 60,00", "Acerto: Deve pagar 20,00", and "Acerto: Deve pagar 40,00" (a scratch compile of the plan with three rows). The paid amount of each row still has no name, because `labels=` names a field only in the add form. |
+| `e-plank-fr` | Read: yes now. The plan is the same as before (`rounds=5, rest=15`). The kit of K1 ends the timer after the fifth round, at 285 s (H1 finding 3). |
+| `e-capitals-it` | Read: yes. Ten cards of a country and its capital in a hidden list, and "La sapevo" and "Non la sapevo" count. The deck no longer has `mark=`, so no card keeps a check of its own. |
+| `e-bmi-en` | Same shape. H1: yes. |
+| `e-gifts-uk` | Same shape. H1: yes. |
+| `e-times7-ru` | Read: yes. A deck of ten tasks from 7 × 1 to 7 × 10 with a typed answer, as before. |
+| `e-percent-ru` | Same shape. H1: yes. |
+| `e-seasons-ru` | Read: yes. The Earth at four places of its orbit with an axis of one fixed tilt, a choice of the season, a card, a lesson of 3 steps, and a question. In the summer of the north the axis leans to the Sun. The two state lines of the fixture are gone. |
+| `e-atom-ru` | Same shape. H1: yes. |
 
-Three of them had a known item, so this task read them in full:
-
-- `e-bbq-pt`: yes now. `labels=` names the value of `show=` ("Acerto"), which was the target of the other new sentence. With three people who paid 100, 20, and 0, the rows show "Acerto: Recebe 60,00", "Acerto: Deve pagar 20,00", and "Acerto: Deve pagar 40,00" (a scratch compile of the plan with three rows). The paid amount of each row still has no name, because `labels=` names a field only in the add form.
-- `e-plank-fr`: yes now. The plan is the same as before (`rounds=5, rest=15`). The kit of K1 ends the timer after the fifth round, at 285 s (H1 finding 3).
-- `e-times7-ru`: yes. A deck of ten tasks from 7 × 1 to 7 × 10 with a typed answer, as before.
-
-Of the 52 plans: 11 new in kind (8 yes, 3 partly), and 41 with the same need kinds. `showcase-lang-pomodoro-zh` has no plan.
+Of the 52 plans: 11 are new in kind (8 yes, 3 partly). Of the 41 with the same need kinds, 9 got a full read (each yes), and 32 have the same shape or one of the small option differences that the table names. `showcase-lang-pomodoro-zh` has no plan.
 
 ### Findings about the kit and the prompt
 
@@ -561,7 +595,7 @@ The task changed nothing in `kit/src`. Each candidate sentence below did not run
 1. **`outside("other")` for a request that the lines serve.** See "Routing". Candidate sentence for the section "System": "When the lines give the main thing of a request but not each detail, such as a record of each day, plan the main thing: outside("other") is only for a main thing that no kind gives." Evidence: `evidence/modelcheck/v3-terra-low/showcase-lang-pomodoro-zh.0.txt`. One reply of one run.
 2. **The value of a choice is text, and a drawing counted with it.** The fault and its repair are in "Faults, repairs, and notes". Candidate sentence: "The value of a choice is text: a formula that counts with it reads number($/NAME)." Evidence: `evidence/modelcheck/v3-terra-low/e-japanese-ru.0.txt` and `.1.txt`. One case, and one repair fixed it.
 3. **Button texts on a timer of one phase with an alert.** Three plans gave `start=`, `pause=`, `reset=`, and `done=` to a timer that the host draws with its own buttons. Each is a note, and each plan is clean. Candidate sentence: "start=, pause=, reset=, and done= are for a timer with rounds or rest: a timer with alert=true and one phase shows the buttons of the host." Evidence: `evidence/modelcheck/v3-terra-low/showcase-lang-tea-tr.0.txt`, `holdout-eggs-it.0.txt`, and `d-breathing.0.txt`.
-4. **A breathing timer and the end of a round timer.** The kit of K1 ends a timer with rounds after the work phase of its last round (`kit/README.md`, section "Parts", `timer`). So `rounds=5, rest=6` gives five inhales and four exhales, and no form of the kit ends on an exhale.
+4. **A breathing timer and the end of a round timer.** The kit of K1 ends a timer with rounds after the work phase of its last round (`kit/README.md`, section "Parts", `timer`). A round timer starts and ends on its work phase. So an inhale of 4 s as the work phase and an exhale of 6 s as the rest has no form that ends on the exhale: `rounds=5, rest=6` gives five inhales and four exhales.
    - The fixture `kit/test/fixtures/model/d-breathing.plan` (prompt v1) has `rounds=1, rest=6`. By that rule its timer now counts only the inhale of 4 s, with no rest phase: with one round, the first work phase is the last one (`kit/src/core.js` lines 596 to 600). This comes from a reading of the code, not from a run.
    - The new plan avoids it with one timer of 10 s and a text, which names no phase on the screen (function line 5). Evidence: `evidence/modelcheck/v3-terra-low/d-breathing.0.txt`.
 5. **The paid amount of a row has no name.** In `e-bbq-pt`, `labels=` names `pago` only in the add form. The row shows the number with no word beside the named value of `show=`. Record C of L1 keeps such rows as they are. Evidence: `evidence/modelcheck/v3-terra-low/e-bbq-pt.0.txt`.
