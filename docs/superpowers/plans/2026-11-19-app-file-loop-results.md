@@ -901,3 +901,24 @@ The order options of the five lists that the decision names:
 | `gpt-6.1-terra` low | 15 | 92012 | 84462 (91.8%) | 4041 | 517 |
 
 The budget was 30 calls. The task used 15: 15 first calls and no repair. `evidence/modelcheck/spend.json` went from 472 to 487, and its log has 15 entries of the label. `LIMIT` of `kit/modelcheck.js` stays at 502.
+
+### Fix round 1: sort= and group= together
+
+The controller saw the cause of the `e-timetable-tr` plan in the words "sort= or group=", which read as a choice of one. The round replaced the new sentence after `order=` with two sentences:
+
+"sort= orders the rows by a field, also when the request says "reorder by" that field, and group= puts the rows under a heading for each value of a field: a list can have both, such as lessons under each day in the order of their time, group=$day, sort=$time. A request to switch the order gets sort= with order=, or sort= that reads a choice, such as sort=$/by == "aisle" ? $aisle : $name."
+
+- The host groups the rows in the order of the list that it gets (`NativeToolUi.kt` line 1693, Kotlin `groupBy`). So `sort=` also orders the rows inside each group.
+- The new hash is `5f4df1c30891`. The section "System" is 21440 bytes. The prompt test passes, and `bun kit/build.js --check` exits 0.
+- `REPAIRS=1 STOP_AT=502 bun kit/modelcheck.js run v4b-terra-low CDE gpt-6.1-terra low` ran four requests one time. Each one is clean at the first try, with no repair. Raw replies and records are in `evidence/modelcheck/v4b-terra-low/`.
+
+| Request | `sort=` | `group=` | `order=` | `reorder=` | Fits the request? |
+| --- | --- | --- | --- | --- | --- |
+| `e-timetable-tr` | none | `$gun` | none | none | Partly, as in `v4-terra-low`: the lessons are grouped by day, but in each day they are not in the order of time. |
+| `showcase-lang-shopping-it` | `$corsia` | none | none | none | Yes, by decision 2, as in `v4-terra-low`. |
+| `e-packing-de` | none | `$kategorie` | none | none | Yes. The category is now a text field that the person types, not a choice of five categories as in v3 and v4. |
+| `showcase-lang-budget-es` | none | none | none | none | Yes: the request asks for no order. The same needs as v3: a figure of the month, a bar chart by category, the list, and two tabs. The category is now a choice of six. |
+
+The plan of `e-timetable-tr` still has no order by time. The new sentence did not move it in this one reply. As the controller decided, no further round follows.
+
+The round used 4 calls of its budget of 8: 4 first calls and no repair. `evidence/modelcheck/spend.json` went from 487 to 491.
