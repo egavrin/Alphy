@@ -16,16 +16,40 @@ Then it runs the app (state, formulas, actions, and the component tree) and chec
 | `src/draw.js` | The drawing of a surface for the run-time: `commandsOf` gives the kit's shapes (circle, rect, line, text, polygon, and their outlines) as Alphy's drawing commands with Alphy's colors, `barOf` is the bar of a timer, `budgetOf` counts what commands cost, and `fit` keeps a reply inside `LIMITS` of one reply. |
 | `src/drag.js` | The drag of a 3D model for the run-time: `dragged` turns a model by 0.6 degrees for each pixel that a pointer moves along x, and `IDLE` is the drag when no drag runs, also after each open. |
 | `src/run.js` | The run-time of a compiled app: `handle` answers each event, and `screen` maps each component to its Alphy node. A timer with rounds, a rest, or no alert draws its bar on a surface and asks for a timer event each second while it runs. A timer with an alert and one phase is Alphy's foreground timer. A Drawing is a canvas with one surface that each reply draws again. A value that an `animate` moves keeps its change in the state field `anim` and asks for a timer event each 50 ms while it moves. |
-| `src/emit.js` | The emitter: an expanded app file as Alphy's app definition, whose `source` is the run-time and the compiled data of the app. It gives a fault for each limit of Alphy that the kit's own mapping can pass: state fields, the fields of a need's object, source bytes, and the nodes and depth of the screen. |
+| `src/emit.js` | The emitter: an expanded app file as Alphy's app definition, whose `source` is the run-time and the compiled data of the app. It gives a fault for each limit of Alphy that the kit's own mapping can pass: state fields, the fields of a need's object, source bytes, and the nodes and depth of the screen. It also keeps the lower limits: a container with no child is a fault of its line, and a plan with no state value keeps one hidden boolean field `d0`, because Alphy keeps 1 to 40 state fields. No line of a plan gets the name `d0`. Each need object has a namer of its own, so the names in it do not depend on the other needs. |
 | `src/compile.js` | The sandbox entry `compileAppFile`: an app file in; the faults and notes of the report and the definition out. |
 | `build.js` | The bundle of the modules as one plain script for the sandbox, the run-time text in it (minified by `Bun.build`), and the copies of the plans for the device tests. |
 | `look.js` | The look numbers of each saved plan and each look fixture of `build.js`: `score_app` of `tools/agent_corpus/visual_score.py` on the compiled definition, as one table row for each plan. |
 | `plans/` | The saved plans. |
 | `test/` | The Bun tests. `test/fixtures/` holds example plans of the prototype that only the tests read. `test/nodes.plan` holds each component of the emitter's node table: the kit test and the device test `eachNodeOfTheTablePassesParseAndSmoke` read it. `test/lists.plan`, `test/rich.plan`, and `test/cards.plan` hold the lists and modals, the lists full to the render work limit, and the cards, charts, tabs, lessons, and questions: each has a kit test and a device test. `test/free.plan` holds the free forms that no other plan holds (an inline Row as a List template, a row Button with `enabled=`, `flip`, `move` with a test, and a line whose name is the name of an inline child): the kit tests and the device test `eachFreeFormPassesParseAndSmoke` read it. `test/shapes.plan` holds each shape kind, each outline form, `each` over a list, each kind of color, a text, and `animate` beside a timer with rounds: the kit tests and the device test `eachShapeAndColorPassesParseAndSmoke` read it. `test/draw.test.js` holds the commands, colors, and limits of `src/draw.js`. `test/budget.test.js` measures each compiled plan against each limit of Alphy and prints one table row for each plan. `test/timers.test.js` holds the timers of `plans/tea.plan` and `plans/timer-rounds.plan`, and the short plan of the device test `timerRoundsPassesParseAndSmoke`. `test/looks.plan` holds each look option and a `Grid`: `test/looks.test.js` and the device test `eachLookOptionPassesParseAndSmoke` read it. `test/fixtures/look-water-ko.plan` and `test/fixtures/look-shopping-it.plan` are two requests of the corpus with components only, in the tree of their baseline apps. `test/fixtures/mock-water-ko.plan`, `mock-units-pl.plan`, `mock-shopping-it.plan`, `mock-habits-uk.plan`, and `mock-price-filter.plan` are five requests of the corpus with parts: the device test `picturesOfEachPlan` shows each one beside the spec of its baseline app (`app/src/androidTest/assets/appfile/baseline/`). `test/entries.test.js`, `test/inputs.test.js`, `test/figures.test.js`, and `test/counter.test.js` hold the parts of a list app (section "Parts"). |
 
-The gate of the kit is `"smoke"`: an app file of this design has no check lines.
+The gate of the kit is `"smoke"`: the smoke run uses each control. The report also runs each check line.
+The example of a figure (`example=[{n: 2}, 4]`) is a check line of its part. A failed example is a fault of the need with the given values, the computed value, and the expected value.
+A check line of the plan (`check("name", [steps])`) that fails is a fault of its line.
 A need takes only the named options of its part (`parts.js` `OPTIONS`): each other option is a fault of the need.
 A fault of a line that a part wrote names the need, such as `need b`, and not the line `b_button`.
+This holds for the faults of the report, of the smoke run, and of a value that no line sets, such as `need c reads $/k, and no line sets it`.
+A field of `entries` is a word, and it must not have the name of a line of the part, such as `row` or `add`.
+`__proto__`, `constructor`, and `prototype` are not names of a plan: as a name, a part of a path, or a field, each one is a fault of its line.
+
+The compile step and the run-time have budgets, so a plan cannot use all the memory or time of the sandbox:
+
+- One event of the run-time, and one look of the compile step, have 200000 steps (`core.js` `STEPS`). Each value, shape, node, and row costs steps, and a text costs one step for each 16 characters.
+- One screen has at most 20000 parts, and one drawing has at most 4096 shapes.
+- A line nests at most 100 levels of brackets, signs, calls, or operators. A line that shows itself is a fault.
+- The host refuses a plan of more than 65536 characters before it calls the sandbox (`AppFileCompiler.kt`).
+
+A budget that stops a plan gives a fault that names the line. An event of the run-time that passes the budget changes nothing.
+
+Each reply of the run-time keeps the state inside the rules of the host:
+
+- A plain value keeps its type. A value of another type, or a number that is not finite, keeps its value from before the event.
+- A number stays within 2^53 - 1 either way, and a text has at most 2048 characters.
+- A choice stays inside its options. An event that takes the state past 49152 bytes changes nothing.
+
+Alphy shows at most 300 characters of a literal text of a screen, and a bound text of at most 2048 characters in full.
+Outside a list row, the kit binds a literal text of 301 to 2048 characters to a value of the state, so Alphy shows it in full.
+An empty literal text, an empty `Section` title, a literal text of more than 2048 characters, and a computed caption or title of more than 300 characters are faults of the line.
 
 ## Look options
 
@@ -61,7 +85,7 @@ The `number` and `display` emphases of a `Text` are display sizes of the host (`
 
 A part changes one need line into component, state, and formula lines (`src/parts.js`).
 The parts use the look of the baseline apps: a hero card first, rows with an emoji and a muted second line, and at most one filled button in each group.
-A hero card holds the main element and at most a filled button or a text button. A field and an outlined or tonal control stand under the card, because their outline shows no contrast on a hero card in the dark theme.
+A hero card holds the main element, at most one filled button, and at most one text button: the card of a timer with rounds holds its filled Start or Pause and its Reset text button. A field and an outlined or tonal control stand under the card, because their outline shows no contrast on a hero card in the dark theme.
 
 The captions that a part writes by itself are in the language of `lang=` of the app line (`src/words.js`): "Add", "Remove", "Less", "More", "Reset", and the others of its table.
 A language outside the table gets the English words and one note of the report that names each option of the need that took an English caption.
@@ -95,6 +119,7 @@ A text that a format function printed is for a person: do not read it back as a 
   - `tones={streak: "accent"}` gives the badge of a value of `show=` its tone. A name that `show=` does not give is a fault.
 - `input`: `options={value: "Label"}` keeps the value in the state and shows the label. `icon=` goes to a text, number, date, or time field and to a choice of more than six options.
   The host draws a choice of six options or fewer as a segmented control, which shows no icon. Each kind of input uses only its own options: `icon=` on a segmented control, a multi-choice, or a toggle is a fault, and so is `min=` on a text field.
+  The kinds are `number`, `money`, `percent`, `count`, `range`, `choice`, `choices`, `toggle`, `text`, `date`, and `time`. Each other kind, such as `slider`, is a fault of the need.
   The kind `range` writes `RangeSlider(label, $/x, min=, max=, step=)`: one state value of two numbers in order, the low and the high (`$/price[0]`, `$/price[1]`).
   Each `TextField` and each `Slider` is a live input of the host (`inputMode: "live"`), also in a row and in a bottom sheet. The host sends its value as a `liveInput` event while the person types or drags, and `handle` takes only that event for it.
   A slider finishes its edit when the drag ends. A text field finishes it with the action key of the keyboard or the finish button. Each other control of the kit, the `RangeSlider` and the `NumberField` included, sends an `action`.
@@ -122,6 +147,8 @@ A text that a format function printed is for a person: do not read it back as a 
 - `drawing` and `model3d`: a plan with no figure or progress has its first drawing or model as the main element, unless the author wrote `root`. The main drawing is in a hero card, and the main model card is a hero card that holds only the model.
   The part chips, the turn buttons, and the explode button of the main model stand under its card, in this order.
   The stage of a model is the muted tone of the theme. A part chip of a model is tonal, and filled while it is the selected part. The explode button is outlined.
+  The line of a part chip has the part id in its name, such as `rover_part_wheels`. An id that is not a word, such as `"wheel-l"`, gives the place of the chip, such as `rover_part_2`.
+  The color of a shape or a body is a color name of the kit (`core.js` `TONES`) or a hex such as `"#336699"`. Each other color of a line is a fault of the line.
 - The value of an option has its type. `sheet=`, `edit=`, `add=`, `remove=`, `hidden=`, and `reorder=` are `true` or `false` in the line, because a part reads them once when it builds the screen. `step=` and `decimals=` are numbers or formulas. A value of another type is a fault of the need.
 
 ## Look rules
@@ -146,7 +173,7 @@ Run each command from the repository root.
 The kit has no dependencies and no install step.
 
 - `bun test kit` runs the tests. The summary of the output shows `0 fail`.
-- `bun kit/build.js` writes `src/icons.js` from the host's sources and the sandbox bundle `app/src/main/assets/appfile/kit.js`, and copies `plans/*.plan`, the test plans `nodes`, `looks`, `lists`, `rich`, `cards`, `free`, `shapes`, `bytes`, and `model`, and the fixtures `water-ko`, `units-pl`, `shopping`, `habits`, `price-filter`, `look-water-ko`, `look-shopping-it`, and the five `mock-*` plans to `app/src/androidTest/assets/appfile/` for the device tests.
+- `bun kit/build.js` writes `src/icons.js` from the host's sources and the sandbox bundle `app/src/main/assets/appfile/kit.js`, and copies `plans/*.plan`, the test plans `nodes`, `looks`, `lists`, `rich`, `cards`, `free`, `shapes`, `bytes`, and `model`, and the fixtures `water-ko`, `units-pl`, `shopping`, `habits`, `price-filter`, `look-water-ko`, `look-shopping-it`, `look-deck-es`, `look-guide-es`, and the five `mock-*` plans to `app/src/androidTest/assets/appfile/` for the device tests.
 - `bun kit/build.js --check` writes nothing. It exits 1 when one of these files differs from what the build writes, and it prints the version of Bun that ran.
 
 The minifier of Bun makes the run-time text, so the bundle depends on the version of Bun.
