@@ -25,6 +25,9 @@ import com.alpha.assistant.tools.agent.AppImageMaker
 import com.alpha.assistant.tools.agent.AppLessonTarget
 import com.alpha.assistant.tools.agent.AppSnapshot
 import com.alpha.assistant.tools.agent.GenerationSettings
+import com.alpha.assistant.tools.appfile.AppFileCompilation
+import com.alpha.assistant.tools.appfile.AppFileCompiler
+import com.alpha.assistant.tools.appfile.AppFilePrevious
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -74,6 +77,9 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
     internal val imageGeneration: ImageGeneration) {
     constructor(provider: ChatProvider, sandbox: SandboxClient): this(provider,sandbox,ImageGeneration(sandbox.context))
     internal fun retainedSession()=sandbox.retainedSession()
+    /** The kit compiles [appFile] with the stored app [previous], with no model call. */
+    internal suspend fun compileAppFile(appFile: String, previous: AppFilePrevious): AppFileCompilation =
+        AppFileCompiler(sandbox.context, sandbox).compile(appFile, previous)
 
     private enum class GenerationProblem(val code: String, val message: String, val correction: String) {
         SPEC("widget_spec", "The generator returned an invalid tool definition, state schema, or controls. Retry the request.",
@@ -859,11 +865,11 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
         ArtifactCoordinator.get(store,expected.id).ordered {
             try {
                 check(current(store,expected.id)==expected)
-                val spec = restoreSpec(expected, target)
+                val (spec, state) = restoreSpec(expected, target)
                 if (spec.threeScene) {
-                    spec.validateState(expected.state)
+                    spec.validateState(state)
                     ThreeSceneAssets(store.context).workerAssets(spec.sceneAssets)
-                } else renderRestore(expected, spec)
+                } else renderRestore(expected, spec, state)
                 check(store.tool(expected.id)==expected)
                 ToolRestoreAvailability()
             } catch(cancel: CancellationException) {
@@ -876,27 +882,54 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
             }
         }
 
-    private fun restoreSpec(current: ToolRecord, target: Int): ToolSpec {
+    /** The spec and the state of the restore of version [target] on [current]. */
+    private suspend fun restoreSpec(current: ToolRecord, target: Int): Pair<ToolSpec, String> {
         check(!store.artifactWorkPending(current.id)) { "Дождись завершения текущего действия." }
         val previous = checkNotNull(store.revisions(current.id).find { it.revision == target }) { "Версия недоступна." }
         val activeSpec = ToolSpec.parsePersisted(current.spec)
         val targetSpec = ToolSpec.parsePersisted(previous.spec)
         check(activeSpec.threeScene == targetSpec.threeScene) { "Версия использует другой способ запуска." }
-        return ToolSpec.forRestore(activeSpec, targetSpec)
+        val appFile = targetSpec.appFile
+        return when {
+            activeSpec.appFile == null && appFile == null -> ToolSpec.forRestore(activeSpec, targetSpec) to current.state
+            // The plan of the version is the source: the kit moves each value of the person by its rules, or it refuses the restore.
+            activeSpec.appFile != null && appFile != null -> kitRevision(kitCompile(current, activeSpec, appFile), current, activeSpec, appFile)
+            // No rule moves a state between the two forms, so only an app with no value of the person takes the version with its start state.
+            !sameToolJson(JSONObject(current.state), JSONObject(activeSpec.initialState)) -> throw savedDataBlocks()
+            else -> targetSpec.withIcon(activeSpec.iconId) to targetSpec.initialState
+        }
     }
 
-    private suspend fun renderRestore(current: ToolRecord, spec: ToolSpec): ToolPreview =
-        if (spec.threeScene) checkThreeScene(spec, current.id, current.revision + 1, current.state,
+    private fun savedDataBlocks() = CloudFailure("widget_state", store.context.getString(com.alpha.assistant.R.string.tool_generation_state))
+
+    /** The compile of [appFile] with the stored app [old] of [stored] as previous. A saved value of the person that blocks it is widget_state. */
+    private suspend fun kitCompile(old: ToolRecord, stored: ToolSpec, appFile: String): AppFileCompilation =
+        generation.compileAppFile(appFile, AppFilePrevious(checkNotNull(stored.appFile), stored.schema.toString(), old.state)).also {
+            if (it.blockedBySavedData || it.savedDataMismatch) throw savedDataBlocks()
+        }
+
+    /** The spec of the clean plan [appFile] and the next state that the kit computed. Each other compile is a failure with no change. */
+    private fun kitRevision(compiled: AppFileCompilation, old: ToolRecord, stored: ToolSpec, appFile: String): Pair<ToolSpec, String> {
+        // A hole is a part that the kit does not have: the plan step never saves one, and each later change by lines refuses it.
+        check(compiled.status == "ok" && !compiled.hole) { "The kit did not compile the app file: ${compiled.status}." }
+        val spec = ToolSpec.parse(checkNotNull(compiled.definition)).withAppLanguage(compiled.language ?: stored.appLanguage)
+            .withIcon(stored.iconId).withAppFile(appFile)
+        return spec to ToolSpec.stateForRevision(stored, spec, old.state, compiled.state)
+    }
+
+    private suspend fun renderRestore(current: ToolRecord, spec: ToolSpec, state: String): ToolPreview =
+        if (spec.threeScene) checkThreeScene(spec, current.id, current.revision + 1, state,
             checkActive = { currentCoroutineContext().ensureActive() })
-        else generation.evaluate(spec, current.id, current.revision + 1, current.state,
+        else generation.evaluate(spec, current.id, current.revision + 1, state,
             JSONObject().put("type", "render"), spec.ui.toString())
 
     suspend fun rollback(id: String, revision: Int, stateVersion: Int, target: Int): ToolRecord =
         AutomationRuntime.withToolRevisionChange(store,id) { rules ->
             val old=current(id,revision,stateVersion)
             check(current(store,id)==old) { "Инструмент изменился. Открой текущую версию." }
-            val preview=renderRestore(old,restoreSpec(old,target))
-            val next=old.copy(revision=revision+1,stateVersion=stateVersion+1,spec=preview.spec.json,ui=preview.ui)
+            val (spec,state)=restoreSpec(old,target)
+            val preview=renderRestore(old,spec,state)
+            val next=old.copy(revision=revision+1,stateVersion=stateVersion+1,spec=preview.spec.json,state=state,ui=preview.ui)
             currentCoroutineContext().ensureActive()
             AutomationRuntime.commitToolRevision(store,rules,id) { stopped ->
                 check(!store.artifactWorkPending(id)) { "Дождись завершения текущего действия." }

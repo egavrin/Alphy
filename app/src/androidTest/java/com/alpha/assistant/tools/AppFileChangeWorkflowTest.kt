@@ -377,10 +377,97 @@ class AppFileChangeWorkflowTest {
         assertEquals(1, store.revisions(before.id).size)
     }
 
+    private fun appFile(record: ToolRecord) = ToolSpec.parsePersisted(record.spec).appFile
+
+    /** [record] with [state] and [ui], as a write of the person commits it. */
+    private fun written(record: ToolRecord, state: String, ui: String = record.ui) =
+        record.copy(stateVersion = record.stateVersion + 1, state = state, ui = ui).also { store.saveTool(it, false) }
+
+    /** [record] after the person typed [name] in the add form of the list and pressed Add. Both events go through the real run-time. */
+    private fun added(record: ToolRecord, name: String): ToolRecord = runBlocking {
+        val spec = ToolSpec.parsePersisted(record.spec)
+        val typed = service.evaluate(spec, record.id, record.revision, record.state, liveInputEvent("items_new_name", name), record.ui)
+        val add = JSONObject().put("type", "action").put("actionId", "items_add").put("value", JSONObject.NULL)
+        val pressed = service.evaluate(spec, record.id, record.revision, typed.state, add, typed.ui)
+        written(record, pressed.state, pressed.ui)
+    }
+
+    /** The restore of version [target] on [record], as the list of versions starts it after its check. */
+    private fun restore(record: ToolRecord, target: Int): Result<ToolRecord> {
+        val checked = runBlocking { engine.restoreAvailability(record, target) }
+        return runCatching { runBlocking { engine.rollback(record.id, record.revision, record.stateVersion, target) } }
+            .also { assertEquals("$checked\n$it", checked.available, it.isSuccess) }
+    }
+
+    /** The list of versions and the restore of [target] both give the message of widget_state, and the store keeps [before]. */
+    private fun assertRestoreRefused(before: ToolRecord, target: Int) {
+        val revisions = store.revisions(before.id).size
+        assertEquals(ToolRestoreAvailability(refused, "widget_state"), runBlocking { engine.restoreAvailability(before, target) })
+        val failure = restore(before, target).exceptionOrNull()
+        assertEquals(failure.toString(), "widget_state", (failure as? CloudFailure)?.code)
+        assertEquals(refused, failure?.message)
+        assertEquals(before, store.tool(before.id))
+        assertEquals(revisions, store.revisions(before.id).size)
+    }
+
+    // Failure case: a restore put the old plan beside the schema of the current version, so the plan and the code differed and a later change lost the rows.
+    @Test fun aRestoreOfAnOlderPlanKeepsTheRowsOfThePerson() {
+        val first = added(shoppingWithData(), "Butter")
+        val second = pressed(change(first, listOf(Scripted.Text(BOUGHT))).saved, "items_done", row("r3", true))
+        val restored = restore(second, 1).getOrThrow()
+        assertEquals(3, restored.revision)
+        assertEquals(shopping, appFile(restored))
+        // The rows of the person stay with their ids and marks: Bread is gone, Milk and Apples are bought, and Butter is the row that the person added.
+        assertSameRows(items(second), items(restored))
+        assertEquals(listOf("r1", "r3", "r4"), items(restored).map { it.getString("id") })
+        assertEquals("Butter", items(restored).last().getString("name"))
+        assertEquals(restored, store.tool(second.id))
+        assertEquals("Восстановление v1", store.revisions(second.id).first().label)
+        // The plan and the code of the restored version agree, so a later change by lines works and keeps the rows.
+        val renamed = change(restored, listOf(Scripted.Text(STILL_TO_BUY))).saved
+        assertSameRows(items(second), items(renamed))
+        // A restore is a new revision, so the person restores the version with the count again. The kit keeps the rows on the way back too.
+        val back = restore(renamed, 2).getOrThrow()
+        assertEquals(5, back.revision)
+        // The restore builds the definition from the plan as the change step built it.
+        assertTrue(back.spec, sameToolJson(JSONObject(second.spec), JSONObject(back.spec)))
+        assertSameRows(items(second), items(back))
+        assertEquals("2", JSONObject(back.state).getJSONObject("d").getString("bought_text"))
+        assertEquals(5, store.revisions(second.id).size)
+    }
+
+    // Failure case: a restore of a plan with no column that the saved rows hold dropped the column, or it changed the app.
+    @Test fun aRestoreThatASavedColumnBlocksChangesNothing() {
+        val urgent = change(shoppingWithData(), listOf(Scripted.Text(URGENT))).saved
+        assertRestoreRefused(urgent, 1)
+    }
+
+    // Failure case: a restore between an app of today's form and a part-built version put one schema beside the other code, so the data did not fit.
+    @Test fun aRestoreBetweenTheTwoFormsNeedsAnAppWithNoData() {
+        val planned = created()
+        val today = change(planned, listOf(Scripted.Text("outside(\"game\")")) + LOOP).saved
+        assertNull(appFile(today))
+        // With a value of the person, neither form takes the other.
+        assertRestoreRefused(written(today, """{"count":5}"""), 1)
+        // With no value of the person, each form comes back as it was saved, with its own start state.
+        val back = restore(written(checkNotNull(store.tool(today.id)), today.state), 1).getOrThrow()
+        assertEquals(shopping, appFile(back))
+        assertTrue(back.state, sameToolJson(JSONObject(planned.state), JSONObject(back.state)))
+        val again = restore(back, 2).getOrThrow()
+        assertNull(appFile(again))
+        assertEquals("Fixture", ToolSpec.parsePersisted(again.spec).title)
+        assertTrue(again.state, sameToolJson(JSONObject(today.state), JSONObject(again.state)))
+        val used = pressed(restore(again, 3).getOrThrow(), "items_done", row("r1", true))
+        assertRestoreRefused(used, 4)
+        assertEquals(5, store.revisions(used.id).size)
+    }
+
     private companion object {
         const val FIX = "The bought items are not counted. Test and fix this app."
         const val NEW ="User request: Make a shopping list by aisle\nWidget brief: A shopping list sorted by aisle"
         const val CHANGE = "User request: Count the bought items too\nWidget brief: Add a count of the bought items"
+        /** A change of the label of the count of the shopping list. */
+        const val STILL_TO_BUY = "need left = figure(\"count\", \"Still to buy\", count(\$/items, !\$done))"
         /** A fault: count reads a value that no line sets. */
         const val BROKEN = "need bought = figure(\"count\", \"Bought\", count(\$/nothing, \$done))"
         const val URGENT = "need items = entries(\"Items\", fields={name: \"text\", aisle: \"text\", done: \"check\", urgent: \"check\"}, " +
