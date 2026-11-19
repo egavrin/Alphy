@@ -164,7 +164,6 @@ class ComparisonChatCaptureTest {
             {"type":"button","text":"Add","action":"add"}]},
             "source":"const s=input.state,e=input.event;if(e.type==='action'&&e.actionId==='add')s.count++;return {state:s};"}""")
         val settings = GenerationSettings(app)
-        val switchBefore = settings.planStep(AiProvider.OPENAI)
         val switchAtCalls = CopyOnWriteArrayList<Boolean>()
         val scripted = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
@@ -186,44 +185,44 @@ class ComparisonChatCaptureTest {
         val directory = File(checkNotNull(app.getExternalFilesDir(null)), "comparison-capture/$runId")
         try {
             // The capture sets the envelope value and restores the earlier one, so the earlier one is the opposite here.
-            settings.setPlanStep(AiProvider.OPENAI, true)
-            try {
-                capture(input, scripted)
-            } catch (failure: IllegalStateException) {
-                val report = File(directory, "report.json").takeIf { it.exists() }?.let { JSONObject(it.readText()) }
-                throw AssertionError(listOf("failure_stage", "failure_type", "failure_frame").joinToString { report?.opt(it).toString() }, failure)
+            withPlanStep(app, AiProvider.OPENAI, true) {
+                try {
+                    capture(input, scripted)
+                } catch (failure: IllegalStateException) {
+                    val report = File(directory, "report.json").takeIf { it.exists() }?.let { JSONObject(it.readText()) }
+                    throw AssertionError(listOf("failure_stage", "failure_type", "failure_frame").joinToString { report?.opt(it).toString() }, failure)
+                }
+                assertTrue(switchAtCalls.isNotEmpty() && switchAtCalls.none { it })
+                assertTrue(settings.planStep(AiProvider.OPENAI))
+                val first = JSONObject(File(directory, "report.json").readText())
+                assertEquals(2, first.getInt("repeat"))
+                assertFalse(first.getBoolean("plan_step"))
+                val second = first.getJSONObject("second")
+                for (report in listOf(first, second)) {
+                    assertEquals("artifact-committed", report.getString("chat_outcome"))
+                    assertEquals("create", report.getString("chat_decision"))
+                    assertEquals(JSONArray(listOf("CHAT_DECISION", "AGENT", "AGENT")).toString(), report.getJSONArray("provider_invocations").toString())
+                    val measurements = report.getJSONObject("measurements")
+                    for (field in listOf("first_ui_ms", "completed_ui_ms", "terminal_chat_ms")) assertFalse(field, measurements.isNull(field))
+                    val trace = report.getJSONObject("operation_trace")
+                    assertEquals(3, measurements.getInt("provider_http_calls"))
+                    assertEquals(3, trace.getJSONArray("http_dispatches").length())
+                    val events = trace.getJSONArray("generation").let { array -> List(array.length()) { array.getJSONObject(it) } }
+                    val phases = events.filter { it.getString("kind") == "phase" }
+                    assertEquals(listOf("draft_start", "draft_end", "capability_guidance_start", "capability_guidance_end", "agent_call_start"),
+                        phases.map { it.getString("name") })
+                    assertEquals(setOf("operation_id", "attempt", "at_ns", "kind", "name", "detail", "ms"), phases.first().keys().asSequence().toSet())
+                    assertEquals(setOf(report.getString("operation_id")), events.map { it.getString("operation_id") }.toSet())
+                    // The Open action of this request's own app, not a card of the earlier chat, ends its time.
+                    val finished = events.single { it.getString("kind") == "finished" }.getLong("at_ns")
+                    assertTrue(report.getLong("send_action_elapsed_ns") + (measurements.getLong("completed_ui_ms") + 1) * 1_000_000 > finished)
+                }
+                assertNotEquals(first.getString("operation_id"), second.getString("operation_id"))
+                assertNotEquals(first.getString("fresh_conversation"), second.getString("fresh_conversation"))
+                val firstEnd = first.getJSONObject("operation_trace").getJSONArray("generation").let { it.getJSONObject(it.length() - 1).getLong("at_ns") }
+                assertTrue(firstEnd < second.getLong("send_action_elapsed_ns"))
             }
-            assertTrue(switchAtCalls.isNotEmpty() && switchAtCalls.none { it })
-            assertTrue(settings.planStep(AiProvider.OPENAI))
-            val first = JSONObject(File(directory, "report.json").readText())
-            assertEquals(2, first.getInt("repeat"))
-            assertFalse(first.getBoolean("plan_step"))
-            val second = first.getJSONObject("second")
-            for (report in listOf(first, second)) {
-                assertEquals("artifact-committed", report.getString("chat_outcome"))
-                assertEquals("create", report.getString("chat_decision"))
-                assertEquals(JSONArray(listOf("CHAT_DECISION", "AGENT", "AGENT")).toString(), report.getJSONArray("provider_invocations").toString())
-                val measurements = report.getJSONObject("measurements")
-                for (field in listOf("first_ui_ms", "completed_ui_ms", "terminal_chat_ms")) assertFalse(field, measurements.isNull(field))
-                val trace = report.getJSONObject("operation_trace")
-                assertEquals(3, measurements.getInt("provider_http_calls"))
-                assertEquals(3, trace.getJSONArray("http_dispatches").length())
-                val events = trace.getJSONArray("generation").let { array -> List(array.length()) { array.getJSONObject(it) } }
-                val phases = events.filter { it.getString("kind") == "phase" }
-                assertEquals(listOf("draft_start", "draft_end", "capability_guidance_start", "capability_guidance_end", "agent_call_start"),
-                    phases.map { it.getString("name") })
-                assertEquals(setOf("operation_id", "attempt", "at_ns", "kind", "name", "detail", "ms"), phases.first().keys().asSequence().toSet())
-                assertEquals(setOf(report.getString("operation_id")), events.map { it.getString("operation_id") }.toSet())
-                // The Open action of this request's own app, not a card of the earlier chat, ends its time.
-                val finished = events.single { it.getString("kind") == "finished" }.getLong("at_ns")
-                assertTrue(report.getLong("send_action_elapsed_ns") + (measurements.getLong("completed_ui_ms") + 1) * 1_000_000 > finished)
-            }
-            assertNotEquals(first.getString("operation_id"), second.getString("operation_id"))
-            assertNotEquals(first.getString("fresh_conversation"), second.getString("fresh_conversation"))
-            val firstEnd = first.getJSONObject("operation_trace").getJSONArray("generation").let { it.getJSONObject(it.length() - 1).getLong("at_ns") }
-            assertTrue(firstEnd < second.getLong("send_action_elapsed_ns"))
         } finally {
-            settings.setPlanStep(AiProvider.OPENAI, switchBefore)
             directory.deleteRecursively()
         }
     }
@@ -241,7 +240,7 @@ class ComparisonChatCaptureTest {
         // Opt-in pictures and screenshot review for a showcase run. The cleanup restores both settings.
         val pictures = input.optBoolean("images")
         val screenshotReview = input.optBoolean("screenshot_review")
-        // The switch of the plan step for the provider of the account. The cleanup restores the earlier value.
+        // The switch of the plan step for the provider of the account. withPlanStep restores the earlier value before the cleanup closes the model.
         val planStep = input.optBoolean("plan_step")
         // 2 sends the request once more in a new conversation of the same process, after the first one is done.
         val repeat = input.optInt("repeat", 1)
@@ -285,7 +284,6 @@ class ComparisonChatCaptureTest {
         // The evidence of the request that runs now is the last one.
         val requests = CopyOnWriteArrayList(listOf(RequestEvidence()))
         val providerHttpCalls = AtomicInteger()
-        var planStepBefore: Pair<AiProvider, Boolean>? = null
         val name = "comparison-$runId"
         val database = "$name.db"
         val databases = listOf(database, "$database-tools.db", "$database-tools.db-automations.db",
@@ -312,336 +310,336 @@ class ComparisonChatCaptureTest {
             report.put("provider", account.provider.id).put("model", chatModel)
             val settings = GenerationSettings(app)
             settings.screenshotReview = screenshotReview
-            planStepBefore = account.provider to settings.planStep(account.provider)
-            settings.setPlanStep(account.provider, planStep)
-            report.put("pictures", pictures).put("screenshot_review", screenshotReview).put("plan_step", planStep)
-            val provider = object : ChatProvider {
-                override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                    check(key == marker)
-                    val stage = request.generationStage?.name ?: if (request.chatDecision) "CHAT_DECISION" else "CHAT"
-                    val evidence = requests.last()
-                    evidence.invocations.add(stage)
-                    session.decisionRejectionObserver = { event ->
-                        evidence.decisionRejections += JSONObject().put("stage",event.stage).put("attempt",event.attempt)
-                            .put("rule",event.shape.rule).put("path",event.shape.path)
-                            .put("observed_type",event.shape.observedType).put("correcting",event.correcting)
-                            .put("at_ns",SystemClock.elapsedRealtimeNanos())
-                            .apply {
-                                event.shape.decisionFields?.let {
-                                    put("missing_fields", JSONArray(it.missing)).put("extra_field_count", it.extraCount)
-                                        .put("kind_class", it.kind.name.lowercase(java.util.Locale.ROOT)).put("wrapped_decision", it.wrappedDecision)
+            withPlanStep(app, account.provider, planStep) {
+                report.put("pictures", pictures).put("screenshot_review", screenshotReview).put("plan_step", planStep)
+                val provider = object : ChatProvider {
+                    override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                        check(key == marker)
+                        val stage = request.generationStage?.name ?: if (request.chatDecision) "CHAT_DECISION" else "CHAT"
+                        val evidence = requests.last()
+                        evidence.invocations.add(stage)
+                        session.decisionRejectionObserver = { event ->
+                            evidence.decisionRejections += JSONObject().put("stage",event.stage).put("attempt",event.attempt)
+                                .put("rule",event.shape.rule).put("path",event.shape.path)
+                                .put("observed_type",event.shape.observedType).put("correcting",event.correcting)
+                                .put("at_ns",SystemClock.elapsedRealtimeNanos())
+                                .apply {
+                                    event.shape.decisionFields?.let {
+                                        put("missing_fields", JSONArray(it.missing)).put("extra_field_count", it.extraCount)
+                                            .put("kind_class", it.kind.name.lowercase(java.util.Locale.ROOT)).put("wrapped_decision", it.wrappedDecision)
+                                    }
                                 }
-                            }
-                    }
-                    fun dispatched() {
-                        providerHttpCalls.incrementAndGet()
-                        evidence.httpDispatches += JSONObject().put("stage", stage)
-                            .put("at_ns", SystemClock.elapsedRealtimeNanos())
-                    }
-                    // A scripted model makes no HTTP call, so each of its replies counts as one dispatch.
-                    val live = if (scripted != null) scripted.also { dispatched() }
-                        else CloudChatProvider({ account }, Endpoints.PRODUCTION, chatModel = { chatModel }, onHttpCall = ::dispatched) {}
-                    val tracedRequest = if (request.chatDecision) request.copy(validateOperation = { decision ->
-                        request.validateOperation?.invoke(decision)
-                        evidence.acceptedOperations += JSONObject().put("kind", decision.kind).put("search", decision.search)
-                            .put("at_ns", SystemClock.elapsedRealtimeNanos())
-                    }) else request
-                    live.respond(account.key, tracedRequest, session, emit)
-                }
-            }
-            keys.save(marker, account.provider).getOrThrow()
-            if (pictures) {
-                // Pictures use the key of the account, so its provider must generate images (spec 11).
-                failureAt = "images"
-                imageSettings.setEnabled(true).getOrThrow()
-            }
-            // The shell holds only the marker. The live image request gets the key of the account, as the chat request does.
-            val pictureProviders = imageProviders(Endpoints.PRODUCTION).mapValues { (_, live) ->
-                ImageProvider { key, model, intent -> check(key == marker); live.generate(account.key, model, intent) }
-            }
-            failureAt = "launch"
-            val toolDatabase = "$database-tools.db"
-            val savedId = if (savedEdit) {
-                val asset = if (caseId == "extra:reference-points-ledger") "saved-edit-ledger" else "saved-edit-grid"
-                val frozen = instrumentation.context.assets.open("behavior-replay/$asset.json").bufferedReader().use { it.readText() }
-                report.put("frozen_artifact_sha256", sha256(frozen))
-                val artifact = JSONObject(frozen)
-                val spec = ToolSpec.parsePersisted(artifact.getJSONObject("spec").toString())
-                val id = artifact.getString("artifact_id")
-                ToolStore(app, toolDatabase).use { tools ->
-                    tools.saveTool(ToolRecord(id, artifact.getInt("artifact_revision"), 1, spec.json,
-                        spec.initialState, spec.ui.toString(), null, true), revision = true)
-                }
-                id
-            } else null
-            val noLocation = object : WeatherLocator {
-                override fun hasPermission() = false
-                override suspend fun locate(): Nothing = error("No device location in a comparison fixture.")
-            }
-            CloudTestActivity.factory = { application ->
-                ShellViewModel(application, provider, store, keys, weatherLocator = noLocation, legacy = isolatedLegacyKeys(application), models = isolatedModels(application), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE, imageProviders = pictureProviders).also { model = it }
-            }
-            val scenario = ActivityScenario.launch(CloudTestActivity::class.java)
-            activity = scenario
-            val vm = onMain { checkNotNull(model) }
-            await(15_000) { onMain { !vm.loading && !vm.tools.busy } }
-            check(onMain { !vm.loadFailed && vm.snapshot.conversations.isEmpty() &&
-                vm.tools.tools.map { it.id } == listOfNotNull(savedId) && vm.tools.drafts.isEmpty() })
-            onMain { vm.tools.generationTraceObserver = { requests.last().generation += it } }
-            val robot = ShellRobot(name)
-            fun visible(id: Int): AccessibilityNodeInfo? {
-                if (robot.diagnostics.freshRoot()?.packageName?.toString() != app.packageName) return null
-                return robot.find(robot.text(id))?.takeIf { it.isVisibleToUser }
-            }
-            fun screenshot(name: String): Boolean {
-                var focused = false
-                scenario.onActivity { focused = it.window.decorView.hasWindowFocus() }
-                if (!focused || robot.diagnostics.freshRoot()?.packageName?.toString() != app.packageName) return false
-                val bitmap = instrumentation.uiAutomation.takeScreenshot() ?: return false
-                try {
-                    return File(directory, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-                } finally { bitmap.recycle() }
-            }
-            if (savedId != null) {
-                failureAt = "workflow"
-                fun savedTool() = onMain { vm.tools.tools.single { it.id == savedId } }
-                val title = ToolSpec.parsePersisted(savedTool().spec).title
-                onMain { vm.openSurface(savedId) }
-                robot.waitFor(robot.text(R.string.tool_refine))
-                val proof = JSONObject().put("status", "failed")
-                report.put("workflow", proof)
-                fun reopen() {
-                    Plan5WorkflowChecks.reopenSaved(robot, title)
-                }
-                var edited = false
-                val refine: (String) -> Unit = {
-                    check(!edited && it == request && providerHttpCalls.get() == 0)
-                    report.put("send_action_elapsed_ns", SystemClock.elapsedRealtimeNanos())
-                    submitSavedEdit(vm, robot, ::savedTool, it, proof, directory)
-                    check(providerHttpCalls.get() > 0)
-                    edited = true
-                }
-                val checks = Plan5WorkflowChecks(robot, proof, ::savedTool, ::screenshot, toolDatabase)
-                if (caseId == "extra:reference-points-ledger") checks.ledger(::reopen, refine)
-                else checks.grid(::reopen, refineVictory = refine)
-                check(edited)
-                proof.put("status", "passed")
-                report.put("chat_outcome", "artifact-committed").put("artifact_id", savedId)
-                    .put("artifact_revision", savedTool().revision)
-                terminal = "complete"
-                return
-            }
-            /**
-             * Sends the request from the composer of the new chat and measures it into [into]: the report, or its object
-             * "second". [stage] prefixes the failure stages and the screenshots. Null when the chat did not settle in time.
-             */
-            fun measuredRequest(into: JSONObject, stage: String): Message? {
-                failureAt = stage + "send"
-                robot.edit(robot.text(R.string.composer_label), request)
-                val draft = onMain {
-                    check(!vm.tools.busy && vm.activeConversationId == null)
-                    vm.snapshot.draft
-                }
-                check(draft.text == request && draft.attachments.isEmpty())
-                into.put("fresh_draft", draft.id)
-                val send = checkNotNull(visible(R.string.composer_send))
-                into.put("send_action_uptime_ms", SystemClock.uptimeMillis())
-                into.put("send_action_elapsed_ns", SystemClock.elapsedRealtimeNanos())
-                check(click(send)) { "The composer Send action did not run." }
-                save(stage + "sent")
-                failureAt = stage + "chat-terminal"
-                var previewObserved = false
-                // The app card's Open action marks the first usable app. It is read before any test step after the chat settles.
-                var openVisibleAt: Long? = null
-                val settled = waitFor(chatSeconds * 1_000L) {
-                    if (!previewObserved && visible(R.string.tool_preview_provisional) != null) {
-                        previewObserved = true
-                        into.put("provisional_visible_elapsed_ns", SystemClock.elapsedRealtimeNanos())
-                        into.put("provisional_label_observed", true)
-                        into.put("provisional_screen", screenshot(stage + "provisional"))
-                    }
-                    if (openVisibleAt == null && visible(R.string.tool_open) != null) openVisibleAt = SystemClock.elapsedRealtimeNanos()
-                    onMain {
-                        val assistant = vm.snapshot.selected?.messages?.lastOrNull()?.takeIf { it.role == "assistant" }
-                        !vm.tools.busy && vm.activeConversationId == null && assistant?.status in terminalChatStatuses
-                    }
-                }
-                val evidence = requests.last()
-                if (!settled) {
-                    val deadline = onMain {
-                        captureChatState(vm).apply {
-                            val at = getLong("at_ns")
-                            val last = evidence.generation.lastOrNull { it.atNanos <= at }
-                            put("generation_last", last?.let(::traceEvent) ?: JSONObject.NULL)
-                            put("provider_http_calls", evidence.httpDispatches.size)
                         }
-                    }
-                    into.put("capture_deadline", deadline)
-                    if (!deadline.getBoolean("terminal") || !deadline.getBoolean("idle")) {
-                        terminal = "unresolved"
-                        report.put("failure_stage", failureAt)
-                        report.put("deadline_screen", screenshot(stage + "deadline"))
-                        return null
-                    }
-                }
-                val chat = onMain { checkNotNull(vm.snapshot.selected) }
-                val user = chat.messages.first()
-                val assistant = chat.messages.last()
-                check(user.role == "user" && assistant.replyTo == user.id && sha256(user.text) == input.getString("request_sha256"))
-                into.put("fresh_conversation", chat.id).put("assistant_message", assistant.id)
-                    .put("assistant_status", assistant.status).put("operation_id", assistant.toolOperationId ?: JSONObject.NULL)
-                    .put("provisional_label_observed", previewObserved)
-                val decision = evidence.acceptedOperations.lastOrNull()?.optString("kind")
-                decision?.let { into.put("chat_decision", it) }
-                into.put("assistant_text", assistant.text)
-                val sentAt = into.getLong("send_action_elapsed_ns")
-                into.getJSONObject("measurements").put("terminal_chat_ms",
-                    (SystemClock.elapsedRealtimeNanos() - sentAt) / 1_000_000)
-                if (openVisibleAt == null && assistant.toolId != null) waitFor(5_000) {
-                    (visible(R.string.tool_open) != null).also { if (it) openVisibleAt = SystemClock.elapsedRealtimeNanos() }
-                }
-                val provisionalAt = into.optLong("provisional_visible_elapsed_ns", 0L).takeIf { it > 0 }
-                listOfNotNull(provisionalAt, openVisibleAt).minOrNull()?.let {
-                    into.getJSONObject("measurements").put("first_ui_ms", (it - sentAt) / 1_000_000)
-                }
-                openVisibleAt?.let { into.getJSONObject("measurements").put("completed_ui_ms", (it - sentAt) / 1_000_000) }
-                if (decision == "device_plan") {
-                    onMain { vm.agent.plan?.takeIf { it.conversationId == chat.id } }?.let { plan ->
-                        into.put("phone_plan", JSONObject().put("phase", plan.phase.name)
-                            .put("steps", JSONArray(plan.steps.map { it.command.json() }))
-                            .put("results", JSONArray(plan.results)))
+                        fun dispatched() {
+                            providerHttpCalls.incrementAndGet()
+                            evidence.httpDispatches += JSONObject().put("stage", stage)
+                                .put("at_ns", SystemClock.elapsedRealtimeNanos())
+                        }
+                        // A scripted model makes no HTTP call, so each of its replies counts as one dispatch.
+                        val live = if (scripted != null) scripted.also { dispatched() }
+                            else CloudChatProvider({ account }, Endpoints.PRODUCTION, chatModel = { chatModel }, onHttpCall = ::dispatched) {}
+                        val tracedRequest = if (request.chatDecision) request.copy(validateOperation = { decision ->
+                            request.validateOperation?.invoke(decision)
+                            evidence.acceptedOperations += JSONObject().put("kind", decision.kind).put("search", decision.search)
+                                .put("at_ns", SystemClock.elapsedRealtimeNanos())
+                        }) else request
+                        live.respond(account.key, tracedRequest, session, emit)
                     }
                 }
-                into.put("chat_outcome", when {
-                    assistant.status != "complete" -> "request-failed"
-                    assistant.toolId != null && assistant.toolRevision != null -> "artifact-committed"
-                    else -> "complete-without-artifact"
-                })
-                if (assistant.status != "complete") {
-                    into.put("failure_code", safeGenerationCode(assistant.errorCode))
-                    if (canvasWorkflow) into.put("scene_diagnostic", assistant.error?.take(400))
+                keys.save(marker, account.provider).getOrThrow()
+                if (pictures) {
+                    // Pictures use the key of the account, so its provider must generate images (spec 11).
+                    failureAt = "images"
+                    imageSettings.setEnabled(true).getOrThrow()
                 }
-                return assistant
-            }
-            val assistant = measuredRequest(report, "") ?: return
-            val artifact = assistant.toolId
-            if (artifact != null) {
-                report.put("artifact_id", artifact).put("artifact_revision", assistant.toolRevision)
-                fun saved() = onMain { vm.tools.tools.singleOrNull { it.id == artifact } }
-                await(5_000) { saved() != null }
-                val record = checkNotNull(saved())
-                check(record.revision == assistant.toolRevision)
-                val definition = JSONObject().put("artifact_id", artifact).put("artifact_revision", record.revision)
-                    .put("spec", JSONObject(record.spec)).toString()
-                File(directory, "artifact.json").writeText(definition)
-                report.put("artifact_sha256", sha256(definition))
-            }
-            failureAt = "review"
-            report.put("chat_screen", screenshot("chat"))
-            if (artifact != null) {
-                val deadline = SystemClock.uptimeMillis() + 5_000
-                var open: AccessibilityNodeInfo? = null
-                while (open == null && SystemClock.uptimeMillis() < deadline) {
-                    open = visible(R.string.tool_open)
-                    if (open == null) SystemClock.sleep(50)
+                // The shell holds only the marker. The live image request gets the key of the account, as the chat request does.
+                val pictureProviders = imageProviders(Endpoints.PRODUCTION).mapValues { (_, live) ->
+                    ImageProvider { key, model, intent -> check(key == marker); live.generate(account.key, model, intent) }
                 }
-                if (open != null) report.put("card_visible_elapsed_ns", SystemClock.elapsedRealtimeNanos())
-                report.put("open_card_action", open?.let(::click) == true)
-            }
-            if (verifyTip && artifact != null) {
-                failureAt = "tip-interaction"
-                check(report.optBoolean("open_card_action"))
-                val callsBeforeInteraction = providerHttpCalls.get()
-                fun savedTool() = onMain { vm.tools.tools.singleOrNull { it.id == artifact } }
-                await(5_000) { savedTool() != null }
-                try {
-                    verifyTipCalculator(robot, scenario, { checkNotNull(savedTool()) }, report, ::screenshot)
-                } finally {
-                    if (report.optJSONObject("tip_interaction")?.optString("status") != "passed") screenshot("tip-failure")
-                }
-                check(providerHttpCalls.get() == callsBeforeInteraction)
-            } else if (verifyTip) {
-                report.put("tip_interaction", JSONObject().put("status", "not-generated"))
-            }
-            if (verifyWorkflow) {
-                failureAt = "workflow"
-                val proof = JSONObject().put("status", "not-generated")
-                report.put("workflow", proof)
-                if (artifact != null) {
-                    proof.put("status", "failed")
-                    check(report.optBoolean("open_card_action"))
-                    if (verifyTip) {
-                        check(report.getJSONObject("tip_interaction").getString("status") == "passed")
-                    } else if (canvasWorkflow) {
-                        save("review")
-                        val checks = CanvasLiveChecks(robot, proof) { name ->
-                            val bitmap = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
-                            try {
-                                File(directory, "$name.png").outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
-                            } finally { bitmap.recycle() }
-                        }
-                        val saved = onMain { vm.tools.tools.single { it.id == artifact } }
-                        val spec = ToolSpec.parsePersisted(saved.spec)
-                        if (caseId == "canvas:wave") {
-                            check(canvasSurfaceIds(spec.ui).isNotEmpty())
-                            val sceneLabel = checkNotNull(firstCanvasLabel(spec.ui))
-                            val amplitude = checks.slider("Amplitude", sceneLabel)
-                            checks.captureCompact(sceneLabel) { robot.waitUntil { checks.progress("Amplitude") == amplitude } }
-                        } else {
-                            check(spec.presentation == "immersive") { "The generated game was not immersive." }
-                            fun score(values: JSONObject): Double? {
-                                val key = values.keys().asSequence().firstOrNull { it.equals("score", true) || it.endsWith("_score") }
-                                return key?.let { (values.opt(it) as? Number)?.toDouble() }
-                            }
-                            val initial = checkNotNull(score(JSONObject(spec.initialState))) { "The game has no observable Score." }
-                            checks.game(spec.title, initial, { onMain { score(JSONObject(vm.tools.tools.single { it.id == artifact }.state)) } }) {
-                                onMain { vm.openSurface(null) }
-                                robot.waitGone(robot.text(R.string.tool_game_controls_open))
-                                robot.click(robot.text(R.string.tool_open))
-                            }
-                            checks.captureCompact(spec.title) { robot.waitFor(robot.text(R.string.tool_game_controls_open)) }
-                        }
-                    } else {
-                        val toolDatabase = "$database-tools.db"
-                        fun savedTool() = onMain { vm.tools.tools.single { it.id == artifact } }
-                        fun reopen() {
-                            val before = savedTool()
-                            Plan5WorkflowChecks.reopenSaved(robot, ToolSpec.parsePersisted(before.spec).title, fromChat = true)
-                            val after = savedTool()
-                            check(after.revision == before.revision)
-                        }
-                        var localCalls = providerHttpCalls.get()
-                        Plan5WorkflowChecks(robot, proof, ::savedTool, ::screenshot, toolDatabase).run(caseId, ::reopen) {
-                            check(providerHttpCalls.get() == localCalls)
-                            submitSavedEdit(vm, robot, ::savedTool, it, proof, directory)
-                            check(providerHttpCalls.get() > localCalls)
-                            localCalls = providerHttpCalls.get()
-                        }
-                        check(providerHttpCalls.get() == localCalls)
+                failureAt = "launch"
+                val toolDatabase = "$database-tools.db"
+                val savedId = if (savedEdit) {
+                    val asset = if (caseId == "extra:reference-points-ledger") "saved-edit-ledger" else "saved-edit-grid"
+                    val frozen = instrumentation.context.assets.open("behavior-replay/$asset.json").bufferedReader().use { it.readText() }
+                    report.put("frozen_artifact_sha256", sha256(frozen))
+                    val artifact = JSONObject(frozen)
+                    val spec = ToolSpec.parsePersisted(artifact.getJSONObject("spec").toString())
+                    val id = artifact.getString("artifact_id")
+                    ToolStore(app, toolDatabase).use { tools ->
+                        tools.saveTool(ToolRecord(id, artifact.getInt("artifact_revision"), 1, spec.json,
+                            spec.initialState, spec.ui.toString(), null, true), revision = true)
                     }
+                    id
+                } else null
+                val noLocation = object : WeatherLocator {
+                    override fun hasPermission() = false
+                    override suspend fun locate(): Nothing = error("No device location in a comparison fixture.")
+                }
+                CloudTestActivity.factory = { application ->
+                    ShellViewModel(application, provider, store, keys, weatherLocator = noLocation, legacy = isolatedLegacyKeys(application), models = isolatedModels(application), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE, imageProviders = pictureProviders).also { model = it }
+                }
+                val scenario = ActivityScenario.launch(CloudTestActivity::class.java)
+                activity = scenario
+                val vm = onMain { checkNotNull(model) }
+                await(15_000) { onMain { !vm.loading && !vm.tools.busy } }
+                check(onMain { !vm.loadFailed && vm.snapshot.conversations.isEmpty() &&
+                    vm.tools.tools.map { it.id } == listOfNotNull(savedId) && vm.tools.drafts.isEmpty() })
+                onMain { vm.tools.generationTraceObserver = { requests.last().generation += it } }
+                val robot = ShellRobot(name)
+                fun visible(id: Int): AccessibilityNodeInfo? {
+                    if (robot.diagnostics.freshRoot()?.packageName?.toString() != app.packageName) return null
+                    return robot.find(robot.text(id))?.takeIf { it.isVisibleToUser }
+                }
+                fun screenshot(name: String): Boolean {
+                    var focused = false
+                    scenario.onActivity { focused = it.window.decorView.hasWindowFocus() }
+                    if (!focused || robot.diagnostics.freshRoot()?.packageName?.toString() != app.packageName) return false
+                    val bitmap = instrumentation.uiAutomation.takeScreenshot() ?: return false
+                    try {
+                        return File(directory, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                    } finally { bitmap.recycle() }
+                }
+                if (savedId != null) {
+                    failureAt = "workflow"
+                    fun savedTool() = onMain { vm.tools.tools.single { it.id == savedId } }
+                    val title = ToolSpec.parsePersisted(savedTool().spec).title
+                    onMain { vm.openSurface(savedId) }
+                    robot.waitFor(robot.text(R.string.tool_refine))
+                    val proof = JSONObject().put("status", "failed")
+                    report.put("workflow", proof)
+                    fun reopen() {
+                        Plan5WorkflowChecks.reopenSaved(robot, title)
+                    }
+                    var edited = false
+                    val refine: (String) -> Unit = {
+                        check(!edited && it == request && providerHttpCalls.get() == 0)
+                        report.put("send_action_elapsed_ns", SystemClock.elapsedRealtimeNanos())
+                        submitSavedEdit(vm, robot, ::savedTool, it, proof, directory)
+                        check(providerHttpCalls.get() > 0)
+                        edited = true
+                    }
+                    val checks = Plan5WorkflowChecks(robot, proof, ::savedTool, ::screenshot, toolDatabase)
+                    if (caseId == "extra:reference-points-ledger") checks.ledger(::reopen, refine)
+                    else checks.grid(::reopen, refineVictory = refine)
+                    check(edited)
                     proof.put("status", "passed")
+                    report.put("chat_outcome", "artifact-committed").put("artifact_id", savedId)
+                        .put("artifact_revision", savedTool().revision)
+                    terminal = "complete"
+                    return
                 }
-            }
-            if (canvasWorkflow && verifyWorkflow) check(report.optJSONObject("workflow")?.optString("status") == "passed")
-            save("review")
-            SystemClock.sleep(reviewSeconds * 1_000L)
-            report.put("review_screen", screenshot("review"))
-            if (repeat == 2) {
-                // The warm request: the same request in a new conversation of this process. The top level keeps the first one.
-                onMain {
-                    vm.openSurface(null)
-                    vm.select(null)
+                /**
+                 * Sends the request from the composer of the new chat and measures it into [into]: the report, or its object
+                 * "second". [stage] prefixes the failure stages and the screenshots. Null when the chat did not settle in time.
+                 */
+                fun measuredRequest(into: JSONObject, stage: String): Message? {
+                    failureAt = stage + "send"
+                    robot.edit(robot.text(R.string.composer_label), request)
+                    val draft = onMain {
+                        check(!vm.tools.busy && vm.activeConversationId == null)
+                        vm.snapshot.draft
+                    }
+                    check(draft.text == request && draft.attachments.isEmpty())
+                    into.put("fresh_draft", draft.id)
+                    val send = checkNotNull(visible(R.string.composer_send))
+                    into.put("send_action_uptime_ms", SystemClock.uptimeMillis())
+                    into.put("send_action_elapsed_ns", SystemClock.elapsedRealtimeNanos())
+                    check(click(send)) { "The composer Send action did not run." }
+                    save(stage + "sent")
+                    failureAt = stage + "chat-terminal"
+                    var previewObserved = false
+                    // The app card's Open action marks the first usable app. It is read before any test step after the chat settles.
+                    var openVisibleAt: Long? = null
+                    val settled = waitFor(chatSeconds * 1_000L) {
+                        if (!previewObserved && visible(R.string.tool_preview_provisional) != null) {
+                            previewObserved = true
+                            into.put("provisional_visible_elapsed_ns", SystemClock.elapsedRealtimeNanos())
+                            into.put("provisional_label_observed", true)
+                            into.put("provisional_screen", screenshot(stage + "provisional"))
+                        }
+                        if (openVisibleAt == null && visible(R.string.tool_open) != null) openVisibleAt = SystemClock.elapsedRealtimeNanos()
+                        onMain {
+                            val assistant = vm.snapshot.selected?.messages?.lastOrNull()?.takeIf { it.role == "assistant" }
+                            !vm.tools.busy && vm.activeConversationId == null && assistant?.status in terminalChatStatuses
+                        }
+                    }
+                    val evidence = requests.last()
+                    if (!settled) {
+                        val deadline = onMain {
+                            captureChatState(vm).apply {
+                                val at = getLong("at_ns")
+                                val last = evidence.generation.lastOrNull { it.atNanos <= at }
+                                put("generation_last", last?.let(::traceEvent) ?: JSONObject.NULL)
+                                put("provider_http_calls", evidence.httpDispatches.size)
+                            }
+                        }
+                        into.put("capture_deadline", deadline)
+                        if (!deadline.getBoolean("terminal") || !deadline.getBoolean("idle")) {
+                            terminal = "unresolved"
+                            report.put("failure_stage", failureAt)
+                            report.put("deadline_screen", screenshot(stage + "deadline"))
+                            return null
+                        }
+                    }
+                    val chat = onMain { checkNotNull(vm.snapshot.selected) }
+                    val user = chat.messages.first()
+                    val assistant = chat.messages.last()
+                    check(user.role == "user" && assistant.replyTo == user.id && sha256(user.text) == input.getString("request_sha256"))
+                    into.put("fresh_conversation", chat.id).put("assistant_message", assistant.id)
+                        .put("assistant_status", assistant.status).put("operation_id", assistant.toolOperationId ?: JSONObject.NULL)
+                        .put("provisional_label_observed", previewObserved)
+                    val decision = evidence.acceptedOperations.lastOrNull()?.optString("kind")
+                    decision?.let { into.put("chat_decision", it) }
+                    into.put("assistant_text", assistant.text)
+                    val sentAt = into.getLong("send_action_elapsed_ns")
+                    into.getJSONObject("measurements").put("terminal_chat_ms",
+                        (SystemClock.elapsedRealtimeNanos() - sentAt) / 1_000_000)
+                    if (openVisibleAt == null && assistant.toolId != null) waitFor(5_000) {
+                        (visible(R.string.tool_open) != null).also { if (it) openVisibleAt = SystemClock.elapsedRealtimeNanos() }
+                    }
+                    val provisionalAt = into.optLong("provisional_visible_elapsed_ns", 0L).takeIf { it > 0 }
+                    listOfNotNull(provisionalAt, openVisibleAt).minOrNull()?.let {
+                        into.getJSONObject("measurements").put("first_ui_ms", (it - sentAt) / 1_000_000)
+                    }
+                    openVisibleAt?.let { into.getJSONObject("measurements").put("completed_ui_ms", (it - sentAt) / 1_000_000) }
+                    if (decision == "device_plan") {
+                        onMain { vm.agent.plan?.takeIf { it.conversationId == chat.id } }?.let { plan ->
+                            into.put("phone_plan", JSONObject().put("phase", plan.phase.name)
+                                .put("steps", JSONArray(plan.steps.map { it.command.json() }))
+                                .put("results", JSONArray(plan.results)))
+                        }
+                    }
+                    into.put("chat_outcome", when {
+                        assistant.status != "complete" -> "request-failed"
+                        assistant.toolId != null && assistant.toolRevision != null -> "artifact-committed"
+                        else -> "complete-without-artifact"
+                    })
+                    if (assistant.status != "complete") {
+                        into.put("failure_code", safeGenerationCode(assistant.errorCode))
+                        if (canvasWorkflow) into.put("scene_diagnostic", assistant.error?.take(400))
+                    }
+                    return assistant
                 }
-                // Closing the app refreshes the library (busy for a moment). The Open card of the first chat must be gone,
-                // or it would end the time of the second request.
-                await(15_000) { onMain { !vm.tools.busy && vm.activeConversationId == null } && visible(R.string.tool_open) == null }
-                val second = JSONObject().put("measurements", JSONObject().put("first_ui_ms", JSONObject.NULL)
-                    .put("completed_ui_ms", JSONObject.NULL).put("provider_http_calls", JSONObject.NULL))
-                report.put("second", second)
-                requests += RequestEvidence()
-                measuredRequest(second, "second-") ?: return
+                val assistant = measuredRequest(report, "") ?: return
+                val artifact = assistant.toolId
+                if (artifact != null) {
+                    report.put("artifact_id", artifact).put("artifact_revision", assistant.toolRevision)
+                    fun saved() = onMain { vm.tools.tools.singleOrNull { it.id == artifact } }
+                    await(5_000) { saved() != null }
+                    val record = checkNotNull(saved())
+                    check(record.revision == assistant.toolRevision)
+                    val definition = JSONObject().put("artifact_id", artifact).put("artifact_revision", record.revision)
+                        .put("spec", JSONObject(record.spec)).toString()
+                    File(directory, "artifact.json").writeText(definition)
+                    report.put("artifact_sha256", sha256(definition))
+                }
+                failureAt = "review"
+                report.put("chat_screen", screenshot("chat"))
+                if (artifact != null) {
+                    val deadline = SystemClock.uptimeMillis() + 5_000
+                    var open: AccessibilityNodeInfo? = null
+                    while (open == null && SystemClock.uptimeMillis() < deadline) {
+                        open = visible(R.string.tool_open)
+                        if (open == null) SystemClock.sleep(50)
+                    }
+                    if (open != null) report.put("card_visible_elapsed_ns", SystemClock.elapsedRealtimeNanos())
+                    report.put("open_card_action", open?.let(::click) == true)
+                }
+                if (verifyTip && artifact != null) {
+                    failureAt = "tip-interaction"
+                    check(report.optBoolean("open_card_action"))
+                    val callsBeforeInteraction = providerHttpCalls.get()
+                    fun savedTool() = onMain { vm.tools.tools.singleOrNull { it.id == artifact } }
+                    await(5_000) { savedTool() != null }
+                    try {
+                        verifyTipCalculator(robot, scenario, { checkNotNull(savedTool()) }, report, ::screenshot)
+                    } finally {
+                        if (report.optJSONObject("tip_interaction")?.optString("status") != "passed") screenshot("tip-failure")
+                    }
+                    check(providerHttpCalls.get() == callsBeforeInteraction)
+                } else if (verifyTip) {
+                    report.put("tip_interaction", JSONObject().put("status", "not-generated"))
+                }
+                if (verifyWorkflow) {
+                    failureAt = "workflow"
+                    val proof = JSONObject().put("status", "not-generated")
+                    report.put("workflow", proof)
+                    if (artifact != null) {
+                        proof.put("status", "failed")
+                        check(report.optBoolean("open_card_action"))
+                        if (verifyTip) {
+                            check(report.getJSONObject("tip_interaction").getString("status") == "passed")
+                        } else if (canvasWorkflow) {
+                            save("review")
+                            val checks = CanvasLiveChecks(robot, proof) { name ->
+                                val bitmap = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+                                try {
+                                    File(directory, "$name.png").outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                                } finally { bitmap.recycle() }
+                            }
+                            val saved = onMain { vm.tools.tools.single { it.id == artifact } }
+                            val spec = ToolSpec.parsePersisted(saved.spec)
+                            if (caseId == "canvas:wave") {
+                                check(canvasSurfaceIds(spec.ui).isNotEmpty())
+                                val sceneLabel = checkNotNull(firstCanvasLabel(spec.ui))
+                                val amplitude = checks.slider("Amplitude", sceneLabel)
+                                checks.captureCompact(sceneLabel) { robot.waitUntil { checks.progress("Amplitude") == amplitude } }
+                            } else {
+                                check(spec.presentation == "immersive") { "The generated game was not immersive." }
+                                fun score(values: JSONObject): Double? {
+                                    val key = values.keys().asSequence().firstOrNull { it.equals("score", true) || it.endsWith("_score") }
+                                    return key?.let { (values.opt(it) as? Number)?.toDouble() }
+                                }
+                                val initial = checkNotNull(score(JSONObject(spec.initialState))) { "The game has no observable Score." }
+                                checks.game(spec.title, initial, { onMain { score(JSONObject(vm.tools.tools.single { it.id == artifact }.state)) } }) {
+                                    onMain { vm.openSurface(null) }
+                                    robot.waitGone(robot.text(R.string.tool_game_controls_open))
+                                    robot.click(robot.text(R.string.tool_open))
+                                }
+                                checks.captureCompact(spec.title) { robot.waitFor(robot.text(R.string.tool_game_controls_open)) }
+                            }
+                        } else {
+                            val toolDatabase = "$database-tools.db"
+                            fun savedTool() = onMain { vm.tools.tools.single { it.id == artifact } }
+                            fun reopen() {
+                                val before = savedTool()
+                                Plan5WorkflowChecks.reopenSaved(robot, ToolSpec.parsePersisted(before.spec).title, fromChat = true)
+                                val after = savedTool()
+                                check(after.revision == before.revision)
+                            }
+                            var localCalls = providerHttpCalls.get()
+                            Plan5WorkflowChecks(robot, proof, ::savedTool, ::screenshot, toolDatabase).run(caseId, ::reopen) {
+                                check(providerHttpCalls.get() == localCalls)
+                                submitSavedEdit(vm, robot, ::savedTool, it, proof, directory)
+                                check(providerHttpCalls.get() > localCalls)
+                                localCalls = providerHttpCalls.get()
+                            }
+                            check(providerHttpCalls.get() == localCalls)
+                        }
+                        proof.put("status", "passed")
+                    }
+                }
+                if (canvasWorkflow && verifyWorkflow) check(report.optJSONObject("workflow")?.optString("status") == "passed")
+                save("review")
+                SystemClock.sleep(reviewSeconds * 1_000L)
+                report.put("review_screen", screenshot("review"))
+                if (repeat == 2) {
+                    // The warm request: the same request in a new conversation of this process. The top level keeps the first one.
+                    onMain {
+                        vm.openSurface(null)
+                        vm.select(null)
+                    }
+                    // Closing the app refreshes the library (busy for a moment). The Open card of the first chat must be gone,
+                    // or it would end the time of the second request.
+                    await(15_000) { onMain { !vm.tools.busy && vm.activeConversationId == null } && visible(R.string.tool_open) == null }
+                    val second = JSONObject().put("measurements", JSONObject().put("first_ui_ms", JSONObject.NULL)
+                        .put("completed_ui_ms", JSONObject.NULL).put("provider_http_calls", JSONObject.NULL))
+                    report.put("second", second)
+                    requests += RequestEvidence()
+                    measuredRequest(second, "second-") ?: return
+                }
+                terminal = "complete"
             }
-            terminal = "complete"
         } catch (failure: Exception) {
             report.put("failure_stage", failureAt).put("failure_type", failure.javaClass.simpleName)
                 .put("failure_frame", failure.stackTrace.firstOrNull { it.className.startsWith("com.alpha") }?.toString())
@@ -661,7 +659,6 @@ class ComparisonChatCaptureTest {
                     vm.memoryStore.close()
                 }
                 GenerationSettings(app).screenshotReview = false
-                planStepBefore?.let { (provider, on) -> GenerationSettings(app).setPlanStep(provider, on) }
                 if (pictures) imageSettings.setEnabled(false).getOrThrow()
                 if (ownsStore) {
                     store.close()

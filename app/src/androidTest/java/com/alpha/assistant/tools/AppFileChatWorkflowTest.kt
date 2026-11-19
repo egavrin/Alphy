@@ -14,7 +14,6 @@ import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.Message
 import com.alpha.assistant.data.MessageProvenance
 import com.alpha.assistant.sandbox.SandboxClient
-import com.alpha.assistant.tools.agent.GenerationSettings
 import com.alpha.assistant.tools.appfile.AppFileCompiler
 import com.alpha.assistant.tools.appfile.AppFilePrevious
 import com.alpha.assistant.tools.appfile.checked
@@ -30,7 +29,6 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -43,33 +41,27 @@ import org.junit.runner.RunWith
 class AppFileChatWorkflowTest {
     private val fixture = ShellFixture("appfile-chat")
     private val robot = ShellRobot("appfile-chat")
-    private val settings = GenerationSettings(fixture.context)
-    private val switchBefore = settings.planStep(AiProvider.OPENAI)
 
     /** Runs at the start of each generation call, inside it. */
     @Volatile private var duringCall: (CloudRequest) -> Unit = {}
 
-    @Before fun switchOn() = settings.setPlanStep(AiProvider.OPENAI, true)
+    @After fun remove() = fixture.remove()
 
-    @After fun restore() {
-        settings.setPlanStep(AiProvider.OPENAI, switchBefore)
-        fixture.remove()
-    }
-
-    /** Opens the shell with a chat model that gives [decisions] in order. The generation calls answer from [script]. */
-    private fun launch(script: AgentScriptProvider, decisions: List<CloudEvent.RoundComplete>, test: (ShellViewModel) -> Unit) {
-        val next = ArrayDeque(decisions)
-        fixture.install(chat = object : ChatProvider {
-            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) =
-                if (request.generationStage == null) emit(next.removeFirst())
-                else { duringCall(request); script.respond(key, request, session, emit) }
-        })
-        fixture.launch().use {
-            val model = checkNotNull(fixture.model)
-            robot.waitUntil { !model.loading }
-            test(model)
+    /** Opens the shell with the switch on and a chat model that gives [decisions] in order. The generation calls answer from [script]. */
+    private fun launch(script: AgentScriptProvider, decisions: List<CloudEvent.RoundComplete>, test: (ShellViewModel) -> Unit) =
+        withPlanStep(fixture.context, AiProvider.OPENAI, true) {
+            val next = ArrayDeque(decisions)
+            fixture.install(chat = object : ChatProvider {
+                override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) =
+                    if (request.generationStage == null) emit(next.removeFirst())
+                    else { duringCall(request); script.respond(key, request, session, emit) }
+            })
+            fixture.launch().use {
+                val model = checkNotNull(fixture.model)
+                robot.waitUntil { !model.loading }
+                test(model)
+            }
         }
-    }
 
     /** Sends [request] in a new chat that routes it to a new app. The generation calls answer from [script]. The saved app goes to [test]. */
     private fun create(request: String, script: AgentScriptProvider, test: (ToolRecord) -> Unit) =

@@ -29,9 +29,9 @@ import com.alpha.assistant.tools.Scripted
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
-import com.alpha.assistant.tools.agent.GenerationSettings
 import com.alpha.assistant.tools.agentReply
 import com.alpha.assistant.tools.appfile.plan as appFilePlan
+import com.alpha.assistant.tools.withPlanStep
 import com.alpha.assistant.voice.FakeLiveAudio
 import com.alpha.assistant.voice.FakeLiveTransport
 import com.alpha.assistant.voice.FakeSpeechInput
@@ -123,11 +123,8 @@ class ShellLiveVoiceWorkflowTest {
 
     /** A hand-off of a create request takes the chat path, so with the switch on it gets one plan call and no agent call (loop plan, task 7). */
     @Test fun miniAppHandOffGetsThePlanStep() {
-        val settings = GenerationSettings(fixture.context)
-        val before = settings.planStep(AiProvider.OPENAI)
         val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))))
-        settings.setPlanStep(AiProvider.OPENAI, true)
-        try {
+        withPlanStep(fixture.context, AiProvider.OPENAI, true) {
             install(chat = object : ChatProvider {
                 override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) =
                     if (request.generationStage != null) script.respond(key, request, session, emit)
@@ -145,8 +142,6 @@ class ShellLiveVoiceWorkflowTest {
                 robot.waitUntil { robot.instrumentation.runOnMainSync { saved = model.tools.tools.singleOrNull { it.id == card } }; saved != null }
                 assertEquals(appFilePlan("calc"), ToolSpec.parsePersisted(checkNotNull(saved).spec).appFile)
             }
-        } finally {
-            settings.setPlanStep(AiProvider.OPENAI, before)
         }
     }
 

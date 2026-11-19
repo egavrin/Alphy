@@ -1,10 +1,13 @@
 package com.alpha.assistant.tools
 
+import android.content.Context
+import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
+import com.alpha.assistant.tools.agent.GenerationSettings
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.util.concurrent.CopyOnWriteArrayList
@@ -53,3 +56,15 @@ internal open class TracedGeneration(private val calls: List<CloudRequest>, val 
 
 /** The agent reply that writes [app]. */
 internal fun writeAppReply(app: JSONObject) = JSONObject().put("tool", "write_app").put("app", app).toString()
+
+/** Sets the plan-step switch of [provider] to [on] for [block], and restores the earlier value after it. */
+internal inline fun <T> withPlanStep(context: Context, provider: AiProvider, on: Boolean, block: () -> T): T {
+    val settings = GenerationSettings(context)
+    val before = settings.planStep(provider)
+    settings.setPlanStep(provider, on)
+    try {
+        return block()
+    } finally {
+        settings.setPlanStep(provider, before)
+    }
+}
