@@ -816,6 +816,12 @@ class AppFileProofTest {
         assertEquals("Bo",app.act("people_remove",row("r1",null)).getString("who"))
         assertEquals("a",app.act(actionOf(spec,"Reset")).getString("k"))
     }
+    @Test fun aStaticScreenKeepsOneHiddenField(): Unit=runBlocking {
+        // Item 2: a plan with no state value keeps one hidden field d0, because Alphy keeps 1 to 40 state fields. The kit test of item 2 has the same plan.
+        val spec=parsedAndSmoked(SandboxClient(instrumentation.targetContext),"static",
+            text="app(\"T\", lang=\"en\")\nneed intro = content(\"Hello\")\nneed note = card(\"Title\", \"Text\")")
+        assertEquals(setOf("d0"),JSONObject(spec.initialState).keys().asSequence().toSet())
+    }
     @Test fun aPlanOverTheLengthCapIsAFaultOfTheHost(): Unit=runBlocking {
         // Item 9 of the final review: the host reads at most 65536 characters of a plan, with no call of the sandbox. A plan of 65536 characters goes to the kit.
         val head="app(\"Long\", lang=\"en\")\nroot = Column([Text(\""
