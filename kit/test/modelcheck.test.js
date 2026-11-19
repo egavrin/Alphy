@@ -2,7 +2,7 @@
 // the merge of a repair, and the record of a request. No test calls the API.
 
 import { expect, test } from "bun:test";
-import { BARS, PROMPT, barFaults, bodyOf, checkOne, faultTable, kindOf, merge, numbers, repairText, taskText } from "../modelcheck.js";
+import { BARS, PROMPT, SET_E, barFaults, bodyOf, checkOne, faultTable, kindOf, merge, numbers, repairText, taskText } from "../modelcheck.js";
 import "./helpers.js";
 
 const PLAN = 'app("Tip", lang="en")\nneed bill = input("money", "Bill", 80, min=0, max=500)\nneed tip = figure("money", "Tip", $/bill * 0.1, example=[{bill: 100}, 10])\n';
@@ -17,6 +17,20 @@ const item = { id: "t", set: "C", request: "A tip calculator", reply: "I'll buil
 test("modelcheck: the task text is the generationPrompt of the app, with the host line under the request of a dialogue", () => {
   expect(taskText(item)).toBe("User request: A tip calculator\nWidget brief: \nExcerpts below may be truncated. Preserve the complete request, brief, and source URLs above.\nReply excerpt: I'll build it.");
   expect(taskText({ request: "Explain", host: "HOST" })).toBe("User request: Explain\nHOST\nWidget brief: \nExcerpts below may be truncated. Preserve the complete request, brief, and source URLs above.");
+});
+
+test("modelcheck: set E is 28 fresh requests with unique ids: 14 apps, 6 dialogue screens with the host line, and 8 that expect outside", async () => {
+  expect(SET_E.length).toBe(28);
+  expect(new Set(SET_E.map((entry) => entry.id)).size).toBe(28);
+  expect(SET_E.every((entry) => ["plan", "outside"].includes(entry.expect) && entry.set === "E" && entry.reply === "")).toBe(true);
+  const screens = SET_E.filter((entry) => entry.host);
+  expect([SET_E.filter((entry) => entry.expect === "plan" && !entry.host).length, screens.length, SET_E.filter((entry) => entry.expect === "outside").length]).toEqual([14, 6, 8]);
+  expect(screens.every((entry) => entry.host === PROMPT.Dialogue && entry.expect === "plan")).toBe(true);
+  const { ask, bodies } = fake(PLAN, PLAN);
+  const screen = await checkOne(screens[0], { ask, model: "m", effort: "low" }), app = await checkOne(SET_E[0], { ask, model: "m", effort: "low" });
+  expect(bodies[0].input[0].content[0].text).toStartWith(`User request: ${screens[0].request}\n${PROMPT.Dialogue}\nWidget brief: \n`);
+  expect(bodies[1].input[0].content[0].text).toStartWith(`User request: ${SET_E[0].request}\nWidget brief: \n`);
+  expect([screen.set, screen.dialogue, app.set, app.dialogue]).toEqual(["E", true, "E", false]);
 });
 
 test("modelcheck: the body is the body of OpenAiResponsesWire with no JSON mode", () => {
@@ -76,13 +90,19 @@ test("modelcheck: the device bars and the host forms that the kit takes", () => 
   expect(barFaults({ compileMs: 1, stateBytes: 1, plan: "", definition: { ui } })).toEqual(["a choice that is the only child of a card or a row"]);
 });
 
-test("modelcheck: the numbers count the clean steps, the routing, and the calls", async () => {
+test("modelcheck: the numbers count the clean steps, the times, the routing, and the calls, with the apps and the dialogue screens of set E apart", async () => {
+  const fresh = { ...item, set: "E", reply: "" }, faulty = PLAN.replace("max=500)", "max=500, bogus=1)");
   const records = [await checkOne(item, { ...fake(PLAN), model: "m", effort: "low" }), await checkOne({ ...item, id: "holdout-tilt-ru", expect: "outside" }, { ...fake(PLAN), model: "m", effort: "low" }),
-    await checkOne({ ...item, id: "x", expect: "plan" }, { ...fake('outside("3d")'), model: "m", effort: "low" })];
+    await checkOne({ ...item, id: "x", expect: "plan" }, { ...fake('outside("3d")'), model: "m", effort: "low" }),
+    await checkOne({ ...fresh, id: "e-app" }, { ...fake(PLAN), model: "m", effort: "low" }), await checkOne({ ...fresh, id: "e-screen", host: "HOST" }, { ...fake(faulty, 'need bill = input("money", "Bill", 80, min=0, max=500)'), model: "m", effort: "low" }),
+    await checkOne({ ...fresh, id: "e-game", expect: "outside" }, { ...fake('outside("game")'), model: "m", effort: "low" })];
   const rows = numbers(records);
-  expect(rows[0]).toStartWith("set C: clean first 1/2, after 1 repair 0/2, after 2 0/2, not clean 1/2 (outside 1); clean under the device bars 1/2");
-  expect(rows[1]).toBe("routing: 0/1 not servable got outside; x outside(3d) went outside wrongly; device misses: holdout-tilt-ru");
-  expect(rows[2]).toStartWith("calls 3,");
+  expect(rows[0]).toStartWith("set C: clean first 1/2, after 1 repair 0/2, after 2 0/2, not clean 1/2 (outside 1); clean under the device bars 1/2 | first call median 2 s, p90 2 s, max 2 s | first text median 1 s |");
+  expect(rows[1]).toStartWith("set E app: clean first 1/1, after 1 repair 0/1, after 2 0/1, not clean 0/1 (outside 0); clean under the device bars 1/1 |");
+  expect(rows[2]).toStartWith("set E dialogue: clean first 0/1, after 1 repair 1/1, after 2 0/1, not clean 0/1 (outside 0); clean under the device bars 1/1 |");
+  expect(rows[3]).toStartWith("set E: clean first 1/2, after 1 repair 1/2, after 2 0/2, not clean 0/2 (outside 0); clean under the device bars 2/2 |");
+  expect(rows[4]).toBe("routing: 1/2 not servable got outside; x outside(3d) went outside wrongly; device misses: holdout-tilt-ru; an outside reply median 2 s, max 2 s");
+  expect(rows[5]).toStartWith("calls 7,");
 });
 
 test("modelcheck: the fault table groups one kind of fault over names and numbers, and says whether the next report still had it", () => {
