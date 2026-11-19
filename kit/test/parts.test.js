@@ -130,6 +130,40 @@ test("deck with no back: pages with a next and a back button and an end", async 
   same([st.press("book_next"), st.find("book_card").props.visible, st.find("book_endCard").props.visible, st.press("book_again"), st.find("book_card").props.visible, st.find("book_front").props.text], ["", false, true, "", true, "One"], "after the last page the card with its next button is hidden and the end shows, so there is no page 4. Again starts from page 1");
 });
 
+// The nodes of a node that show: a hidden node hides its children too.
+const shownIn = (node) => (node.props.visible === false ? [] : [node, ...node.children.flatMap(shownIn)]);
+
+test("deck (L1 item 3): over an empty list each form shows the empty text of the list, or the kit's words, and no done state, no score, and no dead button", async () => {
+  for (const form of ["", ", back=$meaning", ", answer=$meaning"]) for (const empty of ["", ', emptyText="No words yet"']) {
+    const file = await planned(`app("T", lang="ko")\nneed words = entries("Words", fields={word: "text", meaning: "text"}, rows=[]${empty})\nneed quiz = deck("Quiz", $/words, front=$word${form})`);
+    const app = new App(file), shown = () => shownIn(app.find("quiz_view")).slice(1).map((node) => `${node.type} ${node.props.text ?? ""}`.trim());
+    // holdout-words-ko showed "완료" and "다시" over its empty word list, and a score of 0.
+    same({ form, empty, shown: shown() }, { form, empty, shown: [`Text ${empty ? "No words yet" : "아직 기록이 없습니다"}`] }, "only the empty text shows");
+    app.input("words_new_word", "apple");
+    app.input("words_new_meaning", "사과");
+    app.press("words_add");
+    same({ form, front: app.find("quiz_front").props.text, empty: app.find("quiz_empty").props.visible }, { form, front: "apple", empty: false }, "a row brings the card");
+  }
+});
+
+test("deck (L1 item 3): holdout-words-ko shows the empty text of its word list in its quiz, and no 완료, 다시, or 점수", async () => {
+  const app = new App(await planned(fixture("model/holdout-words-ko")));
+  same(shownIn(app.find("quiz_view")).slice(1).map((node) => `${node.type} ${node.props.text ?? ""}`.trim()), ["Text 아직 단어가 없어요"], "the quiz over the empty list");
+});
+
+test("deck (L1 item 3): a deck of pages keeps its Back button at the end, so a person can go back from the end, and Next goes away there", async () => {
+  const st = new App(await planned('app("T")\nneed pages = entries("Pages", fields={line: "text"}, hidden=true, rows=[{line: "One"}])\nneed book = deck("Story", $/pages, front=$line)'));
+  same([st.find("book_prev").props.enabled, st.press("book_next"), st.find("book_endCard").props.visible, st.find("book_next").props.visible, st.find("book_turn").props.visible, st.find("book_prev").props.enabled,
+    st.press("book_prev"), st.find("book_front").props.text], [false, "", true, false, true, true, "", "One"], "with one row, Back works from the end");
+});
+
+test("deck (L1 item 3): the empty text of a deck follows a change of the empty text of its list", async () => {
+  const file = await planned('app("T")\nneed words = entries("Words", fields={word: "text"}, emptyText="None")\nneed quiz = deck("Quiz", $/words, front=$word, back=$word)');
+  file.feed('need words = entries("Words", fields={word: "text"}, emptyText="Nothing here")');
+  await expand(file);
+  same(new App(file).find("quiz_empty").props.text, "Nothing here", "the deck is written again");
+});
+
 test("tabs: needs in groups, a date and a time input, and a chart of the sum for each category", async () => {
   const paged = await planned('app("T")\nneed bed = input("time", "Bed", "23:00")\nneed wake = input("time", "Wake", "07:00")\nneed slept = figure("number", "Hours", hours($/bed, $/wake), example=[{bed: "23:30", wake: "06:00"}, 6.5])\nneed day = input("date", "Day", "2026-11-21")\nneed costs = entries("Costs", fields={what: "text", cat: ["Food", "Bus"], amount: "number"})\nneed sums = chart("By category", groups($/costs, $cat, $amount), $key, $value)\nneed pages = tabs(["Sleep", "Costs"], [[slept, bed, wake, day], [costs, sums]])');
   const pg = new App(paged);

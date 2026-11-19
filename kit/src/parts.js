@@ -317,8 +317,11 @@ const PARTS = {
   },
 
   // need quiz = deck("Quiz", $/words, front=$word, back=$meaning, mark=$known): one row at a time. A tap shows the back, then yes or no goes to the next row.
-  deck(name, need, { caption }) {
+  deck(name, need, { caption, word, emptyOf }) {
     const [title, list] = need.args, opt = need.named, text = caption;
+    // Over an empty list the deck shows the empty text of the list, else the kit's words, and no end, no score, and no button (L1 item 3).
+    const none = [`$/${name}_none := len(${show(list)}) == 0`, `${name}_empty = Text(${emptyOf(list) ?? q(word("No records yet"))}, tone="muted", align="center", visible=$/${name}_none)`];
+    const end = `visible=$/${name}_end && !$/${name}_none`;
     // A field of the row in front, such as $word, is a field of the row that the deck shows now.
     const now = (tree) => show(rebase(tree, `${name}_now`));
     // picture=$field: a picture on each card, from the description in that field of the row.
@@ -329,7 +332,7 @@ const PARTS = {
     // With answer= the person types the answer. The check button says right or wrong, and a right answer counts one point. The check button goes away after its tap, so a point counts once.
     if (opt.answer) return {
       lines: [`$/${name}_i = 0`, `$/${name}_typed = ""`, `$/${name}_checked = false`, `$/${name}_points = 0`,
-        `$/${name}_now := at(${show(list)}, $/${name}_i)`, `$/${name}_end := $/${name}_i >= len(${show(list)})`,
+        `$/${name}_now := at(${show(list)}, $/${name}_i)`, `$/${name}_end := $/${name}_i >= len(${show(list)})`, ...none,
         `$/${name}_right := lower(trim(text($/${name}_typed))) == lower(trim(text(${now(opt.answer)})))`,
         ...picture, front,
         `${name}_field = TextField(${text("field", "Your answer")}, $/${name}_typed, enabled=!$/${name}_checked)`,
@@ -339,28 +342,29 @@ const PARTS = {
         `${name}_card = Card([${inCard}${name}_front], variant="hero", visible=!$/${name}_end)`,
         `${name}_reply = Column([${name}_field, ${name}_check, ${name}_result, ${name}_next], visible=!$/${name}_end)`,
         `${name}_again = Button(${text("again", "Again")}, action=[set($/${name}_i, 0), set($/${name}_points, 0), set($/${name}_typed, ""), set($/${name}_checked, false)])`,
-        `${name}_endCard = Card([Heading(${text("done", "Done")}), ${name}_again], visible=$/${name}_end)`,
-        `${name}_score = Metric(${text("points", "Points")}, $/${name}_points)`,
-        `${name}_view = Section(${show(title)}, [${name}_card, ${name}_reply, ${name}_endCard, ${name}_score])`],
+        `${name}_endCard = Card([Heading(${text("done", "Done")}), ${name}_again], ${end})`,
+        `${name}_score = Metric(${text("points", "Points")}, $/${name}_points, visible=!$/${name}_none)`,
+        `${name}_view = Section(${show(title)}, [${name}_empty, ${name}_card, ${name}_reply, ${name}_endCard, ${name}_score])`],
       top: [`${name}_view`],
     };
     // Without back= the deck is pages: no hidden side and no count. A next and a back button, and an end after the last row.
+    // At the end Next goes and Back stays, so a deck of one row has a Back button that works (L1 item 3).
     // Back is outlined and forward is filled, both explicit, as in the steps and a lesson: Alphy fills the first available button with no variant.
     if (!opt.back) return {
-      lines: [`$/${name}_i = 0`, `$/${name}_now := at(${show(list)}, $/${name}_i)`, `$/${name}_end := $/${name}_i >= len(${show(list)})`,
+      lines: [`$/${name}_i = 0`, `$/${name}_now := at(${show(list)}, $/${name}_i)`, `$/${name}_end := $/${name}_i >= len(${show(list)})`, ...none,
         ...picture, `${name}_front = Heading(text(${now(opt.front)}))`,
-        `${name}_prev = Button(${text("prev", "Back")}, action=dec($/${name}_i), enabled=$/${name}_i > 0, variant="outlined")`, `${name}_next = Button(${text("next", "Next")}, action=inc($/${name}_i), variant="filled")`,
+        `${name}_prev = Button(${text("prev", "Back")}, action=dec($/${name}_i), enabled=$/${name}_i > 0, variant="outlined")`, `${name}_next = Button(${text("next", "Next")}, action=inc($/${name}_i), variant="filled", visible=!$/${name}_end)`,
         `${name}_card = Card([${inCard}${name}_front], variant="hero", visible=!$/${name}_end)`,
-        `${name}_turn = Row([${name}_prev, ${name}_next], visible=!$/${name}_end)`,
+        `${name}_turn = Row([${name}_prev, ${name}_next], visible=!$/${name}_none)`,
         `${name}_again = Button(${text("again", "Again")}, action=set($/${name}_i, 0))`,
-        `${name}_endCard = Card([Heading(${text("done", "Done")}), ${name}_again], visible=$/${name}_end)`,
-        `${name}_view = Section(${show(title)}, [${name}_card, ${name}_turn, ${name}_endCard])`],
+        `${name}_endCard = Card([Heading(${text("done", "Done")}), ${name}_again], ${end})`,
+        `${name}_view = Section(${show(title)}, [${name}_empty, ${name}_card, ${name}_turn, ${name}_endCard])`],
       top: [`${name}_view`],
     };
     const next = `inc($/${name}_i), set($/${name}_open, false)`;
     return {
       lines: [`$/${name}_i = 0`, `$/${name}_open = false`, `$/${name}_yes = 0`, `$/${name}_no = 0`,
-        `$/${name}_now := at(${show(list)}, $/${name}_i)`, `$/${name}_end := $/${name}_i >= len(${show(list)})`,
+        `$/${name}_now := at(${show(list)}, $/${name}_i)`, `$/${name}_end := $/${name}_i >= len(${show(list)})`, ...none,
         ...picture, front, `${name}_back = Text(text(${now(opt.back)}), visible=$/${name}_open, emphasis="headline", align="center")`,
         `${name}_show = Button(${text("show", "Show")}, action=set($/${name}_open, true), visible=!$/${name}_open)`,
         `${name}_yesButton = Button(${text("yes", "Yes")}, action=[inc($/${name}_yes), ${opt.mark ? `set(${now(opt.mark)}, true), ` : ""}${next}], visible=$/${name}_open, icon="Check", variant="filled")`,
@@ -368,9 +372,9 @@ const PARTS = {
         `${name}_card = Card([${inCard}${name}_front, ${name}_back, ${name}_show], variant="hero", visible=!$/${name}_end)`,
         `${name}_mark = Row([${name}_yesButton, ${name}_noButton], visible=$/${name}_open)`,
         `${name}_again = Button(${text("again", "Again")}, action=[set($/${name}_i, 0), set($/${name}_yes, 0), set($/${name}_no, 0), set($/${name}_open, false)])`,
-        `${name}_endCard = Card([Heading(${text("done", "Done")}), ${name}_again], visible=$/${name}_end)`,
-        `${name}_counts = Grid([Metric(${text("yes", "Yes")}, $/${name}_yes), Metric(${text("no", "No")}, $/${name}_no)], columns=2)`,
-        `${name}_view = Section(${show(title)}, [${name}_card, ${name}_mark, ${name}_endCard, ${name}_counts])`],
+        `${name}_endCard = Card([Heading(${text("done", "Done")}), ${name}_again], ${end})`,
+        `${name}_counts = Grid([Metric(${text("yes", "Yes")}, $/${name}_yes), Metric(${text("no", "No")}, $/${name}_no)], columns=2, visible=!$/${name}_none)`,
+        `${name}_view = Section(${show(title)}, [${name}_empty, ${name}_card, ${name}_mark, ${name}_endCard, ${name}_counts])`],
       top: [`${name}_view`],
     };
   },
@@ -656,14 +660,20 @@ export function expand(file) {
       const fault = typeFault(key, tree);
       if (fault) file.partFaults.push({ line: null, text: entry.raw, message: `need ${entry.key}: ${fault}` });
     }
-    let built, parsed;
+    // The empty text of another need that the part read, so that a change of that text writes the part again.
+    let built, parsed, read = "";
     try {
       const word = (text, option) => {
         if (option && !hasWords(lang)) english.set(entry.key, new Set(english.get(entry.key)).add(option));
         return wordOf(lang, text);
       };
       const caption = (option, text) => (entry.tree.named[option] ? show(entry.tree.named[option]) : q(word(text, option)));
-      built = part(entry.key, entry.tree, { hero, word, caption, count: entry.key === listHero, role: roleOf(entry.key), tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
+      // The emptyText= of the list need whose state is this list, such as $/words, shown as a line. A list of another kind has none.
+      const emptyOf = (list) => {
+        const tree = needs.find((other) => other.tree.name === "entries" && show(list) === `$/${other.key}`)?.tree.named.emptyText;
+        return tree && (read = show(tree));
+      };
+      built = part(entry.key, entry.tree, { hero, word, caption, emptyOf, count: entry.key === listHero, role: roleOf(entry.key), tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
       // A part line that the host cannot read is a fault of this need, never an exception. The other needs still expand.
       parsed = built.lines.map((line) => parseLine(line));
       if (parsed.includes(null)) throw new DslError("the part made an empty line");
@@ -690,8 +700,8 @@ export function expand(file) {
     (built.holds ?? []).forEach((other) => held.add(other));
     heads.push(...(built.lead ?? []));
     place.set(entry.key, built.top);
-    // A change of the language of the app, or of the place of a figure, writes the part again.
-    const made = `${entry.raw}${entry.key === hero || entry.key === listHero}${lang}${roleOf(entry.key)}`;
+    // A change of the language of the app, of the place of a figure, or of the empty text that the part read writes the part again.
+    const made = `${entry.raw}${entry.key === hero || entry.key === listHero}${lang}${roleOf(entry.key)}${read}`;
     if (file.expanded.get(entry.key) === made) continue;
     if (!file.expanded.has(entry.key)) fresh.push(entry.key);
     file.expanded.set(entry.key, made);

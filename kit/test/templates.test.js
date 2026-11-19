@@ -40,16 +40,17 @@ test("template: the front of a card deck is a centered display text, the back a 
 
 test("template: the hero card of a deck holds the card and at most its filled button, and the other controls stand under it", async () => {
   // Round before the review: an outlined button or a field on a hero card shows no container in the dark theme.
+  // The empty text of the deck stands first, and it shows only while the list has no row (L1 item 3).
   const kinds = (definition) => {
     const section = every(definition.ui).find((node) => node.type === "section");
     return section.children.map((node) => [node.type, node.variant, every(node).slice(1).map((child) => (child.type === "button" ? child.text : child.type))]);
   };
   const back = await built('app("T", lang="en")', WORDS, 'need cards = deck("Words", $/words, front=$word, back=$meaning)');
-  expect(kinds(back.definition).slice(0, 2)).toEqual([["card", "hero", ["text", "text", "Show"]], ["flowRow", undefined, ["Yes", "No"]]]);
+  expect(kinds(back.definition).slice(0, 3)).toEqual([["text", undefined, []], ["card", "hero", ["text", "text", "Show"]], ["flowRow", undefined, ["Yes", "No"]]]);
   const pages = await built('app("T", lang="en")', WORDS, 'need cards = deck("Words", $/words, front=$word)');
-  expect(kinds(pages.definition).slice(0, 2)).toEqual([["card", "hero", ["text"]], ["flowRow", undefined, ["Back", "Next"]]]);
+  expect(kinds(pages.definition).slice(0, 3)).toEqual([["text", undefined, []], ["card", "hero", ["text"]], ["flowRow", undefined, ["Back", "Next"]]]);
   const typed = await built('app("T", lang="en")', WORDS, 'need cards = deck("Words", $/words, front=$word, answer=$meaning)');
-  expect(kinds(typed.definition).slice(0, 2)).toEqual([["card", "hero", ["text"]], ["column", undefined, ["input", "Check", "banner", "text", "Next"]]]);
+  expect(kinds(typed.definition).slice(0, 3)).toEqual([["text", undefined, []], ["card", "hero", ["text"]], ["column", undefined, ["input", "Check", "banner", "text", "Next"]]]);
 });
 
 test("template: the note at the end of steps is a success notice, and the notice of a question is success for a right answer and warning for a wrong one", async () => {

@@ -310,10 +310,11 @@ test("a deck over an empty list inside tabs (A0-K3): the saved plan of words-ko 
   expect((await compileAppFile(REPLIES["r0-terra-low/holdout-words-ko"][0])).faults).toEqual([]);
 });
 
-test("a deck over an empty list inside tabs (A0-K3): a deck with a back or an answer over a list that starts empty compiles clean in tabs and in steps, as with no holder", async () => {
+test("a deck over an empty list (A0-K3, L1 item 3): each form of deck, pages, back=, and answer=, over a list that starts empty compiles clean alone, in tabs, and in steps", async () => {
   const list = 'need words = entries("Words", fields={word: "text", meaning: "text"}, rows=[])';
-  for (const deck of ["back=$meaning", "answer=$meaning"]) for (const holder of ["", 'need pages = tabs(["Words", "Quiz"], [[words], [quiz]])', 'need pages = steps(["Words", "Quiz"], [[words], [quiz]])']) {
-    const faults = await faultsOf(list, `need quiz = deck("Quiz", $/words, front=$word, ${deck})`, holder);
+  // The pages form failed the smoke run (K1): with one row its Back button was never enabled where it showed.
+  for (const deck of ["", ", back=$meaning", ", answer=$meaning"]) for (const holder of ["", 'need pages = tabs(["Words", "Quiz"], [[words], [quiz]])', 'need pages = steps(["Words", "Quiz"], [[words], [quiz]])']) {
+    const faults = await faultsOf(list, `need quiz = deck("Quiz", $/words, front=$word${deck})`, holder);
     expect({ deck, holder, faults }).toEqual({ deck, holder, faults: [] });
   }
 });

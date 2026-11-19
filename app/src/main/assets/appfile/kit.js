@@ -973,73 +973,73 @@ const WORDS = {
     Add: "Добавить", Yes: "Да", No: "Нет", Back: "Назад", Next: "Далее", Done: "Готово", Start: "Начать", Pause: "Пауза", Reset: "Сбросить", Show: "Показать",
     Again: "Ещё раз", Check: "Проверить", Right: "Верно", Wrong: "Неверно", "Not yet": "Пока нет", Points: "Очки", "Your answer": "Ваш ответ", Rest: "Отдых",
     Work: "Работа", "Time is up": "Время вышло", Step: "Шаг", "Put together": "Собрать", "Take apart": "Разобрать",
-    Remove: "Убрать", Less: "Меньше", More: "Больше",
+    Remove: "Убрать", Less: "Меньше", More: "Больше", "No records yet": "Записей пока нет",
   },
   de: {
     Add: "Hinzufügen", Yes: "Ja", No: "Nein", Back: "Zurück", Next: "Weiter", Done: "Fertig", Start: "Starten", Pause: "Pause", Reset: "Zurücksetzen", Show: "Zeigen",
     Again: "Noch einmal", Check: "Prüfen", Right: "Richtig", Wrong: "Falsch", "Not yet": "Noch nicht", Points: "Punkte", "Your answer": "Deine Antwort", Rest: "Erholung",
     Work: "Belastung", "Time is up": "Zeit abgelaufen", Step: "Schritt", "Put together": "Zusammensetzen", "Take apart": "Zerlegen",
-    Remove: "Entfernen", Less: "Weniger", More: "Mehr",
+    Remove: "Entfernen", Less: "Weniger", More: "Mehr", "No records yet": "Noch keine Einträge",
   },
   es: {
     Add: "Añadir", Yes: "Sí", No: "No", Back: "Atrás", Next: "Siguiente", Done: "Listo", Start: "Empezar", Pause: "Pausa", Reset: "Restablecer", Show: "Mostrar",
     Again: "Otra vez", Check: "Comprobar", Right: "Correcto", Wrong: "Incorrecto", "Not yet": "Todavía no", Points: "Puntos", "Your answer": "Tu respuesta", Rest: "Descanso",
     Work: "Trabajo", "Time is up": "Se acabó el tiempo", Step: "Paso", "Put together": "Montar", "Take apart": "Desmontar",
-    Remove: "Quitar", Less: "Menos", More: "Más",
+    Remove: "Quitar", Less: "Menos", More: "Más", "No records yet": "Aún no hay registros",
   },
   fr: {
     Add: "Ajouter", Yes: "Oui", No: "Non", Back: "Précédent", Next: "Suivant", Done: "Terminé", Start: "Démarrer", Pause: "Pause", Reset: "Réinitialiser", Show: "Afficher",
     Again: "Recommencer", Check: "Vérifier", Right: "Juste", Wrong: "Faux", "Not yet": "Pas encore", Points: "Points", "Your answer": "Ta réponse", Rest: "Repos",
     Work: "Effort", "Time is up": "Temps écoulé", Step: "Étape", "Put together": "Assembler", "Take apart": "Démonter",
-    Remove: "Supprimer", Less: "Moins", More: "Plus",
+    Remove: "Supprimer", Less: "Moins", More: "Plus", "No records yet": "Aucun enregistrement pour l'instant",
   },
   it: {
     Add: "Aggiungi", Yes: "Sì", No: "No", Back: "Indietro", Next: "Avanti", Done: "Fatto", Start: "Avvia", Pause: "Pausa", Reset: "Azzera", Show: "Mostra",
     Again: "Di nuovo", Check: "Verifica", Right: "Giusto", Wrong: "Sbagliato", "Not yet": "Non ancora", Points: "Punti", "Your answer": "La tua risposta", Rest: "Riposo",
     Work: "Lavoro", "Time is up": "Tempo scaduto", Step: "Passo", "Put together": "Assembla", "Take apart": "Smonta",
-    Remove: "Rimuovi", Less: "Meno", More: "Più",
+    Remove: "Rimuovi", Less: "Meno", More: "Più", "No records yet": "Ancora nessun elemento",
   },
   ja: {
     Add: "追加", Yes: "はい", No: "いいえ", Back: "戻る", Next: "次へ", Done: "完了", Start: "開始", Pause: "一時停止", Reset: "リセット", Show: "表示",
     Again: "もう一度", Check: "確認", Right: "正解", Wrong: "不正解", "Not yet": "まだ", Points: "ポイント", "Your answer": "あなたの答え", Rest: "休憩",
     Work: "運動", "Time is up": "時間になりました", Step: "ステップ", "Put together": "組み立てる", "Take apart": "分解する",
-    Remove: "削除", Less: "減らす", More: "増やす",
+    Remove: "削除", Less: "減らす", More: "増やす", "No records yet": "記録はまだありません",
   },
   ko: {
     Add: "추가", Yes: "예", No: "아니요", Back: "뒤로", Next: "다음", Done: "완료", Start: "시작", Pause: "일시정지", Reset: "초기화", Show: "보기",
     Again: "다시", Check: "확인", Right: "정답", Wrong: "오답", "Not yet": "아직", Points: "점수", "Your answer": "내 답", Rest: "휴식",
     Work: "운동", "Time is up": "시간이 종료되었습니다", Step: "단계", "Put together": "조립하기", "Take apart": "분해하기",
-    Remove: "제거", Less: "줄이기", More: "늘리기",
+    Remove: "제거", Less: "줄이기", More: "늘리기", "No records yet": "아직 기록이 없습니다",
   },
   pl: {
     Add: "Dodaj", Yes: "Tak", No: "Nie", Back: "Wstecz", Next: "Dalej", Done: "Gotowe", Start: "Start", Pause: "Pauza", Reset: "Resetuj", Show: "Pokaż",
     Again: "Jeszcze raz", Check: "Sprawdź", Right: "Dobrze", Wrong: "Źle", "Not yet": "Jeszcze nie", Points: "Punkty", "Your answer": "Twoja odpowiedź", Rest: "Odpoczynek",
     Work: "Praca", "Time is up": "Czas minął", Step: "Krok", "Put together": "Złóż", "Take apart": "Rozłóż",
-    Remove: "Usuń", Less: "Mniej", More: "Więcej",
+    Remove: "Usuń", Less: "Mniej", More: "Więcej", "No records yet": "Brak wpisów",
   },
   pt: {
     Add: "Adicionar", Yes: "Sim", No: "Não", Back: "Voltar", Next: "Próximo", Done: "Concluído", Start: "Iniciar", Pause: "Pausar", Reset: "Redefinir", Show: "Mostrar",
     Again: "De novo", Check: "Verificar", Right: "Certo", Wrong: "Errado", "Not yet": "Ainda não", Points: "Pontos", "Your answer": "Sua resposta", Rest: "Descanso",
     Work: "Trabalho", "Time is up": "O tempo acabou", Step: "Passo", "Put together": "Montar", "Take apart": "Desmontar",
-    Remove: "Remover", Less: "Menos", More: "Mais",
+    Remove: "Remover", Less: "Menos", More: "Mais", "No records yet": "Ainda não há registros",
   },
   tr: {
     Add: "Ekle", Yes: "Evet", No: "Hayır", Back: "Geri", Next: "İleri", Done: "Tamam", Start: "Başlat", Pause: "Duraklat", Reset: "Sıfırla", Show: "Göster",
     Again: "Tekrar", Check: "Kontrol et", Right: "Doğru", Wrong: "Yanlış", "Not yet": "Henüz değil", Points: "Puan", "Your answer": "Cevabın", Rest: "Dinlenme",
     Work: "Çalışma", "Time is up": "Süre doldu", Step: "Adım", "Put together": "Birleştir", "Take apart": "Parçalara ayır",
-    Remove: "Kaldır", Less: "Azalt", More: "Artır",
+    Remove: "Kaldır", Less: "Azalt", More: "Artır", "No records yet": "Henüz kayıt yok",
   },
   uk: {
     Add: "Додати", Yes: "Так", No: "Ні", Back: "Назад", Next: "Далі", Done: "Готово", Start: "Почати", Pause: "Пауза", Reset: "Скинути", Show: "Показати",
     Again: "Ще раз", Check: "Перевірити", Right: "Правильно", Wrong: "Неправильно", "Not yet": "Ще ні", Points: "Бали", "Your answer": "Ваша відповідь", Rest: "Відпочинок",
     Work: "Робота", "Time is up": "Час вийшов", Step: "Крок", "Put together": "Зібрати", "Take apart": "Розібрати",
-    Remove: "Прибрати", Less: "Менше", More: "Більше",
+    Remove: "Прибрати", Less: "Менше", More: "Більше", "No records yet": "Записів поки немає",
   },
   zh: {
     Add: "添加", Yes: "是", No: "否", Back: "返回", Next: "下一步", Done: "完成", Start: "开始", Pause: "暂停", Reset: "重置", Show: "显示",
     Again: "再来一次", Check: "检查", Right: "正确", Wrong: "错误", "Not yet": "还没有", Points: "得分", "Your answer": "你的答案", Rest: "休息",
     Work: "训练", "Time is up": "时间到", Step: "步骤", "Put together": "组装", "Take apart": "拆开",
-    Remove: "移除", Less: "减少", More: "增加",
+    Remove: "移除", Less: "减少", More: "增加", "No records yet": "暂无记录",
   },
 };
 
@@ -1371,8 +1371,11 @@ const PARTS = {
   },
 
   // need quiz = deck("Quiz", $/words, front=$word, back=$meaning, mark=$known): one row at a time. A tap shows the back, then yes or no goes to the next row.
-  deck(name, need, { caption }) {
+  deck(name, need, { caption, word, emptyOf }) {
     const [title, list] = need.args, opt = need.named, text = caption;
+    // Over an empty list the deck shows the empty text of the list, else the kit's words, and no end, no score, and no button (L1 item 3).
+    const none = [`$/${name}_none := len(${show(list)}) == 0`, `${name}_empty = Text(${emptyOf(list) ?? q(word("No records yet"))}, tone="muted", align="center", visible=$/${name}_none)`];
+    const end = `visible=$/${name}_end && !$/${name}_none`;
     // A field of the row in front, such as $word, is a field of the row that the deck shows now.
     const now = (tree) => show(rebase(tree, `${name}_now`));
     // picture=$field: a picture on each card, from the description in that field of the row.
@@ -1383,7 +1386,7 @@ const PARTS = {
     // With answer= the person types the answer. The check button says right or wrong, and a right answer counts one point. The check button goes away after its tap, so a point counts once.
     if (opt.answer) return {
       lines: [`$/${name}_i = 0`, `$/${name}_typed = ""`, `$/${name}_checked = false`, `$/${name}_points = 0`,
-        `$/${name}_now := at(${show(list)}, $/${name}_i)`, `$/${name}_end := $/${name}_i >= len(${show(list)})`,
+        `$/${name}_now := at(${show(list)}, $/${name}_i)`, `$/${name}_end := $/${name}_i >= len(${show(list)})`, ...none,
         `$/${name}_right := lower(trim(text($/${name}_typed))) == lower(trim(text(${now(opt.answer)})))`,
         ...picture, front,
         `${name}_field = TextField(${text("field", "Your answer")}, $/${name}_typed, enabled=!$/${name}_checked)`,
@@ -1393,28 +1396,29 @@ const PARTS = {
         `${name}_card = Card([${inCard}${name}_front], variant="hero", visible=!$/${name}_end)`,
         `${name}_reply = Column([${name}_field, ${name}_check, ${name}_result, ${name}_next], visible=!$/${name}_end)`,
         `${name}_again = Button(${text("again", "Again")}, action=[set($/${name}_i, 0), set($/${name}_points, 0), set($/${name}_typed, ""), set($/${name}_checked, false)])`,
-        `${name}_endCard = Card([Heading(${text("done", "Done")}), ${name}_again], visible=$/${name}_end)`,
-        `${name}_score = Metric(${text("points", "Points")}, $/${name}_points)`,
-        `${name}_view = Section(${show(title)}, [${name}_card, ${name}_reply, ${name}_endCard, ${name}_score])`],
+        `${name}_endCard = Card([Heading(${text("done", "Done")}), ${name}_again], ${end})`,
+        `${name}_score = Metric(${text("points", "Points")}, $/${name}_points, visible=!$/${name}_none)`,
+        `${name}_view = Section(${show(title)}, [${name}_empty, ${name}_card, ${name}_reply, ${name}_endCard, ${name}_score])`],
       top: [`${name}_view`],
     };
     // Without back= the deck is pages: no hidden side and no count. A next and a back button, and an end after the last row.
+    // At the end Next goes and Back stays, so a deck of one row has a Back button that works (L1 item 3).
     // Back is outlined and forward is filled, both explicit, as in the steps and a lesson: Alphy fills the first available button with no variant.
     if (!opt.back) return {
-      lines: [`$/${name}_i = 0`, `$/${name}_now := at(${show(list)}, $/${name}_i)`, `$/${name}_end := $/${name}_i >= len(${show(list)})`,
+      lines: [`$/${name}_i = 0`, `$/${name}_now := at(${show(list)}, $/${name}_i)`, `$/${name}_end := $/${name}_i >= len(${show(list)})`, ...none,
         ...picture, `${name}_front = Heading(text(${now(opt.front)}))`,
-        `${name}_prev = Button(${text("prev", "Back")}, action=dec($/${name}_i), enabled=$/${name}_i > 0, variant="outlined")`, `${name}_next = Button(${text("next", "Next")}, action=inc($/${name}_i), variant="filled")`,
+        `${name}_prev = Button(${text("prev", "Back")}, action=dec($/${name}_i), enabled=$/${name}_i > 0, variant="outlined")`, `${name}_next = Button(${text("next", "Next")}, action=inc($/${name}_i), variant="filled", visible=!$/${name}_end)`,
         `${name}_card = Card([${inCard}${name}_front], variant="hero", visible=!$/${name}_end)`,
-        `${name}_turn = Row([${name}_prev, ${name}_next], visible=!$/${name}_end)`,
+        `${name}_turn = Row([${name}_prev, ${name}_next], visible=!$/${name}_none)`,
         `${name}_again = Button(${text("again", "Again")}, action=set($/${name}_i, 0))`,
-        `${name}_endCard = Card([Heading(${text("done", "Done")}), ${name}_again], visible=$/${name}_end)`,
-        `${name}_view = Section(${show(title)}, [${name}_card, ${name}_turn, ${name}_endCard])`],
+        `${name}_endCard = Card([Heading(${text("done", "Done")}), ${name}_again], ${end})`,
+        `${name}_view = Section(${show(title)}, [${name}_empty, ${name}_card, ${name}_turn, ${name}_endCard])`],
       top: [`${name}_view`],
     };
     const next = `inc($/${name}_i), set($/${name}_open, false)`;
     return {
       lines: [`$/${name}_i = 0`, `$/${name}_open = false`, `$/${name}_yes = 0`, `$/${name}_no = 0`,
-        `$/${name}_now := at(${show(list)}, $/${name}_i)`, `$/${name}_end := $/${name}_i >= len(${show(list)})`,
+        `$/${name}_now := at(${show(list)}, $/${name}_i)`, `$/${name}_end := $/${name}_i >= len(${show(list)})`, ...none,
         ...picture, front, `${name}_back = Text(text(${now(opt.back)}), visible=$/${name}_open, emphasis="headline", align="center")`,
         `${name}_show = Button(${text("show", "Show")}, action=set($/${name}_open, true), visible=!$/${name}_open)`,
         `${name}_yesButton = Button(${text("yes", "Yes")}, action=[inc($/${name}_yes), ${opt.mark ? `set(${now(opt.mark)}, true), ` : ""}${next}], visible=$/${name}_open, icon="Check", variant="filled")`,
@@ -1422,9 +1426,9 @@ const PARTS = {
         `${name}_card = Card([${inCard}${name}_front, ${name}_back, ${name}_show], variant="hero", visible=!$/${name}_end)`,
         `${name}_mark = Row([${name}_yesButton, ${name}_noButton], visible=$/${name}_open)`,
         `${name}_again = Button(${text("again", "Again")}, action=[set($/${name}_i, 0), set($/${name}_yes, 0), set($/${name}_no, 0), set($/${name}_open, false)])`,
-        `${name}_endCard = Card([Heading(${text("done", "Done")}), ${name}_again], visible=$/${name}_end)`,
-        `${name}_counts = Grid([Metric(${text("yes", "Yes")}, $/${name}_yes), Metric(${text("no", "No")}, $/${name}_no)], columns=2)`,
-        `${name}_view = Section(${show(title)}, [${name}_card, ${name}_mark, ${name}_endCard, ${name}_counts])`],
+        `${name}_endCard = Card([Heading(${text("done", "Done")}), ${name}_again], ${end})`,
+        `${name}_counts = Grid([Metric(${text("yes", "Yes")}, $/${name}_yes), Metric(${text("no", "No")}, $/${name}_no)], columns=2, visible=!$/${name}_none)`,
+        `${name}_view = Section(${show(title)}, [${name}_empty, ${name}_card, ${name}_mark, ${name}_endCard, ${name}_counts])`],
       top: [`${name}_view`],
     };
   },
@@ -1710,14 +1714,20 @@ function expand(file) {
       const fault = typeFault(key, tree);
       if (fault) file.partFaults.push({ line: null, text: entry.raw, message: `need ${entry.key}: ${fault}` });
     }
-    let built, parsed;
+    // The empty text of another need that the part read, so that a change of that text writes the part again.
+    let built, parsed, read = "";
     try {
       const word = (text, option) => {
         if (option && !hasWords(lang)) english.set(entry.key, new Set(english.get(entry.key)).add(option));
         return wordOf(lang, text);
       };
       const caption = (option, text) => (entry.tree.named[option] ? show(entry.tree.named[option]) : q(word(text, option)));
-      built = part(entry.key, entry.tree, { hero, word, caption, count: entry.key === listHero, role: roleOf(entry.key), tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
+      // The emptyText= of the list need whose state is this list, such as $/words, shown as a line. A list of another kind has none.
+      const emptyOf = (list) => {
+        const tree = needs.find((other) => other.tree.name === "entries" && show(list) === `$/${other.key}`)?.tree.named.emptyText;
+        return tree && (read = show(tree));
+      };
+      built = part(entry.key, entry.tree, { hero, word, caption, emptyOf, count: entry.key === listHero, role: roleOf(entry.key), tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
       // A part line that the host cannot read is a fault of this need, never an exception. The other needs still expand.
       parsed = built.lines.map((line) => parseLine(line));
       if (parsed.includes(null)) throw new DslError("the part made an empty line");
@@ -1744,8 +1754,8 @@ function expand(file) {
     (built.holds ?? []).forEach((other) => held.add(other));
     heads.push(...(built.lead ?? []));
     place.set(entry.key, built.top);
-    // A change of the language of the app, or of the place of a figure, writes the part again.
-    const made = `${entry.raw}${entry.key === hero || entry.key === listHero}${lang}${roleOf(entry.key)}`;
+    // A change of the language of the app, of the place of a figure, or of the empty text that the part read writes the part again.
+    const made = `${entry.raw}${entry.key === hero || entry.key === listHero}${lang}${roleOf(entry.key)}${read}`;
     if (file.expanded.get(entry.key) === made) continue;
     if (!file.expanded.has(entry.key)) fresh.push(entry.key);
     file.expanded.set(entry.key, made);
