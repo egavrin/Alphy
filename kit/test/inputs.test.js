@@ -1,5 +1,5 @@
 // The input part in the look of the baseline apps (Task 11b-2a, D): options as a map, an icon of the field, and a range of two numbers.
-// A text field is a live input of the host (Task 11c): the host sends its text as a liveInput event while the person types.
+// A text field and a slider are live inputs of the host (Task 11c): the host sends the value as a liveInput event while the person types or drags.
 
 import { expect, test } from "bun:test";
 import { report, smoke } from "../src/check.js";
@@ -54,6 +54,23 @@ test("live: a hidden or disabled text field changes nothing, and a typed text th
   let state = live(start, app, "aField", "go").state;
   for (const id of ["bField", "cField", "box_0"]) state = live(state, app, id, id).state;
   expect([state.a, state.b, state.c, state.e]).toEqual(["go", "bField", "cField", "box_0"]);
+});
+
+test("live: a slider is a live input that takes a finite number in its bounds, and a range slider and a number field stay as they are", async () => {
+  const { definition, app } = await built('app("T", lang="en")', 'need tip = input("percent", "Tip %", 15, min=0, max=30)', 'need total = figure("money", "Total", 100 * (1 + $/tip / 100), example=[{tip: 10}, 110])',
+    'need price = input("range", "Price", [100, 500], min=0, max=1000)', 'need n = input("number", "N", 1, min=0, max=9)');
+  const controls = every(definition.ui).filter((node) => ["slider", "rangeSlider", "numberInput"].includes(node.type));
+  expect(controls.map((node) => [node.action, node.inputMode])).toEqual([["tip_field", "live"], ["price_field", undefined], ["n_field", undefined]]);
+  const start = definition.initialState, shown = every(definition.ui).find((node) => node.type === "metric").bind;
+  const moved = live(start, app, "tip_field", 20);
+  expect(Object.keys(moved)).toEqual(["state"]);
+  expect([moved.state.tip, valueAt(moved.state, shown) === valueAt(start, shown)]).toEqual([20, false]);
+  // The same bounds as an action had: a number past the max comes back at the max.
+  expect(live(start, app, "tip_field", 50).state.tip).toBe(30);
+  for (const value of ["20", null, [20]]) expect(live(start, app, "tip_field", value)).toEqual({ state: start });
+  expect(press(start, app, "tip_field", 20)).toEqual({ state: start });
+  expect(live(start, app, "price_field", [200, 300])).toEqual({ state: start });
+  expect(press(start, app, "price_field", [200, 300]).state.price).toEqual([200, 300]);
 });
 
 test("live: a liveInput in an app with a surface timer draws the surfaces with no timers, and the timer goes on", async () => {

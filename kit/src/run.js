@@ -77,7 +77,7 @@ const ranged = (type, low, high, pair) => (n, at) => {
   return { type, ...at.field(pair && ((x) => (fits(x) ? x : undefined))), min, max, ...defined(n.props, ["step"]), ...iconOf(n) };
 };
 /** The controls that the host gives a live input (inputMode "live"), each with the test of the value that the host sends for it (ToolUiCatalog). */
-const LIVE = { TextField: (value) => typeof value === "string" };
+const LIVE = { TextField: (value) => typeof value === "string", Slider: Number.isFinite };
 
 /**
  * Each component of the kit as its Alphy node. at is the walk at the node: its children, its shown values, the field
@@ -431,7 +431,7 @@ export function kitOf(app, state) {
  * An open and a timer event of a timer or a change that runs move each timer and each change to the clock of now. A pointer event
  * of the surface of a model turns the model (drag.js dragged), and an open ends a drag. A timer event of nothing that runs, also a late one after a pause or after
  * the end of a change, and each other event of a surface give the state back as it is. The host sends a liveInput, never an action, for a live
- * control (a TextField), so a liveInput sets only a live control and an action for one changes nothing. The reply to a liveInput holds no timers.
+ * control (a TextField or a Slider), so a liveInput sets only a live control and an action for one changes nothing. The reply to a liveInput holds no timers.
  */
 export function handle(input, app, now = Date.now()) {
   const { state, event } = input;

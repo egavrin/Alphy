@@ -132,7 +132,7 @@ const session = (definition, app) => {
 };
 /**
  * The compiled app and the kit's App of one plan, and act, which sends each event to both: a field value, or a press when the
- * value is null. live sends the value of a live control (a TextField) as the host does, in a liveInput event. A row control
+ * value is null. live sends the value of a live control (a TextField or a Slider) as the host does, in a liveInput event. A row control
  * names its row by the key for the run-time, and by the row's place in the List line for the kit.
  */
 const twins = async (text) => {

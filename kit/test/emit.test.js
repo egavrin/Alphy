@@ -439,7 +439,7 @@ test("emit: a Slider or a NumberField whose bounds do not hold its start value i
   // A Slider without bounds has Alphy's 0 to 100, so 50 passes and 150 does not. A NumberField without bounds has 0 to 1000000.
   expect(faults.map((fault) => fault.split(":")[0])).toEqual(["over", "flat", "below", "steep"]);
   const { definition: free } = emit(await planned(['app("Free", lang="en")', "$/a = 50", "root = Column([free])", 'free = Slider("Free", $/a)'].join("\n")));
-  expect(free.ui.children[0].children[0]).toEqual({ type: "slider", text: "Free", bind: "a", action: "free", min: 0, max: 100 });
+  expect(free.ui.children[0].children[0]).toEqual({ type: "slider", text: "Free", bind: "a", action: "free", inputMode: "live", min: 0, max: 100 });
 });
 
 test("emit: the other values of a part are one object of its need, and a computed test is a field of v", async () => {
@@ -492,9 +492,9 @@ test("emit: each component of the node table becomes its Alphy node", async () =
     { type: "checkbox", text: "Box", bind: "on", action: "onBox" },
     { type: "segmented", text: "Size", bind: "size", action: "sizePick", options: ["S", "M", "L"].map((value) => ({ text: value, value })) },
     { type: "select", text: "Big", bind: "big", action: "sizeList", options: ["S", "M", "L", "XL", "2XL", "3XL", "4XL"].map((value) => ({ text: value, value })) },
-    { type: "slider", text: "Level", bind: "level", action: "levelSlider", min: 0, max: 10, step: 1 },
+    { type: "slider", text: "Level", bind: "level", action: "levelSlider", inputMode: "live", min: 0, max: 10, step: 1 },
     // A Slider without bounds gets Alphy's own 0 to 100.
-    { type: "slider", text: "Free", bind: "pct", action: "freeSlider", min: 0, max: 100 },
+    { type: "slider", text: "Free", bind: "pct", action: "freeSlider", inputMode: "live", min: 0, max: 100 },
     { type: "numberInput", text: "Count", bind: "count", action: "countField", min: 0, max: 1000000 },
     { type: "button", text: "Add", action: "add", variant: "tonal" },
     // A row with no weighted child wraps (the native row has wrap true by default): Alphy's flowRow.
